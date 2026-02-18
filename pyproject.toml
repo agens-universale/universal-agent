@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gc-cli-pub"
+version = "0.0.1"
+description = "CLI cient for agent test purposes. Work with v1/responses api"
+readme = "readme.md"
+requires-python = ">=3.10"
+dependencies = [
+    "pyyaml>=6.0.3",
+    "requests",
+    "jsonschema>=4.0.0",
+]
+
+[project.scripts]
+gc-cli = "cli:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}  # Указываем, что код находится в src/
+
+[dependency-groups]
+dev = [
+    "httpie>=3.2.4",
+]

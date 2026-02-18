@@ -1,0 +1,30 @@
+agent_url : 'http://127.0.0.1:8080/v1/responses'
+# completions_url: 'http://127.0.0.1:8080/v1/chat/completions'
+# completions_url: 'http://127.0.0.1:8013/v1/chat/completions'
+# agent_url: 'http://87.242.94.95:8082/v1/responses'
+# completions_url: 'http://87.242.94.95:8082/v1/chat/completions'
+model: CodeChat
+system_prompt_id: v1
+use_server_subagents: true
+client_name : mini_cli_pub_agent_1
+x_cl_id : 12345
+verbose: true
+max_steps: 200
+use_ask_human_tool: false
+server_tool_prefix: system
+# set dump_storage: false and save_logs: false - to prevent dumping log files in agent current work folder
+dump_storage: true
+save_logs: true
+mcp-servers:
+  rag:
+    url: http://127.0.0.1:8091/mcp
+    # url: http://87.242.94.95:8092/mcp
+    token: 
+    description: Gitverse documentation search and answer
+    serever-name: gitverse-rag
+mcp-meta:
+  tools-cache-ttl: 3600 
+  # Таймаут запроса к MCP (секунды), по spec до ~10 минут
+  request_timeout_sec: 600
+# Порог подряд идущих ответов backend без tool_call; при превышении вызываем completion_tool
+no_tool_call_max_count: 3
