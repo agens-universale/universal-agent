@@ -19,7 +19,7 @@ mcp-servers:
     transport: http
     url: http://127.0.0.1:8091/mcp
     description: Gitverse documentation search and answer
-    serever-name: gitverse RAG
+    server-name: gitverse RAG
   search:
     transport: sse
     url: http://0.0.0.0:10090/mcp
