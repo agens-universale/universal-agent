@@ -90,37 +90,49 @@ def call_mcp_tool(
     _validate_tool_arguments(full_tool_name, tool_schema, arguments_obj)
 
     # MCP-сессия
-    session_id = _get_or_init_session_id(server_key, url, token=token, timeout=timeout)
+    session_id = _get_or_init_session_id(
+        server_key, url, server_cfg, token=token, timeout=timeout
+    )
     if not session_id:
         raise RuntimeError(f"Failed to initialize MCP session for server '{server_key}'")
 
-    try:
-        data = _call_mcp_tool(
+    def do_call(sid: str):
+        return _call_mcp_tool(
             url=url,
-            session_id=session_id,
+            session_id=sid,
             tool_name=base_tool_name,
             arguments=arguments_obj,
+            server_cfg=server_cfg,
             token=token,
             timeout=timeout,
+            server_key=server_key,
         )
+
+    try:
+        data = do_call(session_id)
     except requests.HTTPError:
-        # Пытаемся переинициализировать сессию один раз, как в get_all_tools
-        from connect_mcp.client import _MCP_SESSIONS
+        from tools.connect_mcp.client import _MCP_SESSIONS
 
         _MCP_SESSIONS.pop(server_key, None)
-        session_id = _get_or_init_session_id(server_key, url, token=token, timeout=timeout)
+        session_id = _get_or_init_session_id(
+            server_key, url, server_cfg, token=token, timeout=timeout
+        )
         if not session_id:
             raise RuntimeError(
                 f"Failed to re-initialize MCP session for server '{server_key}'"
             )
-        data = _call_mcp_tool(
-            url=url,
-            session_id=session_id,
-            tool_name=base_tool_name,
-            arguments=arguments_obj,
-            token=token,
-            timeout=timeout,
+        data = do_call(session_id)
+
+    # Пустой ответ от SSE часто означает просроченную сессию — один раз переинициализируем
+    if data == {} and server_cfg.get("transport") == "sse":
+        from tools.connect_mcp.client import _MCP_SESSIONS
+
+        _MCP_SESSIONS.pop(server_key, None)
+        session_id = _get_or_init_session_id(
+            server_key, url, server_cfg, token=token, timeout=timeout
         )
+        if session_id:
+            data = do_call(session_id)
 
     if not isinstance(data, dict):
         return data

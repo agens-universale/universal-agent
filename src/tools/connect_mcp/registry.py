@@ -32,8 +32,10 @@ def _build_tools_registry(servers_cfg: Dict[str, Dict[str, Any]]) -> Dict[str, D
 
         url = server_cfg.get("url")
         token = server_cfg.get("token")
+        transport = server_cfg.get("transport")
 
-        if not url:
+        # Обязательны url и transport (http | sse); stdio — позже
+        if not url or transport not in ("http", "sse"):
             continue
 
         # Доп. метаданные сервера для включения в описание тулов
@@ -46,20 +48,28 @@ def _build_tools_registry(servers_cfg: Dict[str, Dict[str, Any]]) -> Dict[str, D
 
         try:
             # 1) Берём session_id из кэша или инициализируем заново
-            session_id = _get_or_init_session_id(server_name, url, token=token)
+            session_id = _get_or_init_session_id(
+                server_name, url, server_cfg, token=token
+            )
             if not session_id:
                 continue
 
             try:
                 # 2) Пробуем запросить список tools с текущей сессией
-                tools = _tools_list_request(url, session_id=session_id, token=token)
+                tools = _tools_list_request(
+                    url, session_id=session_id, server_cfg=server_cfg, token=token
+                )
             except requests.HTTPError:
                 # Считаем, что сессия могла протухнуть — сбрасываем и пробуем ещё раз
                 _MCP_SESSIONS.pop(server_name, None)
-                session_id = _get_or_init_session_id(server_name, url, token=token)
+                session_id = _get_or_init_session_id(
+                    server_name, url, server_cfg, token=token
+                )
                 if not session_id:
                     continue
-                tools = _tools_list_request(url, session_id=session_id, token=token)
+                tools = _tools_list_request(
+                    url, session_id=session_id, server_cfg=server_cfg, token=token
+                )
 
         except Exception:
             # Если какой-то MCP-сервер не отвечает или ломается —

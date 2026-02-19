@@ -1,8 +1,7 @@
 from typing import Any, Dict, List, Optional
 
-import requests
-
 from config import config_dict as config_data
+from tools.connect_mcp.transport import get_transport
 
 
 # Кэш MCP-сессий в рамках процесса:
@@ -22,20 +21,19 @@ def _normalize_url(url: str) -> str:
 def _send_initialized_notification(
     url: str,
     session_id: str,
+    server_cfg: Dict[str, Any],
     token: Optional[str] = None,
     timeout: float = 10.0,
 ) -> None:
     """
     Отправить notifications/initialized после успешного initialize.
     """
-    url = _normalize_url(url)
-
     payload: Dict[str, Any] = {
         "jsonrpc": "2.0",
         "method": "notifications/initialized",
     }
 
-    headers = {
+    headers: Dict[str, str] = {
         "Content-Type": "application/json",
         "Accept": "application/json",
         "mcp-session-id": session_id,
@@ -43,12 +41,13 @@ def _send_initialized_notification(
     if token:
         headers["Authorization"] = f"Bearer {token}"
 
-    resp = requests.post(url, json=payload, headers=headers, timeout=timeout)
-    resp.raise_for_status()
+    request_fn = get_transport(server_cfg)
+    _headers, _body = request_fn(url, headers, payload, timeout)
 
 
 def _init_mcp_session(
     url: str,
+    server_cfg: Dict[str, Any],
     token: Optional[str] = None,
     timeout: float = 10.0,
 ) -> Optional[str]:
@@ -59,8 +58,6 @@ def _init_mcp_session(
     - отправить notifications/initialized;
     - вернуть session_id.
     """
-    url = _normalize_url(url)
-
     payload: Dict[str, Any] = {
         "jsonrpc": "2.0",
         "id": 1,
@@ -78,22 +75,23 @@ def _init_mcp_session(
         },
     }
 
-    headers = {
+    headers: Dict[str, str] = {
         "Content-Type": "application/json",
         "Accept": "application/json",
     }
     if token:
         headers["Authorization"] = f"Bearer {token}"
 
-    resp = requests.post(url, json=payload, headers=headers, timeout=timeout)
-    resp.raise_for_status()
+    request_fn = get_transport(server_cfg)
+    resp_headers, _body = request_fn(url, headers, payload, timeout)
 
-    # requests делает заголовки case-insensitive, так что нижний регистр сработает
-    session_id = resp.headers.get("mcp-session-id") or resp.headers.get("MCP-Session-Id")
+    session_id = resp_headers.get("mcp-session-id") or resp_headers.get("MCP-Session-Id")
     if not session_id:
         return None
 
-    _send_initialized_notification(url, session_id, token=token, timeout=timeout)
+    _send_initialized_notification(
+        url, session_id, server_cfg, token=token, timeout=timeout
+    )
 
     return session_id
 
@@ -101,15 +99,14 @@ def _init_mcp_session(
 def _tools_list_request(
     url: str,
     session_id: str,
+    server_cfg: Dict[str, Any],
     token: Optional[str] = None,
     timeout: float = 10.0,
 ) -> List[Dict[str, Any]]:
     """
-    Вызвать MCP-метод tools/list по HTTP и вернуть список tools.
+    Вызвать MCP-метод tools/list и вернуть список tools.
     """
-    url = _normalize_url(url)
-
-    headers = {
+    headers: Dict[str, str] = {
         "Accept": "application/json",
         "Content-Type": "application/json",
         "mcp-session-id": session_id,
@@ -124,10 +121,8 @@ def _tools_list_request(
         "params": {},
     }
 
-    response = requests.post(url, json=payload, headers=headers, timeout=timeout)
-    response.raise_for_status()
-
-    data = response.json()
+    request_fn = get_transport(server_cfg)
+    _resp_headers, data = request_fn(url, headers, payload, timeout)
 
     # Ожидаемый формат JSON-RPC 2.0:
     # { "jsonrpc": "2.0", "id": "...", "result": { "tools": [...] } }
@@ -150,15 +145,16 @@ def _call_mcp_tool(
     session_id: str,
     tool_name: str,
     arguments: Dict[str, Any],
+    server_cfg: Dict[str, Any],
     token: Optional[str] = None,
     timeout: float = 10.0,
+    server_key: Optional[str] = None,
 ) -> Any:
     """
     Вызвать MCP-метод tools/call для конкретного инструмента.
+    Если server_key передан и в ответе есть mcp-session-id — обновляем кэш сессии.
     """
-    url = _normalize_url(url)
-
-    headers = {
+    headers: Dict[str, str] = {
         "Accept": "application/json",
         "Content-Type": "application/json",
         "mcp-session-id": session_id,
@@ -176,15 +172,19 @@ def _call_mcp_tool(
         },
     }
 
-    response = requests.post(url, json=payload, headers=headers, timeout=timeout)
-    response.raise_for_status()
-
-    return response.json()
+    request_fn = get_transport(server_cfg)
+    resp_headers, body = request_fn(url, headers, payload, timeout)
+    if server_key:
+        new_sid = resp_headers.get("mcp-session-id") or resp_headers.get("MCP-Session-Id")
+        if new_sid:
+            _MCP_SESSIONS[server_key] = new_sid
+    return body
 
 
 def _get_or_init_session_id(
     server_key: str,
     url: str,
+    server_cfg: Dict[str, Any],
     token: Optional[str] = None,
     timeout: float = 10.0,
 ) -> Optional[str]:
@@ -196,7 +196,9 @@ def _get_or_init_session_id(
     if session_id:
         return session_id
 
-    session_id = _init_mcp_session(url, token=token, timeout=timeout)
+    session_id = _init_mcp_session(
+        url, server_cfg, token=token, timeout=timeout
+    )
     if session_id:
         _MCP_SESSIONS[server_key] = session_id
 

@@ -4,15 +4,13 @@ from jsonschema import Draft7Validator
 
 
 def format_mcp_tool_result(data: dict):
-    print(data.keys())
     try:
-        if "content" and "isError" in data.keys():
+        if "content" in data and "isError" in data:
             return {
                 "content": data["content"],
                 "isError": data["isError"],
             }
-        else:
-            return data
+        return data
     except Exception:
         return data
 
