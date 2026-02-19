@@ -34,9 +34,15 @@ def _build_tools_registry(servers_cfg: Dict[str, Dict[str, Any]]) -> Dict[str, D
         token = server_cfg.get("token")
         transport = server_cfg.get("transport")
 
-        # Обязательны url и transport (http | sse); stdio — позже
-        if not url or transport not in ("http", "sse"):
+        if transport not in ("http", "sse", "stdio"):
             continue
+        if transport == "stdio":
+            if not server_cfg.get("command"):
+                continue
+            url = ""  # stdio не использует url
+        else:
+            if not url:
+                continue
 
         # Доп. метаданные сервера для включения в описание тулов
         server_display_name = (
@@ -47,7 +53,6 @@ def _build_tools_registry(servers_cfg: Dict[str, Dict[str, Any]]) -> Dict[str, D
         server_description = server_cfg.get("description") or ""
 
         try:
-            # 1) Берём session_id из кэша или инициализируем заново
             session_id = _get_or_init_session_id(
                 server_name, url, server_cfg, token=token
             )
@@ -55,12 +60,10 @@ def _build_tools_registry(servers_cfg: Dict[str, Dict[str, Any]]) -> Dict[str, D
                 continue
 
             try:
-                # 2) Пробуем запросить список tools с текущей сессией
                 tools = _tools_list_request(
                     url, session_id=session_id, server_cfg=server_cfg, token=token
                 )
             except requests.HTTPError:
-                # Считаем, что сессия могла протухнуть — сбрасываем и пробуем ещё раз
                 _MCP_SESSIONS.pop(server_name, None)
                 session_id = _get_or_init_session_id(
                     server_name, url, server_cfg, token=token
@@ -110,12 +113,13 @@ def _build_tools_registry(servers_cfg: Dict[str, Dict[str, Any]]) -> Dict[str, D
             }
 
             # служебная мета‑информация, не отправляется в LLM
+            server_url = url if transport != "stdio" else ""
             metadata: Dict[str, Any] = {
                 "mcp_server_key": server_name,
                 "mcp_tool_name": base_name,
                 "server_display_name": server_display_name,
                 "server_description": server_description,
-                "server_url": url,
+                "server_url": server_url,
             }
 
             all_tools[combined_name] = {

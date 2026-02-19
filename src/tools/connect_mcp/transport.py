@@ -1,11 +1,13 @@
 """
 Транспортный слой MCP: один запрос — один ответ (синхронно).
-Тип транспорта задаётся в конфиге сервера (transport: http | sse).
+Тип транспорта задаётся в конфиге сервера (transport: http | sse | stdio).
 """
-from typing import Any, Callable, Dict, Tuple
+from typing import Any, Callable, Dict, List, Tuple
 
 import json
 import os
+import subprocess
+import threading
 import requests
 
 
@@ -142,14 +144,155 @@ def _request_sse(
     return out_headers, body
 
 
+# --------- stdio transport: процесс на один обмен, без долгоживущих процессов ---------
+
+_INIT_PAYLOAD: Dict[str, Any] = {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "initialize",
+    "params": {
+        "protocolVersion": "2024-11-05",
+        "capabilities": {"roots": {"listChanged": True}, "sampling": {}},
+        "clientInfo": {"name": "SurfaceClient", "version": "1.0.0"},
+    },
+}
+
+_INITIALIZED_PAYLOAD: Dict[str, Any] = {
+    "jsonrpc": "2.0",
+    "method": "notifications/initialized",
+}
+
+
+def _readline_with_timeout(stream: "Any", timeout: float) -> str | None:
+    """Прочитать одну строку из stream с таймаутом (кроссплатформенно)."""
+    result: list[str | None] = [None]
+    def read():
+        try:
+            line = stream.readline()
+            result[0] = line if isinstance(line, str) else (line.decode("utf-8") if line else "")
+        except Exception:
+            result[0] = None
+
+    t = threading.Thread(target=read, daemon=True)
+    t.start()
+    t.join(timeout=timeout)
+    return result[0] if result[0] is not None else None
+
+
+def _spawn_stdio_process(server_cfg: Dict[str, Any]) -> subprocess.Popen:
+    """Запустить процесс MCP-сервера по конфигу (command, args, cwd, env)."""
+    command = server_cfg.get("command")
+    if not command:
+        raise ValueError("stdio MCP server config must have 'command'")
+    args = server_cfg.get("args")
+    if args is None:
+        args = []
+    if not isinstance(args, list):
+        args = [args]
+    cmd = [command] + [str(a) for a in args]
+    cwd = server_cfg.get("cwd")
+    env_extra = server_cfg.get("env") or {}
+    env = os.environ.copy()
+    for k, v in env_extra.items():
+        env[str(k)] = str(v)
+
+    return subprocess.Popen(
+        cmd,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        cwd=cwd,
+        env=env,
+        text=True,
+        bufsize=1,
+    )
+
+
+def _stdio_exchange(
+    server_cfg: Dict[str, Any],
+    timeout: float,
+    steps: List[Tuple[Dict[str, Any], bool]],
+) -> List[Dict[str, Any]]:
+    """
+    Запустить процесс, выполнить последовательность шагов (payload, expect_response),
+    после каждого payload при expect_response=True прочитать одну строку JSON-RPC.
+    Процесс по завершении обмена завершается.
+    """
+    proc = _spawn_stdio_process(server_cfg)
+    results: List[Dict[str, Any]] = []
+    try:
+        for payload, expect_response in steps:
+            line_out = json.dumps(payload) + "\n"
+            proc.stdin.write(line_out)
+            proc.stdin.flush()
+            if expect_response:
+                line_in = _readline_with_timeout(proc.stdout, timeout)
+                if line_in is None:
+                    results.append({})
+                else:
+                    line_in = line_in.strip()
+                    try:
+                        results.append(json.loads(line_in) if line_in else {})
+                    except json.JSONDecodeError:
+                        results.append({})
+            else:
+                results.append({})
+    finally:
+        try:
+            proc.terminate()
+        except Exception:
+            pass
+        try:
+            proc.wait(timeout=5.0)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+        except Exception:
+            pass
+    return results
+
+
+def _request_stdio(
+    server_cfg: Dict[str, Any],
+) -> Callable[..., Tuple[Dict[str, str], Dict[str, Any]]]:
+    """
+    Вернуть функцию запроса для stdio с той же сигнатурой, что и http/sse:
+    (url, headers, json_payload, timeout) -> (response_headers, body_dict).
+    Один вызов = один процесс: handshake при необходимости, один ответ, процесс завершается.
+    """
+    cfg = server_cfg
+
+    def request_fn(
+        url: str,
+        headers: Dict[str, str],
+        json_payload: Dict[str, Any],
+        timeout: float,
+    ) -> Tuple[Dict[str, str], Dict[str, Any]]:
+        method = (json_payload or {}).get("method")
+        if method == "initialize":
+            steps: List[Tuple[Dict[str, Any], bool]] = [(json_payload, True)]
+            responses = _stdio_exchange(cfg, timeout, steps)
+            body = responses[0] if responses else {}
+            return ({"mcp-session-id": "stdio"}, body)
+        if method == "notifications/initialized":
+            steps = [(_INIT_PAYLOAD, True), (json_payload, False)]
+            _stdio_exchange(cfg, timeout, steps)
+            return ({}, {})
+        # tools/list, tools/call и др.: полный handshake в одном процессе
+        steps = [(_INIT_PAYLOAD, True), (_INITIALIZED_PAYLOAD, False), (json_payload, True)]
+        responses = _stdio_exchange(cfg, timeout, steps)
+        body = responses[2] if len(responses) > 2 else {}
+        return ({}, body)
+
+    return request_fn
+
+
 def get_transport(server_cfg: Dict[str, Any]) -> Callable[..., Tuple[Dict[str, str], Dict[str, Any]]]:
     """
     Вернуть функцию запроса по конфигу сервера.
 
-    server_cfg должен содержать ключ "transport" со значением "http" или "sse".
-    Для будущего расширения: "stdio".
+    server_cfg должен содержать ключ "transport" со значением "http", "sse" или "stdio".
 
-    Возвращаемая функция имеет сигнатуру:
+    Возвращаемая функция имеет единую сигнатуру для всех транспортов:
         request(url, headers, json_payload, timeout) -> (response_headers, body_dict)
     """
     transport = (server_cfg or {}).get("transport")
@@ -157,9 +300,11 @@ def get_transport(server_cfg: Dict[str, Any]) -> Callable[..., Tuple[Dict[str, s
         return _request_http
     if transport == "sse":
         return _request_sse
+    if transport == "stdio":
+        return _request_stdio(server_cfg)
     raise ValueError(
         f"Invalid or missing 'transport' in MCP server config. "
-        f"Expected 'http' or 'sse', got: {transport!r}"
+        f"Expected 'http', 'sse' or 'stdio', got: {transport!r}"
     )
 
 
@@ -167,4 +312,5 @@ __all__ = [
     "get_transport",
     "_request_http",
     "_request_sse",
+    "_request_stdio",
 ]

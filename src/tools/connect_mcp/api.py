@@ -4,7 +4,7 @@ import json
 import requests
 
 from config import config_dict as config_data
-from tools.connect_mcp.client import _call_mcp_tool, _get_or_init_session_id
+from tools.connect_mcp.client import _MCP_SESSIONS, _call_mcp_tool, _get_or_init_session_id
 from tools.connect_mcp.registry import get_all_tools
 from tools.connect_mcp.validation import _validate_tool_arguments, format_mcp_tool_result
 
@@ -78,10 +78,13 @@ def call_mcp_tool(
     if not isinstance(server_cfg, dict):
         raise ValueError(f"No MCP server config found for key '{server_key}'")
 
-    url = server_cfg.get("url")
+    transport = server_cfg.get("transport")
+    url = server_cfg.get("url") or ""
     token = server_cfg.get("token")
-    if not url:
+    if transport != "stdio" and not url:
         raise ValueError(f"MCP server '{server_key}' has no 'url' in config")
+    if transport == "stdio" and not server_cfg.get("command"):
+        raise ValueError(f"MCP server '{server_key}' (stdio) has no 'command' in config")
 
     # Схема параметров тулы (JSON Schema)
     tool_schema = tool_entry.get("parameters") or {}
@@ -89,7 +92,6 @@ def call_mcp_tool(
     # Валидация аргументов
     _validate_tool_arguments(full_tool_name, tool_schema, arguments_obj)
 
-    # MCP-сессия
     session_id = _get_or_init_session_id(
         server_key, url, server_cfg, token=token, timeout=timeout
     )
@@ -111,8 +113,6 @@ def call_mcp_tool(
     try:
         data = do_call(session_id)
     except requests.HTTPError:
-        from tools.connect_mcp.client import _MCP_SESSIONS
-
         _MCP_SESSIONS.pop(server_key, None)
         session_id = _get_or_init_session_id(
             server_key, url, server_cfg, token=token, timeout=timeout
@@ -123,10 +123,7 @@ def call_mcp_tool(
             )
         data = do_call(session_id)
 
-    # Пустой ответ от SSE часто означает просроченную сессию — один раз переинициализируем
-    if data == {} and server_cfg.get("transport") == "sse":
-        from tools.connect_mcp.client import _MCP_SESSIONS
-
+    if data == {} and transport == "sse":
         _MCP_SESSIONS.pop(server_key, None)
         session_id = _get_or_init_session_id(
             server_key, url, server_cfg, token=token, timeout=timeout

@@ -23,6 +23,15 @@ mcp-servers:
     token: 
     server-name: DuckDuckGo search
     description: Common web and News search
+  # Пример stdio MCP (процесс запускается на каждый запрос списка тулов и на каждый вызов тула):
+  # local-fs:
+  #   transport: stdio
+  #   command: npx
+  #   args: [-y, "@modelcontextprotocol/server-filesystem", "/path/to/allowed/dir"]
+  #   # cwd: /optional/working/dir
+  #   # env: { "VAR": "value" }
+  #   description: Local filesystem tools
+  #   server-name: filesystem
 mcp-meta:
   tools-cache-ttl: 3600 
   # Таймаут запроса к MCP (секунды), по spec до ~10 минут
