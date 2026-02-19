@@ -5,9 +5,12 @@ use_server_subagents: true
 client_name : mini_cli_pub_agent_1
 x_cl_id : 12345
 verbose: true
-max_steps: 200
 use_ask_human_tool: false
 server_tool_prefix: system
+max_steps: 200
+# Порог подряд идущих ответов backend без tool_call; при превышении завершаем работу
+no_tool_call_max_count: 3
+# set dump_storage: false and save_logs: false - to prevent dumping log files in agent current work folder
 # set dump_storage: false and save_logs: false - to prevent dumping log files in agent current work folder
 dump_storage: true
 save_logs: true
@@ -36,5 +39,3 @@ mcp-meta:
   tools-cache-ttl: 3600 
   # Таймаут запроса к MCP (секунды), по spec до ~10 минут
   request_timeout_sec: 600
-# Порог подряд идущих ответов backend без tool_call; при превышении вызываем completion_tool
-no_tool_call_max_count: 3
