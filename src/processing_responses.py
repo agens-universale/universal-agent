@@ -1,7 +1,7 @@
 import json
 
 import config
-from tools import apply_tool
+from tools import apply_tool, WrongFunctionArgumentsException
 from utils.connect_backend import create_call_headers
 
 
@@ -29,6 +29,9 @@ def check_mode(messages) -> Union[str, None]:
     for message in messages:
         if message.get('type', None) == 'function_call_output':
             return 'function_call_output'
+
+    logger.debug('Got Undefined mode for messages:')
+    logger.debug(str(messages))
 
     raise ValueError('Undefined mode')
 
@@ -147,6 +150,16 @@ def run_agent(messages, state: State) -> Union[str, None]:
                 state.previous_response_id = response_id
             else:
                 raise ValueError(f'unconventional mode: {mode}')
+        except WrongFunctionArgumentsException as e:
+            logger.error(e, exc_info=True)
+            tool_error_cnt += 1
+            messages = [
+                {
+                    'role': 'user',
+                    'content': e.to_llm_feedback(),
+                    'id': generate_message_id_func('m')
+                }
+            ]
         except Exception as e:
             # raise e
             logger.error(e, exc_info=True)

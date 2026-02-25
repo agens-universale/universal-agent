@@ -1,4 +1,5 @@
 from tools.simple_tools.write_to_file_tool import WriteToFile
+from tools.simple_tools.append_to_file import AppendToFile
 from tools.simple_tools.read_file import ReadFile
 from tools.simple_tools.list_files import ListFiles
 from tools.simple_tools.search_files import SearchFiles
@@ -16,6 +17,11 @@ simple_tools_data = {
         'tool_fabric': WriteToFile,
         'spec': WriteToFile.tool_description(),
         'description': WriteToFile.prompt_description()
+    },
+    'append_to_file': {
+        'tool_fabric': AppendToFile,
+        'spec': AppendToFile.tool_description(),
+        'description': AppendToFile.prompt_description()
     },
     'read_file': {
         'tool_fabric': ReadFile,

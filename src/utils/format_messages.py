@@ -6,12 +6,17 @@ from utils.convertations import output_chat_completion_to_response
 cut_message = 350
 
 
+def cut_message_f(s):
+    s = str(s)
+    return s if len(str(s)) < cut_message else str(s)[:cut_message] + '\n...[cutted]'
+
+
 def format_type_message(message):
     role = message.get('role', 'Unknown role')
     content = message.get('content', [])
 
     if 'role' == 'system':
-        return '<local system prompt. See debug logs>'
+        return ''
 
     tmpl = ''
 
@@ -40,24 +45,26 @@ def format_type_message(message):
 
 
 def format_type_functions_call(message):
-    global cut_message
     tmpl = f"\n\n>>>>>>>>>>\ncall_id: {message['call_id']}:\n{message['name']}\n"
-    args = []
-    for k,v in json.loads(message['arguments']).items():
-        v_ = v if len(str(v)) < cut_message else str(v)[:cut_message] + '\n...[cutted]'
-        args.append(f'{k}: {v_}')
-    tmpl += '\n'.join(args)
+    try:
+        args = []
+        for k,v in json.loads(message['arguments']).items():
+            v_ = cut_message_f(v)
+            args.append(f'{k}: {v_}')
+        tmpl += '\n'.join(args)
+    except Exception as e:
+        tmpl += str(e) + '\n'
+        tmpl += cut_message_f(message)
     return tmpl
 
 
 def format_type_function_call_output(message):
-    global cut_message
     if 'output' in message:
         text = message['output']
     else:
         text = message['content']
     text = str(text)
-    output = text if len(text) < cut_message else text[:cut_message] + '\n...[cutted]'
+    output = cut_message_f(text)
     tmpl = f"\n\n>>>>>>>>>>\ncompleted: {message['call_id']}:\n{output}\n"
     return tmpl
 

@@ -11,6 +11,42 @@ from utils.convertations import tool_responces_to_chat_completion
 logger = logging.getLogger(__name__)
 
 
+class WrongFunctionArgumentsException(Exception):
+    def __init__(self, message: str, received_args: str, expected_schema: dict | None = None):
+        super().__init__(message)
+        self.message = message
+        self.received_args = received_args
+        self.expected_schema = expected_schema
+
+    def to_llm_feedback(self) -> str:
+        """
+        Формирует четкое и структурированное сообщение об ошибке для LLM.
+        """
+        feedback = "❌ **Tool Argument Validation Failed**\n\n"
+        
+        # 1. Описание проблемы
+        feedback += f"**Error:** {self.message}\n\n"
+        
+        # 2. Что было получено (с обработкой пустых значений)
+        args_display = self.received_args if self.received_args else "(empty or missing)"
+        feedback += f"**Received Arguments:**\n```json\n{args_display}\n```\n\n"
+        
+        # 3. Что ожидалось (если есть схема)
+        if self.expected_schema:
+            feedback += f"**Expected Schema:**\n```json\n{self.expected_schema}\n```\n\n"
+        
+        # 4. Четкая инструкция к действию
+        feedback += (
+            "**Action Required:**\n"
+            "1. Review the error message and schema above.\n"
+            "2. Correct the JSON arguments to match the expected schema.\n"
+            "3. Ensure all required fields are present and have the correct types.\n"
+            "4. Retry the tool call with the fixed arguments."
+        )
+        
+        return feedback
+
+
 tools_data = dict()
 
 for k, v in tools.simple_tools.simple_tools_data.items():
@@ -31,15 +67,25 @@ def apply_tool(tool_name: str, arguments: str, tools_data_=None, **kwargs):
     global tools_data
     if tools_data_ is None:
         tools_data_ = tools_data
-    arguments = json.loads(arguments)
+
     if config.config_dict.get('use_server_subagents', False):
         if tool_name.startswith(config.config_dict['server_tool_prefix']):
             return f'{tool_name} call'
+
     try:
         tool_fabric = tools_data_[tool_name]['tool_fabric']
     except KeyError:
         return f'{tool_name} - there is not such tool on client'
         logger.error(f'apply_tool log:\nkwargs:\n{kwargs}\narguments:\n {arguments}\nNo tool:\n{tool_name}')
+    
+    try:
+        arguments = json.loads(arguments)
+    except Exception as e:
+        raise WrongFunctionArgumentsException(
+            message='некорректный JSON',
+            received_args=arguments,
+            expected_schema=tools_data_[tool_name]['spec']
+        )
 
     tool = tool_fabric(**kwargs)
     # return 'tool executed successfully'
