@@ -1,4 +1,13 @@
 agent_url : 'http://127.0.0.1:8080/v1/responses'
+# remove agent_auth section if it's not necessary
+agent_auth:
+  "auth_endpoint": "http link to auth endpoint"
+  "env_name": "surface_cli"
+  "env_version": "0.0.1"
+  "plugin_name": "surf-cli-plugin"
+  "plugin_version": "0.0.1"
+  "device_code": "set your unic device code (guid like) - for log tracing in prod"
+  "login": "login"
 model: CodeChat
 system_prompt_id: v1
 use_server_subagents: true

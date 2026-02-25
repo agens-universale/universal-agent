@@ -71,6 +71,9 @@ def create_call_headers(state):
         'x_trace_id': str(state.state_id),
         'x_rq_id': str(uuid4())
     }
+    if config.auth_connector:
+        token = config.auth_connector.get_token()
+        call_headers['Authorization'] = f'Bearer {token}'
     return call_headers
 
 
