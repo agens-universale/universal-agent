@@ -4,7 +4,7 @@ import requests
 import re
 import json
 from uuid import uuid4
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Tuple
 
 
 import logging
@@ -15,13 +15,14 @@ from utils.convertations import output_chat_completion_to_response
 import config
 from utils.format_messages import format_message_chat_completions_to_send_backend
 
-def request_backend_responses(data, headers):
+def request_backend_responses(data, headers) -> Tuple[Dict, Dict]:
     url = config.config_dict['agent_url']
     chunks = []
 
     data['stream'] = True
 
     with requests.post(url, json=data, headers=headers, stream=True) as r:
+        r_headers = r.headers
         for line in r.iter_lines():
             chunks.append(line)
             # print(line.decode('utf-8'))
@@ -41,7 +42,7 @@ def request_backend_responses(data, headers):
     if result['type'] not in ['response.completed']:
         raise ValueError(f'wrong stream finish: {chunks[-1].decode("utf-8")}')
 
-    return result['response']
+    return result['response'], r_headers
 
 
 def request_backend_chat_completions(data: Dict, headers: Dict):
@@ -69,8 +70,11 @@ def create_call_headers(state):
     call_headers = {
         'x_cl_id': str(config.config_dict['x_cl_id']),
         'x_trace_id': str(state.state_id),
-        'x_rq_id': str(uuid4())
+        'x_rq_id': str(uuid4()),
+        'x-session-id': str(state.state_id)
     }
+    if state.x_target is not None:
+        call_headers['x-target'] = state.x_target
     if config.auth_connector:
         token = config.auth_connector.get_token()
         call_headers['Authorization'] = f'Bearer {token}'

@@ -21,6 +21,7 @@ class State:
                  specific_role: Optional[str] = None
                  ):
         self.parent_state_id = parent_state_id
+        self.x_target = None
         self.state_id = str(uuid4())
         self.specific_role = specific_role
         self.verbose = verbose
@@ -44,6 +45,11 @@ class State:
             metadata['specificRole'] = self.specific_role
         metadata['useServerSubagents'] = config.config_dict.get('use_server_subagents', False)
         return metadata
+
+    def set_resp_headers_metadata(self, headers):
+        x_target = headers.get('x-target')
+        if x_target and self.x_target is None:
+            self.x_target = x_target
 
     def to_dict(self):
         return vars(self).copy()

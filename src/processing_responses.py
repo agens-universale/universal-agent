@@ -78,7 +78,8 @@ def process_user_ask(messages, state):
     call_data = create_call_data(messages, state)
 
     call_headers = create_call_headers(state)
-    res = request_backend(call_data, call_headers)
+    res, res_headers = request_backend(call_data, call_headers)
+    state.set_resp_headers_metadata(res_headers)
     resp_messages = res['output']
 
     return resp_messages, res['id']
@@ -110,7 +111,8 @@ def process_tool_outputs(messages, state):
 
     # logger.debug('process_tool_outputs data to ask backend')
     # logger.debug(json.dumps(call_data, ensure_ascii=False, indent=2))
-    res = request_backend(call_data, call_headers)
+    res, res_headers = request_backend(call_data, call_headers)
+    state.set_resp_headers_metadata(res_headers)
 
     resp_messages = res['output']
     return resp_messages, res['id']
