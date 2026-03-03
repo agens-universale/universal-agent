@@ -15,13 +15,13 @@ from utils.convertations import output_chat_completion_to_response
 import config
 from utils.format_messages import format_message_chat_completions_to_send_backend
 
-def request_backend_responses(data, headers) -> Tuple[Dict, Dict]:
+def request_backend_responses(data, headers, verify=True) -> Tuple[Dict, Dict]:
     url = config.config_dict['agent_url']
     chunks = []
 
     data['stream'] = True
 
-    with requests.post(url, json=data, headers=headers, stream=True) as r:
+    with requests.post(url, json=data, headers=headers, stream=True, verify=verify) as r:
         r_headers = r.headers
         for line in r.iter_lines():
             chunks.append(line)

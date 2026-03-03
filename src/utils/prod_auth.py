@@ -7,10 +7,11 @@ import hashlib
 class AuthConnector:
 
     def __init__(self, entry_point: str, env_name: str, env_version: str, plugin_name: str,
-                 plugin_version: str, device_code: str, device_code_hex: str, login: str):
+                 plugin_version: str, device_code: str, device_code_hex: str, login: str, verify: bool):
         self.auth_url = None
         self.ttl = 0
         self.access_token = None
+        self.verify=verify
 
         # auth metadata
         self.entry_point = entry_point
@@ -22,9 +23,10 @@ class AuthConnector:
         self.device_code_hex = device_code_hex if device_code_hex else hashlib.sha256(self.device_code.encode('utf-8')).hexdigest()
         self.login = login
 
+
     @staticmethod
-    def get_auth_url(url) -> Optional[str]:
-        resp = requests.get(url, timeout=10)
+    def get_auth_url(url, verify) -> Optional[str]:
+        resp = requests.get(url, timeout=10, verify=verify)
         if resp.status_code != 401:
             raise Exception(f'Incorrect status code from entry point: {resp.status_code}')
 
@@ -35,7 +37,7 @@ class AuthConnector:
 
     @staticmethod
     def create_token(auth_url, env_name: str, env_version: str, plugin_name: str,
-                     plugin_version: str, device_code: str, login: str):
+                     plugin_version: str, device_code: str, login: str, verify: bool):
         """
         curl '<url>' \
         --header 'Content-Type: application/json' \
@@ -65,7 +67,7 @@ class AuthConnector:
         }
         # print(data)
         # print(auth_url)
-        resp = requests.post(auth_url, json=data, timeout=10)
+        resp = requests.post(auth_url, json=data, timeout=10, verify=verify)
         # print(resp)
         resp_data = resp.json()
         return resp_data
@@ -75,12 +77,12 @@ class AuthConnector:
         if now < self.ttl and self.access_token is not None:
             return self.access_token
 
-        auth_url = self.get_auth_url(self.entry_point)
+        auth_url = self.get_auth_url(self.entry_point, self.verify)
 
         self.auth_url = auth_url
 
         resp_data = self.create_token(self.auth_url, self.env_name, self.env_version, self.plugin_name,
-                                      self.plugin_version, self.device_code_hex, self.login)
+                                      self.plugin_version, self.device_code_hex, self.login, self.verify)
         # print(resp_data)
 
         self.access_token = resp_data['access_token']

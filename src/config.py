@@ -1,6 +1,8 @@
 import yaml
 import os
 from uuid import uuid4
+import urllib3
+
 
 import arg_parser
 from utils.prod_auth import AuthConnector
@@ -13,6 +15,10 @@ config_path = custom_config_path if custom_config_path else os.path.join(base_di
 
 with open(config_path, 'r', encoding='utf-8') as file:
     config_dict = yaml.safe_load(file)
+
+verify = config_dict.get('use_ssl', True)
+if verify is False:
+    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 auth_cfg = config_dict.get('agent_auth')
 
@@ -34,7 +40,8 @@ if auth_cfg:
         plugin_version=plugin_version,
         device_code=device_code,
         device_code_hex=device_code_hex,
-        login=login
+        login=login,
+        verify=verify
     )
 else:
     auth_connector = None

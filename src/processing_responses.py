@@ -78,7 +78,8 @@ def process_user_ask(messages, state):
     call_data = create_call_data(messages, state)
 
     call_headers = create_call_headers(state)
-    res, res_headers = request_backend(call_data, call_headers)
+    verify = config.config_dict.get('use_ssl', True)
+    res, res_headers = request_backend(call_data, call_headers, verify=verify)
     state.set_resp_headers_metadata(res_headers)
     resp_messages = res['output']
 
@@ -111,7 +112,8 @@ def process_tool_outputs(messages, state):
 
     # logger.debug('process_tool_outputs data to ask backend')
     # logger.debug(json.dumps(call_data, ensure_ascii=False, indent=2))
-    res, res_headers = request_backend(call_data, call_headers)
+    verify = config.config_dict.get('use_ssl', True)
+    res, res_headers = request_backend(call_data, call_headers, verify=verify)
     state.set_resp_headers_metadata(res_headers)
 
     resp_messages = res['output']
