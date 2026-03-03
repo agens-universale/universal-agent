@@ -1,4 +1,5 @@
 agent_url : 'http://127.0.0.1:8080/v1/responses'
+use_ssl: True
 # remove agent_auth section if it's not necessary
 agent_auth:
   "auth_endpoint": "http link to auth endpoint"
