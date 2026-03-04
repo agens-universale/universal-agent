@@ -1,11 +1,11 @@
 import json
 import traceback
-import tools.simple_tools
 import sys
 import logging
 import config
 from tools.connect_mcp import get_mcp_tools_data
-from tools.simple_tools import simple_tools_spec
+from tools.skills import get_skills_tools_data
+import tools.simple_tools as simple_tools
 from utils.convertations import tool_responces_to_chat_completion
 
 logger = logging.getLogger(__name__)
@@ -49,7 +49,11 @@ class WrongFunctionArgumentsException(Exception):
 
 tools_data = dict()
 
-for k, v in tools.simple_tools.simple_tools_data.items():
+for k, v in simple_tools.simple_tools_data.items():
+    tools_data[k] = v
+
+skills_tools_data = get_skills_tools_data()
+for k, v in skills_tools_data.items():
     tools_data[k] = v
 
 mcp_tools_data = get_mcp_tools_data()
