@@ -49,3 +49,9 @@ mcp-meta:
   tools-cache-ttl: 3600 
   # Таймаут запроса к MCP (секунды), по spec до ~10 минут
   request_timeout_sec: 600
+  
+# Опциональный путь к директории со скиллами (skills).
+# По умолчанию используется ./skills относительно корня проекта.
+# Если задать skills_data_path, он ДОЛЖЕН быть абсолютным путём в файловой системе.
+# Пример:
+# skills_data_path: "/home/user/my-project-skills/skills"

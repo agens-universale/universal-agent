@@ -5,6 +5,7 @@ import arg_parser
 from processing_responses import run_agent
 from states import State, save_state, dump_storage
 import tools
+from tools.skills import get_skills_registry
 import utils.logging_module
 from utils.generate_message_id import generate_msg_id_sha256 as generate_message_id_func
 
@@ -20,6 +21,7 @@ def main():
 
     verbose = arg_parser.run_args.verbose if arg_parser.run_args.verbose else config.config_dict.get('verbose', False)
 
+    skills_list = get_skills_registry().list_skills()
 
     state_data = {
         'parent_state_id': None,
@@ -28,6 +30,7 @@ def main():
         'tools_spec': tools.tools_spec,
         'tools_descr': tools.tools_description,
         'max_steps': config.config_dict['max_steps'],
+        'skills_list': skills_list
     }
 
 

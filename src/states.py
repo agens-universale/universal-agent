@@ -14,6 +14,7 @@ class State:
                  model: str,
                  tools_spec: List[Dict],
                  tools_descr: List[Dict],
+                 skills_list: List[Dict],
                  max_steps: int,
                  parent_state_id: Optional[str] = None,
                  mode: str = None,
@@ -29,6 +30,7 @@ class State:
         self.initial_project_data = get_project_data()
         self.tools = tools_spec
         self.tools_descr = tools_descr
+        self.skills_list = skills_list
         self.call_metadata = self.set_call_metadata()
         self.messages = []
         self.previous_response_id = None
@@ -41,6 +43,10 @@ class State:
         metadata = dict()
         metadata['systemPromptId'] = config.config_dict['system_prompt_id']
         metadata['promptVariables'] = self.initial_project_data
+        if self.skills_list:
+            skills_template = 'For solving task you can use skills.\nUse skills tools for loading skills data and skills resources.\nAvailable skills list:\n'
+            skills_template += json.dumps(self.skills_list, ensure_ascii=False)
+            metadata['promptVariables']['available_skills'] = skills_template
         if self.specific_role is not None:
             metadata['specificRole'] = self.specific_role
         metadata['useServerSubagents'] = config.config_dict.get('use_server_subagents', False)

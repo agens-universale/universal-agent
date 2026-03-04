@@ -77,15 +77,43 @@ def apply_tool(tool_name: str, arguments: str, tools_data_=None, **kwargs):
     except KeyError:
         return f'{tool_name} - there is not such tool on client'
         logger.error(f'apply_tool log:\nkwargs:\n{kwargs}\narguments:\n {arguments}\nNo tool:\n{tool_name}')
-    
-    try:
-        arguments = json.loads(arguments)
-    except Exception as e:
-        raise WrongFunctionArgumentsException(
-            message='некорректный JSON',
-            received_args=arguments,
-            expected_schema=tools_data_[tool_name]['spec']
-        )
+
+    # Определяем, ожидает ли инструмент пустую схему (нет параметров)
+    spec = tools_data_[tool_name].get('spec', {}) or {}
+    params_schema = spec.get('parameters', {}) or {}
+    properties = params_schema.get('properties', {}) or {}
+    required = params_schema.get('required', []) or []
+    is_empty_schema = not properties and not required
+
+    # Нормализуем и парсим аргументы
+    if isinstance(arguments, dict):
+        parsed_arguments = arguments
+    else:
+        arg_str = "" if arguments is None else str(arguments).strip()
+
+        if arg_str == "":
+            # Пустые аргументы:
+            # - если схема пустая, подменяем на {} и вызываем инструмент без параметров;
+            # - если схема не пустая, считаем это ошибкой и даём LLM подробный фидбек.
+            if is_empty_schema:
+                parsed_arguments = {}
+            else:
+                raise WrongFunctionArgumentsException(
+                    message='аргументы инструмента пустые, ожидается валидный JSON-объект',
+                    received_args=str(arguments),
+                    expected_schema=tools_data_[tool_name]['spec']
+                )
+        else:
+            try:
+                parsed_arguments = json.loads(arg_str)
+            except Exception as e:
+                raise WrongFunctionArgumentsException(
+                    message=f'некорректный JSON: {e}',
+                    received_args=str(arguments),
+                    expected_schema=tools_data_[tool_name]['spec']
+                )
+
+    arguments = parsed_arguments
 
     tool = tool_fabric(**kwargs)
     # return 'tool executed successfully'
