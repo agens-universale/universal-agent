@@ -6,6 +6,11 @@ import requests
 from config import config_dict as config_data
 from tools.connect_mcp.client import _MCP_SESSIONS, _call_mcp_tool, _get_or_init_session_id
 from tools.connect_mcp.registry import get_all_tools
+from tools.connect_mcp.stream_client import (
+    call_tool_stream_http,
+    call_tool_stream_sse,
+    call_tool_stream_stdio,
+)
 from tools.connect_mcp.validation import _validate_tool_arguments, format_mcp_tool_result
 
 
@@ -92,44 +97,70 @@ def call_mcp_tool(
     # Валидация аргументов
     _validate_tool_arguments(full_tool_name, tool_schema, arguments_obj)
 
-    session_id = _get_or_init_session_id(
-        server_key, url, server_cfg, token=token, timeout=timeout
-    )
-    if not session_id:
-        raise RuntimeError(f"Failed to initialize MCP session for server '{server_key}'")
-
-    def do_call(sid: str):
-        return _call_mcp_tool(
+    if transport == "stream_sse":
+        data = call_tool_stream_sse(
             url=url,
-            session_id=sid,
-            tool_name=base_tool_name,
-            arguments=arguments_obj,
             server_cfg=server_cfg,
             token=token,
             timeout=timeout,
-            server_key=server_key,
+            tool_name=base_tool_name,
+            arguments=arguments_obj,
         )
-
-    try:
-        data = do_call(session_id)
-    except requests.HTTPError:
-        _MCP_SESSIONS.pop(server_key, None)
+    elif transport == "stream_http":
+        data = call_tool_stream_http(
+            url=url,
+            server_cfg=server_cfg,
+            token=token,
+            timeout=timeout,
+            tool_name=base_tool_name,
+            arguments=arguments_obj,
+        )
+    elif transport == "stream_stdio":
+        data = call_tool_stream_stdio(
+            server_cfg=server_cfg,
+            timeout=timeout,
+            tool_name=base_tool_name,
+            arguments=arguments_obj,
+        )
+    else:
         session_id = _get_or_init_session_id(
             server_key, url, server_cfg, token=token, timeout=timeout
         )
         if not session_id:
-            raise RuntimeError(
-                f"Failed to re-initialize MCP session for server '{server_key}'"
-            )
-        data = do_call(session_id)
+            raise RuntimeError(f"Failed to initialize MCP session for server '{server_key}'")
 
-    if data == {} and transport == "sse":
-        _MCP_SESSIONS.pop(server_key, None)
-        session_id = _get_or_init_session_id(
-            server_key, url, server_cfg, token=token, timeout=timeout
-        )
-        if session_id:
+        def do_call(sid: str):
+            return _call_mcp_tool(
+                url=url,
+                session_id=sid,
+                tool_name=base_tool_name,
+                arguments=arguments_obj,
+                server_cfg=server_cfg,
+                token=token,
+                timeout=timeout,
+                server_key=server_key,
+            )
+
+        try:
             data = do_call(session_id)
+        except requests.HTTPError:
+            _MCP_SESSIONS.pop(server_key, None)
+            session_id = _get_or_init_session_id(
+                server_key, url, server_cfg, token=token, timeout=timeout
+            )
+            if not session_id:
+                raise RuntimeError(
+                    f"Failed to re-initialize MCP session for server '{server_key}'"
+                )
+            data = do_call(session_id)
+
+        if data == {} and transport == "sse":
+            _MCP_SESSIONS.pop(server_key, None)
+            session_id = _get_or_init_session_id(
+                server_key, url, server_cfg, token=token, timeout=timeout
+            )
+            if session_id:
+                data = do_call(session_id)
 
     if not isinstance(data, dict):
         return data

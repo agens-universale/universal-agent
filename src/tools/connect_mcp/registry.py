@@ -12,6 +12,11 @@ logger = logging.getLogger(__name__)
 
 from config import config_dict as config_data
 from tools.connect_mcp.client import _tools_list_request, _get_or_init_session_id, _MCP_SESSIONS
+from tools.connect_mcp.stream_client import (
+    list_tools_stream_http,
+    list_tools_stream_sse,
+    list_tools_stream_stdio,
+)
 
 
 def _build_tools_registry(servers_cfg: Dict[str, Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
@@ -39,9 +44,9 @@ def _build_tools_registry(servers_cfg: Dict[str, Dict[str, Any]]) -> Dict[str, D
         token = server_cfg.get("token")
         transport = server_cfg.get("transport")
 
-        if transport not in ("http", "sse", "stdio"):
+        if transport not in ("http", "sse", "stdio", "stream_sse", "stream_http", "stream_stdio"):
             continue
-        if transport == "stdio":
+        if transport in ("stdio", "stream_stdio"):
             if not server_cfg.get("command"):
                 continue
             url = ""  # stdio не использует url
@@ -58,26 +63,46 @@ def _build_tools_registry(servers_cfg: Dict[str, Dict[str, Any]]) -> Dict[str, D
         server_description = server_cfg.get("description") or ""
 
         try:
-            session_id = _get_or_init_session_id(
-                server_name, url, server_cfg, token=token
-            )
-            if not session_id:
-                continue
-
-            try:
-                tools = _tools_list_request(
-                    url, session_id=session_id, server_cfg=server_cfg, token=token
+            if transport == "stream_sse":
+                tools = list_tools_stream_sse(
+                    url=url,
+                    server_cfg=server_cfg,
+                    token=token,
+                    timeout=10.0,
                 )
-            except requests.HTTPError:
-                _MCP_SESSIONS.pop(server_name, None)
+            elif transport == "stream_http":
+                tools = list_tools_stream_http(
+                    url=url,
+                    server_cfg=server_cfg,
+                    token=token,
+                    timeout=10.0,
+                )
+            elif transport == "stream_stdio":
+                tools = list_tools_stream_stdio(
+                    server_cfg=server_cfg,
+                    timeout=10.0,
+                )
+            else:
                 session_id = _get_or_init_session_id(
                     server_name, url, server_cfg, token=token
                 )
                 if not session_id:
                     continue
-                tools = _tools_list_request(
-                    url, session_id=session_id, server_cfg=server_cfg, token=token
-                )
+
+                try:
+                    tools = _tools_list_request(
+                        url, session_id=session_id, server_cfg=server_cfg, token=token
+                    )
+                except requests.HTTPError:
+                    _MCP_SESSIONS.pop(server_name, None)
+                    session_id = _get_or_init_session_id(
+                        server_name, url, server_cfg, token=token
+                    )
+                    if not session_id:
+                        continue
+                    tools = _tools_list_request(
+                        url, session_id=session_id, server_cfg=server_cfg, token=token
+                    )
 
         except Exception as e:
             # Если какой-то MCP-сервер не отвечает или ломается —

@@ -25,9 +25,10 @@ no_tool_call_max_count: 3
 dump_storage: true
 save_logs: true
 mcp-servers:
+  # доступные типы транспорта http, stdio, sse, stream_http, stream_sse, stream_stdio
   rag:
     transport: http
-    url: http://127.0.0.1:8091/mcp
+    url: https://127.0.0.1:8091/mcp
     description: Gitverse documentation search and answer
     server-name: gitverse RAG
     # Проверка SSL-сертификата для этого MCP-сервера:
