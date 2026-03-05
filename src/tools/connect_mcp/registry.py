@@ -2,8 +2,13 @@ from typing import Any, Dict, Optional
 
 import json
 import time
+import traceback
 
 import requests
+
+import logging
+
+logger = logging.getLogger(__name__)
 
 from config import config_dict as config_data
 from tools.connect_mcp.client import _tools_list_request, _get_or_init_session_id, _MCP_SESSIONS
@@ -74,9 +79,12 @@ def _build_tools_registry(servers_cfg: Dict[str, Dict[str, Any]]) -> Dict[str, D
                     url, session_id=session_id, server_cfg=server_cfg, token=token
                 )
 
-        except Exception:
+        except Exception as e:
             # Если какой-то MCP-сервер не отвечает или ломается —
             # просто пропускаем его, остальные используем.
+            logger.exception(f'{server_name} connection error')
+            print(f'[ERROR] {server_name} connection error: {e}')
+            print(traceback.format_exc())
             continue
 
         # Преобразуем MCP tools в формат function‑tools
