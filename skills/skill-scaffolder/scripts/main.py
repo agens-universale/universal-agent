@@ -10,7 +10,7 @@ def _project_root() -> str:
     """
     Определить корень проекта относительно текущего файла.
     Ожидается структура:
-      <project_root>/skills/skills_data/skill-scaffolder/scripts/main.py
+      <project_root>/skills/skill-scaffolder/scripts/main.py
     """
     here = os.path.dirname(os.path.abspath(__file__))
     return os.path.abspath(os.path.join(here, "..", "..", "..", ".."))
@@ -18,9 +18,10 @@ def _project_root() -> str:
 
 def _default_skills_root() -> str:
     """
-    Дефолтный путь к skills_data для генерации новых skills.
+    Дефолтный путь к skills для генерации новых skills.
     """
-    return os.path.join(_project_root(), "skills", "skills_data")
+    here = os.path.dirname(os.path.abspath(__file__))
+    return os.path.abspath(os.path.join(here, "..", "..", ".."))
 
 
 def _read_args() -> Dict[str, Any]:
