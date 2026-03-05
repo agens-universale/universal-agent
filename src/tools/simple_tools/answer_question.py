@@ -44,6 +44,6 @@ Usage:
         if not answer.strip():
             return "Error: Answer cannot be empty or whitespace only."
 
-        # The framework will print the returned string to the console.
-        return answer
+        print('\n\nAnswer:\n\n', answer, '\n\n')
+        return 'Answer delivered to user'
 
