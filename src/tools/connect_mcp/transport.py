@@ -89,13 +89,16 @@ def _read_sse_first_json(resp: "requests.Response", timeout: float) -> Dict[str,
             prefix_len = 5  # len("data:")
             part = stripped[prefix_len:].strip()
             if part:
-                buffer = [part]
+                buffer.append(part)
                 in_data = True
-                parsed = _try_parse_json_rpc(part)
+                data_str = "\n".join(buffer)
+                parsed = _try_parse_json_rpc(data_str)
                 if parsed is not None:
                     return parsed
             else:
-                buffer = []
+                # empty "data:" line — reset only if not already accumulating
+                if not in_data:
+                    buffer = []
                 in_data = True
         elif in_data and buffer:
             buffer.append(stripped)
