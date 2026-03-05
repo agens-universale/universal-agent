@@ -22,6 +22,7 @@ def _request_http(
     headers: Dict[str, str],
     json_payload: Dict[str, Any],
     timeout: float,
+    verify: bool = True,
 ) -> Tuple[Dict[str, str], Dict[str, Any]]:
     """
     Обычный HTTP: один POST, тело — JSON. Ответ — один JSON-объект.
@@ -33,6 +34,7 @@ def _request_http(
         headers=headers,
         timeout=timeout,
         stream=False,
+        verify=verify,
     )
     resp.raise_for_status()
     # CaseInsensitiveDict -> dict для единообразия
@@ -119,6 +121,7 @@ def _request_sse(
     headers: Dict[str, str],
     json_payload: Dict[str, Any],
     timeout: float,
+    verify: bool = True,
 ) -> Tuple[Dict[str, str], Dict[str, Any]]:
     """
     SSE: POST с stream=True, Accept: text/event-stream.
@@ -134,6 +137,7 @@ def _request_sse(
         headers=headers,
         timeout=timeout,
         stream=True,
+        verify=verify,
     )
     resp.raise_for_status()
     # Ответ SSE часто в UTF-8; без явной кодировки requests может взять Latin-1 и сломать JSON с кириллицей
@@ -299,10 +303,39 @@ def get_transport(server_cfg: Dict[str, Any]) -> Callable[..., Tuple[Dict[str, s
         request(url, headers, json_payload, timeout) -> (response_headers, body_dict)
     """
     transport = (server_cfg or {}).get("transport")
+
+    # Настройка проверки SSL для HTTP/SSE по конфигу сервера:
+    #   verify-ssl: true  (по умолчанию)
+    #   verify-ssl: false (отключить проверку сертификата)
+    verify_cfg = (server_cfg or {}).get("verify-ssl")
+    if isinstance(verify_cfg, bool):
+        verify = verify_cfg
+    elif isinstance(verify_cfg, str):
+        verify = verify_cfg.strip().lower() not in ("false", "0", "no", "off")
+    else:
+        verify = True
+
     if transport == "http":
-        return _request_http
+        def request_http(
+            url: str,
+            headers: Dict[str, str],
+            json_payload: Dict[str, Any],
+            timeout: float,
+        ) -> Tuple[Dict[str, str], Dict[str, Any]]:
+            return _request_http(url, headers, json_payload, timeout, verify=verify)
+
+        return request_http
+
     if transport == "sse":
-        return _request_sse
+        def request_sse(
+            url: str,
+            headers: Dict[str, str],
+            json_payload: Dict[str, Any],
+            timeout: float,
+        ) -> Tuple[Dict[str, str], Dict[str, Any]]:
+            return _request_sse(url, headers, json_payload, timeout, verify=verify)
+
+        return request_sse
     if transport == "stdio":
         return _request_stdio(server_cfg)
     raise ValueError(

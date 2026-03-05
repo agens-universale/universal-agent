@@ -30,12 +30,18 @@ mcp-servers:
     url: http://127.0.0.1:8091/mcp
     description: Gitverse documentation search and answer
     server-name: gitverse RAG
+    # Проверка SSL-сертификата для этого MCP-сервера:
+    # true  - включена (по умолчанию, если параметр не задан)
+    # false - отключена (при проблемах с сертификатом или self-signed)
+    verify-ssl: true
   search:
     transport: sse
     url: http://0.0.0.0:10090/mcp
     token: 
     server-name: DuckDuckGo search
     description: Common web and News search
+    # Для этого сервера можно отдельно отключить проверку SSL, если нужно:
+    # verify-ssl: false
   # Пример stdio MCP (процесс запускается на каждый запрос списка тулов и на каждый вызов тула):
   # local-fs:
   #   transport: stdio
