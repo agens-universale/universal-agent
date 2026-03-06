@@ -3,12 +3,14 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 
 import asyncio
+from urllib.parse import urlsplit, urlunsplit
 
 import httpx
 from mcp.client.session import ClientSession
 from mcp.client.sse import sse_client
 from mcp.client.streamable_http import streamable_http_client
 from mcp.client.stdio import StdioServerParameters, stdio_client
+from mcp.shared.exceptions import McpError
 
 
 def _get_verify_ssl(server_cfg: Dict[str, Any]) -> bool:
@@ -59,6 +61,39 @@ def _make_stream_http_client(
     )
 
 
+def _build_endpoint(base_url: str, suffix: str) -> str:
+    """
+    Построить endpoint без дублирования суффикса.
+    Пример: base_url="https://host/mcp", suffix="/mcp" -> "https://host/mcp"
+    """
+    base = (base_url or "").strip()
+    if not base:
+        return suffix
+
+    parts = urlsplit(base)
+    path = (parts.path or "").rstrip("/")
+    clean_suffix = suffix.rstrip("/")
+
+    if path.endswith(clean_suffix):
+        return urlunsplit((parts.scheme, parts.netloc, path, parts.query, parts.fragment))
+
+    new_path = f"{path}{clean_suffix}" if path else clean_suffix
+    return urlunsplit((parts.scheme, parts.netloc, new_path, parts.query, parts.fragment))
+
+
+def _stream_http_endpoints(base_url: str) -> List[str]:
+    """
+    Кандидаты endpoint для stream_http.
+    Сначала пробуем <base>/mcp (дефолт по старой логике клиента),
+    при 404(Session terminated) — fallback на исходный base_url.
+    """
+    with_mcp = _build_endpoint(base_url, "/mcp")
+    raw = (base_url or "").strip().rstrip("/")
+    if raw and raw != with_mcp:
+        return [with_mcp, raw]
+    return [with_mcp]
+
+
 async def _list_tools_stream_sse_async(
     base_url: str,
     token: Optional[str],
@@ -71,7 +106,7 @@ async def _list_tools_stream_sse_async(
     Ожидается, что base_url — базовый URL сервера (например, http://host:port),
     а SSE эндпоинт доступен по base_url + "/sse" (как в официальном примере).
     """
-    endpoint = base_url.rstrip("/") + "/sse"
+    endpoint = _build_endpoint(base_url, "/sse")
 
     headers: Dict[str, str] = {}
     if token:
@@ -145,7 +180,7 @@ async def _call_tool_stream_sse_async(
     Возвращает словарь в формате, совместимом с format_mcp_tool_result:
       {"content": [...], "isError": bool}
     """
-    endpoint = base_url.rstrip("/") + "/sse"
+    endpoint = _build_endpoint(base_url, "/sse")
 
     headers: Dict[str, str] = {}
     if token:
@@ -217,37 +252,51 @@ async def _list_tools_stream_http_async(
     """
     Асинхронный список тулов через Streamable HTTP транспорт MCP.
     """
-    endpoint = base_url.rstrip("/") + "/mcp"
+    endpoints = _stream_http_endpoints(base_url)
+    last_error: Optional[Exception] = None
 
-    async with (
-        _make_stream_http_client(
-            token=token,
-            timeout=timeout,
-            verify=verify,
-        ) as http_client,
-        streamable_http_client(
-            endpoint,
-            http_client=http_client,
-        ) as (read_stream, write_stream, _),
-        ClientSession(read_stream, write_stream) as session,
-    ):
-        await session.initialize()
-        tools_result = await session.list_tools()
+    for endpoint in endpoints:
+        try:
+            async with (
+                _make_stream_http_client(
+                    token=token,
+                    timeout=timeout,
+                    verify=verify,
+                ) as http_client,
+                streamable_http_client(
+                    endpoint,
+                    http_client=http_client,
+                ) as (read_stream, write_stream, _),
+                ClientSession(read_stream, write_stream) as session,
+            ):
+                await session.initialize()
+                tools_result = await session.list_tools()
 
-        tools: List[Dict[str, Any]] = []
-        for tool in tools_result.tools:
-            if hasattr(tool, "model_dump"):
-                tool_dict = tool.model_dump(by_alias=True, mode="json", exclude_unset=True)
-            elif isinstance(tool, dict):
-                tool_dict = tool
-            else:
-                tool_dict = {
-                    "name": getattr(tool, "name", ""),
-                    "description": getattr(tool, "description", "") or "",
-                }
-            tools.append(tool_dict)
+                tools: List[Dict[str, Any]] = []
+                for tool in tools_result.tools:
+                    if hasattr(tool, "model_dump"):
+                        tool_dict = tool.model_dump(by_alias=True, mode="json", exclude_unset=True)
+                    elif isinstance(tool, dict):
+                        tool_dict = tool
+                    else:
+                        tool_dict = {
+                            "name": getattr(tool, "name", ""),
+                            "description": getattr(tool, "description", "") or "",
+                        }
+                    tools.append(tool_dict)
 
-        return tools
+                return tools
+        except McpError as exc:
+            last_error = exc
+            is_session_terminated = "Session terminated" in str(exc)
+            has_fallback = endpoint != endpoints[-1]
+            if is_session_terminated and has_fallback:
+                continue
+            raise
+
+    if last_error is not None:
+        raise last_error
+    return []
 
 
 def list_tools_stream_http(
@@ -283,37 +332,51 @@ async def _call_tool_stream_http_async(
     """
     Асинхронный вызов конкретного MCP-тула через Streamable HTTP транспорт.
     """
-    endpoint = base_url.rstrip("/") + "/mcp"
+    endpoints = _stream_http_endpoints(base_url)
+    last_error: Optional[Exception] = None
 
-    async with (
-        _make_stream_http_client(
-            token=token,
-            timeout=timeout,
-            verify=verify,
-        ) as http_client,
-        streamable_http_client(
-            endpoint,
-            http_client=http_client,
-        ) as (read_stream, write_stream, _),
-        ClientSession(read_stream, write_stream) as session,
-    ):
-        await session.initialize()
+    for endpoint in endpoints:
+        try:
+            async with (
+                _make_stream_http_client(
+                    token=token,
+                    timeout=timeout,
+                    verify=verify,
+                ) as http_client,
+                streamable_http_client(
+                    endpoint,
+                    http_client=http_client,
+                ) as (read_stream, write_stream, _),
+                ClientSession(read_stream, write_stream) as session,
+            ):
+                await session.initialize()
 
-        result = await session.call_tool(tool_name, arguments or {})
+                result = await session.call_tool(tool_name, arguments or {})
 
-        content_items: List[Any] = []
-        for item in getattr(result, "content", []) or []:
-            if hasattr(item, "model_dump"):
-                content_items.append(item.model_dump(by_alias=True, mode="json", exclude_unset=True))
-            else:
-                content_items.append(item)
+                content_items: List[Any] = []
+                for item in getattr(result, "content", []) or []:
+                    if hasattr(item, "model_dump"):
+                        content_items.append(item.model_dump(by_alias=True, mode="json", exclude_unset=True))
+                    else:
+                        content_items.append(item)
 
-        is_error = bool(getattr(result, "isError", False))
+                is_error = bool(getattr(result, "isError", False))
 
-        return {
-            "content": content_items,
-            "isError": is_error,
-        }
+                return {
+                    "content": content_items,
+                    "isError": is_error,
+                }
+        except McpError as exc:
+            last_error = exc
+            is_session_terminated = "Session terminated" in str(exc)
+            has_fallback = endpoint != endpoints[-1]
+            if is_session_terminated and has_fallback:
+                continue
+            raise
+
+    if last_error is not None:
+        raise last_error
+    return {"content": [], "isError": True}
 
 
 def call_tool_stream_http(
