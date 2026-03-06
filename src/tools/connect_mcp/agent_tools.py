@@ -6,9 +6,8 @@ import copy
 import logging
 from typing import Any, Dict
 
-import config
 from tools.connect_mcp.api import call_mcp_tool
-from tools.connect_mcp.registry import get_all_tools
+from tools.connect_mcp.registry import ToolsCache
 
 logger = logging.getLogger(__name__)
 
@@ -22,10 +21,12 @@ class MCPToolWrapper:
     def __init__(
         self,
         full_tool_name: str,
+        servers_cfg: Dict[str, Dict[str, Any]],
         tools_registry: Dict[str, Dict[str, Any]],
         timeout: float,
     ) -> None:
         self._full_tool_name = full_tool_name
+        self._servers_cfg = servers_cfg
         self._tools_registry = tools_registry
         self._timeout = timeout
 
@@ -33,6 +34,7 @@ class MCPToolWrapper:
         return call_mcp_tool(
             full_tool_name=self._full_tool_name,
             arguments=arguments,
+            servers_cfg=self._servers_cfg,
             tools_registry=self._tools_registry,
             timeout=self._timeout,
         )
@@ -184,24 +186,45 @@ def get_mcp_tools_data() -> Dict[str, Dict[str, Any]]:
     значение — {"tool_fabric": ..., "spec": ..., "description": ...}.
     Если MCP не настроен или загрузка не удалась, возвращается пустой dict.
     """
-    servers_cfg = config.config_dict.get("mcp-servers") or {}
+    # Эта функция должна вызываться с явным config_dict (через run_context),
+    # но сохраняем сигнатуру без аргументов для обратной совместимости.
+    raise RuntimeError(
+        "get_mcp_tools_data() теперь должен вызываться с явным config_dict "
+        "через новую версию функции: get_mcp_tools_data_for_config(config_dict)."
+    )
+
+
+def get_mcp_tools_data_for_config(
+    config_dict: Dict[str, Any],
+) -> Dict[str, Dict[str, Any]]:
+    """
+    Собрать словарь MCP-инструментов в формате tools_data для заданного config_dict.
+    """
+    servers_cfg = config_dict.get("mcp-servers") or {}
     if not servers_cfg:
         return {}
 
+    cfg: Dict[str, Any] = {
+        "mcp-servers": servers_cfg,
+        "mcp-meta": config_dict.get("mcp-meta") or {},
+    }
+
+    tools_cache = ToolsCache(cfg)
+
     try:
-        mcp_registry = get_all_tools(servers_cfg)
+        mcp_registry = tools_cache.get_tools()
     except Exception:
         logger.error("Failed to load MCP tools", exc_info=True)
         return {}
 
     timeout = (
-        config.config_dict.get("mcp-meta", {}).get("request_timeout_sec")
+        config_dict.get("mcp-meta", {}).get("request_timeout_sec")
         or 600
     )
 
     def make_fabric(full_tool_name: str):
         def fabric(**_kwargs: Any) -> MCPToolWrapper:
-            return MCPToolWrapper(full_tool_name, mcp_registry, timeout)
+            return MCPToolWrapper(full_tool_name, servers_cfg, mcp_registry, timeout)
 
         return fabric
 
@@ -227,5 +250,5 @@ def get_mcp_tools_data() -> Dict[str, Dict[str, Any]]:
 
 __all__ = [
     "MCPToolWrapper",
-    "get_mcp_tools_data",
+    "get_mcp_tools_data_for_config",
 ]

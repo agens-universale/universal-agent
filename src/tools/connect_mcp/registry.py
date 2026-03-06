@@ -9,8 +9,6 @@ import requests
 import logging
 
 logger = logging.getLogger(__name__)
-
-from config import config_dict as config_data
 from tools.connect_mcp.client import _tools_list_request, _get_or_init_session_id, _MCP_SESSIONS
 from tools.connect_mcp.stream_client import (
     list_tools_stream_http,
@@ -178,6 +176,11 @@ class ToolsCache:
     """
 
     def __init__(self, cfg: Dict[str, Any], ttl_default: int = 3600) -> None:
+        """
+        cfg — словарь с mcp-конфигурацией, ожидаются ключи:
+        - "mcp-servers": {...}
+        - "mcp-meta": {...} (опционально, для TTL).
+        """
         self._config = cfg
         self._ttl_default = ttl_default
         self._data: Optional[Dict[str, Dict[str, Any]]] = None
@@ -252,21 +255,30 @@ class ToolsCache:
         return fresh_tools
 
 
-# Глобальный инстанс кэша тулов, инициализируется при старте процесса.
-TOOLS_CACHE = ToolsCache(config_data)
-
-
-def get_all_tools(servers_cfg: Dict[str, Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+def get_all_tools(
+    servers_cfg: Dict[str, Dict[str, Any]],
+    mcp_meta: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Dict[str, Any]]:
     """
-    Обёртка для совместимости: получить все тулы через глобальный TOOLS_CACHE.
-    Аргумент servers_cfg сейчас игнорируется и берётся из config_data.
+    Получить все MCP‑тулы для заданной конфигурации серверов.
+
+    Функция-обёртка: внутри создаётся временный ToolsCache на основе
+    переданных servers_cfg и mcp_meta и возвращается результат get_tools().
+
+    Для более тонкого управления кэшем (например, переиспользование
+    инстанса ToolsCache между вызовами) рекомендуется создавать и хранить
+    ToolsCache снаружи (например, в run_context).
     """
-    return TOOLS_CACHE.get_tools()
+    cfg: Dict[str, Any] = {"mcp-servers": servers_cfg}
+    if mcp_meta is not None:
+        cfg["mcp-meta"] = mcp_meta
+
+    cache = ToolsCache(cfg)
+    return cache.get_tools()
 
 
 __all__ = [
     "_build_tools_registry",
     "ToolsCache",
-    "TOOLS_CACHE",
     "get_all_tools",
 ]

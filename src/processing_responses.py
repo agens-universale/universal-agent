@@ -1,24 +1,21 @@
 import json
 
-import config
 from tools import apply_tool, WrongFunctionArgumentsException
 from utils.connect_backend import create_call_headers
-
-
 from utils.connect_backend import request_backend_responses as request_backend
 from utils.connect_backend import create_call_data_responses as create_call_data
 from utils.format_messages import format_message_responses
 from utils.generate_message_id import generate_msg_id_sha256 as generate_message_id_func
 
 from states import State
-from typing import List, Dict, Union, Tuple
+from typing import List, Dict, Union, Tuple, Any
 
 import logging
 
-logger = logging.getLogger(__name__)
+_fallback_logger = logging.getLogger(__name__)
 
 
-def check_mode(messages) -> Union[str, None]:
+def check_mode(messages, logger) -> Union[str, None]:
     if len(messages) == 0:
         raise ValueError('Empty messages list')
     if messages[-1].get('role', None) == 'user':
@@ -70,35 +67,47 @@ def check_trace_finished(messages: List[Dict]) -> Union[str, None]:
     return None
 
 
-def process_user_ask(messages, state):
-
+def process_user_ask(messages, state: State, ctx: Any):
     message = messages[-1]
     messages_to_send = [message]
 
     call_data = create_call_data(messages, state)
 
-    call_headers = create_call_headers(state)
-    verify = config.config_dict.get('use_ssl', True)
-    res, res_headers = request_backend(call_data, call_headers, verify=verify)
+    call_headers = create_call_headers(state, ctx)
+    cfg = getattr(ctx, "config_dict", {}) or {}
+    verify = cfg.get("use_ssl", True)
+    url = cfg["agent_url"]
+    res, res_headers = request_backend(call_data, call_headers, url=url, verify=verify)
     state.set_resp_headers_metadata(res_headers)
     resp_messages = res['output']
 
-    return resp_messages, res['id']
+    return resp_messages, res["id"]
 
 
-def process_tool_calls(messages: List[Dict], state: State):
+def process_tool_calls(
+    messages: List[Dict],
+    state: State,
+    ctx: Any,
+    run_agent_func,
+):
     grouped_messages = group_messages(messages)
     if len(grouped_messages['tool_outputs']) > 0:
         raise ValueError('Messages has tool_outputs')
 
     tools_outputs = []
-    for m in grouped_messages['tool_calls']:
-        tool_res = apply_tool(tool_name=m['name'], arguments=m['arguments'], parent_state=state, run_agent_func=run_agent)
+    for m in grouped_messages["tool_calls"]:
+        tool_res = apply_tool(
+            tool_name=m["name"],
+            arguments=m["arguments"],
+            ctx=ctx,
+            parent_state=state,
+            run_agent_func=run_agent_func,
+        )
         new_message = {
-            'id': generate_message_id_func('fco'),
-            'type': 'function_call_output',
-            'call_id': m['call_id'],
-            'output': tool_res,
+            "id": generate_message_id_func("fco"),
+            "type": "function_call_output",
+            "call_id": m["call_id"],
+            "output": tool_res,
         }
 
         tools_outputs.append(new_message)
@@ -106,29 +115,37 @@ def process_tool_calls(messages: List[Dict], state: State):
     return tools_outputs
 
 
-def process_tool_outputs(messages, state):
-    call_headers = create_call_headers(state)
+def process_tool_outputs(messages, state: State, ctx: Any):
+    call_headers = create_call_headers(state, ctx)
     call_data = create_call_data(messages, state)
 
     # logger.debug('process_tool_outputs data to ask backend')
     # logger.debug(json.dumps(call_data, ensure_ascii=False, indent=2))
-    verify = config.config_dict.get('use_ssl', True)
-    res, res_headers = request_backend(call_data, call_headers, verify=verify)
+    cfg = getattr(ctx, "config_dict", {}) or {}
+    verify = cfg.get("use_ssl", True)
+    url = cfg["agent_url"]
+    res, res_headers = request_backend(call_data, call_headers, url=url, verify=verify)
     state.set_resp_headers_metadata(res_headers)
 
-    resp_messages = res['output']
-    return resp_messages, res['id']
+    resp_messages = res["output"]
+    return resp_messages, res["id"]
 
 
-def run_agent(messages, state: State) -> Union[str, None]:
+def run_agent(messages, state: State, ctx: Any) -> Union[str, None]:
     tool_error_cnt = 0
+    run_logger = getattr(ctx, "logger", _fallback_logger)
+    cfg = getattr(ctx, "config_dict", {}) or {}
+    max_tool_errors = cfg.get("no_tool_call_max_count", 0)
     while True:
         try:
             for m in messages:
                 m_formatted = format_message_responses(m)
                 if len(m_formatted) > 0:
                     print(m_formatted)
-                logger.info(f'\n<message>\n{json.dumps(m, ensure_ascii=False, indent=2)}\n</message>\n')
+                run_logger.info(
+                    "\n<message>\n%s\n</message>\n",
+                    json.dumps(m, ensure_ascii=False, indent=2),
+                )
 
             state.messages += messages
             finish_response = check_trace_finished(messages)
@@ -139,40 +156,40 @@ def run_agent(messages, state: State) -> Union[str, None]:
             if state.steps > state.max_steps:
                 return f'Agent executed {state.max_steps} steps and doesn\'t finish his work because of step limits.'
 
-            if tool_error_cnt > config.config_dict['no_tool_call_max_count']:
+            if tool_error_cnt > max_tool_errors:
                 return f'Agent tools call errors.'
 
-            mode = check_mode(messages)
-            if mode == 'user_ask':
-                messages, response_id = process_user_ask(messages, state)
+            mode = check_mode(messages, run_logger)
+            if mode == "user_ask":
+                messages, response_id = process_user_ask(messages, state, ctx)
                 state.previous_response_id = response_id
-            elif mode == 'function_call':
-                messages = process_tool_calls(messages, state)
+            elif mode == "function_call":
+                messages = process_tool_calls(messages, state, ctx, run_agent_func=run_agent)
                 tool_error_cnt = 0
-            elif mode == 'function_call_output':
-                messages, response_id = process_tool_outputs(messages, state)
+            elif mode == "function_call_output":
+                messages, response_id = process_tool_outputs(messages, state, ctx)
                 state.previous_response_id = response_id
             else:
-                raise ValueError(f'unconventional mode: {mode}')
+                raise ValueError(f"unconventional mode: {mode}")
         except WrongFunctionArgumentsException as e:
-            logger.error(e, exc_info=True)
+            run_logger.error(e, exc_info=True)
             tool_error_cnt += 1
             messages = [
                 {
-                    'role': 'user',
-                    'content': e.to_llm_feedback(),
-                    'id': generate_message_id_func('m')
+                    "role": "user",
+                    "content": e.to_llm_feedback(),
+                    "id": generate_message_id_func("m"),
                 }
             ]
         except Exception as e:
             # raise e
-            logger.error(e, exc_info=True)
+            run_logger.error(e, exc_info=True)
             tool_error_cnt += 1
             messages = [
                 {
-                    'role': 'user',
-                    'content': 'There is no tool call in Agent response. Please send appropriate tool call',
-                    'id': generate_message_id_func('m')
+                    "role": "user",
+                    "content": "There is no tool call in Agent response. Please send appropriate tool call",
+                    "id": generate_message_id_func("m"),
                 }
             ]
 

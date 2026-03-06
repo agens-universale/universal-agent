@@ -1,6 +1,5 @@
 from typing import Any, Dict, List, Optional
 
-from config import config_dict as config_data
 from tools.connect_mcp.transport import get_transport
 
 

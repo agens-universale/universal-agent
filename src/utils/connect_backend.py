@@ -7,17 +7,22 @@ from uuid import uuid4
 from typing import List, Dict, Optional, Tuple
 
 
-import logging
-logger = logging.getLogger(__name__)
-
 from utils.convertations import output_chat_completion_to_response
-
-import config
 from utils.format_messages import format_message_chat_completions_to_send_backend
 
-def request_backend_responses(data, headers, verify=True) -> Tuple[Dict, Dict]:
-    url = config.config_dict['agent_url']
-    chunks = []
+
+def request_backend_responses(
+    data: Dict,
+    headers: Dict,
+    url: str,
+    verify: bool = True,
+) -> Tuple[Dict, Dict]:
+    """
+    Отправить запрос в backend responses API.
+
+    url и verify передаются явно вызывающим кодом (как правило, из ctx.config_dict).
+    """
+    chunks: List[bytes] = []
 
     data['stream'] = True
 
@@ -36,25 +41,19 @@ def request_backend_responses(data, headers, verify=True) -> Tuple[Dict, Dict]:
         print(f'Error read json from backend. Last chunk: {last_chunk}')
         raise e
 
-    logger.debug('Backend got data:')
-    logger.debug(json.dumps(result, ensure_ascii=False, indent=2))
-
     if result['type'] not in ['response.completed']:
         raise ValueError(f'wrong stream finish: {chunks[-1].decode("utf-8")}')
 
-    return result['response'], r_headers
+    return result["response"], r_headers
 
 
-def request_backend_chat_completions(data: Dict, headers: Dict):
-    url = config.config_dict['completions_url']
+def request_backend_chat_completions(data: Dict, headers: Dict, url: str):
+    """
+    Отправить запрос в backend chat completions API.
 
-    logger.debug('Send data to backend_chat_completions:')
-    logger.debug(json.dumps(data, ensure_ascii=False, indent=2))
-
+    url передаётся явно вызывающим кодом (как правило, из ctx.config_dict).
+    """
     r = requests.post(url, json=data, headers=headers)
-
-    logger.debug('Backend got data:')
-    logger.debug(json.dumps(r.json(), ensure_ascii=False, indent=2))
 
     if r.status_code == 200:
         # res = output_chat_completion_to_response(r.json())
@@ -62,37 +61,55 @@ def request_backend_chat_completions(data: Dict, headers: Dict):
         # logger.debug('Transformed to responses format:')
         # logger.debug(json.dumps(res, ensure_ascii=False, indent=2))
         return res
+    raise Exception(f"request error. code: {r.status_code} Response: {r.text}")
 
-    raise Exception(f'request error. code: {r.status_code} Response: {r.text}')
 
+def create_call_headers(state, ctx) -> Dict[str, str]:
+    """
+    Сформировать заголовки вызова для backend API на основе State и RunContext.
+    """
+    config_dict = getattr(ctx, "config_dict", {}) or {}
+    auth_connector = getattr(ctx, "auth_connector", None)
 
-def create_call_headers(state):
-    call_headers = {
-        'x_cl_id': str(config.config_dict['x_cl_id']),
-        'x_trace_id': str(state.state_id),
-        'x_rq_id': str(uuid4()),
-        'x-session-id': str(state.state_id)
+    call_headers: Dict[str, str] = {
+        "x_cl_id": str(config_dict.get("x_cl_id")),
+        "x_trace_id": str(state.state_id),
+        "x_rq_id": str(uuid4()),
+        "x-session-id": str(state.state_id),
     }
     if state.x_target is not None:
-        call_headers['x-target'] = state.x_target
-    if config.auth_connector:
-        token = config.auth_connector.get_token()
-        call_headers['Authorization'] = f'Bearer {token}'
+        call_headers["x-target"] = state.x_target
+    if auth_connector is not None:
+        token = auth_connector.get_token()
+        call_headers["Authorization"] = f"Bearer {token}"
     return call_headers
 
 
-def create_call_data_responses(messages, state, tools: Optional[List]=None, set_previous_response_id: bool=True):
+def create_call_data_responses(
+    messages,
+    state,
+    tools: Optional[List] = None,
+    set_previous_response_id: bool = True,
+) -> Dict:
     call_data = dict()
-    call_data['model'] = state.default_model
-    call_data['input'] = messages
-    call_data['tools'] = tools if tools else state.tools
-    call_data['metadata'] = state.call_metadata
-    call_data['previous_response_id'] = state.previous_response_id if set_previous_response_id else None
+    call_data["model"] = state.default_model
+    call_data["input"] = messages
+    call_data["tools"] = tools if tools else state.tools
+    call_data["metadata"] = state.call_metadata
+    call_data["previous_response_id"] = (
+        state.previous_response_id if set_previous_response_id else None
+    )
     return call_data
 
-
-def create_call_data_completions(messages, state: Optional=None, tools: Optional[List]=None, *args, **kwargs):
-
+    
+def create_call_data_completions(
+    messages,
+    state: Optional = None,
+    tools: Optional[List] = None,
+    model: Optional[str] = None,
+    *args,
+    **kwargs,
+) -> Dict:
     if state is not None:
         state_messages = deepcopy(state.messages)
         state_tools = deepcopy(state.tools)
@@ -113,24 +130,30 @@ def create_call_data_completions(messages, state: Optional=None, tools: Optional
 
     to_send_messages_formatted = []
     for m in to_send_messages:
-        to_send_messages_formatted.append(format_message_chat_completions_to_send_backend(m))
+        to_send_messages_formatted.append(
+            format_message_chat_completions_to_send_backend(m)
+        )
+
+    effective_model = model
+    if effective_model is None and state is not None:
+        effective_model = state.default_model
 
     data = {
-        'model': config.config_dict['model'],
-        'messages': to_send_messages_formatted,
-        'tools': to_send_tools,
-        'temperature': 0.7,
-        'tool_choice': 'auto',
-        'top_p': 0.8,
-        'top_k': 20,
-        'min_p': 0.0,
-        'max_tokens': 8096,
-        'repetition_penalty': 1.2,
-        'separate_reasoning': True,
-        'chat_template_kwargs': {'enable_thinking': False},
+        "model": effective_model,
+        "messages": to_send_messages_formatted,
+        "tools": to_send_tools,
+        "temperature": 0.7,
+        "tool_choice": "auto",
+        "top_p": 0.8,
+        "top_k": 20,
+        "min_p": 0.0,
+        "max_tokens": 8096,
+        "repetition_penalty": 1.2,
+        "separate_reasoning": True,
+        "chat_template_kwargs": {"enable_thinking": False},
     }
 
     return data
-
-if __name__ == '__main__':
+    
+if __name__ == "__main__":
     ...

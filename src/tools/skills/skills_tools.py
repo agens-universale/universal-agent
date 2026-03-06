@@ -9,14 +9,14 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict
 
-from tools.skills.registry import get_skills_registry
+from tools.skills.registry import SkillsRegistry
 
 logger = logging.getLogger(__name__)
 
 
 class SkillsListTool:
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
-        self._registry = get_skills_registry()
+    def __init__(self, registry: SkillsRegistry, *args: Any, **kwargs: Any) -> None:
+        self._registry = registry
 
     def __call__(self, **kwargs: Any) -> Dict[str, Any]:
         try:
@@ -33,8 +33,8 @@ class SkillsListTool:
 
 
 class LoadSkillTool:
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
-        self._registry = get_skills_registry()
+    def __init__(self, registry: SkillsRegistry, *args: Any, **kwargs: Any) -> None:
+        self._registry = registry
 
     def __call__(self, skill_id: str, **kwargs: Any) -> Dict[str, Any]:
         try:
@@ -58,8 +58,8 @@ class LoadSkillTool:
 
 
 class RunSkillScriptTool:
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
-        self._registry = get_skills_registry()
+    def __init__(self, registry: SkillsRegistry, *args: Any, **kwargs: Any) -> None:
+        self._registry = registry
 
     def __call__(
         self,
@@ -93,8 +93,8 @@ class RunSkillScriptTool:
 
 
 class LoadReferenceTool:
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
-        self._registry = get_skills_registry()
+    def __init__(self, registry: SkillsRegistry, *args: Any, **kwargs: Any) -> None:
+        self._registry = registry
 
     def __call__(self, skill_id: str, slug: str, **kwargs: Any) -> Dict[str, Any]:
         try:
@@ -117,8 +117,8 @@ class LoadReferenceTool:
 
 
 class LoadAssetTool:
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
-        self._registry = get_skills_registry()
+    def __init__(self, registry: SkillsRegistry, *args: Any, **kwargs: Any) -> None:
+        self._registry = registry
 
     def __call__(self, skill_id: str, slug: str, **kwargs: Any) -> Dict[str, Any]:
         try:
@@ -140,14 +140,19 @@ class LoadAssetTool:
             }
 
 
-def get_skills_tools_data() -> Dict[str, Dict[str, Any]]:
+def get_skills_tools_data(skills_registry: SkillsRegistry) -> Dict[str, Dict[str, Any]]:
     """
     Собрать словарь инструментов работы со скиллами в формате tools_data.
     """
+    def _make_fabric(tool_cls: type):
+        def fabric(**_kwargs: Any):
+            return tool_cls(skills_registry)
+
+        return fabric
 
     tools: Dict[str, Dict[str, Any]] = {
         "skills_list": {
-            "tool_fabric": SkillsListTool,
+            "tool_fabric": _make_fabric(SkillsListTool),
             "spec": {
                 "type": "function",
                 "name": "skills_list",
@@ -174,7 +179,7 @@ def get_skills_tools_data() -> Dict[str, Dict[str, Any]]:
             ),
         },
         "skills_load": {
-            "tool_fabric": LoadSkillTool,
+            "tool_fabric": _make_fabric(LoadSkillTool),
             "spec": {
                 "type": "function",
                 "name": "skills_load",
@@ -208,7 +213,7 @@ def get_skills_tools_data() -> Dict[str, Dict[str, Any]]:
             ),
         },
         "skills_run_script": {
-            "tool_fabric": RunSkillScriptTool,
+            "tool_fabric": _make_fabric(RunSkillScriptTool),
             "spec": {
                 "type": "function",
                 "name": "skills_run_script",
@@ -258,7 +263,7 @@ def get_skills_tools_data() -> Dict[str, Dict[str, Any]]:
             ),
         },
         "skills_load_reference": {
-            "tool_fabric": LoadReferenceTool,
+            "tool_fabric": _make_fabric(LoadReferenceTool),
             "spec": {
                 "type": "function",
                 "name": "skills_load_reference",
@@ -300,7 +305,7 @@ def get_skills_tools_data() -> Dict[str, Dict[str, Any]]:
             ),
         },
         "skills_load_asset": {
-            "tool_fabric": LoadAssetTool,
+            "tool_fabric": _make_fabric(LoadAssetTool),
             "spec": {
                 "type": "function",
                 "name": "skills_load_asset",

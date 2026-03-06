@@ -3,7 +3,6 @@ from typing import Any, Dict
 import json
 import requests
 
-from config import config_dict as config_data
 from tools.connect_mcp.client import _MCP_SESSIONS, _call_mcp_tool, _get_or_init_session_id
 from tools.connect_mcp.registry import get_all_tools
 from tools.connect_mcp.stream_client import (
@@ -17,7 +16,7 @@ from tools.connect_mcp.validation import _validate_tool_arguments, format_mcp_to
 def call_mcp_tool(
     full_tool_name: str,
     arguments: Dict[str, Any] | str,
-    servers_cfg: Dict[str, Dict[str, Any]] | None = None,
+    servers_cfg: Dict[str, Dict[str, Any]],
     tools_registry: Dict[str, Dict[str, Any]] | None = None,
     timeout: float = 10.0,
 ) -> Any:
@@ -26,10 +25,6 @@ def call_mcp_tool(
 
     full_tool_name: имя вида "<mcp_key>_<tool_name>" (как в get_all_tools).
     arguments: словарь аргументов ИЛИ JSON-строка с аргументами (как в OpenAI tool_call).
-
-    servers_cfg:
-        как правило, config_data['mcp-servers'].
-        Если None — берётся из config_data.
 
     tools_registry:
         результат get_all_tools(servers_cfg) — словарь всех инструментов.
@@ -41,9 +36,6 @@ def call_mcp_tool(
     - если всё валидно — вызывает соответствующий MCP tool через tools/call
       и возвращает result (data['result'] из MCP-ответа).
     """
-    if servers_cfg is None:
-        servers_cfg = config_data.get("mcp-servers") or {}
-
     if tools_registry is None:
         tools_registry = get_all_tools(servers_cfg)
 

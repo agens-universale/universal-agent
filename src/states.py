@@ -2,25 +2,26 @@ import os
 import time
 from uuid import uuid4
 import json
-from typing import List, Union, Dict, Optional
+from typing import List, Union, Dict, Optional, Any
 from utils.project_data import get_project_data
-import config
 
 
 class State:
-
-    def __init__(self,
-                 verbose: bool,
-                 model: str,
-                 tools_spec: List[Dict],
-                 tools_descr: List[Dict],
-                 skills_list: List[Dict],
-                 max_steps: int,
-                 parent_state_id: Optional[str] = None,
-                 mode: str = None,
-                 call_id: Optional[str] = None,
-                 specific_role: Optional[str] = None
-                 ):
+    def __init__(
+        self,
+        verbose: bool,
+        model: str,
+        tools_spec: List[Dict],
+        tools_descr: List[Dict],
+        skills_list: List[Dict],
+        max_steps: int,
+        system_prompt_id: str,
+        use_server_subagents: bool,
+        parent_state_id: Optional[str] = None,
+        mode: Optional[str] = None,
+        call_id: Optional[str] = None,
+        specific_role: Optional[str] = None,
+    ):
         self.parent_state_id = parent_state_id
         self.x_target = None
         self.state_id = str(uuid4())
@@ -31,6 +32,8 @@ class State:
         self.tools = tools_spec
         self.tools_descr = tools_descr
         self.skills_list = skills_list
+        self.system_prompt_id = system_prompt_id
+        self.use_server_subagents = use_server_subagents
         self.call_metadata = self.set_call_metadata()
         self.messages = []
         self.previous_response_id = None
@@ -40,16 +43,20 @@ class State:
         self.steps = 0
 
     def set_call_metadata(self):
-        metadata = dict()
-        metadata['systemPromptId'] = config.config_dict['system_prompt_id']
-        metadata['promptVariables'] = self.initial_project_data
+        metadata: Dict[str, Any] = dict()
+        metadata["systemPromptId"] = self.system_prompt_id
+        metadata["promptVariables"] = self.initial_project_data
         if self.skills_list:
-            skills_template = 'For solving task you can use skills.\nUse skills tools for loading skills data and skills resources.\nAvailable skills list:\n'
+            skills_template = (
+                "For solving task you can use skills.\n"
+                "Use skills tools for loading skills data and skills resources.\n"
+                "Available skills list:\n"
+            )
             skills_template += json.dumps(self.skills_list, ensure_ascii=False)
-            metadata['promptVariables']['available_skills'] = skills_template
+            metadata["promptVariables"]["available_skills"] = skills_template
         if self.specific_role is not None:
-            metadata['specificRole'] = self.specific_role
-        metadata['useServerSubagents'] = config.config_dict.get('use_server_subagents', False)
+            metadata["specificRole"] = self.specific_role
+        metadata["useServerSubagents"] = self.use_server_subagents
         return metadata
 
     def set_resp_headers_metadata(self, headers):

@@ -7,7 +7,6 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 import yaml
-from config import config_dict as _config
 
 
 def _project_root() -> str:
@@ -19,35 +18,12 @@ def _project_root() -> str:
     return os.path.abspath(os.path.join(here, "..", "..", ".."))
 
 
-def _configured_skills_root() -> Optional[str]:
-    """
-    Прочитать путь к skills_data из config.yml, если он задан.
-
-    Ключ в конфиге:
-      skills_data_path: "/abs/path/to/skills/skills_data"
-
-    Ожидается, что путь всегда абсолютный. Никаких преобразований
-    относительных путей не выполняется.
-    """
-    raw = _config.get("skills_data_path")
-    if not isinstance(raw, str):
-        return None
-
-    path = raw.strip()
-    return path or None
-
-
 def _default_skills_root() -> str:
     """
     Определить корень skills_data.
 
-    - Если в config.yml задан skills_data_path — используем его.
-    - Иначе по умолчанию: <project_root>/skills
+    По умолчанию: <project_root>/skills.
     """
-    configured = _configured_skills_root()
-    if configured:
-        return configured
-
     return os.path.join(_project_root(), "skills")
 
 
@@ -372,14 +348,23 @@ class SkillsRegistry:
         }
 
 
-_DEFAULT_REGISTRY = SkillsRegistry()
-
-
-def get_skills_registry() -> SkillsRegistry:
+def get_skills_registry(config_dict: Optional[Dict[str, Any]] = None) -> SkillsRegistry:
     """
-    Глобальный реестр скиллов для использования в инструментах.
+    Фабрика реестра скиллов.
+
+    - Если передан config_dict и в нём задан skills_data_path (строка, не пустая) —
+      используется этот путь как корень скиллов.
+    - Иначе используется путь по умолчанию: <project_root>/skills.
     """
-    return _DEFAULT_REGISTRY
+    skills_root: Optional[str] = None
+    if config_dict is not None:
+        raw = config_dict.get("skills_data_path")
+        if isinstance(raw, str):
+            path = raw.strip()
+            if path:
+                skills_root = path
+
+    return SkillsRegistry(skills_root=skills_root)
 
 
 __all__ = [
