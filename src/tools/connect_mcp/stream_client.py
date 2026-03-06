@@ -38,6 +38,27 @@ def _make_httpx_factory(verify: bool):
     return factory
 
 
+def _make_stream_http_client(
+    token: Optional[str],
+    timeout: float,
+    verify: bool,
+) -> httpx.AsyncClient:
+    """
+    Создать httpx.AsyncClient для stream_http (MCP 1.26.0).
+    В этой версии streamable_http_client принимает http_client и
+    не принимает headers/timeout/httpx_client_factory напрямую.
+    """
+    headers: Dict[str, str] = {}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+
+    return httpx.AsyncClient(
+        headers=headers or None,
+        timeout=timeout,
+        verify=verify,
+    )
+
+
 async def _list_tools_stream_sse_async(
     base_url: str,
     token: Optional[str],
@@ -198,16 +219,15 @@ async def _list_tools_stream_http_async(
     """
     endpoint = base_url.rstrip("/") + "/mcp"
 
-    headers: Dict[str, str] = {}
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
-
-    httpx_factory = _make_httpx_factory(verify)
-
     async with (
+        _make_stream_http_client(
+            token=token,
+            timeout=timeout,
+            verify=verify,
+        ) as http_client,
         streamable_http_client(
             endpoint,
-            httpx_client_factory=httpx_factory,
+            http_client=http_client,
         ) as (read_stream, write_stream, _),
         ClientSession(read_stream, write_stream) as session,
     ):
@@ -265,16 +285,15 @@ async def _call_tool_stream_http_async(
     """
     endpoint = base_url.rstrip("/") + "/mcp"
 
-    headers: Dict[str, str] = {}
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
-
-    httpx_factory = _make_httpx_factory(verify)
-
     async with (
+        _make_stream_http_client(
+            token=token,
+            timeout=timeout,
+            verify=verify,
+        ) as http_client,
         streamable_http_client(
             endpoint,
-            httpx_client_factory=httpx_factory,
+            http_client=http_client,
         ) as (read_stream, write_stream, _),
         ClientSession(read_stream, write_stream) as session,
     ):
