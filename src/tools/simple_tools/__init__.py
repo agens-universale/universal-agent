@@ -12,6 +12,7 @@ from tools.simple_tools.submit_solution import SubmitSolution
 from tools.simple_tools.calculator import Calculator
 from tools.simple_tools.run_python_code import RunPythonCode
 from tools.simple_tools.answer_question import AnswerQuestion
+from tools.simple_tools.fetch_url import FetchUrl
 from typing import Dict, Any
 
 
@@ -82,6 +83,11 @@ def get_simple_tools_data(config_dict: Dict[str, Any]) -> Dict[str, Dict[str, An
             'spec': AnswerQuestion.tool_description(),
             'description': AnswerQuestion.prompt_description(),
         },
+        'fetch_url': {
+            'tool_fabric': FetchUrl,
+            'spec': FetchUrl.tool_description(),
+            'description': FetchUrl.prompt_description(),
+        },
         'submit_solution': {
             'tool_fabric': SubmitSolution,
             'spec': SubmitSolution.tool_description(),
@@ -95,6 +101,20 @@ def get_simple_tools_data(config_dict: Dict[str, Any]) -> Dict[str, Dict[str, An
             'spec': AskHuman.tool_description(),
             'description': AskHuman.prompt_description(),
         }
+
+    stop_tools_cfg = config_dict.get('stop_tools', [])
+    if isinstance(stop_tools_cfg, list):
+        stop_tools = {
+            tool_name.strip()
+            for tool_name in stop_tools_cfg
+            if isinstance(tool_name, str) and tool_name.strip()
+        }
+        if stop_tools:
+            simple_tools_data = {
+                tool_name: tool_data
+                for tool_name, tool_data in simple_tools_data.items()
+                if tool_name not in stop_tools
+            }
 
     return simple_tools_data
 

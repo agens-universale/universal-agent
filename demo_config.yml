@@ -16,6 +16,10 @@ client_name : mini_cli_pub_agent_1
 x_cl_id : 12345
 verbose: true
 use_ask_human_tool: false
+# Имена simple_tools, которые будут отключены и не попадут в tool registry.
+# Пример:
+# stop_tools: [execute_command, run_python_code]
+stop_tools: []
 server_tool_prefix: system
 max_steps: 200
 # Порог подряд идущих ответов backend без tool_call; при превышении завершаем работу
