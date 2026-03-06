@@ -207,7 +207,6 @@ async def _list_tools_stream_http_async(
     async with (
         streamable_http_client(
             endpoint,
-            headers=headers or None,
             timeout=timeout,
             httpx_client_factory=httpx_factory,
         ) as (read_stream, write_stream, _),
@@ -276,7 +275,6 @@ async def _call_tool_stream_http_async(
     async with (
         streamable_http_client(
             endpoint,
-            headers=headers or None,
             timeout=timeout,
             httpx_client_factory=httpx_factory,
         ) as (read_stream, write_stream, _),
