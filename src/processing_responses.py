@@ -8,11 +8,19 @@ from utils.format_messages import format_message_responses
 from utils.generate_message_id import generate_msg_id_sha256 as generate_message_id_func
 
 from states import State
-from typing import List, Dict, Union, Tuple, Any
+from typing import List, Dict, Union, Tuple, Any, Callable, Optional
 
 import logging
 
 _fallback_logger = logging.getLogger(__name__)
+
+
+def _is_previous_response_cache_miss(exc: Exception) -> bool:
+    text = str(exc).lower()
+    return (
+        "previous_response_id" in text
+        and ("not found" in text or "cache" in text)
+    ) or ("cache" in text and "not found" in text)
 
 
 def check_mode(messages, logger) -> Union[str, None]:
@@ -131,7 +139,14 @@ def process_tool_outputs(messages, state: State, ctx: Any):
     return resp_messages, res["id"]
 
 
-def run_agent(messages, state: State, ctx: Any) -> Union[str, None]:
+def run_agent(
+    messages,
+    state: State,
+    ctx: Any,
+    *,
+    get_full_history_messages: Optional[Callable[[], List[Dict]]] = None,
+    persist_messages_callback: Optional[Callable[[List[Dict]], None]] = None,
+) -> Union[str, None]:
     tool_error_cnt = 0
     run_logger = getattr(ctx, "logger", _fallback_logger)
     cfg = getattr(ctx, "config_dict", {}) or {}
@@ -148,6 +163,15 @@ def run_agent(messages, state: State, ctx: Any) -> Union[str, None]:
                 )
 
             state.messages += messages
+            if persist_messages_callback is not None:
+                try:
+                    persist_messages_callback(messages)
+                except Exception as persist_exc:
+                    run_logger.warning(
+                        "Thread messages persist warning: %s",
+                        persist_exc,
+                        exc_info=True,
+                    )
             finish_response = check_trace_finished(messages)
 
             if finish_response:
@@ -161,7 +185,26 @@ def run_agent(messages, state: State, ctx: Any) -> Union[str, None]:
 
             mode = check_mode(messages, run_logger)
             if mode == "user_ask":
-                messages, response_id = process_user_ask(messages, state, ctx)
+                try:
+                    messages, response_id = process_user_ask(messages, state, ctx)
+                except Exception as user_ask_exc:
+                    can_retry_with_full_history = (
+                        state.previous_response_id is not None
+                        and get_full_history_messages is not None
+                        and _is_previous_response_cache_miss(user_ask_exc)
+                    )
+                    if not can_retry_with_full_history:
+                        raise
+
+                    run_logger.warning(
+                        "Cache miss for previous_response_id=%s. Retry with full history.",
+                        state.previous_response_id,
+                    )
+                    full_history_messages = get_full_history_messages()
+                    state.previous_response_id = None
+                    messages, response_id = process_user_ask(
+                        full_history_messages, state, ctx
+                    )
                 state.previous_response_id = response_id
             elif mode == "function_call":
                 messages = process_tool_calls(messages, state, ctx, run_agent_func=run_agent)

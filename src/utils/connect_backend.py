@@ -41,7 +41,8 @@ def request_backend_responses(
         print(f'Error read json from backend. Last chunk: {last_chunk}')
         raise e
 
-    if result['type'] not in ['response.completed']:
+    result_type = result.get("type")
+    if result_type != "response.completed":
         raise ValueError(f'wrong stream finish: {chunks[-1].decode("utf-8")}')
 
     return result["response"], r_headers

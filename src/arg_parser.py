@@ -31,6 +31,12 @@ parser.add_argument(
     help="Путь к кастомному конфигурационному файлу"
 )
 
+parser.add_argument(
+    "-t", "--thread-id",
+    type=str,
+    help="Идентификатор треда для продолжения диалога"
+)
+
 
 run_args = parser.parse_args()
 

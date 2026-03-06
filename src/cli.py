@@ -6,11 +6,14 @@ from config import load_config, build_auth_connector
 from processing_responses import run_agent
 from run_context import RunContext, create_run_context
 from states import State, save_state, dump_storage
+from thread_store import (
+    ThreadSession,
+)
 from tools.skills.registry import get_skills_registry
 from utils.generate_message_id import generate_msg_id_sha256 as generate_message_id_func
 
 
-def run(message: str, ctx: RunContext, *, verbose: bool | None = None) -> Any:
+def run(message: str, ctx: RunContext, *, thread_id: str | None = None, verbose: bool | None = None) -> Any:
     """
     Основная функция одного запуска агента.
     Может вызываться как из CLI, так и из REST‑обёрток.
@@ -39,15 +42,39 @@ def run(message: str, ctx: RunContext, *, verbose: bool | None = None) -> Any:
     state = State(**state_data)
     save_state(state)
 
-    messages = [
-        {
-            "role": "user",
-            "content": message,
-            "id": generate_message_id_func("m"),
-        }
-    ]
+    new_user_message = {
+        "role": "user",
+        "content": message,
+        "id": generate_message_id_func("m"),
+    }
+    messages = [new_user_message]
 
-    response = run_agent(messages, state, ctx)
+    thread_session: ThreadSession | None = None
+    persist_messages_callback = None
+    get_full_history_messages = None
+    if thread_id is not None:
+        thread_session = ThreadSession.from_config(
+            config_dict=config_dict, thread_id=thread_id
+        )
+        state.previous_response_id = thread_session.previous_response_id
+        messages = thread_session.build_initial_messages(new_user_message)
+        thread_session.set_runtime_messages(state.messages)
+
+        def _persist_thread_batch(batch_messages: list[dict]) -> None:
+            thread_session.persist_batch(
+                batch_messages, previous_response_id=state.previous_response_id
+            )
+
+        persist_messages_callback = _persist_thread_batch
+        get_full_history_messages = thread_session.get_full_history_messages
+
+    response = run_agent(
+        messages,
+        state,
+        ctx,
+        get_full_history_messages=get_full_history_messages,
+        persist_messages_callback=persist_messages_callback,
+    )
 
     if config_dict.get("dump_storage"):
         cur_dir = os.getcwd()
@@ -69,8 +96,9 @@ def main() -> Any:
 
     query = arg_parser.run_args.query
     verbose = arg_parser.run_args.verbose
+    thread_id = arg_parser.run_args.thread_id
 
-    return run(query, ctx, verbose=verbose)
+    return run(query, ctx, thread_id=thread_id, verbose=verbose)
 
 
 if __name__ == "__main__":
