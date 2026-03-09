@@ -58,7 +58,42 @@
       - в директории для тредов создаются файлы `data_<thread_id>.jsonl` (сообщения) и `meta_<thread_id>.json` (метаданные, включая `previous_response_id`).
     - По умолчанию логи будут сохраняться в той папке, из которой запущена команда.
 
-5. **MCP-серверы**
+5. **Переопределение настроек config.yml из CLI**
+
+    Любой параметр из `config.yml` (или новый, которого там нет) можно переопределить при запуске через дополнительные аргументы командной строки.
+
+    - Значения из CLI **всегда имеют приоритет** над значениями из `config.yml`.
+    - Поддерживаются следующие формы:
+      - `--param value`
+      - `--param=value`
+      - `--flag` (без значения, в конфиг уйдёт `true`)
+    - Значения автоматически приводятся к типам с помощью `yaml.safe_load`, поэтому:
+      - `--max_steps 50` → `config_dict["max_steps"] == 50` (число),
+      - `--verbose true` → `config_dict["verbose"] == True` (булево),
+      - `--client_name "my_client"` → `config_dict["client_name"] == "my_client"` (строка).
+
+    **Примеры:**
+
+    - Переопределить существующие ключи:
+      ```bash
+      gc-cli -q "..." --agent_md_path "my path" --max_steps 50
+      ```
+      В рантайме будет использовано:
+      - `config_dict["agent_md_path"] == "my path"`,
+      - `config_dict["max_steps"] == 50`,
+      даже если в `config.yml` заданы другие значения.
+
+    - Добавить новый параметр, которого нет в `config.yml`:
+      ```bash
+      gc-cli -q "..." --my_custom_flag true --extra_param "some value"
+      ```
+      В `config_dict` появятся:
+      - `config_dict["my_custom_flag"] == True`,
+      - `config_dict["extra_param"] == "some value"`.
+
+    Обработка этих аргументов реализована в `src/arg_parser.py`, переопределения применяются к загруженному словарю конфига в `src/cli.py`.
+
+6. **MCP-серверы**
 
    Клиент поддерживает MCP (Model Context Protocol): агент может вызывать инструменты
    внешних MCP-серверов (поиск, RAG, файловая система, выполнение кода и т.д.).

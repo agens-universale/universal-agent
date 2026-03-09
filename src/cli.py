@@ -37,6 +37,7 @@ def run(message: str, ctx: RunContext, *, thread_id: str | None = None, verbose:
         "skills_list": skills_list,
         "system_prompt_id": config_dict["system_prompt_id"],
         "use_server_subagents": config_dict.get("use_server_subagents", False),
+        "agent_md_path": config_dict.get("agent_md_path"),
     }
 
     state = State(**state_data)
@@ -91,6 +92,12 @@ def main() -> Any:
     создание RunContext и запуск агента.
     """
     config_dict = load_config(arg_parser.run_args.config)
+
+    # Переопределяем значения из config.yml аргументами командной строки вида
+    # --param value / --param=value / --flag.
+    # Значения из CLI имеют приоритет над конфигом.
+    if getattr(arg_parser, "extra_config_overrides", None):
+        config_dict.update(arg_parser.extra_config_overrides)
     auth_connector = build_auth_connector(config_dict)
     ctx = create_run_context(config_dict, auth_connector=auth_connector)
 
