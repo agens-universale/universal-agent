@@ -146,12 +146,20 @@ def run_agent(
     *,
     get_full_history_messages: Optional[Callable[[], List[Dict]]] = None,
     persist_messages_callback: Optional[Callable[[List[Dict]], None]] = None,
+    get_pending_messages: Optional[Callable[[], List[Dict]]] = None,
+    check_stop: Optional[Callable[[], bool]] = None,
 ) -> Union[str, None]:
     tool_error_cnt = 0
     run_logger = getattr(ctx, "logger", _fallback_logger)
     cfg = getattr(ctx, "config_dict", {}) or {}
     max_tool_errors = cfg.get("no_tool_call_max_count", 0)
     while True:
+        if check_stop is not None and check_stop():
+            return None
+        if get_pending_messages is not None:
+            pending = get_pending_messages()
+            if pending:
+                messages = pending
         try:
             for m in messages:
                 m_formatted = format_message_responses(m)

@@ -43,6 +43,7 @@ class State:
         self.call_id = call_id
         self.max_steps = max_steps
         self.steps = 0
+        self.stop_requested = False
 
     def set_call_metadata(self):
         metadata: Dict[str, Any] = dict()
