@@ -1,0 +1,8 @@
+pyyaml>=6.0.3
+requests
+trafilatura
+readability-lxml
+jsonschema>=4.0.0
+httpx>=0.27.0
+httpx-sse>=0.4.0
+mcp==1.26.0
