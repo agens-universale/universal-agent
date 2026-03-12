@@ -28,6 +28,14 @@ no_tool_call_max_count: 3
 # set dump_storage: false and save_logs: false - to prevent dumping log files in agent current work folder
 dump_storage: true
 save_logs: true
+#
+# Опциональный абсолютный путь к директории, в которую будут складываться
+# файлы логов и дампы состояния (session_storage_*.json).
+# Если параметр не задан или пустой, по умолчанию используется текущая
+# рабочая директория, из которой запускается gc-cli.
+# Пример:
+# logs_dump_dir: "/home/user/my-project/gc-cli-runs"
+
 mcp-servers:
   # доступные типы транспорта http, stdio, sse, stream_http, stream_sse, stream_stdio
   rag:

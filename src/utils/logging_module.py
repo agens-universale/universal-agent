@@ -29,7 +29,7 @@ def create_run_logger(
     logger.handlers.clear()
 
     if config_dict.get("save_logs", False):
-        base_dir = os.getcwd()
+        base_dir = config_dict.get("logs_dump_dir") or os.getcwd()
         suffix = run_id or str(int(time.time()))
         logging_path = os.path.join(base_dir, f"agent_{suffix}.log")
 

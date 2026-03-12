@@ -109,7 +109,7 @@ class AgentExecutor:
         )
 
         if config_dict.get("dump_storage"):
-            cur_dir = os.getcwd()
+            cur_dir = config_dict.get("logs_dump_dir") or os.getcwd()
             dump_storage(cur_dir, indent=2)
 
         print(f"\nПуть к файлу с логами: {self._ctx.logging_path}\n")
