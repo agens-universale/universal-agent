@@ -1,3 +1,4 @@
+import json
 import logging
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
@@ -45,6 +46,11 @@ def create_run_context(
     tools_data, tools_spec, tools_description = build_tools_data(config_dict)
 
     run_logger, logging_path = create_run_logger(config_dict, run_id=run_id)
+
+    run_logger.debug(
+        "Tools specs for this run:\n\n%s",
+        json.dumps(tools_spec, ensure_ascii=False, indent=2),
+    )
 
     ctx = RunContext(
         config_dict=config_dict,
