@@ -160,6 +160,22 @@ def run_agent(
             pending = get_pending_messages()
             if pending:
                 messages = pending
+        # Если от backend'а или get_pending_messages пришёл пустой список сообщений,
+        # не передаём его дальше в check_trace_finished / check_mode, чтобы не падать
+        # с ValueError('Empty messages list'). Вместо этого генерируем понятное
+        # сообщение‑обратную связь для агента.
+        if not messages:
+            run_logger.error("Empty messages list")
+            tool_error_cnt += 1
+            messages = [
+                {
+                    "role": "user",
+                    "content": "There is no tool call in Agent response. Please send appropriate tool call",
+                    "id": generate_message_id_func("m"),
+                }
+            ]
+            state.steps += 1
+            continue
         try:
             for m in messages:
                 m_formatted = format_message_responses(m)
