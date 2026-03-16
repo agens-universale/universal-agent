@@ -44,6 +44,7 @@ class AgentExecutor:
         )
         skills_list = get_skills_registry(config_dict).list_skills()
         state_data = {
+            "limit_project_metadata": config_dict.get("limit_project_metadata", False),
             "parent_state_id": None,
             "verbose": effective_verbose,
             "model": config_dict["model"],
@@ -112,7 +113,8 @@ class AgentExecutor:
             cur_dir = config_dict.get("logs_dump_dir") or os.getcwd()
             dump_storage(cur_dir, indent=2)
 
-        print(f"\nПуть к файлу с логами: {self._ctx.logging_path}\n")
+        if config_dict.get("console_trace", True):
+            print(f"\nПуть к файлу с логами: {self._ctx.logging_path}\n")
         return response
 
     def add_message(self, message: dict) -> None:

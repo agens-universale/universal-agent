@@ -22,6 +22,7 @@ class State:
         call_id: Optional[str] = None,
         specific_role: Optional[str] = None,
         agent_md_path: Optional[str] = None,
+        limit_project_metadata: bool = False,
     ):
         self.parent_state_id = parent_state_id
         self.x_target = None
@@ -30,6 +31,12 @@ class State:
         self.verbose = verbose
         self.default_model = model
         self.initial_project_data = get_project_data()
+        if limit_project_metadata:
+            # В серверном режиме не передаём чувствительные данные о файловой системе.
+            # Оставляем только дату, остальные поля будут добавлены в set_call_metadata.
+            self.initial_project_data = {
+                "currentDate": self.initial_project_data.get("currentDate", "")
+            }
         self.tools = tools_spec
         self.tools_descr = tools_descr
         self.skills_list = skills_list

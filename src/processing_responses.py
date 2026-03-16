@@ -152,6 +152,7 @@ def run_agent(
     tool_error_cnt = 0
     run_logger = getattr(ctx, "logger", _fallback_logger)
     cfg = getattr(ctx, "config_dict", {}) or {}
+    console_trace = cfg.get("console_trace", True)
     max_tool_errors = cfg.get("no_tool_call_max_count", 0)
     while True:
         if check_stop is not None and check_stop():
@@ -179,7 +180,7 @@ def run_agent(
         try:
             for m in messages:
                 m_formatted = format_message_responses(m)
-                if len(m_formatted) > 0:
+                if console_trace and len(m_formatted) > 0:
                     print(m_formatted)
                 run_logger.info(
                     "\n<message>\n%s\n</message>\n",

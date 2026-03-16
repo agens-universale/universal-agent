@@ -1,0 +1,39 @@
+server:
+  host: "0.0.0.0"
+  port: 8000
+  log_level: "info"
+
+defaults:
+  # Идентификатор системы по умолчанию, если во входном JSON нет поля system.
+  system: "generic"
+
+agent:
+  # Относительный путь до файла с универсальными инструкциями агента.
+  server_agentmd_path: "./server_agent.md"
+
+agent_overrides:
+  # Управление консольным трейсом:
+  # при console_trace: false агент не будет печатать пошаговые сообщения в stdout.
+  console_trace: false
+  # Список simple-tools, запрещённых в серверном режиме (чтобы не портить файлы библиотеки).
+  stop_tools:
+    # Отключаем тулы, которые могут повредить файлы библиотеки и работают с файловой системой веб приложения
+    - write_to_file
+    - append_to_file
+    - read_file
+    - list_files
+    - search_files
+    - search_and_replace
+    - execute_command
+    # Отключаем интерактив в консоли
+    - answer_question
+    # Отключаем тулы, которые есть на сервере в режиме server_subagents
+    - update_plan
+    - reflect
+    - calculator
+  verbose: false
+  dump_storage: false
+  save_logs: false
+  max_steps: 100
+
+

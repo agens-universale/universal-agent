@@ -28,6 +28,7 @@ def create_run_logger(
     logger.propagate = False
     logger.handlers.clear()
 
+    # Файловый хендлер — только если явно включены логи.
     if config_dict.get("save_logs", False):
         base_dir = config_dict.get("logs_dump_dir") or os.getcwd()
         suffix = run_id or str(int(time.time()))
@@ -35,7 +36,7 @@ def create_run_logger(
 
         handler = FlushFileHandler(logging_path, encoding="utf-8", mode="a")
         formatter = logging.Formatter(
-            "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+            "%(asctime)s - %(name)s - %(levellevel)s - %(message)s"
         )
         handler.setFormatter(formatter)
         logger.addHandler(handler)
@@ -43,7 +44,16 @@ def create_run_logger(
         logging_path = (
             "Null. Логи отключены. Включите логи в файле config.yml если они необходимы"
         )
-        logger.addHandler(logging.NullHandler())
+
+    # Всегда дублируем ошибки в stderr, чтобы исключения были видны даже при
+    # отключённом файловом логировании.
+    err_handler = logging.StreamHandler()
+    err_handler.setLevel(logging.ERROR)
+    err_formatter = logging.Formatter(
+        "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    )
+    err_handler.setFormatter(err_formatter)
+    logger.addHandler(err_handler)
 
     return logger, logging_path
 

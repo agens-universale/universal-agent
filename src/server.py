@@ -1,0 +1,265 @@
+import json
+import os
+from typing import Any, Dict, Optional
+
+import uvicorn
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse
+
+from run_context import create_run_context  # type: ignore  # noqa: E402
+from agent_executor import AgentExecutor  # type: ignore  # noqa: E402
+from utils.generate_message_id import (  # type: ignore  # noqa: E402
+    generate_msg_id_sha256 as generate_message_id_func,
+)
+from config import build_auth_connector  # type: ignore  # noqa: E402
+from thread_store import (  # type: ignore  # noqa: E402
+    load_thread_messages,
+    load_thread_meta,
+    resolve_threads_dir,
+    validate_thread_id,
+)
+from .rest_api.agent_execution_registry import agent_run_registry  # type: ignore  # noqa: E402
+from .rest_api.server_config import (  # type: ignore  # noqa: E402
+    PROJECT_ROOT,
+    build_agent_config_for_server,
+    load_server_config,
+)
+from .rest_api.utils import (  # type: ignore  # noqa: E402
+    ensure_task_id,
+    normalize_system,
+    patch_asyncio_run_for_fastapi,
+)
+
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+
+# Настраиваем безопасный asyncio.run для работы внутри FastAPI/uvicorn.
+patch_asyncio_run_for_fastapi()
+
+
+SERVER_CONFIG: Dict[str, Any] = load_server_config()
+BASE_AGENT_CONFIG: Dict[str, Any] = build_agent_config_for_server(SERVER_CONFIG)
+
+
+app = FastAPI()
+
+
+@app.middleware("http")
+async def auth_middleware(request: Request, call_next):
+    """
+    Примитивная токен-авторизация для REST-слоя.
+
+    В server_config.yml можно задать:
+
+    server:
+      auth_token: "секретный_токен"
+
+    Если auth_token не задан или пустой, авторизация отключена.
+    Если задан, то каждый запрос должен содержать заголовок:
+
+      Authorization: Bearer <auth_token>
+
+    Иначе вернётся 403.
+    """
+    server_cfg = SERVER_CONFIG.get("server") or {}
+    auth_token = server_cfg.get("auth_token")
+    if not auth_token:
+        return await call_next(request)
+
+    auth_header = request.headers.get("Authorization", "")
+    scheme, _, token = auth_header.partition(" ")
+    if scheme.lower() != "bearer" or token != str(auth_token):
+        return JSONResponse(
+            status_code=403,
+            content={"status": "forbidden", "detail": "invalid or missing token"},
+        )
+
+    return await call_next(request)
+
+
+@app.get("/runs/{system}/{task_id}")
+async def get_run_status(system: str, task_id: str):
+    sys_norm = str(system or "").lower().strip()
+    task_norm = str(task_id or "").strip()
+    if not sys_norm or not task_norm:
+        raise HTTPException(
+            status_code=400,
+            detail={"status": "error", "payload": "system and task_id are required"},
+        )
+
+    run = agent_run_registry.get_status(system=sys_norm, task_id=task_norm)
+    if run is None:
+        raise HTTPException(status_code=404, detail={"status": "not_found"})
+
+    if not run.done:
+        return {
+            "status": "running",
+            "system": sys_norm,
+            "task_id": task_norm,
+            "thread_id": run.thread_id,
+            "started_at": run.started_at,
+            "last_activity_at": run.last_activity_at,
+        }
+
+    if run.error is not None:
+        return {
+            "status": "failed",
+            "system": sys_norm,
+            "task_id": task_norm,
+            "thread_id": run.thread_id,
+            "started_at": run.started_at,
+            "finished_at": run.finished_at,
+            "error": repr(run.error),
+        }
+
+    return {
+        "status": "completed",
+        "system": sys_norm,
+        "task_id": task_norm,
+        "thread_id": run.thread_id,
+        "started_at": run.started_at,
+        "finished_at": run.finished_at,
+        "result": run.result,
+    }
+
+
+@app.post("/events/webhook")
+async def events_webhook(request: Request):
+    try:
+        payload = await request.json()
+    except Exception:
+        raise HTTPException(
+            status_code=400,
+            detail={"status": "error", "payload": "invalid JSON body"},
+        )
+
+    if not isinstance(payload, dict):
+        raise HTTPException(
+            status_code=400,
+            detail={"status": "error", "payload": "JSON body must be an object"},
+        )
+
+    task_id = ensure_task_id(payload)
+
+    # Определяем/нормализуем system: берём из payload["system"] или defaults.system.
+    source_value = payload.get("system")
+    defaults = SERVER_CONFIG.get("defaults") or {}
+    default_system = str(defaults.get("system", "generic"))
+    system = normalize_system(source_value, default_system=default_system)
+    payload["system"] = system
+
+    message_str = json.dumps(payload, ensure_ascii=False)
+
+    def _make_user_message(content: str) -> Dict[str, Any]:
+        return {
+            "role": "user",
+            "content": content,
+            "id": generate_message_id_func("m"),
+        }
+
+    if agent_run_registry.add_user_message(
+        system=system,
+        task_id=task_id,
+        make_message=_make_user_message,
+        content=message_str,
+    ):
+        return {
+            "status": "queued",
+            "payload": payload,
+            "system": system,
+            "task_id": task_id,
+        }
+
+    config_dict = dict(BASE_AGENT_CONFIG)
+    auth_connector = build_auth_connector(config_dict)
+    ctx = create_run_context(config_dict, auth_connector=auth_connector)
+
+    agent_run_registry.start_if_absent(
+        system=system,
+        task_id=task_id,
+        executor_factory=AgentExecutor,
+        ctx=ctx,
+        initial_user_message=message_str,
+        thread_id=task_id,
+        verbose=None,
+    )
+
+    return {
+        "status": "started",
+        "payload": payload,
+        "system": system,
+        "task_id": task_id,
+    }
+
+
+@app.get("/logs/{system}/{task_id}")
+async def get_thread_logs(system: str, task_id: str):
+    """
+    Отдать логи работы агента по связке (system, task_id).
+
+    Возвращает JSON:
+    {
+      "status": "ok",
+      "system": "...",
+      "task_id": "...",
+      "meta": { ... },        # содержимое meta_<thread_id>.json (или {} если нет)
+      "messages": [ ... ]     # список сообщений из data_<thread_id>.jsonl (payload'ы)
+    }
+
+    В качестве thread_id используется task_id (как и в запуске через AgentRunRegistry).
+    """
+    sys_norm = str(system or "").lower().strip()
+    try:
+        task_norm = validate_thread_id(str(task_id or ""))
+    except ValueError as e:
+        raise HTTPException(
+            status_code=400,
+            detail={"status": "error", "payload": str(e)},
+        )
+
+    if not sys_norm:
+        raise HTTPException(
+            status_code=400,
+            detail={"status": "error", "payload": "system is required"},
+        )
+
+    try:
+        threads_dir = resolve_threads_dir(BASE_AGENT_CONFIG)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(
+            status_code=500,
+            detail={"status": "error", "payload": f"threads resolve error: {e!r}"},
+        )
+
+    meta = load_thread_meta(threads_dir, task_norm)
+    messages, _, _ = load_thread_messages(threads_dir, task_norm)
+
+    if not meta and not messages:
+        raise HTTPException(status_code=404, detail={"status": "not_found"})
+
+    return {
+        "status": "ok",
+        "system": sys_norm,
+        "task_id": task_norm,
+        "meta": meta,
+        "messages": messages,
+    }
+
+
+@app.get("/healthcheck")
+async def healthcheck():
+    return {"status": "ok"}
+
+
+if __name__ == "__main__":
+    server_cfg = SERVER_CONFIG.get("server", {}) or {}
+    host = str(server_cfg.get("host", "0.0.0.0"))
+    port_raw = server_cfg.get("port", 8000)
+    try:
+        port = int(port_raw)
+    except (TypeError, ValueError):
+        port = 8000
+
+    uvicorn.run("src.server:app", host=host, port=port)
+
