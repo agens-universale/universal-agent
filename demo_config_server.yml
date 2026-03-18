@@ -26,9 +26,9 @@ agent_overrides:
     - search_and_replace
     - execute_command
     # Отключаем интерактив в консоли
-    - answer_question
+    # - answer_question (deprecated tool, removed from registry)
     # Отключаем тулы, которые есть на сервере в режиме server_subagents
-    - update_plan
+    # - update_plan (deprecated tool, replaced by thread_notes)
     - reflect
     - calculator
   verbose: false
@@ -36,4 +36,20 @@ agent_overrides:
   save_logs: false
   max_steps: 100
 
+swarm:
+  enabled: false
+  threads_dir: "swarm_threads"
+  sandbox_root_dir: ".swarm_sandboxes"
+  max_concurrent: 10
+  ttl_seconds: 86400
+  limits:
+    memory_mb: 1024
+    disk_mb: 2048
+    cpu_percent: 50
+    timeout_seconds: 1800
+  cli_command: "gc-cli"
+  wrapper_path: "scripts/run-cli-in-sandbox.sh"
+  sandbox_tool: "bubblewrap"
+  agentmd_path: "./swarm_agent.md"
+  skills_dir: "./swarm_skills"
 

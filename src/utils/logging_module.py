@@ -36,7 +36,7 @@ def create_run_logger(
 
         handler = FlushFileHandler(logging_path, encoding="utf-8", mode="a")
         formatter = logging.Formatter(
-            "%(asctime)s - %(name)s - %(levellevel)s - %(message)s"
+            "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
         )
         handler.setFormatter(formatter)
         logger.addHandler(handler)

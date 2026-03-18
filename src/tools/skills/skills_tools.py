@@ -6,12 +6,51 @@
 """
 from __future__ import annotations
 
+import json
 import logging
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from tools.skills.registry import SkillsRegistry
 
 logger = logging.getLogger(__name__)
+
+
+def _json_sanitize(value: Any) -> Any:
+    if value is None:
+        return None
+    if isinstance(value, (bytes, bytearray)):
+        return "binary data"
+    if isinstance(value, dict):
+        out: Dict[str, Any] = {}
+        for k, v in value.items():
+            key = k if isinstance(k, str) else str(k)
+            out[key] = _json_sanitize(v)
+        return out
+    if isinstance(value, list):
+        return [_json_sanitize(v) for v in value]
+    if isinstance(value, tuple):
+        return [_json_sanitize(v) for v in value]
+    if isinstance(value, (str, int, float, bool)):
+        return value
+    return str(value)
+
+
+def _wrap(
+    *,
+    tool: str,
+    ok: bool,
+    result: Any = None,
+    error: Optional[Dict[str, Any]] = None,
+    **meta: Any,
+) -> str:
+    payload = {
+        "tool": tool,
+        "ok": ok,
+        **{k: _json_sanitize(v) for k, v in meta.items()},
+        "result": _json_sanitize(result),
+        "error": _json_sanitize(error),
+    }
+    return json.dumps(payload, ensure_ascii=False)
 
 
 class SkillsListTool:
@@ -21,15 +60,15 @@ class SkillsListTool:
     def __call__(self, **kwargs: Any) -> Dict[str, Any]:
         try:
             skills = self._registry.list_skills()
-            return {"skills": skills}
+            return _wrap(tool="skills_list", ok=True, result={"skills": skills})
         except Exception as exc:  # noqa: BLE001
             logger.error("skills_list failed: %s", exc, exc_info=True)
-            return {
-                "error": {
-                    "code": "INTERNAL_ERROR",
-                    "message": f"skills_list failed: {exc}",
-                }
-            }
+            return _wrap(
+                tool="skills_list",
+                ok=False,
+                result=None,
+                error={"code": "INTERNAL_ERROR", "message": f"skills_list failed: {exc}"},
+            )
 
 
 class LoadSkillTool:
@@ -39,22 +78,29 @@ class LoadSkillTool:
     def __call__(self, skill_id: str, **kwargs: Any) -> Dict[str, Any]:
         try:
             detail = self._registry.load_skill_detail(skill_id)
-            return {"skill": detail}
+            return _wrap(
+                tool="skills_load",
+                ok=True,
+                skill_id=skill_id,
+                result={"skill": detail},
+            )
         except KeyError as exc:
-            return {
-                "error": {
-                    "code": "SKILL_NOT_FOUND",
-                    "message": str(exc),
-                }
-            }
+            return _wrap(
+                tool="skills_load",
+                ok=False,
+                skill_id=skill_id,
+                result=None,
+                error={"code": "SKILL_NOT_FOUND", "message": str(exc)},
+            )
         except Exception as exc:  # noqa: BLE001
             logger.error("skills_load failed: %s", exc, exc_info=True)
-            return {
-                "error": {
-                    "code": "INTERNAL_ERROR",
-                    "message": f"skills_load failed: {exc}",
-                }
-            }
+            return _wrap(
+                tool="skills_load",
+                ok=False,
+                skill_id=skill_id,
+                result=None,
+                error={"code": "INTERNAL_ERROR", "message": f"skills_load failed: {exc}"},
+            )
 
 
 class RunSkillScriptTool:
@@ -74,22 +120,38 @@ class RunSkillScriptTool:
                 script_name=script_name,
                 args=args,
             )
-            return result
+            return _wrap(
+                tool="skills_run_script",
+                ok=True,
+                skill_id=skill_id,
+                script_name=script_name,
+                args=args,
+                result=result,
+            )
         except FileNotFoundError as exc:
-            return {
-                "error": {
-                    "code": "SCRIPT_NOT_FOUND",
-                    "message": str(exc),
-                }
-            }
+            return _wrap(
+                tool="skills_run_script",
+                ok=False,
+                skill_id=skill_id,
+                script_name=script_name,
+                args=args,
+                result=None,
+                error={"code": "SCRIPT_NOT_FOUND", "message": str(exc)},
+            )
         except Exception as exc:  # noqa: BLE001
             logger.error("skills_run_script failed: %s", exc, exc_info=True)
-            return {
-                "error": {
+            return _wrap(
+                tool="skills_run_script",
+                ok=False,
+                skill_id=skill_id,
+                script_name=script_name,
+                args=args,
+                result=None,
+                error={
                     "code": "SCRIPT_EXECUTION_FAILED",
                     "message": f"skills_run_script failed: {exc}",
-                }
-            }
+                },
+            )
 
 
 class LoadReferenceTool:
@@ -98,22 +160,33 @@ class LoadReferenceTool:
 
     def __call__(self, skill_id: str, slug: str, **kwargs: Any) -> Dict[str, Any]:
         try:
-            return self._registry.load_reference(skill_id=skill_id, slug=slug)
+            res = self._registry.load_reference(skill_id=skill_id, slug=slug)
+            return _wrap(
+                tool="skills_load_reference",
+                ok=True,
+                skill_id=skill_id,
+                slug=slug,
+                result=res,
+            )
         except KeyError as exc:
-            return {
-                "error": {
-                    "code": "RESOURCE_NOT_FOUND",
-                    "message": str(exc),
-                }
-            }
+            return _wrap(
+                tool="skills_load_reference",
+                ok=False,
+                skill_id=skill_id,
+                slug=slug,
+                result=None,
+                error={"code": "RESOURCE_NOT_FOUND", "message": str(exc)},
+            )
         except Exception as exc:  # noqa: BLE001
             logger.error("skills_load_reference failed: %s", exc, exc_info=True)
-            return {
-                "error": {
-                    "code": "INTERNAL_ERROR",
-                    "message": f"skills_load_reference failed: {exc}",
-                }
-            }
+            return _wrap(
+                tool="skills_load_reference",
+                ok=False,
+                skill_id=skill_id,
+                slug=slug,
+                result=None,
+                error={"code": "INTERNAL_ERROR", "message": f"skills_load_reference failed: {exc}"},
+            )
 
 
 class LoadAssetTool:
@@ -122,22 +195,33 @@ class LoadAssetTool:
 
     def __call__(self, skill_id: str, slug: str, **kwargs: Any) -> Dict[str, Any]:
         try:
-            return self._registry.load_asset(skill_id=skill_id, slug=slug)
+            res = self._registry.load_asset(skill_id=skill_id, slug=slug)
+            return _wrap(
+                tool="skills_load_asset",
+                ok=True,
+                skill_id=skill_id,
+                slug=slug,
+                result=res,
+            )
         except KeyError as exc:
-            return {
-                "error": {
-                    "code": "RESOURCE_NOT_FOUND",
-                    "message": str(exc),
-                }
-            }
+            return _wrap(
+                tool="skills_load_asset",
+                ok=False,
+                skill_id=skill_id,
+                slug=slug,
+                result=None,
+                error={"code": "RESOURCE_NOT_FOUND", "message": str(exc)},
+            )
         except Exception as exc:  # noqa: BLE001
             logger.error("skills_load_asset failed: %s", exc, exc_info=True)
-            return {
-                "error": {
-                    "code": "INTERNAL_ERROR",
-                    "message": f"skills_load_asset failed: {exc}",
-                }
-            }
+            return _wrap(
+                tool="skills_load_asset",
+                ok=False,
+                skill_id=skill_id,
+                slug=slug,
+                result=None,
+                error={"code": "INTERNAL_ERROR", "message": f"skills_load_asset failed: {exc}"},
+            )
 
 
 def get_skills_tools_data(skills_registry: SkillsRegistry) -> Dict[str, Dict[str, Any]]:
@@ -158,7 +242,8 @@ def get_skills_tools_data(skills_registry: SkillsRegistry) -> Dict[str, Dict[str
                 "name": "skills_list",
                 "description": (
                     "List all available local skills discovered in the skills_data directory. "
-                    "Use this tool to see which skills (id, name, description) you can work with."
+                    "Use this tool to see which skills (id, name, description) you can work with. "
+                    "Returns a JSON string envelope: {tool, ok, result, error}. On success, result.skills is a list."
                 ),
                 "parameters": {
                     "type": "object",
@@ -185,7 +270,8 @@ def get_skills_tools_data(skills_registry: SkillsRegistry) -> Dict[str, Dict[str
                 "name": "skills_load",
                 "description": (
                     "Load a specific skill by its id. Returns metadata, instructions, "
-                    "and lists of available references and assets."
+                    "and lists of available references and assets. "
+                    "Returns a JSON string envelope: {tool, ok, skill_id, result, error}. On success, result.skill contains the skill detail."
                 ),
                 "parameters": {
                     "type": "object",
@@ -220,7 +306,9 @@ def get_skills_tools_data(skills_registry: SkillsRegistry) -> Dict[str, Dict[str
                 "description": (
                     "Run a Python script that belongs to a specific skill. "
                     "Arguments are passed as JSON via stdin. "
-                    "If script_name is omitted, scripts/main.py is used."
+                    "If script_name is omitted, scripts/main.py is used. "
+                    "Returns a JSON string envelope: {tool, ok, skill_id, script_name, args, result, error}. "
+                    "On success, the script output is inside result."
                 ),
                 "parameters": {
                     "type": "object",
@@ -269,7 +357,9 @@ def get_skills_tools_data(skills_registry: SkillsRegistry) -> Dict[str, Dict[str
                 "name": "skills_load_reference",
                 "description": (
                     "Load a reference document for a given skill by slug. "
-                    "References live under the skill's references/ directory."
+                    "References live under the skill's references/ directory. "
+                    "Returns a JSON string envelope: {tool, ok, skill_id, slug, result, error}. "
+                    "On success, the reference content is inside result."
                 ),
                 "parameters": {
                     "type": "object",
@@ -311,7 +401,9 @@ def get_skills_tools_data(skills_registry: SkillsRegistry) -> Dict[str, Dict[str
                 "name": "skills_load_asset",
                 "description": (
                     "Load an asset file for a given skill by slug. "
-                    "Assets live under the skill's assets/ directory."
+                    "Assets live under the skill's assets/ directory. "
+                    "Returns a JSON string envelope: {tool, ok, skill_id, slug, result, error}. "
+                    "On success, the asset content is inside result."
                 ),
                 "parameters": {
                     "type": "object",

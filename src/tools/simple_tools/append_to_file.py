@@ -1,3 +1,4 @@
+import json
 import os
 
 from tools.simple_tools.abstract_simple_tool import AbstractSimpleTool
@@ -9,7 +10,11 @@ class AppendToFile(AbstractSimpleTool):
         description = {
             "type": "function",
             "name": "append_to_file",
-            "description": "Appends content to the end of an existing file. Useful for adding notes, logs, or analysis results. The file must already exist.",
+            "description": (
+                "Appends text content to the end of a file. By default the file must exist, but it can optionally "
+                "be created. Returns a JSON string object with fields: ok, path, created, bytes_appended, "
+                "separator, error."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -20,6 +25,22 @@ class AppendToFile(AbstractSimpleTool):
                     "content": {
                         "type": "string",
                         "description": "The text content to append to the file."
+                    },
+                    "separator": {
+                        "type": "string",
+                        "description": "String inserted before appended content. Default '\\n\\n'."
+                    },
+                    "create_if_missing": {
+                        "type": "boolean",
+                        "description": "If true, creates the file if it does not exist. Default false."
+                    },
+                    "make_dirs": {
+                        "type": "boolean",
+                        "description": "If true, creates parent directories when missing (used with create_if_missing). Default false."
+                    },
+                    "encoding": {
+                        "type": "string",
+                        "description": "Text encoding to use. Default 'utf-8'."
                     }
                 },
                 "required": ["path", "content"],
@@ -43,30 +64,148 @@ Usage:
 '''
         return description
 
-    def __call__(self, path: str, content: str, **kwargs) -> str:
+    @staticmethod
+    def _result(
+        *,
+        ok: bool,
+        path: str,
+        separator: str,
+        created: bool = False,
+        bytes_appended: int = 0,
+        error: dict | None = None,
+    ) -> str:
+        return json.dumps(
+            {
+                "tool": "append_to_file",
+                "ok": ok,
+                "path": path,
+                "created": created,
+                "bytes_appended": bytes_appended,
+                "separator": separator,
+                "error": error,
+            },
+            ensure_ascii=False,
+        )
+
+    def __call__(
+        self,
+        path: str,
+        content: str,
+        separator: str = "\n\n",
+        create_if_missing: bool = False,
+        make_dirs: bool = False,
+        encoding: str = "utf-8",
+        **kwargs,
+    ) -> str:
         if not isinstance(path, str):
-            return f'Error: variable path should be string. Got: {path}'
+            return self._result(
+                ok=False,
+                path=str(path),
+                separator=separator,
+                error={"type": "invalid_argument", "field": "path"},
+            )
 
         if not isinstance(content, str):
-            # Исправлена опечатка из оригинального класса (было 'variable path' для content)
-            return f'Error: variable content should be string. Got: {content}'
+            return self._result(
+                ok=False,
+                path=path,
+                separator=separator,
+                error={"type": "invalid_argument", "field": "content"},
+            )
+
+        if not isinstance(separator, str):
+            return self._result(
+                ok=False,
+                path=path,
+                separator="",
+                error={"type": "invalid_argument", "field": "separator"},
+            )
+        if not isinstance(create_if_missing, bool):
+            return self._result(
+                ok=False,
+                path=path,
+                separator=separator,
+                error={"type": "invalid_argument", "field": "create_if_missing"},
+            )
+        if not isinstance(make_dirs, bool):
+            return self._result(
+                ok=False,
+                path=path,
+                separator=separator,
+                error={"type": "invalid_argument", "field": "make_dirs"},
+            )
+        if not isinstance(encoding, str) or not encoding:
+            return self._result(
+                ok=False,
+                path=path,
+                separator=separator,
+                error={"type": "invalid_argument", "field": "encoding"},
+            )
+
+        if not os.path.isabs(path):
+            return self._result(
+                ok=False,
+                path=path,
+                separator=separator,
+                error={
+                    "type": "invalid_argument",
+                    "field": "path",
+                    "message": "path must be absolute",
+                },
+            )
 
         # Проверка существования файла
-        if not os.path.exists(path):
-            return f'Error: File not found at path "{path}". Cannot append to a non-existent file.'
+        exists = os.path.exists(path)
+        if not exists:
+            if not create_if_missing:
+                return self._result(
+                    ok=False,
+                    path=path,
+                    separator=separator,
+                    error={"type": "not_found"},
+                )
+            parent = os.path.dirname(path) or "."
+            if not os.path.exists(parent):
+                if make_dirs:
+                    try:
+                        os.makedirs(parent, exist_ok=True)
+                    except Exception as e:
+                        return self._result(
+                            ok=False,
+                            path=path,
+                            separator=separator,
+                            error={"type": "mkdir_failed", "message": str(e)},
+                        )
+                else:
+                    return self._result(
+                        ok=False,
+                        path=path,
+                        separator=separator,
+                        error={"type": "parent_not_found"},
+                    )
 
         try:
-            # Открываем в режиме добавления ('a')
-            with open(path, 'a', encoding='utf8') as fd:
-                # Добавляем пропуск в одну строку (\n\n) перед новым контентом
-                # Это гарантирует визуальное разделение блоков текста
-                fd.write('\n\n' + content)
-            
-            message = f'content appended to file "{path}"'
+            before = os.path.getsize(path) if os.path.exists(path) else 0
+            with open(path, 'a', encoding=encoding, errors="replace") as fd:
+                fd.write(separator + content)
+            after = os.path.getsize(path)
+            appended = max(0, after - before)
         except Exception as e:
-            message = str(e)
+            return self._result(
+                ok=False,
+                path=path,
+                separator=separator,
+                error={"type": "append_failed", "message": str(e)},
+            )
 
-        return message
+        return self._result(
+            ok=True,
+            path=path,
+            separator=separator,
+            created=not exists,
+            bytes_appended=appended,
+            error=None,
+        )
 
 
 def test_append_to_file():

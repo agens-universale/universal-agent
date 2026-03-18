@@ -1,5 +1,7 @@
 import json
+from typing import Any, Dict, Optional, Tuple
 
+from thread_store import load_thread_meta, resolve_threads_dir, save_thread_meta
 from tools.simple_tools.abstract_simple_tool import AbstractSimpleTool
 
 
@@ -73,8 +75,6 @@ You also can run `update_plan` after finishing some steps and decomposing next s
         if not isinstance(current_plan, str):
             raise ValueError(f"Argument 'current_plan' must be a string. Got: {type(current_plan)} ({current_plan})")
 
-        # print(f"****\nAgent current plan:\n\n{current_plan}\n\n****")
-
         return 'A new plan has been generated. Use it for your next steps.'
 
 
@@ -84,9 +84,11 @@ def run_test():
 
     print("All tests passed.")
 
+
 if __name__ == '__main__':
     run_test()
     arguments = {'current_plan': '1. Определить структуру проекта: один HTML-файл с inline CSS и JavaScript.\n2. Создать HTML-страницу с canvas и интерфейсом выбора персонажа (Wall-E / Eva).\n3. Нарисовать простые спрайты для Wall-E и Eva с помощью canvas или создать как встроенные изображения (в виде данных).\n4. Закодировать лабиринт в виде двумерного массива (стены, проходы, точки, цветок).\n5. Реализовать основной игровой цикл: отрисовка, обработка ввода, движение игрока и врагов.\n6. Добавить логику сбора очков и проверку достижения цветка.\n7. Реализовать завершение уровня и отображение результата.\n8. Протестировать игру и при необходимости исправить ошибки.\n9. Подготовить итоговый отчет о выполнении.'}
     kwargs = {'run_agent_func': lambda : True, 'parent_state': dict()}
     tool = UpdatePlan(**kwargs)
     print(tool(**arguments))
+

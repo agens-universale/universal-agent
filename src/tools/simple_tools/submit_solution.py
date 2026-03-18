@@ -16,7 +16,12 @@ class SubmitSolution(AbstractSimpleTool):
         return {
             "type": "function",
             "name": "submit_solution",
-            "description": "Signals that the AI agent has completed all work and is ready to submit the final solution. This tool must be called exactly upon full task completion, with a concise yet comprehensive summary of actions taken and results achieved. ALWAYS call this tool on task final answer and finish",
+            "description": (
+                "Signals that the AI agent has completed all work and is ready to submit the final solution. "
+                "This tool must be called exactly upon full task completion, with a concise yet comprehensive "
+                "summary of actions taken and results achieved. ALWAYS call this tool for the final user response. "
+                "(The separate answer_question tool is not available; use submit_solution instead.)"
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -44,6 +49,7 @@ Input schema: {"type": "object", "properties": {"task_report": {"type": "string"
 
 Usage:
 - Use this tool **only** when you are 100% certain the task is complete.
+- This is the final user response mechanism. Do not use answer_question (not available).
 - The `task_report` must be brief (3–6 sentences), clear, and self-contained.
 - Include enough context so a human can understand what was done without reviewing code.
 - Do **not** use markdown, code blocks, or formatting in `task_report`.

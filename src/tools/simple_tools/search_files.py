@@ -1,4 +1,5 @@
 import json
+import functools
 import os
 import re
 import shutil
@@ -13,7 +14,11 @@ class SearchFiles(AbstractSimpleTool):
         return {
             "type": "function",
             "name": "search_files",
-            "description": "Recursively searches for a regex pattern in all files within a specified directory, optionally filtered by a glob pattern. Returns a list of matching lines with file paths and line numbers. Returns an empty list if no matches are found.",
+            "description": (
+                "Recursively searches for a regex pattern in file contents under a directory, optionally filtered "
+                "by a glob pattern. Returns a JSON string object with fields: ok, path, regex, file_pattern, "
+                "count, matches, error."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -149,19 +154,47 @@ Search for error logs in Rust source files:
 
         return results
 
+    @staticmethod
+    def _result(
+        *,
+        path: str,
+        regex: str,
+        file_pattern: Optional[str],
+        ok: bool,
+        matches: Optional[List[Dict[str, Any]]] = None,
+        error: Optional[Dict[str, Any]] = None,
+    ) -> str:
+        return json.dumps(
+            {
+                "tool": "search_files",
+                "ok": ok,
+                "path": path,
+                "regex": regex,
+                "file_pattern": file_pattern,
+                "count": len(matches) if matches is not None else 0,
+                "matches": matches if matches is not None else [],
+                "error": error,
+            },
+            ensure_ascii=False,
+        )
+
     def __call__(self, path: str, regex: str, file_pattern: Optional[str] = None, **kwargs) -> str:
+        _result = functools.partial(
+            self._result, path=path, regex=regex, file_pattern=file_pattern
+        )
+
         # Input validation
         if not isinstance(path, str):
-            return f"Error: Argument 'path' must be a string. Got: {type(path)} ({path})"
+            return _result(ok=False, error={"type": "invalid_argument", "field": "path"})
         if not isinstance(regex, str):
-            return f"Error: Argument 'regex' must be a string. Got: {type(regex)} ({regex})"
+            return _result(ok=False, error={"type": "invalid_argument", "field": "regex"})
         if file_pattern is not None and not isinstance(file_pattern, str):
-            return f"Error: Argument 'file_pattern' must be a string or None. Got: {type(file_pattern)} ({file_pattern})"
+            return _result(ok=False, error={"type": "invalid_argument", "field": "file_pattern"})
 
         if not os.path.exists(path):
-            return f"Error: Directory not found: {path}"
+            return _result(ok=False, error={"type": "not_found"})
         if not os.path.isdir(path):
-            return f"Error: Path is not a directory: {path}"
+            return _result(ok=False, error={"type": "not_a_directory"})
 
         file_matcher = self._create_file_matcher(file_pattern, base_path=path)
 
@@ -176,7 +209,7 @@ Search for error logs in Rust source files:
                 if len(file_result) > 0:
                     results += file_result
 
-        return json.dumps(results, ensure_ascii=False)
+        return _result(ok=True, matches=results, error=None)
 
     def _create_file_matcher(self, file_pattern: Optional[str], base_path: str):
         """Creates a matcher function based on glob-like file_pattern."""

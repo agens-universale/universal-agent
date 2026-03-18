@@ -127,6 +127,17 @@ def normalize_tool_spec_for_agent(tool_spec: Dict[str, Any]) -> Dict[str, Any]:
 
     if not isinstance(spec.get("description"), str) or not spec["description"].strip():
         spec["description"] = "No description provided by MCP server."
+    else:
+        # Note: actual MCP tool execution output is normalized by tools.connect_mcp.api.call_mcp_tool
+        # into a stable JSON envelope. Keep this short to avoid bloating tool descriptions.
+        spec["description"] = spec["description"].strip()
+
+    # Ensure the agent knows about the normalized return format for ALL MCP tools.
+    # (MCP servers may return arbitrary shapes; we wrap them consistently.)
+    spec["description"] += (
+        " Return format: JSON string envelope with fields {tool, ok, mcp_server, mcp_tool, arguments, result, error}. "
+        "Binary payloads are replaced with the string 'binary data'."
+    )
 
     parameters = spec.get("parameters")
     if not isinstance(parameters, dict):

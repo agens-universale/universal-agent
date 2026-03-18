@@ -1,15 +1,45 @@
 from tools.simple_tools.abstract_simple_tool import AbstractSimpleTool
 from typing import Optional
 import os
+import json
 
 
 class ReadFile(AbstractSimpleTool):
+    @staticmethod
+    def _result(
+        *,
+        path: str,
+        content: str,
+        start_line: int,
+        end_line: int,
+        total_lines: int,
+        truncated: bool,
+        next_offset: Optional[int],
+    ) -> str:
+        return json.dumps(
+            {
+                "tool": "read_file",
+                "path": path,
+                "content": content,
+                "start_line": start_line,
+                "end_line": end_line,
+                "total_lines": total_lines,
+                "truncated": truncated,
+                "next_offset": next_offset,
+            },
+            ensure_ascii=False,
+        )
+
     @classmethod
     def tool_description(cls):
         description = {
             "type": "function",
             "name": "read_file",
-            "description": "Reads the contents of a file from the local filesystem. Always use this tool to inspect a file before modifying it. If 'view_range' is not provided, only the first 500 lines are returned with a note indicating the total number of lines in the file.",
+            "description": (
+                "Reads the contents of a text file from the local filesystem with optional pagination. "
+                "By default, returns a preview (first 500 lines) together with metadata about the full file "
+                "so the caller can request additional ranges as needed."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -19,8 +49,28 @@ class ReadFile(AbstractSimpleTool):
                     },
                     "view_range": {
                         "type": "string",
-                        "description": "Optional range of lines to read, formatted as 'start_line,end_line' (inclusive). For example, '7,20' returns lines 7 through 20. If omitted, the entire file is read up to the first 500 lines."
-                    }
+                        "description": (
+                            "Optional range of lines to read, formatted as 'start_line,end_line' (inclusive, 1-based). "
+                            "For example, '7,20' returns lines 7 through 20. "
+                            "If omitted and 'offset'/'limit' are not provided, a preview (first 500 lines) is returned. "
+                            "This parameter is kept for backward compatibility; prefer using 'offset' and 'limit'."
+                        )
+                    },
+                    "offset": {
+                        "type": "integer",
+                        "description": (
+                            "Optional 1-based index of the first line to return. "
+                            "Defaults to 1 when used together with 'limit'."
+                        )
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": (
+                            "Optional maximum number of lines to return starting from 'offset'. "
+                            "If omitted but 'offset' is provided, defaults to 500. "
+                            "If both 'offset' and 'limit' are omitted, a preview (first 500 lines) is returned."
+                        )
+                    },
                 },
                 "required": ["path"],
                 "additionalProperties": False
@@ -32,25 +82,72 @@ class ReadFile(AbstractSimpleTool):
     @classmethod
     def prompt_description(cls):
         description = '''Tool name: read_file
-Tool description: Reads the contents of a file from the local filesystem.
-Input schema: {"type": "object", "properties": {"path": {"type": "string", "description": "The path of the file to read."}, "view_range": {"type": "string", "description": "A range of lines to show, e.g., \\"7,20\\"."}}, "required": ["path"], "additionalProperties": false}
+Tool description: Reads the contents of a text file from the local filesystem with explicit pagination support.
+Input schema: {
+  "type": "object",
+  "properties": {
+    "path": {
+      "type": "string",
+      "description": "The path of the file to read."
+    },
+    "view_range": {
+      "type": "string",
+      "description": "DEPRECATED. A range of lines to show, e.g., \\"7,20\\" (1-based, inclusive). Kept for backward compatibility; prefer 'offset' and 'limit'."
+    },
+    "offset": {
+      "type": "integer",
+      "description": "1-based index of the first line to read. Use together with 'limit'."
+    },
+    "limit": {
+      "type": "integer",
+      "description": "Maximum number of lines to return starting from 'offset'. If omitted when 'offset' is provided, defaults to 500."
+    }
+  },
+  "required": ["path"],
+  "additionalProperties": false
+}
+
+Return format:
+- The tool ALWAYS returns a JSON string with the following fields:
+  - "content": string — concatenated file lines in the requested range.
+  - "start_line": integer — 1-based number of the first line returned.
+  - "end_line": integer — 1-based number of the last line returned.
+  - "total_lines": integer — total number of lines in the file.
+  - "truncated": boolean — true if not all lines of the file are included in "content".
+  - "next_offset": integer or null — suggested 1-based offset for the next page (only set when truncated is true).
 
 Usage:
 - Always use this tool to inspect the contents of any file before modifying it.
 - If you need to understand or modify an existing file, read it first using this tool.
-- Use the 'view_range' parameter to read only specific lines if needed (e.g., "10,20" for lines 10 to 20 inclusive).
-- The 'view_range' should be provided as two numbers separated by a comma (start_line,end_line). Both are inclusive.
-- If 'view_range' is not provided, the entire file will be read. Long files will be cut to first 500 rows and suffix <Lines in file {num_lines}, displayed first 500 lines>
-- This tool is essential for avoiding mistakes when editing code. Never assume the content of a file — always read it first.
+- For small files (<= 500 lines), a single call without 'offset'/'limit' is usually enough.
+- For large files, you MUST use pagination when you need the full content:
+  1) First, call read_file with only "path" to get a preview and metadata.
+  2) If "truncated" is true, call read_file again with "offset" = "next_offset" and an appropriate "limit" (e.g., 500).
+  3) Repeat until "truncated" becomes false.
+- When copying, restoring, or refactoring large files, ALWAYS read the entire file by paging through ranges using "offset" and "limit" before writing changes back.
+- The older 'view_range' parameter is supported but should generally be avoided in new code; use 'offset' and 'limit' instead.
 '''
         return description
 
-    def __call__(self, path: str, view_range: Optional[str] = None, **kwargs) -> str:
+    def __call__(
+        self,
+        path: str,
+        view_range: Optional[str] = None,
+        offset: Optional[int] = None,
+        limit: Optional[int] = None,
+        **kwargs,
+    ) -> str:
         if not isinstance(path, str):
             return f"Error: Argument 'path' must be a string. Got: {type(path)} ({path})"
 
         if view_range is not None and not isinstance(view_range, str):
             return f"Error: Argument 'view_range' must be a string or None. Got: {type(view_range)} ({view_range})"
+
+        if offset is not None and not isinstance(offset, int):
+            return f"Error: Argument 'offset' must be an integer or None. Got: {type(offset)} ({offset})"
+
+        if limit is not None and not isinstance(limit, int):
+            return f"Error: Argument 'limit' must be an integer or None. Got: {type(limit)} ({limit})"
 
         if not os.path.exists(path):
             return f"Error: File not found: {path}"
@@ -61,29 +158,77 @@ Usage:
         with open(path, 'r', encoding='utf-8') as fd:
             lines = fd.readlines()
 
-        initial_view_range = view_range
-        if view_range is None:
-            view_range = '0,500'
+        total_lines = len(lines)
 
-        parts = view_range.strip().split(',')
-        if len(parts) != 2:
-            raise ValueError("view_range must have exactly two values: start,end")
+        # Determine the range to read.
+        # Priority:
+        #  1) Explicit view_range (backward compatibility, 1-based inclusive)
+        #  2) offset/limit (preferred)
+        #  3) Default preview: first 500 lines
+        if view_range is not None:
+            parts = view_range.strip().split(',')
+            if len(parts) != 2:
+                return "Error: view_range must have exactly two comma-separated values: start,end"
+            try:
+                start_1_based = int(parts[0])
+                end_1_based = int(parts[1])
+            except ValueError:
+                return "Error: view_range values must be integers, e.g. '7,20'."
 
-        start_line = int(parts[0]) - 1  # Convert to zero-based index
-        end_line = int(parts[1])       # End is inclusive, so we slice to end_line
+            if start_1_based < 1:
+                start_1_based = 1
+            if end_1_based < start_1_based:
+                end_1_based = start_1_based
 
-        if start_line < 0:
-            start_line = 0
-        if end_line > len(lines):
-            end_line = len(lines)
+            if start_1_based > total_lines:
+                start_1_based = total_lines
+                end_1_based = total_lines
 
-        selected_lines = lines[start_line:end_line]
+        elif offset is not None or limit is not None:
+            # Use offset/limit pagination.
+            if offset is None:
+                offset = 1
+            if limit is None:
+                limit = 500
 
-        res = ''.join(selected_lines)
+            if offset < 1:
+                offset = 1
+            if limit < 1:
+                limit = 1
 
-        if len(lines) > end_line and initial_view_range is None:
-            res += f'<Lines in file {len(lines)}, displayed first 500 lines>'
-        return res
+            start_1_based = offset
+            end_1_based = offset + limit - 1
+        else:
+            # Default preview: first 500 lines
+            start_1_based = 1
+            end_1_based = 500
+
+        if start_1_based > total_lines:
+            # Empty range: no content, clamp to end of file
+            start_1_based = total_lines
+            end_1_based = total_lines
+
+        if end_1_based > total_lines:
+            end_1_based = total_lines
+
+        start_idx = max(0, start_1_based - 1)
+        end_idx_exclusive = end_1_based  # slice end is exclusive, lines are 0-based
+
+        selected_lines = lines[start_idx:end_idx_exclusive]
+        content = ''.join(selected_lines)
+
+        truncated = end_1_based < total_lines
+        next_offset = end_1_based + 1 if truncated else None
+
+        return self._result(
+            path=path,
+            content=content,
+            start_line=start_1_based,
+            end_line=end_1_based,
+            total_lines=total_lines,
+            truncated=truncated,
+            next_offset=next_offset,
+        )
 
 
 def test_read_file():

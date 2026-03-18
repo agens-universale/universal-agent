@@ -243,12 +243,15 @@ class ThreadSession:
         )
         self.persisted_messages_count += written
         self.previous_response_id = previous_response_id
-        save_thread_meta(
-            self.threads_dir,
-            self.thread_id,
-            {
-                "created_at": self.meta.get("created_at"),
-                "previous_response_id": self.previous_response_id,
-                "messages_count": self.persisted_messages_count,
-            },
-        )
+        # Preserve arbitrary meta fields (e.g. notes_md), otherwise tools that
+        # update meta would get their data wiped on the next persist_batch().
+        base_meta = load_thread_meta(self.threads_dir, self.thread_id) or {}
+        base_meta["created_at"] = self.meta.get("created_at") or base_meta.get("created_at")
+        base_meta["previous_response_id"] = self.previous_response_id
+        base_meta["messages_count"] = self.persisted_messages_count
+        # Notes are expected to be updated in-memory (state.notes_md) and
+        # then reflected into self.meta before persist_batch().
+        # Always overwrite when we have a string value.
+        if isinstance(self.meta.get("notes_md"), str):
+            base_meta["notes_md"] = self.meta.get("notes_md")
+        save_thread_meta(self.threads_dir, self.thread_id, base_meta)

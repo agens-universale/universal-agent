@@ -1,4 +1,4 @@
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 import json
 import requests
@@ -11,6 +11,72 @@ from tools.connect_mcp.stream_client import (
     call_tool_stream_stdio,
 )
 from tools.connect_mcp.validation import _validate_tool_arguments, format_mcp_tool_result
+
+
+def _json_sanitize(value: Any) -> Any:
+    """
+    Convert arbitrary MCP result to JSON-serializable structure.
+    - bytes/bytearray -> "binary data"
+    - dict/list/tuple -> recursive
+    - everything else -> keep as is when possible; fallback to string repr
+    """
+    if value is None:
+        return None
+    if isinstance(value, (bytes, bytearray)):
+        return "binary data"
+    if isinstance(value, dict):
+        out: Dict[str, Any] = {}
+        for k, v in value.items():
+            # JSON keys must be strings
+            key = k if isinstance(k, str) else str(k)
+            out[key] = _json_sanitize(v)
+        return out
+    if isinstance(value, list):
+        return [_json_sanitize(v) for v in value]
+    if isinstance(value, tuple):
+        return [_json_sanitize(v) for v in value]
+    # Try to keep primitive JSON types as-is
+    if isinstance(value, (str, int, float, bool)):
+        return value
+    # Fallback for unknown objects (e.g. exceptions, custom classes)
+    return str(value)
+
+
+def _wrap_mcp_result(
+    *,
+    full_tool_name: str,
+    server_key: Optional[str],
+    base_tool_name: str,
+    arguments: Dict[str, Any],
+    raw: Any,
+) -> str:
+    """
+    Normalize ANY MCP tool output into a stable JSON envelope.
+    """
+    formatted = format_mcp_tool_result(raw) if isinstance(raw, dict) else raw
+    formatted_sanitized = _json_sanitize(formatted)
+
+    ok = True
+    error: Optional[Dict[str, Any]] = None
+
+    # Common MCP pattern: {"content": ..., "isError": bool}
+    if isinstance(formatted_sanitized, dict) and formatted_sanitized.get("isError") is True:
+        ok = False
+        error = {
+            "type": "mcp_tool_error",
+            "message": "MCP tool returned isError=true",
+        }
+
+    envelope = {
+        "tool": full_tool_name,
+        "ok": ok,
+        "mcp_server": server_key,
+        "mcp_tool": base_tool_name,
+        "arguments": _json_sanitize(arguments),
+        "result": formatted_sanitized,
+        "error": error,
+    }
+    return json.dumps(envelope, ensure_ascii=False)
 
 
 def call_mcp_tool(
@@ -155,10 +221,23 @@ def call_mcp_tool(
                 data = do_call(session_id)
 
     if not isinstance(data, dict):
-        return data
+        # Unknown/legacy transport returned non-dict; still normalize
+        return _wrap_mcp_result(
+            full_tool_name=full_tool_name,
+            server_key=server_key,
+            base_tool_name=base_tool_name,
+            arguments=arguments_obj,
+            raw=data,
+        )
 
     result = data.get("result", data)
-    return format_mcp_tool_result(result)
+    return _wrap_mcp_result(
+        full_tool_name=full_tool_name,
+        server_key=server_key,
+        base_tool_name=base_tool_name,
+        arguments=arguments_obj,
+        raw=result,
+    )
 
 
 __all__ = [

@@ -46,11 +46,15 @@ def load_server_config() -> Dict[str, Any]:
     agent_cfg = raw.get("agent") or {}
     overrides_cfg = raw.get("agent_overrides") or {}
 
+    # Секция swarm — настройки сворм-режима (может отсутствовать в старых конфигах).
+    swarm_cfg = raw.get("swarm") or {}
+
     return {
         "server": server_cfg,
         "defaults": defaults_cfg,
         "agent": agent_cfg,
         "agent_overrides": overrides_cfg,
+        "swarm": swarm_cfg,
     }
 
 

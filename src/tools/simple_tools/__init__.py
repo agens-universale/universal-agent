@@ -6,12 +6,11 @@ from tools.simple_tools.search_files import SearchFiles
 from tools.simple_tools.ask_human import AskHuman
 from tools.simple_tools.execute_command import ExecuteCommand
 from tools.simple_tools.search_and_replace import SearchAndReplace
-from tools.simple_tools.update_plan import UpdatePlan
 from tools.simple_tools.reflect import Reflect
+from tools.simple_tools.thread_notes import ThreadNotes
 from tools.simple_tools.submit_solution import SubmitSolution
 from tools.simple_tools.calculator import Calculator
 from tools.simple_tools.run_python_code import RunPythonCode
-from tools.simple_tools.answer_question import AnswerQuestion
 from tools.simple_tools.fetch_url import FetchUrl
 from typing import Dict, Any
 
@@ -58,10 +57,10 @@ def get_simple_tools_data(config_dict: Dict[str, Any]) -> Dict[str, Dict[str, An
             'spec': SearchAndReplace.tool_description(),
             'description': SearchAndReplace.prompt_description(),
         },
-        'update_plan': {
-            'tool_fabric': UpdatePlan,
-            'spec': UpdatePlan.tool_description(),
-            'description': UpdatePlan.prompt_description(),
+        'thread_notes': {
+            'tool_fabric': ThreadNotes,
+            'spec': ThreadNotes.tool_description(),
+            'description': ThreadNotes.prompt_description(),
         },
         'reflect': {
             'tool_fabric': Reflect,
@@ -77,11 +76,6 @@ def get_simple_tools_data(config_dict: Dict[str, Any]) -> Dict[str, Dict[str, An
             'tool_fabric': RunPythonCode,
             'spec': RunPythonCode.tool_description(),
             'description': RunPythonCode.prompt_description(),
-        },
-        'answer_question': {
-            'tool_fabric': AnswerQuestion,
-            'spec': AnswerQuestion.tool_description(),
-            'description': AnswerQuestion.prompt_description(),
         },
         'fetch_url': {
             'tool_fabric': FetchUrl,

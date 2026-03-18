@@ -4,18 +4,43 @@ from tools.simple_tools.abstract_simple_tool import AbstractSimpleTool
 
 
 class Reflect(AbstractSimpleTool):
+    @staticmethod
+    def _result(
+        *,
+        ok: bool,
+        content: str,
+        truncated: bool,
+        length: int,
+        error: dict | None,
+    ) -> str:
+        return json.dumps(
+            {
+                "tool": "reflect",
+                "ok": ok,
+                "content": content,
+                "truncated": truncated,
+                "length": length,
+                "error": error,
+            },
+            ensure_ascii=False,
+        )
+
     @classmethod
     def tool_description(cls):
         description = {
             "type": "function",
             "name": "reflect",
-            "description": "Capture internal reflections, hypotheses, or insights about the task, environment, or solution strategy. These notes are stored in the conversation history to maintain context and trace your reasoning process. Use this whenever you need to analyze, question assumptions, or brainstorm before taking action.",
+            "description": (
+                "Capture an in-turn reflection (think out loud). "
+                "Returned content is included into dialogue context, but it is NOT persisted anywhere "
+                "and is not visible to other threads/agents."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "content": {
                         "type": "string",
-                        "description": "The reflection content. Be specific: include assumptions, doubts, observations, or potential approaches. These notes are just drafts — their goal is to give you space to think, reflect, and reason about task execution. Feel free to use this tool freely for unstructured thinking."
+                        "description": "Reflection text to include into the dialogue context."
                     }
                 },
                 "required": ["content"],
@@ -28,21 +53,46 @@ class Reflect(AbstractSimpleTool):
     @classmethod
     def prompt_description(cls):
         description = '''Tool name: reflect
-Tool description: Use it freely to generate any thinking or reasoning.'''
+Tool description: Use it to include a short reflection into the dialogue (not persisted).
+Input schema: {"type":"object","properties":{"content":{"type":"string"}},"required":["content"],"additionalProperties":false}
+
+Return format (JSON string):
+{"tool":"reflect","ok":true,"content":"...","truncated":true|false,"length":number,"error":null|{"type":"...","message":"..."}}
+'''
         return description
 
     def __call__(self, content: str, **kwargs) -> str:
         if not isinstance(content, str):
-            raise ValueError(f"Argument 'content' must be a string. Got: {type(content)} ({content})")
+            return self._result(
+                ok=False,
+                content="",
+                truncated=False,
+                length=0,
+                error={"type": "invalid_argument", "field": "content"},
+            )
 
-        # print(f"****\nAgent current plan:\n\n{current_plan}\n\n****")
+        trimmed = content.strip()
+        max_chars = 8000
+        truncated = False
+        if len(trimmed) > max_chars:
+            trimmed = trimmed[:max_chars]
+            truncated = True
 
-        return 'Reflection stored. Keeping this in mind for future reasoning.'
+        return self._result(
+            ok=True,
+            content=trimmed,
+            truncated=truncated,
+            length=len(trimmed),
+            error=None,
+        )
 
 
 def run_test():
     tool = Reflect()
-    assert tool(content='Conquer the World!') == 'Reflection stored. Keeping this in mind for future reasoning.'
+    out = tool(content="Conquer the World!")
+    data = json.loads(out)
+    assert data["ok"] is True
+    assert data["tool"] == "reflect"
 
     print("All tests passed.")
 

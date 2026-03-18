@@ -43,6 +43,21 @@ class AgentExecutor:
             verbose if verbose is not None else config_dict.get("verbose", False)
         )
         skills_list = get_skills_registry(config_dict).list_skills()
+
+        thread_session: ThreadSession | None = None
+        thread_notes_md: str | None = None
+        previous_response_id: str | None = None
+        if thread_id is not None:
+            thread_session = ThreadSession.from_config(
+                config_dict=config_dict, thread_id=thread_id
+            )
+            previous_response_id = thread_session.previous_response_id
+            meta = getattr(thread_session, "meta", None) or {}
+            maybe_notes = meta.get("notes_md")
+            thread_notes_md = (
+                maybe_notes if isinstance(maybe_notes, str) else ""
+            )
+
         state_data = {
             "limit_project_metadata": config_dict.get("limit_project_metadata", False),
             "parent_state_id": None,
@@ -55,6 +70,8 @@ class AgentExecutor:
             "system_prompt_id": config_dict["system_prompt_id"],
             "use_server_subagents": config_dict.get("use_server_subagents", False),
             "agent_md_path": config_dict.get("agent_md_path"),
+            "thread_id": thread_id,
+            "notes_md": thread_notes_md,
         }
         state = State(**state_data)
         save_state(state)
@@ -70,18 +87,19 @@ class AgentExecutor:
         }
         messages = [new_user_message]
 
-        thread_session: ThreadSession | None = None
         persist_messages_callback = None
         get_full_history_messages = None
-        if thread_id is not None:
-            thread_session = ThreadSession.from_config(
-                config_dict=config_dict, thread_id=thread_id
-            )
-            state.previous_response_id = thread_session.previous_response_id
+        if thread_session is not None:
+            state.previous_response_id = previous_response_id
             messages = thread_session.build_initial_messages(new_user_message)
             thread_session.set_runtime_messages(state.messages)
 
             def _persist_thread_batch(batch_messages: list[dict]) -> None:
+                # Persist notes from in-memory state into thread meta.
+                # Tools mutate state, but ThreadSession writes self.meta to disk.
+                notes_md = getattr(state, "notes_md", None)
+                if isinstance(notes_md, str):
+                    thread_session.meta["notes_md"] = notes_md
                 thread_session.persist_batch(
                     batch_messages, previous_response_id=state.previous_response_id
                 )

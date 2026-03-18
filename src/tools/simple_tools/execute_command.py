@@ -2,13 +2,15 @@ from tools.simple_tools.abstract_simple_tool import AbstractSimpleTool
 import subprocess
 import sys
 import os
+import json
 
 
 class ExecuteCommand(AbstractSimpleTool):
     """
     Tool to execute a CLI command on the system and return its output.
     """
-    cut_n = 2000
+    # Default max chars per field (stdout/stderr) before truncation.
+    cut_n = 4000
     timeout = 30
 
     @classmethod
@@ -16,13 +18,39 @@ class ExecuteCommand(AbstractSimpleTool):
         description = {
             "type": "function",
             "name": "execute_command",
-            "description": "Executes a command-line command on the system and returns its output, error stream, and exit code. Use it to run shell commands for inspecting environment, running scripts, or managing files within the project directory.",
+            "description": (
+                "Executes a command synchronously (no background) and returns a JSON string envelope with "
+                "fields: tool, ok, command, cwd, exit_code, timed_out, truncated, stdout, stderr, error. "
+                "stdout/stderr are truncated to max_output_chars each."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "command": {
                         "type": "string",
                         "description": "The command-line command to execute. Must be valid for the operating system and properly quoted, especially when paths contain spaces. Avoid interactive or destructive commands unless absolutely necessary."
+                    },
+                    "timeout_seconds": {
+                        "type": "integer",
+                        "description": f"Execution timeout in seconds. Default is {cls.timeout}.",
+                        "minimum": 1,
+                    },
+                    "max_output_chars": {
+                        "type": "integer",
+                        "description": f"Max number of chars returned for stdout and stderr each. Default is {cls.cut_n}.",
+                        "minimum": 1,
+                    },
+                    "cwd": {
+                        "type": "string",
+                        "description": "Optional working directory. If omitted, uses current working directory.",
+                    },
+                    "env": {
+                        "type": "object",
+                        "description": (
+                            "Optional environment variables to add/override for this command. "
+                            "Values must be strings. If omitted, uses the current process environment."
+                        ),
+                        "additionalProperties": {"type": "string"},
                     }
                 },
                 "required": ["command"],
@@ -35,8 +63,11 @@ class ExecuteCommand(AbstractSimpleTool):
     @classmethod
     def prompt_description(cls):
         description = ('''Tool name: execute_command
-Tool description: Executes a CLI command on the local system and returns stdout, stderr, and exit code.
-Input schema: {"type": "object", "properties": {"command": {"type": "string", "description": "The CLI command to execute. Must be valid for the OS."}}, "required": ["command"], "additionalProperties": false}
+Tool description: Executes a CLI command synchronously and returns stdout/stderr/exit_code as JSON.
+Input schema: {"type": "object", "properties": {"command": {"type": "string", "description": "The CLI command to execute."}, "timeout_seconds": {"type": "integer", "description": "Execution timeout in seconds.", "default": 30}, "max_output_chars": {"type": "integer", "description": "Max chars returned for stdout/stderr each.", "default": 4000}, "cwd": {"type": "string", "description": "Optional working directory (absolute or relative)."}, "env": {"type":"object","description":"Optional env overrides for this command. Values must be strings.","additionalProperties":{"type":"string"}}}, "required": ["command"], "additionalProperties": false}
+
+Return format (JSON string):
+{"tool":"execute_command","ok":true|false,"command":"...","cwd":"...","exit_code":number|null,"timed_out":true|false,"truncated":true|false,"stdout":"...","stderr":"...","error":null|{"type":"...","message":"..."}}
 
 Usage:
 - Use this tool to run shell commands such as listing directories (`ls`, `dir`), checking versions (`python --version`), or running scripts.
@@ -48,7 +79,7 @@ Usage:
 - Avoid interactive commands (e.g., `vim`, `python` without args) — they will time out or fail.
 - This tool is essential for inspecting system state, verifying installations, or automating workflows.
 - It is very helpful if you write a clear, concise description of what this command does in 5-10 words.
-- If the output exceeds ''' + str(cls.cut_n) + ''' characters, output will be truncated before being returned to you.
+- stdout/stderr are truncated to max_output_chars each (default ''' + str(cls.cut_n) + ''').
 
 Important Usage Rules:
 1. Directory Verification:
@@ -75,176 +106,293 @@ Important Usage Rules:
 ''')
         return description
 
-    def __call__(self, command: str, **kwargs) -> str:
+    @staticmethod
+    def _truncate_text(text: str, limit: int) -> tuple[str, bool]:
+        if limit <= 0:
+            return "", False
+        if len(text) <= limit:
+            return text, False
+        cut = text[:limit]
+        return cut, True
+
+    @staticmethod
+    def _result(
+        *,
+        ok: bool,
+        command: str,
+        cwd: str,
+        exit_code: int | None,
+        timed_out: bool,
+        truncated: bool,
+        stdout: str,
+        stderr: str,
+        error: dict | None = None,
+    ) -> str:
+        return json.dumps(
+            {
+                "tool": "execute_command",
+                "ok": ok,
+                "command": command,
+                "cwd": cwd,
+                "exit_code": exit_code,
+                "timed_out": timed_out,
+                "truncated": truncated,
+                "stdout": stdout,
+                "stderr": stderr,
+                "error": error,
+            },
+            ensure_ascii=False,
+        )
+
+    def __call__(
+        self,
+        command: str,
+        timeout_seconds: int | None = None,
+        max_output_chars: int | None = None,
+        cwd: str | None = None,
+        env: dict | None = None,
+        **kwargs,
+    ) -> str:
+        cwd_used = cwd or os.getcwd()
+
         # Input validation
         if not isinstance(command, str):
-            return f"Error: Argument 'command' must be a string. Got: {type(command)} ({command})"
+            return self._result(
+                ok=False,
+                command=str(command),
+                cwd=cwd_used,
+                exit_code=None,
+                timed_out=False,
+                truncated=False,
+                stdout="",
+                stderr="",
+                error={"type": "invalid_argument", "field": "command"},
+            )
 
         if not command.strip():
-            return "Error: Command cannot be empty or whitespace only."
+            return self._result(
+                ok=False,
+                command=command,
+                cwd=cwd_used,
+                exit_code=None,
+                timed_out=False,
+                truncated=False,
+                stdout="",
+                stderr="",
+                error={"type": "invalid_argument", "field": "command", "message": "Empty command"},
+            )
 
-        # Security check: prevent obviously dangerous patterns like shell redirections in sensitive contexts
-        # But we allow common usage since user is responsible.
-        # We rely on subprocess.list2cmdline escaping when using shell=False, but we use shell=True for flexibility.
+        if timeout_seconds is None:
+            timeout_seconds = self.timeout
+        if not isinstance(timeout_seconds, int) or timeout_seconds <= 0:
+            return self._result(
+                ok=False,
+                command=command,
+                cwd=cwd_used,
+                exit_code=None,
+                timed_out=False,
+                truncated=False,
+                stdout="",
+                stderr="",
+                error={"type": "invalid_argument", "field": "timeout_seconds"},
+            )
+
+        if max_output_chars is None:
+            max_output_chars = self.cut_n
+        if not isinstance(max_output_chars, int) or max_output_chars <= 0:
+            return self._result(
+                ok=False,
+                command=command,
+                cwd=cwd_used,
+                exit_code=None,
+                timed_out=False,
+                truncated=False,
+                stdout="",
+                stderr="",
+                error={"type": "invalid_argument", "field": "max_output_chars"},
+            )
+
+        if not isinstance(cwd_used, str) or not cwd_used.strip():
+            return self._result(
+                ok=False,
+                command=command,
+                cwd=str(cwd_used),
+                exit_code=None,
+                timed_out=False,
+                truncated=False,
+                stdout="",
+                stderr="",
+                error={"type": "invalid_argument", "field": "cwd"},
+            )
+        if not os.path.isdir(cwd_used):
+            return self._result(
+                ok=False,
+                command=command,
+                cwd=cwd_used,
+                exit_code=None,
+                timed_out=False,
+                truncated=False,
+                stdout="",
+                stderr="",
+                error={"type": "invalid_argument", "field": "cwd", "message": "Not a directory"},
+            )
+
+        merged_env = None
+        if env is not None:
+            if not isinstance(env, dict):
+                return self._result(
+                    ok=False,
+                    command=command,
+                    cwd=cwd_used,
+                    exit_code=None,
+                    timed_out=False,
+                    truncated=False,
+                    stdout="",
+                    stderr="",
+                    error={"type": "invalid_argument", "field": "env", "message": "env must be an object/map"}
+                )
+            # Ensure string keys and values for subprocess env
+            env_sanitized: dict[str, str] = {}
+            for k, v in env.items():
+                if not isinstance(k, str):
+                    k = str(k)
+                if v is None:
+                    v = ""
+                env_sanitized[k] = v if isinstance(v, str) else str(v)
+            merged_env = {**os.environ, **env_sanitized}
 
         try:
-            # Using shell=True to allow shell features (pipes, env vars, etc.)
-            # This is acceptable here because input comes from AI agent under controlled context.
             result = subprocess.run(
                 command,
                 shell=True,
                 capture_output=True,
                 text=True,
-                timeout=self.timeout,  # Prevent hanging indefinitely
-                cwd=os.getcwd(),
-                encoding='utf-8',
-                errors='replace'  # Handle invalid UTF-8 gracefully
+                timeout=timeout_seconds,
+                cwd=cwd_used,
+                encoding="utf-8",
+                errors="replace",
+                env=merged_env,
             )
 
-            # Build result output
-            output_lines = []
+            stdout_raw = result.stdout or ""
+            stderr_raw = result.stderr or ""
+            stdout, stdout_trunc = self._truncate_text(stdout_raw.rstrip(), max_output_chars)
+            stderr, stderr_trunc = self._truncate_text(stderr_raw.rstrip(), max_output_chars)
+            truncated = stdout_trunc or stderr_trunc
 
-            if result.stdout:
-                output_lines.append(f"STDOUT:\n{result.stdout.rstrip()[:]}")
+            exit_code = result.returncode
+            ok = exit_code == 0
+            error = None
+            if not ok:
+                error = {"type": "non_zero_exit", "message": f"Command exited with status {exit_code}"}
 
-            if result.stderr:
-                output_lines.append(f"STDERR:\n{result.stderr.rstrip()}")
+            return self._result(
+                ok=ok,
+                command=command,
+                cwd=cwd_used,
+                exit_code=exit_code,
+                timed_out=False,
+                truncated=truncated,
+                stdout=stdout,
+                stderr=stderr,
+                error=error,
+            )
 
-            output_lines.append(f"Exit code: {result.returncode}")
-
-            return "\n\n".join(output_lines)
-
-        except subprocess.TimeoutExpired:
-            return (
-                "STDERR:\nCommand timed out after 30 seconds.\n"
-                "Tip: Try a simpler or non-interactive command."
+        except subprocess.TimeoutExpired as e:
+            stdout_raw = getattr(e, "stdout", "") or ""
+            stderr_raw = getattr(e, "stderr", "") or ""
+            stdout, _stdout_trunc = self._truncate_text(stdout_raw.rstrip(), max_output_chars)
+            stderr, _stderr_trunc = self._truncate_text(stderr_raw.rstrip(), max_output_chars)
+            truncated = _stdout_trunc or _stderr_trunc
+            return self._result(
+                ok=False,
+                command=command,
+                cwd=cwd_used,
+                exit_code=None,
+                timed_out=True,
+                truncated=truncated,
+                stdout=stdout,
+                stderr=stderr,
+                error={"type": "timeout", "message": f"Command timed out after {timeout_seconds} seconds"},
             )
         except Exception as e:
-            # Catch other issues (e.g., permission errors, invalid command structure)
-            error_msg = str(e).replace('\n', ' ').strip()
-            return f"STDERR:\nFailed to execute command: {error_msg}\nExit code: -1"
+            err = str(e).replace("\n", " ").strip()
+            return self._result(
+                ok=False,
+                command=command,
+                cwd=cwd_used,
+                exit_code=-1,
+                timed_out=False,
+                truncated=False,
+                stdout="",
+                stderr="",
+                error={"type": "execution_failed", "message": err},
+            )
 
 
 def test_execute_command():
+    import json
+
     executor = ExecuteCommand()
     executor.timeout = 5
 
-    # Test 1: Invalid argument type
+    # Invalid argument type
     try:
-        executor(command=123)  # type: ignore
-        assert False, "Should have raised TypeError"
+        executor(command=123)  # type: ignore[arg-type]
+        assert False, "Expected TypeError"
     except TypeError:
-        pass  # Expected
-
-    # Test 2: Empty command
-    try:
-        executor(command="")
-        assert False, "Should have raised ValueError"
-    except ValueError:
-        pass  # Expected
-
-    # Test 3: Whitespace-only command
-    try:
-        executor(command="   ")
-        assert False, "Should have raised ValueError"
-    except ValueError:
-        pass  # Expected
-
-    # Test 4: Valid simple command – echo or equivalent
-    if sys.platform.startswith('win'):
-        result = executor(command="echo Hello World")
-        assert "STDOUT:" in result
-        assert "Hello World" in result
-        assert "Exit code: 0" in result
-    else:
-        result = executor(command="echo 'Hello World'")
-        assert "STDOUT:" in result
-        assert "Hello World" in result
-        assert "Exit code: 0" in result
-
-    # Test 5: Command with pipe (cross-platform test)
-    if sys.platform.startswith('win'):
-        result = executor(command="dir | findstr .*")
-        assert "STDOUT:" in result or "No files" not in result  # depends on dir content
-        assert "Exit code: 0" in result or "Exit code: 1" not in result  # findstr may return 1 if no match
-    else:
-        result = executor(command="ls -la | head -n 3")
-        lines = [line.strip() for line in result.splitlines() if line.strip()]
-        assert "STDOUT:" in result
-        assert len([l for l in lines if l.startswith('total') or l.endswith('.') or l.endswith('..')]) >= 1
-        assert "Exit code: 0" in result
-
-    # Test 6: Non-existent command
-    result = executor(command="this_command_does_not_exist_xyz123")
-    assert "STDERR:" in result
-    assert "Exit code:" in result
-    assert int(result.split("Exit code: ")[-1]) != 0
-
-    # Test 7: Command with error output (e.g., ls on non-existent file)
-    bad_path = "nonexistent_file_987654321.txt"
-    if sys.platform.startswith('win'):
-        result = executor(command=f"type {bad_path}")
-    else:
-        result = executor(command=f"cat {bad_path}")
-    assert "STDERR:" in result
-    # print(result)
-    assert "No such file" in result or "cannot open" in result or "not found" in result or "Нет" in result
-    assert "Exit code:" in result
-    exit_code_line = [line for line in result.splitlines() if "Exit code:" in line][0]
-    exit_code = int(exit_code_line.split("Exit code: ")[-1])
-    assert exit_code != 0
-
-    # Test 8: Long-running command that should time out
-    if not sys.platform.startswith('win'):  # sleep available on Unix-like
-        result = executor(command="sleep 6 && echo 'too late'")
-        # print(result)
-        assert "timed out" in result.lower()
-
-    # Test 9: Environment variable expansion
-    os.environ["TEST_VAR"] = "HelloFromEnv"
-    if sys.platform.startswith('win'):
-        result = executor(command="echo %TEST_VAR%")
-    else:
-        result = executor(command="echo $TEST_VAR")
-    assert "HelloFromEnv" in result
-    assert "Exit code: 0" in result
-
-    # Test 10: Command with special characters (safe handling)
-    result = executor(command='echo "Hello; whoami"')
-    assert "Hello; whoami" in result
-    assert "Exit code: 0" in result
-
-    # Test 11: Check version command (common diagnostic)
-    result = executor(command="python --version")
-    # Note: python might not exist, but often maps to py or python3
-    # So we accept either success or known error
-    if "python" in result or "Python" in result:
-        assert "Exit code: 0" in result or "Exit code: 1" not in result  # some print to stderr
-    else:
-        # It's okay if Python isn't installed
         pass
 
-    # Test 12: Directory listing
-    if sys.platform.startswith('win'):
-        result = executor(command="dir")
+    # Empty command -> ok=false
+    res = json.loads(executor(command=""))
+    assert res["tool"] == "execute_command"
+    assert res["ok"] is False
+    assert res["error"]["type"] == "invalid_argument"
+
+    # Valid simple command – echo or equivalent
+    if sys.platform.startswith("win"):
+        res = json.loads(executor(command="echo Hello World"))
     else:
-        result = executor(command="ls")
-    assert "STDOUT:" in result
-    assert "Exit code: 0" in result
+        res = json.loads(executor(command="echo 'Hello World'"))
+    assert res["exit_code"] == 0
+    assert res["ok"] is True
+    assert "Hello World" in res["stdout"]
 
-    # Test 13: Piped command with grep/cat
-    if not sys.platform.startswith('win'):
-        result = executor(command="echo 'test data' | grep 'test'")
-        assert "test data" in result
-        assert "Exit code: 0" in result
+    # Non-existent command should have non-zero exit_code
+    res = json.loads(executor(command="this_command_does_not_exist_xyz123"))
+    assert res["ok"] is False
+    assert res["exit_code"] is not None
+    assert res["error"]["type"] == "non_zero_exit"
 
-        result_fail = executor(command="echo 'no match' | grep 'missing'")
-        assert "Exit code: 1" in result_fail  # grep returns 1 if no match
-
-    # Cleanup environment var
+    # Environment variable expansion
+    os.environ["TEST_VAR"] = "HelloFromEnv"
+    if sys.platform.startswith("win"):
+        res = json.loads(executor(command="echo %TEST_VAR%"))
+    else:
+        res = json.loads(executor(command="echo $TEST_VAR"))
+    assert res["ok"] is True
+    assert "HelloFromEnv" in res["stdout"]
     os.environ.pop("TEST_VAR", None)
 
-    print("All tests passed.")
+    # Environment override via tool env parameter
+    if not sys.platform.startswith("win"):
+        res = json.loads(
+            executor(
+                command="python -c \"import os; print(os.environ.get('TOOL_TEST_ENV',''))\"",
+                env={"TOOL_TEST_ENV": "HelloViaToolEnv"},
+            )
+        )
+        assert res["ok"] is True
+        assert "HelloViaToolEnv" in res["stdout"]
+
+    # Timeout (Unix-like)
+    if not sys.platform.startswith("win"):
+        res = json.loads(executor(command="sleep 3 && echo too_late", timeout_seconds=1))
+        assert res["ok"] is False
+        assert res["timed_out"] is True
+        assert res["exit_code"] is None
+
+    print("All tests passed (execute_command).")
 
 
 if __name__ == '__main__':

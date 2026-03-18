@@ -1,15 +1,17 @@
 import json
+import functools
 import os
 import shutil
 import stat
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from tools.simple_tools.abstract_simple_tool import AbstractSimpleTool
+from utils.glob_to_regex import compile_glob
 
 
 class ListFiles(AbstractSimpleTool):
     """
     Tool to list files and directories in a given path.
-    Supports both flat and recursive listing.
+    Supports flat and depth-limited listing.
     """
 
     @classmethod
@@ -17,7 +19,12 @@ class ListFiles(AbstractSimpleTool):
         return {
             "type": "function",
             "name": "list_files",
-            "description": "Lists files and directories within a specified absolute path. Supports both flat listing (default) and recursive traversal. Includes metadata such as type ('file' or 'directory') and whether the item is hidden.",
+            "description": (
+                "Lists files and directories within a specified absolute path. Supports flat listing (default) "
+                "and deeper traversal limited by `max_depth`. Optionally filters results by a glob pattern matched against the "
+                "relative path from the root directory. Returns a JSON string object with: ok, path, "
+                "max_depth, max_entries, truncated, count, entries, and optional glob/error."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -25,9 +32,29 @@ class ListFiles(AbstractSimpleTool):
                         "type": "string",
                         "description": "The absolute path of the directory to list contents from. Must be a valid existing directory."
                     },
-                    "recursive": {
-                        "type": "boolean",
-                        "description": "If true, performs a recursive traversal of all subdirectories. If false or omitted, only lists immediate children"
+                    "glob": {
+                        "type": "string",
+                        "description": (
+                            "Optional glob pattern to filter entries by their relative path from `path` "
+                            "(e.g., '*.py', '**/*.md', 'src/**'). If omitted, all entries are returned."
+                        )
+                    },
+                    "max_depth": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "description": (
+                            "Max directory depth to traverse. "
+                            "0 means only immediate children of `path`. "
+                            "If omitted: 0."
+                        )
+                    },
+                    "max_entries": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "description": (
+                            "Max number of returned entries (files + directories). "
+                            "Default: 200. If exceeded, response will be truncated."
+                        )
                     }
                 },
                 "required": ["path"],
@@ -39,17 +66,29 @@ class ListFiles(AbstractSimpleTool):
     @classmethod
     def prompt_description(cls):
         description = '''Tool name: list_files  
-Tool description: Lists all files and directories in the specified directory. Can perform recursive traversal if requested.
-Input schema: {"type": "object", "properties": {"path": {"type": "string", "description": "The directory absolute path to list contents for."}, "recursive": {"type": "boolean", "description": "If true, lists contents recursively."}}, "required": ["path"], "additionalProperties": false}
+Tool description: Lists files and directories in the specified directory with optional depth/size limits.
+Input schema: {"type": "object", "properties": {"path": {"type": "string", "description": "The directory absolute path to list contents for."}, "max_depth": {"type": "integer", "minimum": 0, "description": "Max directory depth to traverse. Default 0 = only immediate children."}, "max_entries": {"type": "integer", "minimum": 1, "description": "Max number of returned entries. Default 200."}, "glob": {"type": "string"}}, "required": ["path"], "additionalProperties": false}
 
 Usage:
 - Use this tool to explore directory structure.
 - Always provide an **absolute path**.
-- When `recursive=True`, it returns full tree including subdirectories. Default `recursive=False`. 
-- Returns a list of entries with:
-  - `path`: full path of file/directory
-  - `type`: 'file' or 'directory'
-  - `is_hidden`: boolean indicating if file is hidden (e.g., starts with '.' on Unix or marked hidden on Windows)
+- Prefer `max_depth` to control how deep the traversal goes.
+- Set `max_entries` to limit output size.
+- Return format (JSON string):
+{
+  "tool": "list_files",
+  "ok": true|false,
+  "path": "...",
+  "max_depth": integer,
+  "max_entries": integer,
+  "truncated": true|false,
+  "count": integer,
+  "entries": [
+    { "path": "...", "type": "file"|"directory", "is_hidden": boolean }
+  ],
+  "glob": "..." (only when `glob` is provided),
+  "error": {"type":"...","message":"..."} (only when `ok=false`)
+}
 
 Important Rules:
 - **NEVER** use external commands like `ls`, `dir`, `find`, etc. — this tool is safe and cross-platform.
@@ -64,40 +103,151 @@ List top-level contents:
   "path": "/home/user/project"
 }
 
-Recursively list all files:
+List deeper files (example):
 {
   "path": "/home/user/project",
-  "recursive": true
+  "max_depth": 10
 }
 '''
         return description
 
-    def __call__(self, path: str, recursive: bool = False, **kwargs) -> str:
+    @staticmethod
+    def _result(
+        *,
+        path: str,
+        glob: Optional[str],
+        max_depth: Optional[int],
+        max_entries: Optional[int],
+        ok: bool,
+        entries: Optional[List[Dict[str, Any]]] = None,
+        truncated: bool = False,
+        error: Optional[Dict[str, Any]] = None,
+    ) -> str:
+        payload = {
+            "tool": "list_files",
+            "ok": ok,
+            "path": path,
+            "max_depth": max_depth,
+            "max_entries": max_entries,
+            "truncated": truncated,
+            "count": len(entries) if entries is not None else 0,
+            "entries": entries if entries is not None else [],
+        }
+        if glob is not None:
+            payload["glob"] = glob
+        if error is not None:
+            payload["error"] = error
+
+        return json.dumps(payload, ensure_ascii=False)
+
+    def __call__(
+        self,
+        path: str,
+        glob: Optional[str] = None,
+        max_depth: Optional[int] = None,
+        max_entries: Optional[int] = 200,
+    ) -> str:
+        effective_max_depth: int = 0 if max_depth is None else max_depth
+
+        _result = functools.partial(
+            self._result,
+            path=path,
+            glob=glob,
+            max_depth=effective_max_depth,
+            max_entries=max_entries,
+        )
+
         # Input validation
         if not isinstance(path, str):
-            return f"Error: Argument 'path' must be a string. Got: {type(path)} ({path})"
-        if not isinstance(recursive, bool) and recursive is not None:
-            return f"Error: Argument 'recursive' must be a boolean or omitted. Got: {type(recursive)} ({recursive})"
+            return _result(
+                ok=False,
+                error={"type": "invalid_argument", "field": "path"},
+            )
+        if glob is not None and not isinstance(glob, str):
+            return _result(
+                ok=False,
+                error={"type": "invalid_argument", "field": "glob"},
+            )
+        if max_depth is not None and not isinstance(max_depth, int):
+            return _result(
+                ok=False,
+                error={"type": "invalid_argument", "field": "max_depth"},
+            )
+        if isinstance(max_depth, int) and max_depth < 0:
+            return _result(
+                ok=False,
+                error={"type": "invalid_argument", "field": "max_depth"},
+            )
+        if max_entries is not None and not isinstance(max_entries, int):
+            return _result(
+                ok=False,
+                error={"type": "invalid_argument", "field": "max_entries"},
+            )
+        if isinstance(max_entries, int) and max_entries < 1:
+            return _result(
+                ok=False,
+                error={"type": "invalid_argument", "field": "max_entries"},
+            )
 
         path = os.path.normpath(path)
 
         if not os.path.exists(path):
-            return f"Error: Path not found: {path}"
+            return _result(
+                ok=False,
+                error={"type": "not_found"},
+            )
         if not os.path.isdir(path):
-            return f"Error: Path is not a directory: {path}"
+            return _result(
+                ok=False,
+                error={"type": "not_a_directory"},
+            )
 
-        result = []
+        file_matcher = None
+        if glob:
+            glob_re = compile_glob(glob)
+
+            def _matches(rel_path: str) -> bool:
+                rel_path = rel_path.replace(os.sep, "/")
+                return bool(glob_re.match(rel_path))
+
+            file_matcher = _matches
+
+        result: List[Dict[str, Any]] = []
         try:
-            if recursive:
-                self._walk_directory(path, result)
-            else:
-                self._list_directory(path, result)
-        except PermissionError as e:
-            return f"Error: Permission denied while accessing '{path}': {str(e)}"
-        except Exception as e:
-            raise RuntimeError(f"Unexpected error while listing files in '{path}': {str(e)}")
+            hit_limit: bool
+            # To make `truncated` accurate: scan for one extra entry.
+            # If we never reach (max_entries + 1), we didn't actually truncate.
+            scan_max_entries = None
+            if max_entries is not None:
+                scan_max_entries = max_entries + 1
 
-        return json.dumps(result, ensure_ascii=False)
+            if effective_max_depth == 0:
+                hit_limit = self._list_directory(
+                    path, result, file_matcher=file_matcher, max_entries=scan_max_entries
+                )
+            else:
+                hit_limit = self._walk_directory(
+                    path,
+                    result,
+                    file_matcher=file_matcher,
+                    max_depth=effective_max_depth,
+                    max_entries=scan_max_entries,
+                )
+        except PermissionError as e:
+            return _result(
+                ok=False,
+                error={"type": "permission_denied", "message": str(e)},
+            )
+        except Exception as e:
+            return _result(
+                ok=False,
+                error={"type": "unexpected_error", "message": str(e)},
+            )
+
+        if max_entries is not None and len(result) > max_entries:
+            result = result[:max_entries]
+
+        return _result(ok=True, entries=result, truncated=hit_limit)
 
     def _is_hidden_unix(self, name: str) -> bool:
         """Check if file is hidden on Unix-like systems (starts with .)."""
@@ -142,7 +292,14 @@ Recursively list all files:
             "is_hidden": is_hidden
         }
 
-    def _list_directory(self, root_path: str, result: List[Dict[str, Any]]):
+    def _list_directory(
+        self,
+        root_path: str,
+        result: List[Dict[str, Any]],
+        *,
+        file_matcher=None,
+        max_entries: Optional[int] = None,
+    ):
         """List only immediate children of the directory."""
         try:
             names = os.listdir(root_path)
@@ -153,25 +310,66 @@ Recursively list all files:
 
         for name in sorted(names):  # Sort for deterministic output
             filepath = os.path.join(root_path, name)
+            if file_matcher is not None:
+                rel = os.path.relpath(filepath, root_path)
+                if not file_matcher(rel):
+                    continue
             entry = self._get_entry_info(filepath)
             result.append(entry)
+            if max_entries is not None and len(result) >= max_entries:
+                return True
 
-    def _walk_directory(self, root_path: str, result: List[Dict[str, Any]]):
+        return False
+
+    def _walk_directory(
+        self,
+        root_path: str,
+        result: List[Dict[str, Any]],
+        *,
+        file_matcher=None,
+        max_depth: Optional[int] = None,
+        max_entries: Optional[int] = None,
+    ):
         """Recursively walk through directory and list all entries."""
         for dirpath, dirnames, filenames in os.walk(root_path, followlinks=False):
+            rel_dir = os.path.relpath(dirpath, root_path)
+            current_depth = 0 if rel_dir == "." else len(rel_dir.split(os.sep))
+
             # Sort for consistent ordering
             dirnames.sort()
             filenames.sort()
 
+            # If current directory depth reached the limit, we can still list its
+            # immediate children, but must not descend further.
+            prune_children = max_depth is not None and current_depth >= max_depth
+
             # Add directories first
             for dirname in dirnames:
                 dpath = os.path.join(dirpath, dirname)
+                if file_matcher is not None:
+                    rel = os.path.relpath(dpath, root_path)
+                    if not file_matcher(rel):
+                        continue
                 result.append(self._get_entry_info(dpath))
+                if max_entries is not None and len(result) >= max_entries:
+                    return True
 
             # Then add files
             for filename in filenames:
                 fpath = os.path.join(dirpath, filename)
+                if file_matcher is not None:
+                    rel = os.path.relpath(fpath, root_path)
+                    if not file_matcher(rel):
+                        continue
                 result.append(self._get_entry_info(fpath))
+                if max_entries is not None and len(result) >= max_entries:
+                    return True
+
+            if prune_children:
+                # Stop os.walk recursion into subdirectories beyond current depth.
+                dirnames[:] = []
+
+        return False
 
 
 
@@ -252,7 +450,7 @@ def test_list_files_recursive():
         f.write("settings")
 
     tool = ListFiles()
-    result = tool(path=test_dir, recursive=True)
+    result = tool(path=test_dir, max_depth=2)
 
     expected_rel = [
         "a",
@@ -280,6 +478,88 @@ def test_list_files_recursive():
     assert any(r["path"] == cfg_file_path and r["is_hidden"] is False for r in result)
 
     print("test_list_files_recursive passed")
+
+
+def test_list_files_max_depth_0():
+    setup_test_dir()
+    test_dir = TEST_BASE_DIR
+
+    os.makedirs(os.path.join(test_dir, "a"))
+    os.makedirs(os.path.join(test_dir, "a", "b"))
+    os.makedirs(os.path.join(test_dir, ".config"))
+
+    with open(os.path.join(test_dir, "top.txt"), "w") as f:
+        f.write("top")
+    with open(os.path.join(test_dir, "a", "f1.txt"), "w") as f:
+        f.write("deep1")
+    with open(os.path.join(test_dir, "a", "b", "f2.txt"), "w") as f:
+        f.write("deeper2")
+    with open(os.path.join(test_dir, ".config", "cfg"), "w") as f:
+        f.write("settings")
+
+    tool = ListFiles()
+    data = json.loads(tool(path=test_dir, max_depth=0))
+    assert data["ok"] is True
+
+    result_paths = [item["path"] for item in data["entries"]]
+    base = test_dir.replace(os.sep, "/")
+    expected_rel = ["a", ".config", "top.txt"]
+    expected_full = [f"{base}/{p}".replace(os.sep, "/") for p in expected_rel]
+    for p in expected_full:
+        assert p in result_paths, f"Не найден путь: {p}"
+
+    assert f"{base}/a/b".replace(os.sep, "/") not in result_paths, "Слишком глубокие элементы не должны попадать"
+    assert f"{base}/a/f1.txt".replace(os.sep, "/") not in result_paths, "Слишком глубокие элементы не должны попадать"
+    assert f"{base}/.config/cfg".replace(os.sep, "/") not in result_paths, "Слишком глубокие элементы не должны попадать"
+    print("test_list_files_max_depth_0 passed")
+
+
+def test_list_files_max_depth_1():
+    setup_test_dir()
+    test_dir = TEST_BASE_DIR
+
+    os.makedirs(os.path.join(test_dir, "a"))
+    os.makedirs(os.path.join(test_dir, "a", "b"))
+    os.makedirs(os.path.join(test_dir, ".config"))
+
+    with open(os.path.join(test_dir, "top.txt"), "w") as f:
+        f.write("top")
+    with open(os.path.join(test_dir, "a", "f1.txt"), "w") as f:
+        f.write("deep1")
+    with open(os.path.join(test_dir, "a", "b", "f2.txt"), "w") as f:
+        f.write("deeper2")
+    with open(os.path.join(test_dir, ".config", "cfg"), "w") as f:
+        f.write("settings")
+
+    tool = ListFiles()
+    data = json.loads(tool(path=test_dir, max_depth=1))
+    assert data["ok"] is True
+
+    result_paths = [item["path"] for item in data["entries"]]
+    base = test_dir.replace(os.sep, "/")
+    expected_rel = ["a", "a/b", "a/f1.txt", ".config", ".config/cfg", "top.txt"]
+    expected_full = [f"{base}/{p}".replace(os.sep, "/") for p in expected_rel]
+    for p in expected_full:
+        assert p in result_paths, f"Не найден путь: {p}"
+
+    assert f"{base}/a/b/f2.txt".replace(os.sep, "/") not in result_paths, "Элементы глубже max_depth не должны попадать"
+    print("test_list_files_max_depth_1 passed")
+
+
+def test_list_files_max_entries_truncates():
+    setup_test_dir()
+    test_dir = TEST_BASE_DIR
+
+    for i in range(10):
+        with open(os.path.join(test_dir, f"f{i}.txt"), "w") as f:
+            f.write(str(i))
+
+    tool = ListFiles()
+    data = json.loads(tool(path=test_dir, max_depth=10, max_entries=5))
+    assert data["ok"] is True
+    assert data["truncated"] is True
+    assert data["count"] == 5
+    print("test_list_files_max_entries_truncates passed")
 
 
 def test_list_files_empty_dir():
@@ -323,12 +603,11 @@ def test_list_files_input_validation():
         pass  # OK
     os.unlink(file_path)
 
-    # Неверный тип recursive
-    try:
-        tool(path=TEST_BASE_DIR, recursive="yes")
-        assert False, "Должна быть ошибка при передаче строки как recursive"
-    except ValueError as e:
-        assert "must be a boolean" in str(e), f"Неверное сообщение: {e}"
+    # Неверный тип max_depth
+    data = json.loads(tool(path=TEST_BASE_DIR, max_depth="yes"))
+    assert data["ok"] is False
+    assert data["error"]["field"] == "max_depth"
+    print("test_list_files_input_validation max_depth type passed")
 
     print("test_list_files_input_validation passed")
 
@@ -341,7 +620,7 @@ def test_list_files_no_recursive_default():
         f.write("data")
 
     tool = ListFiles()
-    result = tool(path=test_dir)  # recursive по умолчанию False
+    result = tool(path=test_dir)  # max_depth по умолчанию 0
     assert len(result) == 1
     assert result[0]["path"].endswith("/x.txt") or result[0]["path"].endswith("\\x.txt"), "Файл x.txt должен быть найден"
 
@@ -351,6 +630,9 @@ def run_test():
     try:
         test_list_files_basic()
         test_list_files_recursive()
+        test_list_files_max_depth_0()
+        test_list_files_max_depth_1()
+        test_list_files_max_entries_truncates()
         test_list_files_empty_dir()
         test_list_files_input_validation()
         test_list_files_no_recursive_default()

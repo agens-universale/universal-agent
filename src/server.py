@@ -29,6 +29,10 @@ from .rest_api.utils import (  # type: ignore  # noqa: E402
     normalize_system,
     patch_asyncio_run_for_fastapi,
 )
+from .swarm.config import build_swarm_config  # type: ignore  # noqa: E402
+from .swarm.monitor import SwarmMonitor  # type: ignore  # noqa: E402
+from .swarm import runner as swarm_runner  # type: ignore  # noqa: E402
+from .swarm import storage as swarm_storage  # type: ignore  # noqa: E402
 
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -40,9 +44,29 @@ patch_asyncio_run_for_fastapi()
 
 SERVER_CONFIG: Dict[str, Any] = load_server_config()
 BASE_AGENT_CONFIG: Dict[str, Any] = build_agent_config_for_server(SERVER_CONFIG)
+SWARM_CONFIG: Dict[str, Any] = build_swarm_config(SERVER_CONFIG)
+
+
+_swarm_monitor: Optional[SwarmMonitor] = None
 
 
 app = FastAPI()
+
+
+@app.on_event("startup")
+async def _startup_swarm_monitor() -> None:
+    """
+    Инициализировать фоновый монитор сворм-процессов, если режим включён.
+    """
+    global _swarm_monitor  # noqa: PLW0603
+
+    if not SWARM_CONFIG.get("enabled"):
+        return
+
+    threads_dir = str(SWARM_CONFIG["threads_dir"])
+    monitor = SwarmMonitor(threads_dir)
+    monitor.start_in_background()
+    _swarm_monitor = monitor
 
 
 @app.middleware("http")
@@ -244,6 +268,154 @@ async def get_thread_logs(system: str, task_id: str):
         "task_id": task_norm,
         "meta": meta,
         "messages": messages,
+    }
+
+
+@app.post("/swarm/run")
+async def swarm_run(request: Request):
+    """
+    Запуск отдельного сворм-процесса (CLI в песочнице).
+    """
+    if not SWARM_CONFIG.get("enabled"):
+        raise HTTPException(
+            status_code=503,
+            detail={"status": "error", "reason": "swarm_disabled"},
+        )
+
+    try:
+        payload = await request.json()
+    except Exception:
+        raise HTTPException(
+            status_code=400,
+            detail={"status": "error", "payload": "invalid JSON body"},
+        )
+
+    if not isinstance(payload, dict):
+        raise HTTPException(
+            status_code=400,
+            detail={"status": "error", "payload": "JSON body must be an object"},
+        )
+
+    # Нормализуем system и task_id по тем же правилам, что и в вебхуке.
+    task_id = ensure_task_id(payload)
+    source_value = payload.get("system")
+    defaults = SERVER_CONFIG.get("defaults") or {}
+    default_system = str(defaults.get("system", "generic"))
+    system = normalize_system(source_value, default_system=default_system)
+    payload["system"] = system
+
+    # Ограничение по количеству одновременных свормов.
+    max_concurrent = int(SWARM_CONFIG.get("max_concurrent", 10))
+    monitor = _swarm_monitor
+    if monitor is not None:
+        active_count = monitor.get_active_count()
+        if active_count >= max_concurrent:
+            return JSONResponse(
+                status_code=503,
+                content={
+                    "status": "rejected",
+                    "reason": "too_many_concurrent_swarm_processes",
+                    "system": system,
+                    "task_id": task_id,
+                },
+            )
+
+    try:
+        swarm_id, _pid = swarm_runner.start_swarm_process(
+            SWARM_CONFIG, system=system, task_id=task_id, payload=payload
+        )
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(
+            status_code=500,
+            detail={"status": "error", "reason": f"swarm_start_failed: {e!r}"},
+        )
+
+    if monitor is not None:
+        monitor.register_active(swarm_id)
+
+    return {
+        "status": "started",
+        "system": system,
+        "task_id": task_id,
+    }
+
+
+@app.get("/swarm/status/{system}/{task_id}")
+async def get_swarm_status(system: str, task_id: str):
+    """
+    Получить статус сворм-задачи.
+    """
+    if not SWARM_CONFIG.get("enabled"):
+        raise HTTPException(
+            status_code=503,
+            detail={"status": "error", "reason": "swarm_disabled"},
+        )
+
+    sys_norm = str(system or "").lower().strip()
+    task_norm = str(task_id or "").strip()
+    if not sys_norm or not task_norm:
+        raise HTTPException(
+            status_code=400,
+            detail={"status": "error", "payload": "system and task_id are required"},
+        )
+
+    swarm_id = f"{sys_norm}_{task_norm}"
+    threads_dir = str(SWARM_CONFIG["threads_dir"])
+    meta = swarm_storage.load_swarm_meta(threads_dir, swarm_id)
+    if not meta:
+        raise HTTPException(status_code=404, detail={"status": "not_found"})
+
+    swarm_meta = meta.get("swarm_meta") or {}
+    if not isinstance(swarm_meta, dict):
+        swarm_meta = {}
+    status = str(swarm_meta.get("status", "")).strip().lower() or "unknown"
+
+    return {
+        "status": status,
+        "system": sys_norm,
+        "task_id": task_norm,
+        "meta": meta,
+    }
+
+
+@app.get("/swarm/logs/{system}/{task_id}")
+async def get_swarm_logs(system: str, task_id: str):
+    """
+    Получить логи сворм-задачи (метадата + сообщения).
+    """
+    if not SWARM_CONFIG.get("enabled"):
+        raise HTTPException(
+            status_code=503,
+            detail={"status": "error", "reason": "swarm_disabled"},
+        )
+
+    sys_norm = str(system or "").lower().strip()
+    task_norm = str(task_id or "").strip()
+    if not sys_norm or not task_norm:
+        raise HTTPException(
+            status_code=400,
+            detail={"status": "error", "payload": "system and task_id are required"},
+        )
+
+    swarm_id = f"{sys_norm}_{task_norm}"
+    threads_dir = str(SWARM_CONFIG["threads_dir"])
+    meta = swarm_storage.load_swarm_meta(threads_dir, swarm_id)
+    messages = swarm_storage.load_swarm_messages(threads_dir, swarm_id)
+    stdout_lines, stderr_lines = swarm_storage.load_swarm_stdout_stderr(
+        threads_dir, swarm_id
+    )
+
+    if not meta and not messages and not stdout_lines and not stderr_lines:
+        raise HTTPException(status_code=404, detail={"status": "not_found"})
+
+    return {
+        "status": "ok",
+        "system": sys_norm,
+        "task_id": task_norm,
+        "meta": meta,
+        "messages": messages,
+        "stdout": stdout_lines,
+        "stderr": stderr_lines,
     }
 
 
