@@ -23,7 +23,7 @@ def test_thread_notes_read_append_write():
     assert app2["ok"] is True and state.notes_md == "A\n\nB"
     wr = json.loads(tool(action="write", content="X"))
     assert wr["ok"] is True and state.notes_md == "X"
-    assert state.call_metadata["promptVariables"]["notes_md"] == "X"
+    assert "notes_md" not in state.call_metadata.get("promptVariables", {})
 
 
 def test_thread_notes_limits_and_validation():

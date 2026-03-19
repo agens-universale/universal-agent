@@ -66,7 +66,7 @@ def build_agent_config_for_server(server_cfg: Dict[str, Any]) -> Dict[str, Any]:
     - Берём базовый config.yml через load_config().
     - Если в server_cfg.agent задан server_agentmd_path:
         - резолвим путь относительно PROJECT_ROOT (если он относительный);
-        - устанавливаем cfg["agent_md_path"], только если он ещё не задан.
+        - перезаписываем cfg["agent_md_path"] значением server_agentmd_path.
     - Применяем перекрытия из server_cfg.agent_overrides:
         - cfg.update(agent_overrides), как CLI-аргументы перекрывают config.yml.
     """
@@ -77,7 +77,7 @@ def build_agent_config_for_server(server_cfg: Dict[str, Any]) -> Dict[str, Any]:
     if isinstance(server_agent_path, str) and server_agent_path.strip():
         if not os.path.isabs(server_agent_path):
             server_agent_path = os.path.join(PROJECT_ROOT, server_agent_path)
-        cfg.setdefault("agent_md_path", server_agent_path)
+        cfg["agent_md_path"] = server_agent_path
 
     overrides = server_cfg.get("agent_overrides") or {}
     if isinstance(overrides, dict) and overrides:

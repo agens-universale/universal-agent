@@ -60,9 +60,6 @@ class State:
         metadata: Dict[str, Any] = dict()
         metadata["systemPromptId"] = self.system_prompt_id
         metadata["promptVariables"] = self.initial_project_data
-        if getattr(self, "notes_md", None) is not None:
-            # Persistent thread notes for the model (may be empty string).
-            metadata["promptVariables"]["notes_md"] = self.notes_md or ""
         if self.skills_list:
             skills_template = (
                 "For solving task you can use skills.\n"

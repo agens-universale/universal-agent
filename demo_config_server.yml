@@ -8,8 +8,9 @@ defaults:
   system: "generic"
 
 agent:
-  # Относительный путь до файла с универсальными инструкциями агента.
-  server_agentmd_path: "./server_agent.md"
+  # Относительный путь до файла с универсальными инструкциями агента или абсолютный путь.
+  # (резолвится в абсолютный путь относительно корня проекта).
+  server_agentmd_path: "./demo_server_agent.md"
 
 agent_overrides:
   # Управление консольным трейсом:
@@ -30,10 +31,12 @@ agent_overrides:
     # Отключаем тулы, которые есть на сервере в режиме server_subagents
     # - update_plan (deprecated tool, replaced by thread_notes)
     - think
+    - thread_notes
     - calculator
   verbose: false
   dump_storage: false
   save_logs: false
+  use_server_subagents: true
   max_steps: 100
 
 swarm:

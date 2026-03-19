@@ -22,9 +22,39 @@ def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
     - При use_ssl == False отключаются предупреждения urllib3.
     """
     path = config_path or _default_config_path()
+    config_dir = os.path.dirname(os.path.abspath(path))
 
     with open(path, "r", encoding="utf-8") as file:
         config_dict = yaml.safe_load(file) or {}
+
+    def _maybe_override_and_resolve(maybe_env_value: Optional[str], key: str) -> None:
+        """
+        Override config_dict[key] from env and keep it platform independent.
+        If env value is relative - resolve it relative to config.yml directory.
+        """
+        if not isinstance(maybe_env_value, str):
+            return
+        env_value = maybe_env_value.strip()
+        if not env_value:
+            return
+        if os.path.isabs(env_value):
+            config_dict[key] = env_value
+        else:
+            config_dict[key] = os.path.join(config_dir, env_value)
+
+    # Приводим относительные пути к абсолютным относительно каталога config.yml.
+    # Это важно для корректной подстановки promptVariables.userInstructions,
+    # т.к. в State используется open(agent_md_path) без дополнительного cwd-резолва.
+    agent_md_path = config_dict.get("agent_md_path")
+    if isinstance(agent_md_path, str) and agent_md_path.strip() and not os.path.isabs(agent_md_path):
+        config_dict["agent_md_path"] = os.path.join(config_dir, agent_md_path)
+
+    # Swarm-режим прокидывает путь до agent.md / threads / skills через SWARM_* env.
+    # Раньше эти env никак не влияли на CLI-запуск в песочнице, из-за чего
+    # swarm-ручка могла использовать не тот agent.md.
+    _maybe_override_and_resolve(os.environ.get("SWARM_AGENTMD_PATH"), "agent_md_path")
+    _maybe_override_and_resolve(os.environ.get("SWARM_THREADS_DIR"), "threads_data_path")
+    _maybe_override_and_resolve(os.environ.get("SWARM_SKILLS_DIR"), "skills_data_path")
 
     verify = config_dict.get("use_ssl", True)
     if verify is False:

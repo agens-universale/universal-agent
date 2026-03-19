@@ -55,7 +55,7 @@ class AgentExecutor:
             meta = getattr(thread_session, "meta", None) or {}
             maybe_notes = meta.get("notes_md")
             thread_notes_md = (
-                maybe_notes if isinstance(maybe_notes, str) else ""
+                maybe_notes if isinstance(maybe_notes, str) else None
             )
 
         state_data = {
@@ -85,14 +85,42 @@ class AgentExecutor:
             "content": message,
             "id": generate_message_id_func("m"),
         }
+        technical_user_message = None
+        if (
+            thread_session is not None
+            and isinstance(thread_notes_md, str)
+            and thread_notes_md.strip()
+        ):
+            # Первый user-сообщение в такте: "техническая" инструкция серверу/модели,
+            # что клиент подгружает thread notes и их нужно прочитать tool'ом.
+            technical_user_message = {
+                "role": "user",
+                "content": (
+                    '<current_context>'
+                    'client has non-empty thread notes; call `thread_notes` '
+                    'with action="read" to load them.'
+                    '</current_context>'
+                ),
+                "id": generate_message_id_func("m"),
+            }
+
         messages = [new_user_message]
 
         persist_messages_callback = None
         get_full_history_messages = None
         if thread_session is not None:
             state.previous_response_id = previous_response_id
-            messages = thread_session.build_initial_messages(new_user_message)
             thread_session.set_runtime_messages(state.messages)
+
+            base_messages: list[dict] = (
+                thread_session.history_messages
+                if previous_response_id is None
+                else []
+            )
+            messages = [*base_messages]
+            if technical_user_message is not None:
+                messages.append(technical_user_message)
+            messages.append(new_user_message)
 
             def _persist_thread_batch(batch_messages: list[dict]) -> None:
                 # Persist notes from in-memory state into thread meta.

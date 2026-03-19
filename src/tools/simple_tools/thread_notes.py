@@ -32,10 +32,13 @@ class ThreadNotes(AbstractSimpleTool):
             "name": "thread_notes",
             "description": (
                 "Read or update persistent markdown notes for the current thread. "
-                "Notes survive across summarizations and can be rewritten entirely. "
-                "This tool is the ONLY long-lived memory for the thread. "
-                "Use it at the start of each user turn (action='read') and update it after "
-                "you confirm a Decision / Canonical target / Verified fact (action='append' or 'write'). "
+                "Notes persist across turns. "
+                "This tool is the long-lived memory for the thread. "
+                "Use it at the start of each user turn (action='read'). "
+                "When you add new verified facts, ALWAYS use action='append' and provide ONLY the new delta "
+                "(the tool will keep the existing notes). "
+                "Use action='write' ONLY when you must rewrite notes from scratch "
+                "(e.g., canonical target changed, or you detected an earlier entry is wrong). "
                 "Store concise facts, evidence, and decisions; do NOT save long internal reasoning here."
             ),
             "parameters": {
@@ -44,11 +47,19 @@ class ThreadNotes(AbstractSimpleTool):
                     "action": {
                         "type": "string",
                         "enum": ["read", "append", "write"],
-                        "description": "read = return current notes; append = add at the end; write = replace completely.",
+                        "description": (
+                            "read = return current notes; "
+                            "append = add ONLY the new verified delta at the end; "
+                            "write = replace completely with FULL updated notes."
+                        ),
                     },
                     "content": {
                         "type": "string",
-                        "description": "Markdown text for append/write.",
+                        "description": (
+                            "Markdown text for append/write. "
+                            "For append: ONLY the new delta (do not resend the existing notes). "
+                            "For write: the FULL updated markdown."
+                        ),
                         "default": "",
                     },
                 },
@@ -77,6 +88,10 @@ Recommended note structure (keep it concise):
 What NOT to store:
 - Long brainstorming / chain-of-thought
 - Guesses presented as facts
+Append safety rule:
+- For action="append", the `content` MUST be ONLY the new delta (not the whole file), otherwise you'll get duplicated sections.
+Write should be rare:
+- For action="write", resend the entire updated notes only when you need a full rewrite/correction.
 Input schema: {{"type":"object","properties":{{"action":{{"type":"string","enum":["read","append","write"]}}, "content":{{"type":"string","description":"Markdown text for append/write"}}}},"required":["action"],"additionalProperties":false}}
 
 Usage:
@@ -180,20 +195,12 @@ Return format (JSON string):
                 action=action,
                 length=len(new_md),
                 notes_md=None,
-                error={"type": "limit_exceeded", "message": f"Notes exceed {self.MAX_CHARS} chars."},
+                error={"type": "limit_exceeded", "message": (f"Notes exceed {self.MAX_CHARS} chars. Not written. "
+                                                             "Please read first and rewrite new version of notes with new content")},
             )
 
         # Update in-memory state first.
         state.notes_md = new_md
-
-        # Keep the metadata sent to backend in sync so the model sees updates.
-        cm = getattr(state, "call_metadata", None)
-        if isinstance(cm, dict):
-            pv = cm.get("promptVariables")
-            if isinstance(pv, dict):
-                pv["notes_md"] = new_md
-            else:
-                cm["promptVariables"] = {"notes_md": new_md}
 
         return self._result(
             ok=True,
