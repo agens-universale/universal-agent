@@ -29,7 +29,7 @@ agent_overrides:
     # - answer_question (deprecated tool, removed from registry)
     # Отключаем тулы, которые есть на сервере в режиме server_subagents
     # - update_plan (deprecated tool, replaced by thread_notes)
-    - reflect
+    - think
     - calculator
   verbose: false
   dump_storage: false

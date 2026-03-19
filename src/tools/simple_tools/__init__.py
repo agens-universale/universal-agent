@@ -6,7 +6,7 @@ from tools.simple_tools.search_files import SearchFiles
 from tools.simple_tools.ask_human import AskHuman
 from tools.simple_tools.execute_command import ExecuteCommand
 from tools.simple_tools.search_and_replace import SearchAndReplace
-from tools.simple_tools.reflect import Reflect
+from tools.simple_tools.think import Think
 from tools.simple_tools.thread_notes import ThreadNotes
 from tools.simple_tools.submit_solution import SubmitSolution
 from tools.simple_tools.calculator import Calculator
@@ -62,10 +62,10 @@ def get_simple_tools_data(config_dict: Dict[str, Any]) -> Dict[str, Dict[str, An
             'spec': ThreadNotes.tool_description(),
             'description': ThreadNotes.prompt_description(),
         },
-        'reflect': {
-            'tool_fabric': Reflect,
-            'spec': Reflect.tool_description(),
-            'description': Reflect.prompt_description(),
+        'think': {
+            'tool_fabric': Think,
+            'spec': Think.tool_description(),
+            'description': Think.prompt_description(),
         },
         'calculator': {
             'tool_fabric': Calculator,

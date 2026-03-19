@@ -53,6 +53,22 @@ class WrongFunctionArgumentsException(Exception):
         return feedback
 
 
+def _ensure_spec_has_required(spec: Dict[str, Any]) -> None:
+    """
+    Добавить parameters.required если отсутствует.
+    Бэкенд требует обязательное поле required в JSON Schema для object-параметров.
+    """
+    if not isinstance(spec, dict):
+        return
+    params = spec.get("parameters")
+    if not isinstance(params, dict):
+        return
+    if params.get("type") != "object":
+        return
+    if "required" not in params or not isinstance(params["required"], list):
+        params["required"] = params.get("required") or []
+
+
 def build_tools_data(
     config_dict: Dict[str, Any],
 ) -> Tuple[Dict[str, Dict[str, Any]], list, list]:
@@ -78,6 +94,12 @@ def build_tools_data(
     # Логирование оставляем модульным, так как build_tools_data вызывается
     # при создании RunContext, когда logger ещё не привязан к контексту.
     _fallback_logger.debug("Collected tools_data: %s", tools_data)
+
+    # Бэкенд требует parameters.required — нормализуем все spec'и
+    for v in tools_data.values():
+        spec = v.get("spec")
+        if isinstance(spec, dict):
+            _ensure_spec_has_required(spec)
 
     tools_spec = [v["spec"] for v in tools_data.values()]
     tools_description = [v["description"] for v in tools_data.values()]
