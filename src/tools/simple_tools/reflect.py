@@ -8,18 +8,14 @@ class Reflect(AbstractSimpleTool):
     def _result(
         *,
         ok: bool,
-        content: str,
-        truncated: bool,
-        length: int,
+        message: str | None,
         error: dict | None,
     ) -> str:
         return json.dumps(
             {
                 "tool": "reflect",
                 "ok": ok,
-                "content": content,
-                "truncated": truncated,
-                "length": length,
+                "message": message,
                 "error": error,
             },
             ensure_ascii=False,
@@ -31,16 +27,20 @@ class Reflect(AbstractSimpleTool):
             "type": "function",
             "name": "reflect",
             "description": (
-                "Capture an in-turn reflection (think out loud). "
-                "Returned content is included into dialogue context, but it is NOT persisted anywhere "
-                "and is not visible to other threads/agents."
+                "Think out loud during the current turn. "
+                "This tool is for temporary in-dialogue thoughts only: it does NOT save anything "
+                "to thread_notes or any storage. "
+                "Reflection exists only in the current dialogue context."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "content": {
                         "type": "string",
-                        "description": "Reflection text to include into the dialogue context."
+                        "description": (
+                            "Temporary thought text for this dialogue turn only. "
+                            "Not persisted in thread_notes or any storage."
+                        )
                     }
                 },
                 "required": ["content"],
@@ -53,11 +53,12 @@ class Reflect(AbstractSimpleTool):
     @classmethod
     def prompt_description(cls):
         description = '''Tool name: reflect
-Tool description: Use it to include a short reflection into the dialogue (not persisted).
+Tool description: Think out loud for the current dialogue turn. This is temporary and not persisted.
+IMPORTANT: reflect content is NOT saved to thread_notes and NOT saved to any storage. It only exists in the current dialogue context.
 Input schema: {"type":"object","properties":{"content":{"type":"string"}},"required":["content"],"additionalProperties":false}
 
 Return format (JSON string):
-{"tool":"reflect","ok":true,"content":"...","truncated":true|false,"length":number,"error":null|{"type":"...","message":"..."}}
+{"tool":"reflect","ok":true,"message":"...","error":null|{"type":"...","message":"..."}}
 '''
         return description
 
@@ -65,23 +66,12 @@ Return format (JSON string):
         if not isinstance(content, str):
             return self._result(
                 ok=False,
-                content="",
-                truncated=False,
-                length=0,
+                message=None,
                 error={"type": "invalid_argument", "field": "content"},
             )
 
-        trimmed = content.strip()
-        max_chars = 8000
-        truncated = False
-        if len(trimmed) > max_chars:
-            trimmed = trimmed[:max_chars]
-            truncated = True
-
         return self._result(
             ok=True,
-            content=trimmed,
-            truncated=truncated,
-            length=len(trimmed),
+            message="Reflection added to the dialogue context. For persistent notes, use thread_notes or similar tools.",
             error=None,
         )

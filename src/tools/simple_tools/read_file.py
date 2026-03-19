@@ -19,6 +19,7 @@ class ReadFile(AbstractSimpleTool):
         return json.dumps(
             {
                 "tool": "read_file",
+                "ok": True,
                 "path": path,
                 "content": content,
                 "start_line": start_line,
@@ -26,6 +27,36 @@ class ReadFile(AbstractSimpleTool):
                 "total_lines": total_lines,
                 "truncated": truncated,
                 "next_offset": next_offset,
+                "error": None,
+            },
+            ensure_ascii=False,
+        )
+
+    @staticmethod
+    def _error_result(
+        *,
+        path: str,
+        error_type: str,
+        field: Optional[str] = None,
+        message: Optional[str] = None,
+    ) -> str:
+        error_obj = {"type": error_type}
+        if field is not None:
+            error_obj["field"] = field
+        if message is not None:
+            error_obj["message"] = message
+        return json.dumps(
+            {
+                "tool": "read_file",
+                "ok": False,
+                "path": path,
+                "content": "",
+                "start_line": 0,
+                "end_line": 0,
+                "total_lines": 0,
+                "truncated": False,
+                "next_offset": None,
+                "error": error_obj,
             },
             ensure_ascii=False,
         )
@@ -46,15 +77,6 @@ class ReadFile(AbstractSimpleTool):
                     "path": {
                         "type": "string",
                         "description": "The path of the file to read. Must be a valid file path and not a directory."
-                    },
-                    "view_range": {
-                        "type": "string",
-                        "description": (
-                            "Optional range of lines to read, formatted as 'start_line,end_line' (inclusive, 1-based). "
-                            "For example, '7,20' returns lines 7 through 20. "
-                            "If omitted and 'offset'/'limit' are not provided, a preview (first 500 lines) is returned. "
-                            "This parameter is kept for backward compatibility; prefer using 'offset' and 'limit'."
-                        )
                     },
                     "offset": {
                         "type": "integer",
@@ -90,10 +112,6 @@ Input schema: {
       "type": "string",
       "description": "The path of the file to read."
     },
-    "view_range": {
-      "type": "string",
-      "description": "DEPRECATED. A range of lines to show, e.g., \\"7,20\\" (1-based, inclusive). Kept for backward compatibility; prefer 'offset' and 'limit'."
-    },
     "offset": {
       "type": "integer",
       "description": "1-based index of the first line to read. Use together with 'limit'."
@@ -125,35 +143,53 @@ Usage:
   2) If "truncated" is true, call read_file again with "offset" = "next_offset" and an appropriate "limit" (e.g., 500).
   3) Repeat until "truncated" becomes false.
 - When copying, restoring, or refactoring large files, ALWAYS read the entire file by paging through ranges using "offset" and "limit" before writing changes back.
-- The older 'view_range' parameter is supported but should generally be avoided in new code; use 'offset' and 'limit' instead.
 '''
         return description
 
     def __call__(
         self,
         path: str,
-        view_range: Optional[str] = None,
         offset: Optional[int] = None,
         limit: Optional[int] = None,
         **kwargs,
     ) -> str:
         if not isinstance(path, str):
-            return f"Error: Argument 'path' must be a string. Got: {type(path)} ({path})"
-
-        if view_range is not None and not isinstance(view_range, str):
-            return f"Error: Argument 'view_range' must be a string or None. Got: {type(view_range)} ({view_range})"
+            return self._error_result(
+                path=str(path),
+                error_type="invalid_argument",
+                field="path",
+                message=f"Argument 'path' must be a string. Got: {type(path)} ({path})",
+            )
 
         if offset is not None and not isinstance(offset, int):
-            return f"Error: Argument 'offset' must be an integer or None. Got: {type(offset)} ({offset})"
+            return self._error_result(
+                path=path,
+                error_type="invalid_argument",
+                field="offset",
+                message=f"Argument 'offset' must be an integer or None. Got: {type(offset)} ({offset})",
+            )
 
         if limit is not None and not isinstance(limit, int):
-            return f"Error: Argument 'limit' must be an integer or None. Got: {type(limit)} ({limit})"
+            return self._error_result(
+                path=path,
+                error_type="invalid_argument",
+                field="limit",
+                message=f"Argument 'limit' must be an integer or None. Got: {type(limit)} ({limit})",
+            )
 
         if not os.path.exists(path):
-            return f"Error: File not found: {path}"
+            return self._error_result(
+                path=path,
+                error_type="not_found",
+                message=f"File not found: {path}",
+            )
 
         if os.path.isdir(path):
-            return f"Error: Cannot read file: '{path}' is a directory."
+            return self._error_result(
+                path=path,
+                error_type="not_a_file",
+                message=f"Cannot read file: '{path}' is a directory.",
+            )
 
         with open(path, 'r', encoding='utf-8') as fd:
             lines = fd.readlines()
@@ -162,29 +198,9 @@ Usage:
 
         # Determine the range to read.
         # Priority:
-        #  1) Explicit view_range (backward compatibility, 1-based inclusive)
-        #  2) offset/limit (preferred)
-        #  3) Default preview: first 500 lines
-        if view_range is not None:
-            parts = view_range.strip().split(',')
-            if len(parts) != 2:
-                return "Error: view_range must have exactly two comma-separated values: start,end"
-            try:
-                start_1_based = int(parts[0])
-                end_1_based = int(parts[1])
-            except ValueError:
-                return "Error: view_range values must be integers, e.g. '7,20'."
-
-            if start_1_based < 1:
-                start_1_based = 1
-            if end_1_based < start_1_based:
-                end_1_based = start_1_based
-
-            if start_1_based > total_lines:
-                start_1_based = total_lines
-                end_1_based = total_lines
-
-        elif offset is not None or limit is not None:
+        #  1) offset/limit (preferred)
+        #  2) Default preview: first 500 lines
+        if offset is not None or limit is not None:
             # Use offset/limit pagination.
             if offset is None:
                 offset = 1

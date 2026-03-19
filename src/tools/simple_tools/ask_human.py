@@ -1,9 +1,29 @@
 import sys
+import json
 from typing import Optional, Dict, Any
 from tools.simple_tools.abstract_simple_tool import AbstractSimpleTool
 
 
 class AskHuman(AbstractSimpleTool):
+    @staticmethod
+    def _result(
+        *,
+        ok: bool,
+        question: str,
+        response: str,
+        error: Optional[Dict[str, Any]] = None,
+    ) -> str:
+        return json.dumps(
+            {
+                "tool": "ask_human",
+                "ok": ok,
+                "question": question,
+                "response": response,
+                "error": error,
+            },
+            ensure_ascii=False,
+        )
+
     """
     Tool that allows the AI agent to ask a question and receive input from a human user.
     This is essential for clarifying ambiguous requirements, confirming decisions, or obtaining subjective feedback.
@@ -68,14 +88,41 @@ Examples:
 '''
         return description
 
-    def __call__(self, question: str, **kwargs) -> Dict[str, str]:
+    def __call__(self, question: str, **kwargs) -> str:
         # Input validation
         if not isinstance(question, str):
-            raise ValueError(f"Argument 'question' must be a string. Got: {type(question)} ({repr(question)})")
+            return self._result(
+                ok=False,
+                question=str(question),
+                response="",
+                error={
+                    "type": "invalid_argument",
+                    "field": "question",
+                    "message": f"Argument 'question' must be a string. Got: {type(question)} ({repr(question)})",
+                },
+            )
         if not question.strip():
-            raise ValueError("Argument 'question' cannot be empty or whitespace only.")
+            return self._result(
+                ok=False,
+                question=question,
+                response="",
+                error={
+                    "type": "invalid_argument",
+                    "field": "question",
+                    "message": "Argument 'question' cannot be empty or whitespace only.",
+                },
+            )
         if len(question.strip()) > 4096:
-            raise ValueError(f"Question too long ({len(question)} characters). Keep under 4096.")
+            return self._result(
+                ok=False,
+                question=question,
+                response="",
+                error={
+                    "type": "invalid_argument",
+                    "field": "question",
+                    "message": f"Question too long ({len(question)} characters). Keep under 4096.",
+                },
+            )
 
         # Sanitize line endings and normalize whitespace
         question = self._normalize_text(question)
@@ -108,16 +155,31 @@ Examples:
             print(f"Human responded: {repr(response)}", file=sys.stderr)
             print("="*60 + "\n", file=sys.stderr)
 
-            return {"response": response}
+            return self._result(
+                ok=True,
+                question=question,
+                response=response,
+                error=None,
+            )
 
         except KeyboardInterrupt:
             print("\n\n[Interaction interrupted by user]", file=sys.stderr)
-            return {"response": "(user interrupted)"}
+            return self._result(
+                ok=False,
+                question=question,
+                response="(user interrupted)",
+                error={"type": "interrupted", "message": "Interaction interrupted by user."},
+            )
         except Exception as e:
             # Fallback in case of unexpected error
             error_msg = f"(error reading input: {str(e)})"
             print(f"[ask_human error]: {error_msg}", file=sys.stderr)
-            return {"response": error_msg}
+            return self._result(
+                ok=False,
+                question=question,
+                response=error_msg,
+                error={"type": "read_failed", "message": str(e)},
+            )
 
     def _normalize_text(self, text: str) -> str:
         """Normalize line endings and clean up extra whitespace."""

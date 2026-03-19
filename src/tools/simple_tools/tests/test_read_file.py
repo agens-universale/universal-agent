@@ -13,29 +13,32 @@ def test_read_default_preview_and_pagination(tmp_path):
     assert res["next_offset"] == 501
 
 
-def test_read_offset_limit_and_view_range(tmp_path):
+def test_read_offset_limit(tmp_path):
     p = tmp_path / "f.txt"
     p.write_text("a\nb\nc\nd\ne\n", encoding="utf-8")
     by_page = json.loads(ReadFile()(path=str(p), offset=2, limit=2))
     assert by_page["content"] == "b\nc\n"
-    by_range = json.loads(ReadFile()(path=str(p), view_range="3,10"))
-    assert by_range["content"] == "c\nd\ne\n"
 
 
 def test_read_errors_and_type_validation(tmp_path):
     tool = ReadFile()
-    assert "must be a string" in tool(path=123)  # type: ignore[arg-type]
-    assert "File not found" in tool(path=str(tmp_path / "missing.txt"))
+    bad_type = json.loads(tool(path=123))  # type: ignore[arg-type]
+    assert bad_type["ok"] is False and bad_type["error"]["field"] == "path"
+    missing = json.loads(tool(path=str(tmp_path / "missing.txt")))
+    assert missing["ok"] is False and missing["error"]["type"] == "not_found"
     d = tmp_path / "dir"
     d.mkdir()
-    assert "is a directory" in tool(path=str(d))
+    as_dir = json.loads(tool(path=str(d)))
+    assert as_dir["ok"] is False and as_dir["error"]["type"] == "not_a_file"
 
 
-def test_read_view_range_validation_and_clamp(tmp_path):
+def test_read_offset_limit_validation_and_clamp(tmp_path):
     p = tmp_path / "f.txt"
     p.write_text("1\n2\n3\n", encoding="utf-8")
     tool = ReadFile()
-    assert "exactly two comma-separated" in tool(path=str(p), view_range="1")
-    assert "must be integers" in tool(path=str(p), view_range="a,b")
-    clamped = json.loads(tool(path=str(p), view_range="0,0"))
+    bad_offset = json.loads(tool(path=str(p), offset="1"))  # type: ignore[arg-type]
+    assert bad_offset["ok"] is False and bad_offset["error"]["field"] == "offset"
+    bad_limit = json.loads(tool(path=str(p), limit="2"))  # type: ignore[arg-type]
+    assert bad_limit["ok"] is False and bad_limit["error"]["field"] == "limit"
+    clamped = json.loads(tool(path=str(p), offset=0, limit=0))
     assert clamped["start_line"] == 1 and clamped["end_line"] == 1

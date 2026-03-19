@@ -1,8 +1,30 @@
 from typing import Dict, Any
+import json
 from tools.simple_tools.abstract_simple_tool import AbstractSimpleTool
 
 
 class SubmitSolution(AbstractSimpleTool):
+    @staticmethod
+    def _result(
+        *,
+        ok: bool,
+        status: str,
+        message: str,
+        task_report: str,
+        error: Dict[str, Any] | None = None,
+    ) -> str:
+        return json.dumps(
+            {
+                "tool": "submit_solution",
+                "ok": ok,
+                "status": status,
+                "message": message,
+                "task_report": task_report,
+                "error": error,
+            },
+            ensure_ascii=False,
+        )
+
     """
     Tool that signals the AI agent has completed the task and is ready to submit the final solution.
     Requires a concise final report summarizing key steps and the outcome or direct answer to users's question.
@@ -67,7 +89,7 @@ Example usage:
 '''
         return description
 
-    def __call__(self, task_report: str, **kwargs) -> Dict[str, str]:
+    def __call__(self, task_report: str, **kwargs) -> str:
         """
         Execute the submit_solution action with a final report.
 
@@ -79,20 +101,52 @@ Example usage:
         """
         # Input validation
         if not isinstance(task_report, str):
-            return f"Error: Argument 'task_report' must be a string. Got: {type(task_report)} ({repr(task_report)})"
+            return self._result(
+                ok=False,
+                status="rejected",
+                message="Task report validation failed.",
+                task_report="",
+                error={
+                    "type": "invalid_argument",
+                    "field": "task_report",
+                    "message": f"Argument 'task_report' must be a string. Got: {type(task_report)} ({repr(task_report)})",
+                },
+            )
         if not task_report.strip():
-            return "Error: Argument 'task_report' cannot be empty or whitespace only."
+            return self._result(
+                ok=False,
+                status="rejected",
+                message="Task report validation failed.",
+                task_report="",
+                error={
+                    "type": "invalid_argument",
+                    "field": "task_report",
+                    "message": "Argument 'task_report' cannot be empty or whitespace only.",
+                },
+            )
         if len(task_report.strip()) > 10000:
-            return "Error: task_report is too long. Keep shorter. Make under 10 sentences."
+            return self._result(
+                ok=False,
+                status="rejected",
+                message="Task report validation failed.",
+                task_report="",
+                error={
+                    "type": "limit_exceeded",
+                    "field": "task_report",
+                    "message": "task_report is too long. Keep shorter. Make under 10 sentences.",
+                },
+            )
 
         # Normalize line endings and clean whitespace
         task_report = self._normalize_text(task_report)
 
-        return {
-            "status": "submitted",
-            "message": "Task completed and solution submitted.",
-            "task_report": task_report
-        }
+        return self._result(
+            ok=True,
+            status="submitted",
+            message="Task completed and solution submitted.",
+            task_report=task_report,
+            error=None,
+        )
 
     def _normalize_text(self, text: str) -> str:
         """Normalize line endings and trim extra whitespace."""
