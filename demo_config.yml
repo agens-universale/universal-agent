@@ -55,6 +55,14 @@ mcp-servers:
     description: Common web and News search
     # Для этого сервера можно отдельно отключить проверку SSL, если нужно:
     # verify-ssl: false
+  sbertrack:
+    transport: stream_http
+    url: https://sbertrack.example.sbrf.ru/mcp
+    description: Tools for communicating with task-tracker system. Use it for receiving details or communicate about tasks on SberTrack platform.
+    verify-ssl: false
+    # Если сервер требует сертификаты, то можно указать к ним путь через параметры:
+    client-cert: "/path/to/cert.pem"
+    client-key: "/path/to/key.pem"
   # Пример stdio MCP (процесс запускается на каждый запрос списка тулов и на каждый вызов тула):
   # local-fs:
   #   transport: stdio
