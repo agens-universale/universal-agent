@@ -32,7 +32,11 @@ class ThreadNotes(AbstractSimpleTool):
             "name": "thread_notes",
             "description": (
                 "Read or update persistent markdown notes for the current thread. "
-                "Notes survive across summarizations and can be rewritten entirely."
+                "Notes survive across summarizations and can be rewritten entirely. "
+                "This tool is the ONLY long-lived memory for the thread. "
+                "Use it at the start of each user turn (action='read') and update it after "
+                "you confirm a Decision / Canonical target / Verified fact (action='append' or 'write'). "
+                "Store concise facts, evidence, and decisions; do NOT save long internal reasoning here."
             ),
             "parameters": {
                 "type": "object",
@@ -58,6 +62,21 @@ class ThreadNotes(AbstractSimpleTool):
     def prompt_description(cls) -> str:
         return f'''Tool name: thread_notes
 Tool description: Persistent per-thread markdown notes stored in thread meta. Can be read, appended, or rewritten.
+
+Mandatory workflow (use it to avoid contradictions across turns):
+- START of each new user turn: call `thread_notes` with action="read".
+- If you discover/verify something important for this task: call thread_notes with action="append" (add a small factual update).
+- If the user says your previous output is wrong / the canonical target changed: call thread_notes with action="write" (rewrite notes from scratch).
+
+Recommended note structure (keep it concise):
+- Canonical target (name + URL) and what it means for this task
+- Evidence (URLs/files you fetched + key outcomes with result_type)
+- Decisions (what you chose and why)
+- Open questions / unknowns (what is still unverified)
+
+What NOT to store:
+- Long brainstorming / chain-of-thought
+- Guesses presented as facts
 Input schema: {{"type":"object","properties":{{"action":{{"type":"string","enum":["read","append","write"]}}, "content":{{"type":"string","description":"Markdown text for append/write"}}}},"required":["action"],"additionalProperties":false}}
 
 Usage:

@@ -30,7 +30,9 @@ class Think(AbstractSimpleTool):
                 "Think out loud during the current turn. Use it when complex reasoning, "
                 "self-critique, or structured reflection is needed. "
                 "Content is NOT saved to thread_notes or any storage—it only exists in the current dialogue context. "
-                "For persistent notes, use thread_notes."
+                "For persistent notes, use thread_notes. "
+                "If your think output contains a specific Decision / Canonical target / Plan completed / Verified fact, "
+                "you MUST record it separately into thread_notes (action=\"append\" or \"write\") so it can persist - if such tool or it's analog available."
             ),
             "parameters": {
                 "type": "object",
@@ -64,6 +66,7 @@ class Think(AbstractSimpleTool):
         description = '''Tool name: think
 Tool description: Think out loud for the current turn. Supports structured multi-layer thinking: thoughts, critics, doubts, reflection.
 IMPORTANT: think content is NOT saved to thread_notes and NOT saved to any storage. It only exists in the current dialogue context.
+RULE: If your think output contains a specific Decision / Canonical target / Plan completed / Verified fact, you MUST record it separately into thread_notes (action="append" or "write") so it can persist.
 Input schema: {"type":"object","properties":{"thoughts":{"type":"string"},"critics":{"type":"string"},"doubts":{"type":"string"},"reflection":{"type":"string"}},"additionalProperties":false}
 At least one of thoughts, critics, doubts, reflection should be non-empty.
 
