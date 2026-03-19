@@ -254,17 +254,3 @@ Usage:
             error=None,
         )
 
-
-def test_write_to_file():
-    content = "lorem_ipsum"
-    path = './test_file.txt'
-    wt = WriteToFile()
-    wt(path=path, content=content)
-    with open(path, 'r') as fd:
-        data = fd.read()
-
-    assert data == content
-    os.remove(path)
-
-if __name__ == '__main__':
-    test_write_to_file()

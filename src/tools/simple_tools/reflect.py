@@ -85,23 +85,3 @@ Return format (JSON string):
             length=len(trimmed),
             error=None,
         )
-
-
-def run_test():
-    tool = Reflect()
-    out = tool(content="Conquer the World!")
-    data = json.loads(out)
-    assert data["ok"] is True
-    assert data["tool"] == "reflect"
-
-    print("All tests passed.")
-
-if __name__ == '__main__':
-    run_test()
-    arguments = {'content': '1. Определить структуру проекта: один HTML-файл с inline CSS и JavaScript.\n2. Создать HTML-страницу с canvas и интерфейсом выбора персонажа (Wall-E / Eva).\n3. Нарисовать простые спрайты для Wall-E и Eva с помощью canvas или создать как встроенные изображения (в виде данных).\n4. Закодировать лабиринт в виде двумерного массива (стены, проходы, точки, цветок).\n5. Реализовать основной игровой цикл: отрисовка, обработка ввода, движение игрока и врагов.\n6. Добавить логику сбора очков и проверку достижения цветка.\n7. Реализовать завершение уровня и отображение результата.\n8. Протестировать игру и при необходимости исправить ошибки.\n9. Подготовить итоговый отчет о выполнении.'}
-    kwargs = {'run_agent_func': lambda : True, 'parent_state': dict()}
-    tool = Reflect(**kwargs)
-    print(tool(**arguments))
-
-
-

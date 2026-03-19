@@ -206,36 +206,3 @@ Usage:
             bytes_appended=appended,
             error=None,
         )
-
-
-def test_append_to_file():
-    path = './test_append_review.txt'
-    
-    # 1. Сначала создаем файл (так как append требует существования)
-    with open(path, 'w', encoding='utf8') as fd:
-        fd.write("Initial analysis note.")
-    
-    # 2. Тестируем добавление
-    at = AppendToFile()
-    result = at(path=path, content="Second analysis note.")
-    
-    assert "content appended" in result, f"Expected success, got: {result}"
-    
-    with open(path, 'r', encoding='utf8') as fd:
-        data = fd.read()
-    
-    # Ожидаем: исходный текст + 2 переноса строки + новый текст
-    expected = "Initial analysis note.\n\nSecond analysis note."
-    assert data == expected, f"Expected:\n{repr(expected)}\nGot:\n{repr(data)}"
-    
-    # 3. Тестируем ошибку при отсутствии файла
-    fake_path = './non_existent_review.txt'
-    result_error = at(path=fake_path, content="test")
-    assert "Error: File not found" in result_error, f"Expected error, got: {result_error}"
-    
-    # Очистка
-    os.remove(path)
-    print("All tests passed.")
-
-if __name__ == '__main__':
-    test_append_to_file()

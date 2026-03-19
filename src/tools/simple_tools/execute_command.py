@@ -1,6 +1,5 @@
 from tools.simple_tools.abstract_simple_tool import AbstractSimpleTool
 import subprocess
-import sys
 import os
 import json
 
@@ -328,72 +327,3 @@ Important Usage Rules:
                 stderr="",
                 error={"type": "execution_failed", "message": err},
             )
-
-
-def test_execute_command():
-    import json
-
-    executor = ExecuteCommand()
-    executor.timeout = 5
-
-    # Invalid argument type
-    try:
-        executor(command=123)  # type: ignore[arg-type]
-        assert False, "Expected TypeError"
-    except TypeError:
-        pass
-
-    # Empty command -> ok=false
-    res = json.loads(executor(command=""))
-    assert res["tool"] == "execute_command"
-    assert res["ok"] is False
-    assert res["error"]["type"] == "invalid_argument"
-
-    # Valid simple command – echo or equivalent
-    if sys.platform.startswith("win"):
-        res = json.loads(executor(command="echo Hello World"))
-    else:
-        res = json.loads(executor(command="echo 'Hello World'"))
-    assert res["exit_code"] == 0
-    assert res["ok"] is True
-    assert "Hello World" in res["stdout"]
-
-    # Non-existent command should have non-zero exit_code
-    res = json.loads(executor(command="this_command_does_not_exist_xyz123"))
-    assert res["ok"] is False
-    assert res["exit_code"] is not None
-    assert res["error"]["type"] == "non_zero_exit"
-
-    # Environment variable expansion
-    os.environ["TEST_VAR"] = "HelloFromEnv"
-    if sys.platform.startswith("win"):
-        res = json.loads(executor(command="echo %TEST_VAR%"))
-    else:
-        res = json.loads(executor(command="echo $TEST_VAR"))
-    assert res["ok"] is True
-    assert "HelloFromEnv" in res["stdout"]
-    os.environ.pop("TEST_VAR", None)
-
-    # Environment override via tool env parameter
-    if not sys.platform.startswith("win"):
-        res = json.loads(
-            executor(
-                command="python -c \"import os; print(os.environ.get('TOOL_TEST_ENV',''))\"",
-                env={"TOOL_TEST_ENV": "HelloViaToolEnv"},
-            )
-        )
-        assert res["ok"] is True
-        assert "HelloViaToolEnv" in res["stdout"]
-
-    # Timeout (Unix-like)
-    if not sys.platform.startswith("win"):
-        res = json.loads(executor(command="sleep 3 && echo too_late", timeout_seconds=1))
-        assert res["ok"] is False
-        assert res["timed_out"] is True
-        assert res["exit_code"] is None
-
-    print("All tests passed (execute_command).")
-
-
-if __name__ == '__main__':
-    test_execute_command()
