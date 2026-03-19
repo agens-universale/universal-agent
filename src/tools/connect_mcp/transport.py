@@ -2,13 +2,15 @@
 Транспортный слой MCP: один запрос — один ответ (синхронно).
 Тип транспорта задаётся в конфиге сервера (transport: http | sse | stdio).
 """
-from typing import Any, Callable, Dict, List, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import json
 import os
 import subprocess
 import threading
 import requests
+
+from utils.ssl_config import get_verify_ssl, get_client_cert
 
 
 def _normalize_url(url: str) -> str:
@@ -23,6 +25,7 @@ def _request_http(
     json_payload: Dict[str, Any],
     timeout: float,
     verify: bool = True,
+    cert: Optional[tuple] = None,
 ) -> Tuple[Dict[str, str], Dict[str, Any]]:
     """
     Обычный HTTP: один POST, тело — JSON. Ответ — один JSON-объект.
@@ -35,6 +38,7 @@ def _request_http(
         timeout=timeout,
         stream=False,
         verify=verify,
+        cert=cert,
     )
     resp.raise_for_status()
     # CaseInsensitiveDict -> dict для единообразия
@@ -122,6 +126,7 @@ def _request_sse(
     json_payload: Dict[str, Any],
     timeout: float,
     verify: bool = True,
+    cert: Optional[tuple] = None,
 ) -> Tuple[Dict[str, str], Dict[str, Any]]:
     """
     SSE: POST с stream=True, Accept: text/event-stream.
@@ -138,6 +143,7 @@ def _request_sse(
         timeout=timeout,
         stream=True,
         verify=verify,
+        cert=cert,
     )
     resp.raise_for_status()
     # Ответ SSE часто в UTF-8; без явной кодировки requests может взять Latin-1 и сломать JSON с кириллицей
@@ -304,16 +310,8 @@ def get_transport(server_cfg: Dict[str, Any]) -> Callable[..., Tuple[Dict[str, s
     """
     transport = (server_cfg or {}).get("transport")
 
-    # Настройка проверки SSL для HTTP/SSE по конфигу сервера:
-    #   verify-ssl: true  (по умолчанию)
-    #   verify-ssl: false (отключить проверку сертификата)
-    verify_cfg = (server_cfg or {}).get("verify-ssl")
-    if isinstance(verify_cfg, bool):
-        verify = verify_cfg
-    elif isinstance(verify_cfg, str):
-        verify = verify_cfg.strip().lower() not in ("false", "0", "no", "off")
-    else:
-        verify = True
+    verify = get_verify_ssl(server_cfg)
+    cert = get_client_cert(server_cfg)
 
     if transport == "http":
         def request_http(
@@ -322,7 +320,7 @@ def get_transport(server_cfg: Dict[str, Any]) -> Callable[..., Tuple[Dict[str, s
             json_payload: Dict[str, Any],
             timeout: float,
         ) -> Tuple[Dict[str, str], Dict[str, Any]]:
-            return _request_http(url, headers, json_payload, timeout, verify=verify)
+            return _request_http(url, headers, json_payload, timeout, verify=verify, cert=cert)
 
         return request_http
 
@@ -333,7 +331,7 @@ def get_transport(server_cfg: Dict[str, Any]) -> Callable[..., Tuple[Dict[str, s
             json_payload: Dict[str, Any],
             timeout: float,
         ) -> Tuple[Dict[str, str], Dict[str, Any]]:
-            return _request_sse(url, headers, json_payload, timeout, verify=verify)
+            return _request_sse(url, headers, json_payload, timeout, verify=verify, cert=cert)
 
         return request_sse
     if transport == "stdio":

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import asyncio
 from urllib.parse import urlsplit, urlunsplit
@@ -12,30 +12,20 @@ from mcp.client.streamable_http import streamable_http_client
 from mcp.client.stdio import StdioServerParameters, stdio_client
 from mcp.shared.exceptions import McpError
 
+from utils.ssl_config import get_verify_ssl, get_client_cert
 
-def _get_verify_ssl(server_cfg: Dict[str, Any]) -> bool:
+
+def _make_httpx_factory(verify: bool, cert: Optional[Tuple[str, str]] = None):
     """
-    Определить режим проверки SSL-сертификата по конфигу сервера.
-
-    Поддерживает те же варианты, что и transport.get_transport:
-      verify-ssl: true/false | "true"/"false"/"0"/"1"/"no"/"off"
-    """
-    verify_cfg = (server_cfg or {}).get("verify-ssl")
-    if isinstance(verify_cfg, bool):
-        return verify_cfg
-    if isinstance(verify_cfg, str):
-        return verify_cfg.strip().lower() not in ("false", "0", "no", "off")
-    return True
-
-
-def _make_httpx_factory(verify: bool):
-    """
-    Фабрика httpx-клиентов с управляемой проверкой SSL.
+    Фабрика httpx-клиентов с управляемой проверкой SSL и клиентским сертификатом.
     Совместима с сигнатурой httpx_client_factory из MCP SDK.
     """
 
     def factory(headers: Optional[Dict[str, Any]] = None, timeout: Optional[float] = None, auth: Any = None):
-        return httpx.AsyncClient(headers=headers, timeout=timeout, auth=auth, verify=verify)
+        kwargs: Dict[str, Any] = dict(headers=headers, timeout=timeout, auth=auth, verify=verify)
+        if cert is not None:
+            kwargs["cert"] = cert
+        return httpx.AsyncClient(**kwargs)
 
     return factory
 
@@ -44,6 +34,7 @@ def _make_stream_http_client(
     token: Optional[str],
     timeout: float,
     verify: bool,
+    cert: Optional[Tuple[str, str]] = None,
 ) -> httpx.AsyncClient:
     """
     Создать httpx.AsyncClient для stream_http (MCP 1.26.0).
@@ -54,11 +45,15 @@ def _make_stream_http_client(
     if token:
         headers["Authorization"] = f"Bearer {token}"
 
-    return httpx.AsyncClient(
+    kwargs: Dict[str, Any] = dict(
         headers=headers or None,
         timeout=timeout,
         verify=verify,
     )
+    if cert is not None:
+        kwargs["cert"] = cert
+
+    return httpx.AsyncClient(**kwargs)
 
 
 def _build_endpoint(base_url: str, suffix: str) -> str:
@@ -99,6 +94,7 @@ async def _list_tools_stream_sse_async(
     token: Optional[str],
     timeout: float,
     verify: bool,
+    cert: Optional[Tuple[str, str]] = None,
 ) -> List[Dict[str, Any]]:
     """
     Асинхронный список тулов через стандартный SSE-транспорт MCP.
@@ -112,7 +108,7 @@ async def _list_tools_stream_sse_async(
     if token:
         headers["Authorization"] = f"Bearer {token}"
 
-    httpx_factory = _make_httpx_factory(verify)
+    httpx_factory = _make_httpx_factory(verify, cert=cert)
 
     async with (
         sse_client(
@@ -155,13 +151,15 @@ def list_tools_stream_sse(
 
     url: базовый URL сервера из конфига (без /sse в конце).
     """
-    verify = _get_verify_ssl(server_cfg)
+    verify = get_verify_ssl(server_cfg)
+    cert = get_client_cert(server_cfg)
     return asyncio.run(
         _list_tools_stream_sse_async(
             base_url=url,
             token=token,
             timeout=timeout,
             verify=verify,
+            cert=cert,
         )
     )
 
@@ -173,6 +171,7 @@ async def _call_tool_stream_sse_async(
     verify: bool,
     tool_name: str,
     arguments: Dict[str, Any],
+    cert: Optional[Tuple[str, str]] = None,
 ) -> Dict[str, Any]:
     """
     Асинхронный вызов конкретного MCP-тула через SSE-транспорт.
@@ -186,7 +185,7 @@ async def _call_tool_stream_sse_async(
     if token:
         headers["Authorization"] = f"Bearer {token}"
 
-    httpx_factory = _make_httpx_factory(verify)
+    httpx_factory = _make_httpx_factory(verify, cert=cert)
 
     async with (
         sse_client(
@@ -230,7 +229,8 @@ def call_tool_stream_sse(
 
     url: базовый URL сервера из конфига (без /sse в конце).
     """
-    verify = _get_verify_ssl(server_cfg)
+    verify = get_verify_ssl(server_cfg)
+    cert = get_client_cert(server_cfg)
     return asyncio.run(
         _call_tool_stream_sse_async(
             base_url=url,
@@ -239,6 +239,7 @@ def call_tool_stream_sse(
             verify=verify,
             tool_name=tool_name,
             arguments=arguments,
+            cert=cert,
         )
     )
 
@@ -248,6 +249,7 @@ async def _list_tools_stream_http_async(
     token: Optional[str],
     timeout: float,
     verify: bool,
+    cert: Optional[Tuple[str, str]] = None,
 ) -> List[Dict[str, Any]]:
     """
     Асинхронный список тулов через Streamable HTTP транспорт MCP.
@@ -262,6 +264,7 @@ async def _list_tools_stream_http_async(
                     token=token,
                     timeout=timeout,
                     verify=verify,
+                    cert=cert,
                 ) as http_client,
                 streamable_http_client(
                     endpoint,
@@ -310,13 +313,15 @@ def list_tools_stream_http(
 
     url: базовый URL сервера из конфига (без /mcp в конце).
     """
-    verify = _get_verify_ssl(server_cfg)
+    verify = get_verify_ssl(server_cfg)
+    cert = get_client_cert(server_cfg)
     return asyncio.run(
         _list_tools_stream_http_async(
             base_url=url,
             token=token,
             timeout=timeout,
             verify=verify,
+            cert=cert,
         )
     )
 
@@ -328,6 +333,7 @@ async def _call_tool_stream_http_async(
     verify: bool,
     tool_name: str,
     arguments: Dict[str, Any],
+    cert: Optional[Tuple[str, str]] = None,
 ) -> Dict[str, Any]:
     """
     Асинхронный вызов конкретного MCP-тула через Streamable HTTP транспорт.
@@ -342,6 +348,7 @@ async def _call_tool_stream_http_async(
                     token=token,
                     timeout=timeout,
                     verify=verify,
+                    cert=cert,
                 ) as http_client,
                 streamable_http_client(
                     endpoint,
@@ -392,7 +399,8 @@ def call_tool_stream_http(
 
     url: базовый URL сервера из конфига (без /mcp в конце).
     """
-    verify = _get_verify_ssl(server_cfg)
+    verify = get_verify_ssl(server_cfg)
+    cert = get_client_cert(server_cfg)
     return asyncio.run(
         _call_tool_stream_http_async(
             base_url=url,
@@ -401,6 +409,7 @@ def call_tool_stream_http(
             verify=verify,
             tool_name=tool_name,
             arguments=arguments,
+            cert=cert,
         )
     )
 
