@@ -2,6 +2,7 @@ import html as html_lib
 import functools
 import json
 import re
+import time
 from typing import Optional, Dict, Any
 
 import requests
@@ -13,6 +14,9 @@ from tools.simple_tools.abstract_simple_tool import AbstractSimpleTool
 
 class FetchUrl(AbstractSimpleTool):
     timeout_seconds = 20
+    max_content_chars = 20_000
+    max_retries = 2
+    retry_backoff_seconds = 1.0
     default_user_agent = (
         "Mozilla/5.0 (X11; Linux x86_64) "
         "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -29,7 +33,7 @@ class FetchUrl(AbstractSimpleTool):
                 "If the response is binary (e.g., images, PDFs, archives), does NOT return raw bytes; "
                 "instead returns content='binary data' with is_binary=true. "
                 "Always returns a JSON string object with fields: ok, url, final_url, status_code, "
-                "content_type, is_binary, content, extracted, preview, error."
+                "content_type, is_binary, result_type, extracted_source, content, preview, truncated, error."
             ),
             "parameters": {
                 "type": "object",
@@ -67,7 +71,7 @@ Usage:
 - The tool sends a GET request with a realistic browser-like User-Agent.
 - Supports only http/https URLs.
 - On success returns extracted page text.
-- If extraction fails, returns a short preview of raw HTML.
+- If extraction fails, returns preview with HTML tags removed (truncated to max_preview_chars).
 - If request fails, returns an error message with details.
 """
 
@@ -76,6 +80,34 @@ Usage:
         no_tags = re.sub(r"<[^>]+>", " ", content)
         normalized = re.sub(r"\s+", " ", no_tags).strip()
         return html_lib.unescape(normalized)
+
+    _XML_INVALID_CHARS = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+
+    @classmethod
+    def _sanitize_for_xml(cls, text: str) -> str:
+        """Remove NULL bytes and control chars invalid in XML before lxml/readability parsing."""
+        return cls._XML_INVALID_CHARS.sub("", text)
+
+    @classmethod
+    def _looks_like_garbled_text(cls, text: str) -> bool:
+        if not text:
+            return False
+        sample = text[:2000]
+        if "\x00" in sample:
+            return True
+        bad_controls = len(cls._XML_INVALID_CHARS.findall(sample))
+        if bad_controls > 3:
+            return True
+        replacement_chars = sample.count("\ufffd")
+        if replacement_chars > 5:
+            return True
+        total = len(sample)
+        printable = 0
+        for ch in sample:
+            if ch in ("\n", "\r", "\t") or ch.isprintable():
+                printable += 1
+        printable_ratio = printable / max(total, 1)
+        return printable_ratio < 0.85
 
     @staticmethod
     def _is_binary_content_type(content_type: str) -> bool:
@@ -122,27 +154,35 @@ Usage:
         status_code: Optional[int] = None,
         content_type: Optional[str] = None,
         is_binary: bool = False,
+        result_type: Optional[str] = None,
+        extracted_source: Optional[str] = None,
         content: str = "",
-        extracted: bool = False,
         preview: str = "",
+        truncated: bool = False,
+        max_content_chars: Optional[int] = None,
+        max_preview_chars: Optional[int] = None,
         error: Optional[Dict[str, Any]] = None,
     ) -> str:
-        return json.dumps(
-            {
-                "tool": "fetch_url",
-                "ok": ok,
-                "url": url,
-                "final_url": final_url,
-                "status_code": status_code,
-                "content_type": content_type,
-                "is_binary": is_binary,
-                "content": content,
-                "extracted": extracted,
-                "preview": preview,
-                "error": error,
-            },
-            ensure_ascii=False,
-        )
+        payload: Dict[str, Any] = {
+            "tool": "fetch_url",
+            "ok": ok,
+            "url": url,
+            "final_url": final_url,
+            "status_code": status_code,
+            "content_type": content_type,
+            "is_binary": is_binary,
+            "result_type": result_type,
+            "extracted_source": extracted_source,
+            "content": content,
+            "preview": preview,
+            "truncated": truncated,
+            "error": error,
+        }
+        if max_content_chars is not None:
+            payload["max_content_chars"] = max_content_chars
+        if max_preview_chars is not None:
+            payload["max_preview_chars"] = max_preview_chars
+        return json.dumps(payload, ensure_ascii=False)
 
     def __call__(
         self,
@@ -199,7 +239,7 @@ Usage:
                 "image/avif,image/webp,*/*;q=0.8"
             ),
             "Accept-Language": "en-US,en;q=0.9",
-            "Accept-Encoding": "gzip, deflate, br",
+            "Accept-Encoding": "gzip, deflate",
             "Cache-Control": "no-cache",
             "Pragma": "no-cache",
             "Connection": "keep-alive",
@@ -213,23 +253,51 @@ Usage:
             "sec-ch-ua-platform": '"Linux"',
         }
 
-        try:
-            response = requests.get(
-                normalized_url,
-                headers=headers,
-                timeout=effective_timeout,
-                allow_redirects=True,
-            )
-            response.raise_for_status()
-        except requests.RequestException as exc:
+        response = None
+        last_exc = None
+        attempts = 1 + self.max_retries
+        for attempt in range(1, attempts + 1):
+            try:
+                response = requests.get(
+                    normalized_url,
+                    headers=headers,
+                    timeout=effective_timeout,
+                    allow_redirects=True,
+                )
+                response.raise_for_status()
+                break
+            except requests.RequestException as exc:
+                last_exc = exc
+                status = getattr(getattr(exc, "response", None), "status_code", None)
+                retryable = status is None or status in (429,) or status >= 500
+                if (not retryable) or attempt == attempts:
+                    return _result(
+                        ok=False,
+                        final_url=getattr(getattr(exc, "response", None), "url", None),
+                        status_code=status,
+                        content_type=getattr(getattr(exc, "response", None), "headers", {}).get("Content-Type")
+                        if getattr(exc, "response", None) is not None
+                        else None,
+                        result_type="error",
+                        error={
+                            "type": "request_failed",
+                            "message": str(exc),
+                            "attempt": attempt,
+                            "attempts_total": attempts,
+                            "retryable": retryable,
+                        },
+                    )
+                time.sleep(self.retry_backoff_seconds * attempt)
+
+        if response is None:
             return _result(
                 ok=False,
-                final_url=getattr(getattr(exc, "response", None), "url", None),
-                status_code=getattr(getattr(exc, "response", None), "status_code", None),
-                content_type=getattr(getattr(exc, "response", None), "headers", {}).get("Content-Type")
-                if getattr(exc, "response", None) is not None
-                else None,
-                error={"type": "request_failed", "message": str(exc)},
+                result_type="error",
+                error={
+                    "type": "request_failed",
+                    "message": str(last_exc) if last_exc else "Unknown request failure.",
+                    "attempts_total": attempts,
+                },
             )
 
         content_type = response.headers.get("Content-Type", "")
@@ -244,8 +312,8 @@ Usage:
                 status_code=status_code,
                 content_type=content_type,
                 is_binary=True,
+                result_type="binary",
                 content="binary data",
-                extracted=False,
                 preview="",
                 error=None,
             )
@@ -261,8 +329,8 @@ Usage:
                 status_code=status_code,
                 content_type=content_type,
                 is_binary=True,
+                result_type="binary",
                 content="binary data",
-                extracted=False,
                 preview="",
                 error={"type": "decode_failed", "message": str(e)},
             )
@@ -276,20 +344,29 @@ Usage:
         )
 
         if extracted_text and extracted_text.strip():
-            return _result(
-                ok=True,
-                final_url=final_url,
-                status_code=status_code,
-                content_type=content_type,
-                is_binary=False,
-                content=extracted_text.strip(),
-                extracted=True,
-                preview="",
-                error=None,
-            )
+            c = extracted_text.strip()
+            if not self._looks_like_garbled_text(c):
+                truncated = len(c) > self.max_content_chars
+                if truncated:
+                    c = c[: self.max_content_chars]
+                return _result(
+                    ok=True,
+                    final_url=final_url,
+                    status_code=status_code,
+                    content_type=content_type,
+                    is_binary=False,
+                    result_type="content",
+                    extracted_source="trafilatura",
+                    content=c,
+                    preview="",
+                    truncated=truncated,
+                    max_content_chars=self.max_content_chars if truncated else None,
+                    error=None,
+                )
 
         try:
-            readable_doc = Document(text, url=response.url)
+            sanitized_text = self._sanitize_for_xml(text)
+            readable_doc = Document(sanitized_text, url=response.url)
             summary_html = readable_doc.summary(html_partial=True) or ""
             fallback_text = trafilatura.extract(
                 summary_html,
@@ -299,44 +376,83 @@ Usage:
                 favor_recall=True,
             )
             if fallback_text and fallback_text.strip():
-                return _result(
-                    ok=True,
-                    final_url=final_url,
-                    status_code=status_code,
-                    content_type=content_type,
-                    is_binary=False,
-                    content=fallback_text.strip(),
-                    extracted=True,
-                    preview="",
-                    error=None,
-                )
+                c = fallback_text.strip()
+                if not self._looks_like_garbled_text(c):
+                    truncated = len(c) > self.max_content_chars
+                    if truncated:
+                        c = c[: self.max_content_chars]
+                    return _result(
+                        ok=True,
+                        final_url=final_url,
+                        status_code=status_code,
+                        content_type=content_type,
+                        is_binary=False,
+                        result_type="content",
+                        extracted_source="readability_trafilatura",
+                        content=c,
+                        preview="",
+                        truncated=truncated,
+                        max_content_chars=self.max_content_chars if truncated else None,
+                        error=None,
+                    )
 
             cleaned_summary = self._strip_html_tags(summary_html)
-            if cleaned_summary:
+            if cleaned_summary and not self._looks_like_garbled_text(cleaned_summary):
+                c = cleaned_summary
+                truncated = len(c) > self.max_content_chars
+                if truncated:
+                    c = c[: self.max_content_chars]
                 return _result(
                     ok=True,
                     final_url=final_url,
                     status_code=status_code,
                     content_type=content_type,
                     is_binary=False,
-                    content=cleaned_summary,
-                    extracted=True,
+                    result_type="content",
+                    extracted_source="readability_stripped",
+                    content=c,
                     preview="",
+                    truncated=truncated,
+                    max_content_chars=self.max_content_chars if truncated else None,
                     error=None,
                 )
         except Exception:
             pass
 
-        preview = text.strip().replace("\r", "").replace("\n", " ")
-        preview = preview[:max_preview_chars]
+        stripped = self._strip_html_tags(text)
+        if self._looks_like_garbled_text(stripped):
+            return _result(
+                ok=False,
+                final_url=final_url,
+                status_code=status_code,
+                content_type=content_type,
+                is_binary=False,
+                result_type="error",
+                error={
+                    "type": "extraction_failed",
+                    "message": "Could not extract readable text. Response appears garbled or encoded.",
+                },
+            )
+        truncated = len(stripped) > max_preview_chars
+        if truncated:
+            stripped = stripped[:max_preview_chars]
+        header = (
+            f"Content with removed HTML tags (truncated to {max_preview_chars} characters)"
+            if truncated
+            else "Content with removed HTML tags"
+        )
+        preview = f"{header}:\n\n{stripped}"
         return _result(
             ok=True,
             final_url=final_url,
             status_code=status_code,
             content_type=content_type,
             is_binary=False,
+            result_type="preview",
+            extracted_source="stripped_html",
             content="",
-            extracted=False,
             preview=preview,
+            truncated=truncated,
+            max_preview_chars=max_preview_chars if truncated else None,
             error={"type": "extraction_failed", "message": "Could not extract readable text. Returned preview."},
         )

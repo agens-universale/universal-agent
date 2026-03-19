@@ -3,6 +3,16 @@ import json
 from tools.simple_tools.abstract_simple_tool import AbstractSimpleTool
 
 
+SOLUTION_TYPES = (
+    "full_solution",
+    "partial_solution",
+    "answer_question",
+    "couldnt_solve",
+    "need_additional_info",
+    "abandoned",
+)
+
+
 class SubmitSolution(AbstractSimpleTool):
     @staticmethod
     def _result(
@@ -11,25 +21,23 @@ class SubmitSolution(AbstractSimpleTool):
         status: str,
         message: str,
         task_report: str,
+        solution_type: str | None = None,
+        comment: str | None = None,
         error: Dict[str, Any] | None = None,
     ) -> str:
-        return json.dumps(
-            {
-                "tool": "submit_solution",
-                "ok": ok,
-                "status": status,
-                "message": message,
-                "task_report": task_report,
-                "error": error,
-            },
-            ensure_ascii=False,
-        )
-
-    """
-    Tool that signals the AI agent has completed the task and is ready to submit the final solution.
-    Requires a concise final report summarizing key steps and the outcome or direct answer to users's question.
-    This should be called only when all work is verified complete.
-    """
+        out: Dict[str, Any] = {
+            "tool": "submit_solution",
+            "ok": ok,
+            "status": status,
+            "message": message,
+            "task_report": task_report,
+            "error": error,
+        }
+        if solution_type is not None:
+            out["solution_type"] = solution_type
+        if comment is not None:
+            out["comment"] = comment
+        return json.dumps(out, ensure_ascii=False)
 
     @classmethod
     def tool_description(cls) -> Dict[str, Any]:
@@ -37,114 +45,183 @@ class SubmitSolution(AbstractSimpleTool):
             "type": "function",
             "name": "submit_solution",
             "description": (
-                "Signals that the AI agent has completed all work and is ready to submit the final solution. "
-                "This tool must be called exactly upon full task completion, with a concise yet comprehensive "
-                "summary of actions taken and results achieved. ALWAYS call this tool for the final user response. "
-                "(The separate answer_question tool is not available; use submit_solution instead.)"
+                "Signals that the AI agent has finished the CURRENT USER TURN and is ready to hand control "
+                "back to the user. This is end-of-turn, not end-of-thread/session. "
+                "Use solution_type to indicate completeness for this turn. task_report describes what was done; "
+                "comment is for caveats, risks, or next steps. "
+                "Call exactly once at the end of each completed turn, and only after the agent has performed "
+                "all reasonable work it can do for this turn (including relevant tool use/verification when needed). "
+                "Do not call this tool early just to hand back control."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
+                    "solution_type": {
+                        "type": "string",
+                        "description": "Outcome type for the CURRENT TURN: full_solution (turn objective fully done), partial_solution (partially done), answer_question (direct answer to user question), couldnt_solve (failed to solve), need_additional_info (blocked, need more from user), abandoned (stopped by choice).",
+                    },
                     "task_report": {
                         "type": "string",
-                        "description": "A brief but complete summary of the task solution, including key steps performed, the final outcome, and any relevant assumptions. Must be clear, self-contained, and written in plain text (no markdown or code). Keep under 10 sentences. If user asked question and you can make full answer - use this tool."
-                    }
+                        "description": "What was done in this turn: key steps, final result, assumptions, and evidence basis if tools were used. Plain text, no markdown. Required for full_solution, partial_solution, answer_question. For failure types: brief explanation of what happened.",
+                    },
+                    "comment": {
+                        "type": "string",
+                        "description": "Optional. Caveats, risks, unresolved items, or suggested next steps for the user.",
+                    },
                 },
-                "required": ["task_report"],
-                "additionalProperties": False
+                "required": ["solution_type", "task_report"],
+                "additionalProperties": False,
             },
-            "strict": True
+            "strict": True,
         }
 
     @classmethod
     def prompt_description(cls) -> str:
-        description = '''Tool name: submit_solution  
-Tool description: Signals that the current task has been fully completed and the solution is ready for submission.
-A concise `task_report` must be provided, summarizing:
-- Key actions taken
-- Final result or implementation
-- Any assumptions made
+        return '''Tool name: submit_solution
+Tool description: Signals that the CURRENT USER TURN is finished and the outcome is ready to hand back to the user.
+IMPORTANT: This marks end of the current turn, NOT end of the whole thread/session.
+Use solution_type to classify the turn outcome; task_report for what was done in this turn; comment for caveats or next steps.
 
-Input schema: {"type": "object", "properties": {"task_report": {"type": "string", "description": "Short final report about task solution - performed steps and final result. Few theses - short but full."}}, "required": ["task_report"], "additionalProperties": false}
-
-Usage:
-- Use this tool **only** when you are 100% certain the task is complete.
-- This is the final user response mechanism. Do not use answer_question (not available).
-- The `task_report` must be brief (3–6 sentences), clear, and self-contained.
-- Include enough context so a human can understand what was done without reviewing code.
-- Do **not** use markdown, code blocks, or formatting in `task_report`.
-- Avoid vague statements like "I fixed it" — explain *what* was fixed and *how*.
-
-Important Rules:
-- Never call this tool unless all requirements are satisfied.
-- Never call it mid-task or before verification.
-- `task_report` must not be empty or generic.
-- Maximum length: ~500 characters. Be concise.
-- After calling, the session will typically terminate.
-
-Example usage:
+Input schema:
 {
-  "task_report": "Implemented user authentication using JWT tokens. Created /login and /profile endpoints in file /home/dev/project_1/src/logging_controllers.py. Validated input and added error handling. All tests pass."
+  "solution_type": "full_solution" | "partial_solution" | "answer_question" | "couldnt_solve" | "need_additional_info" | "abandoned",
+  "task_report": "string (required)",
+  "comment": "string (optional)"
 }
+
+When to call:
+- Call exactly once at the end of each completed user turn.
+- Do NOT call early. First complete required work for this turn.
+- Do NOT call immediately after planning/thinking if the user asked for deeper execution/research.
+
+Readiness checklist before calling:
+- Turn objective is completed, or clearly blocked.
+- Relevant tools/search/verification for this turn have been performed when needed.
+- Key claims in task_report are grounded in actual tool outputs (not assumptions).
+- Known limitations/risks are captured in comment when relevant.
+
+Choosing solution_type (for current turn):
+- full_solution: turn objective fully completed.
+- partial_solution: meaningful partial progress, but objective not fully completed.
+- answer_question: user asked for a direct answer/explanation.
+- need_additional_info: blocked by missing user input/context.
+- couldnt_solve: attempted but could not solve with available means.
+- abandoned: stopped by explicit choice/instruction.
+
+- task_report: What was done in this turn (steps, result, assumptions/evidence). Plain text, brief.
+- comment: Optional caveats, risks, unresolved items, or next steps.
+
+Return format (JSON string): {"tool":"submit_solution","ok":true,"status":"...","message":"...","task_report":"...","solution_type":"...","comment":"..."|null,"error":null}
 '''
-        return description
 
-    def __call__(self, task_report: str, **kwargs) -> str:
-        """
-        Execute the submit_solution action with a final report.
+    def __call__(
+        self,
+        solution_type: str,
+        task_report: str,
+        comment: str | None = None,
+        **kwargs: Any,
+    ) -> str:
+        # Validate solution_type
+        if not isinstance(solution_type, str):
+            return self._result(
+                ok=False,
+                status="rejected",
+                message="Validation failed.",
+                task_report="",
+                error={
+                    "type": "invalid_argument",
+                    "field": "solution_type",
+                    "message": "solution_type must be a string.",
+                },
+            )
+        if solution_type not in SOLUTION_TYPES:
+            return self._result(
+                ok=False,
+                status="rejected",
+                message="Validation failed.",
+                task_report="",
+                error={
+                    "type": "invalid_argument",
+                    "field": "solution_type",
+                    "message": f"solution_type must be one of: {', '.join(SOLUTION_TYPES)}",
+                },
+            )
 
-        Args:
-            task_report (str): A concise summary of actions taken and the final result.
-
-        Returns:
-            Dict[str, str]: Status and message indicating submission result.
-        """
-        # Input validation
+        # Validate task_report
         if not isinstance(task_report, str):
             return self._result(
                 ok=False,
                 status="rejected",
-                message="Task report validation failed.",
+                message="Validation failed.",
                 task_report="",
                 error={
                     "type": "invalid_argument",
                     "field": "task_report",
-                    "message": f"Argument 'task_report' must be a string. Got: {type(task_report)} ({repr(task_report)})",
+                    "message": f"task_report must be a string. Got: {type(task_report)}",
                 },
             )
         if not task_report.strip():
             return self._result(
                 ok=False,
                 status="rejected",
-                message="Task report validation failed.",
+                message="Validation failed.",
                 task_report="",
                 error={
                     "type": "invalid_argument",
                     "field": "task_report",
-                    "message": "Argument 'task_report' cannot be empty or whitespace only.",
+                    "message": "task_report cannot be empty or whitespace only.",
                 },
             )
         if len(task_report.strip()) > 10000:
             return self._result(
                 ok=False,
                 status="rejected",
-                message="Task report validation failed.",
+                message="Validation failed.",
                 task_report="",
                 error={
                     "type": "limit_exceeded",
                     "field": "task_report",
-                    "message": "task_report is too long. Keep shorter. Make under 10 sentences.",
+                    "message": "task_report is too long. Keep under 10 sentences.",
                 },
             )
 
-        # Normalize line endings and clean whitespace
-        task_report = self._normalize_text(task_report)
+        # Validate comment (optional)
+        if comment is not None:
+            if not isinstance(comment, str):
+                return self._result(
+                    ok=False,
+                    status="rejected",
+                    message="Validation failed.",
+                    task_report="",
+                    error={
+                        "type": "invalid_argument",
+                        "field": "comment",
+                        "message": "comment must be a string.",
+                    },
+                )
+            if len(comment.strip()) > 5000:
+                return self._result(
+                    ok=False,
+                    status="rejected",
+                    message="Validation failed.",
+                    task_report="",
+                    error={
+                        "type": "limit_exceeded",
+                        "field": "comment",
+                        "message": "comment is too long.",
+                    },
+                )
+
+        task_report_norm = self._normalize_text(task_report)
+        comment_norm = self._normalize_text(comment) if comment and comment.strip() else None
 
         return self._result(
             ok=True,
             status="submitted",
-            message="Task completed and solution submitted.",
-            task_report=task_report,
+            message="Task outcome submitted.",
+            task_report=task_report_norm,
+            solution_type=solution_type,
+            comment=comment_norm,
             error=None,
         )
 
@@ -152,7 +229,6 @@ Example usage:
         """Normalize line endings and trim extra whitespace."""
         text = text.replace('\r\n', '\n').replace('\r', '\n')
         lines = [line.rstrip() for line in text.split('\n')]
-        # Remove leading/trailing empty lines
         while lines and not lines[0].strip():
             lines.pop(0)
         while lines and not lines[-1].strip():
