@@ -10,7 +10,7 @@ import subprocess
 import threading
 import requests
 
-from tools.connect_mcp.stream_client import _get_client_cert
+from utils.ssl_config import get_verify_ssl, get_client_cert
 
 
 def _normalize_url(url: str) -> str:
@@ -310,18 +310,8 @@ def get_transport(server_cfg: Dict[str, Any]) -> Callable[..., Tuple[Dict[str, s
     """
     transport = (server_cfg or {}).get("transport")
 
-    # Настройка проверки SSL для HTTP/SSE по конфигу сервера:
-    #   verify-ssl: true  (по умолчанию)
-    #   verify-ssl: false (отключить проверку сертификата)
-    verify_cfg = (server_cfg or {}).get("verify-ssl")
-    if isinstance(verify_cfg, bool):
-        verify = verify_cfg
-    elif isinstance(verify_cfg, str):
-        verify = verify_cfg.strip().lower() not in ("false", "0", "no", "off")
-    else:
-        verify = True
-
-    cert = _get_client_cert(server_cfg)
+    verify = get_verify_ssl(server_cfg)
+    cert = get_client_cert(server_cfg)
 
     if transport == "http":
         def request_http(

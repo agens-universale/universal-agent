@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import logging
 from typing import Any, Dict, List, Optional, Tuple
 
 import asyncio
@@ -13,48 +12,7 @@ from mcp.client.streamable_http import streamable_http_client
 from mcp.client.stdio import StdioServerParameters, stdio_client
 from mcp.shared.exceptions import McpError
 
-logger = logging.getLogger(__name__)
-
-
-def _get_client_cert(server_cfg: Dict[str, Any]) -> Optional[Tuple[str, str]]:
-    """
-    Извлечь клиентский сертификат и ключ из конфига сервера.
-
-    Если заданы оба ключа client-cert и client-key — возвращает кортеж (cert, key).
-    Если задан только один — логирует предупреждение и возвращает None.
-    Если ни один не задан — возвращает None.
-    """
-    cfg = server_cfg or {}
-    cert_path = cfg.get("client-cert")
-    key_path = cfg.get("client-key")
-
-    if cert_path and key_path:
-        return (str(cert_path), str(key_path))
-
-    if cert_path or key_path:
-        logger.warning(
-            "mTLS: задан только %s без %s — клиентский сертификат не будет использован",
-            "client-cert" if cert_path else "client-key",
-            "client-key" if cert_path else "client-cert",
-        )
-        return None
-
-    return None
-
-
-def _get_verify_ssl(server_cfg: Dict[str, Any]) -> bool:
-    """
-    Определить режим проверки SSL-сертификата по конфигу сервера.
-
-    Поддерживает те же варианты, что и transport.get_transport:
-      verify-ssl: true/false | "true"/"false"/"0"/"1"/"no"/"off"
-    """
-    verify_cfg = (server_cfg or {}).get("verify-ssl")
-    if isinstance(verify_cfg, bool):
-        return verify_cfg
-    if isinstance(verify_cfg, str):
-        return verify_cfg.strip().lower() not in ("false", "0", "no", "off")
-    return True
+from utils.ssl_config import get_verify_ssl, get_client_cert
 
 
 def _make_httpx_factory(verify: bool, cert: Optional[Tuple[str, str]] = None):
@@ -193,8 +151,8 @@ def list_tools_stream_sse(
 
     url: базовый URL сервера из конфига (без /sse в конце).
     """
-    verify = _get_verify_ssl(server_cfg)
-    cert = _get_client_cert(server_cfg)
+    verify = get_verify_ssl(server_cfg)
+    cert = get_client_cert(server_cfg)
     return asyncio.run(
         _list_tools_stream_sse_async(
             base_url=url,
@@ -271,8 +229,8 @@ def call_tool_stream_sse(
 
     url: базовый URL сервера из конфига (без /sse в конце).
     """
-    verify = _get_verify_ssl(server_cfg)
-    cert = _get_client_cert(server_cfg)
+    verify = get_verify_ssl(server_cfg)
+    cert = get_client_cert(server_cfg)
     return asyncio.run(
         _call_tool_stream_sse_async(
             base_url=url,
@@ -355,8 +313,8 @@ def list_tools_stream_http(
 
     url: базовый URL сервера из конфига (без /mcp в конце).
     """
-    verify = _get_verify_ssl(server_cfg)
-    cert = _get_client_cert(server_cfg)
+    verify = get_verify_ssl(server_cfg)
+    cert = get_client_cert(server_cfg)
     return asyncio.run(
         _list_tools_stream_http_async(
             base_url=url,
@@ -441,8 +399,8 @@ def call_tool_stream_http(
 
     url: базовый URL сервера из конфига (без /mcp в конце).
     """
-    verify = _get_verify_ssl(server_cfg)
-    cert = _get_client_cert(server_cfg)
+    verify = get_verify_ssl(server_cfg)
+    cert = get_client_cert(server_cfg)
     return asyncio.run(
         _call_tool_stream_http_async(
             base_url=url,
