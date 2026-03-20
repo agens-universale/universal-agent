@@ -9,7 +9,7 @@ agent_auth:
   "plugin_version": "0.0.1"
   "device_code": "set your unic device code (guid like) - for log tracing in prod"
   "login": "login"
-model: CodeChat
+model: CodeAgent
 system_prompt_id: v1
 use_server_subagents: true
 client_name : mini_cli_pub_agent_1
