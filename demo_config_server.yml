@@ -26,18 +26,25 @@ agent_overrides:
     - search_files
     - search_and_replace
     - execute_command
+    - run_python_code
+    # - fetch_url
+    - ask_human
+    #- think
+    #- thread_notes
+    # - calculator
     # Отключаем интерактив в консоли
-    # - answer_question (deprecated tool, removed from registry)
-    # Отключаем тулы, которые есть на сервере в режиме server_subagents
-    # - update_plan (deprecated tool, replaced by thread_notes)
-    - think
-    - thread_notes
-    - calculator
   verbose: false
   dump_storage: false
   save_logs: false
   use_server_subagents: true
   max_steps: 100
+
+threads_cleanup:
+  # Периодическая чистка файлов истории тредов (meta_*.json / data_*.jsonl).
+  # Запускается в фоне внутри процесса REST-сервера.
+  enabled: true
+  interval_seconds: 3600
+  ttl_days: 7
 
 swarm:
   enabled: false

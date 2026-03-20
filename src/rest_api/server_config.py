@@ -19,6 +19,7 @@ def load_server_config() -> Dict[str, Any]:
     - defaults
     - agent
     - agent_overrides (опционально)
+    - threads_cleanup (опционально)
     """
     cfg_path = os.getenv("SERVER_CONFIG_PATH") or os.path.join(
         PROJECT_ROOT, "config_server.yml"
@@ -49,12 +50,15 @@ def load_server_config() -> Dict[str, Any]:
     # Секция swarm — настройки сворм-режима (может отсутствовать в старых конфигах).
     swarm_cfg = raw.get("swarm") or {}
 
+    threads_cleanup_cfg = raw.get("threads_cleanup") or {}
+
     return {
         "server": server_cfg,
         "defaults": defaults_cfg,
         "agent": agent_cfg,
         "agent_overrides": overrides_cfg,
         "swarm": swarm_cfg,
+        "threads_cleanup": threads_cleanup_cfg,
     }
 
 

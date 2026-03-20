@@ -30,6 +30,7 @@ from .rest_api.utils import (  # type: ignore  # noqa: E402
     normalize_system,
     patch_asyncio_run_for_fastapi,
 )
+from server_cleanup_threads import register_cleanup_threads_on_startup  # type: ignore  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +71,15 @@ _swarm_monitor: Optional[Any] = None
 
 
 app = FastAPI()
+
+
+register_cleanup_threads_on_startup(
+    app,
+    server_config=SERVER_CONFIG,
+    base_agent_config=BASE_AGENT_CONFIG,
+    project_root=PROJECT_ROOT,
+    logger=logger,
+)
 
 
 @app.on_event("startup")
