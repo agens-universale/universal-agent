@@ -1,6 +1,7 @@
 import json
 import os
 from typing import Any, Dict, Optional
+import logging
 
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request
@@ -29,10 +30,25 @@ from .rest_api.utils import (  # type: ignore  # noqa: E402
     normalize_system,
     patch_asyncio_run_for_fastapi,
 )
-from .swarm.config import build_swarm_config  # type: ignore  # noqa: E402
-from .swarm.monitor import SwarmMonitor  # type: ignore  # noqa: E402
-from .swarm import runner as swarm_runner  # type: ignore  # noqa: E402
-from .swarm import storage as swarm_storage  # type: ignore  # noqa: E402
+
+logger = logging.getLogger(__name__)
+
+# Swarm-режим пока может быть не готов (например, отсутствуют модули/зависимости).
+# Чтобы обычный REST-вебхук стартовал всегда, делаем swarm-импорты ленивыми:
+# если swarm не импортируется — считаем, что он выключен.
+_SWARM_MODULES_AVAILABLE = True
+try:
+    from .swarm.config import build_swarm_config  # type: ignore  # noqa: E402
+    from .swarm.monitor import SwarmMonitor  # type: ignore  # noqa: E402
+    from .swarm import runner as swarm_runner  # type: ignore  # noqa: E402
+    from .swarm import storage as swarm_storage  # type: ignore  # noqa: E402
+except (ModuleNotFoundError, ImportError) as e:
+    _SWARM_MODULES_AVAILABLE = False
+    logger.warning("swarm disabled due to import error: %r", e)
+    build_swarm_config = None  # type: ignore[assignment]
+    SwarmMonitor = None  # type: ignore[assignment]
+    swarm_runner = None  # type: ignore[assignment]
+    swarm_storage = None  # type: ignore[assignment]
 
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -44,10 +60,13 @@ patch_asyncio_run_for_fastapi()
 
 SERVER_CONFIG: Dict[str, Any] = load_server_config()
 BASE_AGENT_CONFIG: Dict[str, Any] = build_agent_config_for_server(SERVER_CONFIG)
-SWARM_CONFIG: Dict[str, Any] = build_swarm_config(SERVER_CONFIG)
+if _SWARM_MODULES_AVAILABLE and build_swarm_config is not None:
+    SWARM_CONFIG: Dict[str, Any] = build_swarm_config(SERVER_CONFIG)
+else:
+    SWARM_CONFIG = {"enabled": False}
 
 
-_swarm_monitor: Optional[SwarmMonitor] = None
+_swarm_monitor: Optional[Any] = None
 
 
 app = FastAPI()
