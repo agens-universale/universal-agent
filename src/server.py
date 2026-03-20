@@ -275,8 +275,8 @@ async def get_thread_logs(system: str, task_id: str):
             detail={"status": "error", "payload": f"threads resolve error: {e!r}"},
         )
 
-    meta = load_thread_meta(threads_dir, task_norm)
-    messages, _, _ = load_thread_messages(threads_dir, task_norm)
+    meta = load_thread_meta(threads_dir, sys_norm, task_norm)
+    messages, _, _ = load_thread_messages(threads_dir, sys_norm, task_norm)
 
     if not meta and not messages:
         raise HTTPException(status_code=404, detail={"status": "not_found"})
@@ -288,6 +288,65 @@ async def get_thread_logs(system: str, task_id: str):
         "meta": meta,
         "messages": messages,
     }
+
+
+@app.get("/logs/all")
+async def get_all_thread_logs():
+    """
+    Выдать список всех доступных тредов (system + task_id).
+
+    Служебный эндпоинт для режима вебхука: system можно заранее не знать,
+    а также удобно построить UI "журнала".
+    """
+    try:
+        threads_dir = resolve_threads_dir(BASE_AGENT_CONFIG)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(
+            status_code=500,
+            detail={"status": "error", "payload": f"threads resolve error: {e!r}"},
+        )
+
+    out: list[dict[str, Any]] = []
+    try:
+        names = [n for n in os.listdir(threads_dir) if n.startswith("meta_") and n.endswith(".json")]
+    except FileNotFoundError:
+        return {"status": "ok", "logs": []}
+
+    for name in names:
+        meta_path = os.path.join(threads_dir, name)
+        try:
+            with open(meta_path, "r", encoding="utf-8") as f:
+                meta = json.load(f)
+        except Exception:
+            continue
+
+        if not isinstance(meta, dict):
+            continue
+
+        system = meta.get("system")
+        if not isinstance(system, str) or not system.strip():
+            system = "unknown"
+
+        task_id = meta.get("thread_id")
+        if not isinstance(task_id, str) or not task_id.strip():
+            # legacy fallback: meta_<thread_id>.json
+            task_id = name.removeprefix("meta_").removesuffix(".json")
+
+        updated_at = meta.get("updated_at") or meta.get("created_at")
+        messages_count = meta.get("messages_count")
+
+        out.append(
+            {
+                "system": system,
+                "task_id": task_id,
+                "updated_at": updated_at,
+                "messages_count": messages_count,
+                "logs_url": f"/logs/{system}/{task_id}",
+            }
+        )
+
+    out.sort(key=lambda x: str(x.get("updated_at") or ""), reverse=True)
+    return {"status": "ok", "logs": out}
 
 
 @app.post("/swarm/run")

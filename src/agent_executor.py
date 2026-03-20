@@ -35,6 +35,7 @@ class AgentExecutor:
         message: str,
         *,
         thread_id: str | None = None,
+        system: str | None = None,
         verbose: bool | None = None,
     ) -> Any:
         """Запускает агента. При каждом вызове state создаётся заново."""
@@ -48,8 +49,9 @@ class AgentExecutor:
         thread_notes_md: str | None = None
         previous_response_id: str | None = None
         if thread_id is not None:
+            system_id = system or "cli"
             thread_session = ThreadSession.from_config(
-                config_dict=config_dict, thread_id=thread_id
+                config_dict=config_dict, system_id=system_id, thread_id=thread_id
             )
             previous_response_id = thread_session.previous_response_id
             meta = getattr(thread_session, "meta", None) or {}

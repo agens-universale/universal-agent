@@ -6,6 +6,7 @@ from typing import Dict, List, Tuple, Any, Set, Optional
 
 
 _THREAD_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]+$")
+_SYSTEM_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]+$")
 _META_SCHEMA_VERSION = 1
 
 
@@ -32,6 +33,30 @@ def validate_thread_id(thread_id: str) -> str:
     return normalized
 
 
+def sanitize_system_id(system_id: str) -> str:
+    """
+    Санитизировать идентификатор внешней системы для использования в имени файла.
+
+    Разрешаем только латинские буквы, цифры, '_' и '-'.
+    Остальные символы заменяем на '_'.
+    """
+    if not isinstance(system_id, str):
+        raise ValueError("system_id должен быть строкой")
+
+    s = system_id.strip().lower()
+    if not s:
+        raise ValueError("system_id должен быть непустой строкой")
+
+    s = re.sub(r"[^A-Za-z0-9_-]+", "_", s)
+    s = s.strip("_")
+    if not s:
+        raise ValueError("system_id после санитизации стал пустым")
+    if not _SYSTEM_ID_PATTERN.match(s):
+        # На случай логической ошибки при замене символов.
+        raise ValueError("system_id может содержать только латинские буквы, цифры, '_' и '-'")
+    return s
+
+
 def resolve_threads_dir(config_dict: Dict[str, Any]) -> str:
     """
     Определить директорию для хранения тредов.
@@ -55,10 +80,24 @@ def resolve_threads_dir(config_dict: Dict[str, Any]) -> str:
     return path_cfg
 
 
-def _thread_paths(threads_dir: str, thread_id: str) -> Tuple[str, str]:
+def _thread_paths_legacy(threads_dir: str, thread_id: str) -> Tuple[str, str]:
+    """Старый формат файлов без system в имени."""
     normalized = validate_thread_id(thread_id)
     data_path = os.path.join(threads_dir, f"data_{normalized}.jsonl")
     meta_path = os.path.join(threads_dir, f"meta_{normalized}.json")
+    return data_path, meta_path
+
+
+def _thread_paths(threads_dir: str, system_id: str, thread_id: str) -> Tuple[str, str]:
+    """Новый формат файлов с system в имени."""
+    sys_norm = sanitize_system_id(system_id)
+    normalized_thread_id = validate_thread_id(thread_id)
+    data_path = os.path.join(
+        threads_dir, f"data_{sys_norm}_{normalized_thread_id}.jsonl"
+    )
+    meta_path = os.path.join(
+        threads_dir, f"meta_{sys_norm}_{normalized_thread_id}.json"
+    )
     return data_path, meta_path
 
 
@@ -67,9 +106,12 @@ def ensure_threads_dir(threads_dir: str) -> None:
 
 
 def load_thread_messages(
-    threads_dir: str, thread_id: str
+    threads_dir: str, system_id: str, thread_id: str
 ) -> Tuple[List[Dict[str, Any]], Set[str], int]:
-    data_path, _ = _thread_paths(threads_dir, thread_id)
+    data_path, _ = _thread_paths(threads_dir, system_id, thread_id)
+    if not os.path.exists(data_path):
+        # fallback: старые файлы без system в имени
+        data_path, _ = _thread_paths_legacy(threads_dir, thread_id)
     if not os.path.exists(data_path):
         return [], set(), 0
 
@@ -99,10 +141,17 @@ def load_thread_messages(
     return messages, message_keys, max_seq
 
 
-def load_thread_meta(threads_dir: str, thread_id: str) -> Dict[str, Any]:
-    _, meta_path = _thread_paths(threads_dir, thread_id)
+def load_thread_meta(
+    threads_dir: str, system_id: str, thread_id: str
+) -> Dict[str, Any]:
+    _, meta_path = _thread_paths(threads_dir, system_id, thread_id)
+    if not os.path.exists(meta_path):
+        # fallback: старые файлы без system в имени
+        _, meta_path = _thread_paths_legacy(threads_dir, thread_id)
+
     if not os.path.exists(meta_path):
         return {}
+
     with open(meta_path, "r", encoding="utf-8") as f:
         data = json.load(f)
     if not isinstance(data, dict):
@@ -110,12 +159,16 @@ def load_thread_meta(threads_dir: str, thread_id: str) -> Dict[str, Any]:
     return data
 
 
-def save_thread_meta(threads_dir: str, thread_id: str, meta: Dict[str, Any]) -> None:
-    _, meta_path = _thread_paths(threads_dir, thread_id)
+def save_thread_meta(
+    threads_dir: str, system_id: str, thread_id: str, meta: Dict[str, Any]
+) -> None:
+    sys_norm = sanitize_system_id(system_id)
+    _, meta_path = _thread_paths(threads_dir, sys_norm, thread_id)
     ensure_threads_dir(threads_dir)
 
     to_save = dict(meta)
     to_save["thread_id"] = validate_thread_id(thread_id)
+    to_save["system"] = sys_norm
     to_save["schema_version"] = _META_SCHEMA_VERSION
     to_save["updated_at"] = _utc_now_iso()
     if not to_save.get("created_at"):
@@ -129,6 +182,7 @@ def save_thread_meta(threads_dir: str, thread_id: str, meta: Dict[str, Any]) -> 
 
 def append_new_thread_messages(
     threads_dir: str,
+    system_id: str,
     thread_id: str,
     messages: List[Dict[str, Any]],
     known_message_keys: Set[str],
@@ -139,7 +193,7 @@ def append_new_thread_messages(
         return 0
 
     ensure_threads_dir(threads_dir)
-    data_path, _ = _thread_paths(threads_dir, thread_id)
+    data_path, _ = _thread_paths(threads_dir, system_id, thread_id)
 
     seq = start_seq
     wrote = 0
@@ -152,6 +206,7 @@ def append_new_thread_messages(
             record = {
                 "type": "message",
                 "thread_id": thread_id,
+                "system": sanitize_system_id(system_id),
                 "seq": seq,
                 "ts": _utc_now_iso(),
                 "payload": message,
@@ -167,6 +222,7 @@ class ThreadSession:
         self,
         *,
         threads_dir: str,
+        system_id: str,
         thread_id: str,
         history_messages: List[Dict[str, Any]],
         known_message_keys: Set[str],
@@ -175,6 +231,7 @@ class ThreadSession:
         previous_response_id: Optional[str],
     ):
         self.threads_dir = threads_dir
+        self.system_id = sanitize_system_id(system_id)
         self.thread_id = thread_id
         self.history_messages = history_messages
         self.known_message_keys = known_message_keys
@@ -185,15 +242,16 @@ class ThreadSession:
 
     @classmethod
     def from_config(
-        cls, *, config_dict: Dict[str, Any], thread_id: str
+        cls, *, config_dict: Dict[str, Any], system_id: str, thread_id: str
     ) -> "ThreadSession":
+        sys_norm = sanitize_system_id(system_id)
         normalized_thread_id = validate_thread_id(thread_id)
         threads_dir = resolve_threads_dir(config_dict)
         ensure_threads_dir(threads_dir)
 
-        meta = load_thread_meta(threads_dir, normalized_thread_id)
+        meta = load_thread_meta(threads_dir, sys_norm, normalized_thread_id)
         history_messages, known_message_keys, max_seq = load_thread_messages(
-            threads_dir, normalized_thread_id
+            threads_dir, sys_norm, normalized_thread_id
         )
         previous_response_id = meta.get("previous_response_id")
         if not isinstance(previous_response_id, str) or len(previous_response_id) == 0:
@@ -201,6 +259,7 @@ class ThreadSession:
 
         return cls(
             threads_dir=threads_dir,
+            system_id=sys_norm,
             thread_id=normalized_thread_id,
             history_messages=history_messages,
             known_message_keys=known_message_keys,
@@ -236,6 +295,7 @@ class ThreadSession:
     ) -> None:
         written = append_new_thread_messages(
             self.threads_dir,
+            self.system_id,
             self.thread_id,
             batch_messages,
             self.known_message_keys,
@@ -245,7 +305,9 @@ class ThreadSession:
         self.previous_response_id = previous_response_id
         # Preserve arbitrary meta fields (e.g. notes_md), otherwise tools that
         # update meta would get their data wiped on the next persist_batch().
-        base_meta = load_thread_meta(self.threads_dir, self.thread_id) or {}
+        base_meta = (
+            load_thread_meta(self.threads_dir, self.system_id, self.thread_id) or {}
+        )
         base_meta["created_at"] = self.meta.get("created_at") or base_meta.get("created_at")
         base_meta["previous_response_id"] = self.previous_response_id
         base_meta["messages_count"] = self.persisted_messages_count
@@ -254,4 +316,4 @@ class ThreadSession:
         # Always overwrite when we have a string value.
         if isinstance(self.meta.get("notes_md"), str):
             base_meta["notes_md"] = self.meta.get("notes_md")
-        save_thread_meta(self.threads_dir, self.thread_id, base_meta)
+        save_thread_meta(self.threads_dir, self.system_id, self.thread_id, base_meta)
