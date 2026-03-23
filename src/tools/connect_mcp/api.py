@@ -1,6 +1,7 @@
 from typing import Any, Dict, Optional
 
 import json
+import logging
 import requests
 
 from tools.connect_mcp.client import _MCP_SESSIONS, _call_mcp_tool, _get_or_init_session_id
@@ -11,6 +12,9 @@ from tools.connect_mcp.stream_client import (
     call_tool_stream_stdio,
 )
 from tools.connect_mcp.validation import _validate_tool_arguments, format_mcp_tool_result
+from utils.retry import retry_with_backoff
+
+logger = logging.getLogger(__name__)
 
 
 def _json_sanitize(value: Any) -> Any:
@@ -85,6 +89,7 @@ def call_mcp_tool(
     servers_cfg: Dict[str, Dict[str, Any]],
     tools_registry: Dict[str, Dict[str, Any]] | None = None,
     timeout: float = 10.0,
+    default_use_retry: bool = False,
 ) -> Any:
     """
     Вызвать инструмент на соответствующем MCP-сервере.
@@ -155,32 +160,40 @@ def call_mcp_tool(
     # Валидация аргументов
     _validate_tool_arguments(full_tool_name, tool_schema, arguments_obj)
 
-    if transport == "stream_sse":
-        data = call_tool_stream_sse(
-            url=url,
-            server_cfg=server_cfg,
-            token=token,
-            timeout=timeout,
-            tool_name=base_tool_name,
-            arguments=arguments_obj,
-        )
-    elif transport == "stream_http":
-        data = call_tool_stream_http(
-            url=url,
-            server_cfg=server_cfg,
-            token=token,
-            timeout=timeout,
-            tool_name=base_tool_name,
-            arguments=arguments_obj,
-        )
-    elif transport == "stream_stdio":
-        data = call_tool_stream_stdio(
-            server_cfg=server_cfg,
-            timeout=timeout,
-            tool_name=base_tool_name,
-            arguments=arguments_obj,
-        )
-    else:
+    use_retry = bool(server_cfg.get("use_retry", default_use_retry))
+
+    @retry_with_backoff(
+        operation_name=f"MCP tool call ({server_key}:{base_tool_name})",
+        retry_log_level=logging.ERROR,
+        no_more_retries_log_level=logging.ERROR,
+    )
+    def _do_mcp_call() -> Any:
+        if transport == "stream_sse":
+            return call_tool_stream_sse(
+                url=url,
+                server_cfg=server_cfg,
+                token=token,
+                timeout=timeout,
+                tool_name=base_tool_name,
+                arguments=arguments_obj,
+            )
+        if transport == "stream_http":
+            return call_tool_stream_http(
+                url=url,
+                server_cfg=server_cfg,
+                token=token,
+                timeout=timeout,
+                tool_name=base_tool_name,
+                arguments=arguments_obj,
+            )
+        if transport == "stream_stdio":
+            return call_tool_stream_stdio(
+                server_cfg=server_cfg,
+                timeout=timeout,
+                tool_name=base_tool_name,
+                arguments=arguments_obj,
+            )
+
         session_id = _get_or_init_session_id(
             server_key, url, server_cfg, token=token, timeout=timeout
         )
@@ -200,7 +213,7 @@ def call_mcp_tool(
             )
 
         try:
-            data = do_call(session_id)
+            data_local = do_call(session_id)
         except requests.HTTPError:
             _MCP_SESSIONS.pop(server_key, None)
             session_id = _get_or_init_session_id(
@@ -210,15 +223,21 @@ def call_mcp_tool(
                 raise RuntimeError(
                     f"Failed to re-initialize MCP session for server '{server_key}'"
                 )
-            data = do_call(session_id)
+            data_local = do_call(session_id)
 
-        if data == {} and transport == "sse":
+        if data_local == {} and transport == "sse":
             _MCP_SESSIONS.pop(server_key, None)
             session_id = _get_or_init_session_id(
                 server_key, url, server_cfg, token=token, timeout=timeout
             )
             if session_id:
-                data = do_call(session_id)
+                data_local = do_call(session_id)
+        return data_local
+
+    data = _do_mcp_call(
+        use_retry=use_retry,
+        logger=logger,
+    )
 
     if not isinstance(data, dict):
         # Unknown/legacy transport returned non-dict; still normalize

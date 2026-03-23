@@ -7,6 +7,7 @@ import traceback
 import requests
 
 import logging
+from utils.retry import retry_with_backoff
 
 logger = logging.getLogger(__name__)
 from tools.connect_mcp.client import _tools_list_request, _get_or_init_session_id, _MCP_SESSIONS
@@ -17,7 +18,11 @@ from tools.connect_mcp.stream_client import (
 )
 
 
-def _build_tools_registry(servers_cfg: Dict[str, Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+def _build_tools_registry(
+    servers_cfg: Dict[str, Dict[str, Any]],
+    *,
+    default_use_retry: bool = False,
+) -> Dict[str, Dict[str, Any]]:
     """
     Построить словарь всех тулов со всех MCP-серверов (без кэширования).
 
@@ -41,6 +46,7 @@ def _build_tools_registry(servers_cfg: Dict[str, Dict[str, Any]]) -> Dict[str, D
         url = server_cfg.get("url")
         token = server_cfg.get("token")
         transport = server_cfg.get("transport")
+        use_retry = bool(server_cfg.get("use_retry", default_use_retry))
 
         if transport not in ("http", "sse", "stdio", "stream_sse", "stream_http", "stream_stdio"):
             continue
@@ -61,34 +67,42 @@ def _build_tools_registry(servers_cfg: Dict[str, Dict[str, Any]]) -> Dict[str, D
         server_description = server_cfg.get("description") or ""
 
         try:
-            if transport == "stream_sse":
-                tools = list_tools_stream_sse(
-                    url=url,
-                    server_cfg=server_cfg,
-                    token=token,
-                    timeout=10.0,
-                )
-            elif transport == "stream_http":
-                tools = list_tools_stream_http(
-                    url=url,
-                    server_cfg=server_cfg,
-                    token=token,
-                    timeout=10.0,
-                )
-            elif transport == "stream_stdio":
-                tools = list_tools_stream_stdio(
-                    server_cfg=server_cfg,
-                    timeout=10.0,
-                )
-            else:
+            @retry_with_backoff(
+                operation_name=f"MCP tools/list ({server_name})",
+                retry_log_level=logging.ERROR,
+                no_more_retries_log_level=logging.ERROR,
+            )
+            def _fetch_tools() -> list[dict]:
+                if transport == "stream_sse":
+                    return list_tools_stream_sse(
+                        url=url,
+                        server_cfg=server_cfg,
+                        token=token,
+                        timeout=10.0,
+                    )
+                if transport == "stream_http":
+                    return list_tools_stream_http(
+                        url=url,
+                        server_cfg=server_cfg,
+                        token=token,
+                        timeout=10.0,
+                    )
+                if transport == "stream_stdio":
+                    return list_tools_stream_stdio(
+                        server_cfg=server_cfg,
+                        timeout=10.0,
+                    )
+
                 session_id = _get_or_init_session_id(
                     server_name, url, server_cfg, token=token
                 )
                 if not session_id:
-                    continue
+                    raise RuntimeError(
+                        f"Failed to initialize MCP session for server '{server_name}'"
+                    )
 
                 try:
-                    tools = _tools_list_request(
+                    return _tools_list_request(
                         url, session_id=session_id, server_cfg=server_cfg, token=token
                     )
                 except requests.HTTPError:
@@ -97,10 +111,17 @@ def _build_tools_registry(servers_cfg: Dict[str, Dict[str, Any]]) -> Dict[str, D
                         server_name, url, server_cfg, token=token
                     )
                     if not session_id:
-                        continue
-                    tools = _tools_list_request(
+                        raise RuntimeError(
+                            f"Failed to re-initialize MCP session for server '{server_name}'"
+                        )
+                    return _tools_list_request(
                         url, session_id=session_id, server_cfg=server_cfg, token=token
                     )
+
+            tools = _fetch_tools(
+                use_retry=use_retry,
+                logger=logger,
+            )
 
         except Exception as e:
             # Если какой-то MCP-сервер не отвечает или ломается —
@@ -221,6 +242,7 @@ class ToolsCache:
         Получить объединённый словарь тулов с учётом TTL и кэша.
         """
         servers_cfg = self._config.get("mcp-servers") or {}
+        default_use_retry = bool(self._config.get("use_retry", False))
         ttl = self._get_ttl()
         cache_key = self._make_cache_key(servers_cfg)
 
@@ -228,7 +250,10 @@ class ToolsCache:
             return self._data or {}
 
         # Кэш пустой или протух — перестраиваем реестр тулов.
-        fresh_tools = _build_tools_registry(servers_cfg)
+        fresh_tools = _build_tools_registry(
+            servers_cfg,
+            default_use_retry=default_use_retry,
+        )
 
         if cache_key is not None:
             self._data = fresh_tools
@@ -243,9 +268,13 @@ class ToolsCache:
         игнорируя TTL.
         """
         servers_cfg = self._config.get("mcp-servers") or {}
+        default_use_retry = bool(self._config.get("use_retry", False))
         cache_key = self._make_cache_key(servers_cfg)
 
-        fresh_tools = _build_tools_registry(servers_cfg)
+        fresh_tools = _build_tools_registry(
+            servers_cfg,
+            default_use_retry=default_use_retry,
+        )
 
         if cache_key is not None:
             self._data = fresh_tools
@@ -270,6 +299,7 @@ def get_all_tools(
     ToolsCache снаружи (например, в run_context).
     """
     cfg: Dict[str, Any] = {"mcp-servers": servers_cfg}
+    cfg["use_retry"] = False
     if mcp_meta is not None:
         cfg["mcp-meta"] = mcp_meta
 

@@ -24,11 +24,13 @@ class MCPToolWrapper:
         servers_cfg: Dict[str, Dict[str, Any]],
         tools_registry: Dict[str, Dict[str, Any]],
         timeout: float,
+        default_use_retry: bool,
     ) -> None:
         self._full_tool_name = full_tool_name
         self._servers_cfg = servers_cfg
         self._tools_registry = tools_registry
         self._timeout = timeout
+        self._default_use_retry = default_use_retry
 
     def __call__(self, **arguments: Any) -> Any:
         return call_mcp_tool(
@@ -37,6 +39,7 @@ class MCPToolWrapper:
             servers_cfg=self._servers_cfg,
             tools_registry=self._tools_registry,
             timeout=self._timeout,
+            default_use_retry=self._default_use_retry,
         )
 
 
@@ -190,20 +193,6 @@ def normalize_tool_spec_for_agent(tool_spec: Dict[str, Any]) -> Dict[str, Any]:
     return spec
 
 
-def get_mcp_tools_data() -> Dict[str, Dict[str, Any]]:
-    """
-    Собрать словарь MCP-инструментов в формате tools_data.
-    Ключ — полное имя тула (например rag_submit_solution),
-    значение — {"tool_fabric": ..., "spec": ..., "description": ...}.
-    Если MCP не настроен или загрузка не удалась, возвращается пустой dict.
-    """
-    # Эта функция должна вызываться с явным config_dict (через run_context),
-    # но сохраняем сигнатуру без аргументов для обратной совместимости.
-    raise RuntimeError(
-        "get_mcp_tools_data() теперь должен вызываться с явным config_dict "
-        "через новую версию функции: get_mcp_tools_data_for_config(config_dict)."
-    )
-
 
 def get_mcp_tools_data_for_config(
     config_dict: Dict[str, Any],
@@ -218,6 +207,7 @@ def get_mcp_tools_data_for_config(
     cfg: Dict[str, Any] = {
         "mcp-servers": servers_cfg,
         "mcp-meta": config_dict.get("mcp-meta") or {},
+        "use_retry": bool(config_dict.get("use_retry", False)),
     }
 
     tools_cache = ToolsCache(cfg)
@@ -233,9 +223,17 @@ def get_mcp_tools_data_for_config(
         or 600
     )
 
+    default_use_retry = bool(config_dict.get("use_retry", False))
+
     def make_fabric(full_tool_name: str):
         def fabric(**_kwargs: Any) -> MCPToolWrapper:
-            return MCPToolWrapper(full_tool_name, servers_cfg, mcp_registry, timeout)
+            return MCPToolWrapper(
+                full_tool_name,
+                servers_cfg,
+                mcp_registry,
+                timeout,
+                default_use_retry=default_use_retry,
+            )
 
         return fabric
 

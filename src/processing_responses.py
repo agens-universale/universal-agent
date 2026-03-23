@@ -84,8 +84,16 @@ def process_user_ask(messages, state: State, ctx: Any):
     call_headers = create_call_headers(state, ctx)
     cfg = getattr(ctx, "config_dict", {}) or {}
     verify = cfg.get("use_ssl", True)
+    use_retry = cfg.get("use_retry", False)
     url = cfg["agent_url"]
-    res, res_headers = request_backend(call_data, call_headers, url=url, verify=verify)
+    res, res_headers = request_backend(
+        call_data,
+        call_headers,
+        url=url,
+        verify=verify,
+        use_retry=use_retry,
+        logger=getattr(ctx, "logger", None),
+    )
     state.set_resp_headers_metadata(res_headers)
     resp_messages = res['output']
 
@@ -131,8 +139,16 @@ def process_tool_outputs(messages, state: State, ctx: Any):
     # logger.debug(json.dumps(call_data, ensure_ascii=False, indent=2))
     cfg = getattr(ctx, "config_dict", {}) or {}
     verify = cfg.get("use_ssl", True)
+    use_retry = cfg.get("use_retry", False)
     url = cfg["agent_url"]
-    res, res_headers = request_backend(call_data, call_headers, url=url, verify=verify)
+    res, res_headers = request_backend(
+        call_data,
+        call_headers,
+        url=url,
+        verify=verify,
+        use_retry=use_retry,
+        logger=getattr(ctx, "logger", None),
+    )
     state.set_resp_headers_metadata(res_headers)
 
     resp_messages = res["output"]

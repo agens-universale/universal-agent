@@ -1,5 +1,6 @@
 from copy import deepcopy
 
+import logging
 import requests
 import re
 import json
@@ -9,8 +10,44 @@ from typing import List, Dict, Optional, Tuple
 
 from utils.convertations import output_chat_completion_to_response
 from utils.format_messages import format_message_chat_completions_to_send_backend
+from utils.retry import retry_with_backoff
 
 
+logger = logging.getLogger(__name__)
+
+
+def _default_should_retry_backend_exception(exc: Exception) -> bool:
+    """
+    Ретраим только вероятно транзиентные ошибки:
+    - сетевые ошибки/таймауты
+    - HTTP 429 и 5xx
+    - иногда рвётся стрим: ошибки парсинга/валидации
+    """
+    if isinstance(exc, requests.exceptions.HTTPError):
+        status_code = getattr(getattr(exc, "response", None), "status_code", None)
+        if status_code is None:
+            return False
+        return status_code == 429 or status_code >= 500
+
+    if isinstance(
+        exc,
+        (
+            requests.exceptions.Timeout,
+            requests.exceptions.ConnectionError,
+            requests.exceptions.RequestException,
+        ),
+    ):
+        return True
+
+    return isinstance(exc, (json.JSONDecodeError, ValueError))
+
+
+@retry_with_backoff(
+    should_retry=_default_should_retry_backend_exception,
+    retry_log_level=logging.ERROR,
+    no_more_retries_log_level=logging.ERROR,
+    operation_name="Backend request",
+)
 def request_backend_responses(
     data: Dict,
     headers: Dict,
@@ -27,6 +64,7 @@ def request_backend_responses(
     data['stream'] = True
 
     with requests.post(url, json=data, headers=headers, stream=True, verify=verify) as r:
+        r.raise_for_status()
         r_headers = r.headers
         for line in r.iter_lines():
             chunks.append(line)
@@ -48,21 +86,22 @@ def request_backend_responses(
     return result["response"], r_headers
 
 
-def request_backend_chat_completions(data: Dict, headers: Dict, url: str):
+@retry_with_backoff(
+    should_retry=_default_should_retry_backend_exception,
+    retry_log_level=logging.ERROR,
+    no_more_retries_log_level=logging.ERROR,
+    operation_name="Backend chat completion request",
+)
+def request_backend_chat_completions(data: Dict, headers: Dict, url: str, verify: bool = True):
     """
     Отправить запрос в backend chat completions API.
 
     url передаётся явно вызывающим кодом (как правило, из ctx.config_dict).
     """
-    r = requests.post(url, json=data, headers=headers)
-
-    if r.status_code == 200:
-        # res = output_chat_completion_to_response(r.json())
-        res = r.json()
-        # logger.debug('Transformed to responses format:')
-        # logger.debug(json.dumps(res, ensure_ascii=False, indent=2))
-        return res
-    raise Exception(f"request error. code: {r.status_code} Response: {r.text}")
+    r = requests.post(url, json=data, headers=headers, verify=verify)
+    r.raise_for_status()
+    # res = output_chat_completion_to_response(r.json())
+    return r.json()
 
 
 def create_call_headers(state, ctx) -> Dict[str, str]:
