@@ -1,4 +1,11 @@
 agent_url : 'http://127.0.0.1:8080/v1/responses'
+# Режим backend API: responses | chat_completions
+backend_api_mode: responses
+# URL для chat/completions (используется только при backend_api_mode=chat_completions)
+completions_url: 'http://127.0.0.1:8080/v1/chat/completions'
+# Путь к системному промпту для режима chat/completions.
+# Если не задан, используется ./chat_completions_system_prompt.md в корне проекта.
+# chat_completions_system_prompt_path: "./chat_completions_system_prompt.md"
 use_ssl: True
 # Включить ретраи (до 5 попыток) с экспоненциальным backoff
 # для запросов к backend и MCP-серверам.

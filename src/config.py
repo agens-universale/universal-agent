@@ -27,6 +27,11 @@ def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
     with open(path, "r", encoding="utf-8") as file:
         config_dict = yaml.safe_load(file) or {}
 
+    def _resolve_path_from_config_dir(path_value: str) -> str:
+        if os.path.isabs(path_value):
+            return path_value
+        return os.path.join(config_dir, path_value)
+
     def _maybe_override_and_resolve(maybe_env_value: Optional[str], key: str) -> None:
         """
         Override config_dict[key] from env and keep it platform independent.
@@ -37,10 +42,7 @@ def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
         env_value = maybe_env_value.strip()
         if not env_value:
             return
-        if os.path.isabs(env_value):
-            config_dict[key] = env_value
-        else:
-            config_dict[key] = os.path.join(config_dir, env_value)
+        config_dict[key] = _resolve_path_from_config_dir(env_value)
 
     # Приводим относительные пути к абсолютным относительно каталога config.yml.
     # Это важно для корректной подстановки promptVariables.userInstructions,
@@ -48,6 +50,18 @@ def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
     agent_md_path = config_dict.get("agent_md_path")
     if isinstance(agent_md_path, str) and agent_md_path.strip() and not os.path.isabs(agent_md_path):
         config_dict["agent_md_path"] = os.path.join(config_dir, agent_md_path)
+
+    # Путь к локальному системному промпту для chat/completions.
+    # Если не задан в config, используем файл в корне проекта.
+    chat_prompt_path = config_dict.get("chat_completions_system_prompt_path")
+    if isinstance(chat_prompt_path, str) and chat_prompt_path.strip():
+        config_dict["chat_completions_system_prompt_path"] = _resolve_path_from_config_dir(
+            chat_prompt_path.strip()
+        )
+    else:
+        config_dict["chat_completions_system_prompt_path"] = os.path.join(
+            config_dir, "chat_completions_system_prompt.md"
+        )
 
     # Swarm-режим прокидывает путь до agent.md / threads / skills через SWARM_* env.
     # Раньше эти env никак не влияли на CLI-запуск в песочнице, из-за чего
@@ -59,6 +73,14 @@ def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
     verify = config_dict.get("use_ssl", True)
     if verify is False:
         urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+    backend_api_mode_raw = config_dict.get("backend_api_mode", "responses")
+    backend_api_mode = str(backend_api_mode_raw).strip().lower()
+    if backend_api_mode not in {"responses", "chat_completions"}:
+        raise ValueError(
+            "backend_api_mode должен быть 'responses' или 'chat_completions'"
+        )
+    config_dict["backend_api_mode"] = backend_api_mode
 
     return config_dict
 

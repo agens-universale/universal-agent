@@ -4,6 +4,9 @@ from tools import apply_tool, WrongFunctionArgumentsException
 from utils.connect_backend import create_call_headers
 from utils.connect_backend import request_backend_responses as request_backend
 from utils.connect_backend import create_call_data_responses as create_call_data
+from utils.connect_backend import request_backend_chat_completions
+from utils.connect_backend import create_call_data_completions
+from utils.convertations import output_chat_completion_to_response
 from utils.format_messages import format_message_responses
 from utils.generate_message_id import generate_msg_id_sha256 as generate_message_id_func
 
@@ -21,6 +24,82 @@ def _is_previous_response_cache_miss(exc: Exception) -> bool:
         "previous_response_id" in text
         and ("not found" in text or "cache" in text)
     ) or ("cache" in text and "not found" in text)
+
+
+def _get_backend_api_mode(ctx: Any) -> str:
+    cfg = getattr(ctx, "config_dict", {}) or {}
+    raw_mode = str(cfg.get("backend_api_mode", "responses")).strip().lower()
+    if raw_mode in {"responses", "chat_completions"}:
+        return raw_mode
+    raise ValueError(f"Unsupported backend_api_mode: {raw_mode!r}")
+
+
+def _request_backend_canonical(
+    messages: List[Dict],
+    state: State,
+    ctx: Any,
+    *,
+    set_previous_response_id: bool = True,
+) -> Tuple[List[Dict], str, Dict]:
+    """
+    Унифицированный вызов backend для двух режимов API.
+
+    Возвращает:
+    - канонические сообщения (responses-like),
+    - backend response id,
+    - backend response headers (может быть пустым dict).
+    """
+    call_headers = create_call_headers(state, ctx)
+    cfg = getattr(ctx, "config_dict", {}) or {}
+    verify = cfg.get("use_ssl", True)
+    use_retry = cfg.get("use_retry", False)
+    backend_mode = _get_backend_api_mode(ctx)
+
+    if backend_mode == "responses":
+        url = cfg["agent_url"]
+        call_data = create_call_data(
+            messages,
+            state,
+            set_previous_response_id=set_previous_response_id,
+        )
+        res, res_headers = request_backend(
+            call_data,
+            call_headers,
+            url=url,
+            verify=verify,
+            use_retry=use_retry,
+            logger=getattr(ctx, "logger", None),
+        )
+        resp_messages = res["output"]
+        response_id = str(res["id"])
+        return resp_messages, response_id, res_headers
+
+    url = cfg["completions_url"]
+    call_data = create_call_data_completions(
+        messages,
+        state,
+    )
+    res = request_backend_chat_completions(
+        call_data,
+        call_headers,
+        url=url,
+        verify=verify,
+        use_retry=use_retry,
+        logger=getattr(ctx, "logger", None),
+    )
+    if not isinstance(res, dict):
+        raise ValueError("chat/completions backend response must be an object")
+    # Для режима chat/completions всегда используем только choices[0].
+    first_choice_payload = dict(res)
+    choices = res.get("choices")
+    if isinstance(choices, list) and len(choices) > 0:
+        first_choice_payload["choices"] = [choices[0]]
+    canonical = output_chat_completion_to_response(first_choice_payload)
+    resp_messages = canonical["output"]
+    response_id = str(canonical.get("id") or res.get("id") or "")
+    if not response_id:
+        raise ValueError("chat/completions response id is empty")
+    return resp_messages, response_id, {}
 
 
 def check_mode(messages, logger) -> Union[str, None]:
@@ -76,28 +155,13 @@ def check_trace_finished(messages: List[Dict]) -> Union[str, None]:
 
 
 def process_user_ask(messages, state: State, ctx: Any):
-    message = messages[-1]
-    messages_to_send = [message]
-
-    call_data = create_call_data(messages, state)
-
-    call_headers = create_call_headers(state, ctx)
-    cfg = getattr(ctx, "config_dict", {}) or {}
-    verify = cfg.get("use_ssl", True)
-    use_retry = cfg.get("use_retry", False)
-    url = cfg["agent_url"]
-    res, res_headers = request_backend(
-        call_data,
-        call_headers,
-        url=url,
-        verify=verify,
-        use_retry=use_retry,
-        logger=getattr(ctx, "logger", None),
+    resp_messages, response_id, res_headers = _request_backend_canonical(
+        messages,
+        state,
+        ctx,
     )
-    state.set_resp_headers_metadata(res_headers)
-    resp_messages = res['output']
-
-    return resp_messages, res["id"]
+    state.set_resp_headers_metadata(res_headers or {})
+    return resp_messages, response_id
 
 
 def process_tool_calls(
@@ -132,27 +196,13 @@ def process_tool_calls(
 
 
 def process_tool_outputs(messages, state: State, ctx: Any):
-    call_headers = create_call_headers(state, ctx)
-    call_data = create_call_data(messages, state)
-
-    # logger.debug('process_tool_outputs data to ask backend')
-    # logger.debug(json.dumps(call_data, ensure_ascii=False, indent=2))
-    cfg = getattr(ctx, "config_dict", {}) or {}
-    verify = cfg.get("use_ssl", True)
-    use_retry = cfg.get("use_retry", False)
-    url = cfg["agent_url"]
-    res, res_headers = request_backend(
-        call_data,
-        call_headers,
-        url=url,
-        verify=verify,
-        use_retry=use_retry,
-        logger=getattr(ctx, "logger", None),
+    resp_messages, response_id, res_headers = _request_backend_canonical(
+        messages,
+        state,
+        ctx,
     )
-    state.set_resp_headers_metadata(res_headers)
-
-    resp_messages = res["output"]
-    return resp_messages, res["id"]
+    state.set_resp_headers_metadata(res_headers or {})
+    return resp_messages, response_id
 
 
 def run_agent(
@@ -193,6 +243,7 @@ def run_agent(
             ]
             state.steps += 1
             continue
+        mode_for_step_count = None
         try:
             for m in messages:
                 m_formatted = format_message_responses(m)
@@ -213,10 +264,6 @@ def run_agent(
                         persist_exc,
                         exc_info=True,
                     )
-            finish_response = check_trace_finished(messages)
-
-            if finish_response:
-                return finish_response
 
             if state.steps > state.max_steps:
                 return f'Agent executed {state.max_steps} steps and doesn\'t finish his work because of step limits.'
@@ -225,12 +272,15 @@ def run_agent(
                 return f'Agent tools call errors.'
 
             mode = check_mode(messages, run_logger)
+            mode_for_step_count = mode
+            backend_mode = _get_backend_api_mode(ctx)
             if mode == "user_ask":
                 try:
                     messages, response_id = process_user_ask(messages, state, ctx)
                 except Exception as user_ask_exc:
                     can_retry_with_full_history = (
-                        state.previous_response_id is not None
+                        backend_mode == "responses"
+                        and state.previous_response_id is not None
                         and get_full_history_messages is not None
                         and _is_previous_response_cache_miss(user_ask_exc)
                     )
@@ -243,16 +293,30 @@ def run_agent(
                     )
                     full_history_messages = get_full_history_messages()
                     state.previous_response_id = None
-                    messages, response_id = process_user_ask(
-                        full_history_messages, state, ctx
+                    messages, response_id, _ = _request_backend_canonical(
+                        full_history_messages,
+                        state,
+                        ctx,
+                        set_previous_response_id=False,
                     )
-                state.previous_response_id = response_id
+                if backend_mode == "responses":
+                    state.previous_response_id = response_id
+                state.last_backend_response_id = response_id
             elif mode == "function_call":
+                # `submit_solution` должен завершать ТЕКУЩИЙ user turn,
+                # а не сразу срабатывать по истории предыдущих тактов.
+                # Поэтому проверяем только на этапе обработки новых function_call
+                # (которые пришли от бэкенда), когда mode == "function_call".
+                finish_response = check_trace_finished(messages)
+                if finish_response:
+                    return finish_response
                 messages = process_tool_calls(messages, state, ctx, run_agent_func=run_agent)
                 tool_error_cnt = 0
             elif mode == "function_call_output":
                 messages, response_id = process_tool_outputs(messages, state, ctx)
-                state.previous_response_id = response_id
+                if backend_mode == "responses":
+                    state.previous_response_id = response_id
+                state.last_backend_response_id = response_id
             else:
                 raise ValueError(f"unconventional mode: {mode}")
         except WrongFunctionArgumentsException as e:
@@ -277,4 +341,12 @@ def run_agent(
                 }
             ]
 
-        state.steps += 1
+        # На первом `user_ask`-цикле при продолжении диалога по `-t` мы
+        # отправляем бэкенду всю историю треда. Чтобы старые сообщения
+        # не "сдвигали" контроль лимита шагов, пропускаем инкремент
+        # `state.steps` только в этом случае.
+        skip_initial_step = bool(
+            getattr(state, "skip_initial_user_ask_step_when_history", False)
+        )
+        if not (skip_initial_step and state.steps == 0 and mode_for_step_count == "user_ask"):
+            state.steps += 1

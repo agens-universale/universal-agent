@@ -229,6 +229,7 @@ class ThreadSession:
         persisted_messages_count: int,
         meta: Dict[str, Any],
         previous_response_id: Optional[str],
+        backend_api_mode: str,
     ):
         self.threads_dir = threads_dir
         self.system_id = sanitize_system_id(system_id)
@@ -238,6 +239,7 @@ class ThreadSession:
         self.persisted_messages_count = persisted_messages_count
         self.meta = meta
         self.previous_response_id = previous_response_id
+        self.backend_api_mode = backend_api_mode
         self.runtime_messages: List[Dict[str, Any]] = []
 
     @classmethod
@@ -256,6 +258,10 @@ class ThreadSession:
         previous_response_id = meta.get("previous_response_id")
         if not isinstance(previous_response_id, str) or len(previous_response_id) == 0:
             previous_response_id = None
+        backend_api_mode_raw = meta.get("backend_api_mode", "responses")
+        backend_api_mode = str(backend_api_mode_raw).strip().lower()
+        if backend_api_mode not in {"responses", "chat_completions"}:
+            backend_api_mode = "responses"
 
         return cls(
             threads_dir=threads_dir,
@@ -266,6 +272,7 @@ class ThreadSession:
             persisted_messages_count=max_seq,
             meta=meta,
             previous_response_id=previous_response_id,
+            backend_api_mode=backend_api_mode,
         )
 
     def build_initial_messages(self, new_user_message: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -310,10 +317,22 @@ class ThreadSession:
         )
         base_meta["created_at"] = self.meta.get("created_at") or base_meta.get("created_at")
         base_meta["previous_response_id"] = self.previous_response_id
+        base_meta["backend_api_mode"] = self.backend_api_mode
         base_meta["messages_count"] = self.persisted_messages_count
         # Notes are expected to be updated in-memory (state.notes_md) and
         # then reflected into self.meta before persist_batch().
         # Always overwrite when we have a string value.
         if isinstance(self.meta.get("notes_md"), str):
             base_meta["notes_md"] = self.meta.get("notes_md")
+        if isinstance(self.meta.get("last_backend_response_id"), str):
+            base_meta["last_backend_response_id"] = self.meta.get("last_backend_response_id")
+        # Persist rendered chat/completions system prompt for transparency/debugging.
+        # Must stay identical to актуальным данным: when we are in `responses`
+        # mode, there is no system prompt in messages, so it must not be present in meta.
+        if self.backend_api_mode == "chat_completions":
+            prompt = self.meta.get("chat_completions_system_prompt_rendered")
+            if isinstance(prompt, str) and prompt.strip():
+                base_meta["chat_completions_system_prompt_rendered"] = prompt
+        else:
+            base_meta.pop("chat_completions_system_prompt_rendered", None)
         save_thread_meta(self.threads_dir, self.system_id, self.thread_id, base_meta)

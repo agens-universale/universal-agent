@@ -16,6 +16,45 @@ from utils.retry import retry_with_backoff
 logger = logging.getLogger(__name__)
 
 
+def normalize_chat_completions_tools(
+    tools: Optional[List],
+) -> List[Dict]:
+    """
+    Привести tools-spec в формат, ожидаемый backend'ом chat/completions.
+
+    Backend ожидает, что каждый tool выглядит так:
+      {"type": "function", "function": {"name": ..., "parameters": ..., ...}}
+
+    На клиенте tools часто хранятся "плоскими":
+      {"type":"function","name":...,"parameters":...,"strict":true,...}
+    """
+    if not isinstance(tools, list):
+        return []
+
+    normalized: List[Dict] = []
+    for tool in tools:
+        if not isinstance(tool, dict):
+            continue
+
+        if tool.get("type") == "function" and "function" not in tool:
+            fn: Dict = {}
+            if "name" in tool:
+                fn["name"] = tool.get("name")
+            if "description" in tool:
+                fn["description"] = tool.get("description")
+            if "parameters" in tool:
+                fn["parameters"] = tool.get("parameters")
+            if "strict" in tool:
+                fn["strict"] = tool.get("strict")
+
+            normalized.append({"type": "function", "function": fn})
+            continue
+
+        normalized.append(tool)
+
+    return normalized
+
+
 def _default_should_retry_backend_exception(exc: Exception) -> bool:
     """
     Ретраим только вероятно транзиентные ошибки:
@@ -53,6 +92,8 @@ def request_backend_responses(
     headers: Dict,
     url: str,
     verify: bool = True,
+    use_retry: bool = True,
+    logger: Optional[logging.Logger] = None,
 ) -> Tuple[Dict, Dict]:
     """
     Отправить запрос в backend responses API.
@@ -92,15 +133,93 @@ def request_backend_responses(
     no_more_retries_log_level=logging.ERROR,
     operation_name="Backend chat completion request",
 )
-def request_backend_chat_completions(data: Dict, headers: Dict, url: str, verify: bool = True):
+def request_backend_chat_completions(
+    data: Dict,
+    headers: Dict,
+    url: str,
+    verify: bool = True,
+    use_retry: bool = True,
+    logger: Optional[logging.Logger] = None,
+):
     """
     Отправить запрос в backend chat completions API.
 
     url передаётся явно вызывающим кодом (как правило, из ctx.config_dict).
     """
+    if logger is not None:
+        try:
+            logger.debug(
+                "Send request to backend chat/completions url=%s payload=%s",
+                url,
+                json.dumps(data, ensure_ascii=False),
+            )
+        except Exception:
+            # Не роняем процесс из-за проблем с сериализацией payload.
+            logger.debug("Send request to backend chat/completions url=%s", url)
+
     r = requests.post(url, json=data, headers=headers, verify=verify)
-    r.raise_for_status()
-    # res = output_chat_completion_to_response(r.json())
+    try:
+        r.raise_for_status()
+    except requests.exceptions.HTTPError:
+        # В случае 422/400 полезно видеть body: там обычно лежит причина валидации.
+        err_text = None
+        messages_summary = None
+        try:
+            err_text = r.text
+        except Exception:
+            err_text = None
+        if logger is not None:
+            try:
+                payload_messages = data.get("messages") if isinstance(data, dict) else None
+                if isinstance(payload_messages, list):
+                    messages_summary = [
+                        {
+                            "role": m.get("role") if isinstance(m, dict) else None,
+                            "has_content": isinstance(m, dict) and "content" in m,
+                            "content_type": type(m.get("content")).__name__
+                            if isinstance(m, dict) and "content" in m
+                            else None,
+                            "has_tool_calls": isinstance(m, dict)
+                            and isinstance(m.get("tool_calls"), list),
+                            "tool_calls_len": len(m.get("tool_calls"))
+                            if isinstance(m, dict) and isinstance(m.get("tool_calls"), list)
+                            else None,
+                            "has_tool_call_id": isinstance(m, dict)
+                            and "tool_call_id" in m,
+                        }
+                        for m in payload_messages[:20]
+                    ]
+            except Exception:
+                messages_summary = None
+
+            logger.error(
+                "Backend chat/completions HTTP error status=%s url=%s response_body=%s",
+                getattr(r, "status_code", None),
+                url,
+                err_text,
+            )
+            if messages_summary is not None:
+                logger.error(
+                    "Backend chat/completions request messages summary=%s",
+                    messages_summary,
+                )
+        # Печатаем в stdout, чтобы даже при неполной конфигурации логгера
+        # вы точно увидели причину 422 в выводе.
+        try:
+            # Пробуем подсократить слишком длинные ответы.
+            err_text_short = err_text[:4000] if isinstance(err_text, str) else str(err_text)
+        except Exception:
+            err_text_short = str(err_text)
+        print(
+            "=== backend chat/completions validation error ===\n"
+            f"url={url}\n"
+            f"status={getattr(r, 'status_code', None)}\n"
+            f"response_body={err_text_short}\n"
+        )
+        if logger is None and messages_summary is not None:
+            print(f"request messages summary={messages_summary}")
+        raise
+
     return r.json()
 
 
@@ -167,13 +286,13 @@ def create_call_data_completions(
         to_send_messages = messages
 
     to_send_tools = tools if tools is not None else state_tools
+    to_send_tools = normalize_chat_completions_tools(to_send_tools)
 
     to_send_messages_formatted = []
     for m in to_send_messages:
         to_send_messages_formatted.append(
             format_message_chat_completions_to_send_backend(m)
         )
-
     effective_model = model
     if effective_model is None and state is not None:
         effective_model = state.default_model

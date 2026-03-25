@@ -110,32 +110,95 @@ def format_message_completions(message):
         return format_others_responses(message)
 
 
-def format_message_chat_completions_to_send_backend(message):
+def _extract_text_from_canonical_message_content(content):
+    if isinstance(content, str):
+        return content
+    if not isinstance(content, list):
+        return ""
+
+    parts = []
+    for part in content:
+        if not isinstance(part, dict):
+            continue
+        text = part.get("text")
+        if isinstance(text, str) and text:
+            parts.append(text)
+    return "\n\n".join(parts)
+
+
+def _canonical_to_chat_completions_message(message):
+    m_type = message.get("type")
+    if m_type == "message":
+        return {
+            "role": message.get("role", "assistant"),
+            "content": _extract_text_from_canonical_message_content(
+                message.get("content")
+            ),
+        }
+    if m_type == "function_call":
+        return {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": message["call_id"],
+                    "type": "function",
+                    "function": {
+                        "name": message["name"],
+                        "arguments": message["arguments"],
+                    },
+                }
+            ],
+        }
+    if m_type == "function_call_output":
+        output = message.get("output")
+        if output is None:
+            output = message.get("content", "")
+        return {
+            "role": "tool",
+            "tool_call_id": message["call_id"],
+            "content": str(output),
+        }
+    return None
+
+
+def _legacy_role_to_chat_completions_message(message):
     m_role = message.get('role')
     if m_role == 'tool':
-        nm = dict()
-        nm['role'] = 'tool'
-        nm['tool_call_id'] = message['call_id']
-        nm['content'] = message['content']
-        return nm
+        return {
+            'role': 'tool',
+            'tool_call_id': message['call_id'],
+            'content': message.get('content', message.get('output', ''))
+        }
 
     if m_role == 'system':
-        nm = dict()
-        nm['role'] = 'system'
-        nm['content'] = message['content']
-        return nm
+        return {
+            'role': 'system',
+            'content': message['content']
+        }
 
     if m_role == 'user':
-        nm = dict()
-        nm['role'] = 'user'
-        nm['content'] = message['content']
-        return nm
+        return {
+            'role': 'user',
+            'content': message['content']
+        }
 
     if m_role == 'assistant':
-        nm = dict()
-        nm['role'] = 'assistant'
-        nm['content'] = deepcopy(message['content'])
-        nm['tool_calls'] = deepcopy(message.get('tool_calls', list()))
-        return nm
+        return {
+            'role': 'assistant',
+            'content': deepcopy(message['content']),
+            'tool_calls': deepcopy(message.get('tool_calls', list()))
+        }
+    return None
+
+
+def format_message_chat_completions_to_send_backend(message):
+    converted = _canonical_to_chat_completions_message(message)
+    if converted is not None:
+        return converted
+
+    converted = _legacy_role_to_chat_completions_message(message)
+    if converted is not None:
+        return converted
 
     return message

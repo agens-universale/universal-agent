@@ -17,6 +17,7 @@ class State:
         max_steps: int,
         system_prompt_id: str,
         use_server_subagents: bool,
+        chat_completions_system_prompt: Optional[str] = None,
         parent_state_id: Optional[str] = None,
         mode: Optional[str] = None,
         call_id: Optional[str] = None,
@@ -44,12 +45,19 @@ class State:
         self.skills_list = skills_list
         self.system_prompt_id = system_prompt_id
         self.use_server_subagents = use_server_subagents
+        if isinstance(chat_completions_system_prompt, str):
+            stripped = chat_completions_system_prompt.strip()
+            self.chat_completions_system_prompt = stripped or None
+        else:
+            self.chat_completions_system_prompt = None
         self.agent_md_path = agent_md_path
         self.thread_id = thread_id
         self.notes_md = notes_md
         self.call_metadata = self.set_call_metadata()
         self.messages = []
+        self.backend_api_mode = "responses"
         self.previous_response_id = None
+        self.last_backend_response_id = None
         self.mode = mode
         self.call_id = call_id
         self.max_steps = max_steps

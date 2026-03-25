@@ -16,6 +16,7 @@ from states import State, save_state, dump_storage
 from thread_store import ThreadSession
 from tools.skills.registry import get_skills_registry
 from utils.generate_message_id import generate_msg_id_sha256 as generate_message_id_func
+from utils.local_render_system_prompt import render_system_prompt
 
 
 class AgentExecutor:
@@ -48,17 +49,34 @@ class AgentExecutor:
         thread_session: ThreadSession | None = None
         thread_notes_md: str | None = None
         previous_response_id: str | None = None
+        backend_api_mode = str(config_dict.get("backend_api_mode", "responses")).strip().lower()
         if thread_id is not None:
             system_id = system or "cli"
             thread_session = ThreadSession.from_config(
                 config_dict=config_dict, system_id=system_id, thread_id=thread_id
             )
-            previous_response_id = thread_session.previous_response_id
+            if backend_api_mode == "responses":
+                previous_response_id = thread_session.previous_response_id
             meta = getattr(thread_session, "meta", None) or {}
             maybe_notes = meta.get("notes_md")
             thread_notes_md = (
                 maybe_notes if isinstance(maybe_notes, str) else None
             )
+
+        chat_completions_system_prompt: str | None = None
+        rendered_system_prompt: str | None = None
+        if backend_api_mode == "chat_completions":
+            prompt_path = config_dict.get("chat_completions_system_prompt_path")
+            if isinstance(prompt_path, str) and prompt_path.strip():
+                try:
+                    with open(prompt_path, "r", encoding="utf-8") as fd:
+                        chat_completions_system_prompt = fd.read().strip()
+                except OSError as e:
+                    if effective_verbose:
+                        print(
+                            f"Не удалось прочитать chat_completions system prompt: {prompt_path}"
+                        )
+                    raise e
 
         state_data = {
             "limit_project_metadata": config_dict.get("limit_project_metadata", False),
@@ -70,12 +88,35 @@ class AgentExecutor:
             "max_steps": config_dict["max_steps"],
             "skills_list": skills_list,
             "system_prompt_id": config_dict["system_prompt_id"],
+            "chat_completions_system_prompt": chat_completions_system_prompt,
             "use_server_subagents": config_dict.get("use_server_subagents", False),
             "agent_md_path": config_dict.get("agent_md_path"),
             "thread_id": thread_id,
             "notes_md": thread_notes_md,
         }
         state = State(**state_data)
+        state.backend_api_mode = backend_api_mode
+        if (
+            backend_api_mode == "chat_completions"
+            and isinstance(chat_completions_system_prompt, str)
+            and chat_completions_system_prompt.strip()
+        ):
+            # Для chat/completions backend'а system prompt должен быть в истории сообщений.
+            # Делаем это на уровне state-сессии, чтобы transport/formatting не знал
+            # про источники/файлы системного промпта.
+            rendered_system_prompt = render_system_prompt(
+                system_prompt=chat_completions_system_prompt.strip(),
+                tools_spec=state.tools,
+                project_info=state.initial_project_data,
+                specific_prompt=system,
+            )
+            state.messages = [
+                {
+                    "role": "system",
+                    "content": rendered_system_prompt,
+                    "id": generate_message_id_func("m_sys"),
+                }
+            ]
         save_state(state)
 
         with self._lock:
@@ -116,9 +157,14 @@ class AgentExecutor:
 
             base_messages: list[dict] = (
                 thread_session.history_messages
-                if previous_response_id is None
+                if backend_api_mode == "chat_completions" or previous_response_id is None
                 else []
             )
+            # При продолжении через `-t` в chat/completions mode мы отправляем
+            # бэкенду всю историю треда. Чтобы локальные лимиты `max_steps`
+            # не "сдвигались" из-за старых сообщений, будем пропускать инкремент
+            # счётчика шагов на первом `user_ask`-цикле, если история непустая.
+            state.skip_initial_user_ask_step_when_history = len(base_messages) > 0
             messages = [*base_messages]
             if technical_user_message is not None:
                 messages.append(technical_user_message)
@@ -127,9 +173,26 @@ class AgentExecutor:
             def _persist_thread_batch(batch_messages: list[dict]) -> None:
                 # Persist notes from in-memory state into thread meta.
                 # Tools mutate state, but ThreadSession writes self.meta to disk.
+                if (
+                    backend_api_mode == "chat_completions"
+                    and isinstance(rendered_system_prompt, str)
+                    and rendered_system_prompt.strip()
+                ):
+                    thread_session.meta[
+                        "chat_completions_system_prompt_rendered"
+                    ] = rendered_system_prompt
                 notes_md = getattr(state, "notes_md", None)
                 if isinstance(notes_md, str):
                     thread_session.meta["notes_md"] = notes_md
+                thread_session.meta["backend_api_mode"] = state.backend_api_mode
+                thread_session.backend_api_mode = state.backend_api_mode
+                last_backend_response_id = getattr(
+                    state, "last_backend_response_id", None
+                )
+                if isinstance(last_backend_response_id, str) and last_backend_response_id:
+                    thread_session.meta["last_backend_response_id"] = (
+                        last_backend_response_id
+                    )
                 thread_session.persist_batch(
                     batch_messages, previous_response_id=state.previous_response_id
                 )
