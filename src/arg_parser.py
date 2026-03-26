@@ -98,8 +98,17 @@ parser.add_argument(
     help="Идентификатор треда для продолжения диалога",
 )
 
+parser.add_argument(
+    "-n",
+    "--new",
+    action="store_true",
+    help="Начать тред заново: удалить существующие данные треда (только с -t/--thread-id)",
+)
+
 
 parsed_args, unknown_args = parser.parse_known_args()
+if parsed_args.new and not parsed_args.thread_id:
+    parser.error("Аргумент -n/--new можно использовать только вместе с -t/--thread-id.")
 run_args = parsed_args
 extra_config_overrides = _parse_unknown_args(list(unknown_args))
 

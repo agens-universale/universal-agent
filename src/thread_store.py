@@ -105,6 +105,25 @@ def ensure_threads_dir(threads_dir: str) -> None:
     os.makedirs(threads_dir, exist_ok=True)
 
 
+def reset_thread_files(threads_dir: str, system_id: str, thread_id: str) -> List[str]:
+    """
+    Удалить файлы конкретного треда (data/meta), включая legacy-формат.
+    Возвращает список удалённых путей.
+    """
+    sys_norm = sanitize_system_id(system_id)
+    normalized_thread_id = validate_thread_id(thread_id)
+    paths = []
+    paths.extend(_thread_paths(threads_dir, sys_norm, normalized_thread_id))
+    paths.extend(_thread_paths_legacy(threads_dir, normalized_thread_id))
+
+    deleted: List[str] = []
+    for path in paths:
+        if os.path.exists(path):
+            os.remove(path)
+            deleted.append(path)
+    return deleted
+
+
 def load_thread_messages(
     threads_dir: str, system_id: str, thread_id: str
 ) -> Tuple[List[Dict[str, Any]], Set[str], int]:

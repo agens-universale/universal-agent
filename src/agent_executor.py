@@ -13,7 +13,7 @@ from typing import Any
 from processing_responses import run_agent
 from run_context import RunContext
 from states import State, save_state, dump_storage
-from thread_store import ThreadSession
+from thread_store import ThreadSession, reset_thread_files, resolve_threads_dir
 from tools.skills.registry import get_skills_registry
 from utils.generate_message_id import generate_msg_id_sha256 as generate_message_id_func
 from utils.local_render_system_prompt import render_system_prompt
@@ -36,6 +36,7 @@ class AgentExecutor:
         message: str,
         *,
         thread_id: str | None = None,
+        start_new_thread: bool = False,
         system: str | None = None,
         verbose: bool | None = None,
     ) -> Any:
@@ -52,6 +53,9 @@ class AgentExecutor:
         backend_api_mode = str(config_dict.get("backend_api_mode", "responses")).strip().lower()
         if thread_id is not None:
             system_id = system or "cli"
+            if start_new_thread:
+                threads_dir = resolve_threads_dir(config_dict)
+                reset_thread_files(threads_dir, system_id=system_id, thread_id=thread_id)
             thread_session = ThreadSession.from_config(
                 config_dict=config_dict, system_id=system_id, thread_id=thread_id
             )

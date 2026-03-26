@@ -11,6 +11,7 @@ def run(
     ctx: RunContext,
     *,
     thread_id: str | None = None,
+    start_new_thread: bool = False,
     verbose: bool | None = None,
 ) -> Any:
     """
@@ -18,7 +19,10 @@ def run(
     Может вызываться как из CLI, так и из REST‑обёрток.
     """
     return AgentExecutor(ctx).run(
-        message, thread_id=thread_id, verbose=verbose
+        message,
+        thread_id=thread_id,
+        start_new_thread=start_new_thread,
+        verbose=verbose,
     )
 
 
@@ -40,9 +44,15 @@ def main() -> Any:
     query = arg_parser.run_args.query
     verbose = arg_parser.run_args.verbose
     thread_id = arg_parser.run_args.thread_id
+    start_new_thread = arg_parser.run_args.new
 
     executor = AgentExecutor(ctx)
-    return executor.run(query, thread_id=thread_id, verbose=verbose)
+    return executor.run(
+        query,
+        thread_id=thread_id,
+        start_new_thread=start_new_thread,
+        verbose=verbose,
+    )
 
 
 if __name__ == "__main__":
