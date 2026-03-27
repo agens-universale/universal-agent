@@ -3,9 +3,42 @@ agent_url : 'http://127.0.0.1:8080/v1/responses'
 backend_api_mode: responses
 # URL для chat/completions (используется только при backend_api_mode=chat_completions)
 completions_url: 'http://127.0.0.1:8080/v1/chat/completions'
+# Токен для chat/completions (например OpenRouter API key).
+# Если задан, в запрос отправляется заголовок Authorization: Bearer <token>.
+# Можно использовать алиас openrouter_api_key.
+# chat_completions_auth_token: "sk-or-v1-..."
+# openrouter_api_key: "sk-or-v1-..."
+# Необязательные заголовки OpenRouter:
+# openrouter_http_referer: "https://your-app.example"
+# openrouter_x_title: "mini-cli-pub"
 # Путь к системному промпту для режима chat/completions.
 # Если не задан, используется ./chat_completions_system_prompt.md в корне проекта.
 # chat_completions_system_prompt_path: "./chat_completions_system_prompt.md"
+# Параметры суммаризации для chat/completions.
+summary_params:
+  # Путь к промпту суммаризации длинного диалога.
+  # Если не задан, используется src/prompts/chat_completions_summary_prompt.md.
+  # chat_completions_summary_prompt_path: "./summary_prompt.md"
+  # Порог принудительной суммаризации в символах.
+  # <= 0: отключено, > 0: триггер при chars_total >= порога.
+  chat_completions_summary_trigger_chars: 0
+  # Размер батча инкрементальной суммаризации. Если не задан,
+  # рассчитывается как int(chat_completions_summary_trigger_chars * 1.4).
+  incremental_batch_chars: 0
+  # Максимум символов на одно сообщение при подготовке истории к суммаризации.
+  max_message_chars: 50000
+  # Максимум символов на весь диалог (берется хвост целыми сообщениями).
+  max_dialogue_chars: 1000000
+  # Если накопленный summary становится длиннее этого лимита, выполняется
+  # дополнительный шаг "summary-of-summary" для сжатия.
+  max_accumulated_summary_chars: 20000
+  # Лимит (в символах) для блока <original_user_messages> в итоговом <dialog_summary>.
+  # Берутся последние сообщения целиком, пока не исчерпан бюджет.
+  original_user_messages_max_chars: 20000
+  # Сколько последних сообщений включать в <last_dialog_steps>.
+  last_dialog_steps_count: 5
+  # Максимум символов на одно сообщение в <last_dialog_steps>.
+  last_dialog_step_message_max_chars: 5000
 use_ssl: True
 # Включить ретраи (до 5 попыток) с экспоненциальным backoff
 # для запросов к backend и MCP-серверам.

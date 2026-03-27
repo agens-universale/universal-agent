@@ -17,6 +17,11 @@ class ChatCompletionsPromptConfigTest(unittest.TestCase):
                 cfg["chat_completions_system_prompt_path"],
                 os.path.join(tmp_dir, "chat_completions_system_prompt.md"),
             )
+            self.assertTrue(
+                cfg["summary_params"]["chat_completions_summary_prompt_path"].endswith(
+                    "src/prompts/chat_completions_summary_prompt.md"
+                )
+            )
 
     def test_relative_prompt_path_resolved_from_config_dir(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -25,6 +30,8 @@ class ChatCompletionsPromptConfigTest(unittest.TestCase):
                 fd.write(
                     "backend_api_mode: chat_completions\n"
                     "chat_completions_system_prompt_path: prompts/chat.md\n"
+                    "summary_params:\n"
+                    "  chat_completions_summary_prompt_path: prompts/summary.md\n"
                 )
 
             cfg = load_config(cfg_path)
@@ -32,6 +39,127 @@ class ChatCompletionsPromptConfigTest(unittest.TestCase):
                 cfg["chat_completions_system_prompt_path"],
                 os.path.join(tmp_dir, "prompts", "chat.md"),
             )
+            self.assertEqual(
+                cfg["summary_params"]["chat_completions_summary_prompt_path"],
+                os.path.join(tmp_dir, "prompts", "summary.md"),
+            )
+
+    def test_summary_trigger_chars_defaults_to_zero(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            cfg_path = os.path.join(tmp_dir, "config.yml")
+            with open(cfg_path, "w", encoding="utf-8") as fd:
+                fd.write("backend_api_mode: chat_completions\n")
+            cfg = load_config(cfg_path)
+            self.assertEqual(
+                cfg["summary_params"]["chat_completions_summary_trigger_chars"], 0
+            )
+            self.assertEqual(cfg["summary_params"]["incremental_batch_chars"], 0)
+
+    def test_summary_trigger_chars_is_normalized_to_int(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            cfg_path = os.path.join(tmp_dir, "config.yml")
+            with open(cfg_path, "w", encoding="utf-8") as fd:
+                fd.write(
+                    "backend_api_mode: chat_completions\n"
+                    "summary_params:\n"
+                    "  chat_completions_summary_trigger_chars: '123'\n"
+                )
+            cfg = load_config(cfg_path)
+            self.assertEqual(
+                cfg["summary_params"]["chat_completions_summary_trigger_chars"], 123
+            )
+            self.assertEqual(cfg["summary_params"]["incremental_batch_chars"], 172)
+
+    def test_summary_params_defaults(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            cfg_path = os.path.join(tmp_dir, "config.yml")
+            with open(cfg_path, "w", encoding="utf-8") as fd:
+                fd.write("backend_api_mode: chat_completions\n")
+            cfg = load_config(cfg_path)
+            self.assertEqual(cfg["summary_params"]["last_dialog_steps_count"], 5)
+            self.assertEqual(
+                cfg["summary_params"]["last_dialog_step_message_max_chars"], 5000
+            )
+            self.assertEqual(cfg["summary_params"]["max_message_chars"], 50000)
+            self.assertEqual(cfg["summary_params"]["max_dialogue_chars"], 1000000)
+            self.assertEqual(
+                cfg["summary_params"]["max_accumulated_summary_chars"], 20000
+            )
+            self.assertEqual(
+                cfg["summary_params"]["original_user_messages_max_chars"], 20000
+            )
+
+    def test_summary_params_normalization(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            cfg_path = os.path.join(tmp_dir, "config.yml")
+            with open(cfg_path, "w", encoding="utf-8") as fd:
+                fd.write(
+                    "backend_api_mode: chat_completions\n"
+                    "summary_params:\n"
+                    "  chat_completions_summary_trigger_chars: '200'\n"
+                    "  incremental_batch_chars: '260'\n"
+                    "  chat_completions_summary_prompt_path: prompts/summary.md\n"
+                    "  max_message_chars: '45000'\n"
+                    "  max_dialogue_chars: '900000'\n"
+                    "  max_accumulated_summary_chars: '15000'\n"
+                    "  original_user_messages_max_chars: '12000'\n"
+                    "  last_dialog_steps_count: '7'\n"
+                    "  last_dialog_step_message_max_chars: '2500'\n"
+                )
+            cfg = load_config(cfg_path)
+            self.assertEqual(
+                cfg["summary_params"]["chat_completions_summary_prompt_path"],
+                os.path.join(tmp_dir, "prompts", "summary.md"),
+            )
+            self.assertEqual(
+                cfg["summary_params"]["chat_completions_summary_trigger_chars"], 200
+            )
+            self.assertEqual(cfg["summary_params"]["incremental_batch_chars"], 260)
+            self.assertEqual(cfg["summary_params"]["max_message_chars"], 45000)
+            self.assertEqual(cfg["summary_params"]["max_dialogue_chars"], 900000)
+            self.assertEqual(
+                cfg["summary_params"]["max_accumulated_summary_chars"], 15000
+            )
+            self.assertEqual(
+                cfg["summary_params"]["original_user_messages_max_chars"], 12000
+            )
+            self.assertEqual(cfg["summary_params"]["last_dialog_steps_count"], 7)
+            self.assertEqual(
+                cfg["summary_params"]["last_dialog_step_message_max_chars"], 2500
+            )
+
+    def test_incremental_batch_chars_derived_from_trigger(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            cfg_path = os.path.join(tmp_dir, "config.yml")
+            with open(cfg_path, "w", encoding="utf-8") as fd:
+                fd.write(
+                    "backend_api_mode: chat_completions\n"
+                    "summary_params:\n"
+                    "  chat_completions_summary_trigger_chars: 50000\n"
+                )
+            cfg = load_config(cfg_path)
+            self.assertEqual(
+                cfg["summary_params"]["incremental_batch_chars"], 70000
+            )
+
+    def test_chat_completions_auth_token_alias_from_openrouter(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            cfg_path = os.path.join(tmp_dir, "config.yml")
+            with open(cfg_path, "w", encoding="utf-8") as fd:
+                fd.write(
+                    "backend_api_mode: chat_completions\n"
+                    "openrouter_api_key: '  sk-or-v1-test-token  '\n"
+                    "openrouter_http_referer: '  https://example.org/app  '\n"
+                    "openrouter_x_title: '  my cli  '\n"
+                )
+            cfg = load_config(cfg_path)
+            self.assertEqual(
+                cfg["chat_completions_auth_token"], "sk-or-v1-test-token"
+            )
+            self.assertEqual(
+                cfg["openrouter_http_referer"], "https://example.org/app"
+            )
+            self.assertEqual(cfg["openrouter_x_title"], "my cli")
 
 
 if __name__ == "__main__":

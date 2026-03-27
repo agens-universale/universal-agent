@@ -229,6 +229,7 @@ def create_call_headers(state, ctx) -> Dict[str, str]:
     """
     config_dict = getattr(ctx, "config_dict", {}) or {}
     auth_connector = getattr(ctx, "auth_connector", None)
+    backend_mode = str(config_dict.get("backend_api_mode", "responses")).strip().lower()
 
     call_headers: Dict[str, str] = {
         "x_cl_id": str(config_dict.get("x_cl_id")),
@@ -238,9 +239,34 @@ def create_call_headers(state, ctx) -> Dict[str, str]:
     }
     if state.x_target is not None:
         call_headers["x-target"] = state.x_target
-    if auth_connector is not None:
+
+    chat_completions_auth_token = config_dict.get("chat_completions_auth_token")
+    use_chat_completions_token = (
+        backend_mode == "chat_completions"
+        and isinstance(chat_completions_auth_token, str)
+        and bool(chat_completions_auth_token.strip())
+    )
+    if use_chat_completions_token:
+        call_headers["Authorization"] = (
+            f"Bearer {chat_completions_auth_token.strip()}"
+        )
+    elif auth_connector is not None:
         token = auth_connector.get_token()
         call_headers["Authorization"] = f"Bearer {token}"
+
+    # OpenRouter рекомендует передавать HTTP-Referer и X-OpenRouter-Title
+    # приложения. Эти заголовки опциональны и применяются только для
+    # chat/completions режима.
+    if backend_mode == "chat_completions":
+        openrouter_http_referer = config_dict.get("openrouter_http_referer")
+        if isinstance(openrouter_http_referer, str) and openrouter_http_referer.strip():
+            call_headers["HTTP-Referer"] = openrouter_http_referer.strip()
+        openrouter_x_title = config_dict.get("openrouter_x_title")
+        if isinstance(openrouter_x_title, str) and openrouter_x_title.strip():
+            title = openrouter_x_title.strip()
+            call_headers["X-OpenRouter-Title"] = title
+            # Оставляем совместимость со старым алиасом заголовка.
+            call_headers["X-Title"] = title
     return call_headers
 
 

@@ -56,9 +56,26 @@
       ```
     - Пример конфигурации: `demo_config.yml`. Скопируйте в `config.yml` и отредактируйте под свой бэкенд и MCP-серверы.
     - В конфиге можно задать количество шагов агента (`max_steps`), логирование и другие параметры.
+    - Для режима `backend_api_mode: chat_completions` можно передавать токен провайдера
+      (например OpenRouter) через `chat_completions_auth_token` (или алиас `openrouter_api_key`);
+      тогда клиент отправит `Authorization: Bearer <token>` в запрос к `completions_url`.
+      Опционально для OpenRouter поддерживаются заголовки `openrouter_http_referer`
+      и `openrouter_x_title` (в запросе это `HTTP-Referer` и `X-OpenRouter-Title`).
     - Для хранения истории тредов:
       - по умолчанию используется папка `threads` в корне проекта (`mini-cli-pub/threads`);
       - опциональный параметр `threads_data_path` в `config.yml` должен быть **абсолютным путём** к директории хранения;
+      - параметры суммаризации в `chat_completions` задаются в секции `summary_params`:
+        - `summary_params.chat_completions_summary_trigger_chars`:
+          - `<= 0` (или отсутствует) — суммаризация выключена;
+          - `> 0` — при достижении/превышении порога тред архивируется (`data_*`/`meta_*` с суффиксом `__summarized_<YYYYMMDD_HHMMSS>`) и продолжается от compact summary;
+        - `summary_params.incremental_batch_chars` — размер батча для кумулятивной суммаризации; если не задан, используется `int(summary_params.chat_completions_summary_trigger_chars * 1.4)`;
+        - `summary_params.chat_completions_summary_prompt_path` (опционально), по умолчанию `src/prompts/chat_completions_summary_prompt.md`;
+        - `summary_params.max_message_chars` — максимум символов на одно сообщение при подготовке истории к суммаризации (по умолчанию `50000`);
+        - `summary_params.max_dialogue_chars` — максимум символов на весь диалог для суммаризации (по умолчанию `1000000`, берется хвост целыми сообщениями);
+        - `summary_params.max_accumulated_summary_chars` — лимит длины накопленного summary; при превышении запускается дополнительное сжатие summary-of-summary (по умолчанию `20000`);
+        - `summary_params.original_user_messages_max_chars` — лимит символов для блока `<original_user_messages>` в итоговом `<dialog_summary>`; сохраняются последние сообщения целиком (по умолчанию `20000`);
+        - `summary_params.last_dialog_steps_count` — сколько последних сообщений включать;
+        - `summary_params.last_dialog_step_message_max_chars` — максимум символов на одно сообщение (лишнее обрезается).
       - `gc-cli -q "..." -t my-thread` — продолжить диалог по треду;
       - `gc-cli -q "..." -t my-thread -n` (или `--new`) — начать тред заново с тем же id и удалить старые файлы этого треда (`data_*`/`meta_*`);
       - `-n/--new` можно использовать только вместе с `-t/--thread-id`.

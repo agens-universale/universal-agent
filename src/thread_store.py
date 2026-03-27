@@ -14,6 +14,53 @@ def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _utc_now_suffix() -> str:
+    return datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+
+
+def _message_content_to_text(content: Any) -> str:
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: List[str] = []
+        for item in content:
+            if isinstance(item, dict):
+                text = item.get("text")
+                if isinstance(text, str):
+                    parts.append(text)
+                    continue
+            parts.append(json.dumps(item, ensure_ascii=False, sort_keys=True))
+        return "\n".join(parts)
+    if isinstance(content, dict):
+        return json.dumps(content, ensure_ascii=False, sort_keys=True)
+    if content is None:
+        return ""
+    return str(content)
+
+
+def message_text_for_summary(message: Dict[str, Any]) -> str:
+    if not isinstance(message, dict):
+        return ""
+    msg_type = str(message.get("type") or "message")
+    if msg_type == "function_call":
+        name = str(message.get("name") or "")
+        arguments = message.get("arguments")
+        return f"[function_call] {name}\n{_message_content_to_text(arguments)}"
+    if msg_type == "function_call_output":
+        output = message.get("output")
+        return f"[function_call_output]\n{_message_content_to_text(output)}"
+    role = str(message.get("role") or "")
+    content = _message_content_to_text(message.get("content"))
+    return f"[{role}] {content}".strip()
+
+
+def calc_messages_chars_total(messages: List[Dict[str, Any]]) -> int:
+    total = 0
+    for message in messages:
+        total += len(message_text_for_summary(message))
+    return total
+
+
 def make_message_key(message: Dict[str, Any]) -> str:
     msg_id = message.get("id")
     if isinstance(msg_id, str) and len(msg_id) > 0:
@@ -319,6 +366,7 @@ class ThreadSession:
         *,
         previous_response_id: Optional[str],
     ) -> None:
+        known_before = set(self.known_message_keys)
         written = append_new_thread_messages(
             self.threads_dir,
             self.system_id,
@@ -328,6 +376,13 @@ class ThreadSession:
             start_seq=self.persisted_messages_count,
         )
         self.persisted_messages_count += written
+        known_seen = set(known_before)
+        for message in batch_messages:
+            key = make_message_key(message)
+            if key in known_seen:
+                continue
+            self.history_messages.append(message)
+            known_seen.add(key)
         self.previous_response_id = previous_response_id
         # Preserve arbitrary meta fields (e.g. notes_md), otherwise tools that
         # update meta would get their data wiped on the next persist_batch().
@@ -355,3 +410,92 @@ class ThreadSession:
         else:
             base_meta.pop("chat_completions_system_prompt_rendered", None)
         save_thread_meta(self.threads_dir, self.system_id, self.thread_id, base_meta)
+
+    def archive_and_compact_with_summary(
+        self,
+        *,
+        summary_text: str,
+        notes_md: str,
+        user_messages_log: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
+        data_path, meta_path = _thread_paths(self.threads_dir, self.system_id, self.thread_id)
+        ts_suffix = _utc_now_suffix()
+        archive_data_path = data_path.replace(".jsonl", f"__summarized_{ts_suffix}.jsonl")
+        archive_meta_path = meta_path.replace(".json", f"__summarized_{ts_suffix}.json")
+
+        data_exists = os.path.exists(data_path)
+        meta_exists = os.path.exists(meta_path)
+        moved_data = False
+        moved_meta = False
+        try:
+            if data_exists:
+                os.replace(data_path, archive_data_path)
+                moved_data = True
+            if meta_exists:
+                os.replace(meta_path, archive_meta_path)
+                moved_meta = True
+        except Exception:
+            if moved_meta and not os.path.exists(meta_path):
+                os.replace(archive_meta_path, meta_path)
+            if moved_data and not os.path.exists(data_path):
+                os.replace(archive_data_path, data_path)
+            raise
+
+        summary_message = {
+            "role": "user",
+            "content": (
+                "Summarized context from previous dialogue.\n"
+                f"{summary_text.strip()}"
+            ),
+        }
+        compact_messages: List[Dict[str, Any]] = [summary_message]
+
+        known_message_keys: Set[str] = set()
+        seq = 0
+        with open(data_path, "w", encoding="utf-8") as fd:
+            for message in compact_messages:
+                seq += 1
+                record = {
+                    "type": "message",
+                    "thread_id": self.thread_id,
+                    "system": self.system_id,
+                    "seq": seq,
+                    "ts": _utc_now_iso(),
+                    "payload": message,
+                }
+                fd.write(json.dumps(record, ensure_ascii=False) + "\n")
+                known_message_keys.add(make_message_key(message))
+
+        new_meta = {
+            "created_at": _utc_now_iso(),
+            "previous_response_id": None,
+            "backend_api_mode": self.backend_api_mode,
+            "messages_count": len(compact_messages),
+            "notes_md": notes_md.strip(),
+            "last_summarized_at": _utc_now_iso(),
+            "last_summary_archive_suffix": ts_suffix,
+        }
+        if isinstance(user_messages_log, list):
+            new_meta["user_messages_log"] = [
+                str(x).strip() for x in user_messages_log if str(x).strip()
+            ]
+        prompt = self.meta.get("chat_completions_system_prompt_rendered")
+        if isinstance(prompt, str) and prompt.strip():
+            new_meta["chat_completions_system_prompt_rendered"] = prompt
+        last_backend_response_id = self.meta.get("last_backend_response_id")
+        if isinstance(last_backend_response_id, str) and last_backend_response_id.strip():
+            new_meta["last_backend_response_id"] = last_backend_response_id
+        save_thread_meta(self.threads_dir, self.system_id, self.thread_id, new_meta)
+
+        self.history_messages = compact_messages
+        self.runtime_messages = []
+        self.known_message_keys = known_message_keys
+        self.persisted_messages_count = len(compact_messages)
+        self.previous_response_id = None
+        self.meta = new_meta
+        return {
+            "archive_suffix": ts_suffix,
+            "archive_data_path": archive_data_path if data_exists else None,
+            "archive_meta_path": archive_meta_path if meta_exists else None,
+            "new_messages_count": len(compact_messages),
+        }

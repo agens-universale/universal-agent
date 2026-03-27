@@ -8,9 +8,205 @@ import yaml
 from utils.prod_auth import AuthConnector
 
 
+_DEFAULT_LAST_DIALOG_STEPS_COUNT = 5
+_DEFAULT_LAST_DIALOG_STEP_MESSAGE_MAX_CHARS = 5000
+_DEFAULT_MAX_MESSAGE_CHARS = 50000
+_DEFAULT_MAX_DIALOGUE_CHARS = 1000000
+_DEFAULT_MAX_ACCUMULATED_SUMMARY_CHARS = 20000
+_DEFAULT_ORIGINAL_USER_MESSAGES_MAX_CHARS = 20000
+_DEFAULT_INCREMENTAL_BATCH_MULTIPLIER = 1.4
+
+
 def _default_config_path() -> str:
     base_dir = os.path.dirname(os.path.abspath(__file__))
     return os.path.join(base_dir, "..", "config.yml")
+
+
+def _resolve_path_from_config_dir(path_value: str, config_dir: str) -> str:
+    if os.path.isabs(path_value):
+        return path_value
+    return os.path.join(config_dir, path_value)
+
+
+def _maybe_override_and_resolve(
+    maybe_env_value: Optional[str], key: str, config_dict: Dict[str, Any], config_dir: str
+) -> None:
+    if not isinstance(maybe_env_value, str):
+        return
+    env_value = maybe_env_value.strip()
+    if not env_value:
+        return
+    config_dict[key] = _resolve_path_from_config_dir(env_value, config_dir)
+
+
+def _safe_int(value: Any, default: int) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _normalize_agent_md_path(config_dict: Dict[str, Any], config_dir: str) -> None:
+    agent_md_path = config_dict.get("agent_md_path")
+    if (
+        isinstance(agent_md_path, str)
+        and agent_md_path.strip()
+        and not os.path.isabs(agent_md_path)
+    ):
+        config_dict["agent_md_path"] = os.path.join(config_dir, agent_md_path)
+
+
+def _normalize_chat_system_prompt_path(config_dict: Dict[str, Any], config_dir: str) -> None:
+    chat_prompt_path = config_dict.get("chat_completions_system_prompt_path")
+    if isinstance(chat_prompt_path, str) and chat_prompt_path.strip():
+        config_dict["chat_completions_system_prompt_path"] = _resolve_path_from_config_dir(
+            chat_prompt_path.strip(), config_dir
+        )
+    else:
+        config_dict["chat_completions_system_prompt_path"] = os.path.join(
+            config_dir, "chat_completions_system_prompt.md"
+        )
+
+
+def _normalize_backend_api_mode(config_dict: Dict[str, Any]) -> None:
+    backend_api_mode_raw = config_dict.get("backend_api_mode", "responses")
+    backend_api_mode = str(backend_api_mode_raw).strip().lower()
+    if backend_api_mode not in {"responses", "chat_completions"}:
+        raise ValueError(
+            "backend_api_mode должен быть 'responses' или 'chat_completions'"
+        )
+    config_dict["backend_api_mode"] = backend_api_mode
+
+
+def _normalize_chat_completions_auth(config_dict: Dict[str, Any]) -> None:
+    auth_token_raw = config_dict.get("chat_completions_auth_token")
+    openrouter_api_key_raw = config_dict.get("openrouter_api_key")
+    # Для удобства поддерживаем openrouter_api_key как алиас универсального
+    # chat_completions_auth_token.
+    effective_token_raw = (
+        auth_token_raw if auth_token_raw is not None else openrouter_api_key_raw
+    )
+    if isinstance(effective_token_raw, str) and effective_token_raw.strip():
+        config_dict["chat_completions_auth_token"] = effective_token_raw.strip()
+    else:
+        config_dict["chat_completions_auth_token"] = None
+
+    http_referer_raw = config_dict.get("openrouter_http_referer")
+    if isinstance(http_referer_raw, str) and http_referer_raw.strip():
+        config_dict["openrouter_http_referer"] = http_referer_raw.strip()
+    else:
+        config_dict["openrouter_http_referer"] = None
+
+    x_title_raw = config_dict.get("openrouter_x_title")
+    if isinstance(x_title_raw, str) and x_title_raw.strip():
+        config_dict["openrouter_x_title"] = x_title_raw.strip()
+    else:
+        config_dict["openrouter_x_title"] = None
+
+
+def _normalize_summary_params(config_dict: Dict[str, Any], config_dir: str) -> None:
+    summary_params_raw = config_dict.get("summary_params")
+    summary_params = summary_params_raw if isinstance(summary_params_raw, dict) else {}
+
+    summary_prompt_path = summary_params.get("chat_completions_summary_prompt_path")
+    if isinstance(summary_prompt_path, str) and summary_prompt_path.strip():
+        normalized_summary_prompt_path = _resolve_path_from_config_dir(
+            summary_prompt_path.strip(), config_dir
+        )
+    else:
+        normalized_summary_prompt_path = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)),
+            "prompts",
+            "chat_completions_summary_prompt.md",
+        )
+
+    summary_trigger = _safe_int(
+        summary_params.get("chat_completions_summary_trigger_chars", 0), 0
+    )
+    steps_count = _safe_int(
+        summary_params.get(
+            "last_dialog_steps_count", _DEFAULT_LAST_DIALOG_STEPS_COUNT
+        ),
+        _DEFAULT_LAST_DIALOG_STEPS_COUNT,
+    )
+    message_max_chars = _safe_int(
+        summary_params.get(
+            "last_dialog_step_message_max_chars",
+            _DEFAULT_LAST_DIALOG_STEP_MESSAGE_MAX_CHARS,
+        ),
+        _DEFAULT_LAST_DIALOG_STEP_MESSAGE_MAX_CHARS,
+    )
+    max_message_chars = _safe_int(
+        summary_params.get("max_message_chars", _DEFAULT_MAX_MESSAGE_CHARS),
+        _DEFAULT_MAX_MESSAGE_CHARS,
+    )
+    max_dialogue_chars = _safe_int(
+        summary_params.get("max_dialogue_chars", _DEFAULT_MAX_DIALOGUE_CHARS),
+        _DEFAULT_MAX_DIALOGUE_CHARS,
+    )
+    max_accum_summary_chars = _safe_int(
+        summary_params.get(
+            "max_accumulated_summary_chars", _DEFAULT_MAX_ACCUMULATED_SUMMARY_CHARS
+        ),
+        _DEFAULT_MAX_ACCUMULATED_SUMMARY_CHARS,
+    )
+    original_user_messages_max_chars = _safe_int(
+        summary_params.get(
+            "original_user_messages_max_chars",
+            _DEFAULT_ORIGINAL_USER_MESSAGES_MAX_CHARS,
+        ),
+        _DEFAULT_ORIGINAL_USER_MESSAGES_MAX_CHARS,
+    )
+    incremental_batch_chars_raw = summary_params.get("incremental_batch_chars")
+    derived_incremental_default = int(
+        summary_trigger * _DEFAULT_INCREMENTAL_BATCH_MULTIPLIER
+    )
+    incremental_batch_chars = _safe_int(
+        incremental_batch_chars_raw, derived_incremental_default
+    )
+
+    if steps_count <= 0:
+        steps_count = _DEFAULT_LAST_DIALOG_STEPS_COUNT
+    if message_max_chars <= 0:
+        message_max_chars = _DEFAULT_LAST_DIALOG_STEP_MESSAGE_MAX_CHARS
+    if max_message_chars <= 0:
+        max_message_chars = _DEFAULT_MAX_MESSAGE_CHARS
+    if max_dialogue_chars <= 0:
+        max_dialogue_chars = _DEFAULT_MAX_DIALOGUE_CHARS
+    if max_accum_summary_chars <= 0:
+        max_accum_summary_chars = _DEFAULT_MAX_ACCUMULATED_SUMMARY_CHARS
+    if original_user_messages_max_chars <= 0:
+        original_user_messages_max_chars = _DEFAULT_ORIGINAL_USER_MESSAGES_MAX_CHARS
+    if incremental_batch_chars <= 0:
+        incremental_batch_chars = (
+            int(summary_trigger * _DEFAULT_INCREMENTAL_BATCH_MULTIPLIER)
+            if summary_trigger > 0
+            else 0
+        )
+
+    config_dict["summary_params"] = {
+        "chat_completions_summary_prompt_path": normalized_summary_prompt_path,
+        "chat_completions_summary_trigger_chars": summary_trigger,
+        "incremental_batch_chars": incremental_batch_chars,
+        "last_dialog_steps_count": steps_count,
+        "last_dialog_step_message_max_chars": message_max_chars,
+        "max_message_chars": max_message_chars,
+        "max_dialogue_chars": max_dialogue_chars,
+        "max_accumulated_summary_chars": max_accum_summary_chars,
+        "original_user_messages_max_chars": original_user_messages_max_chars,
+    }
+
+
+def _apply_swarm_env_overrides(config_dict: Dict[str, Any], config_dir: str) -> None:
+    _maybe_override_and_resolve(
+        os.environ.get("SWARM_AGENTMD_PATH"), "agent_md_path", config_dict, config_dir
+    )
+    _maybe_override_and_resolve(
+        os.environ.get("SWARM_THREADS_DIR"), "threads_data_path", config_dict, config_dir
+    )
+    _maybe_override_and_resolve(
+        os.environ.get("SWARM_SKILLS_DIR"), "skills_data_path", config_dict, config_dir
+    )
 
 
 def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
@@ -26,61 +222,16 @@ def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
 
     with open(path, "r", encoding="utf-8") as file:
         config_dict = yaml.safe_load(file) or {}
-
-    def _resolve_path_from_config_dir(path_value: str) -> str:
-        if os.path.isabs(path_value):
-            return path_value
-        return os.path.join(config_dir, path_value)
-
-    def _maybe_override_and_resolve(maybe_env_value: Optional[str], key: str) -> None:
-        """
-        Override config_dict[key] from env and keep it platform independent.
-        If env value is relative - resolve it relative to config.yml directory.
-        """
-        if not isinstance(maybe_env_value, str):
-            return
-        env_value = maybe_env_value.strip()
-        if not env_value:
-            return
-        config_dict[key] = _resolve_path_from_config_dir(env_value)
-
-    # Приводим относительные пути к абсолютным относительно каталога config.yml.
-    # Это важно для корректной подстановки promptVariables.userInstructions,
-    # т.к. в State используется open(agent_md_path) без дополнительного cwd-резолва.
-    agent_md_path = config_dict.get("agent_md_path")
-    if isinstance(agent_md_path, str) and agent_md_path.strip() and not os.path.isabs(agent_md_path):
-        config_dict["agent_md_path"] = os.path.join(config_dir, agent_md_path)
-
-    # Путь к локальному системному промпту для chat/completions.
-    # Если не задан в config, используем файл в корне проекта.
-    chat_prompt_path = config_dict.get("chat_completions_system_prompt_path")
-    if isinstance(chat_prompt_path, str) and chat_prompt_path.strip():
-        config_dict["chat_completions_system_prompt_path"] = _resolve_path_from_config_dir(
-            chat_prompt_path.strip()
-        )
-    else:
-        config_dict["chat_completions_system_prompt_path"] = os.path.join(
-            config_dir, "chat_completions_system_prompt.md"
-        )
-
-    # Swarm-режим прокидывает путь до agent.md / threads / skills через SWARM_* env.
-    # Раньше эти env никак не влияли на CLI-запуск в песочнице, из-за чего
-    # swarm-ручка могла использовать не тот agent.md.
-    _maybe_override_and_resolve(os.environ.get("SWARM_AGENTMD_PATH"), "agent_md_path")
-    _maybe_override_and_resolve(os.environ.get("SWARM_THREADS_DIR"), "threads_data_path")
-    _maybe_override_and_resolve(os.environ.get("SWARM_SKILLS_DIR"), "skills_data_path")
+    _normalize_agent_md_path(config_dict, config_dir)
+    _normalize_chat_system_prompt_path(config_dict, config_dir)
+    _normalize_summary_params(config_dict, config_dir)
+    _apply_swarm_env_overrides(config_dict, config_dir)
 
     verify = config_dict.get("use_ssl", True)
     if verify is False:
         urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-
-    backend_api_mode_raw = config_dict.get("backend_api_mode", "responses")
-    backend_api_mode = str(backend_api_mode_raw).strip().lower()
-    if backend_api_mode not in {"responses", "chat_completions"}:
-        raise ValueError(
-            "backend_api_mode должен быть 'responses' или 'chat_completions'"
-        )
-    config_dict["backend_api_mode"] = backend_api_mode
+    _normalize_backend_api_mode(config_dict)
+    _normalize_chat_completions_auth(config_dict)
 
     return config_dict
 
