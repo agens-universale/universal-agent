@@ -3,7 +3,7 @@ import re
 from dataclasses import dataclass
 from typing import Any, Dict, List
 
-from thread_store import message_text_for_summary
+from summarize.summary_utils import message_text_for_summary
 from user_message_policy import is_technical_user_message_text
 from utils.connect_backend import (
     create_call_headers,

@@ -96,7 +96,7 @@ def test_e2e_two_sequential_summaries_keep_user_log_order_and_no_original_block(
             ctx=_ctx(),
             state=state,
             summary_trigger_chars=1,
-            trigger_reason="during_run",
+            trigger_reason="post_step",
             is_cli_mode=False,
             on_summary_applied=lambda event: session.archive_and_compact_summary_payload(
                 event.get("summary_payload", {})
@@ -125,7 +125,7 @@ def test_e2e_two_sequential_summaries_keep_user_log_order_and_no_original_block(
             ctx=_ctx(),
             state=state,
             summary_trigger_chars=1,
-            trigger_reason="during_run",
+            trigger_reason="post_step",
             is_cli_mode=False,
             on_summary_applied=lambda event: session.archive_and_compact_summary_payload(
                 event.get("summary_payload", {})
@@ -146,6 +146,13 @@ def test_e2e_two_sequential_summaries_keep_user_log_order_and_no_original_block(
         assert meta_after_second.get("notes_md", "") == ""
         assert isinstance(meta_after_second.get("dialog_steps_offset"), int)
         assert meta_after_second.get("messages_count") == 1
+        assert meta_after_second.get("previous_response_id") is None
+        assert meta_after_second.get("user_messages_log") == [
+            "[user] first request",
+            "[user] second request",
+            "[user] third request",
+            "[user] fourth request",
+        ]
         rows_after_second = _read_current_data_rows(tmp_dir, thread_id)
         assert len(rows_after_second) == 1
         second_compact_content = rows_after_second[0]["payload"]["content"]
@@ -202,7 +209,7 @@ def test_e2e_user_log_skips_technical_and_tool_messages(monkeypatch):
             ctx=_ctx(),
             state=state,
             summary_trigger_chars=1,
-            trigger_reason="during_run",
+            trigger_reason="post_step",
             is_cli_mode=False,
             on_summary_applied=lambda event: session.archive_and_compact_summary_payload(
                 event.get("summary_payload", {})

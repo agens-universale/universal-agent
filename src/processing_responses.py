@@ -265,6 +265,7 @@ def run_agent(
     *,
     get_full_history_messages: Optional[Callable[[], List[Dict]]] = None,
     persist_messages_callback: Optional[Callable[[List[Dict]], None]] = None,
+    post_step_hook: Optional[Callable[[], None]] = None,
     get_pending_messages: Optional[Callable[[], List[Dict]]] = None,
     check_stop: Optional[Callable[[], bool]] = None,
 ) -> Union[str, None]:
@@ -375,6 +376,15 @@ def run_agent(
                 if backend_mode == "responses":
                     state.previous_response_id = response_id
                 state.last_backend_response_id = response_id
+                if post_step_hook is not None:
+                    try:
+                        post_step_hook()
+                    except Exception as post_step_exc:
+                        run_logger.warning(
+                            "Post-step hook warning: %s",
+                            post_step_exc,
+                            exc_info=True,
+                        )
             else:
                 raise ValueError(f"unconventional mode: {mode}")
         except WrongFunctionArgumentsException as e:

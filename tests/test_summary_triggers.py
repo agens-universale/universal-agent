@@ -101,9 +101,9 @@ class SummaryTriggersTest(unittest.TestCase):
 
             def _fake_run_agent(messages, state, _ctx, **kwargs):
                 call_order.append("run_agent")
-                callback = kwargs.get("persist_messages_callback")
-                if callback is not None:
-                    callback([{"type": "function_call_output", "call_id": "c1", "output": "ok"}])
+                post_step_hook = kwargs.get("post_step_hook")
+                if post_step_hook is not None:
+                    post_step_hook()
                 return "ok"
 
             def _record_summary_call(*args, **kwargs):
@@ -126,7 +126,7 @@ class SummaryTriggersTest(unittest.TestCase):
 
             self.assertEqual(call_order[0], "summary:pre_run")
             self.assertIn("run_agent", call_order)
-            self.assertIn("summary:during_run", call_order)
+            self.assertIn("summary:post_step", call_order)
 
     def test_chat_completions_in_memory_calls_pre_run_and_post_step_summary(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -134,9 +134,9 @@ class SummaryTriggersTest(unittest.TestCase):
             calls: list[str] = []
 
             def _fake_run_agent(messages, state, _ctx, **kwargs):
-                callback = kwargs.get("persist_messages_callback")
-                if callback is not None:
-                    callback([{"role": "user", "content": "u1"}])
+                post_step_hook = kwargs.get("post_step_hook")
+                if post_step_hook is not None:
+                    post_step_hook()
                 return "ok"
 
             def _record(*args, **kwargs):
@@ -154,7 +154,7 @@ class SummaryTriggersTest(unittest.TestCase):
                 result = executor.run("hello", system="cli", verbose=False)
                 self.assertEqual(result, "ok")
 
-            self.assertEqual(calls, ["pre_run", "during_run"])
+            self.assertEqual(calls, ["pre_run", "post_step"])
 
     def test_responses_mode_does_not_call_summary(self):
         with tempfile.TemporaryDirectory() as tmp_dir:

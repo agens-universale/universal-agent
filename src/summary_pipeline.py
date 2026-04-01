@@ -1,8 +1,10 @@
 from typing import Any, Callable, Dict, List, Optional
 
-from summarize.summary_utils import apply_summary_state_patch
+from summarize.summary_utils import (
+    apply_summary_state_patch,
+    calc_messages_chars_total,
+)
 from summarize.thread_summarizer import summarize_dialog_via_chat_completions
-from thread_store import calc_messages_chars_total
 
 
 def without_system_messages(messages_list: List[dict]) -> List[dict]:

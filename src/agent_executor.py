@@ -200,11 +200,20 @@ class AgentExecutor:
                     return True
             return False
 
-        if (
-            thread_session is not None
-            and backend_api_mode == "chat_completions"
-            and summary_trigger_chars > 0
-        ):
+        def _handle_summary_applied(event: dict[str, Any]) -> None:
+            if thread_session is not None:
+                thread_session.archive_and_compact_summary_payload(
+                    event.get("summary_payload", {})
+                )
+            _append_summary_trace(
+                trigger_reason=str(event.get("trigger_reason") or ""),
+                trace_data=event.get("summary_trace", {}),
+                newly_summarized_message_id=str(
+                    event.get("newly_summarized_message_id") or ""
+                ),
+            )
+
+        if backend_api_mode == "chat_completions" and summary_trigger_chars > 0:
             try:
                 maybe_run_summary_compaction(
                     ctx=self._ctx,
@@ -212,50 +221,23 @@ class AgentExecutor:
                     summary_trigger_chars=summary_trigger_chars,
                     trigger_reason="pre_run",
                     is_cli_mode=is_cli_mode,
-                    on_summary_applied=lambda event: (
-                        thread_session.archive_and_compact_summary_payload(
-                            event.get("summary_payload", {})
-                        ),
-                        _append_summary_trace(
-                            trigger_reason=str(event.get("trigger_reason") or ""),
-                            trace_data=event.get("summary_trace", {}),
-                            newly_summarized_message_id=str(
-                                event.get("newly_summarized_message_id") or ""
-                            ),
-                        ),
-                    ),
+                    on_summary_applied=_handle_summary_applied,
                 )
             except Exception as summarize_exc:
                 if logger is not None:
-                    logger.warning(
-                        "summary_failed reason=pre_run thread_id=%s error=%s",
-                        thread_session.thread_id,
-                        summarize_exc,
-                        exc_info=True,
-                    )
-        elif backend_api_mode == "chat_completions" and summary_trigger_chars > 0:
-            try:
-                maybe_run_summary_compaction(
-                    ctx=self._ctx,
-                    state=state,
-                    summary_trigger_chars=summary_trigger_chars,
-                    trigger_reason="pre_run",
-                    is_cli_mode=is_cli_mode,
-                    on_summary_applied=lambda event: _append_summary_trace(
-                        trigger_reason=str(event.get("trigger_reason") or ""),
-                        trace_data=event.get("summary_trace", {}),
-                        newly_summarized_message_id=str(
-                            event.get("newly_summarized_message_id") or ""
-                        ),
-                    ),
-                )
-            except Exception as summarize_exc:
-                if logger is not None:
-                    logger.warning(
-                        "summary_failed reason=pre_run error=%s",
-                        summarize_exc,
-                        exc_info=True,
-                    )
+                    if thread_session is not None:
+                        logger.warning(
+                            "summary_failed reason=pre_run thread_id=%s error=%s",
+                            thread_session.thread_id,
+                            summarize_exc,
+                            exc_info=True,
+                        )
+                    else:
+                        logger.warning(
+                            "summary_failed reason=pre_run error=%s",
+                            summarize_exc,
+                            exc_info=True,
+                        )
                 if is_cli_mode:
                     print(
                         "[summary] Ошибка суммаризации: "
@@ -355,79 +337,56 @@ class AgentExecutor:
                 thread_session.persist_batch(
                     step_messages, previous_response_id=state.previous_response_id
                 )
-                if (
-                    state.backend_api_mode != "chat_completions"
-                    or summary_trigger_chars <= 0
-                ):
-                    return
-                try:
-                    maybe_run_summary_compaction(
-                        ctx=self._ctx,
-                        state=state,
-                        summary_trigger_chars=summary_trigger_chars,
-                        trigger_reason="during_run",
-                        is_cli_mode=is_cli_mode,
-                        on_summary_applied=lambda event: (
-                            thread_session.archive_and_compact_summary_payload(
-                                event.get("summary_payload", {})
-                            ),
-                            _append_summary_trace(
-                                trigger_reason=str(event.get("trigger_reason") or ""),
-                                trace_data=event.get("summary_trace", {}),
-                                newly_summarized_message_id=str(
-                                    event.get("newly_summarized_message_id") or ""
-                                ),
-                            ),
-                        ),
-                    )
-                except Exception as summarize_exc:
-                    if logger is not None:
-                        logger.warning(
-                            "summary_failed reason=during_run thread_id=%s error=%s",
-                            thread_session.thread_id,
-                            summarize_exc,
-                            exc_info=True,
-                        )
-                    if is_cli_mode:
-                        print(
-                            "[summary] Ошибка суммаризации: "
-                            f"thread={thread_session.thread_id}, error={summarize_exc}"
-                        )
 
             persist_messages_callback = _persist_thread_batch
             get_full_history_messages = thread_session.get_full_history_messages
         elif backend_api_mode == "chat_completions" and summary_trigger_chars > 0:
             def _persist_runtime_batch(step_messages: list[dict]) -> None:
                 state.append_user_messages_to_log(step_messages)
-                try:
-                    maybe_run_summary_compaction(
-                        ctx=self._ctx,
-                        state=state,
-                        summary_trigger_chars=summary_trigger_chars,
-                        trigger_reason="during_run",
-                        is_cli_mode=is_cli_mode,
-                        on_summary_applied=lambda event: _append_summary_trace(
-                            trigger_reason=str(event.get("trigger_reason") or ""),
-                            trace_data=event.get("summary_trace", {}),
-                            newly_summarized_message_id=str(
-                                event.get("newly_summarized_message_id") or ""
-                            ),
-                        ),
-                    )
-                except Exception as summarize_exc:
-                    if logger is not None:
+
+            persist_messages_callback = _persist_runtime_batch
+
+        def _post_step_summary_hook() -> None:
+            if (
+                state.backend_api_mode != "chat_completions"
+                or summary_trigger_chars <= 0
+            ):
+                return
+            try:
+                maybe_run_summary_compaction(
+                    ctx=self._ctx,
+                    state=state,
+                    summary_trigger_chars=summary_trigger_chars,
+                    trigger_reason="post_step",
+                    is_cli_mode=is_cli_mode,
+                    on_summary_applied=_handle_summary_applied,
+                )
+            except Exception as summarize_exc:
+                if logger is not None:
+                    if thread_session is not None:
                         logger.warning(
-                            "summary_failed reason=during_run error=%s",
+                            "summary_failed reason=post_step thread_id=%s error=%s",
+                            thread_session.thread_id,
                             summarize_exc,
                             exc_info=True,
                         )
-                    if is_cli_mode:
+                    else:
+                        logger.warning(
+                            "summary_failed reason=post_step error=%s",
+                            summarize_exc,
+                            exc_info=True,
+                        )
+                if is_cli_mode:
+                    if thread_session is not None:
+                        print(
+                            "[summary] Ошибка суммаризации: "
+                            f"thread={thread_session.thread_id}, error={summarize_exc}"
+                        )
+                    else:
                         print(
                             "[summary] Ошибка суммаризации: "
                             f"error={summarize_exc}"
                         )
-
-            persist_messages_callback = _persist_runtime_batch
 
         def get_pending_messages() -> list[dict]:
             with self._lock:
@@ -445,6 +404,7 @@ class AgentExecutor:
             self._ctx,
             get_full_history_messages=get_full_history_messages,
             persist_messages_callback=persist_messages_callback,
+            post_step_hook=_post_step_summary_hook,
             get_pending_messages=get_pending_messages,
             check_stop=check_stop,
         )

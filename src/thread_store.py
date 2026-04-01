@@ -28,54 +28,11 @@ def _utc_now_suffix() -> str:
     return datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
 
 
-def _message_content_to_text(content: Any) -> str:
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        parts: List[str] = []
-        for item in content:
-            if isinstance(item, dict):
-                text = item.get("text")
-                if isinstance(text, str):
-                    parts.append(text)
-                    continue
-            parts.append(json.dumps(item, ensure_ascii=False, sort_keys=True))
-        return "\n".join(parts)
-    if isinstance(content, dict):
-        return json.dumps(content, ensure_ascii=False, sort_keys=True)
-    if content is None:
-        return ""
-    return str(content)
-
-
 def _strip_original_user_messages_block(summary_text: str) -> str:
     if not isinstance(summary_text, str):
         return ""
     cleaned = _ORIGINAL_USER_MESSAGES_BLOCK_RE.sub("", summary_text)
     return cleaned.strip()
-
-
-def message_text_for_summary(message: Dict[str, Any]) -> str:
-    if not isinstance(message, dict):
-        return ""
-    msg_type = str(message.get("type") or "message")
-    if msg_type == "function_call":
-        name = str(message.get("name") or "")
-        arguments = message.get("arguments")
-        return f"[function_call] {name}\n{_message_content_to_text(arguments)}"
-    if msg_type == "function_call_output":
-        output = message.get("output")
-        return f"[function_call_output]\n{_message_content_to_text(output)}"
-    role = str(message.get("role") or "")
-    content = _message_content_to_text(message.get("content"))
-    return f"[{role}] {content}".strip()
-
-
-def calc_messages_chars_total(messages: List[Dict[str, Any]]) -> int:
-    total = 0
-    for message in messages:
-        total += len(message_text_for_summary(message))
-    return total
 
 
 def make_message_key(message: Dict[str, Any]) -> str:

@@ -113,7 +113,7 @@ def test_maybe_run_summary_compaction_twice_uses_meta_user_log(monkeypatch):
             ctx=_ctx(trigger_chars=1),
             state=state,
             summary_trigger_chars=1,
-            trigger_reason="during_run",
+            trigger_reason="post_step",
             is_cli_mode=False,
             on_summary_applied=lambda event: session.archive_and_compact_summary_payload(
                 event.get("summary_payload", {})
@@ -135,7 +135,7 @@ def test_maybe_run_summary_compaction_twice_uses_meta_user_log(monkeypatch):
             ctx=_ctx(trigger_chars=1),
             state=state,
             summary_trigger_chars=1,
-            trigger_reason="during_run",
+            trigger_reason="post_step",
             is_cli_mode=False,
             on_summary_applied=lambda event: session.archive_and_compact_summary_payload(
                 event.get("summary_payload", {})
@@ -177,7 +177,7 @@ def test_maybe_run_summary_compaction_works_without_thread(monkeypatch):
         ctx=_ctx(trigger_chars=1),
         state=state,
         summary_trigger_chars=1,
-        trigger_reason="during_run",
+        trigger_reason="post_step",
         is_cli_mode=False,
     )
     assert ran is True
@@ -219,7 +219,7 @@ def test_maybe_run_summary_compaction_preserves_system_and_state_metadata(monkey
         ctx=_ctx(trigger_chars=1),
         state=state,
         summary_trigger_chars=1,
-        trigger_reason="during_run",
+        trigger_reason="post_step",
         is_cli_mode=False,
     )
 

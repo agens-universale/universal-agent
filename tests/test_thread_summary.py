@@ -3,12 +3,11 @@ import os
 import tempfile
 import unittest
 
+from summarize.summary_utils import calc_messages_chars_total, message_text_for_summary
 from thread_store import (
     ThreadSession,
     append_new_thread_messages,
-    calc_messages_chars_total,
     load_thread_meta,
-    message_text_for_summary,
     save_thread_meta,
 )
 
@@ -42,6 +41,7 @@ class ThreadSummaryTest(unittest.TestCase):
                 thread_id,
                 {
                     "notes_md": "old notes",
+                    "previous_response_id": "resp_prev",
                     "backend_api_mode": "chat_completions",
                     "chat_completions_system_prompt_rendered": "SYSTEM",
                 },
@@ -84,6 +84,8 @@ class ThreadSummaryTest(unittest.TestCase):
             self.assertEqual(meta.get("messages_count"), 1)
             self.assertEqual(meta.get("dialog_steps_offset"), 12)
             self.assertEqual(meta.get("user_messages_log"), ["[user] req1", "[user] req2"])
+            self.assertIsNone(meta.get("previous_response_id"))
+            self.assertEqual(meta.get("chat_completions_system_prompt_rendered"), "SYSTEM")
 
     def test_archive_and_compact_strips_original_user_messages_block(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

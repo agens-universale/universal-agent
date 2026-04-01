@@ -1,7 +1,51 @@
-from typing import Any
+import json
+from typing import Any, Dict, List
 
 from user_message_policy import TECHNICAL_TYPE_DIALOG_SUMMARY, wrap_technical_user_content
 from utils.generate_message_id import generate_msg_id_sha256 as generate_message_id_func
+
+
+def _message_content_to_text(content: Any) -> str:
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: List[str] = []
+        for item in content:
+            if isinstance(item, dict):
+                text = item.get("text")
+                if isinstance(text, str):
+                    parts.append(text)
+                    continue
+            parts.append(json.dumps(item, ensure_ascii=False, sort_keys=True))
+        return "\n".join(parts)
+    if isinstance(content, dict):
+        return json.dumps(content, ensure_ascii=False, sort_keys=True)
+    if content is None:
+        return ""
+    return str(content)
+
+
+def message_text_for_summary(message: Dict[str, Any]) -> str:
+    if not isinstance(message, dict):
+        return ""
+    msg_type = str(message.get("type") or "message")
+    if msg_type == "function_call":
+        name = str(message.get("name") or "")
+        arguments = message.get("arguments")
+        return f"[function_call] {name}\n{_message_content_to_text(arguments)}"
+    if msg_type == "function_call_output":
+        output = message.get("output")
+        return f"[function_call_output]\n{_message_content_to_text(output)}"
+    role = str(message.get("role") or "")
+    content = _message_content_to_text(message.get("content"))
+    return f"[{role}] {content}".strip()
+
+
+def calc_messages_chars_total(messages: List[Dict[str, Any]]) -> int:
+    total = 0
+    for message in messages:
+        total += len(message_text_for_summary(message))
+    return total
 
 
 def apply_summary_state_patch(
