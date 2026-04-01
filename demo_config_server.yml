@@ -10,7 +10,7 @@ defaults:
 agent:
   # Относительный путь до файла с универсальными инструкциями агента или абсолютный путь.
   # (резолвится в абсолютный путь относительно корня проекта).
-  server_agentmd_path: "./demo_server_agent.md"
+  server_agentmd_path: "./prompts/demo_server_agent.md"
 
 agent_overrides:
   # Управление консольным трейсом:
@@ -60,6 +60,6 @@ swarm:
   cli_command: "gc-cli"
   wrapper_path: "scripts/run-cli-in-sandbox.sh"
   sandbox_tool: "bubblewrap"
-  agentmd_path: "./swarm_agent.md"
+  agentmd_path: "./prompts/swarm_agent.md"
   skills_dir: "./swarm_skills"
 

@@ -4,6 +4,10 @@ from uuid import uuid4
 import json
 from typing import List, Union, Dict, Optional, Any
 from utils.project_data import get_project_data
+from user_message_policy import (
+    append_user_log_entries,
+    normalize_user_log_entries,
+)
 
 
 class State:
@@ -63,6 +67,7 @@ class State:
         self.max_steps = max_steps
         self.steps = 0
         self.stop_requested = False
+        self.user_messages_log: List[str] = []
 
     def set_call_metadata(self):
         metadata: Dict[str, Any] = dict()
@@ -129,6 +134,30 @@ class State:
                 return True
         return False
 
+    def init_user_messages_log(self, entries: Optional[List[str]]) -> None:
+        """
+        Initialize `user_messages_log` from persisted/raw entries.
+
+        Назначение:
+        - восстановить лог при старте/продолжении сессии;
+        - нормализовать вход в стабильный `list[str]`;
+        - удалить пустые и дубли, сохранив порядок первых вхождений.
+        """
+        self.user_messages_log = normalize_user_log_entries(entries)
+
+    def append_user_messages_to_log(self, step_messages: List[Dict[str, Any]]) -> None:
+        """
+        Incrementally extend `user_messages_log` with current step messages.
+
+        Назначение:
+        - поддерживать ленту пользовательских запросов в runtime-state;
+        - добавлять только user-сообщения в каноничном формате;
+        - сохранять уникальность записей (без повторов).
+        """
+        self.user_messages_log = append_user_log_entries(
+            self.user_messages_log, step_messages
+        )
+
 
 class SatesStorage:
 
@@ -173,3 +202,5 @@ def dump_storage(cur_dir, **kwargs):
     fp = os.path.join(cur_dir, f'session_storage_{int(time.time())}.json')
     state_storage.save_to_file(fp, **kwargs)
     print(f'\n\nStorage dumped in file {fp}\n\n')
+
+

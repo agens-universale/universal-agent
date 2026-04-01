@@ -64,7 +64,7 @@ def _normalize_chat_system_prompt_path(config_dict: Dict[str, Any], config_dir: 
         )
     else:
         config_dict["chat_completions_system_prompt_path"] = os.path.join(
-            config_dir, "chat_completions_system_prompt.md"
+            config_dir, "prompts", "chat_completions_system_prompt.md"
         )
 
 
@@ -115,7 +115,7 @@ def _normalize_summary_params(config_dict: Dict[str, Any], config_dir: str) -> N
         )
     else:
         normalized_summary_prompt_path = os.path.join(
-            os.path.dirname(os.path.abspath(__file__)),
+            config_dir,
             "prompts",
             "chat_completions_summary_prompt.md",
         )

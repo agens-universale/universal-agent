@@ -322,6 +322,89 @@ def test_trim_original_user_messages_to_max_chars_takes_tail_whole_messages():
     assert trimmed == ["b" * 9000, "c" * 9000]
 
 
+def test_summarize_merges_existing_user_messages_log(monkeypatch):
+    history = _flatten_turns([_make_turn("new user request", "assistant reply")])
+
+    def _fake_request(**_kwargs):
+        return _valid_summary("single-batch")
+
+    monkeypatch.setattr("thread_summarizer._load_prompt_template", lambda _p: "prompt")
+    monkeypatch.setattr("thread_summarizer._request_chat_completion_text", _fake_request)
+    monkeypatch.setattr("thread_summarizer.suggest_memory_additions", lambda **_k: "")
+
+    result = summarize_dialog_via_chat_completions(
+        ctx=_ctx(trigger_chars=999999),
+        state=_state(),
+        full_history_messages=history,
+        current_memory="",
+        user_messages_log=["[user] older user request", "[user] new user request"],
+    )
+    assert result["user_messages_log"] == [
+        "[user] older user request",
+        "[user] new user request",
+    ]
+    assert "<original_user_messages>" not in result["summary_message_content"]
+
+
+def test_summarize_preserves_user_messages_log_chronological_order(monkeypatch):
+    history = _flatten_turns(
+        [
+            _make_turn("third user request", "assistant 1"),
+            _make_turn("fourth user request", "assistant 2"),
+        ]
+    )
+
+    def _fake_request(**_kwargs):
+        return _valid_summary("single-batch")
+
+    monkeypatch.setattr("thread_summarizer._load_prompt_template", lambda _p: "prompt")
+    monkeypatch.setattr("thread_summarizer._request_chat_completion_text", _fake_request)
+    monkeypatch.setattr("thread_summarizer.suggest_memory_additions", lambda **_k: "")
+
+    result = summarize_dialog_via_chat_completions(
+        ctx=_ctx(trigger_chars=999999),
+        state=_state(),
+        full_history_messages=history,
+        current_memory="",
+        user_messages_log=[
+            "[user] first user request",
+            "[user] second user request",
+            "[user] third user request",
+            "[user] fourth user request",
+        ],
+    )
+
+    assert result["user_messages_log"] == [
+        "[user] first user request",
+        "[user] second user request",
+        "[user] third user request",
+        "[user] fourth user request",
+    ]
+
+
+def test_summarize_filters_technical_messages_from_user_messages_log(monkeypatch):
+    history = _flatten_turns([_make_turn("real request", "assistant")])
+
+    def _fake_request(**_kwargs):
+        return _valid_summary("single-batch")
+
+    monkeypatch.setattr("thread_summarizer._load_prompt_template", lambda _p: "prompt")
+    monkeypatch.setattr("thread_summarizer._request_chat_completion_text", _fake_request)
+    monkeypatch.setattr("thread_summarizer.suggest_memory_additions", lambda **_k: "")
+
+    result = summarize_dialog_via_chat_completions(
+        ctx=_ctx(trigger_chars=999999),
+        state=_state(),
+        full_history_messages=history,
+        current_memory="",
+        user_messages_log=[
+            '[user] <current_context>client has non-empty thread notes; call `thread_notes` with action="read" to load them.</current_context>',
+            "[user] real request",
+        ],
+    )
+    assert result["user_messages_log"] == ["[user] real request"]
+
+
 def test_invalid_summary_triggers_one_repair_retry(monkeypatch):
     history = _flatten_turns([_make_turn("u1", "a1")])
     calls = {"n": 0}

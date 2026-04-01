@@ -12,13 +12,13 @@ completions_url: 'http://127.0.0.1:8080/v1/chat/completions'
 # openrouter_http_referer: "https://your-app.example"
 # openrouter_x_title: "mini-cli-pub"
 # Путь к системному промпту для режима chat/completions.
-# Если не задан, используется ./chat_completions_system_prompt.md в корне проекта.
-# chat_completions_system_prompt_path: "./chat_completions_system_prompt.md"
+# Если не задан, используется ./prompts/chat_completions_system_prompt.md.
+# chat_completions_system_prompt_path: "./prompts/chat_completions_system_prompt.md"
 # Параметры суммаризации для chat/completions.
 summary_params:
   # Путь к промпту суммаризации длинного диалога.
-  # Если не задан, используется src/prompts/chat_completions_summary_prompt.md.
-  # chat_completions_summary_prompt_path: "./summary_prompt.md"
+  # Если не задан, используется ./prompts/chat_completions_summary_prompt.md.
+  # chat_completions_summary_prompt_path: "./prompts/chat_completions_summary_prompt.md"
   # Порог принудительной суммаризации в символах.
   # <= 0: отключено, > 0: триггер при chars_total >= порога.
   chat_completions_summary_trigger_chars: 0
@@ -32,7 +32,7 @@ summary_params:
   # Если накопленный summary становится длиннее этого лимита, выполняется
   # дополнительный шаг "summary-of-summary" для сжатия.
   max_accumulated_summary_chars: 20000
-  # Лимит (в символах) для блока <original_user_messages> в итоговом <dialog_summary>.
+  # Лимит (в символах) для meta.user_messages_log (единый источник user-запросов).
   # Берутся последние сообщения целиком, пока не исчерпан бюджет.
   original_user_messages_max_chars: 20000
   # Сколько последних сообщений включать в <last_dialog_steps>.
@@ -122,8 +122,8 @@ mcp-meta:
   
 # Опциональный путь к файлу с пользовательскими инструкциями для агента (agent.md).
 # Рекомендуется задавать как относительный путь от корня проекта (будет резолвиться в абсолютный) или как абсолютный путь.
-# Пример: "./demo_cli_agent.md"
-agent_md_path: "./demo_cli_agent.md"
+# Пример: "./prompts/demo_cli_agent.md"
+agent_md_path: "./prompts/demo_cli_agent.md"
 
 # Опциональный путь к директории для хранения тредов (диалогов).
 # По умолчанию используется ./threads относительно корня проекта.

@@ -1,9 +1,10 @@
 import os
 import re
-import time
+from dataclasses import dataclass
 from typing import Any, Dict, List
 
 from thread_store import message_text_for_summary
+from user_message_policy import is_technical_user_message_text
 from utils.connect_backend import (
     create_call_headers,
     request_backend_chat_completions,
@@ -31,17 +32,16 @@ _REQUIRED_SECTION_MARKERS = (
     "RISKS_AND_OPEN_QUESTIONS",
     "IMPORTANT_ARTIFACTS",
 )
-_SKIP_USER_MESSAGE_SUBSTRINGS = (
-    "there is no tool call in agent response",
-    "client has non-empty thread notes;",
-    "<dialog_summary>",
-    "<current_context>",
-)
+@dataclass
+class MemoryAdditionsResult:
+    extracted: str
+    request_messages: List[Dict[str, str]]
+    raw_response: str
 
 
 def _default_prompt_path() -> str:
     base_dir = os.path.dirname(os.path.abspath(__file__))
-    return os.path.join(base_dir, "prompts", "chat_completions_summary_prompt.md")
+    return os.path.join(base_dir, "..", "prompts", "chat_completions_summary_prompt.md")
 
 
 def _load_prompt_template(path: str) -> str:
@@ -60,8 +60,22 @@ def collect_user_messages_from_history(messages: List[Dict[str, Any]]) -> List[s
         text = message_text_for_summary(msg).strip()
         if not text:
             continue
-        normalized = text.lower()
-        if any(sub in normalized for sub in _SKIP_USER_MESSAGE_SUBSTRINGS):
+        if is_technical_user_message_text(text):
+            continue
+        if text not in out:
+            out.append(text)
+    return out
+
+
+def normalize_user_messages_log(messages: List[str] | None) -> List[str]:
+    out: List[str] = []
+    if not isinstance(messages, list):
+        return out
+    for item in messages:
+        text = str(item).strip()
+        if not text:
+            continue
+        if is_technical_user_message_text(text):
             continue
         if text not in out:
             out.append(text)
@@ -136,6 +150,12 @@ def _trim_original_user_messages_to_max_chars(
 
 
 def _group_into_turns(messages: List[Dict[str, Any]]) -> List[List[Dict[str, Any]]]:
+    def _is_tool_call(msg: Dict[str, Any]) -> bool:
+        return msg.get("type") in {"function_call", "tool_call"}
+
+    def _is_tool_call_output(msg: Dict[str, Any]) -> bool:
+        return msg.get("type") in {"function_call_output", "tool_call_output"}
+
     if not messages:
         return []
     turns: List[List[Dict[str, Any]]] = []
@@ -143,13 +163,13 @@ def _group_into_turns(messages: List[Dict[str, Any]]) -> List[List[Dict[str, Any
     fc_to_fco: Dict[int, int] = {}
 
     for i, msg in enumerate(messages):
-        if msg.get("type") != "function_call":
+        if not _is_tool_call(msg):
             continue
         call_id = msg.get("call_id")
         for j, msg2 in enumerate(messages):
             if j in consumed:
                 continue
-            if msg2.get("type") == "function_call_output" and msg2.get("call_id") == call_id:
+            if _is_tool_call_output(msg2) and msg2.get("call_id") == call_id:
                 fc_to_fco[i] = j
                 consumed.add(j)
                 break
@@ -164,7 +184,7 @@ def _group_into_turns(messages: List[Dict[str, Any]]) -> List[List[Dict[str, Any
         msg_type = msg.get("type", "message")
         role = msg.get("role")
 
-        if msg_type == "function_call":
+        if _is_tool_call(msg):
             if i in fc_to_fco:
                 j = fc_to_fco[i]
                 turns.append([msg, messages[j]])
@@ -174,7 +194,7 @@ def _group_into_turns(messages: List[Dict[str, Any]]) -> List[List[Dict[str, Any
             i += 1
             continue
 
-        if msg_type == "function_call_output":
+        if _is_tool_call_output(msg):
             turns.append([msg])
             i += 1
             continue
@@ -194,7 +214,12 @@ def _group_into_turns(messages: List[Dict[str, Any]]) -> List[List[Dict[str, Any
                     consumed.add(j)
                     j += 1
                     break
-                if nxt_role == "user" or nxt_type in {"function_call", "function_call_output"}:
+                if nxt_role == "user" or nxt_type in {
+                    "function_call",
+                    "tool_call",
+                    "function_call_output",
+                    "tool_call_output",
+                }:
                     break
                 j += 1
             turns.append(turn)
@@ -245,30 +270,31 @@ def _format_last_dialog_steps(
     messages: List[Dict[str, Any]],
     max_steps: int = 5,
     message_max_chars: int = 5000,
+    steps_offset: int = 0,
 ) -> str:
-    tail = messages[-max_steps:] if len(messages) > max_steps else messages
+    turns = _group_into_turns(messages)
+    tail = turns[-max_steps:] if len(turns) > max_steps else turns
+    start_idx = steps_offset + (len(turns) - len(tail)) + 1
     parts: List[str] = []
-    for idx, msg in enumerate(tail, start=1):
-        text = message_text_for_summary(msg).strip()
+    for idx, turn in enumerate(tail, start=start_idx):
+        rendered: List[str] = []
+        for msg in turn:
+            text = message_text_for_summary(msg).strip()
+            if text:
+                rendered.append(_truncate_text(text, message_max_chars))
+        text = "\n".join(rendered).strip()
         if not text:
             continue
-        text = _truncate_text(text, message_max_chars)
         parts.append(f"<turn {idx}>\n{text}\n</turn {idx}>")
     return "\n\n".join(parts)
 
 
 def build_dialog_summary_content(
-    original_user_messages: List[str],
     summary_text: str,
     last_dialog_steps: str,
     current_memory: str = "",
 ) -> str:
-    lines: List[str] = ["<dialog_summary>", "<original_user_messages>"]
-    for m in original_user_messages:
-        lines.append(m.strip())
-    lines.append("</original_user_messages>")
-    lines.append("")
-    lines.append("<summary>")
+    lines: List[str] = ["<summary>"]
     lines.append(summary_text.strip())
     lines.append("</summary>")
     lines.append("")
@@ -285,7 +311,6 @@ def build_dialog_summary_content(
         "<instruction>Use current_memory above as the up-to-date thread_notes state. "
         "You do not need to call thread_notes/read for this summarized context; append new durable facts to thread_notes when needed.</instruction>"
     )
-    lines.append("</dialog_summary>")
     return "\n".join(lines)
 
 
@@ -329,6 +354,30 @@ def _shorten_for_log(text: str, max_chars: int = 500) -> str:
     return f"{s[:max_chars]} ... [TRUNCATED {len(s) - max_chars} chars]"
 
 
+def _log_llm_prompt_and_result(
+    *,
+    logger: Any,
+    label: str,
+    messages: List[Dict[str, str]],
+    output_text: str,
+) -> None:
+    if logger is None:
+        return
+    system_part = "\n\n".join(
+        str(m.get("content", "")) for m in messages if m.get("role") == "system"
+    )
+    user_part = "\n\n".join(
+        str(m.get("content", "")) for m in messages if m.get("role") == "user"
+    )
+    logger.info(
+        "summary_llm_prompt label=%s system=\n%s\n\nuser=\n%s",
+        label,
+        system_part,
+        user_part,
+    )
+    logger.info("summary_llm_result label=%s output=\n%s", label, output_text or "")
+
+
 def _request_chat_completion_text(
     *,
     ctx: Any,
@@ -338,7 +387,6 @@ def _request_chat_completion_text(
     request_label: str = "chat_completion",
 ) -> str:
     cfg = getattr(ctx, "config_dict", {}) or {}
-    logger = getattr(ctx, "logger", None)
     payload = {
         "model": getattr(state, "default_model", None) or cfg.get("model"),
         "messages": messages,
@@ -352,57 +400,20 @@ def _request_chat_completion_text(
         "separate_reasoning": False,
         "chat_template_kwargs": {"enable_thinking": False},
     }
-    if logger is not None:
-        msg_meta = []
-        for idx, message in enumerate(messages, start=1):
-            content = message.get("content", "")
-            msg_meta.append(
-                {
-                    "idx": idx,
-                    "role": message.get("role"),
-                    "content_chars": len(content) if isinstance(content, str) else 0,
-                    "content_preview": _shorten_for_log(
-                        content if isinstance(content, str) else "", max_chars=300
-                    ),
-                }
-            )
-        logger.info(
-            "llm_request_start label=%s url=%s model=%s max_tokens=%s use_retry=%s messages=%s",
-            request_label,
-            cfg.get("completions_url"),
-            payload.get("model"),
-            max_tokens,
-            cfg.get("use_retry", False),
-            msg_meta,
-        )
     headers = create_call_headers(state, ctx)
-    started_at = time.monotonic()
     res = request_backend_chat_completions(
         payload,
         headers,
         url=cfg["completions_url"],
         verify=cfg.get("use_ssl", True),
         use_retry=cfg.get("use_retry", False),
-        logger=logger,
+        logger=getattr(ctx, "logger", None),
     )
-    elapsed_ms = int((time.monotonic() - started_at) * 1000)
     text = (
         res.get("choices", [{}])[0].get("message", {}).get("content")
         if isinstance(res, dict)
         else ""
     )
-    if logger is not None:
-        raw_choices = res.get("choices") if isinstance(res, dict) else None
-        choices_len = len(raw_choices) if isinstance(raw_choices, list) else 0
-        logger.info(
-            "llm_request_result label=%s elapsed_ms=%s response_type=%s choices=%s content_chars=%s content_preview=%s",
-            request_label,
-            elapsed_ms,
-            type(res).__name__,
-            choices_len,
-            len(text or ""),
-            _shorten_for_log(text or "", max_chars=500),
-        )
     return (text or "").strip()
 
 
@@ -413,7 +424,7 @@ def suggest_memory_additions(
     history_text: str,
     summary_text: str,
     current_memory: str,
-) -> str:
+) -> MemoryAdditionsResult:
     system = (
         "You are helping enrich long-term session memory for a technical dialogue. "
         "You receive: (1) full dialog history, (2) summary, (3) current memory. "
@@ -422,9 +433,9 @@ def suggest_memory_additions(
         "stable facts, confirmed decisions, constraints, accepted requirements, key assumptions, "
         "important environment/project details, and explicit user preferences/rules. "
         "Also include meaningful progress state, active plans/next steps, and working hypotheses when they are useful "
-        "for continuity and are not already captured in summary/current memory. "
+        "for continuity and are not already captured in curent_summary/current memory. "
         "Do NOT include transient chatter, noisy tool execution logs, or duplicate/paraphrased content already present "
-        "in summary/current memory. "
+        "in current_summary/current memory. "
         "Prefer concise bullet points in Markdown. "
         "If there is nothing new worth storing, return an empty tag: <add_to_memory></add_to_memory>."
     )
@@ -432,24 +443,31 @@ def suggest_memory_additions(
         "<dialog_history>\n"
         f"{history_text}\n"
         "</dialog_history>\n\n"
-        "<summary>\n"
+        "<current_summary>\n"
         f"{summary_text}\n"
-        "</summary>\n\n"
+        "</current_summary>\n\n"
         "<current_memory>\n"
         f"{current_memory}\n"
         "</current_memory>\n"
     )
+    request_messages = [
+        {"role": "system", "content": system},
+        {"role": "user", "content": user_prompt},
+    ]
     block = _request_chat_completion_text(
         ctx=ctx,
         state=state,
-        messages=[
-            {"role": "system", "content": system},
-            {"role": "user", "content": user_prompt},
-        ],
+        messages=request_messages,
         max_tokens=1200,
         request_label="memory_additions",
     )
     logger = getattr(ctx, "logger", None)
+    _log_llm_prompt_and_result(
+        logger=logger,
+        label="memory_additions",
+        messages=request_messages,
+        output_text=block,
+    )
     if logger is not None:
         logger.info(
             "memory_additions_raw_response chars=%s preview=%s",
@@ -463,7 +481,11 @@ def suggest_memory_additions(
             len(extracted or ""),
             _shorten_for_log(extracted or "", max_chars=500),
         )
-    return extracted
+    return MemoryAdditionsResult(
+        extracted=extracted,
+        request_messages=request_messages,
+        raw_response=block,
+    )
 
 
 def _compress_summary_text(
@@ -481,15 +503,22 @@ def _compress_summary_text(
         "all critical facts, constraints, decisions, and technical references. "
         "Output only compressed summary text."
     )
+    request_messages = [
+        {"role": "system", "content": system},
+        {"role": "user", "content": summary_text},
+    ]
     text = _request_chat_completion_text(
         ctx=ctx,
         state=state,
-        messages=[
-            {"role": "system", "content": system},
-            {"role": "user", "content": summary_text},
-        ],
+        messages=request_messages,
         max_tokens=max_tokens,
         request_label="summary_compress",
+    )
+    _log_llm_prompt_and_result(
+        logger=getattr(ctx, "logger", None),
+        label="summary_compress",
+        messages=request_messages,
+        output_text=text,
     )
     text = (text or "").strip()
     if not text:
@@ -529,16 +558,24 @@ def _repair_summary_text(
         f"{invalid_summary}\n"
         "</invalid_summary>"
     )
-    return _request_chat_completion_text(
+    request_messages = [
+        {"role": "system", "content": system},
+        {"role": "user", "content": user},
+    ]
+    out = _request_chat_completion_text(
         ctx=ctx,
         state=state,
-        messages=[
-            {"role": "system", "content": system},
-            {"role": "user", "content": user},
-        ],
+        messages=request_messages,
         max_tokens=max_tokens,
         request_label="summary_repair",
     )
+    _log_llm_prompt_and_result(
+        logger=getattr(ctx, "logger", None),
+        label="summary_repair",
+        messages=request_messages,
+        output_text=out,
+    )
+    return out
 
 
 def summarize_dialog_via_chat_completions(
@@ -547,26 +584,37 @@ def summarize_dialog_via_chat_completions(
     state: Any,
     full_history_messages: List[Dict[str, Any]],
     current_memory: str = "",
+    user_messages_log: List[str] | None = None,
     max_tokens: int = 2500,
+    steps_offset: int = 0,
 ) -> Dict[str, Any]:
     cfg = getattr(ctx, "config_dict", {}) or {}
     logger = getattr(ctx, "logger", None)
+    trace: Dict[str, Any] = {
+        "step1_batches": [],
+        "step2_memory_update": {
+            "executed": False,
+            "input": {},
+            "output": "",
+        },
+        "final_output": {},
+    }
     if not full_history_messages:
         if logger is not None:
             logger.info("summary_empty_history: no messages to summarize")
         summary_content = build_dialog_summary_content(
-            original_user_messages=[],
             summary_text="",
             last_dialog_steps="",
             current_memory=current_memory,
         )
         return {
             "raw_summary": "",
-            "summary_content": summary_content,
+            "summary_message_content": summary_content,
             "user_messages_log": [],
             "memory_additions": "",
             "last_dialog_steps": "",
             "num_batches": 0,
+            "trace": trace,
         }
     summary_params = cfg.get("summary_params") if isinstance(cfg.get("summary_params"), dict) else {}
     try:
@@ -629,7 +677,7 @@ def summarize_dialog_via_chat_completions(
         max_dialogue_chars=max_dialogue_chars,
         max_message_chars=max_message_chars,
     )
-    user_requests = collect_user_messages_from_history(history_for_summary)
+    user_requests = normalize_user_messages_log(user_messages_log)
     user_requests = _trim_original_user_messages_to_max_chars(
         user_requests, original_user_messages_max_chars
     )
@@ -689,16 +737,39 @@ def summarize_dialog_via_chat_completions(
                 "Update previous_summary using this batch. "
                 "Keep all important facts/decisions/constraints from both."
             )
+        request_messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ]
+        trace_batch: Dict[str, Any] = {
+            "batch_index": batch_index,
+            "batch_total": len(batches),
+            "input_messages": request_messages,
+            "input_system_prompt": system_prompt,
+            "input_user_prompt": user_prompt,
+            "output_summary_text": "",
+        }
+        if logger is not None:
+            logger.info(
+                "summary_batch_request_full_messages batch=%s/%s messages_full=\n%s",
+                batch_index,
+                len(batches),
+                request_messages,
+            )
         text = _request_chat_completion_text(
             ctx=ctx,
             state=state,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
+            messages=request_messages,
             max_tokens=max_tokens,
             request_label=f"summary_batch_{batch_index}",
         )
+        _log_llm_prompt_and_result(
+            logger=logger,
+            label=f"summary_batch_{batch_index}",
+            messages=request_messages,
+            output_text=text,
+        )
+        trace_batch["output_summary_text"] = text
         if logger is not None:
             logger.info(
                 "summary_batch_result batch=%s/%s summary_text=\n%s",
@@ -737,6 +808,12 @@ def summarize_dialog_via_chat_completions(
             )
             repaired_valid, _ = _validate_summary_text(repaired)
             text = repaired if repaired_valid else (accumulated_summary or _FALLBACK_SUMMARY)
+            trace_batch["repair"] = {
+                "reason": reason,
+                "repaired_text": repaired,
+                "repaired_valid": repaired_valid,
+                "final_text_after_repair": text,
+            }
             if logger is not None:
                 logger.info(
                     "summary_batch_repair_result batch=%s/%s repaired_valid=%s repaired_chars=%s final_chars=%s final_preview=%s",
@@ -748,6 +825,7 @@ def summarize_dialog_via_chat_completions(
                     _shorten_for_log(text or "", max_chars=500),
                 )
         accumulated_summary = text
+        trace["step1_batches"].append(trace_batch)
         if len(accumulated_summary) > max_accumulated_summary_chars:
             if logger is not None:
                 logger.info(
@@ -773,13 +851,47 @@ def summarize_dialog_via_chat_completions(
     # когда суммаризация прошла в один батч.
     memory_additions = ""
     if len(batches) <= 1:
-        memory_additions = suggest_memory_additions(
+        trace["step2_memory_update"] = {
+            "executed": True,
+            "input": {
+                "history_text": history_text,
+                "summary_text": text,
+                "current_memory": current_memory,
+            },
+            "output": "",
+            "llm": {},
+        }
+        memory_result = suggest_memory_additions(
             ctx=ctx,
             state=state,
             history_text=history_text,
             summary_text=text,
             current_memory=current_memory,
         )
+        if isinstance(memory_result, str):
+            memory_result = MemoryAdditionsResult(
+                extracted=memory_result,
+                request_messages=[],
+                raw_response="",
+            )
+        memory_additions = memory_result.extracted
+        trace["step2_memory_update"]["output"] = memory_additions
+        trace["step2_memory_update"]["llm"] = {
+            "request_messages": memory_result.request_messages,
+            "raw_response": memory_result.raw_response,
+            "extracted": memory_result.extracted,
+        }
+    else:
+        trace["step2_memory_update"] = {
+            "executed": False,
+            "input": {
+                "history_text": history_text,
+                "summary_text": text,
+                "current_memory": current_memory,
+                "reason": "skipped_for_multi_batch",
+            },
+            "output": "",
+        }
     if logger is not None:
         logger.info(
             "summary_finish batches=%s raw_summary_chars=%s memory_additions_chars=%s",
@@ -801,19 +913,25 @@ def summarize_dialog_via_chat_completions(
         history_for_summary,
         max_steps=last_steps_count,
         message_max_chars=min(last_step_message_max_chars, max_message_chars),
+        steps_offset=max(0, int(steps_offset or 0)),
     )
     summary_content = build_dialog_summary_content(
-        original_user_messages=user_requests,
         summary_text=summary_text,
         last_dialog_steps=last_dialog_steps,
         current_memory=current_memory,
     )
+    trace["final_output"] = {
+        "raw_summary": text,
+        "memory_additions": memory_additions,
+        "summary_message_content": summary_content,
+    }
     return {
         "raw_summary": text,
-        "summary_content": summary_content,
+        "summary_message_content": summary_content,
         "user_messages_log": user_requests,
         "memory_additions": memory_additions,
         "last_dialog_steps": last_dialog_steps,
         "num_batches": len(batches),
+        "trace": trace,
     }
 

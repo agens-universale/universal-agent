@@ -17,6 +17,7 @@ class RunContext:
     - config_dict — словарь конфигурации;
     - auth_connector — коннектор авторизации для бэкенда;
     - logger / logging_path — логгер и путь к файлу логов для этого запуска;
+    - summary_trace_path — отдельный файл trace для суммаризации;
     - tools_data / tools_spec / tools_description — подготовленные данные о тулах.
     """
 
@@ -24,6 +25,7 @@ class RunContext:
     auth_connector: Optional[AuthConnector]
     logger: logging.Logger
     logging_path: str
+    summary_trace_path: str
     tools_data: Dict[str, Dict[str, Any]]
     tools_spec: List[Dict[str, Any]]
     tools_description: List[str]
@@ -45,18 +47,21 @@ def create_run_context(
     """
     tools_data, tools_spec, tools_description = build_tools_data(config_dict)
 
-    run_logger, logging_path = create_run_logger(config_dict, run_id=run_id)
-
-    run_logger.debug(
-        "Tools specs for this run:\n\n%s",
-        json.dumps(tools_spec, ensure_ascii=False, indent=2),
+    run_logger, logging_path, summary_trace_path = create_run_logger(
+        config_dict, run_id=run_id
     )
+
+    #run_logger.debug(
+    #    "Tools specs for this run:\n\n%s",
+    #    json.dumps(tools_spec, ensure_ascii=False, indent=2),
+    #)
 
     ctx = RunContext(
         config_dict=config_dict,
         auth_connector=auth_connector,
         logger=run_logger,
         logging_path=logging_path,
+        summary_trace_path=summary_trace_path,
         tools_data=tools_data,
         tools_spec=tools_spec,
         tools_description=tools_description,

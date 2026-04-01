@@ -34,7 +34,7 @@ def load_server_config() -> Dict[str, Any]:
                 "auth_token": None,
             },
             "defaults": {"system": "generic"},
-            "agent": {"server_agentmd_path": "./server_agent.md"},
+            "agent": {"server_agentmd_path": "./prompts/server_agent.md"},
             "agent_overrides": {},
         }
 

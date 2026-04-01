@@ -18,11 +18,13 @@ class WrongFunctionArgumentsException(Exception):
         message: str,
         received_args: str,
         expected_schema: dict | None = None,
+        tool_name: str | None = None,
     ):
         super().__init__(message)
         self.message = message
         self.received_args = received_args
         self.expected_schema = expected_schema
+        self.tool_name = tool_name
 
     def to_llm_feedback(self) -> str:
         """
@@ -31,6 +33,8 @@ class WrongFunctionArgumentsException(Exception):
         feedback = "❌ **Tool Argument Validation Failed**\n\n"
 
         # 1. Описание проблемы
+        if self.tool_name:
+            feedback += f"**Tool:** `{self.tool_name}`\n\n"
         feedback += f"**Error:** {self.message}\n\n"
 
         # 2. Что было получено (с обработкой пустых значений)
@@ -190,6 +194,7 @@ def apply_tool(
                     message="аргументы инструмента пустые, ожидается валидный JSON-объект",
                     received_args=str(arguments),
                     expected_schema=tools_data_[tool_name]["spec"],
+                    tool_name=tool_name,
                 )
         else:
             try:
@@ -199,6 +204,7 @@ def apply_tool(
                     message=f"некорректный JSON: {e}",
                     received_args=str(arguments),
                     expected_schema=tools_data_[tool_name]["spec"],
+                    tool_name=tool_name,
                 )
 
     arguments = parsed_arguments

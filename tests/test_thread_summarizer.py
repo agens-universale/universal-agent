@@ -15,6 +15,7 @@ class ThreadSummarizerTest(unittest.TestCase):
         messages = [
             {"role": "user", "content": "client has non-empty thread notes; call `thread_notes` with action=\"read\" to load them."},
             {"role": "user", "content": "There is no tool call in Agent response. Please send appropriate tool call"},
+            {"role": "user", "content": "❌ Tool Argument Validation Failed. Expected schema: {...}"},
             {"role": "user", "content": "<dialog_summary>\n...\n</dialog_summary>"},
             {"role": "user", "content": "Сделай рефакторинг parser слоя"},
             {"role": "assistant", "content": "ok"},
@@ -47,6 +48,29 @@ class ThreadSummarizerTest(unittest.TestCase):
             message_max_chars=5000,
         )
         self.assertIn("... [TEXT CUTTED]", steps)
+
+    def test_format_last_dialog_steps_keeps_tool_call_and_output_in_one_turn(self) -> None:
+        steps = _format_last_dialog_steps(
+            [
+                {"type": "function_call", "call_id": "c1", "name": "read_file", "arguments": {"path": "/tmp/a.txt"}},
+                {"type": "function_call_output", "call_id": "c1", "output": {"ok": True}},
+            ],
+            max_steps=5,
+            message_max_chars=5000,
+        )
+        self.assertEqual(steps.count("<turn "), 1)
+        self.assertIn("[function_call] read_file", steps)
+        self.assertIn("[function_call_output]", steps)
+
+    def test_group_into_turns_supports_tool_call_aliases(self) -> None:
+        turns = _group_into_turns(
+            [
+                {"type": "tool_call", "call_id": "c1", "name": "read_file", "arguments": "{}"},
+                {"type": "tool_call_output", "call_id": "c1", "output": "ok"},
+            ]
+        )
+        self.assertEqual(len(turns), 1)
+        self.assertEqual(len(turns[0]), 2)
 
     def test_split_turns_into_char_batches(self) -> None:
         messages = [

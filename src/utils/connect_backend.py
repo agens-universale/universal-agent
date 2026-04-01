@@ -1,9 +1,8 @@
-from copy import deepcopy
-
 import logging
 import requests
 import re
 import json
+from copy import deepcopy
 from uuid import uuid4
 from typing import List, Dict, Optional, Tuple
 
@@ -295,6 +294,12 @@ def create_call_data_completions(
     *args,
     **kwargs,
 ) -> Dict:
+    def _message_key(message: Dict) -> str:
+        msg_id = message.get("id")
+        if isinstance(msg_id, str) and msg_id:
+            return f"id:{msg_id}"
+        return "payload:" + json.dumps(message, ensure_ascii=False, sort_keys=True)
+
     if state is not None:
         state_messages = deepcopy(state.messages)
         state_tools = deepcopy(state.tools)
@@ -304,12 +309,16 @@ def create_call_data_completions(
 
     if isinstance(state_messages, list) and len(state_messages) > 0:
         to_send_messages = state_messages
-        msgs_ids = set((m['id'] for m in state_messages))
+        msgs_ids = set((_message_key(m) for m in state_messages if isinstance(m, dict)))
         for m in messages:
-            if m['id'] not in msgs_ids:
+            if not isinstance(m, dict):
+                continue
+            msg_key = _message_key(m)
+            if msg_key not in msgs_ids:
                 to_send_messages.append(m)
+                msgs_ids.add(msg_key)
     else:
-        to_send_messages = messages
+        to_send_messages = [m for m in messages if isinstance(m, dict)]
 
     to_send_tools = tools if tools is not None else state_tools
     to_send_tools = normalize_chat_completions_tools(to_send_tools)

@@ -4,10 +4,20 @@ import re
 from datetime import datetime, timezone
 from typing import Dict, List, Tuple, Any, Set, Optional
 
+from user_message_policy import (
+    TECHNICAL_TYPE_DIALOG_SUMMARY,
+    wrap_technical_user_content,
+)
+from utils.generate_message_id import generate_msg_id_sha256 as generate_message_id_func
+
 
 _THREAD_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]+$")
 _SYSTEM_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]+$")
 _META_SCHEMA_VERSION = 1
+_ORIGINAL_USER_MESSAGES_BLOCK_RE = re.compile(
+    r"<original_user_messages>.*?</original_user_messages>\s*",
+    re.IGNORECASE | re.DOTALL,
+)
 
 
 def _utc_now_iso() -> str:
@@ -36,6 +46,13 @@ def _message_content_to_text(content: Any) -> str:
     if content is None:
         return ""
     return str(content)
+
+
+def _strip_original_user_messages_block(summary_text: str) -> str:
+    if not isinstance(summary_text, str):
+        return ""
+    cleaned = _ORIGINAL_USER_MESSAGES_BLOCK_RE.sub("", summary_text)
+    return cleaned.strip()
 
 
 def message_text_for_summary(message: Dict[str, Any]) -> str:
@@ -67,6 +84,17 @@ def make_message_key(message: Dict[str, Any]) -> str:
         return f"id:{msg_id}"
     payload = json.dumps(message, ensure_ascii=False, sort_keys=True)
     return f"payload:{payload}"
+
+
+def ensure_message_id(message: Dict[str, Any], prefix: str = "m") -> Dict[str, Any]:
+    if not isinstance(message, dict):
+        return message
+    msg_id = message.get("id")
+    if isinstance(msg_id, str) and msg_id:
+        return message
+    patched = dict(message)
+    patched["id"] = generate_message_id_func(prefix)
+    return patched
 
 
 def validate_thread_id(thread_id: str) -> str:
@@ -201,6 +229,7 @@ def load_thread_messages(
             payload = record.get("payload")
             if not isinstance(payload, dict):
                 continue
+            payload = ensure_message_id(payload)
             messages.append(payload)
             message_keys.add(make_message_key(payload))
 
@@ -362,7 +391,7 @@ class ThreadSession:
 
     def persist_batch(
         self,
-        batch_messages: List[Dict[str, Any]],
+        step_messages: List[Dict[str, Any]],
         *,
         previous_response_id: Optional[str],
     ) -> None:
@@ -371,13 +400,13 @@ class ThreadSession:
             self.threads_dir,
             self.system_id,
             self.thread_id,
-            batch_messages,
+            step_messages,
             self.known_message_keys,
             start_seq=self.persisted_messages_count,
         )
         self.persisted_messages_count += written
         known_seen = set(known_before)
-        for message in batch_messages:
+        for message in step_messages:
             key = make_message_key(message)
             if key in known_seen:
                 continue
@@ -411,13 +440,14 @@ class ThreadSession:
             base_meta.pop("chat_completions_system_prompt_rendered", None)
         save_thread_meta(self.threads_dir, self.system_id, self.thread_id, base_meta)
 
-    def archive_and_compact_with_summary(
+    def archive_and_compact_summary_payload(
         self,
-        *,
-        summary_text: str,
-        notes_md: str,
-        user_messages_log: Optional[List[str]] = None,
+        summary_payload: Dict[str, Any],
     ) -> Dict[str, Any]:
+        summary_text = str(summary_payload.get("summary_message_content") or "").strip()
+        notes_md = str(summary_payload.get("notes_md") or "").strip()
+        user_messages_log = summary_payload.get("user_messages_log")
+        dialog_steps_offset = summary_payload.get("dialog_steps_offset", 0)
         data_path, meta_path = _thread_paths(self.threads_dir, self.system_id, self.thread_id)
         ts_suffix = _utc_now_suffix()
         archive_data_path = data_path.replace(".jsonl", f"__summarized_{ts_suffix}.jsonl")
@@ -443,10 +473,14 @@ class ThreadSession:
 
         summary_message = {
             "role": "user",
-            "content": (
-                "Summarized context from previous dialogue.\n"
-                f"{summary_text.strip()}"
+            "content": wrap_technical_user_content(
+                (
+                    "Summarized context from previous dialogue.\n"
+                    f"{_strip_original_user_messages_block(summary_text)}"
+                ),
+                technical_type=TECHNICAL_TYPE_DIALOG_SUMMARY,
             ),
+            "id": generate_message_id_func("m_sum"),
         }
         compact_messages: List[Dict[str, Any]] = [summary_message]
 
@@ -475,6 +509,13 @@ class ThreadSession:
             "last_summarized_at": _utc_now_iso(),
             "last_summary_archive_suffix": ts_suffix,
         }
+        try:
+            effective_steps_offset = int(dialog_steps_offset)
+        except (TypeError, ValueError):
+            effective_steps_offset = 0
+        if effective_steps_offset < 0:
+            effective_steps_offset = 0
+        new_meta["dialog_steps_offset"] = effective_steps_offset
         if isinstance(user_messages_log, list):
             new_meta["user_messages_log"] = [
                 str(x).strip() for x in user_messages_log if str(x).strip()
@@ -498,4 +539,5 @@ class ThreadSession:
             "archive_data_path": archive_data_path if data_exists else None,
             "archive_meta_path": archive_meta_path if meta_exists else None,
             "new_messages_count": len(compact_messages),
+            "newly_summarized_message_id": summary_message.get("id"),
         }

@@ -15,11 +15,11 @@ class ChatCompletionsPromptConfigTest(unittest.TestCase):
             cfg = load_config(cfg_path)
             self.assertEqual(
                 cfg["chat_completions_system_prompt_path"],
-                os.path.join(tmp_dir, "chat_completions_system_prompt.md"),
+                os.path.join(tmp_dir, "prompts", "chat_completions_system_prompt.md"),
             )
             self.assertTrue(
                 cfg["summary_params"]["chat_completions_summary_prompt_path"].endswith(
-                    "src/prompts/chat_completions_summary_prompt.md"
+                    "prompts/chat_completions_summary_prompt.md"
                 )
             )
 

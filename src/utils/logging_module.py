@@ -10,17 +10,33 @@ class FlushFileHandler(logging.FileHandler):
         self.flush()
 
 
+def build_run_log_paths(
+    config_dict: Dict[str, Any],
+    run_id: Optional[str] = None,
+) -> Tuple[str, str]:
+    """
+    Сконструировать пути к логам одного запуска:
+    - общий лог агента;
+    - отдельный trace-лог суммаризации.
+    """
+    base_dir = config_dict.get("logs_dump_dir") or os.getcwd()
+    suffix = run_id or str(int(time.time()))
+    logging_path = os.path.join(base_dir, f"agent_{suffix}.log")
+    summary_trace_path = os.path.join(base_dir, f"summary_trace_{suffix}.jsonl")
+    return logging_path, summary_trace_path
+
+
 def create_run_logger(
     config_dict: Dict[str, Any],
     run_id: Optional[str] = None,
-) -> Tuple[logging.Logger, str]:
+) -> Tuple[logging.Logger, str, str]:
     """
     Создать логгер и путь к файлу логов для конкретного запуска.
 
     - Если config_dict['save_logs'] == True — логи пишутся в отдельный файл.
       Имя файла включает run_id (если задан) или текущий timestamp.
     - Если save_logs == False — возвращается логгер с NullHandler и
-      строка с сообщением о том, что логи отключены.
+      строки-плейсхолдеры о том, что логи отключены.
     """
     logger_name = f"agent_run_{run_id}" if run_id else "agent_run"
     logger = logging.getLogger(logger_name)
@@ -30,9 +46,7 @@ def create_run_logger(
 
     # Файловый хендлер — только если явно включены логи.
     if config_dict.get("save_logs", False):
-        base_dir = config_dict.get("logs_dump_dir") or os.getcwd()
-        suffix = run_id or str(int(time.time()))
-        logging_path = os.path.join(base_dir, f"agent_{suffix}.log")
+        logging_path, summary_trace_path = build_run_log_paths(config_dict, run_id=run_id)
 
         handler = FlushFileHandler(logging_path, encoding="utf-8", mode="a")
         formatter = logging.Formatter(
@@ -44,6 +58,7 @@ def create_run_logger(
         logging_path = (
             "Null. Логи отключены. Включите логи в файле config.yml если они необходимы"
         )
+        summary_trace_path = ""
 
     # Всегда дублируем ошибки в stderr, чтобы исключения были видны даже при
     # отключённом файловом логировании.
@@ -55,7 +70,7 @@ def create_run_logger(
     err_handler.setFormatter(err_formatter)
     logger.addHandler(err_handler)
 
-    return logger, logging_path
+    return logger, logging_path, summary_trace_path
 
 
-__all__ = ["create_run_logger", "FlushFileHandler"]
+__all__ = ["create_run_logger", "FlushFileHandler", "build_run_log_paths"]

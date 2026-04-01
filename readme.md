@@ -69,11 +69,11 @@
           - `<= 0` (или отсутствует) — суммаризация выключена;
           - `> 0` — при достижении/превышении порога тред архивируется (`data_*`/`meta_*` с суффиксом `__summarized_<YYYYMMDD_HHMMSS>`) и продолжается от compact summary;
         - `summary_params.incremental_batch_chars` — размер батча для кумулятивной суммаризации; если не задан, используется `int(summary_params.chat_completions_summary_trigger_chars * 1.4)`;
-        - `summary_params.chat_completions_summary_prompt_path` (опционально), по умолчанию `src/prompts/chat_completions_summary_prompt.md`;
+        - `summary_params.chat_completions_summary_prompt_path` (опционально), по умолчанию `prompts/chat_completions_summary_prompt.md`;
         - `summary_params.max_message_chars` — максимум символов на одно сообщение при подготовке истории к суммаризации (по умолчанию `50000`);
         - `summary_params.max_dialogue_chars` — максимум символов на весь диалог для суммаризации (по умолчанию `1000000`, берется хвост целыми сообщениями);
         - `summary_params.max_accumulated_summary_chars` — лимит длины накопленного summary; при превышении запускается дополнительное сжатие summary-of-summary (по умолчанию `20000`);
-        - `summary_params.original_user_messages_max_chars` — лимит символов для блока `<original_user_messages>` в итоговом `<dialog_summary>`; сохраняются последние сообщения целиком (по умолчанию `20000`);
+        - `summary_params.original_user_messages_max_chars` — лимит символов для `meta.user_messages_log` (единственный источник user-запросов для суммаризации); сохраняются последние сообщения целиком (по умолчанию `20000`);
         - `summary_params.last_dialog_steps_count` — сколько последних сообщений включать;
         - `summary_params.last_dialog_step_message_max_chars` — максимум символов на одно сообщение (лишнее обрезается).
       - `gc-cli -q "..." -t my-thread` — продолжить диалог по треду;

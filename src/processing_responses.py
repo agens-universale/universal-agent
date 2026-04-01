@@ -1,4 +1,5 @@
 import json
+from types import SimpleNamespace
 
 from tools import apply_tool, WrongFunctionArgumentsException
 from utils.connect_backend import create_call_headers
@@ -6,16 +7,48 @@ from utils.connect_backend import request_backend_responses as request_backend
 from utils.connect_backend import create_call_data_responses as create_call_data
 from utils.connect_backend import request_backend_chat_completions
 from utils.connect_backend import create_call_data_completions
-from utils.convertations import output_chat_completion_to_response
+from utils.convertations import (
+    output_chat_completion_to_response,
+    sanitize_messages_for_chat_completions,
+)
 from utils.format_messages import format_message_responses
 from utils.generate_message_id import generate_msg_id_sha256 as generate_message_id_func
 
 from states import State
 from typing import List, Dict, Union, Tuple, Any, Callable, Optional
+from user_message_policy import (
+    TECHNICAL_TYPE_TECHNICAL,
+    TECHNICAL_TYPE_ERROR_MESSAGE,
+    wrap_technical_user_content,
+    build_invalid_tool_call_feedback_message,
+)
 
 import logging
 
 _fallback_logger = logging.getLogger(__name__)
+def _summarize_call_data_for_log(call_data: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Короткая сводка запроса для корреляции с ответом backend.
+    """
+    messages = call_data.get("messages")
+    tools = call_data.get("tools")
+    return {
+        "model": call_data.get("model"),
+        "messages_count": len(messages) if isinstance(messages, list) else None,
+        "tools_count": len(tools) if isinstance(tools, list) else None,
+    }
+
+
+def _make_technical_feedback_user_message(
+    content: str, *, technical_type: str = TECHNICAL_TYPE_TECHNICAL
+) -> Dict[str, str]:
+    return {
+        "role": "user",
+        "content": wrap_technical_user_content(
+            content, technical_type=technical_type
+        ),
+        "id": generate_message_id_func("m"),
+    }
 
 
 def _is_previous_response_cache_miss(exc: Exception) -> bool:
@@ -75,9 +108,22 @@ def _request_backend_canonical(
         return resp_messages, response_id, res_headers
 
     url = cfg["completions_url"]
-    call_data = create_call_data_completions(
+    sanitized_messages = sanitize_messages_for_chat_completions(
         messages,
-        state,
+        invalid_tool_call_factory=build_invalid_tool_call_feedback_message,
+    )
+    sanitized_state_messages = sanitize_messages_for_chat_completions(
+        getattr(state, "messages", []) or [],
+        invalid_tool_call_factory=build_invalid_tool_call_feedback_message,
+    )
+    chat_state = SimpleNamespace(
+        messages=sanitized_state_messages,
+        tools=getattr(state, "tools", []),
+        default_model=getattr(state, "default_model", None),
+    )
+    call_data = create_call_data_completions(
+        sanitized_messages,
+        chat_state,
     )
     res = request_backend_chat_completions(
         call_data,
@@ -94,7 +140,14 @@ def _request_backend_canonical(
     choices = res.get("choices")
     if isinstance(choices, list) and len(choices) > 0:
         first_choice_payload["choices"] = [choices[0]]
-    canonical = output_chat_completion_to_response(first_choice_payload)
+    canonical = output_chat_completion_to_response(
+        first_choice_payload,
+        logger_override=getattr(ctx, "logger", _fallback_logger),
+        log_context={
+            "url": url,
+            "request_summary": _summarize_call_data_for_log(call_data),
+        },
+    )
     resp_messages = canonical["output"]
     response_id = str(canonical.get("id") or res.get("id") or "")
     if not response_id:
@@ -235,11 +288,10 @@ def run_agent(
             run_logger.error("Empty messages list")
             tool_error_cnt += 1
             messages = [
-                {
-                    "role": "user",
-                    "content": "There is no tool call in Agent response. Please send appropriate tool call",
-                    "id": generate_message_id_func("m"),
-                }
+                _make_technical_feedback_user_message(
+                    "There is no tool call in Agent response. Please send appropriate tool call",
+                    technical_type=TECHNICAL_TYPE_TECHNICAL,
+                )
             ]
             state.steps += 1
             continue
@@ -254,6 +306,12 @@ def run_agent(
                     json.dumps(m, ensure_ascii=False, indent=2),
                 )
 
+            # Логируем оригинальные сообщения, но в state сохраняем уже
+            # санитайзнутый набор (битые function_call -> technical user message).
+            messages = sanitize_messages_for_chat_completions(
+                messages,
+                invalid_tool_call_factory=build_invalid_tool_call_feedback_message,
+            )
             state.messages += messages
             if persist_messages_callback is not None:
                 try:
@@ -323,22 +381,20 @@ def run_agent(
             run_logger.error(e, exc_info=True)
             tool_error_cnt += 1
             messages = [
-                {
-                    "role": "user",
-                    "content": e.to_llm_feedback(),
-                    "id": generate_message_id_func("m"),
-                }
+                _make_technical_feedback_user_message(
+                    e.to_llm_feedback(),
+                    technical_type=TECHNICAL_TYPE_ERROR_MESSAGE,
+                )
             ]
         except Exception as e:
             # raise e
             run_logger.error(e, exc_info=True)
             tool_error_cnt += 1
             messages = [
-                {
-                    "role": "user",
-                    "content": "There is no tool call in Agent response. Please send appropriate tool call",
-                    "id": generate_message_id_func("m"),
-                }
+                _make_technical_feedback_user_message(
+                    "There is no tool call in Agent response. Please send appropriate tool call",
+                    technical_type=TECHNICAL_TYPE_TECHNICAL,
+                )
             ]
 
         # На первом `user_ask`-цикле при продолжении диалога по `-t` мы
