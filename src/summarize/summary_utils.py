@@ -17,7 +17,22 @@ _ORIGINAL_USER_MESSAGES_BLOCK_RE = re.compile(
 
 
 def strip_original_user_messages_block(summary_text: str) -> str:
-    """Убирает из текста саммари блок <original_user_messages>...</original_user_messages>."""
+    """
+    Удаляет из текста фрагмент ``<original_user_messages>...</original_user_messages>``.
+
+    Зачем: при **входе в LLM-суммаризацию** этот блок дублирует то, что уже передаётся отдельным полем
+    ``<user_requests_log>`` в user-промпте (см. ``thread_summarizer._build_history_text`` через
+    ``_message_text_limited``). В дамп треда после compaction текст саммари хранится как выдал пайплайн,
+    без потери фрагментов на этапе ``thread_store.archive_and_compact_summary_payload``.
+
+    Что делает: одно regex-замещение по всему тексту, затем ``strip()`` по краям.
+
+    Аргументы:
+        summary_text: исходная строка саммари. Не-``str`` трактуется как отсутствие данных.
+
+    Возвращает:
+        Очищенную строку либо ``""``, если вход не строка или после очистки текст пуст.
+    """
     if not isinstance(summary_text, str):
         return ""
     cleaned = _ORIGINAL_USER_MESSAGES_BLOCK_RE.sub("", summary_text)
@@ -26,8 +41,19 @@ def strip_original_user_messages_block(summary_text: str) -> str:
 
 def history_has_dialog_summary_message(messages: List[Dict[str, Any]]) -> bool:
     """
-    True, если в списке сообщений уже есть user-сообщение с контентом dialog summary
-    (техническое саммари предыдущего диалога).
+    Проверяет, есть ли в истории уже вставленное техническое user-сообщение с типом dialog summary.
+
+    Зачем: оркестратор (например, ``agent_executor``) различает «сырой» тред и тред после compaction —
+    без этого легко повторить суммаризацию или неверно обработать загруженный из persistence трейс.
+
+    Что делает: проходит по списку, отбирает только dict с ``role == "user"``, извлекает текст через
+    ``user_content_to_text`` и вызывает ``is_dialog_summary_user_message_text``.
+
+    Аргументы:
+        messages: последовательность сообщений (как в OpenAI-совместимом API). Не-словари пропускаются.
+
+    Возвращает:
+        ``True``, если найдено непустое user-сообщение, распознаваемое как dialog summary; иначе ``False``.
     """
     for msg in messages:
         if not isinstance(msg, dict):
@@ -43,6 +69,21 @@ def history_has_dialog_summary_message(messages: List[Dict[str, Any]]) -> bool:
 
 
 def _message_content_to_text(content: Any) -> str:
+    """
+    Приводит поле ``content`` (или payload tool-вызова) к одной строке для встраивания в текст саммари.
+
+    Зачем: ``message_text_for_summary`` должен работать и с чистой строкой, и с multimodal-списком,
+    и с произвольным JSON — без дублирования правил в нескольких ветках.
+
+    Что делает: строка возвращается как есть; список — конкатенация текстовых частей и JSON остального;
+    dict — ``json.dumps``; ``None`` — ``""``; прочие типы — ``str(...)``.
+
+    Аргументы:
+        content: произвольное значение из тела сообщения или аргументов/вывода function_call.
+
+    Возвращает:
+        Скалярную строку без побочных эффектов.
+    """
     if isinstance(content, str):
         return content
     if isinstance(content, list):
@@ -63,6 +104,21 @@ def _message_content_to_text(content: Any) -> str:
 
 
 def message_text_for_summary(message: Dict[str, Any]) -> str:
+    """
+    Строит каноничное текстовое представление одного сообщения для LLM-суммаризации и метрик размера.
+
+    Зачем: ``thread_summarizer`` и ``calc_messages_chars_total`` должны смотреть на один и тот же
+    сериализованный вид, иначе пороги по символам и текст для модели разъедутся.
+
+    Что делает: для ``type=function_call`` / ``function_call_output`` формирует помеченные блоки;
+    для обычных сообщений — ``[<role>]`` плюс текст из ``_message_content_to_text``.
+
+    Аргументы:
+        message: одно сообщение-трекда. Не-словарь даёт ``""``.
+
+    Возвращает:
+        Одна строка — текстовый снимок сообщения для промпта суммаризатора и ``len()`` в метриках.
+    """
     if not isinstance(message, dict):
         return ""
     msg_type = str(message.get("type") or "message")
@@ -79,6 +135,20 @@ def message_text_for_summary(message: Dict[str, Any]) -> str:
 
 
 def calc_messages_chars_total(messages: List[Dict[str, Any]]) -> int:
+    """
+    Считает суммарную длину в символах сериализованного трека (как его увидит саммари).
+
+    Зачем: в ``compaction`` сравнивают размер контекста с порогом до/после схлопывания; одна точка
+    подсчёта через ``message_text_for_summary`` совпадает с тем, что уходит в LLM.
+
+    Что делает: для каждого элемента списка берёт ``len(message_text_for_summary(message))`` и суммирует.
+
+    Аргументы:
+        messages: список сообщений того же вида, что обходит pipeline суммаризации.
+
+    Возвращает:
+        Неотрицательное целое — суммарное число символов по всем сообщениям.
+    """
     total = 0
     for message in messages:
         total += len(message_text_for_summary(message))
@@ -93,35 +163,35 @@ def apply_summary_state_patch(
     summarized_messages_count: int,
 ) -> None:
     """
-    Atomically apply summary-compaction results to runtime state.
+    Атомарно вносит в объект ``state`` результат compaction-суммаризации (без I/O и без решения «когда»).
 
-    Зачем нужна:
-    - Это единая техническая точка применения изменений после суммаризации.
-    - Держит инварианты state в одном месте (notes/offset/previous_response_id/messages).
-    - Не принимает orchestration-решений (когда/почему суммаризировать) и не делает I/O.
+    Зачем: каноничное состояние исполнения живёт в ``state`` (см. принципы слоёв); эта утилита — одна
+    техническая точка, где согласованно обновляются заметки, оффсет шагов, привязка к предыдущему ответу API
+    и список сообщений. Вызывается из ``compaction`` после успешной суммаризации.
 
     Что делает:
-    1) Обновляет `state.notes_md` только при наличии `memory_additions`:
-       - additions аккуратно добавляются к текущим notes;
-       - если additions нет, `state.notes_md` не изменяется.
-    2) Инкрементирует `state.dialog_steps_offset` на `summarized_messages_count`.
-    3) Сбрасывает `state.previous_response_id = None` (контракт после compaction).
-    4) Перестраивает `state.messages` в компактный trace:
-       - если в исходной истории был `system`-message, сохраняет его первым;
-       - затем добавляет одно техническое user summary message.
-       Таким образом system-контекст не теряется, а диалоговая часть схлопывается.
+        1. ``state.notes_md`` — дополняет текстом ``memory_additions``, только если он непустой;
+           иначе поле не меняет.
+        2. ``state.dialog_steps_offset`` — увеличивает на ``summarized_messages_count`` (служебно через
+           ``max(0, int(...))``).
+        3. ``state.previous_response_id`` — сбрасывает в ``None`` (контракт после compaction).
+        4. ``state.messages`` — заменяет на компактный трейс: если в прежней истории есть ``system``,
+           оставляет первое такое сообщение первым, затем одно техническое user-сообщение dialog summary
+           (``wrap_technical_user_content`` + ``TECHNICAL_TYPE_DIALOG_SUMMARY``).
 
     Аргументы:
-    - `state`: объект состояния, который мутируется in-place.
-      Ожидаются поля: `notes_md`, `dialog_steps_offset`, `previous_response_id`, `messages`.
-    - `summary_message_content`: контент summary-сообщения, который будет упакован
-      в техническое user-сообщение при сборке компактного trace.
-    - `memory_additions`: извлеченные durable additions в thread memory; если непустые,
-      приоритетно попадают в `state.notes_md`.
-    - `summarized_messages_count`: сколько сообщений было "схлопнуто"; это число
-      добавляется к `state.dialog_steps_offset`.
-    Возврат:
-    - `None`. Все изменения применяются напрямую в `state`.
+        state:
+            Изменяемый in-place объект исполнения; ожидаются атрибуты ``notes_md``, ``dialog_steps_offset``,
+            ``previous_response_id``, ``messages``.
+        summary_message_content:
+            Текст саммари предыдущего диалога; попадает внутрь служебного user-сообщения.
+        memory_additions:
+            Извлечённые durable дополнения к памяти треда (markdown); при непустом значении дописываются в notes.
+        summarized_messages_count:
+            Число сообщений, схлопнутых в этом проходе; участвует в ``dialog_steps_offset``.
+
+    Возвращает:
+        ``None``; побочный эффект — мутация ``state``.
     """
     notes_base = (state.notes_md or "") if isinstance(getattr(state, "notes_md", None), str) else ""
     notes_new = notes_base

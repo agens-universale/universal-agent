@@ -1,6 +1,7 @@
 import types
 
 from summarize.thread_summarizer import (
+    _build_history_text,
     _group_into_turns,
     _message_text_limited,
     _split_turns_into_char_batches,
@@ -320,6 +321,19 @@ def test_trim_original_user_messages_to_max_chars_takes_tail_whole_messages():
     msgs = ["a" * 10000, "b" * 9000, "c" * 9000]
     trimmed = _trim_original_user_messages_to_max_chars(msgs, 20000)
     assert trimmed == ["b" * 9000, "c" * 9000]
+
+
+def test_build_history_text_strips_original_user_messages_block():
+    inner = "body after block"
+    raw = (
+        "before\n"
+        "<original_user_messages>\nLEGACY_DROP_ME\n</original_user_messages>\n\n"
+        f"{inner}"
+    )
+    messages = [{"role": "user", "content": raw}]
+    out = _build_history_text(messages, max_chars=100_000, max_message_chars=0)
+    assert "LEGACY_DROP_ME" not in out
+    assert inner in out
 
 
 def test_summarize_merges_existing_user_messages_log(monkeypatch):

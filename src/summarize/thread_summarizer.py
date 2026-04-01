@@ -3,7 +3,7 @@ import re
 from dataclasses import dataclass
 from typing import Any, Dict, List
 
-from summarize.summary_utils import message_text_for_summary
+from summarize.summary_utils import message_text_for_summary, strip_original_user_messages_block
 from user_message_policy import is_technical_user_message_text
 from utils.connect_backend import (
     create_call_headers,
@@ -104,7 +104,7 @@ def _build_history_text(
 
 
 def _message_text_limited(message: Dict[str, Any], max_message_chars: int) -> str:
-    text = message_text_for_summary(message)
+    text = strip_original_user_messages_block(message_text_for_summary(message))
     if max_message_chars > 0:
         return _truncate_text(text, max_message_chars)
     return text
@@ -281,9 +281,9 @@ def _format_last_dialog_steps(
     for idx, turn in enumerate(tail, start=start_idx):
         rendered: List[str] = []
         for msg in turn:
-            text = message_text_for_summary(msg).strip()
+            text = _message_text_limited(msg, message_max_chars).strip()
             if text:
-                rendered.append(_truncate_text(text, message_max_chars))
+                rendered.append(text)
         text = "\n".join(rendered).strip()
         if not text:
             continue

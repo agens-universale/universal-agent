@@ -4,7 +4,6 @@ import re
 from datetime import datetime, timezone
 from typing import Dict, List, Tuple, Any, Set, Optional
 
-from summarize.summary_utils import strip_original_user_messages_block
 from user_message_policy import (
     TECHNICAL_TYPE_DIALOG_SUMMARY,
     wrap_technical_user_content,
@@ -423,7 +422,7 @@ class ThreadSession:
             "content": wrap_technical_user_content(
                 (
                     "Summarized context from previous dialogue.\n"
-                    f"{strip_original_user_messages_block(summary_text)}"
+                    f"{summary_text}"
                 ),
                 technical_type=TECHNICAL_TYPE_DIALOG_SUMMARY,
             ),

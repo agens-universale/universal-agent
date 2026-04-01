@@ -87,7 +87,7 @@ class ThreadSummaryTest(unittest.TestCase):
             self.assertIsNone(meta.get("previous_response_id"))
             self.assertEqual(meta.get("chat_completions_system_prompt_rendered"), "SYSTEM")
 
-    def test_archive_and_compact_strips_original_user_messages_block(self) -> None:
+    def test_archive_and_compact_preserves_original_user_messages_in_dump(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             thread_id = "demo-thread"
             system_id = "cli"
@@ -127,7 +127,7 @@ class ThreadSummaryTest(unittest.TestCase):
             with open(data_path, "r", encoding="utf-8") as fd:
                 rows = [json.loads(line) for line in fd if line.strip()]
             payload_content = rows[0]["payload"]["content"]
-            self.assertNotIn("<original_user_messages>", payload_content)
+            self.assertIn("<original_user_messages>", payload_content)
             self.assertIn("<summary>", payload_content)
 
 
