@@ -1,6 +1,6 @@
 import types
 
-from thread_summarizer import (
+from summarize.thread_summarizer import (
     _group_into_turns,
     _message_text_limited,
     _split_turns_into_char_batches,
@@ -52,7 +52,7 @@ def _valid_summary(seed: str) -> str:
         "NEXT_ACTIONS:\n- action one\n- action two\n\n"
         "SPEC_AND_CONSTRAINTS:\n- keep API compatibility\n\n"
         "RISKS_AND_OPEN_QUESTIONS:\n- edge cases remain\n\n"
-        "IMPORTANT_ARTIFACTS:\n- src/thread_summarizer.py\n"
+        "IMPORTANT_ARTIFACTS:\n- src/summarize/thread_summarizer.py\n"
     )
 
 
@@ -63,9 +63,9 @@ def test_summarize_incremental_empty_history_no_model_call(monkeypatch):
         calls.append(kwargs)
         return "should_not_happen"
 
-    monkeypatch.setattr("thread_summarizer._load_prompt_template", lambda _p: "prompt")
-    monkeypatch.setattr("thread_summarizer._request_chat_completion_text", _never_call)
-    monkeypatch.setattr("thread_summarizer.suggest_memory_additions", lambda **_k: "")
+    monkeypatch.setattr("summarize.thread_summarizer._load_prompt_template", lambda _p: "prompt")
+    monkeypatch.setattr("summarize.thread_summarizer._request_chat_completion_text", _never_call)
+    monkeypatch.setattr("summarize.thread_summarizer.suggest_memory_additions", lambda **_k: "")
 
     result = summarize_dialog_via_chat_completions(
         ctx=_ctx(),
@@ -87,9 +87,9 @@ def test_summarize_incremental_single_batch_one_summary_call(monkeypatch):
         calls.append(kwargs)
         return _valid_summary("single-batch")
 
-    monkeypatch.setattr("thread_summarizer._load_prompt_template", lambda _p: "prompt")
-    monkeypatch.setattr("thread_summarizer._request_chat_completion_text", _fake_request)
-    monkeypatch.setattr("thread_summarizer.suggest_memory_additions", lambda **_k: "")
+    monkeypatch.setattr("summarize.thread_summarizer._load_prompt_template", lambda _p: "prompt")
+    monkeypatch.setattr("summarize.thread_summarizer._request_chat_completion_text", _fake_request)
+    monkeypatch.setattr("summarize.thread_summarizer.suggest_memory_additions", lambda **_k: "")
 
     result = summarize_dialog_via_chat_completions(
         ctx=_ctx(trigger_chars=999999),
@@ -124,9 +124,9 @@ def test_summarize_incremental_two_batches_previous_summary_passed(monkeypatch):
         memory_calls.append(kwargs)
         return ""
 
-    monkeypatch.setattr("thread_summarizer._load_prompt_template", lambda _p: "prompt")
-    monkeypatch.setattr("thread_summarizer._request_chat_completion_text", _fake_request)
-    monkeypatch.setattr("thread_summarizer.suggest_memory_additions", _fake_memory)
+    monkeypatch.setattr("summarize.thread_summarizer._load_prompt_template", lambda _p: "prompt")
+    monkeypatch.setattr("summarize.thread_summarizer._request_chat_completion_text", _fake_request)
+    monkeypatch.setattr("summarize.thread_summarizer.suggest_memory_additions", _fake_memory)
 
     result = summarize_dialog_via_chat_completions(
         ctx=_ctx(trigger_chars=4500),
@@ -299,9 +299,9 @@ def test_accumulated_summary_is_compressed_when_limit_exceeded(monkeypatch):
             return _valid_summary("compressed-summary")
         return _valid_summary("final-summary")
 
-    monkeypatch.setattr("thread_summarizer._load_prompt_template", lambda _p: "prompt")
-    monkeypatch.setattr("thread_summarizer._request_chat_completion_text", _fake_request)
-    monkeypatch.setattr("thread_summarizer.suggest_memory_additions", lambda **_k: "")
+    monkeypatch.setattr("summarize.thread_summarizer._load_prompt_template", lambda _p: "prompt")
+    monkeypatch.setattr("summarize.thread_summarizer._request_chat_completion_text", _fake_request)
+    monkeypatch.setattr("summarize.thread_summarizer.suggest_memory_additions", lambda **_k: "")
 
     ctx = _ctx(trigger_chars=4500)
     ctx.config_dict["summary_params"]["max_accumulated_summary_chars"] = 50
@@ -328,9 +328,9 @@ def test_summarize_merges_existing_user_messages_log(monkeypatch):
     def _fake_request(**_kwargs):
         return _valid_summary("single-batch")
 
-    monkeypatch.setattr("thread_summarizer._load_prompt_template", lambda _p: "prompt")
-    monkeypatch.setattr("thread_summarizer._request_chat_completion_text", _fake_request)
-    monkeypatch.setattr("thread_summarizer.suggest_memory_additions", lambda **_k: "")
+    monkeypatch.setattr("summarize.thread_summarizer._load_prompt_template", lambda _p: "prompt")
+    monkeypatch.setattr("summarize.thread_summarizer._request_chat_completion_text", _fake_request)
+    monkeypatch.setattr("summarize.thread_summarizer.suggest_memory_additions", lambda **_k: "")
 
     result = summarize_dialog_via_chat_completions(
         ctx=_ctx(trigger_chars=999999),
@@ -357,9 +357,9 @@ def test_summarize_preserves_user_messages_log_chronological_order(monkeypatch):
     def _fake_request(**_kwargs):
         return _valid_summary("single-batch")
 
-    monkeypatch.setattr("thread_summarizer._load_prompt_template", lambda _p: "prompt")
-    monkeypatch.setattr("thread_summarizer._request_chat_completion_text", _fake_request)
-    monkeypatch.setattr("thread_summarizer.suggest_memory_additions", lambda **_k: "")
+    monkeypatch.setattr("summarize.thread_summarizer._load_prompt_template", lambda _p: "prompt")
+    monkeypatch.setattr("summarize.thread_summarizer._request_chat_completion_text", _fake_request)
+    monkeypatch.setattr("summarize.thread_summarizer.suggest_memory_additions", lambda **_k: "")
 
     result = summarize_dialog_via_chat_completions(
         ctx=_ctx(trigger_chars=999999),
@@ -388,9 +388,9 @@ def test_summarize_filters_technical_messages_from_user_messages_log(monkeypatch
     def _fake_request(**_kwargs):
         return _valid_summary("single-batch")
 
-    monkeypatch.setattr("thread_summarizer._load_prompt_template", lambda _p: "prompt")
-    monkeypatch.setattr("thread_summarizer._request_chat_completion_text", _fake_request)
-    monkeypatch.setattr("thread_summarizer.suggest_memory_additions", lambda **_k: "")
+    monkeypatch.setattr("summarize.thread_summarizer._load_prompt_template", lambda _p: "prompt")
+    monkeypatch.setattr("summarize.thread_summarizer._request_chat_completion_text", _fake_request)
+    monkeypatch.setattr("summarize.thread_summarizer.suggest_memory_additions", lambda **_k: "")
 
     result = summarize_dialog_via_chat_completions(
         ctx=_ctx(trigger_chars=999999),
@@ -415,9 +415,9 @@ def test_invalid_summary_triggers_one_repair_retry(monkeypatch):
             return "[assistant] raw transcript"
         return _valid_summary("repaired")
 
-    monkeypatch.setattr("thread_summarizer._load_prompt_template", lambda _p: "prompt")
-    monkeypatch.setattr("thread_summarizer._request_chat_completion_text", _fake_request)
-    monkeypatch.setattr("thread_summarizer.suggest_memory_additions", lambda **_k: "")
+    monkeypatch.setattr("summarize.thread_summarizer._load_prompt_template", lambda _p: "prompt")
+    monkeypatch.setattr("summarize.thread_summarizer._request_chat_completion_text", _fake_request)
+    monkeypatch.setattr("summarize.thread_summarizer.suggest_memory_additions", lambda **_k: "")
 
     result = summarize_dialog_via_chat_completions(
         ctx=_ctx(trigger_chars=999999),

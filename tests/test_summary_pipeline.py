@@ -1,12 +1,8 @@
 import tempfile
 import types
-import json
-import os
 
 from summary_pipeline import (
-    _append_summary_trace,
     maybe_run_summary_compaction,
-    maybe_run_summary_compaction_in_memory,
 )
 from thread_store import ThreadSession, append_new_thread_messages, save_thread_meta
 
@@ -94,9 +90,9 @@ def test_maybe_run_summary_compaction_twice_uses_meta_user_log(monkeypatch):
             thread_id=thread_id,
         )
 
-        monkeypatch.setattr("thread_summarizer._load_prompt_template", lambda _p: "prompt")
+        monkeypatch.setattr("summarize.thread_summarizer._load_prompt_template", lambda _p: "prompt")
         monkeypatch.setattr(
-            "thread_summarizer._request_chat_completion_text",
+            "summarize.thread_summarizer._request_chat_completion_text",
             lambda **_kwargs: (
                 "TASK_AND_CONTEXT:\n- context\n\n"
                 "GOALS:\n- goals\n\n"
@@ -107,17 +103,21 @@ def test_maybe_run_summary_compaction_twice_uses_meta_user_log(monkeypatch):
                 "IMPORTANT_ARTIFACTS:\n- x\n"
             ),
         )
-        monkeypatch.setattr("thread_summarizer.suggest_memory_additions", lambda **_k: "")
+        monkeypatch.setattr("summarize.thread_summarizer.suggest_memory_additions", lambda **_k: "")
 
         state = _state()
+        state.thread_id = thread_id
+        state.messages = session.get_full_history_messages()
         state.user_messages_log = ["[user] first request", "[user] second request"]
         ran_1 = maybe_run_summary_compaction(
             ctx=_ctx(trigger_chars=1),
             state=state,
-            thread_session=session,
             summary_trigger_chars=1,
             trigger_reason="during_run",
             is_cli_mode=False,
+            on_summary_applied=lambda event: session.archive_and_compact_summary_payload(
+                event.get("summary_payload", {})
+            ),
         )
         assert ran_1 is True
         assert "<original_user_messages>" not in session.history_messages[0]["content"]
@@ -130,13 +130,16 @@ def test_maybe_run_summary_compaction_twice_uses_meta_user_log(monkeypatch):
             ],
             previous_response_id=None,
         )
+        state.messages = session.get_full_history_messages()
         ran_2 = maybe_run_summary_compaction(
             ctx=_ctx(trigger_chars=1),
             state=state,
-            thread_session=session,
             summary_trigger_chars=1,
             trigger_reason="during_run",
             is_cli_mode=False,
+            on_summary_applied=lambda event: session.archive_and_compact_summary_payload(
+                event.get("summary_payload", {})
+            ),
         )
         assert ran_2 is True
         assert state.user_messages_log == [
@@ -146,10 +149,10 @@ def test_maybe_run_summary_compaction_twice_uses_meta_user_log(monkeypatch):
         ]
 
 
-def test_maybe_run_summary_compaction_in_memory_works_without_thread(monkeypatch):
-    monkeypatch.setattr("thread_summarizer._load_prompt_template", lambda _p: "prompt")
+def test_maybe_run_summary_compaction_works_without_thread(monkeypatch):
+    monkeypatch.setattr("summarize.thread_summarizer._load_prompt_template", lambda _p: "prompt")
     monkeypatch.setattr(
-        "thread_summarizer._request_chat_completion_text",
+        "summarize.thread_summarizer._request_chat_completion_text",
         lambda **_kwargs: (
             "TASK_AND_CONTEXT:\n- context\n\n"
             "GOALS:\n- goals\n\n"
@@ -160,7 +163,7 @@ def test_maybe_run_summary_compaction_in_memory_works_without_thread(monkeypatch
             "IMPORTANT_ARTIFACTS:\n- x\n"
         ),
     )
-    monkeypatch.setattr("thread_summarizer.suggest_memory_additions", lambda **_k: "")
+    monkeypatch.setattr("summarize.thread_summarizer.suggest_memory_additions", lambda **_k: "")
 
     state = _state()
     state.messages = [
@@ -170,7 +173,7 @@ def test_maybe_run_summary_compaction_in_memory_works_without_thread(monkeypatch
         {"role": "assistant", "content": "second reply"},
     ]
     state.user_messages_log = ["[user] first request", "[user] second request"]
-    ran = maybe_run_summary_compaction_in_memory(
+    ran = maybe_run_summary_compaction(
         ctx=_ctx(trigger_chars=1),
         state=state,
         summary_trigger_chars=1,
@@ -183,10 +186,10 @@ def test_maybe_run_summary_compaction_in_memory_works_without_thread(monkeypatch
     assert state.user_messages_log == ["[user] first request", "[user] second request"]
 
 
-def test_maybe_run_summary_compaction_in_memory_preserves_system_and_state_metadata(monkeypatch):
-    monkeypatch.setattr("thread_summarizer._load_prompt_template", lambda _p: "prompt")
+def test_maybe_run_summary_compaction_preserves_system_and_state_metadata(monkeypatch):
+    monkeypatch.setattr("summarize.thread_summarizer._load_prompt_template", lambda _p: "prompt")
     monkeypatch.setattr(
-        "thread_summarizer._request_chat_completion_text",
+        "summarize.thread_summarizer._request_chat_completion_text",
         lambda **_kwargs: (
             "TASK_AND_CONTEXT:\n- context\n\n"
             "GOALS:\n- goals\n\n"
@@ -197,7 +200,7 @@ def test_maybe_run_summary_compaction_in_memory_preserves_system_and_state_metad
             "IMPORTANT_ARTIFACTS:\n- x\n"
         ),
     )
-    monkeypatch.setattr("thread_summarizer.suggest_memory_additions", lambda **_k: "")
+    monkeypatch.setattr("summarize.thread_summarizer.suggest_memory_additions", lambda **_k: "")
 
     state = _state()
     system_msg = {"role": "system", "content": "SYSTEM", "id": "sys_1"}
@@ -212,7 +215,7 @@ def test_maybe_run_summary_compaction_in_memory_preserves_system_and_state_metad
     initial_project_data_before = dict(state.initial_project_data)
     call_metadata_before = dict(state.call_metadata)
 
-    ran = maybe_run_summary_compaction_in_memory(
+    ran = maybe_run_summary_compaction(
         ctx=_ctx(trigger_chars=1),
         state=state,
         summary_trigger_chars=1,
@@ -221,8 +224,11 @@ def test_maybe_run_summary_compaction_in_memory_preserves_system_and_state_metad
     )
 
     assert ran is True
-    assert state.messages[0]["role"] == "user"
-    assert "Summarized context from previous dialogue." in state.messages[0]["content"]
+    assert len(state.messages) == 2
+    assert state.messages[0]["role"] == "system"
+    assert state.messages[0]["content"] == "SYSTEM"
+    assert state.messages[1]["role"] == "user"
+    assert "Summarized context from previous dialogue." in state.messages[1]["content"]
     assert "keep me" in state.notes_md
     assert state.user_messages_log == ["[user] first request"]
     assert state.dialog_steps_offset > 7
@@ -231,35 +237,3 @@ def test_maybe_run_summary_compaction_in_memory_preserves_system_and_state_metad
     assert state.initial_project_data == initial_project_data_before
     assert state.call_metadata == call_metadata_before
 
-
-def test_append_summary_trace_writes_jsonl_records():
-    with tempfile.TemporaryDirectory() as tmp_dir:
-        trace_path = os.path.join(tmp_dir, "summary_trace_test.jsonl")
-        ctx = types.SimpleNamespace(
-            summary_trace_path=trace_path,
-            config_dict={"save_logs": True, "logs_dump_dir": tmp_dir},
-        )
-
-        _append_summary_trace(
-            ctx=ctx,
-            trigger_reason="during_run",
-            trace_data={"step": 1},
-            newly_summarized_message_id="m1",
-        )
-        _append_summary_trace(
-            ctx=ctx,
-            trigger_reason="manual",
-            trace_data={"step": 2},
-            newly_summarized_message_id="m2",
-        )
-
-        with open(trace_path, "r", encoding="utf-8") as fd:
-            rows = [json.loads(line) for line in fd if line.strip()]
-
-        assert len(rows) == 2
-        assert rows[0]["trigger_reason"] == "during_run"
-        assert rows[0]["summary_trace"] == {"step": 1}
-        assert rows[0]["newly_summarized_message_id"] == "m1"
-        assert rows[1]["trigger_reason"] == "manual"
-        assert rows[1]["summary_trace"] == {"step": 2}
-        assert rows[1]["newly_summarized_message_id"] == "m2"

@@ -81,22 +81,26 @@ def test_e2e_two_sequential_summaries_keep_user_log_order_and_no_original_block(
         session.meta["backend_api_mode"] = "chat_completions"
         session.backend_api_mode = "chat_completions"
         state = _state()
+        state.thread_id = thread_id
+        state.messages = session.get_full_history_messages()
         state.user_messages_log = ["[user] first request", "[user] second request"]
 
-        monkeypatch.setattr("thread_summarizer._load_prompt_template", lambda _p: "prompt")
+        monkeypatch.setattr("summarize.thread_summarizer._load_prompt_template", lambda _p: "prompt")
         monkeypatch.setattr(
-            "thread_summarizer._request_chat_completion_text",
+            "summarize.thread_summarizer._request_chat_completion_text",
             lambda **_kwargs: _valid_summary("s"),
         )
-        monkeypatch.setattr("thread_summarizer.suggest_memory_additions", lambda **_k: "")
+        monkeypatch.setattr("summarize.thread_summarizer.suggest_memory_additions", lambda **_k: "")
 
         assert maybe_run_summary_compaction(
             ctx=_ctx(),
             state=state,
-            thread_session=session,
             summary_trigger_chars=1,
             trigger_reason="during_run",
             is_cli_mode=False,
+            on_summary_applied=lambda event: session.archive_and_compact_summary_payload(
+                event.get("summary_payload", {})
+            ),
         )
 
         rows_after_first = _read_current_data_rows(tmp_dir, thread_id)
@@ -116,13 +120,16 @@ def test_e2e_two_sequential_summaries_keep_user_log_order_and_no_original_block(
             previous_response_id=None,
         )
         prev_offset = int(state.dialog_steps_offset)
+        state.messages = session.get_full_history_messages()
         assert maybe_run_summary_compaction(
             ctx=_ctx(),
             state=state,
-            thread_session=session,
             summary_trigger_chars=1,
             trigger_reason="during_run",
             is_cli_mode=False,
+            on_summary_applied=lambda event: session.archive_and_compact_summary_payload(
+                event.get("summary_payload", {})
+            ),
         )
         assert int(state.dialog_steps_offset) > prev_offset
 
@@ -177,25 +184,29 @@ def test_e2e_user_log_skips_technical_and_tool_messages(monkeypatch):
         session.meta["backend_api_mode"] = "chat_completions"
         session.backend_api_mode = "chat_completions"
         state = _state()
+        state.thread_id = thread_id
+        state.messages = session.get_full_history_messages()
         state.user_messages_log = [
             '[user] <current_context>client has non-empty thread notes; call `thread_notes` with action="read" to load them.</current_context>',
             "[user] real request",
         ]
 
-        monkeypatch.setattr("thread_summarizer._load_prompt_template", lambda _p: "prompt")
+        monkeypatch.setattr("summarize.thread_summarizer._load_prompt_template", lambda _p: "prompt")
         monkeypatch.setattr(
-            "thread_summarizer._request_chat_completion_text",
+            "summarize.thread_summarizer._request_chat_completion_text",
             lambda **_kwargs: _valid_summary("s-tech"),
         )
-        monkeypatch.setattr("thread_summarizer.suggest_memory_additions", lambda **_k: "")
+        monkeypatch.setattr("summarize.thread_summarizer.suggest_memory_additions", lambda **_k: "")
 
         assert maybe_run_summary_compaction(
             ctx=_ctx(),
             state=state,
-            thread_session=session,
             summary_trigger_chars=1,
             trigger_reason="during_run",
             is_cli_mode=False,
+            on_summary_applied=lambda event: session.archive_and_compact_summary_payload(
+                event.get("summary_payload", {})
+            ),
         )
         # После compaction user log в state не перезаписывается: source of truth
         # для него формируется инкрементально в runtime и здесь сохраняется как есть.

@@ -148,7 +148,7 @@ class SummaryTriggersTest(unittest.TestCase):
             ), patch.object(
                 agent_executor_module, "run_agent", side_effect=_fake_run_agent
             ), patch.object(
-                agent_executor_module, "maybe_run_summary_compaction_in_memory", side_effect=_record
+                agent_executor_module, "maybe_run_summary_compaction", side_effect=_record
             ):
                 executor = agent_executor_module.AgentExecutor(ctx)
                 result = executor.run("hello", system="cli", verbose=False)
@@ -166,15 +166,12 @@ class SummaryTriggersTest(unittest.TestCase):
                 agent_executor_module, "run_agent", return_value="ok"
             ), patch.object(
                 agent_executor_module, "maybe_run_summary_compaction"
-            ) as compaction_mock, patch.object(
-                agent_executor_module, "maybe_run_summary_compaction_in_memory"
-            ) as compaction_memory_mock:
+            ) as compaction_mock:
                 executor = agent_executor_module.AgentExecutor(ctx)
                 result = executor.run("hello", thread_id="thr1", system="cli", verbose=False)
                 self.assertEqual(result, "ok")
 
             compaction_mock.assert_not_called()
-            compaction_memory_mock.assert_not_called()
 
 
 if __name__ == "__main__":

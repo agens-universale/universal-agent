@@ -1,6 +1,6 @@
 import unittest
 
-from thread_summarizer import (
+from summarize.thread_summarizer import (
     _format_last_dialog_steps,
     _group_into_turns,
     _split_turns_into_char_batches,
@@ -31,7 +31,7 @@ class ThreadSummarizerTest(unittest.TestCase):
             "PLAN_AND_PROGRESS:\n- [DONE] something.\n\n"
             "NEXT_ACTIONS:\n- action.\n\n"
             "SPEC_AND_CONSTRAINTS:\n- constraints.\n\n"
-            "IMPORTANT_ARTIFACTS:\n- src/thread_summarizer.py\n"
+            "IMPORTANT_ARTIFACTS:\n- src/summarize/thread_summarizer.py\n"
         )
         self.assertTrue(_is_valid_summary_text(good_summary))
         self.assertFalse(_is_valid_summary_text(""))

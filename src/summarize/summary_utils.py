@@ -25,15 +25,16 @@ def apply_summary_state_patch(
        - если additions нет, `state.notes_md` не изменяется.
     2) Инкрементирует `state.dialog_steps_offset` на `summarized_messages_count`.
     3) Сбрасывает `state.previous_response_id = None` (контракт после compaction).
-    4) Всегда заменяет `state.messages` на один технический user summary message
-       (trace-head), чтобы in-memory состояние имело такой же инвариант после
-       compaction, как и persisted trace.
+    4) Перестраивает `state.messages` в компактный trace:
+       - если в исходной истории был `system`-message, сохраняет его первым;
+       - затем добавляет одно техническое user summary message.
+       Таким образом system-контекст не теряется, а диалоговая часть схлопывается.
 
     Аргументы:
     - `state`: объект состояния, который мутируется in-place.
       Ожидаются поля: `notes_md`, `dialog_steps_offset`, `previous_response_id`, `messages`.
     - `summary_message_content`: контент summary-сообщения, который будет упакован
-      в техническое user-сообщение при замене trace-head.
+      в техническое user-сообщение при сборке компактного trace.
     - `memory_additions`: извлеченные durable additions в thread memory; если непустые,
       приоритетно попадают в `state.notes_md`.
     - `summarized_messages_count`: сколько сообщений было "схлопнуто"; это число
@@ -66,5 +67,19 @@ def apply_summary_state_patch(
         ),
         "id": generate_message_id_func("m_sum"),
     }
+    previous_messages = (
+        list(getattr(state, "messages", []))
+        if isinstance(getattr(state, "messages", []), list)
+        else []
+    )
+    system_message = None
+    for msg in previous_messages:
+        if not isinstance(msg, dict):
+            continue
+        if str(msg.get("role", "")).strip().lower() == "system":
+            system_message = msg
+            break
     state.messages = [summary_message]
+    if isinstance(system_message, dict):
+        state.messages = [system_message, summary_message]
     return None

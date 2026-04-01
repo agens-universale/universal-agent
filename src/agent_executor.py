@@ -7,15 +7,13 @@ State создаётся заново при каждом run(). Возвращ�
 """
 
 import os
+import json
 import threading
 from typing import Any
 
 from processing_responses import run_agent
 from run_context import RunContext
-from summary_pipeline import (
-    maybe_run_summary_compaction,
-    maybe_run_summary_compaction_in_memory,
-)
+from summary_pipeline import maybe_run_summary_compaction
 from states import State, save_state, dump_storage
 from thread_store import (
     ThreadSession,
@@ -161,6 +159,34 @@ class AgentExecutor:
             self._state = state
             self._pending_messages = []
 
+        def _resolve_summary_trace_path() -> str:
+            path = getattr(self._ctx, "summary_trace_path", "")
+            if isinstance(path, str) and path.strip():
+                return path.strip()
+            cfg = getattr(self._ctx, "config_dict", {}) or {}
+            if not cfg.get("save_logs", False):
+                return ""
+            base_dir = cfg.get("logs_dump_dir") or os.getcwd()
+            return os.path.join(base_dir, "summary_trace.jsonl")
+
+        def _append_summary_trace(
+            *, trigger_reason: str, trace_data: dict, newly_summarized_message_id: str
+        ) -> None:
+            trace_path = _resolve_summary_trace_path()
+            if not trace_path:
+                return
+            trace_dir = os.path.dirname(trace_path)
+            if trace_dir:
+                os.makedirs(trace_dir, exist_ok=True)
+            payload = {
+                "trigger_reason": trigger_reason,
+                "summary_trace": trace_data or {},
+                "newly_summarized_message_id": newly_summarized_message_id,
+            }
+            with open(trace_path, "a", encoding="utf-8") as fd:
+                fd.write(json.dumps(payload, ensure_ascii=False))
+                fd.write("\n")
+
         def _contains_dialog_summary_message(messages_list: list[dict]) -> bool:
             for msg in messages_list:
                 if not isinstance(msg, dict):
@@ -183,10 +209,21 @@ class AgentExecutor:
                 maybe_run_summary_compaction(
                     ctx=self._ctx,
                     state=state,
-                    thread_session=thread_session,
                     summary_trigger_chars=summary_trigger_chars,
                     trigger_reason="pre_run",
                     is_cli_mode=is_cli_mode,
+                    on_summary_applied=lambda event: (
+                        thread_session.archive_and_compact_summary_payload(
+                            event.get("summary_payload", {})
+                        ),
+                        _append_summary_trace(
+                            trigger_reason=str(event.get("trigger_reason") or ""),
+                            trace_data=event.get("summary_trace", {}),
+                            newly_summarized_message_id=str(
+                                event.get("newly_summarized_message_id") or ""
+                            ),
+                        ),
+                    ),
                 )
             except Exception as summarize_exc:
                 if logger is not None:
@@ -198,23 +235,30 @@ class AgentExecutor:
                     )
         elif backend_api_mode == "chat_completions" and summary_trigger_chars > 0:
             try:
-                maybe_run_summary_compaction_in_memory(
+                maybe_run_summary_compaction(
                     ctx=self._ctx,
                     state=state,
                     summary_trigger_chars=summary_trigger_chars,
                     trigger_reason="pre_run",
                     is_cli_mode=is_cli_mode,
+                    on_summary_applied=lambda event: _append_summary_trace(
+                        trigger_reason=str(event.get("trigger_reason") or ""),
+                        trace_data=event.get("summary_trace", {}),
+                        newly_summarized_message_id=str(
+                            event.get("newly_summarized_message_id") or ""
+                        ),
+                    ),
                 )
             except Exception as summarize_exc:
                 if logger is not None:
                     logger.warning(
-                        "summary_failed reason=pre_run_in_memory error=%s",
+                        "summary_failed reason=pre_run error=%s",
                         summarize_exc,
                         exc_info=True,
                     )
                 if is_cli_mode:
                     print(
-                        "[summary] Ошибка суммаризации (in-memory): "
+                        "[summary] Ошибка суммаризации: "
                         f"error={summarize_exc}"
                     )
 
@@ -320,10 +364,21 @@ class AgentExecutor:
                     maybe_run_summary_compaction(
                         ctx=self._ctx,
                         state=state,
-                        thread_session=thread_session,
                         summary_trigger_chars=summary_trigger_chars,
                         trigger_reason="during_run",
                         is_cli_mode=is_cli_mode,
+                        on_summary_applied=lambda event: (
+                            thread_session.archive_and_compact_summary_payload(
+                                event.get("summary_payload", {})
+                            ),
+                            _append_summary_trace(
+                                trigger_reason=str(event.get("trigger_reason") or ""),
+                                trace_data=event.get("summary_trace", {}),
+                                newly_summarized_message_id=str(
+                                    event.get("newly_summarized_message_id") or ""
+                                ),
+                            ),
+                        ),
                     )
                 except Exception as summarize_exc:
                     if logger is not None:
@@ -345,23 +400,30 @@ class AgentExecutor:
             def _persist_runtime_batch(step_messages: list[dict]) -> None:
                 state.append_user_messages_to_log(step_messages)
                 try:
-                    maybe_run_summary_compaction_in_memory(
+                    maybe_run_summary_compaction(
                         ctx=self._ctx,
                         state=state,
                         summary_trigger_chars=summary_trigger_chars,
                         trigger_reason="during_run",
                         is_cli_mode=is_cli_mode,
+                        on_summary_applied=lambda event: _append_summary_trace(
+                            trigger_reason=str(event.get("trigger_reason") or ""),
+                            trace_data=event.get("summary_trace", {}),
+                            newly_summarized_message_id=str(
+                                event.get("newly_summarized_message_id") or ""
+                            ),
+                        ),
                     )
                 except Exception as summarize_exc:
                     if logger is not None:
                         logger.warning(
-                            "summary_failed reason=during_run_in_memory error=%s",
+                            "summary_failed reason=during_run error=%s",
                             summarize_exc,
                             exc_info=True,
                         )
                     if is_cli_mode:
                         print(
-                            "[summary] Ошибка суммаризации (in-memory): "
+                            "[summary] Ошибка суммаризации: "
                             f"error={summarize_exc}"
                         )
 

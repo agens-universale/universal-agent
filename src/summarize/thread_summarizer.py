@@ -32,6 +32,8 @@ _REQUIRED_SECTION_MARKERS = (
     "RISKS_AND_OPEN_QUESTIONS",
     "IMPORTANT_ARTIFACTS",
 )
+
+
 @dataclass
 class MemoryAdditionsResult:
     extracted: str
