@@ -36,17 +36,51 @@ _REQUIRED_SECTION_MARKERS = (
 
 @dataclass
 class MemoryAdditionsResult:
+    """Результат запроса к LLM для предложений по долговременной памяти диалога.
+
+    Назначение: зафиксировать и извлечённый текст для `thread_notes`, и полезные
+    для отладки/трассировки артефакты (сообщения запроса и сырой ответ модели).
+
+    Attributes:
+        extracted: Содержимое тега `<add_to_memory>` после парсинга; пустая строка,
+            если тега нет или он пустой.
+        request_messages: Список сообщений (обычно system + user), отправленный
+            в `chat completions` для этого шага.
+        raw_response: Полный текст ответа модели до извлечения XML-фрагмента.
+    """
+
     extracted: str
     request_messages: List[Dict[str, str]]
     raw_response: str
 
 
 def _default_prompt_path() -> str:
+    """Возвращает путь к файлу системного промпта суммаризации по умолчанию.
+
+    Назначение: единая точка, откуда `summarize_dialog_via_chat_completions` берёт
+    шаблон инструкций для LLM, если в конфиге не задан свой путь.
+
+    Returns:
+        Абсолютный путь к `src/prompts/chat_completions_summary_prompt.md`
+        относительно расположения этого модуля.
+    """
     base_dir = os.path.dirname(os.path.abspath(__file__))
     return os.path.join(base_dir, "..", "prompts", "chat_completions_summary_prompt.md")
 
 
 def _load_prompt_template(path: str) -> str:
+    """Читает файл с системным промптом суммаризации и проверяет, что он не пустой.
+
+    Args:
+        path: Путь к markdown/текстовому файлу с промптом.
+
+    Returns:
+        Содержимое файла без ведущих/конечных пробельных строк.
+
+    Raises:
+        ValueError: Если после `strip()` текст пустой — иначе LLM получил бы
+            пустой system prompt.
+    """
     with open(path, "r", encoding="utf-8") as fd:
         prompt = fd.read().strip()
     if not prompt:
@@ -55,6 +89,22 @@ def _load_prompt_template(path: str) -> str:
 
 
 def collect_user_messages_from_history(messages: List[Dict[str, Any]]) -> List[str]:
+    """Собирает из истории сообщений уникальные тексты пользовательских реплик для лога запросов.
+
+    Назначение: сформировать «журнал» явных пользовательских требований, который
+    далее уходит в промпт суммаризации (`user_requests_log`) отдельно от полной истории.
+
+    Поведение: обходятся только сообщения с `role == "user"`; текст берётся через
+    `message_text_for_summary`, отбрасываются пустые и технические сообщения
+    (`is_technical_user_message_text`); дубликаты по точному совпадению текста не
+    добавляются повторно (порядок — первое вхождение).
+
+    Args:
+        messages: Список сообщений диалога в формате словарей (как в хранилище треда).
+
+    Returns:
+        Список уникальных непустых пользовательских текстов в порядке первого появления.
+    """
     out: List[str] = []
     for msg in messages:
         if msg.get("role") != "user":
@@ -70,6 +120,22 @@ def collect_user_messages_from_history(messages: List[Dict[str, Any]]) -> List[s
 
 
 def normalize_user_messages_log(messages: List[str] | None) -> List[str]:
+    """Нормализует внешний лог пользовательских сообщений в список строк без мусора.
+
+    Назначение: безопасно принять `user_messages_log` из состояния (может быть
+    не списком или содержать «технические» реплики) и привести к тому же виду,
+    что и результат `collect_user_messages_from_history`.
+
+    Поведение: не-список даёт пустой результат; элементы приводятся к строке и
+    обрезаются по краям; пустые и технические строки отбрасываются; дубликаты
+    по полному тексту не повторяются.
+
+    Args:
+        messages: Сырой лог или ``None``.
+
+    Returns:
+        Очищенный список уникальных пользовательских текстов.
+    """
     out: List[str] = []
     if not isinstance(messages, list):
         return out
@@ -89,6 +155,25 @@ def _build_history_text(
     max_chars: int = 200_000,
     max_message_chars: int = 0,
 ) -> str:
+    """Склеивает историю в нумерованный многострочный текст для подстановки в промпт LLM.
+
+    Назначение: получить компактное, линейное представление батча сообщений с
+    контролем размера, чтобы не превысить лимиты контекста/логирования.
+
+    Поведение: для каждого сообщения извлекается текст (с опциональной обрезкой
+    на сообщение через `_message_text_limited`), пустые пропускаются; строки вида
+    ``"{n}. {text}"`` накапливаются, пока суммарная длина (плюс переносы) не
+    превысит `max_chars` — остальное не включается.
+
+    Args:
+        messages: Сообщения одного батча в порядке хронологии.
+        max_chars: Верхняя граница длины итоговой строки (по грубой оценке).
+        max_message_chars: Если > 0, каждое сообщение обрезается до этой длины
+            перед агрегированием.
+
+    Returns:
+        Текст диалога для вставки в XML-блоки промпта или логи.
+    """
     parts: List[str] = []
     total = 0
     for idx, msg in enumerate(messages, start=1):
@@ -104,6 +189,20 @@ def _build_history_text(
 
 
 def _message_text_limited(message: Dict[str, Any], max_message_chars: int) -> str:
+    """Возвращает текст одного сообщения для суммаризации с опциональной обрезкой.
+
+    Назначение: единообразно извлечь «видимый» текст сообщения (включая мультимодальные
+    поля через `message_text_for_summary`), убрав служебный блок original-user-messages,
+    и при необходимости усечь до лимита символов.
+
+    Args:
+        message: Словарь сообщения из истории треда.
+        max_message_chars: Если положительный — результат проходит через
+            `_truncate_text`; иначе возвращается полный текст после strip-блока.
+
+    Returns:
+        Строка текста сообщения, готовая для подсчёта длины батчей и для промпта.
+    """
     text = strip_original_user_messages_block(message_text_for_summary(message))
     if max_message_chars > 0:
         return _truncate_text(text, max_message_chars)
@@ -116,6 +215,25 @@ def _trim_history_to_max_dialogue_chars(
     max_dialogue_chars: int,
     max_message_chars: int,
 ) -> List[Dict[str, Any]]:
+    """Обрезает историю с конца назад так, чтобы суммарный объём текста уложился в лимит.
+
+    Назначение: перед суммаризацией отбросить самые старые сообщения, если полный
+    диалог слишком длинный; сохраняется хвост диалога (наиболее актуальная часть).
+
+    Поведение: при `max_dialogue_chars <= 0` история не режется. Иначе с конца
+    накапливается длина `_message_text_limited` для каждого сообщения; как только
+    сумма превышает лимит, берётся суффикс начиная со следующего индекса; если
+    даже одного сообщения «не влезает» в бюджет, возвращается список из последнего
+    сообщения.
+
+    Args:
+        messages: Полная история в хронологическом порядке.
+        max_dialogue_chars: Максимальная суммарная длина текста выбранного суффикса.
+        max_message_chars: Лимит на одно сообщение при оценке длины (как в батчинге).
+
+    Returns:
+        Возможно укороченный список сообщений (суффикс исходного списка).
+    """
     if not messages:
         return []
     if max_dialogue_chars <= 0:
@@ -136,6 +254,23 @@ def _trim_history_to_max_dialogue_chars(
 def _trim_original_user_messages_to_max_chars(
     messages: List[str], max_chars: int
 ) -> List[str]:
+    """Оставляет в логе пользовательских запросов хвост, укладывающийся в лимит символов.
+
+    Назначение: ограничить размер блока `<user_requests_log>` в промпте, сохранив
+    наиболее поздние формулировки пользователя.
+
+    Поведение: при `max_chars <= 0` список не меняется. Иначе сообщения перебираются
+    с конца к началу; в результат попадают подряд последние элементы, пока суммарная
+    длина не превысит `max_chars` (первое сообщение, не поместившееся целиком при
+    уже непустом результате, отбрасывается вместе с более старыми).
+
+    Args:
+        messages: Список пользовательских текстов (уже нормализованный).
+        max_chars: Ограничение на суммарную длину выбранного хвоста.
+
+    Returns:
+        Подсписок `messages` — последние элементы в исходном порядке.
+    """
     if not messages:
         return []
     if max_chars <= 0:
@@ -152,10 +287,31 @@ def _trim_original_user_messages_to_max_chars(
 
 
 def _group_into_turns(messages: List[Dict[str, Any]]) -> List[List[Dict[str, Any]]]:
+    """Разбивает плоский список сообщений на «ходы» (turns) для батчинга и форматирования.
+
+    Назначение: представить диалог как последовательность логических шагов: пары
+    вызов инструмента + вывод, пользователь с первым ответом ассистента, либо
+    отдельные сообщения, не вошедшие в склейку.
+
+    Поведение: предварительно по `call_id` сопоставляются `function_call`/`tool_call`
+    с соответствующим `*_output`. Затем линейным проходом формируются группы:
+    вызов+вывод; одиночный вызов без вывода; одиночный output; для `role=user`
+    в ход включаются последующие сообщения приёмника до того же сообщения
+    ассистента (`role=assistant`, `type=message`), либо прерывание при новом
+    пользователе или tool-сообщении.
+
+    Args:
+        messages: История сообщений в порядке возникновения.
+
+    Returns:
+        Список ходов; каждый ход — список одного или нескольких исходных сообщений.
+    """
     def _is_tool_call(msg: Dict[str, Any]) -> bool:
+        """True, если сообщение — вызов инструмента (function/tool call)."""
         return msg.get("type") in {"function_call", "tool_call"}
 
     def _is_tool_call_output(msg: Dict[str, Any]) -> bool:
+        """True, если сообщение — результат выполнения вызова инструмента."""
         return msg.get("type") in {"function_call_output", "tool_call_output"}
 
     if not messages:
@@ -240,6 +396,26 @@ def _split_turns_into_char_batches(
     batch_chars_limit: int,
     max_message_chars: int = 0,
 ) -> List[List[List[Dict[str, Any]]]]:
+    """Делит последовательность ходов на батчи по приблизительному лимиту символов.
+
+    Назначение: инкрементальная суммаризация — несколько вызовов LLM с нарастающим
+    `accumulated_summary`, чтобы не отправлять сверхдлинный текст одним запросом.
+
+    Поведение: при неположительном `batch_chars_limit` или пустых `turns` возвращается
+    либо один батч со всеми ходами, либо пустой список. Иначе ходы идут по порядку;
+    длина хода — сумма длин `_message_text_limited` по сообщениям хода. Новый батч
+    начинается, если добавление хода превысит лимит; также батч «закрывается» при
+    достижении или превышении лимита накопленной длины (включение хода может
+    отодвинуть границу на следующий батч).
+
+    Args:
+        turns: Список ходов из `_group_into_turns`.
+        batch_chars_limit: Максимум символов на один батч (оценка по тексту сообщений).
+        max_message_chars: Лимит длины одного сообщения при подсчёте.
+
+    Returns:
+        Список батчей; каждый батч — список ходов (каждый ход — список сообщений).
+    """
     if batch_chars_limit <= 0 or not turns:
         return [turns] if turns else []
     batches: List[List[List[Dict[str, Any]]]] = []
@@ -263,6 +439,18 @@ def _split_turns_into_char_batches(
 
 
 def _truncate_text(text: str, max_chars: int) -> str:
+    """Укорачивает строку до `max_chars` с явным маркером обрезки.
+
+    Назначение: предсказуемо ограничить размер текста в промптах и логах без
+    молчаливой потери контекста.
+
+    Args:
+        text: Исходный текст.
+        max_chars: Максимальная длина сохраняемого префикса; при ≤ 0 текст не режется.
+
+    Returns:
+        Исходная строка или префикс длины `max_chars` с суффиксом ``... [TEXT CUTTED]``.
+    """
     if max_chars <= 0 or len(text) <= max_chars:
         return text
     return text[:max_chars] + " ... [TEXT CUTTED]"
@@ -274,6 +462,26 @@ def _format_last_dialog_steps(
     message_max_chars: int = 5000,
     steps_offset: int = 0,
 ) -> str:
+    """Форматирует последние N ходов диалога в XML-подобные блоки для сообщения-сводки.
+
+    Назначение: дать модели и пользователю компактный «хвост» недавних реплик
+    рядом с текстовой сводкой (`last_dialog_steps` внутри `build_dialog_summary_content`).
+
+    Поведение: история группируется в ходы; берётся срез последних `max_steps` ходов;
+    каждый ход нумеруется с учётом `steps_offset` и позиции среза в общей ленте
+    (`start_idx`); внутри хода тексты сообщений (после `_message_text_limited`)
+    склеиваются через перевод строки; пустые ходы пропускаются.
+
+    Args:
+        messages: Сообщения (обычно уже усечённая к суммаризации история).
+        max_steps: Сколько последних ходов включить.
+        message_max_chars: Лимит символов на сообщение при рендере.
+        steps_offset: Добавка к номеру первого показанного хода (сдвиг нумерации).
+
+    Returns:
+        Многострочная строка с блоками ``<turn k>...</turn k>`` или пустая, если
+        нечего показать.
+    """
     turns = _group_into_turns(messages)
     tail = turns[-max_steps:] if len(turns) > max_steps else turns
     start_idx = steps_offset + (len(turns) - len(tail)) + 1
@@ -296,6 +504,23 @@ def build_dialog_summary_content(
     last_dialog_steps: str,
     current_memory: str = "",
 ) -> str:
+    """Собирает итоговое тело сообщения-резюме треда для подстановки в историю чата.
+
+    Назначение: один каноничный формат «сводки» с тремя зонами: текст сводки,
+    текущие заметки/память и последние шаги диалога, плюс инструкция не дублировать
+    чтение `thread_notes`, если память уже передана в блоке.
+
+    Args:
+        summary_text: Основной текст суммаризации (может уже включать блок
+            предложенной памяти от вызывающего кода).
+        last_dialog_steps: Отформатированный хвост диалога (например из
+            `_format_last_dialog_steps`).
+        current_memory: Строка текущего состояния `thread_notes` или пусто.
+
+    Returns:
+        Единая строка с размеченными секциями `<summary>`, `<current_memory>`,
+        `<last_dialog_steps>` и `<instruction>…</instruction>`.
+    """
     lines: List[str] = ["<summary>"]
     lines.append(summary_text.strip())
     lines.append("</summary>")
@@ -317,11 +542,40 @@ def build_dialog_summary_content(
 
 
 def _is_valid_summary_text(text: str) -> bool:
+    """Возвращает True, если черновик сводки проходит эвристическую валидацию.
+
+    Назначение: быстрая проверка без разбора кода причины отказа; детали см.
+    в `_validate_summary_text`.
+
+    Args:
+        text: Ответ модели с текстом сводки.
+
+    Returns:
+        ``True``/``False`` по результату валидации.
+    """
     ok, _ = _validate_summary_text(text)
     return ok
 
 
 def _validate_summary_text(text: str) -> tuple[bool, str]:
+    """Проверяет качество/структуру ответа LLM для сводки диалога.
+
+    Назначение: отсеять пустые, слишком короткие, похожие на мусор или недостаточно
+    структурированные ответы до принятия их как `accumulated_summary`.
+
+    Критерии: непустой текст; не начинается с известных «плохих» префиксов
+    (`_INVALID_SUMMARY_PREFIXES`); длина ≥ `_MIN_SUMMARY_CHARS`; не меньше
+    `_MIN_SUMMARY_LINES` непустых строк; в верхнем регистре встречается не меньше
+    трёх маркеров секций из `_REQUIRED_SECTION_MARKERS` (гибкая проверка структуры).
+
+    Args:
+        text: Строка сводки от модели.
+
+    Returns:
+        Пара (успех, код причины): при успехе ``(True, "ok")``; иначе ``False`` и
+        одно из: ``empty``, ``invalid_prefix``, ``too_short``, ``too_few_lines``,
+        ``missing_structure``.
+    """
     s = (text or "").strip()
     if not s:
         return False, "empty"
@@ -343,6 +597,17 @@ def _validate_summary_text(text: str) -> tuple[bool, str]:
 
 
 def _extract_add_to_memory(block: str) -> str:
+    """Достаёт содержимое первого парного тега `<add_to_memory>...</add_to_memory>`.
+
+    Назначение: распарсить строго ожидаемый формат ответа шага обогащения памяти.
+
+    Args:
+        block: Сырой текст ответа модели.
+
+    Returns:
+        Внутренность тега с обрезанными краевыми пробелами или пустая строка,
+        если тег не найден.
+    """
     match = re.search(r"<add_to_memory>\s*(.*?)\s*</add_to_memory>", block, re.DOTALL | re.IGNORECASE)
     if not match:
         return ""
@@ -350,6 +615,16 @@ def _extract_add_to_memory(block: str) -> str:
 
 
 def _shorten_for_log(text: str, max_chars: int = 500) -> str:
+    """Усекает текст для компактного логирования с пометкой о скрытом хвосте.
+
+    Args:
+        text: Строка для превью; ``None`` трактуется как пустая.
+        max_chars: Максимальная длина возвращаемого префикса (после `strip`).
+
+    Returns:
+        Полный текст, если он не длиннее `max_chars`, иначе префикс и суффикс
+        ``... [TRUNCATED N chars]``, где N — число отброшенных символов.
+    """
     s = (text or "").strip()
     if len(s) <= max_chars:
         return s
@@ -363,6 +638,20 @@ def _log_llm_prompt_and_result(
     messages: List[Dict[str, str]],
     output_text: str,
 ) -> None:
+    """Пишет в лог полный system/user промпт и ответ LLM для шага суммаризации или починки.
+
+    Назначение: трассировка без повторной сборки payload вручную при отладке качества
+    сводок.
+
+    Args:
+        logger: Обычно `ctx.logger`; при ``None`` вызов — no-op.
+        label: Короткий тег шага (например ``summary_batch_1``, ``memory_additions``).
+        messages: Сообщения запроса к API с ролями `system` и/или `user`.
+        output_text: Текст ответа модели (может быть пустым).
+
+    Returns:
+        None.
+    """
     if logger is None:
         return
     system_part = "\n\n".join(
@@ -388,6 +677,29 @@ def _request_chat_completion_text(
     max_tokens: int,
     request_label: str = "chat_completion",
 ) -> str:
+    """Отправляет запрос chat completions на бэкенд и возвращает текст ответа ассистента.
+
+    Назначение: единая точка HTTP-вызова для всех LLM-шагов этого модуля
+    (суммаризация, сжатие, починка, память) с фиксированными гиперпараметрами
+    и без инструментов.
+
+    Поведение: собирается payload (модель из `state.default_model` или конфига,
+    `temperature`≈0, `tools=[]`, лимит `max_tokens`), выставляются заголовки
+    `create_call_headers`, вызывается `request_backend_chat_completions`; из
+    ответа извлекается `choices[0].message.content`.
+
+    Args:
+        ctx: Контекст выполнения с `config_dict` и опционально `logger`.
+        state: Состояние сессии (модель, данные для заголовков).
+        messages: Пары роль/контент для chat API.
+        max_tokens: Верхняя граница длины генерируемого ответа.
+        request_label: Метка для возможной трассировки на стороне вызывающего;
+            в этом теле не используется, но фиксирует семантику вызова.
+
+    Returns:
+        Обрезанный по краям текст ответа или пустая строка при сбое/неожиданном
+        формате ответа.
+    """
     cfg = getattr(ctx, "config_dict", {}) or {}
     payload = {
         "model": getattr(state, "default_model", None) or cfg.get("model"),
@@ -427,6 +739,26 @@ def suggest_memory_additions(
     summary_text: str,
     current_memory: str,
 ) -> MemoryAdditionsResult:
+    """Запрашивает у LLM фрагмент долговременной памяти в формате `<add_to_memory>`.
+
+    Назначение: второй такт после сводки (когда включён): предложить только
+    устойчивые факты и решения, не дублируя уже имеющееся в сводке и `current_memory`,
+    для последующего добавления в `thread_notes`.
+
+    Поведение: формируется system+user промпт с тремя XML-блоками (история, сводка,
+    память); вызывается `_request_chat_completion_text`; логируются сырой ответ и
+    извлечённое содержимое тега; возвращается `MemoryAdditionsResult`.
+
+    Args:
+        ctx: Контекст с конфигом и логгером.
+        state: Состояние для выбора модели и запроса к бэкенду.
+        history_text: Полный текст диалога в формате, как у `_build_history_text`.
+        summary_text: Итоговая сводка после шага суммаризации.
+        current_memory: Текущее содержимое памяти треда (строка).
+
+    Returns:
+        Результат с полями `extracted`, `request_messages`, `raw_response`.
+    """
     system = (
         "You are helping enrich long-term session memory for a technical dialogue. "
         "You receive: (1) full dialog history, (2) summary, (3) current memory. "
@@ -498,6 +830,25 @@ def _compress_summary_text(
     max_chars: int,
     max_tokens: int,
 ) -> str:
+    """Сжимает слишком длинную сводку вторым вызовом LLM с сохранением смысла.
+
+    Назначение: уложить накопленную инкрементальную сводку в `max_accumulated_summary_chars`
+    без механической обрезки посередине абзаца, когда это возможно.
+
+    Поведение: если текст уже короче лимита — возвращается как есть. Иначе
+    запрос с инструкцией сжать; при пустом ответе — запасной вариант: срез исходника
+    до `max_chars`; если ответ длиннее лимита — `_truncate_text`.
+
+    Args:
+        ctx: Контекст запроса.
+        state: Состояние для бэкенда.
+        summary_text: Текущая длинная сводка.
+        max_chars: Целевая верхняя граница длины результата.
+        max_tokens: Лимит токенов на ответ при сжатии.
+
+    Returns:
+        Сжатый или усечённый текст, пригодный как новая `accumulated_summary`.
+    """
     if not summary_text or len(summary_text) <= max_chars:
         return summary_text
     system = (
@@ -540,6 +891,23 @@ def _repair_summary_text(
     reason: str,
     max_tokens: int,
 ) -> str:
+    """Перегенерирует сводку, если первичный ответ модели не прошёл `_validate_summary_text`.
+
+    Назначение: повысить надёжность конвейера: дать LLM явный контекст (лог запросов,
+    история, причина отказа, черновик) и требование структуры с секциями.
+
+    Args:
+        ctx: Контекст выполнения.
+        state: Состояние сессии.
+        history_text: Текст истории батча, на котором сорвалась валидация.
+        user_requests_text: Отформатированный список пользовательских запросов.
+        invalid_summary: Исходный невалидный ответ.
+        reason: Код от `_validate_summary_text` для включения в user-промпт.
+        max_tokens: Лимит длины исправленной сводки.
+
+    Returns:
+        Текст исправленной сводки (может снова быть невалидным — проверяет вызывающий).
+    """
     system = (
         "You are fixing an invalid technical summary for a software-engineering dialogue. "
         "You receive the original user requests log, full dialogue history, and an invalid summary draft. "
@@ -590,6 +958,49 @@ def summarize_dialog_via_chat_completions(
     max_tokens: int = 2500,
     steps_offset: int = 0,
 ) -> Dict[str, Any]:
+    """Строит структурированную сводку диалога через chat completions (в т.ч. батчами).
+
+    Назначение: основной оркестратор слоя суммаризации — подготовить текст для
+    сообщения-резюме треда, опционально предложить доп. память, вернуть размеченный
+    контент и подробный `trace` для наблюдаемости.
+
+    Поведение (кратко):
+        - Читает параметры из `ctx.config_dict["summary_params"]` (лимиты символов,
+          размер батча, путь к промпту, число последних шагов и т.д.).
+        - Усекает историю по `max_dialogue_chars`, нормализует и усекает лог
+          пользовательских запросов.
+        - Группирует сообщения в ходы и делит на батчи по `incremental_batch_chars`.
+        - Для каждого батча вызывает LLM: первый батч — «с нуля», следующие —
+          обновление `previous_summary`; валидирует ответ, при провале — `_repair_summary_text`,
+          иначе fallback на предыдущую сводку или `_FALLBACK_SUMMARY`.
+        - По необходимости сжимает накопленную сводку через `_compress_summary_text`.
+        - Шаг `suggest_memory_additions` выполняется только если весь диалог уложился
+          в один батч (мультибатч: в trace фиксируется пропуск).
+        - Собирает `summary_message_content` через `build_dialog_summary_content` и
+          `last_dialog_steps` через `_format_last_dialog_steps`.
+
+    Args:
+        ctx: Контекст с `config_dict` и `logger`.
+        state: Состояние сессии (модель, заголовки бэкенда).
+        full_history_messages: Полная история сообщений треда.
+        current_memory: Актуальные заметки/память для вставки в итоговое сообщение
+            и в шаг памяти.
+        user_messages_log: Внешний журнал реплик пользователя (`None` допустим):
+            нормализуется и усекается, затем входит в блок `<user_requests_log>`;
+            при пустом результате в промпт подставляется маркер `- not found`.
+        max_tokens: Лимит ответа LLM на батч и связанные вызовы (сжатие/починка).
+        steps_offset: Сдвиг нумерации в `_format_last_dialog_steps` (инкрементальные сценарии).
+
+    Returns:
+        Словарь с полями:
+            ``raw_summary`` — текст сводки без блока предложенной памяти;
+            ``summary_message_content`` — полное тело для сообщения в чате;
+            ``user_messages_log`` — очищенный список пользовательских строк;
+            ``memory_additions`` — извлечённый `<add_to_memory>` или пусто;
+            ``last_dialog_steps`` — форматированный хвост диалога;
+            ``num_batches`` — число батчей LLM;
+            ``trace`` — структура с шагами, промптами и результатами для отладки.
+    """
     cfg = getattr(ctx, "config_dict", {}) or {}
     logger = getattr(ctx, "logger", None)
     trace: Dict[str, Any] = {
