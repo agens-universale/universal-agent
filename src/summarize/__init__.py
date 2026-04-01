@@ -1,1 +1,1 @@
-"""Summary-related utilities and helpers."""
+"""Суммаризация диалога: утилиты, вызов LLM и compaction runtime-state (`compaction`)."""

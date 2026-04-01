@@ -13,7 +13,9 @@ from typing import Any
 
 from processing_responses import run_agent
 from run_context import RunContext
-from summary_pipeline import maybe_run_summary_compaction
+from summarize.compaction import maybe_run_summary_compaction
+from summarize.config import parse_summary_trigger_chars
+from summarize.summary_utils import history_has_dialog_summary_message
 from states import State, save_state, dump_storage
 from thread_store import (
     ThreadSession,
@@ -23,7 +25,6 @@ from thread_store import (
 from tools.skills.registry import get_skills_registry
 from user_message_policy import (
     TECHNICAL_TYPE_CURRENT_CONTEXT,
-    is_dialog_summary_user_message_text,
     wrap_technical_user_content,
 )
 from utils.generate_message_id import generate_msg_id_sha256 as generate_message_id_func
@@ -81,18 +82,7 @@ class AgentExecutor:
         else:
             system_id = system or "cli"
         is_cli_mode = system_id == "cli"
-        summary_params = (
-            config_dict.get("summary_params")
-            if isinstance(config_dict.get("summary_params"), dict)
-            else {}
-        )
-        summary_trigger_raw = summary_params.get(
-            "chat_completions_summary_trigger_chars", 0
-        )
-        try:
-            summary_trigger_chars = int(summary_trigger_raw)
-        except (TypeError, ValueError):
-            summary_trigger_chars = 0
+        summary_trigger_chars = parse_summary_trigger_chars(config_dict)
 
         chat_completions_system_prompt: str | None = None
         rendered_system_prompt: str | None = None
@@ -187,19 +177,6 @@ class AgentExecutor:
                 fd.write(json.dumps(payload, ensure_ascii=False))
                 fd.write("\n")
 
-        def _contains_dialog_summary_message(messages_list: list[dict]) -> bool:
-            for msg in messages_list:
-                if not isinstance(msg, dict):
-                    continue
-                if str(msg.get("role", "")).strip().lower() != "user":
-                    continue
-                content = msg.get("content")
-                if not isinstance(content, str):
-                    continue
-                if is_dialog_summary_user_message_text(content):
-                    return True
-            return False
-
         def _handle_summary_applied(event: dict[str, Any]) -> None:
             if thread_session is not None:
                 thread_session.archive_and_compact_summary_payload(
@@ -254,7 +231,7 @@ class AgentExecutor:
             thread_session is not None
             and isinstance(thread_notes_md, str)
             and thread_notes_md.strip()
-            and not _contains_dialog_summary_message(thread_session.history_messages)
+            and not history_has_dialog_summary_message(thread_session.history_messages)
         ):
             # Первый user-сообщение в такте: "техническая" инструкция серверу/модели,
             # что клиент подгружает thread notes и их нужно прочитать tool'ом.
@@ -278,7 +255,7 @@ class AgentExecutor:
             thread_session is not None
             and isinstance(thread_notes_md, str)
             and thread_notes_md.strip()
-            and _contains_dialog_summary_message(thread_session.history_messages)
+            and history_has_dialog_summary_message(thread_session.history_messages)
             and logger is not None
         ):
             logger.info(

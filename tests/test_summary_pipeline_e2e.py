@@ -3,7 +3,7 @@ import os
 import tempfile
 import types
 
-from summary_pipeline import (
+from summarize.compaction import (
     maybe_run_summary_compaction,
 )
 from thread_store import ThreadSession, append_new_thread_messages, load_thread_meta
@@ -45,7 +45,7 @@ def _valid_summary(seed: str) -> str:
         "NEXT_ACTIONS:\n- next\n\n"
         "SPEC_AND_CONSTRAINTS:\n- keep\n\n"
         "RISKS_AND_OPEN_QUESTIONS:\n- none\n\n"
-        "IMPORTANT_ARTIFACTS:\n- src/summary_pipeline.py\n"
+        "IMPORTANT_ARTIFACTS:\n- src/summarize/compaction.py\n"
     )
 
 

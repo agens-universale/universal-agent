@@ -1,10 +1,10 @@
 from typing import Any, Callable, Dict, List, Optional
 
-from summarize.summary_utils import (
+from .summary_utils import (
     apply_summary_state_patch,
     calc_messages_chars_total,
 )
-from summarize.thread_summarizer import summarize_dialog_via_chat_completions
+from .thread_summarizer import summarize_dialog_via_chat_completions
 
 
 def without_system_messages(messages_list: List[dict]) -> List[dict]:
@@ -34,7 +34,7 @@ def maybe_run_summary_compaction(
     - Проверить, пора ли суммаризировать текущую сессию по порогу символов.
     - Если порог достигнут, получить summary через LLM и атомарно применить patch к `state`.
     - Передать результат наружу через callback для побочных эффектов (archive/trace/persistence),
-      не выполняя I/O внутри pipeline.
+      не выполняя I/O внутри слоя compaction.
 
     Ключевой архитектурный принцип:
     - Источник данных для суммаризации всегда один: `state.messages`.

@@ -1,7 +1,7 @@
 import tempfile
 import types
 
-from summary_pipeline import (
+from summarize.compaction import (
     maybe_run_summary_compaction,
 )
 from thread_store import ThreadSession, append_new_thread_messages, save_thread_meta

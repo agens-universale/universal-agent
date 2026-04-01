@@ -4,6 +4,7 @@ import re
 from datetime import datetime, timezone
 from typing import Dict, List, Tuple, Any, Set, Optional
 
+from summarize.summary_utils import strip_original_user_messages_block
 from user_message_policy import (
     TECHNICAL_TYPE_DIALOG_SUMMARY,
     wrap_technical_user_content,
@@ -14,10 +15,6 @@ from utils.generate_message_id import generate_msg_id_sha256 as generate_message
 _THREAD_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]+$")
 _SYSTEM_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]+$")
 _META_SCHEMA_VERSION = 1
-_ORIGINAL_USER_MESSAGES_BLOCK_RE = re.compile(
-    r"<original_user_messages>.*?</original_user_messages>\s*",
-    re.IGNORECASE | re.DOTALL,
-)
 
 
 def _utc_now_iso() -> str:
@@ -26,13 +23,6 @@ def _utc_now_iso() -> str:
 
 def _utc_now_suffix() -> str:
     return datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-
-
-def _strip_original_user_messages_block(summary_text: str) -> str:
-    if not isinstance(summary_text, str):
-        return ""
-    cleaned = _ORIGINAL_USER_MESSAGES_BLOCK_RE.sub("", summary_text)
-    return cleaned.strip()
 
 
 def make_message_key(message: Dict[str, Any]) -> str:
@@ -433,7 +423,7 @@ class ThreadSession:
             "content": wrap_technical_user_content(
                 (
                     "Summarized context from previous dialogue.\n"
-                    f"{_strip_original_user_messages_block(summary_text)}"
+                    f"{strip_original_user_messages_block(summary_text)}"
                 ),
                 technical_type=TECHNICAL_TYPE_DIALOG_SUMMARY,
             ),

@@ -1,8 +1,45 @@
 import json
+import re
 from typing import Any, Dict, List
 
-from user_message_policy import TECHNICAL_TYPE_DIALOG_SUMMARY, wrap_technical_user_content
+from user_message_policy import (
+    TECHNICAL_TYPE_DIALOG_SUMMARY,
+    is_dialog_summary_user_message_text,
+    user_content_to_text,
+    wrap_technical_user_content,
+)
 from utils.generate_message_id import generate_msg_id_sha256 as generate_message_id_func
+
+_ORIGINAL_USER_MESSAGES_BLOCK_RE = re.compile(
+    r"<original_user_messages>.*?</original_user_messages>\s*",
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def strip_original_user_messages_block(summary_text: str) -> str:
+    """Убирает из текста саммари блок <original_user_messages>...</original_user_messages>."""
+    if not isinstance(summary_text, str):
+        return ""
+    cleaned = _ORIGINAL_USER_MESSAGES_BLOCK_RE.sub("", summary_text)
+    return cleaned.strip()
+
+
+def history_has_dialog_summary_message(messages: List[Dict[str, Any]]) -> bool:
+    """
+    True, если в списке сообщений уже есть user-сообщение с контентом dialog summary
+    (техническое саммари предыдущего диалога).
+    """
+    for msg in messages:
+        if not isinstance(msg, dict):
+            continue
+        if str(msg.get("role", "")).strip().lower() != "user":
+            continue
+        content = user_content_to_text(msg.get("content")).strip()
+        if not content:
+            continue
+        if is_dialog_summary_user_message_text(content):
+            return True
+    return False
 
 
 def _message_content_to_text(content: Any) -> str:
