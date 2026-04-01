@@ -90,9 +90,9 @@ def test_maybe_run_summary_compaction_twice_uses_meta_user_log(monkeypatch):
             thread_id=thread_id,
         )
 
-        monkeypatch.setattr("summarize.thread_summarizer._load_prompt_template", lambda _p: "prompt")
+        monkeypatch.setattr("summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
         monkeypatch.setattr(
-            "summarize.thread_summarizer._request_chat_completion_text",
+            "summarize.llm_chat.request_chat_completion_text",
             lambda **_kwargs: (
                 "TASK_AND_CONTEXT:\n- context\n\n"
                 "GOALS:\n- goals\n\n"
@@ -103,7 +103,7 @@ def test_maybe_run_summary_compaction_twice_uses_meta_user_log(monkeypatch):
                 "IMPORTANT_ARTIFACTS:\n- x\n"
             ),
         )
-        monkeypatch.setattr("summarize.thread_summarizer.suggest_memory_additions", lambda **_k: "")
+        monkeypatch.setattr("summarize.memory_suggestions.suggest_memory_additions", lambda **_k: "")
 
         state = _state()
         state.thread_id = thread_id
@@ -150,9 +150,9 @@ def test_maybe_run_summary_compaction_twice_uses_meta_user_log(monkeypatch):
 
 
 def test_maybe_run_summary_compaction_works_without_thread(monkeypatch):
-    monkeypatch.setattr("summarize.thread_summarizer._load_prompt_template", lambda _p: "prompt")
+    monkeypatch.setattr("summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
     monkeypatch.setattr(
-        "summarize.thread_summarizer._request_chat_completion_text",
+        "summarize.llm_chat.request_chat_completion_text",
         lambda **_kwargs: (
             "TASK_AND_CONTEXT:\n- context\n\n"
             "GOALS:\n- goals\n\n"
@@ -163,7 +163,7 @@ def test_maybe_run_summary_compaction_works_without_thread(monkeypatch):
             "IMPORTANT_ARTIFACTS:\n- x\n"
         ),
     )
-    monkeypatch.setattr("summarize.thread_summarizer.suggest_memory_additions", lambda **_k: "")
+    monkeypatch.setattr("summarize.memory_suggestions.suggest_memory_additions", lambda **_k: "")
 
     state = _state()
     state.messages = [
@@ -187,9 +187,9 @@ def test_maybe_run_summary_compaction_works_without_thread(monkeypatch):
 
 
 def test_maybe_run_summary_compaction_preserves_system_and_state_metadata(monkeypatch):
-    monkeypatch.setattr("summarize.thread_summarizer._load_prompt_template", lambda _p: "prompt")
+    monkeypatch.setattr("summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
     monkeypatch.setattr(
-        "summarize.thread_summarizer._request_chat_completion_text",
+        "summarize.llm_chat.request_chat_completion_text",
         lambda **_kwargs: (
             "TASK_AND_CONTEXT:\n- context\n\n"
             "GOALS:\n- goals\n\n"
@@ -200,7 +200,7 @@ def test_maybe_run_summary_compaction_preserves_system_and_state_metadata(monkey
             "IMPORTANT_ARTIFACTS:\n- x\n"
         ),
     )
-    monkeypatch.setattr("summarize.thread_summarizer.suggest_memory_additions", lambda **_k: "")
+    monkeypatch.setattr("summarize.memory_suggestions.suggest_memory_additions", lambda **_k: "")
 
     state = _state()
     system_msg = {"role": "system", "content": "SYSTEM", "id": "sys_1"}

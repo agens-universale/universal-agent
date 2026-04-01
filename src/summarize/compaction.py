@@ -1,9 +1,9 @@
 from typing import Any, Callable, Dict, List, Optional
 
-from .summary_utils import (
-    apply_summary_state_patch,
-    calc_messages_chars_total,
-)
+from user_message_policy import TECHNICAL_TYPE_DIALOG_SUMMARY, wrap_technical_user_content
+from utils.generate_message_id import generate_msg_id_sha256 as generate_message_id_func
+
+from .summary_serialization import calc_messages_chars_total
 from .thread_summarizer import summarize_dialog_via_chat_completions
 
 
@@ -16,6 +16,87 @@ def without_system_messages(messages_list: List[dict]) -> List[dict]:
             continue
         out.append(msg)
     return out
+
+
+def apply_summary_state_patch(
+    *,
+    state: Any,
+    summary_message_content: str,
+    memory_additions: str,
+    summarized_messages_count: int,
+) -> None:
+    """
+    Атомарно вносит в объект ``state`` результат compaction-суммаризации (без I/O и без решения «когда»).
+
+    Зачем: каноничное состояние исполнения живёт в ``state`` (см. принципы слоёв); эта функция — точка,
+    где согласованно обновляются заметки, оффсет шагов, привязка к предыдущему ответу API и список
+    сообщений. Вызывается из ``maybe_run_summary_compaction`` после успешной суммаризации.
+
+    Что делает:
+        1. ``state.notes_md`` — дополняет текстом ``memory_additions``, только если он непустой;
+           иначе поле не меняет.
+        2. ``state.dialog_steps_offset`` — увеличивает на ``summarized_messages_count`` (служебно через
+           ``max(0, int(...))``).
+        3. ``state.previous_response_id`` — сбрасывает в ``None`` (контракт после compaction).
+        4. ``state.messages`` — заменяет на компактный трейс: если в прежней истории есть ``system``,
+           оставляет первое такое сообщение первым, затем одно техническое user-сообщение dialog summary
+           (``wrap_technical_user_content`` + ``TECHNICAL_TYPE_DIALOG_SUMMARY``).
+
+    Аргументы:
+        state:
+            Изменяемый in-place объект исполнения; ожидаются атрибуты ``notes_md``, ``dialog_steps_offset``,
+            ``previous_response_id``, ``messages``.
+        summary_message_content:
+            Текст саммари предыдущего диалога; попадает внутрь служебного user-сообщения.
+        memory_additions:
+            Извлечённые durable дополнения к памяти треда (markdown); при непустом значении дописываются в notes.
+        summarized_messages_count:
+            Число сообщений, схлопнутых в этом проходе; участвует в ``dialog_steps_offset``.
+
+    Возвращает:
+        ``None``; побочный эффект — мутация ``state``.
+    """
+    notes_base = (state.notes_md or "") if isinstance(getattr(state, "notes_md", None), str) else ""
+    notes_new = notes_base
+    additions_text = str(memory_additions or "").strip()
+    if additions_text:
+        notes_new = (
+            (notes_base + "\n\n" + additions_text).strip()
+            if notes_base
+            else additions_text
+        )
+        state.notes_md = notes_new
+    prev_offset = int(getattr(state, "dialog_steps_offset", 0) or 0)
+    state.dialog_steps_offset = prev_offset + max(0, int(summarized_messages_count or 0))
+    state.previous_response_id = None
+
+    summary_message = {
+        "role": "user",
+        "content": wrap_technical_user_content(
+            (
+                "Summarized context from previous dialogue.\n"
+                f"{str(summary_message_content or '').strip()}"
+            ),
+            technical_type=TECHNICAL_TYPE_DIALOG_SUMMARY,
+        ),
+        "id": generate_message_id_func("m_sum"),
+    }
+    previous_messages = (
+        list(getattr(state, "messages", []))
+        if isinstance(getattr(state, "messages", []), list)
+        else []
+    )
+    system_message = None
+    for msg in previous_messages:
+        if not isinstance(msg, dict):
+            continue
+        if str(msg.get("role", "")).strip().lower() == "system":
+            system_message = msg
+            break
+    state.messages = [summary_message]
+    if isinstance(system_message, dict):
+        state.messages = [system_message, summary_message]
+    return None
 
 
 def maybe_run_summary_compaction(

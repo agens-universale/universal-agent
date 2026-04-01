@@ -1,13 +1,12 @@
 import unittest
 
-from summarize.thread_summarizer import (
-    _format_last_dialog_steps,
-    _group_into_turns,
-    _split_turns_into_char_batches,
-    _validate_summary_text,
+from summarize.dialog_history import (
     collect_user_messages_from_history,
-    _is_valid_summary_text,
+    format_last_dialog_steps,
+    group_into_turns,
+    split_turns_into_char_batches,
 )
+from summarize.summary_validation import is_valid_summary_text, validate_summary_text
 
 
 class ThreadSummarizerTest(unittest.TestCase):
@@ -33,16 +32,16 @@ class ThreadSummarizerTest(unittest.TestCase):
             "SPEC_AND_CONSTRAINTS:\n- constraints.\n\n"
             "IMPORTANT_ARTIFACTS:\n- src/summarize/thread_summarizer.py\n"
         )
-        self.assertTrue(_is_valid_summary_text(good_summary))
-        self.assertFalse(_is_valid_summary_text(""))
-        self.assertFalse(_is_valid_summary_text("[assistant] raw transcript"))
-        ok, reason = _validate_summary_text("TASK_AND_CONTEXT:\n- short")
+        self.assertTrue(is_valid_summary_text(good_summary))
+        self.assertFalse(is_valid_summary_text(""))
+        self.assertFalse(is_valid_summary_text("[assistant] raw transcript"))
+        ok, reason = validate_summary_text("TASK_AND_CONTEXT:\n- short")
         self.assertFalse(ok)
         self.assertEqual(reason, "too_short")
 
     def test_format_last_dialog_steps_applies_per_message_limit(self) -> None:
         long_text = "x" * 6000
-        steps = _format_last_dialog_steps(
+        steps = format_last_dialog_steps(
             [{"role": "user", "content": long_text}],
             max_steps=5,
             message_max_chars=5000,
@@ -50,7 +49,7 @@ class ThreadSummarizerTest(unittest.TestCase):
         self.assertIn("... [TEXT CUTTED]", steps)
 
     def test_format_last_dialog_steps_keeps_tool_call_and_output_in_one_turn(self) -> None:
-        steps = _format_last_dialog_steps(
+        steps = format_last_dialog_steps(
             [
                 {"type": "function_call", "call_id": "c1", "name": "read_file", "arguments": {"path": "/tmp/a.txt"}},
                 {"type": "function_call_output", "call_id": "c1", "output": {"ok": True}},
@@ -63,7 +62,7 @@ class ThreadSummarizerTest(unittest.TestCase):
         self.assertIn("[function_call_output]", steps)
 
     def test_group_into_turns_supports_tool_call_aliases(self) -> None:
-        turns = _group_into_turns(
+        turns = group_into_turns(
             [
                 {"type": "tool_call", "call_id": "c1", "name": "read_file", "arguments": "{}"},
                 {"type": "tool_call_output", "call_id": "c1", "output": "ok"},
@@ -78,8 +77,8 @@ class ThreadSummarizerTest(unittest.TestCase):
             {"role": "assistant", "content": "b" * 2000},
             {"role": "user", "content": "c" * 2000},
         ]
-        turns = _group_into_turns(messages)
-        batches = _split_turns_into_char_batches(
+        turns = group_into_turns(messages)
+        batches = split_turns_into_char_batches(
             turns, batch_chars_limit=3500
         )
         self.assertEqual(len(batches), 2)
@@ -92,7 +91,7 @@ class ThreadSummarizerTest(unittest.TestCase):
             {"type": "function_call", "call_id": "c1", "name": "tool", "arguments": "{}"},
             {"type": "function_call_output", "call_id": "c1", "output": "ok"},
         ]
-        turns = _group_into_turns(messages)
+        turns = group_into_turns(messages)
         self.assertEqual(len(turns), 2)
         self.assertEqual(len(turns[1]), 2)
         self.assertEqual(turns[1][0].get("type"), "function_call")

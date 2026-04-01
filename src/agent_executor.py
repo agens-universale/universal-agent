@@ -15,7 +15,7 @@ from processing_responses import run_agent
 from run_context import RunContext
 from summarize.compaction import maybe_run_summary_compaction
 from summarize.config import parse_summary_trigger_chars
-from summarize.summary_utils import history_has_dialog_summary_message
+from summarize.summary_serialization import history_has_dialog_summary_message
 from states import State, save_state, dump_storage
 from thread_store import (
     ThreadSession,

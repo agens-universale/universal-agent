@@ -1,14 +1,14 @@
 import types
 
-from summarize.thread_summarizer import (
-    _build_history_text,
-    _group_into_turns,
-    _message_text_limited,
-    _split_turns_into_char_batches,
-    _trim_original_user_messages_to_max_chars,
-    _trim_history_to_max_dialogue_chars,
-    summarize_dialog_via_chat_completions,
+from summarize.dialog_history import (
+    build_history_text,
+    group_into_turns,
+    message_text_limited,
+    split_turns_into_char_batches,
+    trim_history_to_max_dialogue_chars,
+    trim_original_user_messages_to_max_chars,
 )
+from summarize.thread_summarizer import summarize_dialog_via_chat_completions
 
 
 def _ctx(trigger_chars: int = 120000):
@@ -64,9 +64,9 @@ def test_summarize_incremental_empty_history_no_model_call(monkeypatch):
         calls.append(kwargs)
         return "should_not_happen"
 
-    monkeypatch.setattr("summarize.thread_summarizer._load_prompt_template", lambda _p: "prompt")
-    monkeypatch.setattr("summarize.thread_summarizer._request_chat_completion_text", _never_call)
-    monkeypatch.setattr("summarize.thread_summarizer.suggest_memory_additions", lambda **_k: "")
+    monkeypatch.setattr("summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
+    monkeypatch.setattr("summarize.llm_chat.request_chat_completion_text", _never_call)
+    monkeypatch.setattr("summarize.memory_suggestions.suggest_memory_additions", lambda **_k: "")
 
     result = summarize_dialog_via_chat_completions(
         ctx=_ctx(),
@@ -88,9 +88,9 @@ def test_summarize_incremental_single_batch_one_summary_call(monkeypatch):
         calls.append(kwargs)
         return _valid_summary("single-batch")
 
-    monkeypatch.setattr("summarize.thread_summarizer._load_prompt_template", lambda _p: "prompt")
-    monkeypatch.setattr("summarize.thread_summarizer._request_chat_completion_text", _fake_request)
-    monkeypatch.setattr("summarize.thread_summarizer.suggest_memory_additions", lambda **_k: "")
+    monkeypatch.setattr("summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
+    monkeypatch.setattr("summarize.llm_chat.request_chat_completion_text", _fake_request)
+    monkeypatch.setattr("summarize.memory_suggestions.suggest_memory_additions", lambda **_k: "")
 
     result = summarize_dialog_via_chat_completions(
         ctx=_ctx(trigger_chars=999999),
@@ -125,9 +125,9 @@ def test_summarize_incremental_two_batches_previous_summary_passed(monkeypatch):
         memory_calls.append(kwargs)
         return ""
 
-    monkeypatch.setattr("summarize.thread_summarizer._load_prompt_template", lambda _p: "prompt")
-    monkeypatch.setattr("summarize.thread_summarizer._request_chat_completion_text", _fake_request)
-    monkeypatch.setattr("summarize.thread_summarizer.suggest_memory_additions", _fake_memory)
+    monkeypatch.setattr("summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
+    monkeypatch.setattr("summarize.llm_chat.request_chat_completion_text", _fake_request)
+    monkeypatch.setattr("summarize.memory_suggestions.suggest_memory_additions", _fake_memory)
 
     result = summarize_dialog_via_chat_completions(
         ctx=_ctx(trigger_chars=4500),
@@ -150,11 +150,11 @@ def test_batches_respect_turn_boundaries():
         {"type": "function_call_output", "call_id": "id1", "output": "ok1"},
         {"type": "message", "role": "assistant", "content": "done"},
     ]
-    turns = _group_into_turns(history)
+    turns = group_into_turns(history)
     # Ожидаем: [user], [function_call+function_call_output], [assistant]
     assert len(turns) == 3
     assert len(turns[1]) == 2
-    batches = _split_turns_into_char_batches(turns, batch_chars_limit=20)
+    batches = split_turns_into_char_batches(turns, batch_chars_limit=20)
     # Даже при маленьком лимите второй turn не режется на части.
     assert any(len(turn) == 2 for batch in batches for turn in batch)
 
@@ -179,7 +179,7 @@ def test_group_into_turns_user_tool_tool_result_assistant():
         {"type": "function_call_output", "call_id": "id2", "output": "ok2"},
         {"type": "message", "role": "assistant", "content": "Готово, сделал X."},
     ]
-    turns = _group_into_turns(history)
+    turns = group_into_turns(history)
     assert _turns_reconstruct_history(turns) == history
     assert len(turns) == 4
     assert len(turns[0]) == 1 and turns[0][0].get("role") == "user"
@@ -194,7 +194,7 @@ def test_group_into_turns_tool_call_user_tool_result():
         {"type": "message", "role": "user", "content": "подожди"},
         {"type": "function_call_output", "call_id": "cid1", "output": "done"},
     ]
-    turns = _group_into_turns(history)
+    turns = group_into_turns(history)
     _assert_turns_preserve_all_messages(turns, history)
     assert len(turns) == 2
     assert len(turns[0]) == 2
@@ -209,7 +209,7 @@ def test_group_into_turns_tool1_tool2_result1_result2():
         {"type": "function_call_output", "call_id": "id1", "output": "res1"},
         {"type": "function_call_output", "call_id": "id2", "output": "res2"},
     ]
-    turns = _group_into_turns(history)
+    turns = group_into_turns(history)
     _assert_turns_preserve_all_messages(turns, history)
     assert len(turns) == 2
     assert turns[0][0].get("call_id") == turns[0][1].get("call_id") == "id1"
@@ -223,7 +223,7 @@ def test_group_into_turns_chain_user_assistant_user_assistant():
         {"type": "message", "role": "user", "content": "q2"},
         {"type": "message", "role": "assistant", "content": "a2"},
     ]
-    turns = _group_into_turns(history)
+    turns = group_into_turns(history)
     assert _turns_reconstruct_history(turns) == history
     assert len(turns) == 2
     assert len(turns[0]) == 2 and len(turns[1]) == 2
@@ -237,7 +237,7 @@ def test_group_into_turns_chain_fc1_user_fc2_fco1_fco2():
         {"type": "function_call_output", "call_id": "id1", "output": "r1"},
         {"type": "function_call_output", "call_id": "id2", "output": "r2"},
     ]
-    turns = _group_into_turns(history)
+    turns = group_into_turns(history)
     _assert_turns_preserve_all_messages(turns, history)
     assert len(turns) == 3
     assert turns[0][0].get("call_id") == turns[0][1].get("call_id") == "id1"
@@ -246,20 +246,20 @@ def test_group_into_turns_chain_fc1_user_fc2_fco1_fco2():
 
 
 def test_group_into_turns_empty_and_orphans():
-    assert _group_into_turns([]) == []
+    assert group_into_turns([]) == []
 
     orphan_fc = [{"type": "function_call", "call_id": "orphan", "name": "tool", "arguments": "{}"}]
-    turns_fc = _group_into_turns(orphan_fc)
+    turns_fc = group_into_turns(orphan_fc)
     assert len(turns_fc) == 1 and len(turns_fc[0]) == 1
 
     orphan_fco = [{"type": "function_call_output", "call_id": "x", "output": "y"}]
-    turns_fco = _group_into_turns(orphan_fco)
+    turns_fco = group_into_turns(orphan_fco)
     assert len(turns_fco) == 1 and len(turns_fco[0]) == 1
 
 
 def test_message_text_limited_truncates_to_max_message_chars():
     msg = {"role": "user", "content": "x" * 60000}
-    text = _message_text_limited(msg, 50000)
+    text = message_text_limited(msg, 50000)
     assert len(text) <= 50000 + len(" ... [TEXT CUTTED]")
     assert text.endswith(" ... [TEXT CUTTED]")
 
@@ -270,7 +270,7 @@ def test_trim_history_to_max_dialogue_chars_takes_tail():
         {"role": "assistant", "content": "b" * 30000},
         {"role": "user", "content": "c" * 30000},
     ]
-    trimmed = _trim_history_to_max_dialogue_chars(
+    trimmed = trim_history_to_max_dialogue_chars(
         messages,
         max_dialogue_chars=50000,
         max_message_chars=50000,
@@ -300,9 +300,9 @@ def test_accumulated_summary_is_compressed_when_limit_exceeded(monkeypatch):
             return _valid_summary("compressed-summary")
         return _valid_summary("final-summary")
 
-    monkeypatch.setattr("summarize.thread_summarizer._load_prompt_template", lambda _p: "prompt")
-    monkeypatch.setattr("summarize.thread_summarizer._request_chat_completion_text", _fake_request)
-    monkeypatch.setattr("summarize.thread_summarizer.suggest_memory_additions", lambda **_k: "")
+    monkeypatch.setattr("summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
+    monkeypatch.setattr("summarize.llm_chat.request_chat_completion_text", _fake_request)
+    monkeypatch.setattr("summarize.memory_suggestions.suggest_memory_additions", lambda **_k: "")
 
     ctx = _ctx(trigger_chars=4500)
     ctx.config_dict["summary_params"]["max_accumulated_summary_chars"] = 50
@@ -319,7 +319,7 @@ def test_accumulated_summary_is_compressed_when_limit_exceeded(monkeypatch):
 
 def test_trim_original_user_messages_to_max_chars_takes_tail_whole_messages():
     msgs = ["a" * 10000, "b" * 9000, "c" * 9000]
-    trimmed = _trim_original_user_messages_to_max_chars(msgs, 20000)
+    trimmed = trim_original_user_messages_to_max_chars(msgs, 20000)
     assert trimmed == ["b" * 9000, "c" * 9000]
 
 
@@ -331,7 +331,7 @@ def test_build_history_text_strips_original_user_messages_block():
         f"{inner}"
     )
     messages = [{"role": "user", "content": raw}]
-    out = _build_history_text(messages, max_chars=100_000, max_message_chars=0)
+    out = build_history_text(messages, max_chars=100_000, max_message_chars=0)
     assert "LEGACY_DROP_ME" not in out
     assert inner in out
 
@@ -342,9 +342,9 @@ def test_summarize_merges_existing_user_messages_log(monkeypatch):
     def _fake_request(**_kwargs):
         return _valid_summary("single-batch")
 
-    monkeypatch.setattr("summarize.thread_summarizer._load_prompt_template", lambda _p: "prompt")
-    monkeypatch.setattr("summarize.thread_summarizer._request_chat_completion_text", _fake_request)
-    monkeypatch.setattr("summarize.thread_summarizer.suggest_memory_additions", lambda **_k: "")
+    monkeypatch.setattr("summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
+    monkeypatch.setattr("summarize.llm_chat.request_chat_completion_text", _fake_request)
+    monkeypatch.setattr("summarize.memory_suggestions.suggest_memory_additions", lambda **_k: "")
 
     result = summarize_dialog_via_chat_completions(
         ctx=_ctx(trigger_chars=999999),
@@ -371,9 +371,9 @@ def test_summarize_preserves_user_messages_log_chronological_order(monkeypatch):
     def _fake_request(**_kwargs):
         return _valid_summary("single-batch")
 
-    monkeypatch.setattr("summarize.thread_summarizer._load_prompt_template", lambda _p: "prompt")
-    monkeypatch.setattr("summarize.thread_summarizer._request_chat_completion_text", _fake_request)
-    monkeypatch.setattr("summarize.thread_summarizer.suggest_memory_additions", lambda **_k: "")
+    monkeypatch.setattr("summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
+    monkeypatch.setattr("summarize.llm_chat.request_chat_completion_text", _fake_request)
+    monkeypatch.setattr("summarize.memory_suggestions.suggest_memory_additions", lambda **_k: "")
 
     result = summarize_dialog_via_chat_completions(
         ctx=_ctx(trigger_chars=999999),
@@ -402,9 +402,9 @@ def test_summarize_filters_technical_messages_from_user_messages_log(monkeypatch
     def _fake_request(**_kwargs):
         return _valid_summary("single-batch")
 
-    monkeypatch.setattr("summarize.thread_summarizer._load_prompt_template", lambda _p: "prompt")
-    monkeypatch.setattr("summarize.thread_summarizer._request_chat_completion_text", _fake_request)
-    monkeypatch.setattr("summarize.thread_summarizer.suggest_memory_additions", lambda **_k: "")
+    monkeypatch.setattr("summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
+    monkeypatch.setattr("summarize.llm_chat.request_chat_completion_text", _fake_request)
+    monkeypatch.setattr("summarize.memory_suggestions.suggest_memory_additions", lambda **_k: "")
 
     result = summarize_dialog_via_chat_completions(
         ctx=_ctx(trigger_chars=999999),
@@ -429,9 +429,9 @@ def test_invalid_summary_triggers_one_repair_retry(monkeypatch):
             return "[assistant] raw transcript"
         return _valid_summary("repaired")
 
-    monkeypatch.setattr("summarize.thread_summarizer._load_prompt_template", lambda _p: "prompt")
-    monkeypatch.setattr("summarize.thread_summarizer._request_chat_completion_text", _fake_request)
-    monkeypatch.setattr("summarize.thread_summarizer.suggest_memory_additions", lambda **_k: "")
+    monkeypatch.setattr("summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
+    monkeypatch.setattr("summarize.llm_chat.request_chat_completion_text", _fake_request)
+    monkeypatch.setattr("summarize.memory_suggestions.suggest_memory_additions", lambda **_k: "")
 
     result = summarize_dialog_via_chat_completions(
         ctx=_ctx(trigger_chars=999999),

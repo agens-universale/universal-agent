@@ -85,12 +85,12 @@ def test_e2e_two_sequential_summaries_keep_user_log_order_and_no_original_block(
         state.messages = session.get_full_history_messages()
         state.user_messages_log = ["[user] first request", "[user] second request"]
 
-        monkeypatch.setattr("summarize.thread_summarizer._load_prompt_template", lambda _p: "prompt")
+        monkeypatch.setattr("summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
         monkeypatch.setattr(
-            "summarize.thread_summarizer._request_chat_completion_text",
+            "summarize.llm_chat.request_chat_completion_text",
             lambda **_kwargs: _valid_summary("s"),
         )
-        monkeypatch.setattr("summarize.thread_summarizer.suggest_memory_additions", lambda **_k: "")
+        monkeypatch.setattr("summarize.memory_suggestions.suggest_memory_additions", lambda **_k: "")
 
         assert maybe_run_summary_compaction(
             ctx=_ctx(),
@@ -198,12 +198,12 @@ def test_e2e_user_log_skips_technical_and_tool_messages(monkeypatch):
             "[user] real request",
         ]
 
-        monkeypatch.setattr("summarize.thread_summarizer._load_prompt_template", lambda _p: "prompt")
+        monkeypatch.setattr("summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
         monkeypatch.setattr(
-            "summarize.thread_summarizer._request_chat_completion_text",
+            "summarize.llm_chat.request_chat_completion_text",
             lambda **_kwargs: _valid_summary("s-tech"),
         )
-        monkeypatch.setattr("summarize.thread_summarizer.suggest_memory_additions", lambda **_k: "")
+        monkeypatch.setattr("summarize.memory_suggestions.suggest_memory_additions", lambda **_k: "")
 
         assert maybe_run_summary_compaction(
             ctx=_ctx(),

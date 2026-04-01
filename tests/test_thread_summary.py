@@ -3,7 +3,7 @@ import os
 import tempfile
 import unittest
 
-from summarize.summary_utils import calc_messages_chars_total, message_text_for_summary
+from summarize.summary_serialization import calc_messages_chars_total, message_text_for_summary
 from thread_store import (
     ThreadSession,
     append_new_thread_messages,
