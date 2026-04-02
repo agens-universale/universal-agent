@@ -3,7 +3,11 @@ import os
 import tempfile
 import unittest
 
-from summarize.summary_serialization import calc_messages_chars_total, message_text_for_summary
+from summarize.summary_serialization import (
+    calc_history_chars_for_trigger,
+    calc_messages_chars_total,
+    message_text_for_summary,
+)
 from thread_store import (
     ThreadSession,
     append_new_thread_messages,
@@ -21,6 +25,33 @@ class ThreadSummaryTest(unittest.TestCase):
         ]
         expected = sum(len(message_text_for_summary(m)) for m in messages)
         self.assertEqual(calc_messages_chars_total(messages), expected)
+
+    def test_calc_history_chars_for_trigger_omits_role_wrappers(self) -> None:
+        messages = [{"role": "user", "content": "hello"}]
+        raw = calc_history_chars_for_trigger(messages)
+        serialized = calc_messages_chars_total(messages)
+        self.assertEqual(raw, 5)
+        self.assertGreater(serialized, raw)
+
+    def test_message_text_for_summary_tool_call_aliases_match_function_style(self) -> None:
+        fc = {
+            "type": "function_call",
+            "name": "read",
+            "arguments": "{}",
+        }
+        tc = {
+            "type": "tool_call",
+            "name": "read",
+            "arguments": "{}",
+            "call_id": "c1",
+        }
+        self.assertTrue(message_text_for_summary(tc).startswith("[tool_call]"))
+        self.assertIn("read", message_text_for_summary(tc))
+        self.assertIn("read", message_text_for_summary(fc))
+        self.assertEqual(
+            calc_history_chars_for_trigger([fc]),
+            calc_history_chars_for_trigger([tc]),
+        )
 
     def test_archive_and_compact_summary_payload_creates_archive_and_new_trace(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

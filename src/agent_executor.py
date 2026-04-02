@@ -13,7 +13,10 @@ from typing import Any
 
 from processing_responses import run_agent
 from run_context import RunContext
-from summarize.compaction import maybe_run_summary_compaction
+from summarize.compaction import (
+    history_exceeds_summary_trigger,
+    run_summary_compaction,
+)
 from summarize.config import parse_summary_trigger_chars
 from summarize.summary_serialization import history_has_dialog_summary_message
 from states import State, save_state, dump_storage
@@ -192,14 +195,17 @@ class AgentExecutor:
 
         if backend_api_mode == "chat_completions" and summary_trigger_chars > 0:
             try:
-                maybe_run_summary_compaction(
-                    ctx=self._ctx,
+                if history_exceeds_summary_trigger(
                     state=state,
                     summary_trigger_chars=summary_trigger_chars,
-                    trigger_reason="pre_run",
-                    is_cli_mode=is_cli_mode,
-                    on_summary_applied=_handle_summary_applied,
-                )
+                ):
+                    run_summary_compaction(
+                        ctx=self._ctx,
+                        state=state,
+                        trigger_reason="pre_run",
+                        is_cli_mode=is_cli_mode,
+                        on_summary_applied=_handle_summary_applied,
+                    )
             except Exception as summarize_exc:
                 if logger is not None:
                     if thread_session is not None:
@@ -330,14 +336,17 @@ class AgentExecutor:
             ):
                 return
             try:
-                maybe_run_summary_compaction(
-                    ctx=self._ctx,
+                if history_exceeds_summary_trigger(
                     state=state,
                     summary_trigger_chars=summary_trigger_chars,
-                    trigger_reason="post_step",
-                    is_cli_mode=is_cli_mode,
-                    on_summary_applied=_handle_summary_applied,
-                )
+                ):
+                    run_summary_compaction(
+                        ctx=self._ctx,
+                        state=state,
+                        trigger_reason="post_step",
+                        is_cli_mode=is_cli_mode,
+                        on_summary_applied=_handle_summary_applied,
+                    )
             except Exception as summarize_exc:
                 if logger is not None:
                     if thread_session is not None:

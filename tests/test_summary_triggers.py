@@ -106,10 +106,9 @@ class SummaryTriggersTest(unittest.TestCase):
                     post_step_hook()
                 return "ok"
 
-            def _record_summary_call(*args, **kwargs):
+            def _record_summary_call(**kwargs):
                 reason = str(kwargs.get("trigger_reason"))
                 call_order.append(f"summary:{reason}")
-                return False
 
             with patch.object(
                 agent_executor_module, "get_skills_registry", return_value=_SkillsRegistryStub()
@@ -117,7 +116,11 @@ class SummaryTriggersTest(unittest.TestCase):
                 agent_executor_module, "run_agent", side_effect=_fake_run_agent
             ), patch.object(
                 agent_executor_module,
-                "maybe_run_summary_compaction",
+                "history_exceeds_summary_trigger",
+                return_value=True,
+            ), patch.object(
+                agent_executor_module,
+                "run_summary_compaction",
                 side_effect=_record_summary_call,
             ):
                 executor = agent_executor_module.AgentExecutor(ctx)
@@ -139,16 +142,19 @@ class SummaryTriggersTest(unittest.TestCase):
                     post_step_hook()
                 return "ok"
 
-            def _record(*args, **kwargs):
+            def _record(**kwargs):
                 calls.append(str(kwargs.get("trigger_reason")))
-                return False
 
             with patch.object(
                 agent_executor_module, "get_skills_registry", return_value=_SkillsRegistryStub()
             ), patch.object(
                 agent_executor_module, "run_agent", side_effect=_fake_run_agent
             ), patch.object(
-                agent_executor_module, "maybe_run_summary_compaction", side_effect=_record
+                agent_executor_module,
+                "history_exceeds_summary_trigger",
+                return_value=True,
+            ), patch.object(
+                agent_executor_module, "run_summary_compaction", side_effect=_record
             ):
                 executor = agent_executor_module.AgentExecutor(ctx)
                 result = executor.run("hello", system="cli", verbose=False)
@@ -165,7 +171,7 @@ class SummaryTriggersTest(unittest.TestCase):
             ), patch.object(
                 agent_executor_module, "run_agent", return_value="ok"
             ), patch.object(
-                agent_executor_module, "maybe_run_summary_compaction"
+                agent_executor_module, "run_summary_compaction"
             ) as compaction_mock:
                 executor = agent_executor_module.AgentExecutor(ctx)
                 result = executor.run("hello", thread_id="thr1", system="cli", verbose=False)

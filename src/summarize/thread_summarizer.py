@@ -40,8 +40,9 @@ def summarize_dialog_via_chat_completions(
         - По необходимости сжимает накопленную сводку через `summary_llm_steps.compress_summary_text`.
         - Шаг `memory_suggestions.suggest_memory_additions` выполняется только если весь диалог уложился
           в один батч (мультибатч: в trace фиксируется пропуск).
-        - Собирает `summary_message_content` через `summary_message_body.build_dialog_summary_content` и
-          `last_dialog_steps` через `dialog_history.format_last_dialog_steps`.
+        - Форматирует `last_dialog_steps` через `dialog_history.format_last_dialog_steps`.
+          Полное тело сообщения для чата собирает `apply_summary_state_patch` после обновления
+          `state.notes_md` (см. `compaction.run_summary_compaction`).
 
     Args:
         ctx: Контекст с `config_dict` и `logger`.
@@ -58,9 +59,10 @@ def summarize_dialog_via_chat_completions(
     Returns:
         Словарь с полями:
             ``raw_summary`` — текст сводки без блока предложенной памяти;
-            ``summary_message_content`` — полное тело для сообщения в чате;
+            ``summary_message_content`` — для непустой истории пустая строка; итоговое тело строит
+                ``apply_summary_state_patch``. Для пустой истории — готовое тело без вызова compaction;
             ``user_messages_log`` — очищенный список пользовательских строк;
-            ``memory_additions`` — извлечённый `<add_to_memory>` или пусто;
+            ``memory_additions`` — извлечённый фрагмент для дописывания в заметки (сырой текст) или пусто;
             ``last_dialog_steps`` — форматированный хвост диалога;
             ``num_batches`` — число батчей LLM;
             ``trace`` — структура с шагами, промптами и результатами для отладки.
@@ -84,6 +86,11 @@ def summarize_dialog_via_chat_completions(
             last_dialog_steps="",
             current_memory=current_memory,
         )
+        trace["final_output"] = {
+            "raw_summary": "",
+            "memory_additions": "",
+            "summary_message_content": summary_content,
+        }
         return {
             "raw_summary": "",
             "summary_message_content": summary_content,
@@ -183,7 +190,9 @@ def summarize_dialog_via_chat_completions(
     for batch_index, batch_turns in enumerate(batches, start=1):
         batch: List[Dict[str, Any]] = [m for turn in batch_turns for m in turn]
         history_text = dialog_history.build_history_text(
-            batch, max_message_chars=max_message_chars
+            batch,
+            max_chars=0,
+            max_message_chars=max_message_chars,
         )
         if logger is not None:
             logger.info(
@@ -325,7 +334,9 @@ def summarize_dialog_via_chat_completions(
     text = accumulated_summary or FALLBACK_SUMMARY
 
     history_text = dialog_history.build_history_text(
-        history_for_summary, max_message_chars=max_message_chars
+        history_for_summary,
+        max_chars=0,
+        max_message_chars=max_message_chars,
     )
     # Как и в референсе: второй такт апдейта памяти делаем только
     # когда суммаризация прошла в один батч.
@@ -374,20 +385,13 @@ def summarize_dialog_via_chat_completions(
         }
     if logger is not None:
         logger.info(
-            "summary_finish batches=%s raw_summary_chars=%s memory_additions_chars=%s",
+            "summary_finish batches=%s memory_step_executed=%s raw_summary_chars=%s memory_additions_chars=%s",
             len(batches),
+            len(batches) <= 1,
             len(text),
             len(memory_additions or ""),
         )
         logger.info("summary_final_raw_text=\n%s", text)
-    summary_text = text
-    if memory_additions:
-        summary_text = (
-            f"{text}\n\n{summary_message_body.SUGGESTED_MEMORY_HEADER}\n"
-            f"<add_to_memory>\n{memory_additions}\n</add_to_memory>"
-        )
-    if logger is not None:
-        logger.info("summary_final_content_text=\n%s", summary_text)
 
     last_dialog_steps = dialog_history.format_last_dialog_steps(
         history_for_summary,
@@ -395,19 +399,13 @@ def summarize_dialog_via_chat_completions(
         message_max_chars=min(last_step_message_max_chars, max_message_chars),
         steps_offset=max(0, int(steps_offset or 0)),
     )
-    summary_content = summary_message_body.build_dialog_summary_content(
-        summary_text=summary_text,
-        last_dialog_steps=last_dialog_steps,
-        current_memory=current_memory,
-    )
     trace["final_output"] = {
         "raw_summary": text,
         "memory_additions": memory_additions,
-        "summary_message_content": summary_content,
     }
     return {
         "raw_summary": text,
-        "summary_message_content": summary_content,
+        "summary_message_content": "",
         "user_messages_log": user_requests,
         "memory_additions": memory_additions,
         "last_dialog_steps": last_dialog_steps,

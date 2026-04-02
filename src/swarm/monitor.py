@@ -2,7 +2,7 @@ import threading
 import time
 from typing import Dict, Optional, Set
 
-from . import storage
+import swarm.storage as storage
 
 
 class SwarmMonitor:

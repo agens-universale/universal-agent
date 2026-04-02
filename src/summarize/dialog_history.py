@@ -2,16 +2,32 @@
 
 from typing import Any, Callable, Dict, List, TypeVar
 
-from summarize.summary_serialization import message_text_for_summary, strip_original_user_messages_block
+from user_message_policy import is_dialog_summary_user_message_text, user_content_to_text
+
+from summarize.summary_serialization import (
+    message_text_for_summary,
+    strip_original_user_messages_block,
+)
 
 T = TypeVar("T")
 
 
-def _tail_by_limit(items: List[T], limit: int, measure: Callable[[T], int]) -> List[T]:
+def _tail_by_limit(
+    items: List[T],
+    limit: int,
+    measure: Callable[[T], int],
+    *,
+    glue_before_older: int = 0,
+) -> List[T]:
     """Возвращает хвост элементов, суммарная «стоимость» которого не превышает ``limit``.
 
     ``measure`` задаёт неотрицательный вклад одного элемента (байты, символы, токены —
     что угодно в единицах вызывающего кода).
+
+    ``glue_before_older``: если при склейке выбранных элементов между соседними в
+    хронологическом порядке вставляется разделитель фиксированной длины (например
+    ``\\n\\n`` между XML-блоками), укажите его длину; учитывается только при
+    добавлении более старого элемента к уже выбранному хвосту.
 
     Правила:
     - при пустом списке возвращается ``[]``;
@@ -27,6 +43,8 @@ def _tail_by_limit(items: List[T], limit: int, measure: Callable[[T], int]) -> L
     for idx in range(len(items) - 1, -1, -1):
         item = items[idx]
         cost = max(0, int(measure(item)))
+        if selected_reversed:
+            cost += glue_before_older
         if selected_reversed and used + cost > limit:
             break
         selected_reversed.append(item)
@@ -79,38 +97,46 @@ def build_history_text(
     max_chars: int = 200_000,
     max_message_chars: int = 0,
 ) -> str:
-    """Склеивает историю в нумерованный многострочный текст для подстановки в промпт LLM.
+    """Склеивает историю в XML-блоки сообщений для подстановки в промпт LLM.
 
-    Назначение: получить компактное, линейное представление батча сообщений для промпта
-    с контролем общего размера результирующего текста.
+    Назначение: получить линейное представление батча сообщений для промпта с явными
+    границами и контролем общего размера результирующего текста.
 
-    Поведение: сначала формируются все строки ``"{n}. {text}"`` (после
-    `message_text_limited`, пустые пропускаются). Затем, если задан положительный
-    `max_chars`, выбирается хвост этих уже отформатированных строк, который
-    помещается в лимит (включая переводы строк). Порядок строк в результате
-    остаётся хронологическим.
+    Поведение: для каждого непустого текста после `message_text_limited` формируется
+    блок ``<message n=\"k\">...</message>`` (``k`` — порядковый номер в исходном
+    списке ``messages``, с единицы). Блоки разделяются двойным переводом строки.
+    Сообщения dialog summary (накопленная сводка) при положительном ``max_message_chars``
+    не режутся по этому лимиту. Если задан положительный `max_chars`, выбирается хвост
+    блоков, который помещается в лимит; порядок остаётся хронологическим.
 
     Args:
         messages: Сообщения одного батча в порядке хронологии.
         max_chars: Лимит длины итоговой склеенной строки; при ``<= 0`` лимит отключён.
-        max_message_chars: Если > 0, каждое сообщение обрезается до этой длины
-            перед агрегированием.
+        max_message_chars: Если > 0, каждое сообщение (кроме dialog summary) обрезается
+            до этой длины перед агрегированием.
 
     Returns:
         Текст диалога для вставки в XML-блоки промпта или логи.
     """
     rows: List[str] = []
     for idx, msg in enumerate(messages, start=1):
-        text = message_text_limited(msg, max_message_chars).strip()
+        # Для определения dialog_summary нам нужно именно текстовое представление user-content.
+        # (is_dialog_summary_user_message_text работает по строке, а не по структуре message.)
+        content_text = user_content_to_text(msg.get("content")).strip()
+        per_limit = (
+            0 if is_dialog_summary_user_message_text(content_text) else max_message_chars
+        )
+        text = message_text_limited(msg, per_limit).strip()
         if not text:
             continue
-        rows.append(f"{idx}. {text}")
+        rows.append(f'<message n="{idx}">\n{text}\n</message>')
     tail_rows = _tail_by_limit(
         rows,
         max_chars,
-        lambda row: len(row) + 1,
+        len,
+        glue_before_older=2,
     )
-    return "\n".join(tail_rows)
+    return "\n\n".join(tail_rows)
 
 
 def trim_history_to_max_dialogue_chars(

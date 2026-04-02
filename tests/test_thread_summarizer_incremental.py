@@ -8,7 +8,9 @@ from summarize.dialog_history import (
     trim_history_to_max_dialogue_chars,
     trim_original_user_messages_to_max_chars,
 )
+from summarize.compaction import apply_summary_state_patch
 from summarize.thread_summarizer import summarize_dialog_via_chat_completions
+from user_message_policy import TECHNICAL_TYPE_DIALOG_SUMMARY, wrap_technical_user_content
 
 
 def _ctx(trigger_chars: int = 120000):
@@ -101,6 +103,47 @@ def test_summarize_incremental_single_batch_one_summary_call(monkeypatch):
     assert "single-batch" in result["raw_summary"]
     assert result["num_batches"] == 1
     assert len(calls) == 1
+
+
+def test_memory_additions_go_to_thread_notes_not_inside_summary(monkeypatch):
+    history = _flatten_turns([_make_turn("hi", "hello")])
+
+    def _fake_request(**kwargs):
+        return _valid_summary("with-memory")
+
+    def _fake_memory(**kwargs):
+        return "- bullet one\n- bullet two"
+
+    monkeypatch.setattr("summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
+    monkeypatch.setattr("summarize.llm_chat.request_chat_completion_text", _fake_request)
+    monkeypatch.setattr("summarize.memory_suggestions.suggest_memory_additions", _fake_memory)
+
+    result = summarize_dialog_via_chat_completions(
+        ctx=_ctx(trigger_chars=999999),
+        state=_state(),
+        full_history_messages=history,
+        current_memory="existing note",
+    )
+    state = types.SimpleNamespace(
+        notes_md="existing note",
+        messages=[],
+        dialog_steps_offset=0,
+        previous_response_id=None,
+    )
+    content = apply_summary_state_patch(
+        state=state,
+        raw_summary=result["raw_summary"],
+        last_dialog_steps=result["last_dialog_steps"],
+        memory_additions=result["memory_additions"],
+        summarized_messages_count=len(history),
+    )
+    assert "<add_to_memory>" not in content
+    assert "Suggested memory" not in content
+    inner = content.split("<summary>")[1].split("</summary>")[0]
+    assert "bullet one" not in inner
+    notes_block = content.split("<thread_notes>")[1].split("</thread_notes>")[0]
+    assert "existing note" in notes_block
+    assert "bullet one" in notes_block
 
 
 def test_summarize_incremental_two_batches_previous_summary_passed(monkeypatch):
@@ -264,6 +307,15 @@ def test_message_text_limited_truncates_to_max_message_chars():
     assert text.endswith(" ... [TEXT CUTTED]")
 
 
+def test_build_history_text_includes_full_dialog_summary_under_per_message_cap():
+    payload = "z" * 40000
+    content = wrap_technical_user_content(payload, technical_type=TECHNICAL_TYPE_DIALOG_SUMMARY)
+    messages = [{"role": "user", "content": content}]
+    out = build_history_text(messages, max_chars=0, max_message_chars=500)
+    assert payload in out
+    assert " ... [TEXT CUTTED]" not in out
+
+
 def test_trim_history_to_max_dialogue_chars_takes_tail():
     messages = [
         {"role": "user", "content": "a" * 30000},
@@ -357,7 +409,49 @@ def test_build_history_text_max_chars_takes_tail_of_formatted_rows():
     out = build_history_text(messages, max_chars=20, max_message_chars=0)
     assert "third" in out
     assert "first" not in out
-    assert out.strip().startswith("3.")
+    assert out.strip().startswith('<message n="3">')
+
+
+def test_summarize_pipeline_calls_build_history_text_with_max_chars_disabled(monkeypatch):
+    """Батчи уже ограничены split_turns_into_char_batches; второй хвост по строкам не применяем."""
+    captured: list[dict] = []
+
+    def wrapped(*args, **kwargs):
+        captured.append(dict(kwargs))
+        return build_history_text(*args, **kwargs)
+
+    monkeypatch.setattr(
+        "summarize.thread_summarizer.dialog_history.build_history_text",
+        wrapped,
+    )
+
+    def _fake_request(**_kwargs):
+        return (
+            "TASK_AND_CONTEXT:\n- x\n\n"
+            "GOALS:\n- x\n\n"
+            "PLAN_AND_PROGRESS:\n- x\n\n"
+            "NEXT_ACTIONS:\n- x\n\n"
+            "SPEC_AND_CONSTRAINTS:\n- x\n\n"
+            "RISKS_AND_OPEN_QUESTIONS:\n- x\n\n"
+            "IMPORTANT_ARTIFACTS:\n- x\n"
+        )
+
+    monkeypatch.setattr("summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
+    monkeypatch.setattr("summarize.llm_chat.request_chat_completion_text", _fake_request)
+    monkeypatch.setattr("summarize.memory_suggestions.suggest_memory_additions", lambda **_k: "")
+
+    history = [
+        {"role": "user", "content": "u1"},
+        {"role": "assistant", "content": "a1"},
+    ]
+    summarize_dialog_via_chat_completions(
+        ctx=_ctx(trigger_chars=999999),
+        state=types.SimpleNamespace(default_model="m"),
+        full_history_messages=history,
+        current_memory="",
+    )
+    assert captured
+    assert all(k.get("max_chars") == 0 for k in captured)
 
 
 def test_summarize_merges_existing_user_messages_log(monkeypatch):
@@ -381,7 +475,20 @@ def test_summarize_merges_existing_user_messages_log(monkeypatch):
         "older user request",
         "new user request",
     ]
-    assert "<original_user_messages>" not in result["summary_message_content"]
+    state = types.SimpleNamespace(
+        notes_md="",
+        messages=[],
+        dialog_steps_offset=0,
+        previous_response_id=None,
+    )
+    built = apply_summary_state_patch(
+        state=state,
+        raw_summary=result["raw_summary"],
+        last_dialog_steps=result["last_dialog_steps"],
+        memory_additions=result["memory_additions"],
+        summarized_messages_count=len(history),
+    )
+    assert "<original_user_messages>" not in built
 
 
 def test_summarize_preserves_user_messages_log_chronological_order(monkeypatch):

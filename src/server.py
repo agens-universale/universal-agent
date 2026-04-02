@@ -19,13 +19,13 @@ from thread_store import (  # type: ignore  # noqa: E402
     resolve_threads_dir,
     validate_thread_id,
 )
-from .rest_api.agent_execution_registry import agent_run_registry  # type: ignore  # noqa: E402
-from .rest_api.server_config import (  # type: ignore  # noqa: E402
+from rest_api.agent_execution_registry import agent_run_registry  # type: ignore  # noqa: E402
+from rest_api.server_config import (  # type: ignore  # noqa: E402
     PROJECT_ROOT,
     build_agent_config_for_server,
     load_server_config,
 )
-from .rest_api.utils import (  # type: ignore  # noqa: E402
+from rest_api.utils import (  # type: ignore  # noqa: E402
     ensure_task_id,
     normalize_system,
     patch_asyncio_run_for_fastapi,
@@ -39,10 +39,10 @@ logger = logging.getLogger(__name__)
 # если swarm не импортируется — считаем, что он выключен.
 _SWARM_MODULES_AVAILABLE = True
 try:
-    from .swarm.config import build_swarm_config  # type: ignore  # noqa: E402
-    from .swarm.monitor import SwarmMonitor  # type: ignore  # noqa: E402
-    from .swarm import runner as swarm_runner  # type: ignore  # noqa: E402
-    from .swarm import storage as swarm_storage  # type: ignore  # noqa: E402
+    from swarm.config import build_swarm_config  # type: ignore  # noqa: E402
+    from swarm.monitor import SwarmMonitor  # type: ignore  # noqa: E402
+    from swarm import runner as swarm_runner  # type: ignore  # noqa: E402
+    from swarm import storage as swarm_storage  # type: ignore  # noqa: E402
 except (ModuleNotFoundError, ImportError) as e:
     _SWARM_MODULES_AVAILABLE = False
     logger.warning("swarm disabled due to import error: %r", e)

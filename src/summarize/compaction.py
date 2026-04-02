@@ -3,8 +3,12 @@ from typing import Any, Callable, Dict, List, Optional
 from user_message_policy import TECHNICAL_TYPE_DIALOG_SUMMARY, wrap_technical_user_content
 from utils.generate_message_id import generate_msg_id_sha256 as generate_message_id_func
 
-from .summary_serialization import calc_messages_chars_total
-from .thread_summarizer import summarize_dialog_via_chat_completions
+from summarize.summary_serialization import (
+    calc_history_chars_for_trigger,
+    calc_messages_chars_total,
+)
+from summarize.summary_message_body import build_dialog_summary_content
+from summarize.thread_summarizer import summarize_dialog_via_chat_completions
 
 
 def without_system_messages(messages_list: List[dict]) -> List[dict]:
@@ -21,24 +25,27 @@ def without_system_messages(messages_list: List[dict]) -> List[dict]:
 def apply_summary_state_patch(
     *,
     state: Any,
-    summary_message_content: str,
+    raw_summary: str,
+    last_dialog_steps: str,
     memory_additions: str,
     summarized_messages_count: int,
-) -> None:
+) -> str:
     """
     Атомарно вносит в объект ``state`` результат compaction-суммаризации (без I/O и без решения «когда»).
 
     Зачем: каноничное состояние исполнения живёт в ``state`` (см. принципы слоёв); эта функция — точка,
     где согласованно обновляются заметки, оффсет шагов, привязка к предыдущему ответу API и список
-    сообщений. Вызывается из ``maybe_run_summary_compaction`` после успешной суммаризации.
+    сообщений. Вызывается из ``run_summary_compaction`` после успешной суммаризации.
 
     Что делает:
         1. ``state.notes_md`` — дополняет текстом ``memory_additions``, только если он непустой;
            иначе поле не меняет.
-        2. ``state.dialog_steps_offset`` — увеличивает на ``summarized_messages_count`` (служебно через
+        2. Собирает тело сообщения-резюме через ``build_dialog_summary_content`` уже **после** шага (1):
+           в ``<thread_notes>`` попадает актуальный ``state.notes_md``.
+        3. ``state.dialog_steps_offset`` — увеличивает на ``summarized_messages_count`` (служебно через
            ``max(0, int(...))``).
-        3. ``state.previous_response_id`` — сбрасывает в ``None`` (контракт после compaction).
-        4. ``state.messages`` — заменяет на компактный трейс: если в прежней истории есть ``system``,
+        4. ``state.previous_response_id`` — сбрасывает в ``None`` (контракт после compaction).
+        5. ``state.messages`` — заменяет на компактный трейс: если в прежней истории есть ``system``,
            оставляет первое такое сообщение первым, затем одно техническое user-сообщение dialog summary
            (``wrap_technical_user_content`` + ``TECHNICAL_TYPE_DIALOG_SUMMARY``).
 
@@ -46,21 +53,29 @@ def apply_summary_state_patch(
         state:
             Изменяемый in-place объект исполнения; ожидаются атрибуты ``notes_md``, ``dialog_steps_offset``,
             ``previous_response_id``, ``messages``.
-        summary_message_content:
-            Текст саммари предыдущего диалога; попадает внутрь служебного user-сообщения.
+        raw_summary:
+            Текст сводки LLM для секции ``<summary>``.
+        last_dialog_steps:
+            Отформатированный хвост диалога для ``<last_dialog_steps>``.
         memory_additions:
             Извлечённые durable дополнения к памяти треда (markdown); при непустом значении дописываются в notes.
         summarized_messages_count:
             Число сообщений, схлопнутых в этом проходе; участвует в ``dialog_steps_offset``.
 
     Возвращает:
-        ``None``; побочный эффект — мутация ``state``.
+        Итоговое тело резюме (то же, что вложено в служебное сообщение).
     """
     additions_text = str(memory_additions or "").strip()
     if additions_text:
         base = (state.notes_md or "") if isinstance(getattr(state, "notes_md", None), str) else ""
         base = base.strip()
         state.notes_md = f"{base}\n\n{additions_text}" if base else additions_text
+    notes_md = (state.notes_md or "") if isinstance(getattr(state, "notes_md", None), str) else ""
+    summary_message_content = build_dialog_summary_content(
+        summary_text=str(raw_summary or ""),
+        last_dialog_steps=str(last_dialog_steps or ""),
+        current_memory=notes_md,
+    )
     prev_offset = int(getattr(state, "dialog_steps_offset", 0) or 0)
     state.dialog_steps_offset = prev_offset + max(0, int(summarized_messages_count or 0))
     state.previous_response_id = None
@@ -70,7 +85,7 @@ def apply_summary_state_patch(
         "content": wrap_technical_user_content(
             (
                 "Summarized context from previous dialogue.\n"
-                f"{str(summary_message_content or '').strip()}"
+                f"{summary_message_content.strip()}"
             ),
             technical_type=TECHNICAL_TYPE_DIALOG_SUMMARY,
         ),
@@ -92,101 +107,56 @@ def apply_summary_state_patch(
         state.messages = [system_message, summary_message]
     else:
         state.messages = [summary_message]
-    return None
+    return summary_message_content
 
 
-def maybe_run_summary_compaction(
+def history_exceeds_summary_trigger(
+    *,
+    state: Any,
+    summary_trigger_chars: int,
+) -> bool:
+    """
+    Дешёвая проверка: объём истории (`calc_history_chars_for_trigger`) строго больше порога.
+
+    При ``summary_trigger_chars <= 0`` всегда ``False`` (суммаризация отключена конфигом).
+    """
+    if summary_trigger_chars <= 0:
+        return False
+    full_messages = without_system_messages(getattr(state, "messages", []))
+    return calc_history_chars_for_trigger(full_messages) > summary_trigger_chars
+
+
+def run_summary_compaction(
     *,
     ctx: Any,
     state: Any,
-    summary_trigger_chars: int,
     trigger_reason: str,
     is_cli_mode: bool,
     on_summary_applied: Optional[Callable[[Dict[str, Any]], None]] = None,
-) -> bool:
+) -> None:
     """
-    Условно выполняет compaction диалога через единый runtime-state.
-
-    Назначение:
-    - Проверить, пора ли суммаризировать текущую сессию по порогу символов.
-    - Если порог достигнут, получить summary через LLM и атомарно применить patch к `state`.
-    - Передать результат наружу через callback для побочных эффектов (archive/trace/persistence),
-      не выполняя I/O внутри слоя compaction.
-
-    Ключевой архитектурный принцип:
-    - Источник данных для суммаризации всегда один: `state.messages`.
-    - Флаг `-t` не меняет входные данные и логику compaction; он влияет только на post-action
-      в orchestration-слое (через `on_summary_applied`).
-
-    Алгоритм:
-    1) Берем `state.messages` и отбрасываем `system`-сообщения.
-    2) Считаем общий объем текста (`chars_total`) и сравниваем с `summary_trigger_chars`.
-       Если порог не достигнут -> `False`.
-    3) Вызываем `summarize_dialog_via_chat_completions(...)` и получаем summary payload.
-    4) Применяем результат к состоянию через `apply_summary_state_patch(...)`:
-       - обновление `notes_md` (при наличии additions),
-       - инкремент `dialog_steps_offset`,
-       - `previous_response_id = None`,
-       - схлопывание диалоговой истории до одного технического summary user-сообщения
-         с сохранением `system`-сообщения (если оно присутствовало).
-    5) Если передан `on_summary_applied`, отдаем в него событие с payload/trace/metadata
-       для внешних побочных действий.
-    6) Логируем метрики и возвращаем `True`.
-
-    Параметры:
-    - `ctx`: run context (конфиг, logger и прочее окружение вызова).
-    - `state`: runtime session/state; ожидаются поля `messages`, `notes_md`,
-      `user_messages_log`, `dialog_steps_offset`, `thread_id`.
-    - `summary_trigger_chars`: порог символов для запуска суммаризации.
-    - `trigger_reason`: причина вызова (например, `pre_run` или `post_step`) для логов/trace.
-    - `is_cli_mode`: включает человекочитаемый консольный вывод прогресса суммаризации.
-    - `on_summary_applied`: необязательный callback post-action.
-      Вызывается после успешного apply patch и получает словарь события:
-      {
-        "trigger_reason": str,
-        "summary_payload": {
-          "summary_message_content": str,
-          "notes_md": str,
-          "user_messages_log": list[str],
-          "dialog_steps_offset": int,
-        },
-        "summary_trace": dict,
-        "newly_summarized_message_id": str,
-      }
-
-    Возвращает:
-    - `True`, если compaction выполнен.
-    - `False`, если порог не достигнут и compaction пропущен.
+    Выполняет compaction: LLM-сводка и ``apply_summary_state_patch``. Порог «когда» не проверяет —
+    вызывающий обязан вызвать после `history_exceeds_summary_trigger` (или в тестах принудительно).
     """
     logger = getattr(ctx, "logger", None)
     thread_id = getattr(state, "thread_id", None)
     full_messages = without_system_messages(getattr(state, "messages", []))
-    chars_total = calc_messages_chars_total(full_messages)
+    trigger_volume = calc_history_chars_for_trigger(full_messages)
+    serialized_chars = calc_messages_chars_total(full_messages)
     if logger is not None:
         logger.info(
-            "summary_precheck reason=%s thread_id=%s history_messages=%s chars_total=%s threshold=%s",
+            "summary_triggered reason=%s thread_id=%s trigger_volume=%s serialized_chars=%s history_messages=%s",
             trigger_reason,
             thread_id,
+            trigger_volume,
+            serialized_chars,
             len(full_messages),
-            chars_total,
-            summary_trigger_chars,
-        )
-    if chars_total <= summary_trigger_chars:
-        return False
-
-    if logger is not None:
-        logger.info(
-            "summary_triggered reason=%s thread_id=%s chars_total=%s threshold=%s",
-            trigger_reason,
-            thread_id,
-            chars_total,
-            summary_trigger_chars,
         )
     if is_cli_mode:
         print(
             "[summary] Запущена суммаризация: "
-            f"thread={thread_id}, chars={chars_total}, "
-            f"threshold={summary_trigger_chars}"
+            f"thread={thread_id}, trigger_volume={trigger_volume}, "
+            f"serialized_chars={serialized_chars}"
         )
 
     source_user_log = getattr(state, "user_messages_log", None)
@@ -207,23 +177,27 @@ def maybe_run_summary_compaction(
     memory_additions = summary_result.get("memory_additions", "")
     if logger is not None:
         logger.info("summary_received_raw_text=\n%s", raw_summary)
-        logger.info(
-            "summary_received_message_content=\n%s",
-            summary_result.get("summary_message_content", ""),
-        )
     if is_cli_mode:
         print("[summary] Полученный raw summary:")
         print(raw_summary)
 
-    apply_summary_state_patch(
+    summary_message_content = apply_summary_state_patch(
         state=state,
-        summary_message_content=summary_result.get("summary_message_content", ""),
+        raw_summary=raw_summary,
+        last_dialog_steps=str(summary_result.get("last_dialog_steps") or ""),
         memory_additions=memory_additions,
         summarized_messages_count=len(full_messages),
     )
+    trace = summary_result.get("trace")
+    if isinstance(trace, dict):
+        final_out = trace.get("final_output")
+        if isinstance(final_out, dict):
+            final_out["summary_message_content"] = summary_message_content
+    if logger is not None:
+        logger.info("summary_received_message_content=\n%s", summary_message_content)
 
     summary_payload = {
-        "summary_message_content": summary_result.get("summary_message_content", ""),
+        "summary_message_content": summary_message_content,
         "notes_md": (state.notes_md or "") if isinstance(state.notes_md, str) else "",
         "user_messages_log": list(getattr(state, "user_messages_log", []) or []),
         "dialog_steps_offset": int(getattr(state, "dialog_steps_offset", 0) or 0),
@@ -242,15 +216,20 @@ def maybe_run_summary_compaction(
             }
         )
 
-    new_chars = calc_messages_chars_total(without_system_messages(getattr(state, "messages", [])))
-    ratio = round((new_chars / chars_total), 4) if chars_total > 0 else 0.0
+    new_serialized = calc_messages_chars_total(
+        without_system_messages(getattr(state, "messages", []))
+    )
+    ratio = (
+        round((new_serialized / serialized_chars), 4) if serialized_chars > 0 else 0.0
+    )
     if logger is not None:
         logger.info(
-            "summary_completed reason=%s thread_id=%s old_chars=%s new_chars=%s compression_ratio=%s num_batches=%s memory_additions_chars=%s",
+            "summary_completed reason=%s thread_id=%s trigger_volume=%s serialized_before=%s serialized_after=%s compression_ratio=%s num_batches=%s memory_additions_chars=%s",
             trigger_reason,
             thread_id,
-            chars_total,
-            new_chars,
+            trigger_volume,
+            serialized_chars,
+            new_serialized,
             ratio,
             summary_result.get("num_batches"),
             len(memory_additions or ""),
@@ -258,8 +237,50 @@ def maybe_run_summary_compaction(
     if is_cli_mode:
         print(
             "[summary] Завершена: "
-            f"old_chars={chars_total}, new_chars={new_chars}, ratio={ratio}, "
+            f"serialized_before={serialized_chars}, serialized_after={new_serialized}, ratio={ratio}, "
             f"batches={summary_result.get('num_batches')}, "
             f"memory_additions_chars={len(memory_additions or '')}"
         )
+
+
+def maybe_run_summary_compaction(
+    *,
+    ctx: Any,
+    state: Any,
+    summary_trigger_chars: int,
+    trigger_reason: str,
+    is_cli_mode: bool,
+    on_summary_applied: Optional[Callable[[Dict[str, Any]], None]] = None,
+) -> bool:
+    """
+    Условно выполняет compaction: проверка `history_exceeds_summary_trigger`, затем при необходимости
+    `run_summary_compaction`.
+    """
+    logger = getattr(ctx, "logger", None)
+    thread_id = getattr(state, "thread_id", None)
+    if summary_trigger_chars <= 0:
+        return False
+    full_messages = without_system_messages(getattr(state, "messages", []))
+    trigger_volume = calc_history_chars_for_trigger(full_messages)
+    serialized_chars = calc_messages_chars_total(full_messages)
+    if logger is not None:
+        logger.info(
+            "summary_precheck reason=%s thread_id=%s history_messages=%s trigger_volume=%s serialized_chars=%s threshold=%s",
+            trigger_reason,
+            thread_id,
+            len(full_messages),
+            trigger_volume,
+            serialized_chars,
+            summary_trigger_chars,
+        )
+    if trigger_volume <= summary_trigger_chars:
+        return False
+
+    run_summary_compaction(
+        ctx=ctx,
+        state=state,
+        trigger_reason=trigger_reason,
+        is_cli_mode=is_cli_mode,
+        on_summary_applied=on_summary_applied,
+    )
     return True

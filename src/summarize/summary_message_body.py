@@ -2,8 +2,6 @@
 
 from typing import List
 
-SUGGESTED_MEMORY_HEADER = "## Suggested memory additions"
-
 
 def build_dialog_summary_content(
     summary_text: str,
@@ -17,11 +15,10 @@ def build_dialog_summary_content(
     чтение `thread_notes`, если память уже передана в блоке.
 
     Args:
-        summary_text: Основной текст суммаризации (может уже включать блок
-            предложенной памяти от вызывающего кода).
+        summary_text: Основной текст суммаризации (сводка LLM).
         last_dialog_steps: Отформатированный хвост диалога (например из
             `format_last_dialog_steps` в модуле подготовки истории).
-        current_memory: Строка текущего состояния `thread_notes` или пусто.
+        current_memory: Текст для `<thread_notes>` (актуальные заметки треда).
 
     Returns:
         Единая строка с размеченными секциями `<summary>`, `<thread_notes>`,

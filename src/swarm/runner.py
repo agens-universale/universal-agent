@@ -4,7 +4,7 @@ import subprocess
 from datetime import datetime, timezone
 from typing import Any, Dict, Tuple
 
-from . import storage
+import swarm.storage as storage
 
 
 def _utc_now_iso() -> str:
