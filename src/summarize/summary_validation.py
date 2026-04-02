@@ -1,5 +1,7 @@
 """Эвристики пригодности текста сводки для пайплайна суммаризации."""
 
+import re
+
 INVALID_SUMMARY_PREFIXES = (
     "[tool_call ",
     "[assistant",
@@ -23,6 +25,32 @@ FALLBACK_SUMMARY = (
     "Continue from the latest confirmed user requirements and implementation state."
 )
 
+_MIN_SECTION_HITS = 2
+# Части имён секций после split по "_" не считаются ключевыми (союзы и т.п.),
+# иначе «and» в обычном тексте засчитывал бы маркеры вроде TASK_AND_CONTEXT.
+_SECTION_KEYWORD_STOPWORDS = frozenset({"and"})
+
+
+def _section_marker_hit(text: str, marker: str) -> bool:
+    """Секция считается «есть», если в тексте как отдельное слово встречается
+    хотя бы один фрагмент имени маркера (по подчёркиваниям), без учёта регистра.
+
+    Примеры: для ``TASK_AND_CONTEXT`` достаточно ``task`` или ``context``;
+    для ``GOALS`` — слово ``goals``. Фрагмент ``AND`` в имени маркера не проверяется.
+    """
+    keywords = [
+        p
+        for p in marker.split("_")
+        if p and p.lower() not in _SECTION_KEYWORD_STOPWORDS
+    ]
+    if not keywords:
+        return False
+    lowered_keywords = [k.lower() for k in keywords]
+    return any(
+        re.search(rf"(?<!\\w){re.escape(kw)}(?!\\w)", text, re.IGNORECASE)
+        for kw in lowered_keywords
+    )
+
 
 def validate_summary_text(text: str) -> tuple[bool, str]:
     """Проверяет качество/структуру ответа LLM для сводки диалога.
@@ -32,8 +60,11 @@ def validate_summary_text(text: str) -> tuple[bool, str]:
 
     Критерии: непустой текст; не начинается с известных «плохих» префиксов
     (`INVALID_SUMMARY_PREFIXES`); длина ≥ `MIN_SUMMARY_CHARS`; не меньше
-    `MIN_SUMMARY_LINES` непустых строк; в верхнем регистре встречается не меньше
-    трёх маркеров секций из `REQUIRED_SECTION_MARKERS` (гибкая проверка структуры).
+    `MIN_SUMMARY_LINES` непустых строк; не менее ``_MIN_SECTION_HITS`` «попаданий»
+    по секциям из `REQUIRED_SECTION_MARKERS` — для каждого маркера достаточно,
+    чтобы в тексте как отдельное слово встретился хотя бы один его фрагмент
+    (части имени по ``_``, без учёта регистра; союз ``and`` из имени не используется),
+    например ``Task and context`` закрывает ``TASK_AND_CONTEXT``.
 
     Args:
         text: Строка сводки от модели.
@@ -53,12 +84,10 @@ def validate_summary_text(text: str) -> tuple[bool, str]:
     non_empty_lines = [line for line in s.splitlines() if line.strip()]
     if len(non_empty_lines) < MIN_SUMMARY_LINES:
         return False, "too_few_lines"
-    section_hits = 0
-    upper_s = s.upper()
-    for marker in REQUIRED_SECTION_MARKERS:
-        if marker in upper_s:
-            section_hits += 1
-    if section_hits < 3:
+    section_hits = sum(
+        1 for marker in REQUIRED_SECTION_MARKERS if _section_marker_hit(s, marker)
+    )
+    if section_hits < _MIN_SECTION_HITS:
         return False, "missing_structure"
     return True, "ok"
 

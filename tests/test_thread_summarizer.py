@@ -1,7 +1,11 @@
 import unittest
 
 from summarize.dialog_history import format_last_dialog_steps, group_into_turns, split_turns_into_char_batches
-from summarize.summary_validation import is_valid_summary_text, validate_summary_text
+from summarize.summary_validation import (
+    _section_marker_hit,
+    is_valid_summary_text,
+    validate_summary_text,
+)
 from user_message_policy import append_user_log_entries
 
 
@@ -28,6 +32,33 @@ class ThreadSummarizerTest(unittest.TestCase):
             "IMPORTANT_ARTIFACTS:\n- src/summarize/thread_summarizer.py\n"
         )
         self.assertTrue(is_valid_summary_text(good_summary))
+        human_headers = (
+            "# Task and context\n"
+            "- User wants a fact-check of acp2.md and acp3.md output.\n\n"
+            "## Goals\n"
+            "- Verify claims; produce corrected doc.\n\n"
+            "### Plan and progress\n"
+            "- [DONE] Read official docs.\n\n"
+            "### Next actions\n"
+            "- Draft acp3.md.\n\n"
+            "### Spec and constraints\n"
+            "- Preserve full article structure.\n\n"
+            "### Risks and open questions\n"
+            "- Minor site wording may change.\n\n"
+            "### Important artifacts\n"
+            "- prompts/chat_completions_summary_prompt.md\n"
+        )
+        self.assertTrue(
+            is_valid_summary_text(human_headers),
+            " spaced/markdown headings should satisfy soft section keywords",
+        )
+        self.assertFalse(
+            _section_marker_hit(
+                "Something and nothing and everything and more.",
+                "TASK_AND_CONTEXT",
+            ),
+            "conjunction 'and' must not count toward TASK_AND_CONTEXT",
+        )
         self.assertFalse(is_valid_summary_text(""))
         self.assertFalse(is_valid_summary_text("[assistant] raw transcript"))
         ok, reason = validate_summary_text("TASK_AND_CONTEXT:\n- short")

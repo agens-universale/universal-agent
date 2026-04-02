@@ -19,7 +19,8 @@ Rules:
 - Preserve exact technical identifiers: file paths, symbols, config keys, CLI flags, APIs, env/tooling details.
 - Be concise but complete: do not drop accepted decisions, hard constraints, or important unresolved risks.
 
-Required structure (always output all sections, use exactly these section titles):
+Required structure (always output all sections below). Each section must start with a clear header line:
+use either the exact UPPERCASE_WITH_UNDERSCORES title as written here, or a Markdown heading (`#` / `##`) that contains the same words with spaces (e.g. `# Task and context` or `## TASK_AND_CONTEXT:`). Do not omit sections; use `n/a` or `- none` only if a section is truly empty.
 
 TASK_AND_CONTEXT:
 - Current task formulation, scope, key background, and what problem is being solved now.
