@@ -83,7 +83,7 @@ def test_e2e_two_sequential_summaries_keep_user_log_order_and_no_original_block(
         state = _state()
         state.thread_id = thread_id
         state.messages = session.get_full_history_messages()
-        state.user_messages_log = ["[user] first request", "[user] second request"]
+        state.user_messages_log = ["first request", "second request"]
 
         monkeypatch.setattr("summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
         monkeypatch.setattr(
@@ -109,7 +109,7 @@ def test_e2e_two_sequential_summaries_keep_user_log_order_and_no_original_block(
         assert "<original_user_messages>" not in first_compact_content
         assert "Summarized context from previous dialogue." in first_compact_content
 
-        state.user_messages_log.extend(["[user] third request", "[user] fourth request"])
+        state.user_messages_log.extend(["third request", "fourth request"])
         session.persist_batch(
             [
                 {"role": "user", "content": "third request"},
@@ -134,10 +134,10 @@ def test_e2e_two_sequential_summaries_keep_user_log_order_and_no_original_block(
         assert int(state.dialog_steps_offset) > prev_offset
 
         assert state.user_messages_log == [
-            "[user] first request",
-            "[user] second request",
-            "[user] third request",
-            "[user] fourth request",
+            "first request",
+            "second request",
+            "third request",
+            "fourth request",
         ]
         assert state.previous_response_id is None
         meta_after_second = load_thread_meta(tmp_dir, system_id, thread_id)
@@ -148,10 +148,10 @@ def test_e2e_two_sequential_summaries_keep_user_log_order_and_no_original_block(
         assert meta_after_second.get("messages_count") == 1
         assert meta_after_second.get("previous_response_id") is None
         assert meta_after_second.get("user_messages_log") == [
-            "[user] first request",
-            "[user] second request",
-            "[user] third request",
-            "[user] fourth request",
+            "first request",
+            "second request",
+            "third request",
+            "fourth request",
         ]
         rows_after_second = _read_current_data_rows(tmp_dir, thread_id)
         assert len(rows_after_second) == 1
@@ -194,8 +194,8 @@ def test_e2e_user_log_skips_technical_and_tool_messages(monkeypatch):
         state.thread_id = thread_id
         state.messages = session.get_full_history_messages()
         state.user_messages_log = [
-            '[user] <current_context>client has non-empty thread notes; call `thread_notes` with action="read" to load them.</current_context>',
-            "[user] real request",
+            '<current_context>client has non-empty thread notes; call `thread_notes` with action="read" to load them.</current_context>',
+            "real request",
         ]
 
         monkeypatch.setattr("summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
@@ -218,8 +218,8 @@ def test_e2e_user_log_skips_technical_and_tool_messages(monkeypatch):
         # После compaction user log в state не перезаписывается: source of truth
         # для него формируется инкрементально в runtime и здесь сохраняется как есть.
         assert state.user_messages_log == [
-            '[user] <current_context>client has non-empty thread notes; call `thread_notes` with action="read" to load them.</current_context>',
-            "[user] real request",
+            '<current_context>client has non-empty thread notes; call `thread_notes` with action="read" to load them.</current_context>',
+            "real request",
         ]
         meta_after = load_thread_meta(tmp_dir, system_id, thread_id)
         assert meta_after.get("backend_api_mode") == "chat_completions"

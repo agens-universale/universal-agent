@@ -2,10 +2,11 @@
 
 INVALID_SUMMARY_PREFIXES = (
     "[tool_call ",
-    "[assistant]",
-    "[user]",
-    "<dialog_summary>",
+    "[assistant",
+    "[user",
+    # "<dialog_summary>",
 )
+
 MIN_SUMMARY_CHARS = 200
 MIN_SUMMARY_LINES = 3
 REQUIRED_SECTION_MARKERS = (
@@ -74,5 +75,5 @@ def is_valid_summary_text(text: str) -> bool:
     Returns:
         ``True``/``False`` по результату валидации.
     """
-    ok, _ = validate_summary_text(text)
-    return ok
+    status, _ = validate_summary_text(text)
+    return status

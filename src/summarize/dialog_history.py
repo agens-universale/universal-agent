@@ -1,71 +1,38 @@
-"""Подготовка многосообщенийной истории для промпта суммаризации: ходы, батчи, хвост, лог запросов."""
+"""Подготовка истории диалога для промпта суммаризации: ходы, батчи, хвост, лог запросов."""
 
-from typing import Any, Dict, List
+from typing import Any, Callable, Dict, List, TypeVar
 
 from summarize.summary_serialization import message_text_for_summary, strip_original_user_messages_block
-from user_message_policy import is_technical_user_message_text
+
+T = TypeVar("T")
 
 
-def collect_user_messages_from_history(messages: List[Dict[str, Any]]) -> List[str]:
-    """Собирает из истории сообщений уникальные тексты пользовательских реплик для лога запросов.
+def _tail_by_limit(items: List[T], limit: int, measure: Callable[[T], int]) -> List[T]:
+    """Возвращает хвост элементов, суммарная «стоимость» которого не превышает ``limit``.
 
-    Назначение: сформировать «журнал» явных пользовательских требований, который
-    далее уходит в промпт суммаризации (`user_requests_log`) отдельно от полной истории.
+    ``measure`` задаёт неотрицательный вклад одного элемента (байты, символы, токены —
+    что угодно в единицах вызывающего кода).
 
-    Поведение: обходятся только сообщения с `role == "user"`; текст берётся через
-    `message_text_for_summary`, отбрасываются пустые и технические сообщения
-    (`is_technical_user_message_text`); дубликаты по точному совпадению текста не
-    добавляются повторно (порядок — первое вхождение).
-
-    Args:
-        messages: Список сообщений диалога в формате словарей (как в хранилище треда).
-
-    Returns:
-        Список уникальных непустых пользовательских текстов в порядке первого появления.
+    Правила:
+    - при пустом списке возвращается ``[]``;
+    - при ``limit <= 0`` лимит отключён и возвращается исходный список;
+    - идём с конца исходного порядка; при переполнении бюджета старые элементы отбрасываются.
     """
-    out: List[str] = []
-    for msg in messages:
-        if msg.get("role") != "user":
-            continue
-        text = message_text_for_summary(msg).strip()
-        if not text:
-            continue
-        if is_technical_user_message_text(text):
-            continue
-        if text not in out:
-            out.append(text)
-    return out
-
-
-def normalize_user_messages_log(messages: List[str] | None) -> List[str]:
-    """Нормализует внешний лог пользовательских сообщений в список строк без мусора.
-
-    Назначение: безопасно принять `user_messages_log` из состояния (может быть
-    не списком или содержать «технические» реплики) и привести к тому же виду,
-    что и результат `collect_user_messages_from_history`.
-
-    Поведение: не-список даёт пустой результат; элементы приводятся к строке и
-    обрезаются по краям; пустые и технические строки отбрасываются; дубликаты
-    по полному тексту не повторяются.
-
-    Args:
-        messages: Сырой лог или ``None``.
-
-    Returns:
-        Очищенный список уникальных пользовательских текстов.
-    """
-    out: List[str] = []
-    if not isinstance(messages, list):
-        return out
-    for item in messages:
-        text = str(item).strip()
-        if not text:
-            continue
-        if is_technical_user_message_text(text):
-            continue
-        if text not in out:
-            out.append(text)
-    return out
+    if not items:
+        return []
+    if limit <= 0:
+        return items
+    selected_reversed: List[T] = []
+    used = 0
+    for idx in range(len(items) - 1, -1, -1):
+        item = items[idx]
+        cost = max(0, int(measure(item)))
+        if selected_reversed and used + cost > limit:
+            break
+        selected_reversed.append(item)
+        used += cost
+    selected_reversed.reverse()
+    return selected_reversed
 
 
 def truncate_text(text: str, max_chars: int) -> str:
@@ -114,35 +81,36 @@ def build_history_text(
 ) -> str:
     """Склеивает историю в нумерованный многострочный текст для подстановки в промпт LLM.
 
-    Назначение: получить компактное, линейное представление батча сообщений с
-    контролем размера, чтобы не превысить лимиты контекста/логирования.
+    Назначение: получить компактное, линейное представление батча сообщений для промпта
+    с контролем общего размера результирующего текста.
 
-    Поведение: для каждого сообщения извлекается текст (с опциональной обрезкой
-    на сообщение через `message_text_limited`), пустые пропускаются; строки вида
-    ``"{n}. {text}"`` накапливаются, пока суммарная длина (плюс переносы) не
-    превысит `max_chars` — остальное не включается.
+    Поведение: сначала формируются все строки ``"{n}. {text}"`` (после
+    `message_text_limited`, пустые пропускаются). Затем, если задан положительный
+    `max_chars`, выбирается хвост этих уже отформатированных строк, который
+    помещается в лимит (включая переводы строк). Порядок строк в результате
+    остаётся хронологическим.
 
     Args:
         messages: Сообщения одного батча в порядке хронологии.
-        max_chars: Верхняя граница длины итоговой строки (по грубой оценке).
+        max_chars: Лимит длины итоговой склеенной строки; при ``<= 0`` лимит отключён.
         max_message_chars: Если > 0, каждое сообщение обрезается до этой длины
             перед агрегированием.
 
     Returns:
         Текст диалога для вставки в XML-блоки промпта или логи.
     """
-    parts: List[str] = []
-    total = 0
+    rows: List[str] = []
     for idx, msg in enumerate(messages, start=1):
         text = message_text_limited(msg, max_message_chars).strip()
         if not text:
             continue
-        row = f"{idx}. {text}"
-        total += len(row) + 1
-        if total > max_chars:
-            break
-        parts.append(row)
-    return "\n".join(parts)
+        rows.append(f"{idx}. {text}")
+    tail_rows = _tail_by_limit(
+        rows,
+        max_chars,
+        lambda row: len(row) + 1,
+    )
+    return "\n".join(tail_rows)
 
 
 def trim_history_to_max_dialogue_chars(
@@ -170,21 +138,11 @@ def trim_history_to_max_dialogue_chars(
     Returns:
         Возможно укороченный список сообщений (суффикс исходного списка).
     """
-    if not messages:
-        return []
-    if max_dialogue_chars <= 0:
-        return messages
-    total = 0
-    start_idx = len(messages)
-    for i in range(len(messages) - 1, -1, -1):
-        total += len(message_text_limited(messages[i], max_message_chars))
-        if total > max_dialogue_chars:
-            start_idx = i + 1
-            break
-        start_idx = i
-    if start_idx >= len(messages):
-        return messages[-1:]
-    return messages[start_idx:]
+    return _tail_by_limit(
+        messages,
+        max_dialogue_chars,
+        lambda msg: len(message_text_limited(msg, max_message_chars)),
+    )
 
 
 def trim_original_user_messages_to_max_chars(messages: List[str], max_chars: int) -> List[str]:
@@ -205,19 +163,7 @@ def trim_original_user_messages_to_max_chars(messages: List[str], max_chars: int
     Returns:
         Подсписок `messages` — последние элементы в исходном порядке.
     """
-    if not messages:
-        return []
-    if max_chars <= 0:
-        return messages
-    out: List[str] = []
-    used = 0
-    for msg in reversed(messages):
-        msg_len = len(msg)
-        if out and used + msg_len > max_chars:
-            break
-        out.insert(0, msg)
-        used += msg_len
-    return out
+    return _tail_by_limit(messages, max_chars, len)
 
 
 def group_into_turns(messages: List[Dict[str, Any]]) -> List[List[Dict[str, Any]]]:

@@ -85,6 +85,35 @@ def user_content_to_text(content: Any) -> str:
         return ""
     return str(content)
 
+def extract_real_user_message_text(message: Any) -> str:
+    """
+    Extract a "real" user request text from a raw message.
+
+    In this module, "real" means user-provided business/request content
+    (what the user actually asks for), not technical/runtime service signals
+    such as context-injection hints, validation errors, or summary markers.
+
+    Selection rules:
+    - accept only dict-like messages with `role == "user"`;
+    - convert `content` to plain text via `user_content_to_text`;
+    - trim whitespace and drop empty values;
+    - drop messages recognized as technical by `is_technical_user_message_text`.
+
+    Returns:
+    - raw user text for `state.user_messages_log` when message is accepted;
+    - empty string when message should be skipped.
+    """
+    if not isinstance(message, dict):
+        return ""
+    if str(message.get("role", "")).strip().lower() != "user":
+        return ""
+    content = user_content_to_text(message.get("content")).strip()
+    if not content:
+        return ""
+    if is_technical_user_message_text(content):
+        return ""
+    return content
+
 
 def resolve_technical_user_content_type(content: str) -> str:
     """
@@ -107,27 +136,12 @@ def resolve_technical_user_content_type(content: str) -> str:
     return TECHNICAL_TYPE_TECHNICAL
 
 
-def to_user_log_entry(message: Dict[str, Any]) -> str:
-    """
-    Convert raw message to canonical `user_messages_log` entry.
-    """
-    if not isinstance(message, dict):
-        return ""
-    if str(message.get("role", "")).strip().lower() != "user":
-        return ""
-    content = user_content_to_text(message.get("content")).strip()
-    if not content:
-        return ""
-    if is_technical_user_message_text(content):
-        technical_type = resolve_technical_user_content_type(content)
-        tagged = wrap_technical_user_content(content, technical_type=technical_type)
-        return f"[user][technical] {tagged}".strip()
-    return f"[user] {content}".strip()
-
-
 def normalize_user_log_entries(entries: Any) -> List[str]:
     """
-    Normalize user log entries to `list[str]` without empty values and duplicates.
+    Normalize `user_messages_log` to `list[str]`:
+    - keep only non-empty strings;
+    - drop technical messages;
+    - deduplicate by exact text preserving first occurrence order.
     """
     out: List[str] = []
     if not isinstance(entries, list):
@@ -136,6 +150,8 @@ def normalize_user_log_entries(entries: Any) -> List[str]:
         text = str(item).strip()
         if not text:
             continue
+        if is_technical_user_message_text(text):
+            continue
         if text not in out:
             out.append(text)
     return out
@@ -143,15 +159,23 @@ def normalize_user_log_entries(entries: Any) -> List[str]:
 
 def append_user_log_entries(existing: List[str], step_messages: List[Dict[str, Any]]) -> List[str]:
     """
-    Append canonical user log entries from step messages to existing log.
+    Append only new real user messages to existing log.
+
+    Logic:
+    - keep existing entries as baseline (without re-normalization);
+    - iterate over new step messages;
+    - extract candidate via `extract_real_user_message_text`;
+    - append candidate only when it is non-empty and absent in existing/result.
     """
-    out = normalize_user_log_entries(existing)
+    out = list(existing) if isinstance(existing, list) else []
+    seen = set(out)
     for message in step_messages:
-        entry = to_user_log_entry(message)
+        entry = extract_real_user_message_text(message)
         if not entry:
             continue
-        if entry not in out:
+        if entry not in seen:
             out.append(entry)
+            seen.add(entry)
     return out
 
 

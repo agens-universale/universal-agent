@@ -1,16 +1,12 @@
 import unittest
 
-from summarize.dialog_history import (
-    collect_user_messages_from_history,
-    format_last_dialog_steps,
-    group_into_turns,
-    split_turns_into_char_batches,
-)
+from summarize.dialog_history import format_last_dialog_steps, group_into_turns, split_turns_into_char_batches
 from summarize.summary_validation import is_valid_summary_text, validate_summary_text
+from user_message_policy import append_user_log_entries
 
 
 class ThreadSummarizerTest(unittest.TestCase):
-    def test_collect_user_messages_from_history_skips_technical_message(self) -> None:
+    def test_append_user_log_entries_skips_technical_user_message(self) -> None:
         messages = [
             {"role": "user", "content": "client has non-empty thread notes; call `thread_notes` with action=\"read\" to load them."},
             {"role": "user", "content": "There is no tool call in Agent response. Please send appropriate tool call"},
@@ -19,9 +15,8 @@ class ThreadSummarizerTest(unittest.TestCase):
             {"role": "user", "content": "Сделай рефакторинг parser слоя"},
             {"role": "assistant", "content": "ok"},
         ]
-        log = collect_user_messages_from_history(messages)
-        self.assertEqual(len(log), 1)
-        self.assertIn("Сделай рефакторинг", log[0])
+        log = append_user_log_entries([], messages)
+        self.assertEqual(log, ["Сделай рефакторинг parser слоя"])
 
     def test_is_valid_summary_text(self) -> None:
         good_summary = (

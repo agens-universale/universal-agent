@@ -39,21 +39,21 @@ def _state():
 
 def test_state_user_messages_log_preserves_order_and_dedup():
     state = _state()
-    state.user_messages_log = ["[user] first", "[user] second"]
+    state.user_messages_log = ["first", "second"]
     for msg in [
         {"role": "user", "content": "third"},
         {"role": "user", "content": "second"},
         {"role": "assistant", "content": "ok"},
     ]:
         if msg.get("role") == "user":
-            item = f"[user] {msg.get('content')}".strip()
-            if item not in state.user_messages_log:
+            item = str(msg.get("content") or "").strip()
+            if item and item not in state.user_messages_log:
                 state.user_messages_log.append(item)
     out = state.user_messages_log
     assert out == [
-        "[user] first",
-        "[user] second",
-        "[user] third",
+        "first",
+        "second",
+        "third",
     ]
 
 
@@ -81,7 +81,7 @@ def test_maybe_run_summary_compaction_twice_uses_meta_user_log(monkeypatch):
             thread_id,
             {
                 "backend_api_mode": "chat_completions",
-                "user_messages_log": ["[user] first request", "[user] second request"],
+                "user_messages_log": ["first request", "second request"],
             },
         )
         session = ThreadSession.from_config(
@@ -108,7 +108,7 @@ def test_maybe_run_summary_compaction_twice_uses_meta_user_log(monkeypatch):
         state = _state()
         state.thread_id = thread_id
         state.messages = session.get_full_history_messages()
-        state.user_messages_log = ["[user] first request", "[user] second request"]
+        state.user_messages_log = ["first request", "second request"]
         ran_1 = maybe_run_summary_compaction(
             ctx=_ctx(trigger_chars=1),
             state=state,
@@ -122,7 +122,7 @@ def test_maybe_run_summary_compaction_twice_uses_meta_user_log(monkeypatch):
         assert ran_1 is True
         assert "<original_user_messages>" not in session.history_messages[0]["content"]
 
-        state.user_messages_log.append("[user] third request")
+        state.user_messages_log.append("third request")
         session.persist_batch(
             [
                 {"role": "user", "content": "third request"},
@@ -143,9 +143,9 @@ def test_maybe_run_summary_compaction_twice_uses_meta_user_log(monkeypatch):
         )
         assert ran_2 is True
         assert state.user_messages_log == [
-            "[user] first request",
-            "[user] second request",
-            "[user] third request",
+            "first request",
+            "second request",
+            "third request",
         ]
 
 
@@ -172,7 +172,7 @@ def test_maybe_run_summary_compaction_works_without_thread(monkeypatch):
         {"role": "user", "content": "second request"},
         {"role": "assistant", "content": "second reply"},
     ]
-    state.user_messages_log = ["[user] first request", "[user] second request"]
+    state.user_messages_log = ["first request", "second request"]
     ran = maybe_run_summary_compaction(
         ctx=_ctx(trigger_chars=1),
         state=state,
@@ -183,7 +183,7 @@ def test_maybe_run_summary_compaction_works_without_thread(monkeypatch):
     assert ran is True
     assert len(state.messages) == 1
     assert "Summarized context from previous dialogue." in state.messages[0]["content"]
-    assert state.user_messages_log == ["[user] first request", "[user] second request"]
+    assert state.user_messages_log == ["first request", "second request"]
 
 
 def test_maybe_run_summary_compaction_preserves_system_and_state_metadata(monkeypatch):
@@ -210,7 +210,7 @@ def test_maybe_run_summary_compaction_preserves_system_and_state_metadata(monkey
         {"role": "assistant", "content": "first reply", "id": "m2"},
     ]
     state.notes_md = "keep me"
-    state.user_messages_log = ["[user] first request"]
+    state.user_messages_log = ["first request"]
     state.dialog_steps_offset = 7
     initial_project_data_before = dict(state.initial_project_data)
     call_metadata_before = dict(state.call_metadata)
@@ -230,7 +230,7 @@ def test_maybe_run_summary_compaction_preserves_system_and_state_metadata(monkey
     assert state.messages[1]["role"] == "user"
     assert "Summarized context from previous dialogue." in state.messages[1]["content"]
     assert "keep me" in state.notes_md
-    assert state.user_messages_log == ["[user] first request"]
+    assert state.user_messages_log == ["first request"]
     assert state.dialog_steps_offset > 7
     assert state.previous_response_id is None
     # Контракт этапа 1: compaction не должен менять project metadata/call metadata.

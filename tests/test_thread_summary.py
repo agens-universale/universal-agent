@@ -56,7 +56,7 @@ class ThreadSummaryTest(unittest.TestCase):
                 {
                     "summary_message_content": "compressed summary",
                     "notes_md": "## Thread summary\n\ncompressed summary",
-                    "user_messages_log": ["[user] req1", "[user] req2"],
+                    "user_messages_log": ["req1", "req2"],
                     "dialog_steps_offset": 12,
                 }
             )
@@ -83,7 +83,7 @@ class ThreadSummaryTest(unittest.TestCase):
             self.assertEqual(meta.get("backend_api_mode"), "chat_completions")
             self.assertEqual(meta.get("messages_count"), 1)
             self.assertEqual(meta.get("dialog_steps_offset"), 12)
-            self.assertEqual(meta.get("user_messages_log"), ["[user] req1", "[user] req2"])
+            self.assertEqual(meta.get("user_messages_log"), ["req1", "req2"])
             self.assertIsNone(meta.get("previous_response_id"))
             self.assertEqual(meta.get("chat_completions_system_prompt_rendered"), "SYSTEM")
 
@@ -109,7 +109,7 @@ class ThreadSummaryTest(unittest.TestCase):
             summary_text = (
                 "<dialog_summary>\n"
                 "<original_user_messages>\n"
-                "[user] old request\n"
+                "old request\n"
                 "</original_user_messages>\n\n"
                 "<summary>\n"
                 "TASK_AND_CONTEXT:\n- keep this\n"

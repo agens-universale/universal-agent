@@ -331,9 +331,33 @@ def test_build_history_text_strips_original_user_messages_block():
         f"{inner}"
     )
     messages = [{"role": "user", "content": raw}]
-    out = build_history_text(messages, max_chars=100_000, max_message_chars=0)
+    out = build_history_text(messages, max_message_chars=0)
     assert "LEGACY_DROP_ME" not in out
     assert inner in out
+
+
+def test_build_history_text_keeps_all_rows_and_order():
+    messages = [
+        {"role": "user", "content": "first"},
+        {"role": "assistant", "content": "second"},
+        {"role": "user", "content": "third"},
+    ]
+    out = build_history_text(messages, max_message_chars=0)
+    assert "third" in out
+    assert "first" in out
+    assert out.index("first") < out.index("second") < out.index("third")
+
+
+def test_build_history_text_max_chars_takes_tail_of_formatted_rows():
+    messages = [
+        {"role": "user", "content": "first"},
+        {"role": "assistant", "content": "second"},
+        {"role": "user", "content": "third"},
+    ]
+    out = build_history_text(messages, max_chars=20, max_message_chars=0)
+    assert "third" in out
+    assert "first" not in out
+    assert out.strip().startswith("3.")
 
 
 def test_summarize_merges_existing_user_messages_log(monkeypatch):
@@ -351,11 +375,11 @@ def test_summarize_merges_existing_user_messages_log(monkeypatch):
         state=_state(),
         full_history_messages=history,
         current_memory="",
-        user_messages_log=["[user] older user request", "[user] new user request"],
+        user_messages_log=["older user request", "new user request"],
     )
     assert result["user_messages_log"] == [
-        "[user] older user request",
-        "[user] new user request",
+        "older user request",
+        "new user request",
     ]
     assert "<original_user_messages>" not in result["summary_message_content"]
 
@@ -381,18 +405,18 @@ def test_summarize_preserves_user_messages_log_chronological_order(monkeypatch):
         full_history_messages=history,
         current_memory="",
         user_messages_log=[
-            "[user] first user request",
-            "[user] second user request",
-            "[user] third user request",
-            "[user] fourth user request",
+            "first user request",
+            "second user request",
+            "third user request",
+            "fourth user request",
         ],
     )
 
     assert result["user_messages_log"] == [
-        "[user] first user request",
-        "[user] second user request",
-        "[user] third user request",
-        "[user] fourth user request",
+        "first user request",
+        "second user request",
+        "third user request",
+        "fourth user request",
     ]
 
 
@@ -412,11 +436,11 @@ def test_summarize_filters_technical_messages_from_user_messages_log(monkeypatch
         full_history_messages=history,
         current_memory="",
         user_messages_log=[
-            '[user] <current_context>client has non-empty thread notes; call `thread_notes` with action="read" to load them.</current_context>',
-            "[user] real request",
+            '<current_context>client has non-empty thread notes; call `thread_notes` with action="read" to load them.</current_context>',
+            "real request",
         ],
     )
-    assert result["user_messages_log"] == ["[user] real request"]
+    assert result["user_messages_log"] == ["real request"]
 
 
 def test_invalid_summary_triggers_one_repair_retry(monkeypatch):

@@ -9,6 +9,7 @@ from summarize import (
     summary_message_body,
 )
 from summarize.summary_validation import FALLBACK_SUMMARY, validate_summary_text
+from user_message_policy import normalize_user_log_entries
 
 
 def summarize_dialog_via_chat_completions(
@@ -153,7 +154,10 @@ def summarize_dialog_via_chat_completions(
         max_dialogue_chars=max_dialogue_chars,
         max_message_chars=max_message_chars,
     )
-    user_requests = dialog_history.normalize_user_messages_log(user_messages_log)
+    # `state.user_messages_log` is expected to be already filtered and deduplicated by State
+    # via user_message_policy. We still normalize defensively here because this function can be
+    # called with persisted/raw data in tests and integrations.
+    user_requests = normalize_user_log_entries(user_messages_log)
     user_requests = dialog_history.trim_original_user_messages_to_max_chars(
         user_requests, original_user_messages_max_chars
     )

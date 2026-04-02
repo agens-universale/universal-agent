@@ -56,16 +56,11 @@ def apply_summary_state_patch(
     Возвращает:
         ``None``; побочный эффект — мутация ``state``.
     """
-    notes_base = (state.notes_md or "") if isinstance(getattr(state, "notes_md", None), str) else ""
-    notes_new = notes_base
     additions_text = str(memory_additions or "").strip()
     if additions_text:
-        notes_new = (
-            (notes_base + "\n\n" + additions_text).strip()
-            if notes_base
-            else additions_text
-        )
-        state.notes_md = notes_new
+        base = (state.notes_md or "") if isinstance(getattr(state, "notes_md", None), str) else ""
+        base = base.strip()
+        state.notes_md = f"{base}\n\n{additions_text}" if base else additions_text
     prev_offset = int(getattr(state, "dialog_steps_offset", 0) or 0)
     state.dialog_steps_offset = prev_offset + max(0, int(summarized_messages_count or 0))
     state.previous_response_id = None
@@ -93,9 +88,10 @@ def apply_summary_state_patch(
         if str(msg.get("role", "")).strip().lower() == "system":
             system_message = msg
             break
-    state.messages = [summary_message]
     if isinstance(system_message, dict):
         state.messages = [system_message, summary_message]
+    else:
+        state.messages = [summary_message]
     return None
 
 
@@ -175,7 +171,7 @@ def maybe_run_summary_compaction(
             chars_total,
             summary_trigger_chars,
         )
-    if chars_total < summary_trigger_chars:
+    if chars_total <= summary_trigger_chars:
         return False
 
     if logger is not None:
