@@ -105,8 +105,8 @@ Return format (JSON string):
   "ok": true|false,
   "action": "read|append|write",
   "length": number,
-  "notes_md": "..." (only for read),
-  "error": null|{{"type":"...","message":"..."}}
+  "error": null|{{"type":"...","message":"..."}},
+  "notes_md": "..." (only for read; last field)
 }}
 '''
 
@@ -125,8 +125,8 @@ Return format (JSON string):
                 "ok": ok,
                 "action": action,
                 "length": length,
-                "notes_md": notes_md if action == "read" else None,
                 "error": error,
+                "notes_md": notes_md if action == "read" else None,
             },
             ensure_ascii=False,
         )

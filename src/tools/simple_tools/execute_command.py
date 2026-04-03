@@ -19,7 +19,7 @@ class ExecuteCommand(AbstractSimpleTool):
             "name": "execute_command",
             "description": (
                 "Executes a command synchronously (no background) and returns a JSON string envelope with "
-                "fields: tool, ok, command, cwd, exit_code, timed_out, truncated, stdout, stderr, error. "
+                "fields: tool, ok, command, cwd, exit_code, timed_out, truncated, error, then stdout/stderr last. "
                 "stdout/stderr are truncated to max_output_chars each."
             ),
             "parameters": {
@@ -66,7 +66,7 @@ Tool description: Executes a CLI command synchronously and returns stdout/stderr
 Input schema: {"type": "object", "properties": {"command": {"type": "string", "description": "The CLI command to execute."}, "timeout_seconds": {"type": "integer", "description": "Execution timeout in seconds.", "default": 30}, "max_output_chars": {"type": "integer", "description": "Max chars returned for stdout/stderr each.", "default": 4000}, "cwd": {"type": "string", "description": "Optional working directory (absolute or relative)."}, "env": {"type":"object","description":"Optional env overrides for this command. Values must be strings.","additionalProperties":{"type":"string"}}}, "required": ["command"], "additionalProperties": false}
 
 Return format (JSON string):
-{"tool":"execute_command","ok":true|false,"command":"...","cwd":"...","exit_code":number|null,"timed_out":true|false,"truncated":true|false,"stdout":"...","stderr":"...","error":null|{"type":"...","message":"..."}}
+{"tool":"execute_command","ok":true|false,"command":"...","cwd":"...","exit_code":number|null,"timed_out":true|false,"truncated":true|false,"error":null|{"type":"...","message":"..."},"stdout":"...","stderr":"..."}
 
 Usage:
 - Use this tool to run shell commands such as listing directories (`ls`, `dir`), checking versions (`python --version`), or running scripts.
@@ -136,9 +136,9 @@ Important Usage Rules:
                 "exit_code": exit_code,
                 "timed_out": timed_out,
                 "truncated": truncated,
+                "error": error,
                 "stdout": stdout,
                 "stderr": stderr,
-                "error": error,
             },
             ensure_ascii=False,
         )

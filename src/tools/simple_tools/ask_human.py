@@ -17,9 +17,9 @@ class AskHuman(AbstractSimpleTool):
             {
                 "tool": "ask_human",
                 "ok": ok,
+                "error": error,
                 "question": question,
                 "response": response,
-                "error": error,
             },
             ensure_ascii=False,
         )

@@ -30,13 +30,13 @@ class SubmitSolution(AbstractSimpleTool):
             "ok": ok,
             "status": status,
             "message": message,
-            "task_report": task_report,
             "error": error,
         }
         if solution_type is not None:
             out["solution_type"] = solution_type
         if comment is not None:
             out["comment"] = comment
+        out["task_report"] = task_report
         return json.dumps(out, ensure_ascii=False)
 
     @classmethod
@@ -111,7 +111,7 @@ Choosing solution_type (for current turn):
 - task_report: What was done in this turn (steps, result, assumptions/evidence). Plain text, brief.
 - comment: Optional caveats, risks, unresolved items, or next steps.
 
-Return format (JSON string): {"tool":"submit_solution","ok":true,"status":"...","message":"...","task_report":"...","solution_type":"...","comment":"..."|null,"error":null}
+Return format (JSON string): {"tool":"submit_solution","ok":true,"status":"...","message":"...","error":null,"solution_type":"...","comment":"..."|null,"task_report":"..."}
 '''
 
     def __call__(

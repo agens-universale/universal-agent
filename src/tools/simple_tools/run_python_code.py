@@ -16,7 +16,7 @@ class RunPythonCode(AbstractSimpleTool):
             "name": "run_python_code",
             "description": (
                 "Runs Python code synchronously (no background) in a subprocess and returns a JSON string envelope "
-                "with: tool, ok, return_code, timed_out, truncated, stdout, stderr, error. "
+                "with: tool, ok, return_code, timed_out, truncated, error, then stdout/stderr last. "
                 "stdout/stderr are truncated to max_output_chars each."
             ),
             "parameters": {
@@ -75,9 +75,9 @@ Return format (JSON string):
   "return_code": number|null,
   "timed_out": true|false,
   "truncated": true|false,
+  "error": null|{"type":"...","message":"..."},
   "stdout": "...",
-  "stderr": "...",
-  "error": null|{"type":"...","message":"..."}
+  "stderr": "..."
 }
 '''
         return description
@@ -108,9 +108,9 @@ Return format (JSON string):
                 "return_code": return_code,
                 "timed_out": timed_out,
                 "truncated": truncated,
+                "error": error,
                 "stdout": stdout,
                 "stderr": stderr,
-                "error": error,
             },
             ensure_ascii=False,
         )

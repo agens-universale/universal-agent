@@ -21,13 +21,13 @@ class ReadFile(AbstractSimpleTool):
                 "tool": "read_file",
                 "ok": True,
                 "path": path,
-                "content": content,
                 "start_line": start_line,
                 "end_line": end_line,
                 "total_lines": total_lines,
                 "truncated": truncated,
                 "next_offset": next_offset,
                 "error": None,
+                "content": content,
             },
             ensure_ascii=False,
         )
@@ -50,13 +50,13 @@ class ReadFile(AbstractSimpleTool):
                 "tool": "read_file",
                 "ok": False,
                 "path": path,
-                "content": "",
                 "start_line": 0,
                 "end_line": 0,
                 "total_lines": 0,
                 "truncated": False,
                 "next_offset": None,
                 "error": error_obj,
+                "content": "",
             },
             ensure_ascii=False,
         )
@@ -126,13 +126,13 @@ Input schema: {
 }
 
 Return format:
-- The tool ALWAYS returns a JSON string with the following fields:
-  - "content": string — concatenated file lines in the requested range.
+- The tool ALWAYS returns a JSON string with the following fields (metadata first, "content" last):
   - "start_line": integer — 1-based number of the first line returned.
   - "end_line": integer — 1-based number of the last line returned.
   - "total_lines": integer — total number of lines in the file.
   - "truncated": boolean — true if not all lines of the file are included in "content".
   - "next_offset": integer or null — suggested 1-based offset for the next page (only set when truncated is true).
+  - "content": string — concatenated file lines in the requested range.
 
 Usage:
 - Always use this tool to inspect the contents of any file before modifying it.

@@ -15,8 +15,8 @@ class Think(AbstractSimpleTool):
             {
                 "tool": "think",
                 "ok": ok,
-                "message": message,
                 "error": error,
+                "message": message,
             },
             ensure_ascii=False,
         )
@@ -71,7 +71,7 @@ Input schema: {"type":"object","properties":{"thoughts":{"type":"string"},"criti
 At least one of thoughts, critics, doubts, reflection should be non-empty.
 
 Return format (JSON string):
-{"tool":"think","ok":true,"message":"...","error":null|{"type":"...","message":"..."}}
+{"tool":"think","ok":true,"error":null|{"type":"...","message":"..."},"message":"..."}
 '''
         return description
 

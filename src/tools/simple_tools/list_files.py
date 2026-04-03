@@ -130,12 +130,12 @@ List deeper files (example):
             "max_entries": max_entries,
             "truncated": truncated,
             "count": len(entries) if entries is not None else 0,
-            "entries": entries if entries is not None else [],
         }
         if glob is not None:
             payload["glob"] = glob
         if error is not None:
             payload["error"] = error
+        payload["entries"] = entries if entries is not None else []
 
         return json.dumps(payload, ensure_ascii=False)
 

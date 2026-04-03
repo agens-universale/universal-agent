@@ -77,8 +77,8 @@ def _wrap_mcp_result(
         "mcp_server": server_key,
         "mcp_tool": base_tool_name,
         "arguments": _json_sanitize(arguments),
-        "result": formatted_sanitized,
         "error": error,
+        "result": formatted_sanitized,
     }
     return json.dumps(envelope, ensure_ascii=False)
 

@@ -115,8 +115,8 @@ Update version string:
                 "matched": matched,
                 "replaced": replaced,
                 "path": path,
-                "message": message,
                 "error": error,
+                "message": message,
             },
             ensure_ascii=False,
         )

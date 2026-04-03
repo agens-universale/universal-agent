@@ -32,8 +32,9 @@ class FetchUrl(AbstractSimpleTool):
                 "Fetches a URL via HTTP GET and returns extracted readable text when possible. "
                 "If the response is binary (e.g., images, PDFs, archives), does NOT return raw bytes; "
                 "instead returns content='binary data' with is_binary=true. "
-                "Always returns a JSON string object with fields: ok, url, final_url, status_code, "
-                "content_type, is_binary, result_type, extracted_source, content, preview, truncated, error."
+                "Always returns a JSON string object: metadata fields first (ok, url, final_url, status_code, "
+                "content_type, is_binary, result_type, extracted_source, truncated, error, optional max_* limits), "
+                "then bulk text fields last (content, preview)."
             ),
             "parameters": {
                 "type": "object",
@@ -173,8 +174,6 @@ Usage:
             "is_binary": is_binary,
             "result_type": result_type,
             "extracted_source": extracted_source,
-            "content": content,
-            "preview": preview,
             "truncated": truncated,
             "error": error,
         }
@@ -182,6 +181,8 @@ Usage:
             payload["max_content_chars"] = max_content_chars
         if max_preview_chars is not None:
             payload["max_preview_chars"] = max_preview_chars
+        payload["content"] = content
+        payload["preview"] = preview
         return json.dumps(payload, ensure_ascii=False)
 
     def __call__(

@@ -171,8 +171,8 @@ Search for error logs in Rust source files:
                 "regex": regex,
                 "file_pattern": file_pattern,
                 "count": len(matches) if matches is not None else 0,
-                "matches": matches if matches is not None else [],
                 "error": error,
+                "matches": matches if matches is not None else [],
             },
             ensure_ascii=False,
         )

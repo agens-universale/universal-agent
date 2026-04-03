@@ -47,8 +47,8 @@ def _wrap(
         "tool": tool,
         "ok": ok,
         **{k: _json_sanitize(v) for k, v in meta.items()},
-        "result": _json_sanitize(result),
         "error": _json_sanitize(error),
+        "result": _json_sanitize(result),
     }
     return json.dumps(payload, ensure_ascii=False)
 
@@ -243,7 +243,7 @@ def get_skills_tools_data(skills_registry: SkillsRegistry) -> Dict[str, Dict[str
                 "description": (
                     "List all available local skills discovered in the skills_data directory. "
                     "Use this tool to see which skills (id, name, description) you can work with. "
-                    "Returns a JSON string envelope: {tool, ok, result, error}. On success, result.skills is a list."
+                    "Returns a JSON string envelope: {tool, ok, error, result}. On success, result.skills is a list."
                 ),
                 "parameters": {
                     "type": "object",
@@ -271,7 +271,7 @@ def get_skills_tools_data(skills_registry: SkillsRegistry) -> Dict[str, Dict[str
                 "description": (
                     "Load a specific skill by its id. Returns metadata, instructions, "
                     "and lists of available references and assets. "
-                    "Returns a JSON string envelope: {tool, ok, skill_id, result, error}. On success, result.skill contains the skill detail."
+                    "Returns a JSON string envelope: {tool, ok, skill_id, error, result}. On success, result.skill contains the skill detail."
                 ),
                 "parameters": {
                     "type": "object",
@@ -307,7 +307,7 @@ def get_skills_tools_data(skills_registry: SkillsRegistry) -> Dict[str, Dict[str
                     "Run a Python script that belongs to a specific skill. "
                     "Arguments are passed as JSON via stdin. "
                     "If script_name is omitted, scripts/main.py is used. "
-                    "Returns a JSON string envelope: {tool, ok, skill_id, script_name, args, result, error}. "
+                    "Returns a JSON string envelope: {tool, ok, skill_id, script_name, args, error, result}. "
                     "On success, the script output is inside result."
                 ),
                 "parameters": {
@@ -358,7 +358,7 @@ def get_skills_tools_data(skills_registry: SkillsRegistry) -> Dict[str, Dict[str
                 "description": (
                     "Load a reference document for a given skill by slug. "
                     "References live under the skill's references/ directory. "
-                    "Returns a JSON string envelope: {tool, ok, skill_id, slug, result, error}. "
+                    "Returns a JSON string envelope: {tool, ok, skill_id, slug, error, result}. "
                     "On success, the reference content is inside result."
                 ),
                 "parameters": {
@@ -402,7 +402,7 @@ def get_skills_tools_data(skills_registry: SkillsRegistry) -> Dict[str, Dict[str
                 "description": (
                     "Load an asset file for a given skill by slug. "
                     "Assets live under the skill's assets/ directory. "
-                    "Returns a JSON string envelope: {tool, ok, skill_id, slug, result, error}. "
+                    "Returns a JSON string envelope: {tool, ok, skill_id, slug, error, result}. "
                     "On success, the asset content is inside result."
                 ),
                 "parameters": {

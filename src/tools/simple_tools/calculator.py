@@ -20,9 +20,9 @@ class Calculator(AbstractSimpleTool):
                 "tool": "calculator",
                 "ok": ok,
                 "expression": expression,
-                "value": value,
                 "value_type": value_type,
                 "error": error,
+                "value": value,
             },
             ensure_ascii=False,
         )
@@ -68,9 +68,9 @@ Return format (JSON string):
   "tool":"calculator",
   "ok": true|false,
   "expression": "...",
-  "value": <result or null>,
   "value_type": "...",
-  "error": null|{{"type":"...","message":"..."}}
+  "error": null|{{"type":"...","message":"..."}},
+  "value": <result or null>
 }}
 '''
         return description
