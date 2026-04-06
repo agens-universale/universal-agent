@@ -292,6 +292,7 @@ def create_call_data_completions(
     tools: Optional[List] = None,
     model: Optional[str] = None,
     *args,
+    max_tokens: Optional[int] = None,
     **kwargs,
 ) -> Dict:
     def _message_key(message: Dict) -> str:
@@ -332,6 +333,15 @@ def create_call_data_completions(
     if effective_model is None and state is not None:
         effective_model = state.default_model
 
+    effective_max_tokens = 8096
+    if max_tokens is not None:
+        try:
+            effective_max_tokens = int(max_tokens)
+        except (TypeError, ValueError):
+            effective_max_tokens = 8096
+        if effective_max_tokens < 1:
+            effective_max_tokens = 8096
+
     data = {
         "model": effective_model,
         "messages": to_send_messages_formatted,
@@ -341,7 +351,7 @@ def create_call_data_completions(
         "top_p": 0.8,
         "top_k": 20,
         "min_p": 0.0,
-        "max_tokens": 8096,
+        "max_tokens": effective_max_tokens,
         "repetition_penalty": 1.2,
         "separate_reasoning": True,
         "chat_template_kwargs": {"enable_thinking": False},

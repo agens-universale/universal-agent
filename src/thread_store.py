@@ -359,7 +359,7 @@ class ThreadSession:
             self.history_messages.append(message)
             known_seen.add(key)
         self.previous_response_id = previous_response_id
-        # Preserve arbitrary meta fields (e.g. notes_md), otherwise tools that
+        # Preserve arbitrary meta fields (e.g. memory_files), otherwise tools that
         # update meta would get their data wiped on the next persist_batch().
         base_meta = (
             load_thread_meta(self.threads_dir, self.system_id, self.thread_id) or {}
@@ -368,11 +368,8 @@ class ThreadSession:
         base_meta["previous_response_id"] = self.previous_response_id
         base_meta["backend_api_mode"] = self.backend_api_mode
         base_meta["messages_count"] = self.persisted_messages_count
-        # Notes are expected to be updated in-memory (state.notes_md) and
-        # then reflected into self.meta before persist_batch().
-        # Always overwrite when we have a string value.
-        if isinstance(self.meta.get("notes_md"), str):
-            base_meta["notes_md"] = self.meta.get("notes_md")
+        if isinstance(self.meta.get("memory_files"), dict):
+            base_meta["memory_files"] = self.meta["memory_files"]
         if isinstance(self.meta.get("last_backend_response_id"), str):
             base_meta["last_backend_response_id"] = self.meta.get("last_backend_response_id")
         # Persist rendered chat/completions system prompt for transparency/debugging.
@@ -391,7 +388,6 @@ class ThreadSession:
         summary_payload: Dict[str, Any],
     ) -> Dict[str, Any]:
         summary_text = str(summary_payload.get("summary_message_content") or "").strip()
-        notes_md = str(summary_payload.get("notes_md") or "").strip()
         user_messages_log = summary_payload.get("user_messages_log")
         dialog_steps_offset = summary_payload.get("dialog_steps_offset", 0)
         data_path, meta_path = _thread_paths(self.threads_dir, self.system_id, self.thread_id)
@@ -446,15 +442,17 @@ class ThreadSession:
                 fd.write(json.dumps(record, ensure_ascii=False) + "\n")
                 known_message_keys.add(make_message_key(message))
 
+        memory_files = summary_payload.get("memory_files")
         new_meta = {
             "created_at": _utc_now_iso(),
             "previous_response_id": None,
             "backend_api_mode": self.backend_api_mode,
             "messages_count": len(compact_messages),
-            "notes_md": notes_md.strip(),
             "last_summarized_at": _utc_now_iso(),
             "last_summary_archive_suffix": ts_suffix,
         }
+        if isinstance(memory_files, dict):
+            new_meta["memory_files"] = memory_files
         try:
             effective_steps_offset = int(dialog_steps_offset)
         except (TypeError, ValueError):

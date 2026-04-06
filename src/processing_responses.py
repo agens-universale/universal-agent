@@ -1,6 +1,7 @@
 import json
 from types import SimpleNamespace
 
+from config import parse_chat_completions_max_tokens
 from tools import apply_tool, WrongFunctionArgumentsException
 from utils.connect_backend import create_call_headers
 from utils.connect_backend import request_backend_responses as request_backend
@@ -34,6 +35,7 @@ def _summarize_call_data_for_log(call_data: Dict[str, Any]) -> Dict[str, Any]:
     tools = call_data.get("tools")
     return {
         "model": call_data.get("model"),
+        "max_tokens": call_data.get("max_tokens"),
         "messages_count": len(messages) if isinstance(messages, list) else None,
         "tools_count": len(tools) if isinstance(tools, list) else None,
     }
@@ -121,9 +123,13 @@ def _request_backend_canonical(
         tools=getattr(state, "tools", []),
         default_model=getattr(state, "default_model", None),
     )
+    completions_max_tokens = parse_chat_completions_max_tokens(
+        cfg.get("chat_completions_max_tokens", 8096), default=8096
+    )
     call_data = create_call_data_completions(
         sanitized_messages,
         chat_state,
+        max_tokens=completions_max_tokens,
     )
     res = request_backend_chat_completions(
         call_data,
@@ -135,6 +141,19 @@ def _request_backend_canonical(
     )
     if not isinstance(res, dict):
         raise ValueError("chat/completions backend response must be an object")
+    _run_log = getattr(ctx, "logger", None) or _fallback_logger
+    _choices_raw = res.get("choices")
+    _finish = None
+    if isinstance(_choices_raw, list) and len(_choices_raw) > 0:
+        _ch0 = _choices_raw[0]
+        if isinstance(_ch0, dict):
+            _finish = _ch0.get("finish_reason")
+    _run_log.info(
+        "chat/completions response meta: max_tokens_requested=%s finish_reason=%s usage=%s",
+        call_data.get("max_tokens"),
+        _finish,
+        res.get("usage"),
+    )
     # Для режима chat/completions всегда используем только choices[0].
     first_choice_payload = dict(res)
     choices = res.get("choices")
@@ -307,12 +326,33 @@ def run_agent(
                     json.dumps(m, ensure_ascii=False, indent=2),
                 )
 
-            # Логируем оригинальные сообщения, но в state сохраняем уже
-            # санитайзнутый набор (битые function_call -> technical user message).
+            # В state и в тред уходит уже санитайзнутый набор (битые function_call ->
+            # technical user message). Сырой вывод бэкенда логируется выше; если
+            # санитайз изменил батч — логируем то, что реально закоммичено (иначе
+            # в agent_log не видно подставленного фидбека, хотя он есть в threads jsonl).
+            _pre_sanitize_digest = json.dumps(
+                messages, ensure_ascii=False, sort_keys=True, default=str
+            )
             messages = sanitize_messages_for_chat_completions(
                 messages,
                 invalid_tool_call_factory=build_invalid_tool_call_feedback_message,
             )
+            _post_sanitize_digest = json.dumps(
+                messages, ensure_ascii=False, sort_keys=True, default=str
+            )
+            if _post_sanitize_digest != _pre_sanitize_digest:
+                run_logger.info(
+                    "\n<message_batch_committed>\n"
+                    "Санитайз для chat/completions изменил батч относительно сырого "
+                    "ответа выше (например, невалидный JSON вызова тула заменён на "
+                    "техническое user-сообщение — то же, что уходит в persist треда).\n"
+                    "</message_batch_committed>\n"
+                )
+                for m in messages:
+                    run_logger.info(
+                        "\n<message_committed>\n%s\n</message_committed>\n",
+                        json.dumps(m, ensure_ascii=False, indent=2, default=str),
+                    )
             state.messages += messages
             if persist_messages_callback is not None:
                 try:

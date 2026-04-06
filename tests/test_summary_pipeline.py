@@ -28,7 +28,7 @@ def _ctx(trigger_chars: int = 1):
 def _state():
     return types.SimpleNamespace(
         default_model="test-model",
-        notes_md="",
+        memory_files={},
         dialog_steps_offset=0,
         previous_response_id=None,
         messages=[],
@@ -209,7 +209,7 @@ def test_maybe_run_summary_compaction_preserves_system_and_state_metadata(monkey
         {"role": "user", "content": "first request", "id": "m1"},
         {"role": "assistant", "content": "first reply", "id": "m2"},
     ]
-    state.notes_md = "keep me"
+    state.memory_files = {"journal": "keep me"}
     state.user_messages_log = ["first request"]
     state.dialog_steps_offset = 7
     initial_project_data_before = dict(state.initial_project_data)
@@ -229,7 +229,7 @@ def test_maybe_run_summary_compaction_preserves_system_and_state_metadata(monkey
     assert state.messages[0]["content"] == "SYSTEM"
     assert state.messages[1]["role"] == "user"
     assert "Summarized context from previous dialogue." in state.messages[1]["content"]
-    assert "keep me" in state.notes_md
+    assert "keep me" in state.memory_files.get("journal", "")
     assert state.user_messages_log == ["first request"]
     assert state.dialog_steps_offset > 7
     assert state.previous_response_id is None

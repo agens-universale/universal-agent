@@ -4,7 +4,7 @@ from user_message_policy import extract_real_user_message_text
 def test_extract_real_user_message_text_skips_current_context_as_technical():
     msg = {
         "role": "user",
-        "content": 'client has non-empty thread notes; call `thread_notes` with action="read" to load them.',
+        "content": 'client has non-empty memory files; call `memory_files` with action="list" to see available files, then read what you need.',
     }
     out = extract_real_user_message_text(msg)
     assert out == ""

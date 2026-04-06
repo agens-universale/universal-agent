@@ -60,6 +60,23 @@ class ConvertationsTest(unittest.TestCase):
         self.assertIn("provider returned choice error", str(ctx.exception).lower())
         self.assertIn("provider_unavailable", str(ctx.exception))
 
+    def test_output_chat_completion_accepts_finish_reason_length(self):
+        payload = _base_payload()
+        payload["choices"][0]["finish_reason"] = "length"
+        payload["choices"][0]["message"]["tool_calls"] = [
+            {
+                "id": "call_x",
+                "type": "function",
+                "function": {"name": "f", "arguments": "{}"},
+            }
+        ]
+
+        res = output_chat_completion_to_response(payload, logger_override=None)
+
+        types_out = [item["type"] for item in res["output"]]
+        self.assertIn("message", types_out)
+        self.assertIn("function_call", types_out)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -105,7 +105,7 @@ def test_summarize_incremental_single_batch_one_summary_call(monkeypatch):
     assert len(calls) == 1
 
 
-def test_memory_additions_go_to_thread_notes_not_inside_summary(monkeypatch):
+def test_memory_additions_go_to_memory_files_journal_not_inside_summary(monkeypatch):
     history = _flatten_turns([_make_turn("hi", "hello")])
 
     def _fake_request(**kwargs):
@@ -125,7 +125,7 @@ def test_memory_additions_go_to_thread_notes_not_inside_summary(monkeypatch):
         current_memory="existing note",
     )
     state = types.SimpleNamespace(
-        notes_md="existing note",
+        memory_files={"journal": "existing note"},
         messages=[],
         dialog_steps_offset=0,
         previous_response_id=None,
@@ -141,9 +141,9 @@ def test_memory_additions_go_to_thread_notes_not_inside_summary(monkeypatch):
     assert "Suggested memory" not in content
     inner = content.split("<summary>")[1].split("</summary>")[0]
     assert "bullet one" not in inner
-    notes_block = content.split("<thread_notes>")[1].split("</thread_notes>")[0]
-    assert "existing note" in notes_block
-    assert "bullet one" in notes_block
+    journal_block = content.split('<file name="journal">')[1].split("</file>")[0]
+    assert "existing note" in journal_block
+    assert "bullet one" in journal_block
 
 
 def test_summarize_incremental_two_batches_previous_summary_passed(monkeypatch):
@@ -476,7 +476,7 @@ def test_summarize_merges_existing_user_messages_log(monkeypatch):
         "new user request",
     ]
     state = types.SimpleNamespace(
-        notes_md="",
+        memory_files={},
         messages=[],
         dialog_steps_offset=0,
         previous_response_id=None,
@@ -543,7 +543,7 @@ def test_summarize_filters_technical_messages_from_user_messages_log(monkeypatch
         full_history_messages=history,
         current_memory="",
         user_messages_log=[
-            '<current_context>client has non-empty thread notes; call `thread_notes` with action="read" to load them.</current_context>',
+            '<current_context>client has non-empty memory files; call `memory_files` with action="list" to see available files, then read what you need.</current_context>',
             "real request",
         ],
     )

@@ -14,6 +14,13 @@ completions_url: 'http://127.0.0.1:8080/v1/chat/completions'
 # Путь к системному промпту для режима chat/completions.
 # Если не задан, используется ./prompts/chat_completions_system_prompt.md.
 # chat_completions_system_prompt_path: "./prompts/chat_completions_system_prompt.md"
+#
+# Лимит токенов на ответ API chat/completions (поле max_tokens). У OpenRouter фактический
+# потолок генерации ≈ min(max_tokens, context_window − длина_промпта): длинная история треда
+# «съедает» окно — аргументы тула обрываются на десятках символов даже при большом max_tokens.
+# Тогда: короткий write/create + append_to_file чанками, суммаризация/новый тред, или модель с
+# большим контекстом. Допустимы int и строки вида "16k", "32k".
+# chat_completions_max_tokens: 8096
 # Параметры суммаризации для chat/completions.
 summary_params:
   # Путь к промпту суммаризации длинного диалога.
@@ -39,6 +46,11 @@ summary_params:
   last_dialog_steps_count: 5
   # Максимум символов на одно сообщение в <last_dialog_steps>.
   last_dialog_step_message_max_chars: 5000
+# Настройки memory_files — персистентных именованных регистров памяти треда.
+# memory_files_max_file_chars: 50000       # Лимит символов на один файл (default 50000)
+# memory_files_total_budget_chars: 150000  # Суммарный бюджет на все файлы (default 150000)
+# memory_files_max_files: 20               # Максимум файлов в треде (default 20)
+
 use_ssl: True
 # Включить ретраи (до 5 попыток) с экспоненциальным backoff
 # для запросов к backend и MCP-серверам.
@@ -67,7 +79,10 @@ server_tool_prefix: system
 max_steps: 200
 # Порог подряд идущих ответов backend без tool_call; при превышении завершаем работу
 no_tool_call_max_count: 3
-# set dump_storage: false and save_logs: false - to prevent dumping log files in agent current work folder
+# Выводить пошаговый трейс работы агента в stdout (print).
+# В CLI-режиме обычно удобно оставить true, в серверном режиме
+# рекомендуется переопределять на false через agent_overrides.console_trace.
+console_trace: true
 # set dump_storage: false and save_logs: false - to prevent dumping log files in agent current work folder
 dump_storage: true
 save_logs: true

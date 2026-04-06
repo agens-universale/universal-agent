@@ -11,6 +11,14 @@ from summarize.summary_message_body import build_dialog_summary_content
 from summarize.thread_summarizer import summarize_dialog_via_chat_completions
 
 
+def _journal_text(state: Any) -> str:
+    """Extract journal text from state.memory_files for backward-compat with summarizer."""
+    mf = getattr(state, "memory_files", None)
+    if isinstance(mf, dict):
+        return (mf.get("journal") or "").strip()
+    return ""
+
+
 def without_system_messages(messages_list: List[dict]) -> List[dict]:
     out: List[dict] = []
     for msg in messages_list:
@@ -38,10 +46,10 @@ def apply_summary_state_patch(
     сообщений. Вызывается из ``run_summary_compaction`` после успешной суммаризации.
 
     Что делает:
-        1. ``state.notes_md`` — дополняет текстом ``memory_additions``, только если он непустой;
-           иначе поле не меняет.
+        1. ``state.memory_files["journal"]`` — дополняет текстом ``memory_additions``, только если
+           он непустой; иначе не меняет.
         2. Собирает тело сообщения-резюме через ``build_dialog_summary_content`` уже **после** шага (1):
-           в ``<thread_notes>`` попадает актуальный ``state.notes_md``.
+           в ``<memory_files>`` попадает актуальный ``state.memory_files``.
         3. ``state.dialog_steps_offset`` — увеличивает на ``summarized_messages_count`` (служебно через
            ``max(0, int(...))``).
         4. ``state.previous_response_id`` — сбрасывает в ``None`` (контракт после compaction).
@@ -51,14 +59,15 @@ def apply_summary_state_patch(
 
     Аргументы:
         state:
-            Изменяемый in-place объект исполнения; ожидаются атрибуты ``notes_md``, ``dialog_steps_offset``,
+            Изменяемый in-place объект исполнения; ожидаются атрибуты ``memory_files``, ``dialog_steps_offset``,
             ``previous_response_id``, ``messages``.
         raw_summary:
             Текст сводки LLM для секции ``<summary>``.
         last_dialog_steps:
             Отформатированный хвост диалога для ``<last_dialog_steps>``.
         memory_additions:
-            Извлечённые durable дополнения к памяти треда (markdown); при непустом значении дописываются в notes.
+            Извлечённые durable дополнения к памяти треда (markdown); при непустом значении дописываются
+            в ``memory_files["journal"]``.
         summarized_messages_count:
             Число сообщений, схлопнутых в этом проходе; участвует в ``dialog_steps_offset``.
 
@@ -66,15 +75,18 @@ def apply_summary_state_patch(
         Итоговое тело резюме (то же, что вложено в служебное сообщение).
     """
     additions_text = str(memory_additions or "").strip()
+    mf = getattr(state, "memory_files", None)
+    if not isinstance(mf, dict):
+        mf = {}
+        state.memory_files = mf
     if additions_text:
-        base = (state.notes_md or "") if isinstance(getattr(state, "notes_md", None), str) else ""
-        base = base.strip()
-        state.notes_md = f"{base}\n\n{additions_text}" if base else additions_text
-    notes_md = (state.notes_md or "") if isinstance(getattr(state, "notes_md", None), str) else ""
+        journal = (mf.get("journal") or "").strip()
+        mf["journal"] = f"{journal}\n\n{additions_text}" if journal else additions_text
+
     summary_message_content = build_dialog_summary_content(
         summary_text=str(raw_summary or ""),
         last_dialog_steps=str(last_dialog_steps or ""),
-        current_memory=notes_md,
+        memory_files=mf,
     )
     prev_offset = int(getattr(state, "dialog_steps_offset", 0) or 0)
     state.dialog_steps_offset = prev_offset + max(0, int(summarized_messages_count or 0))
@@ -169,7 +181,7 @@ def run_summary_compaction(
         ctx=ctx,
         state=state,
         full_history_messages=full_messages,
-        current_memory=(state.notes_md or "") if isinstance(state.notes_md, str) else "",
+        current_memory=_journal_text(state),
         user_messages_log=source_user_log,
         steps_offset=int(getattr(state, "dialog_steps_offset", 0) or 0),
     )
@@ -198,7 +210,7 @@ def run_summary_compaction(
 
     summary_payload = {
         "summary_message_content": summary_message_content,
-        "notes_md": (state.notes_md or "") if isinstance(state.notes_md, str) else "",
+        "memory_files": dict(getattr(state, "memory_files", None) or {}),
         "user_messages_log": list(getattr(state, "user_messages_log", []) or []),
         "dialog_steps_offset": int(getattr(state, "dialog_steps_offset", 0) or 0),
     }

@@ -72,13 +72,19 @@ def get_output_list(dct, logger_override=None):
                 "Chat completion provider returned choice error: "
                 f"code={err_code!r} message={err_message!r} metadata={err_metadata!r}"
             )
-        if dct_choice['finish_reason'] not in ("stop", "tool_calls"):
+        if dct_choice['finish_reason'] not in ("stop", "tool_calls", "length"):
             if logger_override is not None:
                 logger_override.error(
                     "Unknown finish reason in chat/completions payload: payload=%s",
                     _safe_json_for_log(dct),
                 )
             raise ValueError("Unknown finish reason")
+        if dct_choice["finish_reason"] == "length" and logger_override is not None:
+            logger_override.warning(
+                "chat/completions choice finished with length (output may be truncated; "
+                "tool JSON may be incomplete). payload=%s",
+                _safe_json_for_log(dct),
+            )
 
         # --- FIX 1: Check for None content before creating a message object ---
         if dct_choice['message'].get('content') is not None:

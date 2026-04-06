@@ -30,7 +30,7 @@ def _ctx():
 def _state():
     return types.SimpleNamespace(
         default_model="test-model",
-        notes_md="",
+        memory_files={},
         dialog_steps_offset=0,
         previous_response_id=None,
         user_messages_log=[],
@@ -142,8 +142,9 @@ def test_e2e_two_sequential_summaries_keep_user_log_order_and_no_original_block(
         assert state.previous_response_id is None
         meta_after_second = load_thread_meta(tmp_dir, system_id, thread_id)
         assert meta_after_second.get("backend_api_mode") == "chat_completions"
-        # При отсутствии memory_additions notes не форсируются fallback-summary.
-        assert meta_after_second.get("notes_md", "") == ""
+        # При отсутствии memory_additions journal остаётся пустым.
+        mf = meta_after_second.get("memory_files", {})
+        assert mf.get("journal", "") == ""
         assert isinstance(meta_after_second.get("dialog_steps_offset"), int)
         assert meta_after_second.get("messages_count") == 1
         assert meta_after_second.get("previous_response_id") is None

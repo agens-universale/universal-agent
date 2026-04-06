@@ -25,6 +25,7 @@ _TECHNICAL_USER_MARKERS = (
     "<error_message>",
     "[user][technical]",
     "client has non-empty thread notes;",
+    "client has non-empty memory files;",
     "there is no tool call in agent response",
     "tool argument validation failed",
     "expected schema:",
@@ -129,6 +130,7 @@ def resolve_technical_user_content_type(content: str) -> str:
     if (
         "<current_context>" in normalized
         or "client has non-empty thread notes;" in normalized
+        or "client has non-empty memory files;" in normalized
     ):
         return TECHNICAL_TYPE_CURRENT_CONTEXT
     if is_dialog_summary_user_message_text(content):
@@ -183,12 +185,19 @@ def build_invalid_tool_call_feedback_message(message: dict) -> dict:
     tool_name = str(message.get("name", "unknown_tool"))
     raw_args = message.get("arguments")
     args_text = str(raw_args) if raw_args is not None else "(missing)"
-    error_text = "unknown validation error"
     try:
         json.loads(args_text)
         error_text = "tool arguments were marked invalid by pre-send validation"
     except Exception as exc:  # noqa: BLE001
         error_text = f"invalid JSON in tool arguments: {exc}"
+
+    mitigation = ""
+    if tool_name in ("write_to_file", "append_to_file"):
+        mitigation = (
+            "\n\nRegenerate with valid JSON. For large file bodies, follow the tool "
+            "descriptions: brief `write_to_file` then multiple `append_to_file` calls "
+            "with moderate chunks—not one oversized `arguments` payload."
+        )
 
     feedback = (
         "Tool call cannot be sent to chat/completions backend because arguments are invalid.\n\n"
@@ -199,6 +208,7 @@ def build_invalid_tool_call_feedback_message(message: dict) -> dict:
         f"{args_text}\n"
         "```\n\n"
         "Please regenerate this tool call with valid JSON arguments."
+        f"{mitigation}"
     )
     return {
         "role": "user",

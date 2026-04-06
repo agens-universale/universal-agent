@@ -64,7 +64,7 @@ class AgentExecutor:
         skills_list = get_skills_registry(config_dict).list_skills()
 
         thread_session: ThreadSession | None = None
-        thread_notes_md: str | None = None
+        thread_memory_files: dict | None = None
         previous_response_id: str | None = None
         backend_api_mode = str(config_dict.get("backend_api_mode", "responses")).strip().lower()
         if thread_id is not None:
@@ -78,9 +78,9 @@ class AgentExecutor:
             if backend_api_mode == "responses":
                 previous_response_id = thread_session.previous_response_id
             meta = getattr(thread_session, "meta", None) or {}
-            maybe_notes = meta.get("notes_md")
-            thread_notes_md = (
-                maybe_notes if isinstance(maybe_notes, str) else None
+            maybe_memory_files = meta.get("memory_files")
+            thread_memory_files = (
+                dict(maybe_memory_files) if isinstance(maybe_memory_files, dict) else None
             )
         else:
             system_id = system or "cli"
@@ -116,7 +116,7 @@ class AgentExecutor:
             "use_server_subagents": config_dict.get("use_server_subagents", False),
             "agent_md_path": config_dict.get("agent_md_path"),
             "thread_id": thread_id,
-            "notes_md": thread_notes_md,
+            "memory_files": thread_memory_files,
         }
         state = State(**state_data)
         state.backend_api_mode = backend_api_mode
@@ -233,20 +233,21 @@ class AgentExecutor:
             "id": generate_message_id_func("m"),
         }
         technical_user_message = None
+        _has_memory = (
+            isinstance(thread_memory_files, dict)
+            and any(v.strip() for v in thread_memory_files.values() if isinstance(v, str))
+        )
         if (
             thread_session is not None
-            and isinstance(thread_notes_md, str)
-            and thread_notes_md.strip()
+            and _has_memory
             and not history_has_dialog_summary_message(thread_session.history_messages)
         ):
-            # Первый user-сообщение в такте: "техническая" инструкция серверу/модели,
-            # что клиент подгружает thread notes и их нужно прочитать tool'ом.
             technical_user_message = {
                 "role": "user",
                 "content": wrap_technical_user_content(
                     (
-                        'client has non-empty thread notes; call `thread_notes` '
-                        'with action="read" to load them.'
+                        'client has non-empty memory files; call `memory_files` '
+                        'with action="list" to see available files, then read what you need.'
                     ),
                     technical_type=TECHNICAL_TYPE_CURRENT_CONTEXT,
                 ),
@@ -254,13 +255,12 @@ class AgentExecutor:
             }
             if logger is not None:
                 logger.info(
-                    "summary_context_message_added thread_id=%s reason=notes_present_no_dialog_summary",
+                    "summary_context_message_added thread_id=%s reason=memory_files_present_no_dialog_summary",
                     thread_session.thread_id,
                 )
         elif (
             thread_session is not None
-            and isinstance(thread_notes_md, str)
-            and thread_notes_md.strip()
+            and _has_memory
             and history_has_dialog_summary_message(thread_session.history_messages)
             and logger is not None
         ):
@@ -303,9 +303,9 @@ class AgentExecutor:
                     thread_session.meta[
                         "chat_completions_system_prompt_rendered"
                     ] = rendered_system_prompt
-                notes_md = getattr(state, "notes_md", None)
-                if isinstance(notes_md, str):
-                    thread_session.meta["notes_md"] = notes_md
+                memory_files = getattr(state, "memory_files", None)
+                if isinstance(memory_files, dict):
+                    thread_session.meta["memory_files"] = memory_files
                 state.append_user_messages_to_log(step_messages)
                 thread_session.meta["user_messages_log"] = state.user_messages_log
                 thread_session.meta["backend_api_mode"] = state.backend_api_mode

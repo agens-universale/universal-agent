@@ -37,7 +37,7 @@ def test_chat_completions_logs_raw_backend_payload_on_conversion_error(caplog, m
     def _fake_create_call_headers(_state, _ctx):
         return {"Authorization": "Bearer fake"}
 
-    def _fake_create_call_data(_messages, _state):
+    def _fake_create_call_data(_messages, _state, **_kwargs):
         return {"model": "CodeChat", "messages": [{"role": "user", "content": "ping"}], "tools": []}
 
     def _fake_request_backend(*_args, **_kwargs):

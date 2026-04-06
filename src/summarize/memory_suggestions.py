@@ -11,7 +11,7 @@ from summarize import llm_chat
 class MemoryAdditionsResult:
     """Результат запроса к LLM для предложений по долговременной памяти диалога.
 
-    Назначение: зафиксировать и извлечённый текст для `thread_notes`, и полезные
+    Назначение: зафиксировать и извлечённый текст для ``memory_files["journal"]``, и полезные
     для отладки/трассировки артефакты (сообщения запроса и сырой ответ модели).
 
     Attributes:
@@ -57,7 +57,7 @@ def suggest_memory_additions(
 
     Назначение: второй такт после сводки (когда включён): предложить только
     устойчивые факты и решения, не дублируя уже имеющееся в сводке и `current_memory`,
-    для последующего добавления в `thread_notes`.
+    для последующего добавления в ``memory_files["journal"]``.
 
     Поведение: формируется system+user промпт с тремя XML-блоками (история, сводка,
     память); вызывается `llm_chat.request_chat_completion_text`; логируются сырой ответ и
@@ -75,7 +75,7 @@ def suggest_memory_additions(
     """
     system = (
         "You are helping enrich long-term session memory for a technical dialogue. "
-        "You receive: (1) full dialog history, (2) summary, (3) thread_notes snapshot. "
+        "You receive: (1) full dialog history, (2) summary, (3) current memory snapshot. "
         "Return EXACTLY one XML tag and nothing else: <add_to_memory>...</add_to_memory>. "
         "Inside the tag, include ONLY durable information that should persist across turns: "
         "stable facts, confirmed decisions, constraints, accepted requirements, key assumptions, "
@@ -94,9 +94,9 @@ def suggest_memory_additions(
         "<current_summary>\n"
         f"{summary_text}\n"
         "</current_summary>\n\n"
-        "<thread_notes>\n"
+        "<current_memory>\n"
         f"{current_memory}\n"
-        "</thread_notes>\n"
+        "</current_memory>\n"
     )
     request_messages = [
         {"role": "system", "content": system},

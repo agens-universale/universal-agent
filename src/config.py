@@ -46,6 +46,37 @@ def _safe_int(value: Any, default: int) -> int:
         return default
 
 
+def parse_chat_completions_max_tokens(raw: Any, *, default: int = 8096) -> int:
+    """
+    Значение chat_completions_max_tokens из YAML: int, float или строки вида "16k".
+    Булевы и прочий мусор → default; ноль и отрицательные → default.
+    """
+    if raw is None:
+        return default
+    if isinstance(raw, bool):
+        return default
+    if isinstance(raw, (int, float)):
+        n = int(raw)
+        return n if n >= 1 else default
+    if isinstance(raw, str):
+        s = raw.strip().lower().replace(" ", "").replace("_", "")
+        if not s:
+            return default
+        if s.endswith("k"):
+            try:
+                base = float(s[:-1])
+                n = int(base * 1000)
+            except ValueError:
+                return default
+            return n if n >= 1 else default
+        try:
+            n = int(float(s))
+        except ValueError:
+            return default
+        return n if n >= 1 else default
+    return default
+
+
 def _normalize_agent_md_path(config_dict: Dict[str, Any], config_dir: str) -> None:
     agent_md_path = config_dict.get("agent_md_path")
     if (

@@ -12,7 +12,10 @@ class WriteToFile(AbstractSimpleTool):
             "name": "write_to_file",
             "description": (
                 "Writes text content to a file (optionally creating parent directories). By default overwrites the "
-                "target file. Returns a JSON string object with fields: ok, path, created, bytes_written, "
+                "target file. Keep each call small: `content` must be short (outline, stub, or first section only). "
+                "For long documents or articles, write a minimal file here, then append the rest with multiple "
+                "`append_to_file` calls (moderate-sized chunks per call). One huge `content` often breaks tool-call "
+                "JSON in chat APIs. Returns a JSON string with fields: ok, path, created, bytes_written, "
                 "mode, backup_path, error."
             ),
             "parameters": {
@@ -24,7 +27,11 @@ class WriteToFile(AbstractSimpleTool):
                     },
                     "content": {
                         "type": "string",
-                        "description": "The full text content to write into the file. This will completely replace the existing file content. Always include complete and correct syntax when writing code or structured data."
+                        "description": (
+                            "Text to write; must be short. For large output: use a placeholder or opening section "
+                            "only, then add the bulk via several `append_to_file` calls. For code/config, keep to one "
+                            "small file or split across write + appends."
+                        ),
                     },
                     "mode": {
                         "type": "string",
@@ -64,6 +71,7 @@ Input schema: {"type": "object", "properties": {"path": {"type": "string", "desc
 
 Usage:
 - This tool will overwrite the existing file if there is one at the provided path.
+- **Payload size:** put only brief `content` here (stub, headers, or first small section). For anything long, call `append_to_file` repeatedly with moderate chunks—never one massive `write_to_file`.
 - If this is an existing file, you MUST use the Read tool first to read the file's contents. This tool will fail if you did not read the file first.
 - ALWAYS prefer editing existing files in the codebase. NEVER write new files unless explicitly required.
 - NEVER proactively create documentation files (*.md) or README files. Only create documentation files if explicitly requested by the User.

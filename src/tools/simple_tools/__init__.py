@@ -8,6 +8,7 @@ from tools.simple_tools.execute_command import ExecuteCommand
 from tools.simple_tools.search_and_replace import SearchAndReplace
 from tools.simple_tools.think import Think
 from tools.simple_tools.thread_notes import ThreadNotes
+from tools.simple_tools.memory_files import MemoryFiles
 from tools.simple_tools.submit_solution import SubmitSolution
 from tools.simple_tools.calculator import Calculator
 from tools.simple_tools.run_python_code import RunPythonCode
@@ -57,10 +58,15 @@ def get_simple_tools_data(config_dict: Dict[str, Any]) -> Dict[str, Dict[str, An
             'spec': SearchAndReplace.tool_description(),
             'description': SearchAndReplace.prompt_description(),
         },
-        'thread_notes': {
-            'tool_fabric': ThreadNotes,
-            'spec': ThreadNotes.tool_description(),
-            'description': ThreadNotes.prompt_description(),
+        # 'thread_notes': {
+        #     'tool_fabric': ThreadNotes,
+        #     'spec': ThreadNotes.tool_description(),
+        #     'description': ThreadNotes.prompt_description(),
+        # },
+        'memory_files': {
+            'tool_fabric': MemoryFiles,
+            'spec': MemoryFiles.tool_description(),
+            'description': MemoryFiles.prompt_description(config_dict),
         },
         'think': {
             'tool_fabric': Think,

@@ -11,8 +11,9 @@ class AppendToFile(AbstractSimpleTool):
             "type": "function",
             "name": "append_to_file",
             "description": (
-                "Appends text content to the end of a file. By default the file must exist, but it can optionally "
-                "be created. Returns a JSON string object with fields: ok, path, created, bytes_appended, "
+                "Appends text to the end of a file. Use several calls with moderate `content` blocks to build large "
+                "files—do not put an entire long document in a single append. By default the file must exist, but it "
+                "can optionally be created. Returns a JSON string with fields: ok, path, created, bytes_appended, "
                 "separator, error."
             ),
             "parameters": {
@@ -24,7 +25,10 @@ class AppendToFile(AbstractSimpleTool):
                     },
                     "content": {
                         "type": "string",
-                        "description": "The text content to append to the file."
+                        "description": (
+                            "Text to append; keep each call a moderate size (e.g. one section or a few KB). "
+                            "For long output, chain many `append_to_file` calls instead of one huge payload."
+                        ),
                     },
                     "separator": {
                         "type": "string",
@@ -57,7 +61,8 @@ Tool description: Appends content to an existing file (e.g., for notes, logs, an
 Input schema: {"type": "object", "properties": {"path": {"type": "string", "description": "Absolute path to an existing file."}, "content": {"type": "string", "description": "Content to append."}}, "required": ["path", "content"], "additionalProperties": false}
 
 Usage:
-- The target file MUST exist. If the file does not exist, use create_file or write_to_file first.
+- The target file MUST exist. If the file does not exist, use create_file or write_to_file first (use a short initial `write_to_file` for new long files).
+- **Chunking:** for large bodies, append in multiple steps; each `content` should be modest. Do not send an entire article or huge blob in one call.
 - The tool automatically adds a newline separator before the new content to ensure distinct entries.
 - Ideal for accumulating analysis notes, debugging logs, or review comments without overwriting previous data.
 - Do not use for modifying source code logic.
