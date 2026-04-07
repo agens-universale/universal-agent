@@ -12,10 +12,12 @@ from summarize.thread_summarizer import summarize_dialog_via_chat_completions
 
 
 def _journal_text(state: Any) -> str:
-    """Extract journal text from state.memory_files for backward-compat with summarizer."""
-    mf = getattr(state, "memory_files", None)
-    if isinstance(mf, dict):
-        return (mf.get("journal") or "").strip()
+    """Extract journal text from state.shared.memory_files for backward-compat with summarizer."""
+    shared = getattr(state, "shared", None)
+    if shared is not None:
+        mf = getattr(shared, "memory_files", None)
+        if isinstance(mf, dict):
+            return (mf.get("journal") or "").strip()
     return ""
 
 
@@ -46,10 +48,10 @@ def apply_summary_state_patch(
     сообщений. Вызывается из ``run_summary_compaction`` после успешной суммаризации.
 
     Что делает:
-        1. ``state.memory_files["journal"]`` — дополняет текстом ``memory_additions``, только если
+        1. ``state.shared.memory_files["journal"]`` — дополняет текстом ``memory_additions``, только если
            он непустой; иначе не меняет.
         2. Собирает тело сообщения-резюме через ``build_dialog_summary_content`` уже **после** шага (1):
-           в ``<memory_files>`` попадает актуальный ``state.memory_files``.
+           в ``<memory_files>`` попадает актуальный ``state.shared.memory_files``.
         3. ``state.dialog_steps_offset`` — увеличивает на ``summarized_messages_count`` (служебно через
            ``max(0, int(...))``).
         4. ``state.previous_response_id`` — сбрасывает в ``None`` (контракт после compaction).
@@ -75,10 +77,15 @@ def apply_summary_state_patch(
         Итоговое тело резюме (то же, что вложено в служебное сообщение).
     """
     additions_text = str(memory_additions or "").strip()
-    mf = getattr(state, "memory_files", None)
+    shared = getattr(state, "shared", None)
+    if shared is None:
+        from states import SharedStateData
+        shared = SharedStateData()
+        state.shared = shared
+    mf = shared.memory_files
     if not isinstance(mf, dict):
         mf = {}
-        state.memory_files = mf
+        shared.memory_files = mf
     if additions_text:
         journal = (mf.get("journal") or "").strip()
         mf["journal"] = f"{journal}\n\n{additions_text}" if journal else additions_text
@@ -208,9 +215,13 @@ def run_summary_compaction(
     if logger is not None:
         logger.info("summary_received_message_content=\n%s", summary_message_content)
 
+    _shared = getattr(state, "shared", None)
     summary_payload = {
         "summary_message_content": summary_message_content,
-        "memory_files": dict(getattr(state, "memory_files", None) or {}),
+        "shared": {
+            "memory_files": dict(getattr(_shared, "memory_files", None) or {}) if _shared else {},
+            "notes_md": str(getattr(_shared, "notes_md", "") or "") if _shared else "",
+        },
         "user_messages_log": list(getattr(state, "user_messages_log", []) or []),
         "dialog_steps_offset": int(getattr(state, "dialog_steps_offset", 0) or 0),
     }

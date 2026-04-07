@@ -19,11 +19,11 @@ class ThreadNotes(AbstractSimpleTool):
     )
 
     def __init__(
-        self, ctx: Any = None, parent_state: Any = None, **kwargs: Any
+        self, ctx: Any = None, state: Any = None, **kwargs: Any
     ) -> None:
         super().__init__(**kwargs)
         self._ctx = ctx
-        self._parent_state = parent_state
+        self._state = state
 
     @classmethod
     def tool_description(cls) -> Dict[str, Any]:
@@ -132,17 +132,18 @@ Return format (JSON string):
         )
 
     def __call__(self, action: str, content: str = "", **kwargs: Any) -> str:
-        state = self._parent_state
+        state = self._state
         if state is None:
             return self._result(
                 ok=False,
                 action=action,
                 length=0,
                 notes_md=None,
-                error={"type": "no_state", "message": "parent_state is missing."},
+                error={"type": "no_state", "message": "state is missing."},
             )
 
-        existing_md = getattr(state, "notes_md", None)
+        shared = getattr(state, "shared", None)
+        existing_md = getattr(shared, "notes_md", None) if shared is not None else None
         existing_md_stripped = (
             existing_md.strip() if isinstance(existing_md, str) else ""
         )
@@ -199,8 +200,7 @@ Return format (JSON string):
                                                              "Please read first and rewrite new version of notes with new content")},
             )
 
-        # Update in-memory state first.
-        state.notes_md = new_md
+        state.shared.notes_md = new_md
 
         return self._result(
             ok=True,

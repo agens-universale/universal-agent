@@ -5,56 +5,16 @@ import logging
 from typing import Any, Dict, Tuple, Optional
 
 from tools.connect_mcp import get_mcp_tools_data
+from tools.arguments_validation import (
+    WrongFunctionArgumentsException,
+    parse_and_validate_tool_arguments,
+)
 from tools.skills.registry import get_skills_registry
 from tools.skills.skills_tools import get_skills_tools_data
 from tools.simple_tools import get_simple_tools_data
+from tools.subagents.registry import is_subagent_tool
 
 _fallback_logger = logging.getLogger(__name__)
-
-
-class WrongFunctionArgumentsException(Exception):
-    def __init__(
-        self,
-        message: str,
-        received_args: str,
-        expected_schema: dict | None = None,
-        tool_name: str | None = None,
-    ):
-        super().__init__(message)
-        self.message = message
-        self.received_args = received_args
-        self.expected_schema = expected_schema
-        self.tool_name = tool_name
-
-    def to_llm_feedback(self) -> str:
-        """
-        Формирует четкое и структурированное сообщение об ошибке для LLM.
-        """
-        feedback = "❌ **Tool Argument Validation Failed**\n\n"
-
-        # 1. Описание проблемы
-        if self.tool_name:
-            feedback += f"**Tool:** `{self.tool_name}`\n\n"
-        feedback += f"**Error:** {self.message}\n\n"
-
-        # 2. Что было получено (с обработкой пустых значений)
-        args_display = self.received_args if self.received_args else "(empty or missing)"
-        feedback += f"**Received Arguments:**\n```json\n{args_display}\n```\n\n"
-
-        # 3. Что ожидалось (если есть схема)
-        if self.expected_schema:
-            feedback += f"**Expected Schema:**\n```json\n{self.expected_schema}\n```\n\n"
-
-        # 4. Четкая инструкция к действию
-        feedback += (
-            "**Action Required:**\n"
-            "1. Review the error message and schema above.\n"
-            "2. Correct the JSON arguments to match the expected schema.\n"
-            "3. Ensure all required fields are present and have the correct types.\n"
-            "4. Retry the tool call with the fixed arguments."
-        )
-
-        return feedback
 
 
 def _ensure_spec_has_required(spec: Dict[str, Any]) -> None:
@@ -94,6 +54,14 @@ def build_tools_data(
     mcp_tools_data = get_mcp_tools_data(config_dict)
     for k, v in mcp_tools_data.items():
         tools_data[k] = v
+
+    use_local_subagents = config_dict.get("use_local_subagents", False)
+    backend_mode = str(config_dict.get("backend_api_mode", "responses")).strip().lower()
+    if use_local_subagents and backend_mode == "chat_completions":
+        from tools.subagents.registry import get_subagents_tools_data
+        subagent_tools = get_subagents_tools_data()
+        for k, v in subagent_tools.items():
+            tools_data[k] = v
 
     # Логирование оставляем модульным, так как build_tools_data вызывается
     # при создании RunContext, когда logger ещё не привязан к контексту.
@@ -152,6 +120,23 @@ def apply_tool(
     ):
         return f"{tool_name} call"
 
+    use_local_subagents = config_dict.get("use_local_subagents", False)
+    if use_local_subagents and is_subagent_tool(tool_name):
+        from tools.subagents.runner import SubagentRunner  # lazy: runner imports from tools
+        orchestrator_state = kwargs.get("state")
+        run_agent_func = kwargs.get("run_agent_func")
+        if orchestrator_state is None or run_agent_func is None:
+            return f"Subagent {tool_name}: missing state or run_agent_func"
+        tool_spec = tools_data_.get(tool_name, {}).get("spec", {}) or {}
+        parsed_args = parse_and_validate_tool_arguments(
+            tool_name=tool_name,
+            arguments=arguments,
+            tool_spec=tool_spec,
+            allow_empty_for_empty_schema=False,
+        )
+        runner = SubagentRunner(ctx, orchestrator_state, config_dict)
+        return runner.run(tool_name, parsed_args, run_agent_func)
+
     # Определяем, каким логгером пользоваться: контекстный или модульный.
     log = _fallback_logger
     if ctx is not None and hasattr(ctx, "logger"):
@@ -172,42 +157,12 @@ def apply_tool(
 
     # Определяем, ожидает ли инструмент пустую схему (нет параметров)
     spec = tools_data_[tool_name].get("spec", {}) or {}
-    params_schema = spec.get("parameters", {}) or {}
-    properties = params_schema.get("properties", {}) or {}
-    required = params_schema.get("required", []) or []
-    is_empty_schema = not properties and not required
-
-    # Нормализуем и парсим аргументы
-    if isinstance(arguments, dict):
-        parsed_arguments = arguments
-    else:
-        arg_str = "" if arguments is None else str(arguments).strip()
-
-        if arg_str == "":
-            # Пустые аргументы:
-            # - если схема пустая, подменяем на {} и вызываем инструмент без параметров;
-            # - если схема не пустая, считаем это ошибкой и даём LLM подробный фидбек.
-            if is_empty_schema:
-                parsed_arguments = {}
-            else:
-                raise WrongFunctionArgumentsException(
-                    message="аргументы инструмента пустые, ожидается валидный JSON-объект",
-                    received_args=str(arguments),
-                    expected_schema=tools_data_[tool_name]["spec"],
-                    tool_name=tool_name,
-                )
-        else:
-            try:
-                parsed_arguments = json.loads(arg_str)
-            except Exception as e:  # noqa: BLE001
-                raise WrongFunctionArgumentsException(
-                    message=f"некорректный JSON: {e}",
-                    received_args=str(arguments),
-                    expected_schema=tools_data_[tool_name]["spec"],
-                    tool_name=tool_name,
-                )
-
-    arguments = parsed_arguments
+    arguments = parse_and_validate_tool_arguments(
+        tool_name=tool_name,
+        arguments=arguments,
+        tool_spec=spec,
+        allow_empty_for_empty_schema=True,
+    )
 
     tool = tool_fabric(**kwargs)
     # log.debug(

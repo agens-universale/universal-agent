@@ -19,7 +19,7 @@ from summarize.compaction import (
 )
 from summarize.config import parse_summary_trigger_chars
 from summarize.summary_serialization import history_has_dialog_summary_message
-from states import State, save_state, dump_storage
+from states import State, SharedStateData, save_state, dump_storage
 from thread_store import (
     ThreadSession,
     reset_thread_files,
@@ -32,6 +32,13 @@ from user_message_policy import (
 )
 from utils.generate_message_id import generate_msg_id_sha256 as generate_message_id_func
 from utils.local_render_system_prompt import render_system_prompt
+
+ORCHESTRATOR_SPECIFIC_ROLE = (
+    "You are an orchestrator agent. Your job is to delegate tasks to subagents and validate their results. "
+    "At the beginning of a task, if needed, prefer using the planner subagent to build an execution plan. "
+    "After delegating a task to a subagent, you must validate the result either yourself or by delegating "
+    "a dedicated review to the critic subagent."
+)
 
 
 class AgentExecutor:
@@ -64,7 +71,7 @@ class AgentExecutor:
         skills_list = get_skills_registry(config_dict).list_skills()
 
         thread_session: ThreadSession | None = None
-        thread_memory_files: dict | None = None
+        thread_shared: SharedStateData | None = None
         previous_response_id: str | None = None
         backend_api_mode = str(config_dict.get("backend_api_mode", "responses")).strip().lower()
         if thread_id is not None:
@@ -78,10 +85,16 @@ class AgentExecutor:
             if backend_api_mode == "responses":
                 previous_response_id = thread_session.previous_response_id
             meta = getattr(thread_session, "meta", None) or {}
-            maybe_memory_files = meta.get("memory_files")
-            thread_memory_files = (
-                dict(maybe_memory_files) if isinstance(maybe_memory_files, dict) else None
-            )
+            shared_raw = meta.get("shared") or {}
+            if isinstance(shared_raw, dict) and shared_raw:
+                thread_shared = SharedStateData(
+                    memory_files=dict(shared_raw.get("memory_files", {})),
+                    notes_md=str(shared_raw.get("notes_md", "")),
+                )
+            else:
+                maybe_memory_files = meta.get("memory_files")
+                if isinstance(maybe_memory_files, dict):
+                    thread_shared = SharedStateData(memory_files=dict(maybe_memory_files))
         else:
             system_id = system or "cli"
         is_cli_mode = system_id == "cli"
@@ -116,8 +129,10 @@ class AgentExecutor:
             "use_server_subagents": config_dict.get("use_server_subagents", False),
             "agent_md_path": config_dict.get("agent_md_path"),
             "thread_id": thread_id,
-            "memory_files": thread_memory_files,
+            "shared": thread_shared,
         }
+        if config_dict.get("use_local_subagents", False):
+            state_data["specific_role"] = ORCHESTRATOR_SPECIFIC_ROLE
         state = State(**state_data)
         state.backend_api_mode = backend_api_mode
         state.dialog_steps_offset = 0
@@ -137,7 +152,7 @@ class AgentExecutor:
                 system_prompt=chat_completions_system_prompt.strip(),
                 tools_spec=state.tools,
                 project_info=state.initial_project_data,
-                specific_prompt=system,
+                specific_role=state.specific_role,
             )
             state.messages = [
                 {
@@ -233,9 +248,10 @@ class AgentExecutor:
             "id": generate_message_id_func("m"),
         }
         technical_user_message = None
+        _thread_mf = thread_shared.memory_files if thread_shared is not None else {}
         _has_memory = (
-            isinstance(thread_memory_files, dict)
-            and any(v.strip() for v in thread_memory_files.values() if isinstance(v, str))
+            isinstance(_thread_mf, dict)
+            and any(v.strip() for v in _thread_mf.values() if isinstance(v, str))
         )
         if (
             thread_session is not None
@@ -303,9 +319,12 @@ class AgentExecutor:
                     thread_session.meta[
                         "chat_completions_system_prompt_rendered"
                     ] = rendered_system_prompt
-                memory_files = getattr(state, "memory_files", None)
-                if isinstance(memory_files, dict):
-                    thread_session.meta["memory_files"] = memory_files
+                _shared = getattr(state, "shared", None)
+                if isinstance(_shared, SharedStateData):
+                    thread_session.meta["shared"] = {
+                        "memory_files": _shared.memory_files,
+                        "notes_md": _shared.notes_md,
+                    }
                 state.append_user_messages_to_log(step_messages)
                 thread_session.meta["user_messages_log"] = state.user_messages_log
                 thread_session.meta["backend_api_mode"] = state.backend_api_mode

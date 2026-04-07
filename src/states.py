@@ -1,5 +1,6 @@
 import os
 import time
+from dataclasses import dataclass, field
 from uuid import uuid4
 import json
 from typing import List, Union, Dict, Optional, Any
@@ -8,6 +9,13 @@ from user_message_policy import (
     append_user_log_entries,
     normalize_user_log_entries,
 )
+
+
+@dataclass
+class SharedStateData:
+    """Данные, разделяемые между оркестратором и его субагентами."""
+    memory_files: Dict[str, str] = field(default_factory=dict)
+    notes_md: str = ""
 
 
 class State:
@@ -29,7 +37,7 @@ class State:
         agent_md_path: Optional[str] = None,
         limit_project_metadata: bool = False,
         thread_id: Optional[str] = None,
-        memory_files: Optional[Dict[str, str]] = None,
+        shared: Optional["SharedStateData"] = None,
     ):
         self.parent_state_id = parent_state_id
         self.x_target = None
@@ -56,9 +64,7 @@ class State:
             self.chat_completions_system_prompt = None
         self.agent_md_path = agent_md_path
         self.thread_id = thread_id
-        self.memory_files: Dict[str, str] = (
-            dict(memory_files) if isinstance(memory_files, dict) else {}
-        )
+        self.shared: SharedStateData = shared if isinstance(shared, SharedStateData) else SharedStateData()
         self.call_metadata = self.set_call_metadata()
         self.messages = []
         self.backend_api_mode = "responses"

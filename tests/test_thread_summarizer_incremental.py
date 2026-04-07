@@ -124,8 +124,9 @@ def test_memory_additions_go_to_memory_files_journal_not_inside_summary(monkeypa
         full_history_messages=history,
         current_memory="existing note",
     )
+    from states import SharedStateData
     state = types.SimpleNamespace(
-        memory_files={"journal": "existing note"},
+        shared=SharedStateData(memory_files={"journal": "existing note"}),
         messages=[],
         dialog_steps_offset=0,
         previous_response_id=None,

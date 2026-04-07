@@ -21,7 +21,7 @@ def render_system_prompt(
     system_prompt: str,
     tools_spec: List[Dict[str, Any]],
     project_info: Dict[str, Any],
-    specific_prompt: Optional[str],
+    specific_role: Optional[str],
 ) -> str:
     """
     Local rendering of chat_completions system prompt.
@@ -58,15 +58,15 @@ def render_system_prompt(
         system_prompt = system_prompt.replace("<user_info>", user_info_inner)
 
     # --- specific role ---
-    if specific_prompt is None:
-        specific_prompt = "Specific role is not provided. Follow the common prompt instructions."
+    if specific_role is None:
+        specific_role = "Specific role is not provided. Follow the common prompt instructions."
 
     if "</specific_role>" in system_prompt:
         system_prompt = _replace_tag_block(
-            system_prompt, "specific_role", str(specific_prompt)
+            system_prompt, "specific_role", str(specific_role)
         )
     elif "<specific_role>" in system_prompt:
-        system_prompt = system_prompt.replace("<specific_role>", str(specific_prompt))
+        system_prompt = system_prompt.replace("<specific_role>", str(specific_role))
 
     return system_prompt
 

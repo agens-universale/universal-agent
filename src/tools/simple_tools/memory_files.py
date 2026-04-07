@@ -35,7 +35,7 @@ class MemoryFiles(AbstractSimpleTool):
     """
     Multiple named memory registers persisted per-thread.
 
-    Stored in state.memory_files: Dict[str, str].
+    Stored in state.shared.memory_files: Dict[str, str].
     Default register: ``journal``.
     """
 
@@ -48,12 +48,12 @@ class MemoryFiles(AbstractSimpleTool):
     def __init__(
         self,
         ctx: Any = None,
-        parent_state: Any = None,
+        state: Any = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
         self._ctx = ctx
-        self._state = parent_state
+        self._state = state
         cfg = getattr(ctx, "config_dict", None) or {}
         self.MAX_FILE_CHARS = self._cfg_int(cfg, "memory_files_max_file_chars", _DEFAULT_MAX_FILE_CHARS)
         self.TOTAL_BUDGET_CHARS = self._cfg_int(cfg, "memory_files_total_budget_chars", _DEFAULT_TOTAL_BUDGET_CHARS)
@@ -189,13 +189,15 @@ Return format (JSON string):
     # ------------------------------------------------------------------
 
     def _get_files(self) -> Dict[str, str]:
-        raw = getattr(self._state, "memory_files", None)
-        if isinstance(raw, dict):
-            return raw
+        shared = getattr(self._state, "shared", None)
+        if shared is not None:
+            raw = getattr(shared, "memory_files", None)
+            if isinstance(raw, dict):
+                return raw
         return {}
 
     def _set_files(self, files: Dict[str, str]) -> None:
-        self._state.memory_files = files
+        self._state.shared.memory_files = files
 
     @staticmethod
     def _result(
@@ -250,7 +252,7 @@ Return format (JSON string):
             return self._result(
                 ok=False,
                 action=action,
-                error={"type": "no_state", "message": "parent_state is missing."},
+                error={"type": "no_state", "message": "state is missing."},
             )
 
         if not isinstance(file_name, str) or not file_name.strip():

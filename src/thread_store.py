@@ -368,8 +368,8 @@ class ThreadSession:
         base_meta["previous_response_id"] = self.previous_response_id
         base_meta["backend_api_mode"] = self.backend_api_mode
         base_meta["messages_count"] = self.persisted_messages_count
-        if isinstance(self.meta.get("memory_files"), dict):
-            base_meta["memory_files"] = self.meta["memory_files"]
+        if isinstance(self.meta.get("shared"), dict):
+            base_meta["shared"] = self.meta["shared"]
         if isinstance(self.meta.get("last_backend_response_id"), str):
             base_meta["last_backend_response_id"] = self.meta.get("last_backend_response_id")
         # Persist rendered chat/completions system prompt for transparency/debugging.
@@ -442,7 +442,7 @@ class ThreadSession:
                 fd.write(json.dumps(record, ensure_ascii=False) + "\n")
                 known_message_keys.add(make_message_key(message))
 
-        memory_files = summary_payload.get("memory_files")
+        shared_data = summary_payload.get("shared")
         new_meta = {
             "created_at": _utc_now_iso(),
             "previous_response_id": None,
@@ -451,8 +451,8 @@ class ThreadSession:
             "last_summarized_at": _utc_now_iso(),
             "last_summary_archive_suffix": ts_suffix,
         }
-        if isinstance(memory_files, dict):
-            new_meta["memory_files"] = memory_files
+        if isinstance(shared_data, dict):
+            new_meta["shared"] = shared_data
         try:
             effective_steps_offset = int(dialog_steps_offset)
         except (TypeError, ValueError):

@@ -67,6 +67,14 @@ agent_auth:
 model: CodeAgent
 system_prompt_id: v1
 use_server_subagents: true
+# Локальные субагенты (работают только при backend_api_mode=chat_completions).
+# В этом демо-конфиге backend_api_mode=responses, поэтому параметр не влияет,
+# но оставлен как явная документация доступной опции.
+use_local_subagents: false
+# Лимит шагов дочернего агента.
+subagent_max_steps: 50
+# Модель для субагентов; null -> наследовать model родителя.
+subagent_model: null
 client_name : mini_cli_pub_agent_1
 x_cl_id : 12345
 verbose: true

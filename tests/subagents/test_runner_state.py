@@ -1,0 +1,130 @@
+"""Tests for SubagentRunner._build_child_state."""
+
+from types import SimpleNamespace
+
+from states import State, SharedStateData, save_state
+from tools.subagents.registry import SUBAGENT_CLASSES, is_subagent_tool
+from tools.subagents.runner import SubagentRunner
+
+
+def _make_orchestrator_state(**overrides):
+    shared = overrides.pop("shared", SharedStateData(memory_files={"journal": "test"}))
+    state = State(
+        verbose=False,
+        model="test-model",
+        tools_spec=[{"name": "read_file"}, {"name": "subagent_worker"}],
+        tools_descr=["read desc", "worker desc"],
+        skills_list=[],
+        max_steps=100,
+        system_prompt_id="test-prompt",
+        use_server_subagents=False,
+        chat_completions_system_prompt="You are a helpful assistant.",
+        specific_role=None,
+        agent_md_path=None,
+        shared=shared,
+        **overrides,
+    )
+    state.backend_api_mode = "chat_completions"
+    save_state(state)
+    return state
+
+
+def _make_config(**overrides):
+    cfg = {
+        "use_local_subagents": True,
+        "backend_api_mode": "chat_completions",
+        "subagent_max_steps": 30,
+        "enabled_tools": [],
+        "skills_data_path": "",
+        "mcp_servers": [],
+        "model": "test-model",
+        "system_prompt_id": "test-prompt",
+    }
+    cfg.update(overrides)
+    return cfg
+
+
+def _make_ctx(config_dict=None):
+    return SimpleNamespace(
+        config_dict=config_dict or _make_config(),
+        auth_connector=None,
+        logger=None,
+        logging_path="",
+        summary_trace_path="",
+        tools_data={},
+        tools_spec=[],
+        tools_description=[],
+    )
+
+
+class TestBuildChildState:
+    def test_parent_state_id_equals_orchestrator(self):
+        orch = _make_orchestrator_state()
+        cfg = _make_config()
+        runner = SubagentRunner(_make_ctx(cfg), orch, cfg)
+        child = runner._build_child_state("test role")
+        assert child.parent_state_id == orch.state_id
+
+    def test_shared_is_same_reference(self):
+        shared = SharedStateData(memory_files={"journal": "shared data"})
+        orch = _make_orchestrator_state(shared=shared)
+        cfg = _make_config()
+        runner = SubagentRunner(_make_ctx(cfg), orch, cfg)
+        child = runner._build_child_state("test role")
+        assert child.shared is orch.shared
+        assert child.shared is shared
+
+    def test_specific_role_set(self):
+        orch = _make_orchestrator_state()
+        cfg = _make_config()
+        runner = SubagentRunner(_make_ctx(cfg), orch, cfg)
+        role = "You are an expert planner."
+        child = runner._build_child_state(role)
+        assert child.specific_role == role
+
+    def test_no_subagent_tools_in_child(self):
+        orch = _make_orchestrator_state()
+        cfg = _make_config()
+        runner = SubagentRunner(_make_ctx(cfg), orch, cfg)
+        child = runner._build_child_state("test role")
+        child_tool_names = {t.get("name") for t in child.tools if isinstance(t, dict)}
+        for name in child_tool_names:
+            assert not is_subagent_tool(name), (
+                f"Subagent tool {name} should NOT be in child state tools"
+            )
+
+    def test_backend_api_mode_is_chat_completions(self):
+        orch = _make_orchestrator_state()
+        cfg = _make_config()
+        runner = SubagentRunner(_make_ctx(cfg), orch, cfg)
+        child = runner._build_child_state("test role")
+        assert child.backend_api_mode == "chat_completions"
+
+    def test_max_steps_from_config(self):
+        orch = _make_orchestrator_state()
+        cfg = _make_config(subagent_max_steps=25)
+        runner = SubagentRunner(_make_ctx(cfg), orch, cfg)
+        child = runner._build_child_state("test role")
+        assert child.max_steps == 25
+
+    def test_max_steps_default_when_not_in_config(self):
+        orch = _make_orchestrator_state()
+        cfg = _make_config()
+        del cfg["subagent_max_steps"]
+        runner = SubagentRunner(_make_ctx(cfg), orch, cfg)
+        child = runner._build_child_state("test role")
+        assert child.max_steps == 50
+
+    def test_model_inherited_from_orchestrator(self):
+        orch = _make_orchestrator_state()
+        cfg = _make_config()
+        runner = SubagentRunner(_make_ctx(cfg), orch, cfg)
+        child = runner._build_child_state("test role")
+        assert child.default_model == orch.default_model
+
+    def test_use_server_subagents_is_false(self):
+        orch = _make_orchestrator_state()
+        cfg = _make_config()
+        runner = SubagentRunner(_make_ctx(cfg), orch, cfg)
+        child = runner._build_child_state("test role")
+        assert child.use_server_subagents is False

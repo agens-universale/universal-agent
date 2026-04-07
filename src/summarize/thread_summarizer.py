@@ -42,7 +42,7 @@ def summarize_dialog_via_chat_completions(
           в один батч (мультибатч: в trace фиксируется пропуск).
         - Форматирует `last_dialog_steps` через `dialog_history.format_last_dialog_steps`.
           Полное тело сообщения для чата собирает `apply_summary_state_patch` после обновления
-          `state.memory_files` (см. `compaction.run_summary_compaction`).
+          `state.shared.memory_files` (см. `compaction.run_summary_compaction`).
 
     Args:
         ctx: Контекст с `config_dict` и `logger`.

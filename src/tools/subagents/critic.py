@@ -1,4 +1,4 @@
-from src.tools.subagents.abstract_subagent import (
+from tools.subagents.abstract_subagent import (
     AbstractSubagent,
 )
 

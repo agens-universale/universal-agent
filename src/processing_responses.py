@@ -252,7 +252,7 @@ def process_tool_calls(
             tool_name=m["name"],
             arguments=m["arguments"],
             ctx=ctx,
-            parent_state=state,
+            state=state,
             run_agent_func=run_agent_func,
         )
         new_message = {

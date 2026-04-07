@@ -14,7 +14,7 @@ class LocalRenderSystemPromptTest(unittest.TestCase):
             system_prompt=tmpl,
             tools_spec=[],
             project_info={"projectDir": "/tmp/x", "currentDate": "2026-03-25"},
-            specific_prompt="ROLE_X",
+            specific_role="ROLE_X",
         )
 
         self.assertIn("<item>projectDir: /tmp/x</item>", out)
