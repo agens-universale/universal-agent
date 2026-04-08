@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Optional
 
 from utils.prod_auth import AuthConnector
 from utils.logging_module import create_run_logger
+from utils.logging_module import generate_run_id
 from tools import build_tools_data
 
 
@@ -22,6 +23,7 @@ class RunContext:
     """
 
     config_dict: Dict[str, Any]
+    run_id: str
     auth_connector: Optional[AuthConnector]
     logger: logging.Logger
     logging_path: str
@@ -45,10 +47,11 @@ def create_run_context(
       с одним и тем же конфигом.
     - Логгер создаётся заново для каждого запуска (своё имя файла логов).
     """
+    effective_run_id = run_id or generate_run_id()
     tools_data, tools_spec, tools_description = build_tools_data(config_dict)
 
     run_logger, logging_path, summary_trace_path = create_run_logger(
-        config_dict, run_id=run_id
+        config_dict, run_id=effective_run_id, agent_kind="main"
     )
 
     #run_logger.debug(
@@ -58,6 +61,7 @@ def create_run_context(
 
     ctx = RunContext(
         config_dict=config_dict,
+        run_id=effective_run_id,
         auth_connector=auth_connector,
         logger=run_logger,
         logging_path=logging_path,
@@ -68,7 +72,7 @@ def create_run_context(
     )
 
     run_logger.debug(
-        "Created RunContext (run_id=%s, logging_path=%s)", run_id, logging_path
+        "Created RunContext (run_id=%s, logging_path=%s)", effective_run_id, logging_path
     )
 
     return ctx

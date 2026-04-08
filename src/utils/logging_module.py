@@ -1,6 +1,7 @@
 import logging
 import os
 import time
+import uuid
 from typing import Tuple, Dict, Any, Optional
 
 
@@ -10,9 +11,25 @@ class FlushFileHandler(logging.FileHandler):
         self.flush()
 
 
+def generate_run_id() -> str:
+    """Generate unique run identifier for log isolation."""
+    return f"{int(time.time() * 1000)}_{uuid.uuid4().hex[:8]}"
+
+
+def _normalize_agent_kind(agent_kind: Optional[str]) -> str:
+    value = (agent_kind or "main").strip().lower()
+    if not value:
+        return "main"
+    if value.startswith("subagent_"):
+        value = value[len("subagent_"):]
+    normalized = "".join(ch if ch.isalnum() else "_" for ch in value).strip("_")
+    return normalized or "main"
+
+
 def build_run_log_paths(
     config_dict: Dict[str, Any],
     run_id: Optional[str] = None,
+    agent_kind: Optional[str] = None,
 ) -> Tuple[str, str]:
     """
     Сконструировать пути к логам одного запуска:
@@ -20,15 +37,17 @@ def build_run_log_paths(
     - отдельный trace-лог суммаризации.
     """
     base_dir = config_dict.get("logs_dump_dir") or os.getcwd()
-    suffix = run_id or str(int(time.time()))
-    logging_path = os.path.join(base_dir, f"agent_{suffix}.log")
-    summary_trace_path = os.path.join(base_dir, f"summary_trace_{suffix}.jsonl")
+    suffix = run_id or generate_run_id()
+    kind = _normalize_agent_kind(agent_kind)
+    logging_path = os.path.join(base_dir, f"agent_{kind}_{suffix}.log")
+    summary_trace_path = os.path.join(base_dir, f"summary_trace_{kind}_{suffix}.jsonl")
     return logging_path, summary_trace_path
 
 
 def create_run_logger(
     config_dict: Dict[str, Any],
     run_id: Optional[str] = None,
+    agent_kind: Optional[str] = None,
 ) -> Tuple[logging.Logger, str, str]:
     """
     Создать логгер и путь к файлу логов для конкретного запуска.
@@ -38,7 +57,9 @@ def create_run_logger(
     - Если save_logs == False — возвращается логгер с NullHandler и
       строки-плейсхолдеры о том, что логи отключены.
     """
-    logger_name = f"agent_run_{run_id}" if run_id else "agent_run"
+    effective_run_id = run_id or generate_run_id()
+    kind = _normalize_agent_kind(agent_kind)
+    logger_name = f"agent_run_{kind}_{effective_run_id}"
     logger = logging.getLogger(logger_name)
     logger.setLevel(logging.DEBUG)
     logger.propagate = False
@@ -46,7 +67,9 @@ def create_run_logger(
 
     # Файловый хендлер — только если явно включены логи.
     if config_dict.get("save_logs", False):
-        logging_path, summary_trace_path = build_run_log_paths(config_dict, run_id=run_id)
+        logging_path, summary_trace_path = build_run_log_paths(
+            config_dict, run_id=effective_run_id, agent_kind=kind
+        )
 
         handler = FlushFileHandler(logging_path, encoding="utf-8", mode="a")
         formatter = logging.Formatter(
@@ -73,4 +96,9 @@ def create_run_logger(
     return logger, logging_path, summary_trace_path
 
 
-__all__ = ["create_run_logger", "FlushFileHandler", "build_run_log_paths"]
+__all__ = [
+    "create_run_logger",
+    "FlushFileHandler",
+    "build_run_log_paths",
+    "generate_run_id",
+]

@@ -11,6 +11,7 @@ from tools import build_tools_data
 from tools.subagents.registry import get_subagent_class
 from utils.generate_message_id import generate_msg_id_sha256 as generate_message_id_func
 from utils.local_render_system_prompt import render_system_prompt
+from utils.logging_module import generate_run_id
 
 _log = logging.getLogger(__name__)
 
@@ -86,7 +87,7 @@ class SubagentRunner:
         messages = self._build_initial_messages(child_state, agent_role, initial_message)
 
         try:
-            child_ctx = self._build_child_ctx()
+            child_ctx = self._build_child_ctx(tool_name=tool_name)
         except Exception as exc:
             return self._error_response(
                 tool_name=tool_name,
@@ -264,21 +265,24 @@ class SubagentRunner:
         child_state.messages = messages.copy()
         return messages
 
-    def _build_child_ctx(self) -> Any:
+    def _build_child_ctx(self, tool_name: str) -> Any:
         """Построить RunContext для дочернего агента (без субагентов в tools)."""
         from run_context import RunContext
         from utils.logging_module import create_run_logger
 
         child_config = {**self._config, "use_local_subagents": False}
+        child_run_id = generate_run_id()
+        child_agent_kind = tool_name
         child_tools_data, child_tools_spec, child_tools_descr = build_tools_data(
             child_config
         )
         child_logger, child_log_path, child_summary_trace_path = create_run_logger(
-            child_config
+            child_config, run_id=child_run_id, agent_kind=child_agent_kind
         )
 
         return RunContext(
             config_dict=child_config,
+            run_id=child_run_id,
             auth_connector=getattr(self._ctx, "auth_connector", None),
             logger=child_logger,
             logging_path=child_log_path,
@@ -337,11 +341,13 @@ class SubagentRunner:
             "event": event,
             "tool_name": tool_name,
             "parent_state_id": self._orchestrator_state.state_id,
+            "parent_run_id": getattr(self._ctx, "run_id", None),
         }
         if child_state is not None:
             payload["child_state_id"] = child_state.state_id
         if child_ctx is not None:
             payload["child_run_id"] = getattr(child_ctx, "run_id", None)
+        payload["subagent_tool_name"] = tool_name
         if isinstance(extra, dict):
             payload.update(extra)
 
