@@ -55,7 +55,10 @@ class TestList:
         state = _make_state({"journal": "abc", "arch": "x" * 100})
         res = _call(state, action="list")
         assert res["ok"] is True
-        assert res["files"] == {"journal": 3, "arch": 100}
+        assert res["files"] == {
+            "journal": "Length - 3 chars",
+            "arch": "Length - 100 chars",
+        }
         assert res["total_chars"] == 103
         assert "hint" not in res
 
@@ -250,6 +253,8 @@ class TestEdgeCases:
         res = _parse(tool(action="list"))
         assert res["ok"] is False
         assert res["error"]["type"] == "no_state"
+        assert res["files"] == {}
+        assert res["total_chars"] == 0
 
     def test_invalid_action(self):
         res = _call(_make_state(), action="explode")

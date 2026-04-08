@@ -23,8 +23,8 @@ def _validate_file_name(name: str) -> Optional[str]:
     return None
 
 
-def _files_summary(files: Dict[str, str]) -> Dict[str, int]:
-    return {k: len(v) for k, v in files.items()}
+def _files_summary(files: Dict[str, str]) -> Dict[str, str]:
+    return {k: f"Length - {len(v)} chars" for k, v in files.items()}
 
 
 def _total_chars(files: Dict[str, str]) -> int:
@@ -177,7 +177,7 @@ Return format (JSON string):
   "ok": true|false,
   "action": "list|read|append|write|delete",
   "error": null|{{"type":"...","message":"...","files":{{...}}}},
-  "files": {{"file_name": char_count, ...}},
+  "files": {{"file_name": "Length - <N> chars", ...}},
   "total_chars": number,
   "hint": "..." (only for list when files is empty — nudge to start using memory),
   "content": "..." (only for read)
@@ -199,26 +199,33 @@ Return format (JSON string):
     def _set_files(self, files: Dict[str, str]) -> None:
         self._state.shared.memory_files = files
 
-    @staticmethod
     def _result(
+        self,
         *,
         ok: bool,
         action: str,
-        files: Optional[Dict[str, int]] = None,
-        total_chars: int = 0,
+        files: Optional[Dict[str, str]] = None,
+        total_chars: Optional[int] = None,
         content: Optional[str] = None,
         error: Optional[Dict[str, Any]] = None,
         hint: Optional[str] = None,
     ) -> str:
+        if files is None:
+            current_files = self._get_files() if self._state is not None else {}
+            normalized_files = _files_summary(current_files)
+        else:
+            normalized_files = files
+        normalized_total_chars = (
+            _total_chars(self._get_files()) if total_chars is None and self._state is not None else (total_chars or 0)
+        )
         payload: Dict[str, Any] = {
             "tool": "memory_files",
             "ok": ok,
             "action": action,
             "error": error,
+            "files": normalized_files,
         }
-        if files is not None:
-            payload["files"] = files
-        payload["total_chars"] = total_chars
+        payload["total_chars"] = normalized_total_chars
         if content is not None:
             payload["content"] = content
         if hint is not None:
@@ -252,6 +259,8 @@ Return format (JSON string):
             return self._result(
                 ok=False,
                 action=action,
+                files={},
+                total_chars=0,
                 error={"type": "no_state", "message": "state is missing."},
             )
 
