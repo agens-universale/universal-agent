@@ -74,7 +74,7 @@ use_local_subagents: false
 # Лимит шагов дочернего агента.
 subagent_max_steps: 50
 # Модель для субагентов; null -> наследовать model родителя.
-subagent_model: null
+# subagent_model: null
 client_name : mini_cli_pub_agent_1
 x_cl_id : 12345
 verbose: true

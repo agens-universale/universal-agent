@@ -24,6 +24,8 @@ def test_fetch_url_validation():
     assert json.loads(tool(url="ftp://x"))["error"]["field"] == "url"
     assert json.loads(tool(url="https://x", timeout_seconds=-1))["error"]["field"] == "timeout_seconds"
     assert json.loads(tool(url="https://x", max_preview_chars=0))["error"]["field"] == "max_preview_chars"
+    assert json.loads(tool(url="https://x", offset=-1))["error"]["field"] == "offset"
+    assert json.loads(tool(url="https://x", limit=0))["error"]["field"] == "limit"
 
 
 def test_fetch_url_binary(monkeypatch):
@@ -50,3 +52,60 @@ def test_fetch_url_request_failure(monkeypatch):
     data = json.loads(FetchUrl()(url="https://example.com"))
     assert data["ok"] is False
     assert data["error"]["type"] == "request_failed"
+
+
+def test_fetch_url_caches_full_content_and_slices(monkeypatch):
+    calls = {"n": 0}
+
+    def _get(*_a, **_k):
+        calls["n"] += 1
+        return _Resp("<html></html>", url="https://example.com")
+
+    monkeypatch.setattr(requests, "get", _get)
+    monkeypatch.setattr(fetch_url_module.trafilatura, "extract", lambda *a, **k: "ABCDEFGHIJKLMNOPQRSTUVWXYZ")
+
+    state = SimpleNamespace(shared=SimpleNamespace(fetch_url_cache={}))
+    tool = FetchUrl(state=state)
+
+    first = json.loads(tool(url="https://example.com", offset=5, limit=10))
+    assert first["ok"] is True
+    assert first["content"] == "FGHIJKLMNO"
+    assert first["total_chars"] == 26
+    assert first["returned_chars"] == 10
+    assert first["has_more"] is True
+    assert first["cache_hit"] is False
+    assert state.shared.fetch_url_cache["https://example.com"] == "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+
+    second = json.loads(tool(url="https://example.com", offset=20, limit=10))
+    assert second["ok"] is True
+    assert second["content"] == "UVWXYZ"
+    assert second["returned_chars"] == 6
+    assert second["has_more"] is False
+    assert second["cache_hit"] is True
+    assert calls["n"] == 1
+
+
+def test_fetch_url_offset_beyond_end_returns_empty_from_cache(monkeypatch):
+    monkeypatch.setattr(fetch_url_module.trafilatura, "extract", lambda *a, **k: "short")
+    monkeypatch.setattr(requests, "get", lambda *a, **k: _Resp("<html></html>", url="https://example.com"))
+
+    state = SimpleNamespace(shared=SimpleNamespace(fetch_url_cache={}))
+    tool = FetchUrl(state=state)
+    _ = json.loads(tool(url="https://example.com", offset=0, limit=5))
+
+    data = json.loads(tool(url="https://example.com", offset=99, limit=5))
+    assert data["ok"] is True
+    assert data["content"] == ""
+    assert data["returned_chars"] == 0
+    assert data["has_more"] is False
+    assert data["cache_hit"] is True
+
+
+def test_fetch_url_does_not_cache_binary(monkeypatch):
+    monkeypatch.setattr(requests, "get", lambda *a, **k: _Resp("", content_type="application/pdf"))
+
+    state = SimpleNamespace(shared=SimpleNamespace(fetch_url_cache={}))
+    data = json.loads(FetchUrl(state=state)(url="https://example.com/a.pdf"))
+    assert data["ok"] is True
+    assert data["is_binary"] is True
+    assert state.shared.fetch_url_cache == {}

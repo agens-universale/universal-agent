@@ -16,6 +16,7 @@ class SharedStateData:
     """Данные, разделяемые между оркестратором и его субагентами."""
     memory_files: Dict[str, str] = field(default_factory=dict)
     notes_md: str = ""
+    fetch_url_cache: Dict[str, str] = field(default_factory=dict)
 
 
 class State:

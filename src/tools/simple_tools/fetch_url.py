@@ -23,6 +23,11 @@ class FetchUrl(AbstractSimpleTool):
         "Chrome/124.0.0.0 Safari/537.36"
     )
 
+    def __init__(self, ctx: Any = None, state: Any = None, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self._ctx = ctx
+        self._state = state
+
     @classmethod
     def tool_description(cls):
         return {
@@ -32,8 +37,9 @@ class FetchUrl(AbstractSimpleTool):
                 "Fetches a URL via HTTP GET and returns extracted readable text when possible. "
                 "If the response is binary (e.g., images, PDFs, archives), does NOT return raw bytes; "
                 "instead returns content='binary data' with is_binary=true. "
+                "Stores full extracted text in session in-memory cache by URL and supports paginated reads via offset/limit. "
                 "Always returns a JSON string object: metadata fields first (ok, url, final_url, status_code, "
-                "content_type, is_binary, result_type, extracted_source, truncated, error, optional max_* limits), "
+                "content_type, is_binary, result_type, extracted_source, truncated, error, pagination fields), "
                 "then bulk text fields last (content, preview)."
             ),
             "parameters": {
@@ -54,6 +60,14 @@ class FetchUrl(AbstractSimpleTool):
                         "type": "integer",
                         "description": "Maximum number of characters for HTML/text preview in the response. Default 1200.",
                     },
+                    "offset": {
+                        "type": "integer",
+                        "description": "Character offset for paginated reads from cached full content. Default 0.",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": f"Maximum number of characters to return in content. Default {cls.max_content_chars}.",
+                    },
                 },
                 "required": ["url"],
                 "additionalProperties": False,
@@ -65,13 +79,14 @@ class FetchUrl(AbstractSimpleTool):
     def prompt_description(cls):
         return f"""Tool name: fetch_url
 Tool description: Downloads a web page via HTTP GET and extracts the main text content using trafilatura.
-Input schema: {{"type": "object", "properties": {{"url": {{"type": "string", "description": "Absolute URL to fetch."}}, "timeout_seconds": {{"type": "integer", "description": "HTTP timeout in seconds."}}}}, "required": ["url"], "additionalProperties": false}}
+Input schema: {{"type": "object", "properties": {{"url": {{"type": "string", "description": "Absolute URL to fetch."}}, "timeout_seconds": {{"type": "integer", "description": "HTTP timeout in seconds."}}, "offset": {{"type": "integer", "description": "Character offset for paginated reads."}}, "limit": {{"type": "integer", "description": "Max characters to return in this call."}}}}, "required": ["url"], "additionalProperties": false}}
 
 Usage:
 - Use this tool when you need readable text from a web page.
 - The tool sends a GET request with a realistic browser-like User-Agent.
 - Supports only http/https URLs.
-- On success returns extracted page text.
+- On success stores full extracted page text in session cache keyed by URL.
+- Use offset/limit to read long pages in chunks from cache.
 - If extraction fails, returns preview with HTML tags removed (truncated to max_preview_chars).
 - If request fails, returns an error message with details.
 """
@@ -163,6 +178,12 @@ Usage:
         max_content_chars: Optional[int] = None,
         max_preview_chars: Optional[int] = None,
         error: Optional[Dict[str, Any]] = None,
+        offset: Optional[int] = None,
+        limit: Optional[int] = None,
+        returned_chars: Optional[int] = None,
+        total_chars: Optional[int] = None,
+        has_more: Optional[bool] = None,
+        cache_hit: Optional[bool] = None,
     ) -> str:
         payload: Dict[str, Any] = {
             "tool": "fetch_url",
@@ -181,15 +202,58 @@ Usage:
             payload["max_content_chars"] = max_content_chars
         if max_preview_chars is not None:
             payload["max_preview_chars"] = max_preview_chars
+        if offset is not None:
+            payload["offset"] = offset
+        if limit is not None:
+            payload["limit"] = limit
+        if returned_chars is not None:
+            payload["returned_chars"] = returned_chars
+        if total_chars is not None:
+            payload["total_chars"] = total_chars
+        if has_more is not None:
+            payload["has_more"] = has_more
+        if cache_hit is not None:
+            payload["cache_hit"] = cache_hit
         payload["content"] = content
         payload["preview"] = preview
         return json.dumps(payload, ensure_ascii=False)
+
+    def _get_cache(self) -> Optional[Dict[str, str]]:
+        shared = getattr(self._state, "shared", None)
+        if shared is None:
+            return None
+        cache = getattr(shared, "fetch_url_cache", None)
+        if not isinstance(cache, dict):
+            cache = {}
+            setattr(shared, "fetch_url_cache", cache)
+        return cache
+
+    def _slice_content(self, content: str, offset: int, limit: int) -> Dict[str, Any]:
+        total_chars = len(content)
+        if offset >= total_chars:
+            return {
+                "content": "",
+                "returned_chars": 0,
+                "total_chars": total_chars,
+                "has_more": False,
+            }
+        chunk = content[offset : offset + limit]
+        returned_chars = len(chunk)
+        has_more = offset + returned_chars < total_chars
+        return {
+            "content": chunk,
+            "returned_chars": returned_chars,
+            "total_chars": total_chars,
+            "has_more": has_more,
+        }
 
     def __call__(
         self,
         url: str,
         timeout_seconds: Optional[int] = None,
         max_preview_chars: int = 1200,
+        offset: int = 0,
+        limit: Optional[int] = None,
         **kwargs,
     ) -> str:
         if not isinstance(url, str):
@@ -213,6 +277,20 @@ Usage:
                 error={"type": "invalid_argument", "field": "max_preview_chars"},
             )
 
+        if not isinstance(offset, int) or offset < 0:
+            return _result(
+                ok=False,
+                error={"type": "invalid_argument", "field": "offset"},
+            )
+
+        if limit is None:
+            limit = self.max_content_chars
+        if not isinstance(limit, int) or limit <= 0:
+            return _result(
+                ok=False,
+                error={"type": "invalid_argument", "field": "limit"},
+            )
+
         normalized_url = url.strip()
         if not normalized_url:
             return _result(
@@ -231,6 +309,29 @@ Usage:
             return _result(
                 ok=False,
                 error={"type": "invalid_argument", "field": "timeout_seconds", "message": "timeout_seconds must be greater than 0."},
+            )
+
+        cache = self._get_cache()
+        if cache is not None and normalized_url in cache:
+            sliced = self._slice_content(cache[normalized_url], offset, limit)
+            return _result(
+                ok=True,
+                final_url=normalized_url,
+                status_code=200,
+                content_type="text/plain; charset=utf-8",
+                is_binary=False,
+                result_type="content",
+                extracted_source="cache",
+                content=sliced["content"],
+                preview="",
+                truncated=sliced["has_more"],
+                offset=offset,
+                limit=limit,
+                returned_chars=sliced["returned_chars"],
+                total_chars=sliced["total_chars"],
+                has_more=sliced["has_more"],
+                cache_hit=True,
+                error=None,
             )
 
         headers = {
@@ -316,6 +417,12 @@ Usage:
                 result_type="binary",
                 content="binary data",
                 preview="",
+                offset=offset,
+                limit=limit,
+                returned_chars=0,
+                total_chars=0,
+                has_more=False,
+                cache_hit=False,
                 error=None,
             )
 
@@ -347,9 +454,9 @@ Usage:
         if extracted_text and extracted_text.strip():
             c = extracted_text.strip()
             if not self._looks_like_garbled_text(c):
-                truncated = len(c) > self.max_content_chars
-                if truncated:
-                    c = c[: self.max_content_chars]
+                if cache is not None:
+                    cache[normalized_url] = c
+                sliced = self._slice_content(c, offset, limit)
                 return _result(
                     ok=True,
                     final_url=final_url,
@@ -358,10 +465,15 @@ Usage:
                     is_binary=False,
                     result_type="content",
                     extracted_source="trafilatura",
-                    content=c,
+                    content=sliced["content"],
                     preview="",
-                    truncated=truncated,
-                    max_content_chars=self.max_content_chars if truncated else None,
+                    truncated=sliced["has_more"],
+                    offset=offset,
+                    limit=limit,
+                    returned_chars=sliced["returned_chars"],
+                    total_chars=sliced["total_chars"],
+                    has_more=sliced["has_more"],
+                    cache_hit=False,
                     error=None,
                 )
 
@@ -379,9 +491,9 @@ Usage:
             if fallback_text and fallback_text.strip():
                 c = fallback_text.strip()
                 if not self._looks_like_garbled_text(c):
-                    truncated = len(c) > self.max_content_chars
-                    if truncated:
-                        c = c[: self.max_content_chars]
+                    if cache is not None:
+                        cache[normalized_url] = c
+                    sliced = self._slice_content(c, offset, limit)
                     return _result(
                         ok=True,
                         final_url=final_url,
@@ -390,19 +502,24 @@ Usage:
                         is_binary=False,
                         result_type="content",
                         extracted_source="readability_trafilatura",
-                        content=c,
+                        content=sliced["content"],
                         preview="",
-                        truncated=truncated,
-                        max_content_chars=self.max_content_chars if truncated else None,
+                        truncated=sliced["has_more"],
+                        offset=offset,
+                        limit=limit,
+                        returned_chars=sliced["returned_chars"],
+                        total_chars=sliced["total_chars"],
+                        has_more=sliced["has_more"],
+                        cache_hit=False,
                         error=None,
                     )
 
             cleaned_summary = self._strip_html_tags(summary_html)
             if cleaned_summary and not self._looks_like_garbled_text(cleaned_summary):
                 c = cleaned_summary
-                truncated = len(c) > self.max_content_chars
-                if truncated:
-                    c = c[: self.max_content_chars]
+                if cache is not None:
+                    cache[normalized_url] = c
+                sliced = self._slice_content(c, offset, limit)
                 return _result(
                     ok=True,
                     final_url=final_url,
@@ -411,10 +528,15 @@ Usage:
                     is_binary=False,
                     result_type="content",
                     extracted_source="readability_stripped",
-                    content=c,
+                    content=sliced["content"],
                     preview="",
-                    truncated=truncated,
-                    max_content_chars=self.max_content_chars if truncated else None,
+                    truncated=sliced["has_more"],
+                    offset=offset,
+                    limit=limit,
+                    returned_chars=sliced["returned_chars"],
+                    total_chars=sliced["total_chars"],
+                    has_more=sliced["has_more"],
+                    cache_hit=False,
                     error=None,
                 )
         except Exception:
