@@ -73,6 +73,7 @@ def repair_summary_text(
     invalid_summary: str,
     reason: str,
     max_tokens: int,
+    project_data_block: str = "",
 ) -> str:
     """Перегенерирует сводку, если первичный ответ модели не прошёл `validate_summary_text`.
 
@@ -87,6 +88,7 @@ def repair_summary_text(
         invalid_summary: Исходный невалидный ответ.
         reason: Код от `validate_summary_text` для включения в user-промпт.
         max_tokens: Лимит длины исправленной сводки.
+        project_data_block: Фрагмент `<project_data>...</project_data>` (как в основном батче суммаризации).
 
     Returns:
         Текст исправленной сводки (может снова быть невалидным — проверяет вызывающий).
@@ -104,6 +106,7 @@ def repair_summary_text(
         "<dialog_history>\n"
         f"{history_text}\n"
         "</dialog_history>\n\n"
+        f"{project_data_block}"
         "Rewrite summary using the real context above. It must be high-quality, concise, and structured. "
         "Use these section headers (exact UPPERCASE_WITH_UNDERSCORES or Markdown headings with the same words): "
         "TASK_AND_CONTEXT, GOALS, DECISIONS_AND_RATIONALE, PLAN_AND_PROGRESS, NEXT_ACTIONS, "

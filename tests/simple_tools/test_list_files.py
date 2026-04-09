@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 from tools.simple_tools.list_files import ListFiles
 
@@ -10,7 +11,7 @@ def test_list_default_and_hidden(tmp_path):
     res = json.loads(ListFiles()(path=str(tmp_path)))
     assert res["ok"] is True
     assert res["count"] == 3
-    by_name = {item["path"].split("/")[-1]: item for item in res["entries"]}
+    by_name = {Path(item["path"]).name: item for item in res["entries"]}
     assert by_name[".env"]["is_hidden"] is True
     assert by_name["dir"]["type"] == "directory"
 
@@ -21,7 +22,7 @@ def test_list_depth_glob_and_truncate(tmp_path):
     (tmp_path / "src" / "b.txt").write_text("x", encoding="utf-8")
     res = json.loads(ListFiles()(path=str(tmp_path), max_depth=2, glob="**/*.py"))
     assert res["ok"] is True and res["count"] == 1
-    assert res["entries"][0]["path"].endswith("/a.py")
+    assert Path(res["entries"][0]["path"]) == (tmp_path / "src" / "a.py").resolve()
     trunc = json.loads(ListFiles()(path=str(tmp_path), max_depth=2, max_entries=1))
     assert trunc["truncated"] is True and trunc["count"] == 1
 

@@ -2,6 +2,7 @@ import json
 import os
 
 from tools.simple_tools.abstract_simple_tool import AbstractSimpleTool
+from utils.tool_report_paths import tool_report_abspath
 
 class AppendToFile(AbstractSimpleTool):
 
@@ -83,7 +84,7 @@ Usage:
             {
                 "tool": "append_to_file",
                 "ok": ok,
-                "path": path,
+                "path": tool_report_abspath(path),
                 "created": created,
                 "bytes_appended": bytes_appended,
                 "separator": separator,

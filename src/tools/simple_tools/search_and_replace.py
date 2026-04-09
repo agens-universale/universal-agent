@@ -3,6 +3,7 @@ import json
 import functools
 from typing import Dict, Any
 from tools.simple_tools.abstract_simple_tool import AbstractSimpleTool
+from utils.tool_report_paths import tool_report_abspath
 
 
 class SearchAndReplace(AbstractSimpleTool):
@@ -114,7 +115,7 @@ Update version string:
                 "ok": ok,
                 "matched": matched,
                 "replaced": replaced,
-                "path": path,
+                "path": tool_report_abspath(path),
                 "error": error,
                 "message": message,
             },

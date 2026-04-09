@@ -3,6 +3,8 @@ from typing import Optional
 import os
 import json
 
+from utils.tool_report_paths import tool_report_abspath
+
 
 class ReadFile(AbstractSimpleTool):
     @staticmethod
@@ -20,7 +22,7 @@ class ReadFile(AbstractSimpleTool):
             {
                 "tool": "read_file",
                 "ok": True,
-                "path": path,
+                "path": tool_report_abspath(path),
                 "start_line": start_line,
                 "end_line": end_line,
                 "total_lines": total_lines,
@@ -49,7 +51,7 @@ class ReadFile(AbstractSimpleTool):
             {
                 "tool": "read_file",
                 "ok": False,
-                "path": path,
+                "path": tool_report_abspath(path),
                 "start_line": 0,
                 "end_line": 0,
                 "total_lines": 0,

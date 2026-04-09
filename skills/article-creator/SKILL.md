@@ -38,6 +38,10 @@ A structured multi-agent workflow for producing publication-ready, rigorously fa
 
 ### Phase 2: Section Drafting & Refinement (Iterative Loop)
 *Executed per outline item:*
+**Hard gating rule for `Orchestrator`**:
+- Process sections strictly one-by-one (`section_n` fully approved before `section_n+1` starts).
+- Do NOT start drafting the next section until the current section has `Critic` status `Pass` for all claims.
+- Do NOT batch-run all `Worker` drafts first and postpone `Critic` to the end.
 1. **Assignment**: `Orchestrator` routes the section to:
    - `Worker` (standard complexity), or
    - `SpecialAgent` (complex/niche topics; auto-generates system prompt from role description)
@@ -49,6 +53,7 @@ A structured multi-agent workflow for producing publication-ready, rigorously fa
    - `Pass / Minor / Critical` tags per claim
 4. **Revision**: `Worker` updates the section, explicitly addressing every Minor and Critical item.
 5. **Verification**: `Critic` cross-checks the revised version against the previous report. Loop repeats until all items are `Pass`.
+6. **Gate check by `Orchestrator`**: Only after `Pass` on the current section, enqueue and start the next outline item.
 
 ### Phase 3: Editorial Compilation
 1. `SpecialAgent` is instantiated with role `Editor` with competence in necessary domain.
@@ -81,6 +86,7 @@ A structured multi-agent workflow for producing publication-ready, rigorously fa
 4. **SpecialAgent Prompting**: Role description must fit the article topic.
 5. **Final Consistency Check**: `Worker` must run a self-review pass to verify citation integrity, markdown validity, and claim-to-source mapping before delivery.
 6. Translate article into Russian language. Final article should ve always in Russian language. Don't omit any information in translation
+7. **No deferred section QA**: Running `Critic` only once after all section drafts are produced is prohibited. Section-level critic loop is mandatory during Phase 2.
 
 
 ## Expected Article format

@@ -5,6 +5,7 @@ import re
 from typing import Optional, List, Dict, Any
 from tools.simple_tools.abstract_simple_tool import AbstractSimpleTool
 from utils.glob_to_regex import compile_glob
+from utils.tool_report_paths import tool_report_abspath
 
 
 class SearchFiles(AbstractSimpleTool):
@@ -139,7 +140,7 @@ Search for error logs in Rust source files:
                         else:
                             found_content = found_content.strip()
                         found_data = {
-                            "file": file_path,
+                            "file": tool_report_abspath(file_path),
                             "line": line_num,
                             "line_content": found_content
                         }
@@ -167,7 +168,7 @@ Search for error logs in Rust source files:
             {
                 "tool": "search_files",
                 "ok": ok,
-                "path": path,
+                "path": tool_report_abspath(path),
                 "regex": regex,
                 "file_pattern": file_pattern,
                 "count": len(matches) if matches is not None else 0,

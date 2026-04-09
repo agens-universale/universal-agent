@@ -2,6 +2,7 @@ import json
 import os
 
 from tools.simple_tools.abstract_simple_tool import AbstractSimpleTool
+from utils.tool_report_paths import tool_report_abspath
 
 class WriteToFile(AbstractSimpleTool):
 
@@ -94,11 +95,11 @@ Usage:
             {
                 "tool": "write_to_file",
                 "ok": ok,
-                "path": path,
+                "path": tool_report_abspath(path),
                 "mode": mode,
                 "created": created,
                 "bytes_written": bytes_written,
-                "backup_path": backup_path,
+                "backup_path": tool_report_abspath(backup_path),
                 "error": error,
             },
             ensure_ascii=False,

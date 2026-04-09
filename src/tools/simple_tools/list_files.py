@@ -5,6 +5,7 @@ import stat
 from typing import List, Dict, Any, Optional
 from tools.simple_tools.abstract_simple_tool import AbstractSimpleTool
 from utils.glob_to_regex import compile_glob
+from utils.tool_report_paths import tool_report_abspath
 
 
 class ListFiles(AbstractSimpleTool):
@@ -125,7 +126,7 @@ List deeper files (example):
         payload = {
             "tool": "list_files",
             "ok": ok,
-            "path": path,
+            "path": tool_report_abspath(path),
             "max_depth": max_depth,
             "max_entries": max_entries,
             "truncated": truncated,
@@ -286,7 +287,7 @@ List deeper files (example):
             is_hidden = self._is_hidden(filepath)
 
         return {
-            "path": filepath.replace(os.sep, '/'),  # Normalize to forward slashes
+            "path": tool_report_abspath(filepath),
             "type": entry_type,
             "is_hidden": is_hidden
         }

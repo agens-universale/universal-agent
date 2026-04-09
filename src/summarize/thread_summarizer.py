@@ -10,6 +10,7 @@ from summarize import (
 )
 from summarize.summary_validation import FALLBACK_SUMMARY, validate_summary_text
 from user_message_policy import normalize_user_log_entries
+from utils.project_data import get_project_data
 
 
 def summarize_dialog_via_chat_completions(
@@ -185,6 +186,17 @@ def summarize_dialog_via_chat_completions(
             len(batches),
             prompt_path,
         )
+    pd = get_project_data()
+    project_block = (
+        "<project_data>\n"
+        f"OS: {pd['OS']}\n"
+        f"shell: {pd['shell']}\n"
+        f"projectDir: {pd['projectDir']}\n"
+        f"currentDate: {pd['currentDate']}\n"
+        f"isGitProject: {pd['isGitProject']}\n"
+        f"projectDirListing:\n{pd['projectDirListing']}\n"
+        "</project_data>\n\n"
+    )
     accumulated_summary = ""
     for batch_index, batch_turns in enumerate(batches, start=1):
         batch: List[Dict[str, Any]] = [m for turn in batch_turns for m in turn]
@@ -209,6 +221,7 @@ def summarize_dialog_via_chat_completions(
                 "<dialog_history>\n"
                 f"{history_text}\n"
                 "</dialog_history>\n\n"
+                f"{project_block}"
                 "Produce the structured summary now."
             )
         else:
@@ -222,6 +235,7 @@ def summarize_dialog_via_chat_completions(
                 "<dialog_history_batch>\n"
                 f"{history_text}\n"
                 "</dialog_history_batch>\n\n"
+                f"{project_block}"
                 "Update previous_summary using this batch. "
                 "Keep all important facts/decisions/constraints from both."
             )
@@ -293,6 +307,7 @@ def summarize_dialog_via_chat_completions(
                 invalid_summary=text,
                 reason=reason,
                 max_tokens=max_tokens,
+                project_data_block=project_block,
             )
             repaired_valid, _ = validate_summary_text(repaired)
             text = repaired if repaired_valid else (accumulated_summary or FALLBACK_SUMMARY)
