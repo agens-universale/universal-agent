@@ -78,7 +78,8 @@ class ChatCompletionsPromptConfigTest(unittest.TestCase):
             cfg = load_config(cfg_path)
             self.assertEqual(cfg["summary_params"]["last_dialog_steps_count"], 5)
             self.assertEqual(
-                cfg["summary_params"]["last_dialog_step_message_max_chars"], 5000
+                cfg["summary_params"]["last_dialog_step_message_max_chars"],
+                1500,
             )
             self.assertEqual(cfg["summary_params"]["max_message_chars"], 50000)
             self.assertEqual(cfg["summary_params"]["max_dialogue_chars"], 1000000)
@@ -125,7 +126,8 @@ class ChatCompletionsPromptConfigTest(unittest.TestCase):
             )
             self.assertEqual(cfg["summary_params"]["last_dialog_steps_count"], 7)
             self.assertEqual(
-                cfg["summary_params"]["last_dialog_step_message_max_chars"], 2500
+                cfg["summary_params"]["last_dialog_step_message_max_chars"],
+                2500,
             )
 
     def test_incremental_batch_chars_derived_from_trigger(self):

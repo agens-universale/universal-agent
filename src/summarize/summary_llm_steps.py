@@ -2,7 +2,8 @@
 
 from typing import Any
 
-from summarize import dialog_history, llm_chat
+from summarize import dialog_history
+from utils.llm_chat_client import log_llm_prompt_and_result, request_chat_completion_text
 
 
 def compress_summary_text(
@@ -43,14 +44,14 @@ def compress_summary_text(
         {"role": "system", "content": system},
         {"role": "user", "content": summary_text},
     ]
-    text = llm_chat.request_chat_completion_text(
+    text = request_chat_completion_text(
         ctx=ctx,
         state=state,
         messages=request_messages,
         max_tokens=max_tokens,
         request_label="summary_compress",
     )
-    llm_chat.log_llm_prompt_and_result(
+    log_llm_prompt_and_result(
         logger=getattr(ctx, "logger", None),
         label="summary_compress",
         messages=request_messages,
@@ -119,14 +120,14 @@ def repair_summary_text(
         {"role": "system", "content": system},
         {"role": "user", "content": user},
     ]
-    out = llm_chat.request_chat_completion_text(
+    out = request_chat_completion_text(
         ctx=ctx,
         state=state,
         messages=request_messages,
         max_tokens=max_tokens,
         request_label="summary_repair",
     )
-    llm_chat.log_llm_prompt_and_result(
+    log_llm_prompt_and_result(
         logger=getattr(ctx, "logger", None),
         label="summary_repair",
         messages=request_messages,

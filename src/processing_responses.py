@@ -2,6 +2,7 @@ import json
 from types import SimpleNamespace
 
 from config import parse_chat_completions_max_tokens
+from intent_guard import validate_final_report_vs_user_intent
 from tools import apply_tool, WrongFunctionArgumentsException
 from utils.connect_backend import create_call_headers
 from utils.connect_backend import request_backend_responses as request_backend
@@ -408,6 +409,30 @@ def run_agent(
                 # (которые пришли от бэкенда), когда mode == "function_call".
                 finish_response = check_trace_finished(messages)
                 if finish_response:
+                    strict_finish_gate = bool(
+                        cfg.get("strict_submit_solution_validation", True)
+                    )
+                    is_main_agent = getattr(state, "parent_state_id", None) is None
+                    if strict_finish_gate and is_main_agent and backend_mode == "chat_completions":
+                        validation = validate_final_report_vs_user_intent(
+                            ctx=ctx,
+                            state=state,
+                            user_messages_log=getattr(state, "user_messages_log", []) or [],
+                            submit_solution_arguments=finish_response,
+                        )
+                        if not validation.ok:
+                            run_logger.warning(
+                                "finish_gate_rejected conflicts=%s missing=%s",
+                                validation.conflicts,
+                                validation.missing_requirements,
+                            )
+                            messages = [
+                                _make_technical_feedback_user_message(
+                                    validation.feedback_for_agent,
+                                    technical_type=TECHNICAL_TYPE_TECHNICAL,
+                                )
+                            ]
+                            continue
                     return finish_response
                 messages = process_tool_calls(messages, state, ctx, run_agent_func=run_agent)
                 tool_error_cnt = 0

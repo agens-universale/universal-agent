@@ -13,6 +13,12 @@ from summarize.thread_summarizer import summarize_dialog_via_chat_completions
 from user_message_policy import TECHNICAL_TYPE_DIALOG_SUMMARY, wrap_technical_user_content
 
 
+def _patch_chat_completion(monkeypatch, fake):
+    """Патчит имя там, где оно связано после `from ... import ...`."""
+    monkeypatch.setattr("summarize.thread_summarizer.request_chat_completion_text", fake)
+    monkeypatch.setattr("summarize.summary_llm_steps.request_chat_completion_text", fake)
+
+
 def _ctx(trigger_chars: int = 120000):
     incremental_batch_chars = int(trigger_chars * 1.4) if trigger_chars > 0 else 0
     return types.SimpleNamespace(
@@ -67,8 +73,8 @@ def test_summarize_incremental_empty_history_no_model_call(monkeypatch):
         return "should_not_happen"
 
     monkeypatch.setattr("summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
-    monkeypatch.setattr("summarize.llm_chat.request_chat_completion_text", _never_call)
-    monkeypatch.setattr("summarize.memory_suggestions.suggest_memory_additions", lambda **_k: "")
+    _patch_chat_completion(monkeypatch, _never_call)
+    monkeypatch.setattr("summarize.memory_suggestions.suggest_updated_journal", lambda **_k: "")
 
     result = summarize_dialog_via_chat_completions(
         ctx=_ctx(),
@@ -91,8 +97,8 @@ def test_summarize_incremental_single_batch_one_summary_call(monkeypatch):
         return _valid_summary("single-batch")
 
     monkeypatch.setattr("summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
-    monkeypatch.setattr("summarize.llm_chat.request_chat_completion_text", _fake_request)
-    monkeypatch.setattr("summarize.memory_suggestions.suggest_memory_additions", lambda **_k: "")
+    _patch_chat_completion(monkeypatch, _fake_request)
+    monkeypatch.setattr("summarize.memory_suggestions.suggest_updated_journal", lambda **_k: "")
 
     result = summarize_dialog_via_chat_completions(
         ctx=_ctx(trigger_chars=999999),
@@ -112,11 +118,15 @@ def test_memory_additions_go_to_memory_files_journal_not_inside_summary(monkeypa
         return _valid_summary("with-memory")
 
     def _fake_memory(**kwargs):
-        return "- bullet one\n- bullet two"
+        # Имитация LLM: переписывает journal целиком, но сохраняет прежнее содержимое.
+        return (
+            f"{kwargs.get('current_memory', '').strip()}\n\n"
+            "- bullet one\n- bullet two"
+        )
 
     monkeypatch.setattr("summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
-    monkeypatch.setattr("summarize.llm_chat.request_chat_completion_text", _fake_request)
-    monkeypatch.setattr("summarize.memory_suggestions.suggest_memory_additions", _fake_memory)
+    _patch_chat_completion(monkeypatch, _fake_request)
+    monkeypatch.setattr("summarize.memory_suggestions.suggest_updated_journal", _fake_memory)
 
     result = summarize_dialog_via_chat_completions(
         ctx=_ctx(trigger_chars=999999),
@@ -135,7 +145,7 @@ def test_memory_additions_go_to_memory_files_journal_not_inside_summary(monkeypa
         state=state,
         raw_summary=result["raw_summary"],
         last_dialog_steps=result["last_dialog_steps"],
-        memory_additions=result["memory_additions"],
+        updated_journal=result["updated_journal"],
         summarized_messages_count=len(history),
     )
     assert "<add_to_memory>" not in content
@@ -170,8 +180,8 @@ def test_summarize_incremental_two_batches_previous_summary_passed(monkeypatch):
         return ""
 
     monkeypatch.setattr("summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
-    monkeypatch.setattr("summarize.llm_chat.request_chat_completion_text", _fake_request)
-    monkeypatch.setattr("summarize.memory_suggestions.suggest_memory_additions", _fake_memory)
+    _patch_chat_completion(monkeypatch, _fake_request)
+    monkeypatch.setattr("summarize.memory_suggestions.suggest_updated_journal", _fake_memory)
 
     result = summarize_dialog_via_chat_completions(
         ctx=_ctx(trigger_chars=4500),
@@ -354,8 +364,8 @@ def test_accumulated_summary_is_compressed_when_limit_exceeded(monkeypatch):
         return _valid_summary("final-summary")
 
     monkeypatch.setattr("summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
-    monkeypatch.setattr("summarize.llm_chat.request_chat_completion_text", _fake_request)
-    monkeypatch.setattr("summarize.memory_suggestions.suggest_memory_additions", lambda **_k: "")
+    _patch_chat_completion(monkeypatch, _fake_request)
+    monkeypatch.setattr("summarize.memory_suggestions.suggest_updated_journal", lambda **_k: "")
 
     ctx = _ctx(trigger_chars=4500)
     ctx.config_dict["summary_params"]["max_accumulated_summary_chars"] = 50
@@ -438,8 +448,8 @@ def test_summarize_pipeline_calls_build_history_text_with_max_chars_disabled(mon
         )
 
     monkeypatch.setattr("summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
-    monkeypatch.setattr("summarize.llm_chat.request_chat_completion_text", _fake_request)
-    monkeypatch.setattr("summarize.memory_suggestions.suggest_memory_additions", lambda **_k: "")
+    _patch_chat_completion(monkeypatch, _fake_request)
+    monkeypatch.setattr("summarize.memory_suggestions.suggest_updated_journal", lambda **_k: "")
 
     history = [
         {"role": "user", "content": "u1"},
@@ -462,8 +472,8 @@ def test_summarize_merges_existing_user_messages_log(monkeypatch):
         return _valid_summary("single-batch")
 
     monkeypatch.setattr("summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
-    monkeypatch.setattr("summarize.llm_chat.request_chat_completion_text", _fake_request)
-    monkeypatch.setattr("summarize.memory_suggestions.suggest_memory_additions", lambda **_k: "")
+    _patch_chat_completion(monkeypatch, _fake_request)
+    monkeypatch.setattr("summarize.memory_suggestions.suggest_updated_journal", lambda **_k: "")
 
     result = summarize_dialog_via_chat_completions(
         ctx=_ctx(trigger_chars=999999),
@@ -486,7 +496,7 @@ def test_summarize_merges_existing_user_messages_log(monkeypatch):
         state=state,
         raw_summary=result["raw_summary"],
         last_dialog_steps=result["last_dialog_steps"],
-        memory_additions=result["memory_additions"],
+        updated_journal=result["updated_journal"],
         summarized_messages_count=len(history),
     )
     assert "<original_user_messages>" not in built
@@ -504,8 +514,8 @@ def test_summarize_preserves_user_messages_log_chronological_order(monkeypatch):
         return _valid_summary("single-batch")
 
     monkeypatch.setattr("summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
-    monkeypatch.setattr("summarize.llm_chat.request_chat_completion_text", _fake_request)
-    monkeypatch.setattr("summarize.memory_suggestions.suggest_memory_additions", lambda **_k: "")
+    _patch_chat_completion(monkeypatch, _fake_request)
+    monkeypatch.setattr("summarize.memory_suggestions.suggest_updated_journal", lambda **_k: "")
 
     result = summarize_dialog_via_chat_completions(
         ctx=_ctx(trigger_chars=999999),
@@ -535,8 +545,8 @@ def test_summarize_filters_technical_messages_from_user_messages_log(monkeypatch
         return _valid_summary("single-batch")
 
     monkeypatch.setattr("summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
-    monkeypatch.setattr("summarize.llm_chat.request_chat_completion_text", _fake_request)
-    monkeypatch.setattr("summarize.memory_suggestions.suggest_memory_additions", lambda **_k: "")
+    _patch_chat_completion(monkeypatch, _fake_request)
+    monkeypatch.setattr("summarize.memory_suggestions.suggest_updated_journal", lambda **_k: "")
 
     result = summarize_dialog_via_chat_completions(
         ctx=_ctx(trigger_chars=999999),
@@ -562,8 +572,8 @@ def test_invalid_summary_triggers_one_repair_retry(monkeypatch):
         return _valid_summary("repaired")
 
     monkeypatch.setattr("summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
-    monkeypatch.setattr("summarize.llm_chat.request_chat_completion_text", _fake_request)
-    monkeypatch.setattr("summarize.memory_suggestions.suggest_memory_additions", lambda **_k: "")
+    _patch_chat_completion(monkeypatch, _fake_request)
+    monkeypatch.setattr("summarize.memory_suggestions.suggest_updated_journal", lambda **_k: "")
 
     result = summarize_dialog_via_chat_completions(
         ctx=_ctx(trigger_chars=999999),

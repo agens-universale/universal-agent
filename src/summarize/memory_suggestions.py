@@ -5,30 +5,34 @@ import re
 from dataclasses import dataclass
 from typing import Any, Dict, List
 
-from summarize import llm_chat
+from utils.llm_chat_client import (
+    log_llm_prompt_and_result,
+    request_chat_completion_text,
+    shorten_for_log,
+)
 
 _BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+_PROJECT_ROOT = os.path.abspath(os.path.join(_BASE_DIR, "..", ".."))
 DEFAULT_MEMORY_UPDATE_PROMPT_PATH = os.path.abspath(
-    os.path.join(_BASE_DIR, "..", "prompts", "chat_completions_memory_update_prompt.md")
+    os.path.join(_PROJECT_ROOT, "prompts", "chat_completions_memory_update_prompt.md")
 )
 
 
 @dataclass
-class MemoryAdditionsResult:
-    """Результат запроса к LLM для предложений по долговременной памяти диалога.
+class UpdatedJournalResult:
+    """Результат LLM-шага полной актуализации ``memory_files["journal"]``.
 
-    Назначение: зафиксировать и извлечённый текст для ``memory_files["journal"]``, и полезные
-    для отладки/трассировки артефакты (сообщения запроса и сырой ответ модели).
+    Назначение: зафиксировать переписанный journal и артефакты запроса (сообщения,
+    сырой ответ) для трассировки и отладки.
 
     Attributes:
-    extracted: Содержимое обновлённого journal; для обратной совместимости поле
-            оставлено с тем же именем.
-        request_messages: Список сообщений (обычно system + user), отправленный
-            в `chat completions` для этого шага.
+        updated_journal: Текст нового journal из ``<updated_journal>...</updated_journal>``;
+            при ошибке формата ответа — пустая строка.
+        request_messages: Сообщения (обычно system + user), отправленные в chat completions.
         raw_response: Полный текст ответа модели до извлечения XML-фрагмента.
     """
 
-    extracted: str
+    updated_journal: str
     request_messages: List[Dict[str, str]]
     raw_response: str
 
@@ -54,33 +58,34 @@ def extract_updated_journal(block: str) -> str:
     return match.group(1).strip()
 
 
-def suggest_memory_additions(
+def suggest_updated_journal(
     *,
     ctx: Any,
     state: Any,
     history_text: str,
     summary_text: str,
     current_memory: str,
-) -> MemoryAdditionsResult:
-    """Запрашивает у LLM актуальную версию journal в формате `<updated_journal>`.
+) -> UpdatedJournalResult:
+    """Запрашивает у LLM полную актуальную версию journal в `<updated_journal>`.
 
-    Назначение: второй такт после сводки (когда включён): переписать `journal`
-    целиком с учётом истории + summary + текущей памяти, чтобы избежать накопления
-    дубликатов и устаревших промежуточных статусов.
+    Назначение: второй такт после сводки (когда включён) — не дельта, а **перепись**
+    ``journal`` целиком по истории диалога, итоговой сводке и предыдущему journal,
+    чтобы убрать дубликаты и устаревшие промежуточные статусы.
 
-    Поведение: формируется system+user промпт с тремя XML-блоками (история, сводка,
-    текущий journal); вызывается `llm_chat.request_chat_completion_text`; логируются
-    сырой ответ и извлечённый обновлённый journal; возвращается `MemoryAdditionsResult`.
+    Поведение: system из файла промпта; user с блоками ``<dialog_history>``,
+    ``<current_summary>``, ``<current_journal>``; вызов
+    ``utils.llm_chat_client.request_chat_completion_text``; логирование; разбор
+    ``<updated_journal>`` → поле ``updated_journal`` в ``UpdatedJournalResult``.
 
     Args:
         ctx: Контекст с конфигом и логгером.
         state: Состояние для выбора модели и запроса к бэкенду.
-        history_text: Полный текст диалога в формате, как у `dialog_history.build_history_text`.
+        history_text: Текст диалога в формате ``dialog_history.build_history_text``.
         summary_text: Итоговая сводка после шага суммаризации.
-        current_memory: Текущий journal треда.
+        current_memory: Текущий journal треда до переписывания.
 
     Returns:
-        Результат с полями `extracted`, `request_messages`, `raw_response`.
+        ``UpdatedJournalResult`` с полями ``updated_journal``, ``request_messages``, ``raw_response``.
     """
     cfg = getattr(ctx, "config_dict", {}) or {}
     summary_params = cfg.get("summary_params") if isinstance(cfg.get("summary_params"), dict) else {}
@@ -92,7 +97,11 @@ def suggest_memory_additions(
         raise ValueError(
             "summary_params.chat_completions_memory_update_prompt_path is empty"
         )
-    prompt_path = os.path.abspath(prompt_path_raw)
+    prompt_path = (
+        prompt_path_raw
+        if os.path.isabs(prompt_path_raw)
+        else os.path.abspath(os.path.join(_PROJECT_ROOT, prompt_path_raw))
+    )
     if not os.path.exists(prompt_path):
         raise FileNotFoundError(
             f"Memory update prompt file not found: {prompt_path}"
@@ -122,34 +131,35 @@ def suggest_memory_additions(
         {"role": "system", "content": system},
         {"role": "user", "content": user_prompt},
     ]
-    block = llm_chat.request_chat_completion_text(
+    request_label = "journal_update_after_summary"
+    raw_llm_response = request_chat_completion_text(
         ctx=ctx,
         state=state,
         messages=request_messages,
         max_tokens=1200,
-        request_label="memory_additions",
+        request_label=request_label,
     )
-    llm_chat.log_llm_prompt_and_result(
+    log_llm_prompt_and_result(
         logger=logger,
-        label="memory_additions",
+        label=request_label,
         messages=request_messages,
-        output_text=block,
+        output_text=raw_llm_response,
     )
     if logger is not None:
         logger.info(
-            "memory_additions_raw_response chars=%s preview=%s",
-            len(block or ""),
-            llm_chat.shorten_for_log(block or "", max_chars=500),
+            "journal_update_after_summary_raw chars=%s preview=%s",
+            len(raw_llm_response or ""),
+            shorten_for_log(raw_llm_response or "", max_chars=500),
         )
-    extracted = extract_updated_journal(block)
+    updated_journal_text = extract_updated_journal(raw_llm_response)
     if logger is not None:
         logger.info(
-            "memory_additions_extracted chars=%s preview=%s",
-            len(extracted or ""),
-            llm_chat.shorten_for_log(extracted or "", max_chars=500),
+            "journal_update_after_summary_parsed chars=%s preview=%s",
+            len(updated_journal_text or ""),
+            shorten_for_log(updated_journal_text or "", max_chars=500),
         )
-    return MemoryAdditionsResult(
-        extracted=extracted,
+    return UpdatedJournalResult(
+        updated_journal=updated_journal_text,
         request_messages=request_messages,
-        raw_response=block,
+        raw_response=raw_llm_response,
     )

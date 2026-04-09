@@ -63,7 +63,7 @@
 - ``summary_message_body`` — тело сообщения-резюме;
 - ``summary_llm_steps`` — сжатие и починка сводки (отдельные вызовы LLM);
 - ``memory_suggestions`` — шаг предложений для долговременной памяти;
-- ``llm_chat`` — chat completions и логирование;
+- ``utils.llm_chat_client`` — chat completions и логирование;
 - ``prompt_loading`` — загрузка шаблона промпта;
 - ``config`` — параметры порогов (в корне пакета рядом).
 """

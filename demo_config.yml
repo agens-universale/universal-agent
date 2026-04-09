@@ -33,6 +33,9 @@ summary_params:
   # Путь к промпту обновления journal на шаге memory update.
   # Если не задан, используется ./prompts/chat_completions_memory_update_prompt.md.
   # chat_completions_memory_update_prompt_path: "./prompts/chat_completions_memory_update_prompt.md"
+  # Путь к промпту LLM-валидации финального submit_solution на консистентность user intent.
+  # Если не задан, используется ./prompts/chat_completions_intent_guard_prompt.md.
+  # chat_completions_intent_guard_prompt_path: "./prompts/chat_completions_intent_guard_prompt.md"
   # Порог принудительной суммаризации в символах.
   # <= 0: отключено, > 0: триггер при chars_total >= порога.
   chat_completions_summary_trigger_chars: 0
@@ -52,7 +55,7 @@ summary_params:
   # Сколько последних сообщений включать в <last_dialog_steps>.
   last_dialog_steps_count: 5
   # Максимум символов на одно сообщение в <last_dialog_steps>.
-  last_dialog_step_message_max_chars: 5000
+  last_dialog_step_message_max_chars: 1500
 # Настройки memory_files — персистентных именованных регистров памяти треда.
 # memory_files_max_file_chars: 50000       # Лимит символов на один файл (default 50000)
 # memory_files_total_budget_chars: 150000  # Суммарный бюджет на все файлы (default 150000)
@@ -94,6 +97,9 @@ server_tool_prefix: system
 max_steps: 200
 # Порог подряд идущих ответов backend без tool_call; при превышении завершаем работу
 no_tool_call_max_count: 3
+# Строгая проверка submit_solution(full_solution) на соответствие user intent.
+# Проверяется только у основного агента (не у субагентов).
+strict_submit_solution_validation: true
 # Выводить пошаговый трейс работы агента в stdout (print).
 # В CLI-режиме обычно удобно оставить true, в серверном режиме
 # рекомендуется переопределять на false через agent_overrides.console_trace.

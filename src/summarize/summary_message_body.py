@@ -2,19 +2,60 @@
 
 from typing import Dict, List
 
+from xml.sax.saxutils import quoteattr
+
+_JOURNAL_REGISTER = "journal"
+
+
+def _register_meta(raw: str) -> tuple[int, int]:
+    """Число символов и логических строк (как у splitlines) для метаданных."""
+    text = raw or ""
+    return len(text), len(text.splitlines())
+
 
 def _render_memory_files_section(memory_files: Dict[str, str]) -> str:
-    """Render all memory files into an XML block for the summary message."""
+    """Рендерит блок memory_files: journal целиком, остальные — индекс с метаданными.
+
+    Journal соответствует регистру ``journal`` (как у инструмента ``memory_files``).
+    Остальные ключи не встраиваются полностью — только имя, число символов и строк,
+    чтобы модель при необходимости вызвала ``memory_files`` / ``read``.
+    """
     if not memory_files:
         return ""
     parts: List[str] = ["<memory_files>"]
-    for name in sorted(memory_files):
-        content = (memory_files[name] or "").strip()
-        parts.append(f'<file name="{name}">')
+
+    if _JOURNAL_REGISTER in memory_files:
+        content = (memory_files[_JOURNAL_REGISTER] or "").strip()
+        parts.append(f'<file name="{_JOURNAL_REGISTER}">')
         parts.append(content)
         parts.append("</file>")
+
+    others = sorted(name for name in memory_files if name != _JOURNAL_REGISTER)
+    if others:
+        parts.append("<other_registers>")
+        parts.append(
+            "These registers exist for this thread but are not inlined after summarization. "
+            "When you need their full text, call the memory_files tool with action \"read\" "
+            "and the corresponding file_name."
+        )
+        for name in others:
+            chars, lines = _register_meta(memory_files[name] or "")
+            parts.append(
+                "<register "
+                f"name={quoteattr(name)} chars={quoteattr(str(chars))} lines={quoteattr(str(lines))} "
+                "/>"
+            )
+        parts.append("</other_registers>")
+
     parts.append("</memory_files>")
     return "\n".join(parts)
+
+
+_MEMORY_FILES_HINT = (
+    "The block above inlines the updated journal only. Other registers (if listed) are "
+    "described by metadata; read them with memory_files when needed. "
+    "Continue to append or update registers as the thread progresses."
+)
 
 
 def build_dialog_summary_content(
@@ -25,7 +66,7 @@ def build_dialog_summary_content(
     """Собирает итоговое тело сообщения-резюме треда для подстановки в историю чата.
 
     Назначение: один каноничный формат «сводки» с зонами: текст сводки,
-    memory files и последние шаги диалога.
+    memory files (journal полностью после шага памяти, прочие — индекс) и последние шаги диалога.
 
     Args:
         summary_text: Основной текст суммаризации (сводка LLM).
@@ -41,12 +82,10 @@ def build_dialog_summary_content(
 
     lines.append("")
     mf = memory_files or {}
-    lines.append(_render_memory_files_section(mf))
-    lines.append(
-        "The memory_files section above contains all persistent memory registers for this thread. "
-        "You do not need to call memory_files/read for this summarized context; "
-        "append or update files as needed."
-    )
+    mem_section = _render_memory_files_section(mf)
+    if mem_section:
+        lines.append(mem_section)
+        lines.append(_MEMORY_FILES_HINT)
 
     lines.append("")
     lines.append("<last_dialog_steps>")

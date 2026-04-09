@@ -52,7 +52,8 @@ def apply_summary_state_patch(
            ``updated_journal``, если оно непустое (это уже актуализированная версия, не дельта);
            иначе не меняет.
         2. Собирает тело сообщения-резюме через ``build_dialog_summary_content`` уже **после** шага (1):
-           в ``<memory_files>`` попадает актуальный ``state.shared.memory_files``.
+           в ``<memory_files>`` попадает актуальный ``journal`` целиком и индекс прочих регистров
+           (имя, размер), без полного текста остальных файлов.
         3. ``state.dialog_steps_offset`` — увеличивает на ``summarized_messages_count`` (служебно через
            ``max(0, int(...))``).
         4. ``state.previous_response_id`` — сбрасывает в ``None`` (контракт после compaction).

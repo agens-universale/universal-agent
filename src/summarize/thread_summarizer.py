@@ -1,8 +1,8 @@
 from typing import Any, Dict, List
 
+from config import _DEFAULT_LAST_DIALOG_STEP_MESSAGE_MAX_CHARS
 from summarize import (
     dialog_history,
-    llm_chat,
     memory_suggestions,
     prompt_loading,
     summary_llm_steps,
@@ -10,6 +10,11 @@ from summarize import (
 )
 from summarize.summary_validation import FALLBACK_SUMMARY, validate_summary_text
 from user_message_policy import normalize_user_log_entries
+from utils.llm_chat_client import (
+    log_llm_prompt_and_result,
+    request_chat_completion_text,
+    shorten_for_log,
+)
 from utils.project_data import get_project_data
 
 
@@ -26,12 +31,13 @@ def summarize_dialog_via_chat_completions(
     """Строит структурированную сводку диалога через chat completions (в т.ч. батчами).
 
     Назначение: основной оркестратор слоя суммаризации — подготовить текст для
-    сообщения-резюме треда, опционально предложить доп. память, вернуть размеченный
-    контент и подробный `trace` для наблюдаемости.
+    сообщения-резюме треда, опционально переписать journal через LLM, вернуть
+    размеченный контент и подробный `trace` для наблюдаемости.
 
     Поведение (кратко):
         - Читает параметры из `ctx.config_dict["summary_params"]` (лимиты символов,
-          размер батча, путь к промпту, число последних шагов и т.д.).
+          размер батча, путь к промпту, число последних шагов,
+          `last_dialog_step_message_max_chars` для хвоста `<last_dialog_steps>` и т.д.).
         - Усекает историю по `max_dialogue_chars`, нормализует и усекает лог
           пользовательских запросов.
         - Группирует сообщения в ходы и делит на батчи по `incremental_batch_chars`.
@@ -39,7 +45,7 @@ def summarize_dialog_via_chat_completions(
           обновление `previous_summary`; валидирует ответ, при провале —
           `summary_llm_steps.repair_summary_text`, иначе fallback на предыдущую сводку или `FALLBACK_SUMMARY`.
         - По необходимости сжимает накопленную сводку через `summary_llm_steps.compress_summary_text`.
-        - Шаг `memory_suggestions.suggest_memory_additions` выполняется только если весь диалог уложился
+        - Шаг `memory_suggestions.suggest_updated_journal` выполняется только если весь диалог уложился
           в один батч (мультибатч: в trace фиксируется пропуск).
         - Форматирует `last_dialog_steps` через `dialog_history.format_last_dialog_steps`.
           Полное тело сообщения для чата собирает `apply_summary_state_patch` после обновления
@@ -63,7 +69,9 @@ def summarize_dialog_via_chat_completions(
             ``summary_message_content`` — для непустой истории пустая строка; итоговое тело строит
                 ``apply_summary_state_patch``. Для пустой истории — готовое тело без вызова compaction;
             ``user_messages_log`` — очищенный список пользовательских строк;
-            ``memory_additions`` — извлечённый фрагмент для дописывания в заметки (сырой текст) или пусто;
+            ``memory_additions`` — устаревшее имя ключа; то же, что ``updated_journal`` (полный текст
+                journal после LLM-переписывания) или пусто;
+            ``updated_journal`` — полная актуализированная версия journal (не дельта) или пусто;
             ``last_dialog_steps`` — форматированный хвост диалога;
             ``num_batches`` — число батчей LLM;
             ``trace`` — структура с шагами, промптами и результатами для отладки.
@@ -107,14 +115,17 @@ def summarize_dialog_via_chat_completions(
         last_steps_count = 5
     try:
         last_step_message_max_chars = int(
-            summary_params.get("last_dialog_step_message_max_chars", 5000)
+            summary_params.get(
+                "last_dialog_step_message_max_chars",
+                _DEFAULT_LAST_DIALOG_STEP_MESSAGE_MAX_CHARS,
+            )
         )
     except (TypeError, ValueError):
-        last_step_message_max_chars = 5000
+        last_step_message_max_chars = _DEFAULT_LAST_DIALOG_STEP_MESSAGE_MAX_CHARS
     if last_steps_count <= 0:
         last_steps_count = 5
     if last_step_message_max_chars <= 0:
-        last_step_message_max_chars = 5000
+        last_step_message_max_chars = _DEFAULT_LAST_DIALOG_STEP_MESSAGE_MAX_CHARS
     try:
         max_message_chars = int(summary_params.get("max_message_chars", 50000))
     except (TypeError, ValueError):
@@ -258,14 +269,14 @@ def summarize_dialog_via_chat_completions(
                 len(batches),
                 request_messages,
             )
-        text = llm_chat.request_chat_completion_text(
+        text = request_chat_completion_text(
             ctx=ctx,
             state=state,
             messages=request_messages,
             max_tokens=max_tokens,
             request_label=f"summary_batch_{batch_index}",
         )
-        llm_chat.log_llm_prompt_and_result(
+        log_llm_prompt_and_result(
             logger=logger,
             label=f"summary_batch_{batch_index}",
             messages=request_messages,
@@ -288,7 +299,7 @@ def summarize_dialog_via_chat_completions(
                     len(batches),
                     reason,
                     len(text or ""),
-                    llm_chat.shorten_for_log(text or "", max_chars=500),
+                    shorten_for_log(text or "", max_chars=500),
                 )
                 logger.info(
                     "summary_batch_repair_start batch=%s/%s reason=%s history_chars=%s user_requests_chars=%s invalid_summary_chars=%s",
@@ -325,7 +336,7 @@ def summarize_dialog_via_chat_completions(
                     repaired_valid,
                     len(repaired or ""),
                     len(text or ""),
-                    llm_chat.shorten_for_log(text or "", max_chars=500),
+                    shorten_for_log(text or "", max_chars=500),
                 )
         accumulated_summary = text
         trace["step1_batches"].append(trace_batch)
@@ -352,10 +363,8 @@ def summarize_dialog_via_chat_completions(
         max_chars=0,
         max_message_chars=max_message_chars,
     )
-    # Второй такт апдейта памяти: просим LLM вернуть полную актуализированную
-    # версию journal (не дельту). Для multi-batch пока пропускаем, чтобы не
-    # удлинять критический путь суммаризации.
-    memory_additions = ""
+    # Второй такт: LLM полностью переписывает journal (не дельта). Для multi-batch пока пропускаем.
+    updated_journal = ""
     if len(batches) <= 1:
         trace["step2_memory_update"] = {
             "executed": True,
@@ -367,7 +376,7 @@ def summarize_dialog_via_chat_completions(
             "output": "",
             "llm": {},
         }
-        memory_result = memory_suggestions.suggest_memory_additions(
+        memory_result = memory_suggestions.suggest_updated_journal(
             ctx=ctx,
             state=state,
             history_text=history_text,
@@ -375,17 +384,17 @@ def summarize_dialog_via_chat_completions(
             current_memory=current_memory,
         )
         if isinstance(memory_result, str):
-            memory_result = memory_suggestions.MemoryAdditionsResult(
-                extracted=memory_result,
+            memory_result = memory_suggestions.UpdatedJournalResult(
+                updated_journal=memory_result,
                 request_messages=[],
                 raw_response="",
             )
-        memory_additions = memory_result.extracted
-        trace["step2_memory_update"]["output"] = memory_additions
+        updated_journal = memory_result.updated_journal
+        trace["step2_memory_update"]["output"] = updated_journal
         trace["step2_memory_update"]["llm"] = {
             "request_messages": memory_result.request_messages,
             "raw_response": memory_result.raw_response,
-            "extracted": memory_result.extracted,
+            "updated_journal": memory_result.updated_journal,
         }
     else:
         trace["step2_memory_update"] = {
@@ -400,11 +409,11 @@ def summarize_dialog_via_chat_completions(
         }
     if logger is not None:
         logger.info(
-            "summary_finish batches=%s memory_step_executed=%s raw_summary_chars=%s memory_additions_chars=%s",
+            "summary_finish batches=%s journal_update_executed=%s raw_summary_chars=%s updated_journal_chars=%s",
             len(batches),
             len(batches) <= 1,
             len(text),
-            len(memory_additions or ""),
+            len(updated_journal or ""),
         )
         logger.info("summary_final_raw_text=\n%s", text)
 
@@ -416,15 +425,15 @@ def summarize_dialog_via_chat_completions(
     )
     trace["final_output"] = {
         "raw_summary": text,
-        "memory_additions": memory_additions,
-        "updated_journal": memory_additions,
+        "memory_additions": updated_journal,
+        "updated_journal": updated_journal,
     }
     return {
         "raw_summary": text,
         "summary_message_content": "",
         "user_messages_log": user_requests,
-        "memory_additions": memory_additions,
-        "updated_journal": memory_additions,
+        "memory_additions": updated_journal,
+        "updated_journal": updated_journal,
         "last_dialog_steps": last_dialog_steps,
         "num_batches": len(batches),
         "trace": trace,

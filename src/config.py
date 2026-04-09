@@ -9,7 +9,8 @@ from utils.prod_auth import AuthConnector
 
 
 _DEFAULT_LAST_DIALOG_STEPS_COUNT = 5
-_DEFAULT_LAST_DIALOG_STEP_MESSAGE_MAX_CHARS = 5000
+# Лимит символов на одно сообщение в <last_dialog_steps> (сообщение после compaction).
+_DEFAULT_LAST_DIALOG_STEP_MESSAGE_MAX_CHARS = 1500
 _DEFAULT_MAX_MESSAGE_CHARS = 50000
 _DEFAULT_MAX_DIALOGUE_CHARS = 1000000
 _DEFAULT_MAX_ACCUMULATED_SUMMARY_CHARS = 20000
@@ -160,13 +161,6 @@ def _normalize_summary_params(config_dict: Dict[str, Any], config_dir: str) -> N
         ),
         _DEFAULT_LAST_DIALOG_STEPS_COUNT,
     )
-    message_max_chars = _safe_int(
-        summary_params.get(
-            "last_dialog_step_message_max_chars",
-            _DEFAULT_LAST_DIALOG_STEP_MESSAGE_MAX_CHARS,
-        ),
-        _DEFAULT_LAST_DIALOG_STEP_MESSAGE_MAX_CHARS,
-    )
     max_message_chars = _safe_int(
         summary_params.get("max_message_chars", _DEFAULT_MAX_MESSAGE_CHARS),
         _DEFAULT_MAX_MESSAGE_CHARS,
@@ -198,8 +192,19 @@ def _normalize_summary_params(config_dict: Dict[str, Any], config_dir: str) -> N
 
     if steps_count <= 0:
         steps_count = _DEFAULT_LAST_DIALOG_STEPS_COUNT
-    if message_max_chars <= 0:
-        message_max_chars = _DEFAULT_LAST_DIALOG_STEP_MESSAGE_MAX_CHARS
+
+    last_dialog_step_message_max_chars = _safe_int(
+        summary_params.get(
+            "last_dialog_step_message_max_chars",
+            _DEFAULT_LAST_DIALOG_STEP_MESSAGE_MAX_CHARS,
+        ),
+        _DEFAULT_LAST_DIALOG_STEP_MESSAGE_MAX_CHARS,
+    )
+    if last_dialog_step_message_max_chars <= 0:
+        last_dialog_step_message_max_chars = (
+            _DEFAULT_LAST_DIALOG_STEP_MESSAGE_MAX_CHARS
+        )
+
     if max_message_chars <= 0:
         max_message_chars = _DEFAULT_MAX_MESSAGE_CHARS
     if max_dialogue_chars <= 0:
@@ -220,7 +225,7 @@ def _normalize_summary_params(config_dict: Dict[str, Any], config_dir: str) -> N
         "chat_completions_summary_trigger_chars": summary_trigger,
         "incremental_batch_chars": incremental_batch_chars,
         "last_dialog_steps_count": steps_count,
-        "last_dialog_step_message_max_chars": message_max_chars,
+        "last_dialog_step_message_max_chars": last_dialog_step_message_max_chars,
         "max_message_chars": max_message_chars,
         "max_dialogue_chars": max_dialogue_chars,
         "max_accumulated_summary_chars": max_accum_summary_chars,

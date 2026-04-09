@@ -9,6 +9,11 @@ from summarize.compaction import (
 from thread_store import ThreadSession, append_new_thread_messages, load_thread_meta
 
 
+def _patch_chat_completion(monkeypatch, fake):
+    monkeypatch.setattr("summarize.thread_summarizer.request_chat_completion_text", fake)
+    monkeypatch.setattr("summarize.summary_llm_steps.request_chat_completion_text", fake)
+
+
 def _ctx():
     return types.SimpleNamespace(
         config_dict={
@@ -86,11 +91,11 @@ def test_e2e_two_sequential_summaries_keep_user_log_order_and_no_original_block(
         state.user_messages_log = ["first request", "second request"]
 
         monkeypatch.setattr("summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
-        monkeypatch.setattr(
-            "summarize.llm_chat.request_chat_completion_text",
+        _patch_chat_completion(
+            monkeypatch,
             lambda **_kwargs: _valid_summary("s"),
         )
-        monkeypatch.setattr("summarize.memory_suggestions.suggest_memory_additions", lambda **_k: "")
+        monkeypatch.setattr("summarize.memory_suggestions.suggest_updated_journal", lambda **_k: "")
 
         assert maybe_run_summary_compaction(
             ctx=_ctx(),
@@ -142,7 +147,7 @@ def test_e2e_two_sequential_summaries_keep_user_log_order_and_no_original_block(
         assert state.previous_response_id is None
         meta_after_second = load_thread_meta(tmp_dir, system_id, thread_id)
         assert meta_after_second.get("backend_api_mode") == "chat_completions"
-        # При отсутствии memory_additions journal остаётся пустым.
+        # При пустом updated_journal (нет LLM-переписи) journal в state не меняется.
         mf = meta_after_second.get("memory_files", {})
         assert mf.get("journal", "") == ""
         assert isinstance(meta_after_second.get("dialog_steps_offset"), int)
@@ -159,7 +164,7 @@ def test_e2e_two_sequential_summaries_keep_user_log_order_and_no_original_block(
         second_compact_content = rows_after_second[0]["payload"]["content"]
         assert "<original_user_messages>" not in second_compact_content
 
-        archives = [x for x in os.listdir(tmp_dir) if "__summarized_" in x]
+        archives = [x for x in os.listdir(tmp_dir) if "__pre_summary__" in x]
         assert len(archives) >= 2
 
 
@@ -200,11 +205,11 @@ def test_e2e_user_log_skips_technical_and_tool_messages(monkeypatch):
         ]
 
         monkeypatch.setattr("summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
-        monkeypatch.setattr(
-            "summarize.llm_chat.request_chat_completion_text",
+        _patch_chat_completion(
+            monkeypatch,
             lambda **_kwargs: _valid_summary("s-tech"),
         )
-        monkeypatch.setattr("summarize.memory_suggestions.suggest_memory_additions", lambda **_k: "")
+        monkeypatch.setattr("summarize.memory_suggestions.suggest_updated_journal", lambda **_k: "")
 
         assert maybe_run_summary_compaction(
             ctx=_ctx(),

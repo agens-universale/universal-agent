@@ -347,7 +347,7 @@ def split_turns_into_char_batches(
 def format_last_dialog_steps(
     messages: List[Dict[str, Any]],
     max_steps: int = 5,
-    message_max_chars: int = 5000,
+    message_max_chars: int = 1500,
     steps_offset: int = 0,
 ) -> str:
     """Форматирует последние N ходов диалога в XML-подобные блоки для сообщения-сводки.
@@ -363,7 +363,8 @@ def format_last_dialog_steps(
     Args:
         messages: Сообщения (обычно уже усечённая к суммаризации история).
         max_steps: Сколько последних ходов включить.
-        message_max_chars: Лимит символов на сообщение при рендере.
+        message_max_chars: Лимит символов на сообщение при рендере (в runtime обычно
+            ``summary_params.last_dialog_step_message_max_chars``).
         steps_offset: Добавка к номеру первого показанного хода (сдвиг нумерации).
 
     Returns:
