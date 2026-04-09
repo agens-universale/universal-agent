@@ -78,12 +78,13 @@ Your output becomes part of the codebase — write it as if you’ll maintain it
         "strict": True,
     }
 
-    def __init__(self, task, **kwargs):
+    def __init__(self, task, reason=""):
         self.task = task
+        self.reason = reason
 
     @classmethod
-    async def create_instance(cls, task, **kwargs):
-        instance = cls(task=task)
+    async def create_instance(cls, task, reason="", **kwargs):
+        instance = cls(task=task, reason=reason)
         return instance
 
     def get_initial_data(self):
@@ -92,7 +93,8 @@ CODE GENERATOR HANDOFF ADDENDUM
 - Include at least one check for functional correctness and one for integration compatibility when context allows.
 - If tests were not run, state the reason in evidence.
 """
-        return self.with_handoff_contract(self.agent_role, coder_notes), self.task
+        assignment = self.build_assignment_message({"task": self.task, "reason": self.reason})
+        return self.with_handoff_contract(self.agent_role, coder_notes), assignment
 
     def get_agent_name(self):
         return self.agent_name

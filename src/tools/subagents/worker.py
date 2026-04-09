@@ -79,12 +79,13 @@ Your execution is the foundation for downstream evaluation. Make it precise, ver
         "strict": True,
     }
 
-    def __init__(self, task):
+    def __init__(self, task, reason=""):
         self.task = task
+        self.reason = reason
 
     @classmethod
-    async def create_instance(cls, task, **kwargs):
-        instance = cls(task)
+    async def create_instance(cls, task, reason="", **kwargs):
+        instance = cls(task, reason=reason)
         return instance
 
     def get_initial_data(self):
@@ -93,7 +94,8 @@ WORKER HANDOFF ADDENDUM
 - `issues` is optional; include it only for blockers, failed checks, or accepted risks.
 - If no artifacts were produced, explain why in `report_summary` and add a failed/partial check with evidence.
 """
-        return self.with_handoff_contract(self.agent_role, worker_notes), self.task
+        assignment = self.build_assignment_message({"task": self.task, "reason": self.reason})
+        return self.with_handoff_contract(self.agent_role, worker_notes), assignment
 
     def get_agent_name(self):
         return self.agent_name

@@ -37,7 +37,7 @@ def apply_summary_state_patch(
     state: Any,
     raw_summary: str,
     last_dialog_steps: str,
-    memory_additions: str,
+    updated_journal: str,
     summarized_messages_count: int,
 ) -> str:
     """
@@ -48,8 +48,9 @@ def apply_summary_state_patch(
     сообщений. Вызывается из ``run_summary_compaction`` после успешной суммаризации.
 
     Что делает:
-        1. ``state.shared.memory_files["journal"]`` — дополняет текстом ``memory_additions``, только если
-           он непустой; иначе не меняет.
+        1. ``state.shared.memory_files["journal"]`` — полностью обновляет journal значением
+           ``updated_journal``, если оно непустое (это уже актуализированная версия, не дельта);
+           иначе не меняет.
         2. Собирает тело сообщения-резюме через ``build_dialog_summary_content`` уже **после** шага (1):
            в ``<memory_files>`` попадает актуальный ``state.shared.memory_files``.
         3. ``state.dialog_steps_offset`` — увеличивает на ``summarized_messages_count`` (служебно через
@@ -67,16 +68,16 @@ def apply_summary_state_patch(
             Текст сводки LLM для секции ``<summary>``.
         last_dialog_steps:
             Отформатированный хвост диалога для ``<last_dialog_steps>``.
-        memory_additions:
-            Извлечённые durable дополнения к памяти треда (markdown); при непустом значении дописываются
-            в ``memory_files["journal"]``.
+        updated_journal:
+            Актуализированная полная версия journal; при непустом значении заменяет
+            ``memory_files["journal"]``.
         summarized_messages_count:
             Число сообщений, схлопнутых в этом проходе; участвует в ``dialog_steps_offset``.
 
     Возвращает:
         Итоговое тело резюме (то же, что вложено в служебное сообщение).
     """
-    additions_text = str(memory_additions or "").strip()
+    updated_journal_text = str(updated_journal or "").strip()
     shared = getattr(state, "shared", None)
     if shared is None:
         from states import SharedStateData
@@ -86,9 +87,8 @@ def apply_summary_state_patch(
     if not isinstance(mf, dict):
         mf = {}
         shared.memory_files = mf
-    if additions_text:
-        journal = (mf.get("journal") or "").strip()
-        mf["journal"] = f"{journal}\n\n{additions_text}" if journal else additions_text
+    if updated_journal_text:
+        mf["journal"] = updated_journal_text
 
     summary_message_content = build_dialog_summary_content(
         summary_text=str(raw_summary or ""),
@@ -193,7 +193,9 @@ def run_summary_compaction(
         steps_offset=int(getattr(state, "dialog_steps_offset", 0) or 0),
     )
     raw_summary = str(summary_result.get("raw_summary") or "")
-    memory_additions = summary_result.get("memory_additions", "")
+    updated_journal = summary_result.get("updated_journal", "")
+    if not updated_journal:
+        updated_journal = summary_result.get("memory_additions", "")
     if logger is not None:
         logger.info("summary_received_raw_text=\n%s", raw_summary)
     if is_cli_mode:
@@ -204,7 +206,7 @@ def run_summary_compaction(
         state=state,
         raw_summary=raw_summary,
         last_dialog_steps=str(summary_result.get("last_dialog_steps") or ""),
-        memory_additions=memory_additions,
+        updated_journal=updated_journal,
         summarized_messages_count=len(full_messages),
     )
     trace = summary_result.get("trace")
@@ -247,7 +249,7 @@ def run_summary_compaction(
     )
     if logger is not None:
         logger.info(
-            "summary_completed reason=%s thread_id=%s trigger_volume=%s serialized_before=%s serialized_after=%s compression_ratio=%s num_batches=%s memory_additions_chars=%s",
+            "summary_completed reason=%s thread_id=%s trigger_volume=%s serialized_before=%s serialized_after=%s compression_ratio=%s num_batches=%s updated_journal_chars=%s",
             trigger_reason,
             thread_id,
             trigger_volume,
@@ -255,14 +257,14 @@ def run_summary_compaction(
             new_serialized,
             ratio,
             summary_result.get("num_batches"),
-            len(memory_additions or ""),
+            len(updated_journal or ""),
         )
     if is_cli_mode:
         print(
             "[summary] Завершена: "
             f"serialized_before={serialized_chars}, serialized_after={new_serialized}, ratio={ratio}, "
             f"batches={summary_result.get('num_batches')}, "
-            f"memory_additions_chars={len(memory_additions or '')}"
+            f"updated_journal_chars={len(updated_journal or '')}"
         )
 
 

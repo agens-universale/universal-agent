@@ -352,8 +352,9 @@ def summarize_dialog_via_chat_completions(
         max_chars=0,
         max_message_chars=max_message_chars,
     )
-    # Как и в референсе: второй такт апдейта памяти делаем только
-    # когда суммаризация прошла в один батч.
+    # Второй такт апдейта памяти: просим LLM вернуть полную актуализированную
+    # версию journal (не дельту). Для multi-batch пока пропускаем, чтобы не
+    # удлинять критический путь суммаризации.
     memory_additions = ""
     if len(batches) <= 1:
         trace["step2_memory_update"] = {
@@ -361,7 +362,7 @@ def summarize_dialog_via_chat_completions(
             "input": {
                 "history_text": history_text,
                 "summary_text": text,
-                "current_memory": current_memory,
+                "current_journal": current_memory,
             },
             "output": "",
             "llm": {},
@@ -416,12 +417,14 @@ def summarize_dialog_via_chat_completions(
     trace["final_output"] = {
         "raw_summary": text,
         "memory_additions": memory_additions,
+        "updated_journal": memory_additions,
     }
     return {
         "raw_summary": text,
         "summary_message_content": "",
         "user_messages_log": user_requests,
         "memory_additions": memory_additions,
+        "updated_journal": memory_additions,
         "last_dialog_steps": last_dialog_steps,
         "num_batches": len(batches),
         "trace": trace,

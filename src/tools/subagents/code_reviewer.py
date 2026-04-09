@@ -108,12 +108,13 @@ Ensure the review is precise, actionable, and ready for developer handoff."""
         "strict": True,
     }
 
-    def __init__(self, task):
+    def __init__(self, task, reason=""):
         self.task = task
+        self.reason = reason
 
     @classmethod
-    async def create_instance(cls, task, **kwargs):
-        instance = cls(task)
+    async def create_instance(cls, task, reason="", **kwargs):
+        instance = cls(task, reason=reason)
         return instance
 
     def get_initial_data(self):
@@ -128,7 +129,8 @@ CODE REVIEWER HANDOFF ADDENDUM
     "evidence": "string"
   }
 """
-        return self.with_handoff_contract(self.agent_role, reviewer_notes), self.task
+        assignment = self.build_assignment_message({"task": self.task, "reason": self.reason})
+        return self.with_handoff_contract(self.agent_role, reviewer_notes), assignment
 
     def get_agent_name(self):
         return self.agent_name

@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import os
 from functools import partial
 from typing import Any, Callable, Dict, List, Optional
 
@@ -216,6 +217,7 @@ class SubagentRunner:
         """Создать дочерний State, наследуя общие данные от оркестратора."""
         child_config = {**self._config, "use_local_subagents": False}
         child_tools_data, child_tools_spec, child_tools_descr = build_tools_data(child_config)
+        child_system_prompt = self._resolve_subagent_system_prompt()
 
         parent = self._orchestrator_state
         child_state = State(
@@ -228,7 +230,7 @@ class SubagentRunner:
             max_steps=self._config.get("subagent_max_steps", 50),
             system_prompt_id=parent.system_prompt_id,
             use_server_subagents=False,
-            chat_completions_system_prompt=parent.chat_completions_system_prompt,
+            chat_completions_system_prompt=child_system_prompt,
             specific_role=agent_role,
             agent_md_path=parent.agent_md_path,
             shared=parent.shared,
@@ -236,8 +238,46 @@ class SubagentRunner:
         child_state.backend_api_mode = "chat_completions"
         return child_state
 
+    def _resolve_subagent_system_prompt(self) -> Optional[str]:
+        """Вернуть системный промпт для субагента с fallback на промпт родителя."""
+        prompt_path_raw = self._config.get("chat_completions_subagent_system_prompt_path")
+        candidate_paths: List[str] = []
+        if isinstance(prompt_path_raw, str) and prompt_path_raw.strip():
+            candidate_paths.append(os.path.abspath(prompt_path_raw.strip()))
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        default_prompt_path = os.path.abspath(
+            os.path.join(
+                base_dir,
+                "..",
+                "..",
+                "..",
+                "prompts",
+                "chat_completions_subagent_system_prompt.md",
+            )
+        )
+        candidate_paths.append(default_prompt_path)
+
+        for prompt_path in candidate_paths:
+            if not prompt_path:
+                continue
+            try:
+                if not os.path.exists(prompt_path):
+                    continue
+                with open(prompt_path, "r", encoding="utf-8") as fd:
+                    loaded = fd.read().strip()
+                if loaded:
+                    return loaded
+            except OSError:
+                _log.warning(
+                    "Failed to read subagent system prompt from %s",
+                    prompt_path,
+                    exc_info=True,
+                )
+
+        return self._orchestrator_state.chat_completions_system_prompt
+
     def _build_initial_messages(
-        self, child_state: State, agent_role: str, task_text: str,
+        self, child_state: State, agent_role: str, initial_user_message: str,
     ) -> List[Dict[str, Any]]:
         """Сформировать начальные сообщения (system + user) и записать их в child_state."""
         messages: List[Dict[str, Any]] = []
@@ -258,7 +298,7 @@ class SubagentRunner:
 
         messages.append({
             "role": "user",
-            "content": task_text,
+            "content": initial_user_message,
             "id": generate_message_id_func("m_user_sub"),
         })
 

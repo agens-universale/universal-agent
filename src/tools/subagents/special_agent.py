@@ -150,12 +150,14 @@ class SpecialAgent(AbstractSubagent):
         role: str,
         role_description: str,
         task: str,
+        reason: str,
         model: str,
         config_dict: Dict[str, Any],
     ):
         self.role = role
         self.role_description = role_description
         self.task = task
+        self.reason = reason
         self.model = model
         self.config_dict = config_dict
         self.agent_role: str | None = None
@@ -163,9 +165,17 @@ class SpecialAgent(AbstractSubagent):
     @classmethod
     async def create_instance(
         cls, role: str, role_description: str, task: str, model: str,
+        reason: str = "",
         config_dict: Dict[str, Any] | None = None, **kwargs,
     ):
-        instance = cls(role, role_description, task, model, config_dict or {})
+        instance = cls(
+            role,
+            role_description,
+            task,
+            reason,
+            model,
+            config_dict or {},
+        )
         instance.agent_role = instance._generate_role(role, role_description, model)
         return instance
 
@@ -208,7 +218,8 @@ SPECIAL AGENT HANDOFF ADDENDUM
 - Adapt optional fields (issues, metrics, recommendations, blockers) to the assigned domain.
 - Keep the final payload machine-readable and avoid prose-only final handoff.
 """
-        return self.with_handoff_contract(role_prompt, special_notes), self.task
+        assignment = self.build_assignment_message({"task": self.task, "reason": self.reason})
+        return self.with_handoff_contract(role_prompt, special_notes), assignment
 
     def get_agent_name(self):
         return self.agent_name

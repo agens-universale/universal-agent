@@ -109,12 +109,13 @@ Your plan is the single source of truth for execution. Make it precise, dependen
     "strict": True,
 }
 
-    def __init__(self, task):
+    def __init__(self, task, reason=""):
         self.task = task
+        self.reason = reason
 
     @classmethod
-    async def create_instance(cls, task, **kwargs):
-        instance = cls(task)
+    async def create_instance(cls, task, reason="", **kwargs):
+        instance = cls(task, reason=reason)
         return instance
 
     def get_initial_data(self):
@@ -123,7 +124,8 @@ PLANNER HANDOFF ADDENDUM
 - In `checks`, include at least one item confirming dependency ordering and one confirming success-criteria coverage.
 - If the plan is returned inline instead of file output, describe that explicitly in `report_summary`.
 """
-        return self.with_handoff_contract(self.agent_role, planner_notes), self.task
+        assignment = self.build_assignment_message({"task": self.task, "reason": self.reason})
+        return self.with_handoff_contract(self.agent_role, planner_notes), assignment
 
     def get_agent_name(self):
         return self.agent_name

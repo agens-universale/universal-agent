@@ -392,8 +392,8 @@ class ThreadSession:
         dialog_steps_offset = summary_payload.get("dialog_steps_offset", 0)
         data_path, meta_path = _thread_paths(self.threads_dir, self.system_id, self.thread_id)
         ts_suffix = _utc_now_suffix()
-        archive_data_path = data_path.replace(".jsonl", f"__summarized_{ts_suffix}.jsonl")
-        archive_meta_path = meta_path.replace(".json", f"__summarized_{ts_suffix}.json")
+        archive_data_path = data_path.replace(".jsonl", f"__pre_summary__{ts_suffix}.jsonl")
+        archive_meta_path = meta_path.replace(".json", f"__pre_summary__{ts_suffix}.json")
 
         data_exists = os.path.exists(data_path)
         meta_exists = os.path.exists(meta_path)

@@ -14,6 +14,10 @@ completions_url: 'http://127.0.0.1:8080/v1/chat/completions'
 # Путь к системному промпту для режима chat/completions.
 # Если не задан, используется ./prompts/chat_completions_system_prompt.md.
 # chat_completions_system_prompt_path: "./prompts/chat_completions_system_prompt.md"
+# Путь к системному промпту для локальных субагентов (chat/completions).
+# Если не задан, раннер попробует ./prompts/chat_completions_subagent_system_prompt.md,
+# а затем fallback на промпт родительского оркестратора.
+# chat_completions_subagent_system_prompt_path: "./prompts/chat_completions_subagent_system_prompt.md"
 #
 # Лимит токенов на ответ API chat/completions (поле max_tokens). У OpenRouter фактический
 # потолок генерации ≈ min(max_tokens, context_window − длина_промпта): длинная история треда
@@ -26,6 +30,9 @@ summary_params:
   # Путь к промпту суммаризации длинного диалога.
   # Если не задан, используется ./prompts/chat_completions_summary_prompt.md.
   # chat_completions_summary_prompt_path: "./prompts/chat_completions_summary_prompt.md"
+  # Путь к промпту обновления journal на шаге memory update.
+  # Если не задан, используется ./prompts/chat_completions_memory_update_prompt.md.
+  # chat_completions_memory_update_prompt_path: "./prompts/chat_completions_memory_update_prompt.md"
   # Порог принудительной суммаризации в символах.
   # <= 0: отключено, > 0: триггер при chars_total >= порога.
   chat_completions_summary_trigger_chars: 0
