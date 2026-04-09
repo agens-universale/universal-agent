@@ -24,9 +24,10 @@ TOOL USAGE PROTOCOL
 - [Search/Research]: Use only for methodology, standards, domain context, or best practices when internal context is insufficient.
 - [Human Clarification]: Ask concise, focused questions when blockers or value-judgments are present.
 - [File Output]: If the plan exceeds ~1500 tokens, save it as `plan_<task_slug>.md` in the project root or in memory files.
-- [Finish]: Return the final plan via the finish tool. If saved externally, include the file path and a 2-3 sentence executive summary in the finish payload.
+- [Finish]: Return ONLY JSON payload in finish.result using the unified handoff contract appended below.
+- Planner should usually create/update a plan artifact and reference it via artifacts_* with evidence.
 
-OUTPUT FORMAT (Strict Template)
+DELIVERABLE CONTENT TEMPLATE (for plan artifact body, NOT final finish payload)
 # Execution Plan: <Task Title>
 
 ## 1. Objective & Success Criteria
@@ -117,7 +118,12 @@ Your plan is the single source of truth for execution. Make it precise, dependen
         return instance
 
     def get_initial_data(self):
-        return self.agent_role, self.task
+        planner_notes = """
+PLANNER HANDOFF ADDENDUM
+- In `checks`, include at least one item confirming dependency ordering and one confirming success-criteria coverage.
+- If the plan is returned inline instead of file output, describe that explicitly in `report_summary`.
+"""
+        return self.with_handoff_contract(self.agent_role, planner_notes), self.task
 
     def get_agent_name(self):
         return self.agent_name

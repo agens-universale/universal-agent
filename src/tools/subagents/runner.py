@@ -167,7 +167,7 @@ class SubagentRunner:
                 steps=child_state.steps,
             )
 
-        result_text = result or "Subagent finished without explicit result."
+        result_payload: Any = result or "Subagent finished without explicit result."
         self._log_lifecycle(
             event="subagent_end",
             tool_name=tool_name,
@@ -177,7 +177,7 @@ class SubagentRunner:
         )
         return self._success_response(
             tool_name=tool_name,
-            result=result_text,
+            result=result_payload,
             steps=child_state.steps,
             finish_reason="completed",
         )
@@ -293,7 +293,7 @@ class SubagentRunner:
         )
 
     def _success_response(
-        self, tool_name: str, result: str, steps: int, finish_reason: str,
+        self, tool_name: str, result: Any, steps: int, finish_reason: str,
     ) -> str:
         payload = {
             "ok": True,

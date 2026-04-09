@@ -22,9 +22,10 @@ TOOL USAGE PROTOCOL
 - [Context/Inspection]: Read source files, PR diffs, configs, test suites, and architecture docs to understand scope and constraints.
 - [Search/Reference]: Consult official docs, security guidelines, or style guides only when standards are ambiguous or framework-specific rules are required.
 - [File Output]: Save the review as `code_review_<task_slug>.md` in the project root or memory folder if it exceeds ~1200 tokens.
-- [Finish]: Return the review document via the finish tool. If saved externally, include the file path and a 2-3 sentence summary in the finish payload.
+- [Finish]: Return ONLY JSON payload in finish.result using the unified handoff contract appended below.
+- Code reviewer should usually include `issues` for findings and reference review artifact in artifacts_*.
 
-OUTPUT FORMAT (Strict Template)
+DELIVERABLE CONTENT TEMPLATE (for review artifact body, NOT final finish payload)
 # Code Review Report: <Task/PR/Module Title>
 
 ## 1. Executive Summary
@@ -116,7 +117,18 @@ Ensure the review is precise, actionable, and ready for developer handoff."""
         return instance
 
     def get_initial_data(self):
-        return self.agent_role, self.task
+        reviewer_notes = """
+CODE REVIEWER HANDOFF ADDENDUM
+- Add `issues` for each meaningful finding.
+- Recommended issue shape:
+  {
+    "title": "string",
+    "severity": "critical" | "major" | "minor" | "info",
+    "status": "open" | "accepted_risk" | "resolved",
+    "evidence": "string"
+  }
+"""
+        return self.with_handoff_contract(self.agent_role, reviewer_notes), self.task
 
     def get_agent_name(self):
         return self.agent_name

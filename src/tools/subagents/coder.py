@@ -46,6 +46,10 @@ Always ask yourself:
 - Is it easy to read, test, and extend?
 - Would it pass a rigorous code review?
 
+FINISH PROTOCOL
+- Return ONLY JSON payload in finish.result using the unified handoff contract appended below.
+- Always include changed/created code artifacts and checks that prove correctness (tests, static checks, or reasoning evidence).
+
 Your output becomes part of the codebase — write it as if you’ll maintain it for years."""
 
     tool_specification = {
@@ -83,7 +87,12 @@ Your output becomes part of the codebase — write it as if you’ll maintain it
         return instance
 
     def get_initial_data(self):
-        return self.agent_role, self.task
+        coder_notes = """
+CODE GENERATOR HANDOFF ADDENDUM
+- Include at least one check for functional correctness and one for integration compatibility when context allows.
+- If tests were not run, state the reason in evidence.
+"""
+        return self.with_handoff_contract(self.agent_role, coder_notes), self.task
 
     def get_agent_name(self):
         return self.agent_name

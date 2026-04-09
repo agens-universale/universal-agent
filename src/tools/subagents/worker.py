@@ -17,42 +17,18 @@ EXECUTION WORKFLOW
 2. Preparation: Gather required inputs, verify constraints, and align with domain standards or methodologies.
 3. Implementation: Execute the step using appropriate methods, tools, or frameworks. Maintain quality, consistency, and strict adherence to scope.
 4. Validation & Documentation: Verify output against success criteria, document decisions/assumptions, and package the deliverable for handoff.
-5. Handoff: Return the artifact and execution report via the finish tool.
+5. Handoff: Return schema-conformant JSON via the finish tool (JSON-first protocol, no prose-only blob).
 
 TOOL USAGE PROTOCOL
 - [Context/Inspection]: Read input files, briefs, datasets, configs, or prior outputs to align with requirements.
 - [Search/Reference]: Use web search or documentation lookup when necessary if such tools are available.
 - [Execution/Creation]: Use domain-appropriate tools to generate the deliverable (documents, analysis, configurations, drafts, datasets, etc.).
 - [File Output]: Create necessary artefacts and execution reports as `exec_report_<step_slug>.md` in the project root or memory files.
-- [Finish]: Return the execution summary via the finish tool. Include artifact paths, validation status, and a brief note on alignment with the plan. 
-- If not saved externally - return execution summary as text in result of tool call of finish tool or save it in memory files.
-
-OUTPUT FORMAT (Strict Template)
-# Execution Report: <Step Title>
-
-## 1. Step Context
-- Assigned Step: <Exact step title from plan>
-- Dependencies Met: [Yes / No / Partial] <List prerequisites used or missing>
-- Success Criteria: <Restated exactly from plan>
-
-## 2. Deliverable
-- Artifact: `<deliverable_filename>`
-- Format: <markdown, json, csv, docx, config, etc.>
-- Summary: <2-3 sentences describing what was produced and how it meets the criteria>
-
-## 3. Implementation Notes
-<Free-form description: Methods used, key decisions, assumptions made, tools/frameworks applied, and any deviations from the plan with clear justification. Explain your reasoning transparently.>
-
-## 4. Validation & Self-Check
-- Alignment with Plan: [Met / Partially Met / Not Met]
-- Success Criteria Met: [Yes / No / Partially]
-- Known Limitations: <Missing data, scope trade-offs, or unresolved constraints>
-- Ready for Review: [Yes / No] <If No, explicitly state what blocks handoff>
-
-## 5. Artifacts & References
-- Deliverable: list of artefacts with links to them.
-- Input sources: <paths/URLs/docs used>
-- Standards applied: <Guidelines, frameworks, or conventions followed>
+- [Finish]: Return ONLY JSON payload in finish.result using the unified handoff contract appended below.
+- For worker handoff:
+  - `artifacts_created`/`artifacts_updated` and `checks` are mandatory in practice and must be meaningful.
+  - Do not return markdown templates as final handoff.
+  - If detailed report is needed, save it to file and reference in artifacts with evidence.
 
 GUIDING PRINCIPLES
 - Execute only the assigned step. Do not plan ahead, critique, or modify unrelated components.
@@ -112,7 +88,12 @@ Your execution is the foundation for downstream evaluation. Make it precise, ver
         return instance
 
     def get_initial_data(self):
-        return self.agent_role, self.task
+        worker_notes = """
+WORKER HANDOFF ADDENDUM
+- `issues` is optional; include it only for blockers, failed checks, or accepted risks.
+- If no artifacts were produced, explain why in `report_summary` and add a failed/partial check with evidence.
+"""
+        return self.with_handoff_contract(self.agent_role, worker_notes), self.task
 
     def get_agent_name(self):
         return self.agent_name

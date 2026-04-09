@@ -12,7 +12,6 @@ SOLUTION_TYPES = (
     "abandoned",
 )
 
-
 class SubmitSolution(AbstractSimpleTool):
     @staticmethod
     def _result(
@@ -23,6 +22,7 @@ class SubmitSolution(AbstractSimpleTool):
         task_report: str,
         solution_type: str | None = None,
         comment: str | None = None,
+        handoff: Dict[str, Any] | None = None,
         error: Dict[str, Any] | None = None,
     ) -> str:
         out: Dict[str, Any] = {
@@ -36,6 +36,8 @@ class SubmitSolution(AbstractSimpleTool):
             out["solution_type"] = solution_type
         if comment is not None:
             out["comment"] = comment
+        if handoff is not None:
+            out["handoff"] = handoff
         out["task_report"] = task_report
         return json.dumps(out, ensure_ascii=False)
 
@@ -68,8 +70,11 @@ class SubmitSolution(AbstractSimpleTool):
                         "type": "string",
                         "description": "Optional. Caveats, risks, unresolved items, or suggested next steps for the user.",
                     },
+                    "handoff": {
+                        "description": "Required handoff payload for machine-readable outcomes. Tool-agnostic by design: schema is defined by the current workflow, not by submit_solution itself. Prefer any JSON-compatible value.",
+                    },
                 },
-                "required": ["solution_type", "task_report"],
+                "required": ["solution_type", "task_report", "handoff"],
                 "additionalProperties": False,
             },
             "strict": True,
@@ -86,8 +91,14 @@ Input schema:
 {
   "solution_type": "full_solution" | "partial_solution" | "answer_question" | "couldnt_solve" | "need_additional_info" | "abandoned",
   "task_report": "string (required)",
-  "comment": "string (optional)"
+  "comment": "string (optional)",
+  "handoff": { ... arbitrary JSON object ... } (required)
 }
+
+Handoff policy:
+- submit_solution does not enforce a specific handoff schema.
+- If a workflow defines a contract (for example, by role/tool prompt), follow that contract.
+- Otherwise keep handoff minimal, stable, and machine-readable.
 
 When to call:
 - Call exactly once at the end of each completed user turn.
@@ -99,6 +110,7 @@ Readiness checklist before calling:
 - Relevant tools/search/verification for this turn have been performed when needed.
 - Key claims in task_report are grounded in actual tool outputs (not assumptions).
 - Known limitations/risks are captured in comment when relevant.
+- If this turn benefits from machine-readable transfer, include handoff JSON.
 
 Choosing solution_type (for current turn):
 - full_solution: turn objective fully completed.
@@ -110,8 +122,9 @@ Choosing solution_type (for current turn):
 
 - task_report: What was done in this turn (steps, result, assumptions/evidence). Plain text, brief.
 - comment: Optional caveats, risks, unresolved items, or next steps.
+- handoff: Required structured payload for downstream machine-readable workflows.
 
-Return format (JSON string): {"tool":"submit_solution","ok":true,"status":"...","message":"...","error":null,"solution_type":"...","comment":"..."|null,"task_report":"..."}
+Return format (JSON string): {"tool":"submit_solution","ok":true,"status":"...","message":"...","error":null,"solution_type":"...","comment":"..."|null,"handoff":{...},"task_report":"..."}
 '''
 
     def __call__(
@@ -119,6 +132,7 @@ Return format (JSON string): {"tool":"submit_solution","ok":true,"status":"...",
         solution_type: str,
         task_report: str,
         comment: str | None = None,
+        handoff: Dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> str:
         # Validate solution_type
@@ -222,6 +236,7 @@ Return format (JSON string): {"tool":"submit_solution","ok":true,"status":"...",
             task_report=task_report_norm,
             solution_type=solution_type,
             comment=comment_norm,
+            handoff=handoff,
             error=None,
         )
 

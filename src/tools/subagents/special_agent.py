@@ -202,7 +202,13 @@ class SpecialAgent(AbstractSubagent):
         return res_data["choices"][0]["message"]["content"]
 
     def get_initial_data(self):
-        return self.agent_role, self.task
+        role_prompt = self.agent_role or ""
+        special_notes = """
+SPECIAL AGENT HANDOFF ADDENDUM
+- Adapt optional fields (issues, metrics, recommendations, blockers) to the assigned domain.
+- Keep the final payload machine-readable and avoid prose-only final handoff.
+"""
+        return self.with_handoff_contract(role_prompt, special_notes), self.task
 
     def get_agent_name(self):
         return self.agent_name

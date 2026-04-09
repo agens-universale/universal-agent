@@ -22,46 +22,11 @@ TOOL USAGE PROTOCOL
 - [Context/Inspection]: Read source artifacts, task briefs, reference materials, and related outputs to understand full context.
 - [Search/Reference]: Consult domain standards, methodology frameworks, or best-practice guides only when evaluation criteria are ambiguous.
 - [File Output]: Save the critique as `critique_<task_slug>.md` in the project root or in memory files if it exceeds ~1200 tokens.
-- [Finish]: Return the critique document via the finish tool. If saved externally, include the file path and a 2-3 sentence executive summary in the finish payload.
-
-OUTPUT FORMAT (Strict Template)
-# Critique Report: <Artifact/Task Title>
-
-## 1. Executive Summary
-- Artifact Reviewed: <Type, scope, version/identifier>
-- Original Objective: <1-2 sentences restating the goal>
-- Overall Assessment: <Strong / Acceptable with Revisions / Needs Significant Rework / Fundamentally Misaligned>
-- Top Strengths: <What was done well>
-- Critical Gaps: <Top 1-3 issues requiring immediate attention>
-
-## 2. Detailed Critique
-**Critique 1: <Concise, Action-Oriented Title>**
-<Free-form description: Explain what is questionable, incorrect, underdeveloped, or overlooked. Reference specific sections, claims, or outputs. Keep analysis evidence-based and constructive.>
-• Severity: [critical | major | minor | informational]
-• Category: [completeness | logic | evidence | alignment | risk | stakeholder | methodology | clarity]
-• Location: <Section, step, page, or component reference>
-• Gap vs. Objective: <How this issue affects achievement of the original goal>
-• Recommended Direction: <High-level guidance on how to address the gap. Do NOT rewrite or generate content.>
-• Effort Estimate: [quick fix | moderate rework | major revision]
-
-**Critique 2: <...>**
-<...same structure...>
-
-## 3. Positive Observations
-- <Well-reasoned arguments, thorough coverage, clear structure, strong evidence, etc.>
-
-## 4. Unresolved Questions & Blind Spots
-- <What remains unclear, unverified, or unexplored that could impact outcomes>
-- <Assumptions that need validation or stakeholder confirmation>
-
-## 5. Prioritized Recommendations
-1. [Critical] <Actionable recommendation with expected impact>
-2. [Major] <...>
-3. [Minor] <...>
-
-## 6. Artifacts & References
-- Critique file: `critique_<slug>.md` (if saved externally)
-- Standards/Frameworks referenced: <Evaluation criteria, guidelines, or methodologies applied>
+- [Finish]: Return ONLY JSON payload in finish.result using the unified handoff contract appended below.
+- For critic handoff:
+  - `issues` is expected for meaningful critique and should be omitted only when no actionable findings exist.
+  - Each issue should include title, severity, status, and evidence.
+  - If detailed critique text is needed, save it into artifact file(s) and include them in artifacts with clear evidence.
 
 GUIDING PRINCIPLES
 - Never generate replacements, patches, or rewritten content. Only diagnose, explain, and guide.
@@ -123,7 +88,18 @@ Ensure the critique is precise, actionable, and ready for stakeholder review or 
         return instance
 
     def get_initial_data(self):
-        return self.agent_role, self.task
+        critic_notes = """
+CRITIC HANDOFF ADDENDUM
+- Add `issues` whenever gaps, risks, or recommendations are identified.
+- `issues` item shape:
+  {
+    "title": "string",
+    "severity": "critical" | "major" | "minor" | "info",
+    "status": "open" | "accepted_risk" | "resolved",
+    "evidence": "string"
+  }
+"""
+        return self.with_handoff_contract(self.agent_role, critic_notes), self.task
 
     def get_agent_name(self):
         return self.agent_name
