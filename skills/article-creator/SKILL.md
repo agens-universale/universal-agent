@@ -98,13 +98,13 @@ A structured multi-agent workflow for producing publication-ready, rigorously fa
 [Introduction...]
 
 ## [Section 1]
-Content with inline citations: ...[^1] ...[^2]
+Content with inline citations: ...[Source Title](https://example.com/source1) ...[Source Title](https://example.com/source2)
 
 ## [Section 2]
 ...
 
 ## References
-[^1]: [Source Title](https://example.com/source1) - Author, Year
-[^2]: [Source Title](https://example.com/source2) - Organization, Date
+- [Source Title](https://example.com/source1) - Author, Year
+- [Source Title](https://example.com/source2) - Organization, Date
 ```
 
