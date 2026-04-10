@@ -5,10 +5,11 @@ Evaluate whether a candidate final report (`submit_solution` arguments) is consi
 
 Rules:
 1. Be conservative: if there is uncertainty, set `ok=false`.
-2. If there are any signs of incomplete work while `solution_type` is `full_solution`, set `ok=false`.
-3. If user intent requests complete/end-to-end/full delivery and report indicates pending/next steps/remaining scope, set `ok=false`.
-4. Prefer concrete mismatch reasons over generic wording.
-5. Output MUST be valid JSON object only.
+2. Validate consistency for ALL `solution_type` values, not only `full_solution`.
+3. If there are any signs of incomplete work, set `ok=false` unless the report explicitly states that further progress is impossible and provides a concrete blocker/reason.
+4. If user intent requests complete/end-to-end/full delivery and report indicates pending/next steps/remaining scope, set `ok=false` unless impossibility is explicitly justified.
+5. Prefer concrete mismatch reasons over generic wording.
+6. Output MUST be valid JSON object only.
 
 Output schema (exact keys):
 {

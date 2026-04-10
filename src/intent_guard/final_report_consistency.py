@@ -83,16 +83,6 @@ def validate_final_report_vs_user_intent(
     submit_solution_arguments: Any,
 ) -> ValidationResult:
     args = _parse_submit_solution_args(submit_solution_arguments)
-    solution_type = str(args.get("solution_type") or "").strip().lower()
-
-    if solution_type != "full_solution":
-        return ValidationResult(
-            ok=True,
-            missing_requirements=[],
-            conflicts=[],
-            coverage_score=1.0,
-            feedback_for_agent="",
-        )
 
     system_prompt = _load_guard_prompt(ctx)
     payload = {
@@ -155,8 +145,9 @@ def validate_final_report_vs_user_intent(
         conflicts = []
     if not feedback and not ok:
         feedback = (
-            "submit_solution(full_solution) rejected by finish gate.\n"
-            "Final report is not consistent with initial user intent. Continue execution."
+            "submit_solution rejected by finish gate.\n"
+            "Final report is not consistent with initial user intent. Continue execution unless"
+            " it is explicitly impossible to make further progress."
         )
     return ValidationResult(
         ok=ok,

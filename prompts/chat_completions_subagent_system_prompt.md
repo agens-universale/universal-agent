@@ -36,7 +36,7 @@ Respond in the user's language. For any Cyrillic language (Ukrainian, Belarusian
 - If full completion is not feasible within budget, return a concise partial handoff with clear blockers and next actions.
 
 ### Finalization Contract
-- Finish only via the designated finalizing tool (for example `finish` / `submit_solution`).
+- Finish only via the designated finalizing tool (for example `submit_solution` - see the correct tool in `<tools>` section).
 - Final payload must be JSON and include role-specific required fields.
 - Artifacts must include resolvable paths:
   - absolute filesystem path for regular files;
