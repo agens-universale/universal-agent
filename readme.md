@@ -305,3 +305,47 @@ uv run python -m src.server
 - При построении `config_dict` для сервера эти поля попадают в конфиг как `stop_tools`,
   и `src/tools/simple_tools/__init__.py` автоматически вырезает такие тулы из реестра.
 - Это защищает директорию библиотеки и окружение сервера от нежелательных изменений файловой системы. 
+
+## Swarm-режим (только Linux)
+
+> ⚠️ **Swarm-режим работает только на Linux.** Он зависит от `bubblewrap` (bwrap) для изоляции процессов и от `timeout` из GNU coreutils для ограничения времени выполнения. На macOS и Windows эти инструменты недоступны.
+
+Swarm-режим позволяет REST-серверу запускать CLI-агенты в изолированных песочницах (bubblewrap). Каждый swarm работает как отдельный процесс с собственным workspace, ограниченными ресурсами и полной изоляцией от серверного процесса.
+
+### Включение
+
+В `config_server.yml`:
+
+```yaml
+swarm:
+  enabled: true
+  max_concurrent: 10
+  limits:
+    timeout_seconds: 1800
+    memory_mb: 1024
+    disk_mb: 2048
+```
+
+### Эндпоинты
+
+- `POST /swarm/run` — запуск swarm-задачи
+- `GET /swarm/status/{system}/{task_id}` — статус задачи
+- `GET /swarm/logs/{system}/{task_id}` — логи задачи
+
+### Системные требования (Linux)
+
+| Зависимость | Обязательность | Пакет в Ubuntu/Debian | Пакет в Fedora/RHEL | Пакет в Alpine |
+|-------------|---------------|----------------------|---------------------|----------------|
+| `bubblewrap` (bwrap) | Обязательная | `bubblewrap` | `bubblewrap` | `bubblewrap` |
+| `timeout` (GNU coreutils) | Обязательная | `coreutils` | `coreutils` | `coreutils` |
+| `gc-cli` в `$PATH` | Обязательная | — | — | — |
+| `psutil` (Python) | Опциональная | `python3-psutil` | `python3-psutil` | `py3-psutil` |
+
+> **Примечание:** На минимальных контейнерах (Alpine и т.п.) `timeout` может отсутствовать — установите `coreutils`. Без `timeout` bash-скрипт запустится без ограничения времени; Python-side таймаут (monitor) обеспечивает запасной механизм.
+
+### Ограничения
+
+- Лимит `max_concurrent` — без очереди; при превышении запросы отбиваются ошибкой 429/503.
+- Хранение логов — `swarm_threads/`, рабочих директорий — `.swarm_sandboxes/`.
+- Рекомендуется cron-задача для очистки старых swarm-данных (см. `scripts/cleanup_swarm_threads.py`).
+- Bubblewrap-монтирование `/lib`, `/lib64`, `/usr` может потребовать адаптации под конкретный дистрибутив (например, на Arch Linux `/lib` → symlink на `/usr/lib`).
