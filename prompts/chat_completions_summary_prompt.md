@@ -20,6 +20,9 @@ Rules:
 - Preserve exact technical identifiers: file paths, symbols, config keys, CLI flags, APIs, env/tooling details.
 - Do not guess, infer, or invent file paths (or “likely” paths). List paths and file artifacts **exactly as they appear** in <dialog_history> / tool outputs / user messages. If a path was not stated, do not fabricate it; say it is unknown or omit it. You may use <project_data> only to interpret or normalize roots that already match the dialog, not to add files that never appeared.
 - Be concise but complete: do not drop accepted decisions, hard constraints, or important unresolved risks.
+- Always derive execution mode from explicit user intent:
+  - If user intent says planning/analysis only, set stage to planning and do not output implementation/coding actions.
+  - If user explicitly approved coding/execution, set stage to implementation.
 
 Required structure (always output all sections below). Each section must start with a clear header line:
 use either the exact UPPERCASE_WITH_UNDERSCORES title as written here, or a Markdown heading (`#` / `##`) that contains the same words with spaces (e.g. `# Task and context` or `## TASK_AND_CONTEXT:`). Do not omit sections; use `n/a` or `- none` only if a section is truly empty.
@@ -38,8 +41,14 @@ PLAN_AND_PROGRESS:
 - Brief stepwise plan with statuses: [DONE], [IN_PROGRESS], [TODO].
 - Include concrete outcomes and references to files/modules/functions/tests where relevant.
 
+EXECUTION_STAGE:
+- Must be one of: planning | implementation.
+- If `planning`, explicitly state "planning-only" and keep all next actions non-coding/non-solving.
+- If `implementation`, next actions may include concrete code changes / task solving steps.
+
 NEXT_ACTIONS:
 - 3-7 focused, executable next actions for the next 1-3 iterations.
+- If EXECUTION_STAGE is `planning`, allowed actions are analysis/planning/clarification only (no file edits, no code generation, no implementation delegation) - creating planning/analyzing artefacts / memory files.
 
 SPEC_AND_CONSTRAINTS:
 - Explicit and implicit requirements, contracts, compatibility constraints, edge-case expectations.

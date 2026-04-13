@@ -95,6 +95,7 @@ def apply_summary_state_patch(
         summary_text=str(raw_summary or ""),
         last_dialog_steps=str(last_dialog_steps or ""),
         memory_files=mf,
+        user_messages_log=list(getattr(state, "user_messages_log", []) or []),
     )
     prev_offset = int(getattr(state, "dialog_steps_offset", 0) or 0)
     state.dialog_steps_offset = prev_offset + max(0, int(summarized_messages_count or 0))

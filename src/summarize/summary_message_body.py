@@ -58,10 +58,24 @@ _MEMORY_FILES_HINT = (
 )
 
 
+def _render_user_messages_log_section(user_messages_log: List[str]) -> str:
+    """Рендерит блок с журналом исходных пользовательских запросов."""
+    if not user_messages_log:
+        return ""
+    parts: List[str] = ["<user_messages_log>"]
+    for item in user_messages_log:
+        text = str(item or "").strip()
+        if text:
+            parts.append(f"- {text}")
+    parts.append("</user_messages_log>")
+    return "\n".join(parts)
+
+
 def build_dialog_summary_content(
     summary_text: str,
     last_dialog_steps: str,
     memory_files: Dict[str, str] | None = None,
+    user_messages_log: List[str] | None = None,
 ) -> str:
     """Собирает итоговое тело сообщения-резюме треда для подстановки в историю чата.
 
@@ -72,6 +86,7 @@ def build_dialog_summary_content(
         summary_text: Основной текст суммаризации (сводка LLM).
         last_dialog_steps: Отформатированный хвост диалога.
         memory_files: Dict[str, str] с содержимым memory-файлов (может быть пустым).
+        user_messages_log: Список "живых" пользовательских запросов (без техсообщений).
 
     Returns:
         Единая строка с размеченными секциями.
@@ -86,6 +101,15 @@ def build_dialog_summary_content(
     if mem_section:
         lines.append(mem_section)
         lines.append(_MEMORY_FILES_HINT)
+
+    user_log = user_messages_log or []
+    user_log_section = _render_user_messages_log_section(user_log)
+    if user_log_section:
+        lines.append("")
+        lines.append(user_log_section)
+        lines.append(
+            "Treat this block as the authoritative source of original user intent."
+        )
 
     lines.append("")
     lines.append("<last_dialog_steps>")

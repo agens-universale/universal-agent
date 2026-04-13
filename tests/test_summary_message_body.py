@@ -56,3 +56,20 @@ def test_empty_memory_files_skips_section_and_hint():
     assert "The block above inlines" not in body
     assert "<last_dialog_steps>" in body
     assert "tail" in body
+
+
+def test_user_messages_log_section_added_with_intent_hint():
+    body = build_dialog_summary_content(
+        summary_text="S",
+        last_dialog_steps="tail",
+        memory_files={},
+        user_messages_log=[
+            "пока не правь код, только анализ",
+            "сделай только план",
+        ],
+    )
+    assert "<user_messages_log>" in body
+    assert "- пока не правь код, только анализ" in body
+    assert "- сделай только план" in body
+    assert "authoritative source of original user intent" in body
+    assert "</user_messages_log>" in body
