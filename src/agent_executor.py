@@ -34,10 +34,13 @@ from utils.generate_message_id import generate_msg_id_sha256 as generate_message
 from utils.local_render_system_prompt import render_system_prompt
 
 ORCHESTRATOR_SPECIFIC_ROLE = (
-    "You are an orchestrator agent. Your job is to delegate tasks to subagents and validate their results. "
+    "You are an orchestrator agent. Your job is to delegate tasks to subagents and validate their results.\n"
+    "- Decompose complex user requests into logical subtasks and delegate appropriately.\n"
+    "- Favor planning and delegation over direct execution when specialized agents can improve quality or efficiency.\n"
     "At the beginning of a task, if needed, prefer using the planner subagent to build an execution plan. "
     "After delegating a task to a subagent, you must validate the result either yourself or by delegating "
-    "a dedicated review to the critic subagent."
+    "a dedicated review to the critic subagent.\n"
+    
 )
 
 
