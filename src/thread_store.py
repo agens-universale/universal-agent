@@ -372,6 +372,12 @@ class ThreadSession:
             base_meta["shared"] = self.meta["shared"]
         if isinstance(self.meta.get("last_backend_response_id"), str):
             base_meta["last_backend_response_id"] = self.meta.get("last_backend_response_id")
+        if isinstance(self.meta.get("user_messages_log"), list):
+            base_meta["user_messages_log"] = [
+                str(x).strip()
+                for x in self.meta.get("user_messages_log", [])
+                if str(x).strip()
+            ]
         # Persist rendered chat/completions system prompt for transparency/debugging.
         # Must stay identical to актуальным данным: when we are in `responses`
         # mode, there is no system prompt in messages, so it must not be present in meta.
@@ -442,21 +448,26 @@ class ThreadSession:
                 fd.write(json.dumps(record, ensure_ascii=False) + "\n")
                 known_message_keys.add(make_message_key(message))
 
+        existing_meta = dict(self.meta) if isinstance(self.meta, dict) else {}
         shared_data = summary_payload.get("shared")
-        new_meta = {
-            "created_at": _utc_now_iso(),
-            "previous_response_id": None,
-            "backend_api_mode": self.backend_api_mode,
-            "messages_count": len(compact_messages),
-            "last_summarized_at": _utc_now_iso(),
-            "last_summary_archive_suffix": ts_suffix,
-        }
+        now_iso = _utc_now_iso()
+        new_meta = dict(existing_meta)
+        new_meta.update(
+            {
+                "created_at": existing_meta.get("created_at") or now_iso,
+                "previous_response_id": None,
+                "backend_api_mode": self.backend_api_mode,
+                "messages_count": len(compact_messages),
+                "last_summarized_at": now_iso,
+                "last_summary_archive_suffix": ts_suffix,
+            }
+        )
         if isinstance(shared_data, dict):
             new_meta["shared"] = shared_data
         try:
             effective_steps_offset = int(dialog_steps_offset)
         except (TypeError, ValueError):
-            effective_steps_offset = 0
+            effective_steps_offset = int(existing_meta.get("dialog_steps_offset", 0) or 0)
         if effective_steps_offset < 0:
             effective_steps_offset = 0
         new_meta["dialog_steps_offset"] = effective_steps_offset
@@ -464,10 +475,16 @@ class ThreadSession:
             new_meta["user_messages_log"] = [
                 str(x).strip() for x in user_messages_log if str(x).strip()
             ]
-        prompt = self.meta.get("chat_completions_system_prompt_rendered")
+        elif isinstance(existing_meta.get("user_messages_log"), list):
+            new_meta["user_messages_log"] = [
+                str(x).strip()
+                for x in existing_meta.get("user_messages_log", [])
+                if str(x).strip()
+            ]
+        prompt = existing_meta.get("chat_completions_system_prompt_rendered")
         if isinstance(prompt, str) and prompt.strip():
             new_meta["chat_completions_system_prompt_rendered"] = prompt
-        last_backend_response_id = self.meta.get("last_backend_response_id")
+        last_backend_response_id = existing_meta.get("last_backend_response_id")
         if isinstance(last_backend_response_id, str) and last_backend_response_id.strip():
             new_meta["last_backend_response_id"] = last_backend_response_id
         save_thread_meta(self.threads_dir, self.system_id, self.thread_id, new_meta)

@@ -155,6 +155,35 @@ def test_maybe_run_summary_compaction_twice_uses_meta_user_log(monkeypatch):
         ]
 
 
+def test_persist_batch_writes_user_messages_log_to_meta():
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        thread_id = "demo-thread"
+        system_id = "cli"
+        session = ThreadSession.from_config(
+            config_dict={"threads_data_path": tmp_dir},
+            system_id=system_id,
+            thread_id=thread_id,
+        )
+        session.meta["user_messages_log"] = ["first request", "second request"]
+        session.persist_batch(
+            [
+                {"role": "user", "content": "first request"},
+                {"role": "assistant", "content": "first reply"},
+            ],
+            previous_response_id=None,
+        )
+
+        reloaded = ThreadSession.from_config(
+            config_dict={"threads_data_path": tmp_dir},
+            system_id=system_id,
+            thread_id=thread_id,
+        )
+        assert reloaded.meta.get("user_messages_log") == [
+            "first request",
+            "second request",
+        ]
+
+
 def test_maybe_run_summary_compaction_works_without_thread(monkeypatch):
     monkeypatch.setattr("summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
     _patch_chat_completion(

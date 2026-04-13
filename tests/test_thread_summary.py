@@ -71,10 +71,12 @@ class ThreadSummaryTest(unittest.TestCase):
                 system_id,
                 thread_id,
                 {
+                    "created_at": "2026-01-01T00:00:00+00:00",
                     "notes_md": "old notes",
                     "previous_response_id": "resp_prev",
                     "backend_api_mode": "chat_completions",
                     "chat_completions_system_prompt_rendered": "SYSTEM",
+                    "custom_meta_key": "preserve-me",
                 },
             )
 
@@ -97,10 +99,10 @@ class ThreadSummaryTest(unittest.TestCase):
 
             suffix = result["archive_suffix"]
             archived_data = os.path.join(
-                tmp_dir, f"data_cli_{thread_id}__summarized_{suffix}.jsonl"
+                tmp_dir, f"data_cli_{thread_id}__pre_summary__{suffix}.jsonl"
             )
             archived_meta = os.path.join(
-                tmp_dir, f"meta_cli_{thread_id}__summarized_{suffix}.json"
+                tmp_dir, f"meta_cli_{thread_id}__pre_summary__{suffix}.json"
             )
             self.assertTrue(os.path.exists(archived_data))
             self.assertTrue(os.path.exists(archived_meta))
@@ -123,6 +125,8 @@ class ThreadSummaryTest(unittest.TestCase):
             self.assertEqual(meta.get("user_messages_log"), ["req1", "req2"])
             self.assertIsNone(meta.get("previous_response_id"))
             self.assertEqual(meta.get("chat_completions_system_prompt_rendered"), "SYSTEM")
+            self.assertEqual(meta.get("created_at"), "2026-01-01T00:00:00+00:00")
+            self.assertEqual(meta.get("custom_meta_key"), "preserve-me")
 
     def test_archive_and_compact_preserves_original_user_messages_in_dump(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
