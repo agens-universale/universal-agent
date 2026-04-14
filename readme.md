@@ -1,6 +1,6 @@
 # GigaCode CLI (gc-cli)
 
-Тестовый (non production) CLI-клиент для работы с агентом GigaCode: отправка запросов, вызов инструментов и MCP-серверов. Требуется запущенный бэкенд агента с API `v1/responses`.
+Background и CLI-клиент для работы с агентом GigaCode: отправка запросов, вызов инструментов и MCP-серверов. Требуется запущенный бэкенд агента с API `v1/responses` или режимом `chat_completions` с доступом к модели (chat/completions - openrouter, vllm и др.).
 
 **Требования:** Python 3.10 или новее.
 
@@ -49,7 +49,7 @@
    
 4. **Конфигурация клиента**
 
-    - Требуется запущенный GigaCode Agent с API `v1/responses`. Адрес сервиса задаётся в `config.yml`.
+    - Требуется запущенный GigaCode Agent с API `v1/responses` или с режимом `backend_api_mode: chat_completions`. Адрес сервиса задаётся в `config.yml`.
     - **Где ищется конфиг:** по умолчанию — файл `config.yml` рядом с установленным пакетом (каталог, откуда был выполнен `pip install -e .`, подкаталог `src`). Чтобы использовать конфиг из текущей папки или указать свой путь:
       ```commandline
       gc-cli -q "ваш вопрос" --config ./config.yml
