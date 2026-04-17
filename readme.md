@@ -349,3 +349,54 @@ swarm:
 - Хранение логов — `swarm_threads/`, рабочих директорий — `.swarm_sandboxes/`.
 - Рекомендуется cron-задача для очистки старых swarm-данных (см. `scripts/cleanup_swarm_threads.py`).
 - Bubblewrap-монтирование `/lib`, `/lib64`, `/usr` может потребовать адаптации под конкретный дистрибутив (например, на Arch Linux `/lib` → symlink на `/usr/lib`).
+
+---
+
+# Playwright MCP (браузер)
+
+Агент умеет управлять браузером через MCP-сервер `@playwright/mcp`. Доступные инструменты:
+навигация, клики, ввод текста, скриншоты, снапшот accessibility-дерева страницы, выполнение JS.
+
+![Playwright MCP demo](browserforgif.gif)
+
+## Запуск локально (для разработки и отладки)
+
+Требования: Node.js 18+.
+
+```bash
+# Установить Playwright-браузеры (один раз)
+npx playwright install chromium
+
+# Запустить MCP-сервер через Makefile из корня проекта
+make start        # фоновый запуск, логи → /tmp/playwright-mcp.log
+make start-debug  # foreground с подробными логами входящих запросов
+make stop         # остановить
+make restart      # перезапустить
+make status       # проверить статус
+make logs         # смотреть логи в реальном времени
+```
+
+## Запуск в Docker
+
+```bash
+cd dockerfiles/mcp/playwright
+docker compose up -d --build   # сборка и запуск
+docker compose down            # остановить
+docker logs playwright-mcp -f  # логи входящих запросов
+```
+
+В обоих случаях сервер слушает на `http://localhost:8931/mcp`.
+
+## Подключение в config.yml
+
+```yaml
+mcp-servers:
+  browser:
+    transport: stream_http
+    url: http://localhost:8931/mcp
+    description: Browser automation via Playwright. Use for web navigation, clicking,
+      form filling, taking screenshots, and web scraping. Available actions - navigate
+      to URL, click elements, type text, take screenshot, get page snapshot
+      (accessibility tree), evaluate JavaScript.
+    server-name: playwright-browser
+```

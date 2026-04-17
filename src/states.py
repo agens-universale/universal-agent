@@ -18,6 +18,10 @@ class SharedStateData:
     notes_md: str = ""
     fetch_url_cache: Dict[str, str] = field(default_factory=dict)
 
+    def to_dict(self):
+        import dataclasses
+        return dataclasses.asdict(self)
+
 
 class State:
     def __init__(
@@ -118,7 +122,10 @@ class State:
             self.x_target = x_target
 
     def to_dict(self):
-        return vars(self).copy()
+        result = vars(self).copy()
+        if isinstance(result.get('shared'), SharedStateData):
+            result['shared'] = result['shared'].to_dict()
+        return result
 
     def add_message(self, message):
         self.messages.append(message)

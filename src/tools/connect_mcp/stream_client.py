@@ -3,6 +3,8 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional, Tuple
 
 import asyncio
+import threading
+import concurrent.futures
 from urllib.parse import urlsplit, urlunsplit
 
 import httpx
@@ -13,6 +15,71 @@ from mcp.client.stdio import StdioServerParameters, stdio_client
 from mcp.shared.exceptions import McpError
 
 from utils.ssl_config import get_verify_ssl, get_client_cert
+
+
+# ---------------------------------------------------------------------------
+# Persistent session manager
+# Keeps one MCP ClientSession alive per server key in a background event loop.
+# This lets browser (and other stateful) MCP servers maintain context across
+# multiple tool calls within a single gc-cli process.
+# ---------------------------------------------------------------------------
+
+class _PersistentSessionManager:
+    """
+    Runs a dedicated asyncio event loop in a background daemon thread.
+    Caches open MCP ClientSession objects keyed by server_key.
+    All async calls are dispatched to that loop via run_coroutine_threadsafe.
+    """
+
+    def __init__(self):
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
+        self._thread: Optional[threading.Thread] = None
+        self._lock = threading.Lock()
+        # server_key -> open ClientSession (async object in _loop)
+        self._sessions: Dict[str, Any] = {}
+        # server_key -> context managers stack (for cleanup)
+        self._cm_stacks: Dict[str, Any] = {}
+
+    def _ensure_loop(self):
+        with self._lock:
+            if self._loop is None or not self._loop.is_running():
+                self._loop = asyncio.new_event_loop()
+                self._thread = threading.Thread(
+                    target=self._loop.run_forever,
+                    daemon=True,
+                    name="mcp-session-loop",
+                )
+                self._thread.start()
+
+    def run(self, coro) -> Any:
+        """Submit a coroutine to the background loop and block until done."""
+        self._ensure_loop()
+        fut = concurrent.futures.Future()
+
+        async def _wrapper():
+            try:
+                result = await coro
+                fut.set_result(result)
+            except Exception as exc:
+                fut.set_exception(exc)
+
+        asyncio.run_coroutine_threadsafe(_wrapper(), self._loop)
+        return fut.result(timeout=120)
+
+    def get_session(self, server_key: str) -> Optional[Any]:
+        return self._sessions.get(server_key)
+
+    def set_session(self, server_key: str, session: Any, cm_stack: Any):
+        self._sessions[server_key] = session
+        self._cm_stacks[server_key] = cm_stack
+
+    def invalidate(self, server_key: str):
+        """Remove cached session (e.g. after an error)."""
+        self._sessions.pop(server_key, None)
+        self._cm_stacks.pop(server_key, None)
+
+
+_SESSION_MANAGER = _PersistentSessionManager()
 
 
 def _make_httpx_factory(verify: bool, cert: Optional[Tuple[str, str]] = None):
@@ -386,6 +453,74 @@ async def _call_tool_stream_http_async(
     return {"content": [], "isError": True}
 
 
+async def _call_tool_stream_http_persistent(
+    server_key: str,
+    base_url: str,
+    token: Optional[str],
+    timeout: float,
+    verify: bool,
+    tool_name: str,
+    arguments: Dict[str, Any],
+    cert: Optional[Tuple[str, str]] = None,
+) -> Dict[str, Any]:
+    """
+    Вызов MCP-тула через Streamable HTTP с персистентной сессией.
+    Сессия кешируется в _SESSION_MANAGER и переиспользуется между вызовами.
+    """
+    session: Optional[ClientSession] = _SESSION_MANAGER.get_session(server_key)
+
+    async def _open_session(endpoint: str) -> ClientSession:
+        http_client = _make_stream_http_client(token=token, timeout=timeout, verify=verify, cert=cert)
+        await http_client.__aenter__()
+        transport = streamable_http_client(endpoint, http_client=http_client)
+        read_stream, write_stream, _ = await transport.__aenter__()
+        new_session = ClientSession(read_stream, write_stream)
+        await new_session.__aenter__()
+        await new_session.initialize()
+        _SESSION_MANAGER.set_session(server_key, new_session, (http_client, transport, new_session))
+        return new_session
+
+    endpoints = _stream_http_endpoints(base_url)
+
+    async def _call(s: ClientSession) -> Dict[str, Any]:
+        result = await s.call_tool(tool_name, arguments or {})
+        content_items: List[Any] = []
+        for item in getattr(result, "content", []) or []:
+            if hasattr(item, "model_dump"):
+                content_items.append(item.model_dump(by_alias=True, mode="json", exclude_unset=True))
+            else:
+                content_items.append(item)
+        return {"content": content_items, "isError": bool(getattr(result, "isError", False))}
+
+    # Try with cached session first
+    if session is not None:
+        try:
+            return await _call(session)
+        except Exception:
+            _SESSION_MANAGER.invalidate(server_key)
+            session = None
+
+    # Open new persistent session
+    last_error: Optional[Exception] = None
+    for endpoint in endpoints:
+        try:
+            session = await _open_session(endpoint)
+            return await _call(session)
+        except McpError as exc:
+            last_error = exc
+            _SESSION_MANAGER.invalidate(server_key)
+            if "Session terminated" in str(exc) and endpoint != endpoints[-1]:
+                continue
+            raise
+        except Exception as exc:
+            last_error = exc
+            _SESSION_MANAGER.invalidate(server_key)
+
+    if last_error is not None:
+        raise last_error
+    return {"content": [], "isError": True}
+
+
 def call_tool_stream_http(
     url: str,
     server_cfg: Dict[str, Any],
@@ -396,22 +531,41 @@ def call_tool_stream_http(
 ) -> Dict[str, Any]:
     """
     Синхронная обёртка над _call_tool_stream_http_async.
+    Использует персистентную сессию для сохранения состояния браузера/сервера
+    между последовательными вызовами в рамках одного процесса.
 
     url: базовый URL сервера из конфига (без /mcp в конце).
     """
     verify = get_verify_ssl(server_cfg)
     cert = get_client_cert(server_cfg)
-    return asyncio.run(
-        _call_tool_stream_http_async(
-            base_url=url,
-            token=token,
-            timeout=timeout,
-            verify=verify,
-            tool_name=tool_name,
-            arguments=arguments,
-            cert=cert,
+    server_key = f"stream_http::{url}"
+
+    try:
+        return _SESSION_MANAGER.run(
+            _call_tool_stream_http_persistent(
+                server_key=server_key,
+                base_url=url,
+                token=token,
+                timeout=timeout,
+                verify=verify,
+                tool_name=tool_name,
+                arguments=arguments,
+                cert=cert,
+            )
         )
-    )
+    except Exception:
+        # Fallback to stateless mode on any persistent session failure
+        return asyncio.run(
+            _call_tool_stream_http_async(
+                base_url=url,
+                token=token,
+                timeout=timeout,
+                verify=verify,
+                tool_name=tool_name,
+                arguments=arguments,
+                cert=cert,
+            )
+        )
 
 
 async def _list_tools_stream_stdio_async(
