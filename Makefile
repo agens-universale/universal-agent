@@ -5,7 +5,7 @@ OUT_DIR  := /tmp/playwright-mcp
 
 .PHONY: start start-debug stop restart status logs
 
-start:
+playwrrite_start:
 	@if pgrep -f "playwright/mcp" > /dev/null; then \
 		echo "Already running (use 'make restart' to restart)"; \
 	else \
@@ -19,7 +19,7 @@ start:
 	fi
 
 # Запуск с выводом всех входящих запросов в терминал (не в фоне)
-start-debug:
+playwrrite_start-debug:
 	@pkill -f "playwright/mcp" 2>/dev/null || true
 	DEBUG=pw:mcp* npx @playwright/mcp@0.0.70 \
 		--port $(PORT) \
@@ -27,17 +27,17 @@ start-debug:
 		--isolated \
 		--output-dir $(OUT_DIR)
 
-stop:
+playwrrite_stop:
 	@pkill -f "playwright/mcp" && echo "Stopped" || echo "Not running"
 
-restart: stop
+playwrrite_restart: stop
 	@sleep 1
 	@$(MAKE) start
 
-status:
+playwrrite_status:
 	@pgrep -f "playwright/mcp" > /dev/null \
 		&& echo "Running (PID: $$(pgrep -f 'playwright/mcp'))" \
 		|| echo "Not running"
 
-logs:
+playwrrite_logs:
 	@tail -f $(LOG_FILE)
