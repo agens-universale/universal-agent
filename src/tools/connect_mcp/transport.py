@@ -218,6 +218,8 @@ def _spawn_stdio_process(server_cfg: Dict[str, Any]) -> subprocess.Popen:
         env=env,
         text=True,
         bufsize=1,
+        encoding="utf-8",
+        errors="replace",
     )
 
 
