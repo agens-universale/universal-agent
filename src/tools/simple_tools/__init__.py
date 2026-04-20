@@ -13,6 +13,7 @@ from tools.simple_tools.submit_solution import SubmitSolution
 from tools.simple_tools.calculator import Calculator
 from tools.simple_tools.run_python_code import RunPythonCode
 from tools.simple_tools.fetch_url import FetchUrl
+from tools.simple_tools.save_base64_file import SaveBase64File
 from typing import Dict, Any
 
 
@@ -92,6 +93,11 @@ def get_simple_tools_data(config_dict: Dict[str, Any]) -> Dict[str, Dict[str, An
             'tool_fabric': SubmitSolution,
             'spec': SubmitSolution.tool_description(),
             'description': SubmitSolution.prompt_description(),
+        },
+        'save_base64_file': {
+            'tool_fabric': SaveBase64File,
+            'spec': SaveBase64File.tool_description(),
+            'description': SaveBase64File.prompt_description(),
         },
     }
 

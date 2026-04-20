@@ -405,6 +405,23 @@ mcp-servers:
 
 Прослойка между агентом и playwrite mcp. Работает через transport stdio. Запуск локально
 
+
+
+```yaml
+  browser:
+    transport: stdio
+    command: /Users/nikita/sber/original-backgroud-agent/.venv/bin/browser-use
+    args: ["--mcp"]
+    cwd: /Users/nikita/sber/original-backgroud-agent
+    # Держим один процесс browser-use (и Chromium) на всё время работы
+    # агента: handshake выполняется один раз, все tools/call идут через
+    # живой stdin/stdout. Закрывается в AgentExecutor.run() finally.
+    persistent_session: true
+    persistent_session_close_tool: browser_close_all
+    description: Browser automation via browser-use. Use for web navigation, clicking, form filling, taking screenshots, and web scraping. Available actions - navigate (browser_navigate), click by index or coordinates (browser_click), type text (browser_type), get page state with interactive elements and optional screenshot (browser_get_state), extract structured content (browser_extract_content), get raw HTML (browser_get_html), take screenshot (browser_screenshot), scroll (browser_scroll), go back (browser_go_back), manage tabs (browser_list_tabs, browser_switch_tab, browser_close_tab), sessions (browser_list_sessions, browser_close_session, browser_close_all), and high-level agent fallback (retry_with_browser_use_agent).
+    server-name: browser-use
+```
+
 ```bash
 uv add browser-use 
 # uvx browser-use install  # Run if you don't have Chromium installed
