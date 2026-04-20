@@ -400,3 +400,12 @@ mcp-servers:
       (accessibility tree), evaluate JavaScript.
     server-name: playwright-browser
 ```
+
+# Browser User 
+
+Прослойка между агентом и playwrite mcp. Работает через transport stdio. Запуск локально
+
+```bash
+uv add browser-use 
+# uvx browser-use install  # Run if you don't have Chromium installed
+```

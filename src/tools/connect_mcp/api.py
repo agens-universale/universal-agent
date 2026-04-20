@@ -5,6 +5,10 @@ import logging
 import requests
 
 from tools.connect_mcp.client import _MCP_SESSIONS, _call_mcp_tool, _get_or_init_session_id
+from tools.connect_mcp.persistent_stdio import (
+    PersistentStdioRegistry,
+    is_persistent_stdio,
+)
 from tools.connect_mcp.registry import get_all_tools
 from tools.connect_mcp.stream_client import (
     call_tool_stream_http,
@@ -192,6 +196,15 @@ def call_mcp_tool(
                 timeout=timeout,
                 tool_name=base_tool_name,
                 arguments=arguments_obj,
+            )
+        if is_persistent_stdio(server_cfg):
+            session = PersistentStdioRegistry.instance().get_or_create(
+                server_key, server_cfg
+            )
+            return session.call(
+                "tools/call",
+                {"name": base_tool_name, "arguments": arguments_obj},
+                timeout,
             )
 
         session_id = _get_or_init_session_id(

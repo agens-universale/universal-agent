@@ -25,6 +25,7 @@ from thread_store import (
     reset_thread_files,
     resolve_threads_dir,
 )
+from tools.connect_mcp.persistent_stdio import PersistentStdioRegistry
 from tools.skills.registry import get_skills_registry
 from user_message_policy import (
     TECHNICAL_TYPE_CURRENT_CONTEXT,
@@ -406,16 +407,21 @@ class AgentExecutor:
             with self._lock:
                 return self._state.stop_requested if self._state is not None else False
 
-        response = run_agent(
-            messages,
-            state,
-            self._ctx,
-            get_full_history_messages=get_full_history_messages,
-            persist_messages_callback=persist_messages_callback,
-            post_step_hook=_post_step_summary_hook,
-            get_pending_messages=get_pending_messages,
-            check_stop=check_stop,
-        )
+        try:
+            response = run_agent(
+                messages,
+                state,
+                self._ctx,
+                get_full_history_messages=get_full_history_messages,
+                persist_messages_callback=persist_messages_callback,
+                post_step_hook=_post_step_summary_hook,
+                get_pending_messages=get_pending_messages,
+                check_stop=check_stop,
+            )
+        finally:
+            # Закрываем долгоживущие stdio MCP-сессии (напр. browser-use + Chromium),
+            # чтобы они не переживали конкретный запуск агента.
+            PersistentStdioRegistry.instance().close_all()
 
         if config_dict.get("dump_storage"):
             cur_dir = config_dict.get("logs_dump_dir") or os.getcwd()

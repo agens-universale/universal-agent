@@ -11,6 +11,10 @@ from utils.retry import retry_with_backoff
 
 logger = logging.getLogger(__name__)
 from tools.connect_mcp.client import _tools_list_request, _get_or_init_session_id, _MCP_SESSIONS
+from tools.connect_mcp.persistent_stdio import (
+    PersistentStdioRegistry,
+    is_persistent_stdio,
+)
 from tools.connect_mcp.stream_client import (
     list_tools_stream_http,
     list_tools_stream_sse,
@@ -92,6 +96,18 @@ def _build_tools_registry(
                         server_cfg=server_cfg,
                         timeout=10.0,
                     )
+                if is_persistent_stdio(server_cfg):
+                    session = PersistentStdioRegistry.instance().get_or_create(
+                        server_name, server_cfg
+                    )
+                    resp = session.call("tools/list", {}, 10.0)
+                    result = resp.get("result") if isinstance(resp, dict) else None
+                    tools = (
+                        result.get("tools", [])
+                        if isinstance(result, dict)
+                        else []
+                    )
+                    return tools if isinstance(tools, list) else []
 
                 session_id = _get_or_init_session_id(
                     server_name, url, server_cfg, token=token
