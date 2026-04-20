@@ -365,7 +365,8 @@ swarm:
 
 ```bash
 # Установить Playwright-браузеры (один раз)
-npx playwright install chromium
+npm install -g playwright
+playwright install chromium
 
 # Запустить MCP-сервер через Makefile из корня проекта
 make start        # фоновый запуск, логи → /tmp/playwright-mcp.log
