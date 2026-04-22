@@ -1,6 +1,6 @@
 agent_url : 'http://127.0.0.1:8080/v1/responses'
 # Режим backend API: responses | chat_completions
-backend_api_mode: responses
+backend_api_mode: chat_completions
 # URL для chat/completions (используется только при backend_api_mode=chat_completions)
 completions_url: 'http://127.0.0.1:8080/v1/chat/completions'
 # Токен для chat/completions (например OpenRouter API key).
@@ -38,10 +38,10 @@ summary_params:
   # chat_completions_intent_guard_prompt_path: "./prompts/chat_completions_intent_guard_prompt.md"
   # Порог принудительной суммаризации в символах.
   # <= 0: отключено, > 0: триггер при chars_total >= порога.
-  chat_completions_summary_trigger_chars: 0
+  chat_completions_summary_trigger_chars: 200000
   # Размер батча инкрементальной суммаризации. Если не задан,
   # рассчитывается как int(chat_completions_summary_trigger_chars * 1.4).
-  incremental_batch_chars: 0
+  incremental_batch_chars: 280000
   # Максимум символов на одно сообщение при подготовке истории к суммаризации.
   max_message_chars: 50000
   # Максимум символов на весь диалог (берется хвост целыми сообщениями).
@@ -61,7 +61,7 @@ summary_params:
 # memory_files_total_budget_chars: 150000  # Суммарный бюджет на все файлы (default 150000)
 # memory_files_max_files: 20               # Максимум файлов в треде (default 20)
 
-use_ssl: True
+use_ssl: false
 # Включить ретраи (до 5 попыток) с экспоненциальным backoff
 # для запросов к backend и MCP-серверам.
 use_retry: true
@@ -78,9 +78,9 @@ model: CodeAgent
 system_prompt_id: v1
 use_server_subagents: true
 # Локальные субагенты (работают только при backend_api_mode=chat_completions).
-# В этом демо-конфиге backend_api_mode=responses, поэтому параметр не влияет,
-# но оставлен как явная документация доступной опции.
-use_local_subagents: false
+# В этом демо-конфиге режим chat_completions включен, поэтому локальные
+# субагенты активны по умолчанию.
+use_local_subagents: true
 # Лимит шагов дочернего агента.
 subagent_max_steps: 50
 # Модель для субагентов; null -> наследовать model родителя.
@@ -117,15 +117,15 @@ save_logs: true
 
 mcp-servers:
   # доступные типы транспорта http, stdio, sse, stream_http, stream_sse, stream_stdio
-  rag:
-    transport: http
-    url: https://127.0.0.1:8091/mcp
-    description: Gitverse documentation search and answer
-    server-name: gitverse RAG
+  # rag:
+  #  transport: http
+  #  url: https://127.0.0.1:8091/mcp
+  #  description: Company documentation search and answer
+  #  server-name: Documentation RAG
     # Проверка SSL-сертификата для этого MCP-сервера:
     # true  - включена (по умолчанию, если параметр не задан)
     # false - отключена (при проблемах с сертификатом или self-signed)
-    verify-ssl: true
+    verify-ssl: false
   search:
     transport: sse
     url: http://0.0.0.0:10090/mcp
