@@ -250,6 +250,12 @@ class AgentExecutor:
             "content": message,
             "id": generate_message_id_func("m"),
         }
+        # Seed user_messages_log с текущим пользовательским сообщением.
+        # _persist_*_batch-коллбэки ниже получают только step_messages
+        # (ответ ассистента + tool calls/outputs); без этого seed'а
+        # finish_gate в processing_responses.py читает пустой лог и
+        # отвергает валидный submit_solution как «user intent is empty».
+        state.append_user_messages_to_log([new_user_message])
         technical_user_message = None
         _thread_mf = thread_shared.memory_files if thread_shared is not None else {}
         _has_memory = (
