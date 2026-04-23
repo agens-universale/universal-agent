@@ -78,6 +78,64 @@ class _PersistentSessionManager:
         self._sessions.pop(server_key, None)
         self._cm_stacks.pop(server_key, None)
 
+    def close_all(self) -> None:
+        """
+        Закрыть все открытые сессии и остановить фоновый loop.
+        Безопасно вызывать из основного потока; каждый cm_stack закрывается
+        в своём же event loop через run_coroutine_threadsafe.
+        Ничего не делает, если loop не запускался.
+        """
+        with self._lock:
+            loop = self._loop
+            stacks = list(self._cm_stacks.items())
+            self._sessions.clear()
+            self._cm_stacks.clear()
+
+        if loop is None or not loop.is_running():
+            return
+
+        async def _close_stack(cms: Any) -> None:
+            # cm_stack — tuple контекст-менеджеров в порядке открытия;
+            # закрываем в обратном порядке, глотая ошибки по каждому.
+            for cm in reversed(cms):
+                try:
+                    await cm.__aexit__(None, None, None)
+                except Exception:
+                    pass
+
+        for _key, cm_stack in stacks:
+            fut = concurrent.futures.Future()
+
+            async def _wrapper(cms=cm_stack):
+                try:
+                    await _close_stack(cms)
+                    fut.set_result(None)
+                except Exception as exc:
+                    fut.set_exception(exc)
+
+            try:
+                asyncio.run_coroutine_threadsafe(_wrapper(), loop)
+                fut.result(timeout=15)
+            except Exception:
+                pass
+
+        # Останавливаем loop и даём фоновому потоку завершиться.
+        try:
+            loop.call_soon_threadsafe(loop.stop)
+        except Exception:
+            pass
+        thread = self._thread
+        if thread is not None:
+            try:
+                thread.join(timeout=5)
+            except Exception:
+                pass
+
+        with self._lock:
+            if self._loop is loop:
+                self._loop = None
+                self._thread = None
+
 
 _SESSION_MANAGER = _PersistentSessionManager()
 
@@ -283,6 +341,62 @@ async def _call_tool_stream_sse_async(
         }
 
 
+async def _call_tool_stream_sse_persistent(
+    server_key: str,
+    base_url: str,
+    token: Optional[str],
+    timeout: float,
+    verify: bool,
+    tool_name: str,
+    arguments: Dict[str, Any],
+    cert: Optional[Tuple[str, str]] = None,
+) -> Dict[str, Any]:
+    """
+    Persistent вариант: держим открытой одну ClientSession поверх живого
+    SSE-коннекта в фоновом event loop _SESSION_MANAGER, переиспользуем между вызовами.
+    """
+    session: Optional[ClientSession] = _SESSION_MANAGER.get_session(server_key)
+
+    async def _open_session() -> ClientSession:
+        endpoint = _build_endpoint(base_url, "/sse")
+        headers: Dict[str, str] = {}
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        httpx_factory = _make_httpx_factory(verify, cert=cert)
+        transport_cm = sse_client(
+            endpoint,
+            headers=headers or None,
+            timeout=timeout,
+            httpx_client_factory=httpx_factory,
+        )
+        read_stream, write_stream = await transport_cm.__aenter__()
+        new_session = ClientSession(read_stream, write_stream)
+        await new_session.__aenter__()
+        await new_session.initialize()
+        _SESSION_MANAGER.set_session(server_key, new_session, (transport_cm, new_session))
+        return new_session
+
+    async def _call(s: ClientSession) -> Dict[str, Any]:
+        result = await s.call_tool(tool_name, arguments or {})
+        content_items: List[Any] = []
+        for item in getattr(result, "content", []) or []:
+            if hasattr(item, "model_dump"):
+                content_items.append(item.model_dump(by_alias=True, mode="json", exclude_unset=True))
+            else:
+                content_items.append(item)
+        return {"content": content_items, "isError": bool(getattr(result, "isError", False))}
+
+    if session is not None:
+        try:
+            return await _call(session)
+        except Exception:
+            _SESSION_MANAGER.invalidate(server_key)
+            session = None
+
+    session = await _open_session()
+    return await _call(session)
+
+
 def call_tool_stream_sse(
     url: str,
     server_cfg: Dict[str, Any],
@@ -294,10 +408,32 @@ def call_tool_stream_sse(
     """
     Синхронная обёртка над _call_tool_stream_sse_async для tools/call.
 
+    Если server_cfg.persistent_session=true — используется persistent режим
+    (сессия живёт между вызовами). Иначе — stateless (как раньше).
+
     url: базовый URL сервера из конфига (без /sse в конце).
     """
     verify = get_verify_ssl(server_cfg)
     cert = get_client_cert(server_cfg)
+
+    if bool(server_cfg.get("persistent_session")):
+        server_key = f"stream_sse::{url}"
+        try:
+            return _SESSION_MANAGER.run(
+                _call_tool_stream_sse_persistent(
+                    server_key=server_key,
+                    base_url=url,
+                    token=token,
+                    timeout=timeout,
+                    verify=verify,
+                    tool_name=tool_name,
+                    arguments=arguments,
+                    cert=cert,
+                )
+            )
+        except Exception:
+            _SESSION_MANAGER.invalidate(f"stream_sse::{url}")
+
     return asyncio.run(
         _call_tool_stream_sse_async(
             base_url=url,
@@ -531,14 +667,28 @@ def call_tool_stream_http(
 ) -> Dict[str, Any]:
     """
     Синхронная обёртка над _call_tool_stream_http_async.
-    Использует персистентную сессию для сохранения состояния браузера/сервера
-    между последовательными вызовами в рамках одного процесса.
+    Персистентная сессия включается флагом `persistent_session: true`
+    (единый дефолт со всеми остальными транспортами — False).
 
     url: базовый URL сервера из конфига (без /mcp в конце).
     """
     verify = get_verify_ssl(server_cfg)
     cert = get_client_cert(server_cfg)
     server_key = f"stream_http::{url}"
+
+    persistent = bool(server_cfg.get("persistent_session"))
+    if not persistent:
+        return asyncio.run(
+            _call_tool_stream_http_async(
+                base_url=url,
+                token=token,
+                timeout=timeout,
+                verify=verify,
+                tool_name=tool_name,
+                arguments=arguments,
+                cert=cert,
+            )
+        )
 
     try:
         return _SESSION_MANAGER.run(
@@ -669,6 +819,59 @@ async def _call_tool_stream_stdio_async(
         }
 
 
+async def _call_tool_stream_stdio_persistent(
+    server_key: str,
+    server_cfg: Dict[str, Any],
+    timeout: float,
+    tool_name: str,
+    arguments: Dict[str, Any],
+) -> Dict[str, Any]:
+    """
+    Persistent вариант: держим stdio MCP-сервер живым (один subprocess +
+    одна ClientSession) в фоновом event loop _SESSION_MANAGER.
+    """
+    session: Optional[ClientSession] = _SESSION_MANAGER.get_session(server_key)
+
+    async def _open_session() -> ClientSession:
+        command = server_cfg.get("command")
+        args = server_cfg.get("args") or []
+        if not isinstance(args, list):
+            args = [args]
+        params = StdioServerParameters(
+            command=str(command),
+            args=[str(a) for a in args],
+            env=server_cfg.get("env") or None,
+            cwd=server_cfg.get("cwd") or None,
+        )
+        transport_cm = stdio_client(params)
+        read_stream, write_stream = await transport_cm.__aenter__()
+        new_session = ClientSession(read_stream, write_stream)
+        await new_session.__aenter__()
+        await new_session.initialize()
+        _SESSION_MANAGER.set_session(server_key, new_session, (transport_cm, new_session))
+        return new_session
+
+    async def _call(s: ClientSession) -> Dict[str, Any]:
+        result = await s.call_tool(tool_name, arguments or {})
+        content_items: List[Any] = []
+        for item in getattr(result, "content", []) or []:
+            if hasattr(item, "model_dump"):
+                content_items.append(item.model_dump(by_alias=True, mode="json", exclude_unset=True))
+            else:
+                content_items.append(item)
+        return {"content": content_items, "isError": bool(getattr(result, "isError", False))}
+
+    if session is not None:
+        try:
+            return await _call(session)
+        except Exception:
+            _SESSION_MANAGER.invalidate(server_key)
+            session = None
+
+    session = await _open_session()
+    return await _call(session)
+
+
 def call_tool_stream_stdio(
     server_cfg: Dict[str, Any],
     timeout: float,
@@ -677,7 +880,28 @@ def call_tool_stream_stdio(
 ) -> Dict[str, Any]:
     """
     Синхронная обёртка над _call_tool_stream_stdio_async.
+
+    При persistent_session=true субпроцесс и ClientSession держатся живыми
+    между вызовами (одна Chromium-сессия на весь цикл работы агента).
     """
+    if bool(server_cfg.get("persistent_session")):
+        # Ключ по команде+args, чтобы одинаковые сервера делили сессию.
+        args = server_cfg.get("args") or []
+        args_key = ",".join(str(a) for a in (args if isinstance(args, list) else [args]))
+        server_key = f"stream_stdio::{server_cfg.get('command')}::{args_key}"
+        try:
+            return _SESSION_MANAGER.run(
+                _call_tool_stream_stdio_persistent(
+                    server_key=server_key,
+                    server_cfg=server_cfg,
+                    timeout=timeout,
+                    tool_name=tool_name,
+                    arguments=arguments,
+                )
+            )
+        except Exception:
+            _SESSION_MANAGER.invalidate(server_key)
+
     return asyncio.run(
         _call_tool_stream_stdio_async(
             server_cfg=server_cfg,

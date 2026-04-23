@@ -293,7 +293,18 @@ class PersistentStdioRegistry:
                 pass
 
 
+def is_persistent_session(server_cfg: Dict[str, Any]) -> bool:
+    """
+    True, если в server_cfg включён флаг persistent_session.
+    Применимо к любому транспорту (stdio, stream_stdio, stream_sse, stream_http).
+    """
+    if not isinstance(server_cfg, dict):
+        return False
+    return bool(server_cfg.get("persistent_session"))
+
+
 def is_persistent_stdio(server_cfg: Dict[str, Any]) -> bool:
+    """Specialized: persistent режим именно для classic stdio транспорта."""
     if not isinstance(server_cfg, dict):
         return False
     if server_cfg.get("transport") != "stdio":
@@ -305,4 +316,5 @@ __all__ = [
     "PersistentStdioSession",
     "PersistentStdioRegistry",
     "is_persistent_stdio",
+    "is_persistent_session",
 ]

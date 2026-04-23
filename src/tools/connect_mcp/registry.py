@@ -70,6 +70,16 @@ def _build_tools_registry(
         )
         server_description = server_cfg.get("description") or ""
 
+        # persistent_session унифицирован: легаси `sse`/`http` транспорт не имеет
+        # своей персистентной сессии, поэтому при флаге true роутим через
+        # SDK-клиент `stream_sse`/`stream_http` (то же делаем и в call_mcp_tool).
+        effective_transport = transport
+        if server_cfg.get("persistent_session"):
+            if transport == "sse":
+                effective_transport = "stream_sse"
+            elif transport == "http":
+                effective_transport = "stream_http"
+
         try:
             @retry_with_backoff(
                 operation_name=f"MCP tools/list ({server_name})",
@@ -77,14 +87,14 @@ def _build_tools_registry(
                 no_more_retries_log_level=logging.ERROR,
             )
             def _fetch_tools() -> list[dict]:
-                if transport == "stream_sse":
+                if effective_transport == "stream_sse":
                     return list_tools_stream_sse(
                         url=url,
                         server_cfg=server_cfg,
                         token=token,
                         timeout=10.0,
                     )
-                if transport == "stream_http":
+                if effective_transport == "stream_http":
                     return list_tools_stream_http(
                         url=url,
                         server_cfg=server_cfg,

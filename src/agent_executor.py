@@ -26,6 +26,7 @@ from thread_store import (
     resolve_threads_dir,
 )
 from tools.connect_mcp.persistent_stdio import PersistentStdioRegistry
+from tools.connect_mcp.stream_client import _SESSION_MANAGER as _STREAM_SESSION_MANAGER
 from tools.skills.registry import get_skills_registry
 from user_message_policy import (
     TECHNICAL_TYPE_CURRENT_CONTEXT,
@@ -422,6 +423,12 @@ class AgentExecutor:
             # Закрываем долгоживущие stdio MCP-сессии (напр. browser-use + Chromium),
             # чтобы они не переживали конкретный запуск агента.
             PersistentStdioRegistry.instance().close_all()
+            # И persistent-сессии stream_* транспортов (stream_stdio/stream_sse/stream_http):
+            # закрываем все открытые ClientSession в их фоновом event loop и гасим loop.
+            try:
+                _STREAM_SESSION_MANAGER.close_all()
+            except Exception:
+                pass
 
         if config_dict.get("dump_storage"):
             cur_dir = config_dict.get("logs_dump_dir") or os.getcwd()
