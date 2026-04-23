@@ -14,7 +14,12 @@ def _replace_tag_block(template: str, tag: str, new_inner: str) -> str:
     if not re.search(pattern, template, flags=re.DOTALL):
         return template
 
-    return re.sub(pattern, rf"\1{new_inner}\3", template, flags=re.DOTALL)
+    return re.sub(
+        pattern,
+        lambda m: m.group(1) + new_inner + m.group(3),
+        template,
+        flags=re.DOTALL,
+    )
 
 
 def render_system_prompt(
