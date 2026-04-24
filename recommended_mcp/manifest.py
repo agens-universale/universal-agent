@@ -16,6 +16,9 @@ class ManifestError(ValueError):
 class InstallSpec:
     type: str
     platforms: tuple[str, ...] = ()
+    # Для type=npx: команды post-ensure для прогрева npm-кэша/расширений.
+    # Каждая запись — argv-список; вызывается как subprocess.run(cmd, check=True).
+    commands: tuple[tuple[str, ...], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -50,9 +53,23 @@ def _parse_entry(raw: dict[str, Any], source: Path) -> MCPEntry:
     install_raw = raw.get("install")
     if not isinstance(install_raw, dict):
         raise ManifestError(f"mcp '{name}' missing 'install' block in {source}")
+    commands_raw = install_raw.get("commands")
+    if commands_raw is None:
+        commands_raw = []
+    if not isinstance(commands_raw, list):
+        raise ManifestError(f"mcp '{name}' 'install.commands' must be a list in {source}")
+    commands: list[tuple[str, ...]] = []
+    for idx, cmd in enumerate(commands_raw):
+        if not isinstance(cmd, list) or not all(isinstance(c, str) for c in cmd):
+            raise ManifestError(
+                f"mcp '{name}' 'install.commands[{idx}]' must be a list of strings"
+            )
+        commands.append(tuple(cmd))
+
     install = InstallSpec(
         type=install_raw.get("type", ""),
         platforms=tuple(install_raw.get("platforms", ()) or ()),
+        commands=tuple(commands),
     )
     if not install.type:
         raise ManifestError(f"mcp '{name}' missing 'install.type' in {source}")

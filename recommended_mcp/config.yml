@@ -4,17 +4,35 @@
 # install.py и run.py читают этот файл.
 
 mcps:
-  - name: computer
-    path: ./computer
-    install:
-      type: wheel
-      platforms: [win32]
-    # run-блок отсутствует: MCP спавнится агентом через stdio.
+  # - name: computer
+  #   path: ./computer
+  #   install:
+  #     type: wheel
+  #     platforms: [win32]
+  #   # run-блок отсутствует: MCP спавнится агентом через stdio.
 
-  - name: office-reader
-    path: ./office-reader
+  # - name: office-reader
+  #   path: ./office-reader
+  #   install:
+  #     type: docker
+  #   run:
+  #     type: docker-compose
+  #     detach: true
+
+  - name: browser_playwright
+    path: ./browser_playwright
     install:
-      type: docker
-    run:
-      type: docker-compose
-      detach: true
+      type: npx # 
+      commands:
+        # Прогреваем npm-кэш (иначе первый запуск агента тянет пакет по сети).
+        - [npm, "install", "-g", "@playwright/mcp@0.0.70"]
+        # Предварительно качаем chromium — иначе скачается на первом tool_call.
+        - [npx, "playwright", "install", "--with-deps", "chromium"]
+    # run-блок отсутствует: агент спавнит сервер через stdio on-demand,
+    # с persistent_session: true процесс/браузер живут весь цикл агента.
+    # для докера использовать
+    # install:
+    #   type: docker
+    # run:
+    #   type: docker-compose
+    #   detach: true

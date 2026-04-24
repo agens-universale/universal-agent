@@ -1,0 +1,22 @@
+# Скопируй этот блок в секцию mcp-servers: своего config.yml агента.
+# Работает с persistent_session: true — один процесс npx и один Chromium
+# живут весь цикл работы агента (см. src/tools/connect_mcp/persistent_stdio.py).
+#
+# Windows: если `command: npx` падает с "file not found", поменяй на `npx.cmd`.
+browser_playwright:
+  transport: stream_stdio
+  command: npx
+  args: ["-y", "@playwright/mcp@latest"]
+  persistent_session: true
+  persistent_session_close_tool: browser_close
+  description: Browser automation via Playwright. Use for web navigation, clicking, form filling, taking screenshots, and webscraping.
+  server-name: playwright-browser
+
+# http version
+
+# browser_playwright:
+#   transport: stream_http
+#   url: http://localhost:8931/mcp
+#   description: Browser automation via Playwright. Use for web navigation, clicking, form filling, taking screenshots, and web scraping.
+#   server-name: playwright-browser
+#   persistent_session: true
