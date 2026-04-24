@@ -1,0 +1,6 @@
+# recommended_mcp/config.yml
+# Манифест доступных MCP-интеграций для background-agent.
+# Чтобы пропустить MCP — закомментируй его блок.
+# install.py и run.py читают этот файл.
+
+mcps: []
