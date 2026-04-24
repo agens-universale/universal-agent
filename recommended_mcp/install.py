@@ -146,14 +146,17 @@ def _install_npx(name: str, commands: tuple[tuple[str, ...], ...]) -> None:
     Шаги:
       1. ensure Node.js/npx (идемпотентно).
       2. прогнать install.commands из config.yml (обычно — pre-fetch npm-пакетов
-         и загрузка Playwright-браузеров). Первое `npx` в argv подменяется на
-         абсолютный путь, чтобы Windows .cmd-shim не требовал shell=True.
+         и загрузка Playwright-браузеров). Первый элемент argv (npm/npx/yarn/...)
+         резолвится через shutil.which — на Windows .cmd-shim'ы CreateProcess
+         без shell=True не находит по bare-имени, нужен абсолютный путь.
     """
-    npx = _ensure_node()
+    _ensure_node()
     for cmd in commands:
         argv = list(cmd)
-        if argv and argv[0] == "npx":
-            argv[0] = npx
+        if argv:
+            resolved = shutil.which(argv[0])
+            if resolved:
+                argv[0] = resolved
         print(f"[install] {name}: {' '.join(argv)}")
         subprocess.run(argv, check=True)
 
