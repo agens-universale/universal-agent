@@ -3,4 +3,10 @@
 # Чтобы пропустить MCP — закомментируй его блок.
 # install.py и run.py читают этот файл.
 
-mcps: []
+mcps:
+  - name: computer
+    path: ./computer
+    install:
+      type: wheel
+      platforms: [win32]
+    # run-блок отсутствует: MCP спавнится агентом через stdio.
