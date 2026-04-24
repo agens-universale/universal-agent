@@ -184,6 +184,7 @@ Usage:
         total_chars: Optional[int] = None,
         has_more: Optional[bool] = None,
         cache_hit: Optional[bool] = None,
+        meta: Optional[Dict[str, Optional[str]]] = None,
     ) -> str:
         payload: Dict[str, Any] = {
             "tool": "fetch_url",
@@ -196,6 +197,7 @@ Usage:
             "result_type": result_type,
             "extracted_source": extracted_source,
             "truncated": truncated,
+            "meta": meta if meta is not None else {"title": None, "description": None, "lang": None},
             "error": error,
         }
         if max_content_chars is not None:
@@ -218,7 +220,7 @@ Usage:
         payload["preview"] = preview
         return json.dumps(payload, ensure_ascii=False)
 
-    def _get_cache(self) -> Optional[Dict[str, str]]:
+    def _get_cache(self) -> Optional[Dict[str, Any]]:
         shared = getattr(self._state, "shared", None)
         if shared is None:
             return None
@@ -227,6 +229,48 @@ Usage:
             cache = {}
             setattr(shared, "fetch_url_cache", cache)
         return cache
+
+    @staticmethod
+    def _normalize_meta(meta: Optional[Dict[str, Any]]) -> Dict[str, Optional[str]]:
+        normalized: Dict[str, Optional[str]] = {"title": None, "description": None, "lang": None}
+        if not isinstance(meta, dict):
+            return normalized
+        for key in ("title", "description", "lang"):
+            value = meta.get(key)
+            if isinstance(value, str):
+                value = value.strip()
+                normalized[key] = value or None
+        return normalized
+
+    @classmethod
+    def _extract_meta(cls, html: str) -> Dict[str, Optional[str]]:
+        meta: Dict[str, Optional[str]] = {"title": None, "description": None, "lang": None}
+        if not html:
+            return meta
+        title_match = re.search(r"<title\b[^>]*>(.*?)</title>", html, flags=re.IGNORECASE | re.DOTALL)
+        if title_match:
+            title = cls._strip_html_tags(title_match.group(1)).strip()
+            meta["title"] = title or None
+
+        html_match = re.search(r"<html\b([^>]*)>", html, flags=re.IGNORECASE)
+        if html_match:
+            attrs = html_match.group(1)
+            lang_match = re.search(r"""\blang\s*=\s*(['"])(.*?)\1""", attrs, flags=re.IGNORECASE | re.DOTALL)
+            if lang_match:
+                lang = html_lib.unescape(re.sub(r"\s+", " ", lang_match.group(2))).strip()
+                meta["lang"] = lang or None
+
+        description_patterns = [
+            r"""<meta\b(?=[^>]*\bname\s*=\s*(['"])description\1)(?=[^>]*\bcontent\s*=\s*(['"])(.*?)\2)[^>]*>""",
+            r"""<meta\b(?=[^>]*\bproperty\s*=\s*(['"])og:description\1)(?=[^>]*\bcontent\s*=\s*(['"])(.*?)\2)[^>]*>""",
+        ]
+        for pattern in description_patterns:
+            description_match = re.search(pattern, html, flags=re.IGNORECASE | re.DOTALL)
+            if description_match:
+                description = html_lib.unescape(re.sub(r"\s+", " ", description_match.group(3))).strip()
+                meta["description"] = description or None
+                break
+        return cls._normalize_meta(meta)
 
     def _slice_content(self, content: str, offset: int, limit: int) -> Dict[str, Any]:
         total_chars = len(content)
@@ -313,7 +357,14 @@ Usage:
 
         cache = self._get_cache()
         if cache is not None and normalized_url in cache:
-            sliced = self._slice_content(cache[normalized_url], offset, limit)
+            cached = cache[normalized_url]
+            if isinstance(cached, dict):
+                cached_content = cached.get("content", "")
+                cached_meta = self._normalize_meta(cached.get("meta"))
+            else:
+                cached_content = cached if isinstance(cached, str) else ""
+                cached_meta = self._normalize_meta(None)
+            sliced = self._slice_content(cached_content, offset, limit)
             return _result(
                 ok=True,
                 final_url=normalized_url,
@@ -331,6 +382,7 @@ Usage:
                 total_chars=sliced["total_chars"],
                 has_more=sliced["has_more"],
                 cache_hit=True,
+                meta=cached_meta,
                 error=None,
             )
 
@@ -423,6 +475,7 @@ Usage:
                 total_chars=0,
                 has_more=False,
                 cache_hit=False,
+                meta=self._normalize_meta(None),
                 error=None,
             )
 
@@ -440,13 +493,16 @@ Usage:
                 result_type="binary",
                 content="binary data",
                 preview="",
+                meta=self._normalize_meta(None),
                 error={"type": "decode_failed", "message": str(e)},
             )
+
+        page_meta = self._extract_meta(text)
 
         extracted_text = trafilatura.extract(
             text,
             url=response.url,
-            include_links=False,
+            include_links=True,
             include_images=False,
             favor_recall=True,
         )
@@ -455,7 +511,7 @@ Usage:
             c = extracted_text.strip()
             if not self._looks_like_garbled_text(c):
                 if cache is not None:
-                    cache[normalized_url] = c
+                    cache[normalized_url] = {"content": c, "meta": page_meta}
                 sliced = self._slice_content(c, offset, limit)
                 return _result(
                     ok=True,
@@ -474,6 +530,7 @@ Usage:
                     total_chars=sliced["total_chars"],
                     has_more=sliced["has_more"],
                     cache_hit=False,
+                    meta=page_meta,
                     error=None,
                 )
 
@@ -492,7 +549,7 @@ Usage:
                 c = fallback_text.strip()
                 if not self._looks_like_garbled_text(c):
                     if cache is not None:
-                        cache[normalized_url] = c
+                        cache[normalized_url] = {"content": c, "meta": page_meta}
                     sliced = self._slice_content(c, offset, limit)
                     return _result(
                         ok=True,
@@ -511,6 +568,7 @@ Usage:
                         total_chars=sliced["total_chars"],
                         has_more=sliced["has_more"],
                         cache_hit=False,
+                        meta=page_meta,
                         error=None,
                     )
 
@@ -518,7 +576,7 @@ Usage:
             if cleaned_summary and not self._looks_like_garbled_text(cleaned_summary):
                 c = cleaned_summary
                 if cache is not None:
-                    cache[normalized_url] = c
+                    cache[normalized_url] = {"content": c, "meta": page_meta}
                 sliced = self._slice_content(c, offset, limit)
                 return _result(
                     ok=True,
@@ -537,6 +595,7 @@ Usage:
                     total_chars=sliced["total_chars"],
                     has_more=sliced["has_more"],
                     cache_hit=False,
+                    meta=page_meta,
                     error=None,
                 )
         except Exception:
@@ -551,6 +610,7 @@ Usage:
                 content_type=content_type,
                 is_binary=False,
                 result_type="error",
+                meta=page_meta,
                 error={
                     "type": "extraction_failed",
                     "message": "Could not extract readable text. Response appears garbled or encoded.",
@@ -577,5 +637,6 @@ Usage:
             preview=preview,
             truncated=truncated,
             max_preview_chars=max_preview_chars if truncated else None,
+            meta=page_meta,
             error={"type": "extraction_failed", "message": "Could not extract readable text. Returned preview."},
         )

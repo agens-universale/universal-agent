@@ -1,16 +1,23 @@
+# Для работы с backend API в режиме responses
 agent_url : 'http://127.0.0.1:8080/v1/responses'
+
 # Режим backend API: responses | chat_completions
-backend_api_mode: responses
+backend_api_mode: chat_completions
+
 # URL для chat/completions (используется только при backend_api_mode=chat_completions)
-completions_url: 'http://127.0.0.1:8080/v1/chat/completions'
+completions_url: 'http://127.0.0.1:8014/v1/chat/completions'
+# completions_url: https://openrouter.ai/api/v1/chat/completions'
+
 # Токен для chat/completions (например OpenRouter API key).
 # Если задан, в запрос отправляется заголовок Authorization: Bearer <token>.
 # Можно использовать алиас openrouter_api_key.
 # chat_completions_auth_token: "sk-or-v1-..."
 # openrouter_api_key: "sk-or-v1-..."
+
 # Необязательные заголовки OpenRouter:
 # openrouter_http_referer: "https://your-app.example"
 # openrouter_x_title: "mini-cli-pub"
+
 # Путь к системному промпту для режима chat/completions.
 # Если не задан, используется ./prompts/chat_completions_system_prompt.md.
 # chat_completions_system_prompt_path: "./prompts/chat_completions_system_prompt.md"
@@ -18,13 +25,15 @@ completions_url: 'http://127.0.0.1:8080/v1/chat/completions'
 # Если не задан, раннер попробует ./prompts/chat_completions_subagent_system_prompt.md,
 # а затем fallback на промпт родительского оркестратора.
 # chat_completions_subagent_system_prompt_path: "./prompts/chat_completions_subagent_system_prompt.md"
-#
+
 # Лимит токенов на ответ API chat/completions (поле max_tokens). У OpenRouter фактический
 # потолок генерации ≈ min(max_tokens, context_window − длина_промпта): длинная история треда
 # «съедает» окно — аргументы тула обрываются на десятках символов даже при большом max_tokens.
 # Тогда: короткий write/create + append_to_file чанками, суммаризация/новый тред, или модель с
 # большим контекстом. Допустимы int и строки вида "16k", "32k".
-# chat_completions_max_tokens: 8096
+# chat_completions_max_tokens: 8000
+chat_completions_max_tokens: 32768
+
 # Параметры суммаризации для chat/completions.
 summary_params:
   # Путь к промпту суммаризации длинного диалога.
@@ -38,68 +47,80 @@ summary_params:
   # chat_completions_intent_guard_prompt_path: "./prompts/chat_completions_intent_guard_prompt.md"
   # Порог принудительной суммаризации в символах.
   # <= 0: отключено, > 0: триггер при chars_total >= порога.
-  chat_completions_summary_trigger_chars: 0
+  chat_completions_summary_trigger_chars: 200000
   # Размер батча инкрементальной суммаризации. Если не задан,
   # рассчитывается как int(chat_completions_summary_trigger_chars * 1.4).
-  incremental_batch_chars: 0
+  incremental_batch_chars: 280000
   # Максимум символов на одно сообщение при подготовке истории к суммаризации.
-  max_message_chars: 50000
+  max_message_chars: 30000
   # Максимум символов на весь диалог (берется хвост целыми сообщениями).
   max_dialogue_chars: 1000000
   # Если накопленный summary становится длиннее этого лимита, выполняется
   # дополнительный шаг "summary-of-summary" для сжатия.
-  max_accumulated_summary_chars: 20000
+  max_accumulated_summary_chars: 60000
   # Лимит (в символах) для meta.user_messages_log (единый источник user-запросов).
   # Берутся последние сообщения целиком, пока не исчерпан бюджет.
   original_user_messages_max_chars: 20000
   # Сколько последних сообщений включать в <last_dialog_steps>.
-  last_dialog_steps_count: 5
+  last_dialog_steps_count: 4
   # Максимум символов на одно сообщение в <last_dialog_steps>.
-  last_dialog_step_message_max_chars: 1500
+  last_dialog_step_message_max_chars: 5000
+
 # Настройки memory_files — персистентных именованных регистров памяти треда.
 # memory_files_max_file_chars: 50000       # Лимит символов на один файл (default 50000)
 # memory_files_total_budget_chars: 150000  # Суммарный бюджет на все файлы (default 150000)
 # memory_files_max_files: 20               # Максимум файлов в треде (default 20)
 
-use_ssl: True
+use_ssl: false
+
 # Включить ретраи (до 5 попыток) с экспоненциальным backoff
 # для запросов к backend и MCP-серверам.
 use_retry: true
-# remove agent_auth section if it's not necessary
-agent_auth:
-  "auth_endpoint": "http link to auth endpoint"
-  "env_name": "surface_cli"
-  "env_version": "0.0.1"
-  "plugin_name": "surf-cli-plugin"
-  "plugin_version": "0.0.1"
-  "device_code": "set your unic device code (guid like) - for log tracing in prod"
-  "login": "login"
-model: CodeAgent
+
+# Gigacode Prod data
 system_prompt_id: v1
-use_server_subagents: true
+use_server_subagents: false
+# GigaCode prod agent_auth section if it's not necessary
+# agent_auth:
+#  "auth_endpoint": "http link to auth endpoint"
+#  "env_name": "surface_cli"
+#  "env_version": "0.0.1"
+#  "plugin_name": "surf-cli-plugin"
+#  "plugin_version": "0.0.1"
+#  "device_code": "set your unic device code (guid like) - for log tracing in prod"
+#  "login": "login"
+
+model: MiniMax-M2.7
+# Для модли с OpenRouter указывайте как она дана там с префиксом вендора, например: z-ai/glm-5.1
+
 # Локальные субагенты (работают только при backend_api_mode=chat_completions).
-# В этом демо-конфиге backend_api_mode=responses, поэтому параметр не влияет,
-# но оставлен как явная документация доступной опции.
-use_local_subagents: false
+use_local_subagents: true
 # Лимит шагов дочернего агента.
 subagent_max_steps: 50
 # Модель для субагентов; null -> наследовать model родителя.
 # subagent_model: null
+
+# Данные для трейсов гигакода
 client_name : mini_cli_pub_agent_1
 x_cl_id : 12345
 verbose: true
 use_ask_human_tool: false
+
 # Имена simple_tools, которые будут отключены и не попадут в tool registry.
 # Пример:
 # stop_tools: [execute_command, run_python_code]
 stop_tools: []
 server_tool_prefix: system
+
 max_steps: 200
+
 # Порог подряд идущих ответов backend без tool_call; при превышении завершаем работу
 no_tool_call_max_count: 3
+
 # Строгая проверка submit_solution(full_solution) на соответствие user intent.
 # Проверяется только у основного агента (не у субагентов).
 strict_submit_solution_validation: true
+
 # Выводить пошаговый трейс работы агента в stdout (print).
 # В CLI-режиме обычно удобно оставить true, в серверном режиме
 # рекомендуется переопределять на false через agent_overrides.console_trace.
@@ -115,7 +136,9 @@ save_logs: true
 # Пример:
 # logs_dump_dir: "/home/user/my-project/gc-cli-runs"
 
+# MCP-сервера
 mcp-servers:
+<<<<<<< HEAD
   # доступные типы транспорта stdio, stream_http
   #
   # --- Playwright Browser MCP ---
@@ -184,10 +207,19 @@ mcp-servers:
     url: https://127.0.0.1:8091/mcp
     description: Gitverse documentation search and answer
     server-name: gitverse RAG
+=======
+  # доступные типы транспорта http, stdio, sse, stream_http, stream_sse, stream_stdio
+  # rag:
+  #  transport: http
+  #  url: https://127.0.0.1:8091/mcp
+  #  description: Company documentation search and answer
+  #  server-name: Documentation RAG
+>>>>>>> feat/recommended-mcp
     # Проверка SSL-сертификата для этого MCP-сервера:
     # true  - включена (по умолчанию, если параметр не задан)
     # false - отключена (при проблемах с сертификатом или self-signed)
-    verify-ssl: true
+    # verify-ssl: false
+  # Дефолтный сервер поиска ddgs-mcp
   search:
     transport: sse
     url: http://0.0.0.0:10090/mcp
@@ -196,14 +228,14 @@ mcp-servers:
     description: Common web and News search
     # Для этого сервера можно отдельно отключить проверку SSL, если нужно:
     # verify-ssl: false
-  sbertrack:
-    transport: stream_http
-    url: https://sbertrack.example.sbrf.ru/mcp
-    description: Tools for communicating with task-tracker system. Use it for receiving details or communicate about tasks on SberTrack platform.
-    verify-ssl: false
-    # Если сервер требует сертификаты, то можно указать к ним путь через параметры:
-    client-cert: "/path/to/cert.pem"
-    client-key: "/path/to/key.pem"
+  # sbertrack:
+  #  transport: stream_http
+  #  url: https://sbertrack.example.sbrf.ru/mcp
+  #  description: Tools for communicating with task-tracker system. Use it for receiving details or communicate about tasks on SberTrack platform.
+  #  verify-ssl: false
+  #  # Если сервер требует сертификаты, то можно указать к ним путь через параметры:
+  #  client-cert: "/path/to/cert.pem"
+  #  client-key: "/path/to/key.pem"
   # Пример stdio MCP (процесс запускается на каждый запрос списка тулов и на каждый вызов тула):
   # local-fs:
   #   transport: stdio
