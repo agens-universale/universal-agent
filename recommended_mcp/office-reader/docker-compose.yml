@@ -1,0 +1,14 @@
+# mcp-office-reader — HTTP-сервер в Docker.
+# Порт слушает только на localhost (не смотрит в сеть).
+# Workspace монтируется из корня background-agent read-only —
+# office-reader видит файлы проекта агента, но не может их изменить.
+# Чтобы дать доступ к файлам вне проекта — добавь свой volume сюда.
+
+services:
+  office-reader:
+    build: .
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - ../..:/workspace:ro
+    restart: unless-stopped
