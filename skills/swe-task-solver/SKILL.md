@@ -1,7 +1,7 @@
 ---
 id: "swe-task-solver"
 name: "swe-task-solver"
-description: "Lightweight, escalation-based protocol for solving SWE tasks with planning, implementation, review, state tracking, and verification proportional to risk. Use for features, bugfixes, behavior-changing refactors, and pre-implementation exploration."
+description: "Solves software engineering delivery tasks with risk-based planning, implementation, review, and verification. Use for features, bugfixes, behavior-changing refactors, test fixes, and implementation-ready code changes. Use exploration mode only when code work is likely and requirements or risks need clarification before delivery. Do not use for standalone codebase explanation, pure research, architecture ADRs, article writing, or project overview."
 version: "0.9.1"
 ---
 
@@ -22,7 +22,7 @@ Map protocol roles to whatever the current runtime provides:
 ## Use When
 - Implementing a feature, bugfix, or behavior-changing refactor.
 - Changing one or more files with an observable success condition.
-- Investigating requirements or architecture before coding.
+- Investigating implementation requirements before coding when code delivery is the likely next step.
 - Applying quality gates before completion, not only after the fact.
 
 Do not use this skill for simple explanations, read-only code lookup, or one-step commands with no delivery decision.

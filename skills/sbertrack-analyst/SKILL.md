@@ -1,7 +1,7 @@
 ---
 id: "sbertrack-business-analyst"
-name: "Business Analyst on SbertTrack tasks"
-description: "Инструкция для решения задач в роли бизнес аналитика на основе задач с площадки СберТрек. Генерация бизнес требований по необходимому шаблону."
+name: "sbertrack-business-analyst"
+description: "Generates structured business requirements for SberTrack tasks by analyzing task descriptions, linked tasks, wiki context, conflicts, and missing information. Use when working with SberTrack issues as a business analyst and the user needs requirements, AS IS/TO BE process, scenarios, acceptance criteria, wiki page creation, or comments in SberTrack."
 version: "0.0.1"
 ---
 

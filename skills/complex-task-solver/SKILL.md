@@ -1,137 +1,134 @@
 ---
 id: "complex-task-solver"
-name: "Complex Task Solver"
-description: "Instructions for agents on solving complex multi-step tasks with planner-critic, step-check, actor-critic loops, fact-checking, and intent alignment"
-version: "0.2.0"
+name: "complex-task-solver"
+description: "Strict orchestration protocol for high-impact, multi-step tasks with external side effects, blockers, irreversible actions, or cross-tool workflows. Use when the task requires planning gates, critic loops, approval before side effects, and recovery from failed attempts. Do not use when a specialized skill directly covers the task, such as SWE implementation, architecture design, topic research, article creation, article checking, or project overview."
+version: "0.4.0"
 ---
 
-# Skill: Complex Task Solving — Self-Correcting Planning & Intent-Aligned Delivery
+# Skill: Complex Task Solver — Universal Strict Orchestration
 
 ## Overview
-A general-purpose multi-agent workflow for solving complex, open-ended tasks. The skill orchestrates `Planner`, `Actor`, `Critic`, and `SpecialAgent` sub-agents through three mandatory self-correction modules: (1) `Planner-Critic` for plan quality review, (2) `Step-Check` for pre-action relevance validation, and (3) `Actor-Critic` for post-action outcome evaluation. The pipeline then performs final artifact assembly and intent-alignment verification. It guarantees factual correctness, traceable reasoning, and output that matches user intent.
+Universal strict protocol for complex tasks in any domain: research, browser flows, OS actions, form filling, bookings, data handling, and software work.
+The goal is reliable execution quality under uncertainty through mandatory self-correction loops and explicit safety gates.
 
-## Language Strategy (Critical)
-- **Target Language**: All final user-facing content MUST be in **Russian**.
-- **Intermediate Artifacts**: Plans, drafts, critic reports, and reasoning traces MAY be multilingual for research efficiency, but must be synthesized into Russian before user delivery.
-- **Research Phase**: Agents are encouraged to search sources in any language (for coding and science search in English). All synthesized conclusions must be written directly in Russian — no "write in English then translate" workflow.
-- **Terminology**: Use established Russian technical terms. For neologisms or widely used English terms, keep the English term with a brief Russian explanation on first use.
+## Use When
+- The task is multi-step and cross-tool (browser + files + shell + APIs).
+- Requirements are evolving and need iterative re-planning.
+- The workflow has decision points, blockers, or external dependencies.
+- The output is not just code and may include forms, operations, analysis, or submissions.
 
-## Agent Roles & Responsibilities
+## Do Not Use When
+- The task is trivial or one-step.
+- A specialized project skill is a better fit (for example, architecture-only design or pure SWE delivery).
+- No meaningful execution decisions are required.
 
-| Role | Responsibility | Language Constraint |
-|------|---------------|---------------------|
-| `Planner` | Decomposes the task into atomic, verifiable steps; flags items requiring `SpecialAgent` | Plan and step descriptions in **Russian** |
-| `Actor` | Executes the assigned step: research, coding, analysis, drafting | Output artifacts in **Russian** |
-| `Critic` | Fact-checks every claim using live search; validates logic, completeness, and intent alignment | Reports and feedback in **Russian** |
-| `Step-Check` *(function, implemented by Orchestrator + Critic)* | Verifies before every action that the planned action is still relevant to current state and constraints | Check outputs in **Russian** |
-| `SpecialAgent` | Instantiated on demand for niche/complex subtasks (e.g., `CodeReviewer`, `DataAnalyst`); receives an auto-generated role prompt | Role-specific output in **Russian** |
-| `Orchestrator` *(implicit)* | Manages workflow gates, artifact versioning, role routing, and loop control | Internal coordination (language-agnostic) |
+## Language Strategy
+- Final user-facing content must be in Russian.
+- Research may use any language, but conclusions and decisions are reported in Russian.
+- Use stable Russian technical terminology; keep common English terms only when useful.
 
-## Workflow Pipeline
+## Roles
+- `Planner`: decomposes goal into executable steps with checkpoints.
+- `Actor`: performs the current step using available tools.
+- `Critic`: validates relevance, correctness, and user-intent alignment.
+- `SpecialAgent`: optional specialist for narrow high-uncertainty subtasks.
+- `Orchestrator`: controls order, gates, retries, and stop/replan conditions.
 
-### Phase 1: Planning & Task Decomposition & Planner-Critic Validation
-1. `Planner` analyzes user intent, constraints, and success criteria. Use web search and artifact inspection if needed.
-2. `Planner` outputs a structured plan:
-   - Ordered list of atomic, testable steps
-   - Expected artifact type per step (code, text, data, decision)
-   - Flags for steps requiring `SpecialAgent`
-   - Explicit success criteria for final artifact
-3. `Planner-Critic` review (mandatory):
-   - `Critic` evaluates plan quality, consistency, feasibility, and coverage of user intent.
-   - Report format: `[Plan Item] → [Issue] → [Evidence/Risk] → [Correction] → [Status]`
-4. If plan has `Minor/Critical` issues, `Planner` revises and resubmits.
-5. `Orchestrator` proceeds only when plan reaches `Planner-Critic: Pass`.
+Strict role separation is mandatory: `Critic` never executes side-effect actions.
 
-### Phase 2: Per-Step Execution Loop (Step-Check + Actor-Critic)
-*Executed strictly sequentially for each plan item:*
+## Mandatory Strict Workflow
+Every non-trivial task follows the same strict process:
+1. Planner-Critic pass on plan.
+2. Step-Check before each action.
+3. Actor execution.
+4. Actor-Critic validation loop until pass.
+5. Explicit approval gate before irreversible action.
 
-**Hard gating rules for `Orchestrator`**:
-- Process steps one by one: `step_n` must reach `Critic: Pass` before `step_n+1` starts.
-- No batch execution of Actors without interleaved Critic validation.
-- `Critic` MUST use live internet search to fact-check every non-trivial claim.
-- Before each action, run `Step-Check`; if failed, do not execute action until re-planned.
+## Universal Workflow
 
-1. **Step-Check (pre-action gate)**:
-   - Validate that the next action still matches current environment/task state.
-   - Confirm dependencies are still valid and no higher-priority blocker emerged.
-   - If mismatch detected: route to `Planner` for micro-replan of current and downstream steps.
-2. **Assignment**: `Orchestrator` routes step to:
-   - `Actor` (standard complexity), or
-   - `SpecialAgent` (complex/niche; auto-generates a system prompt from the role description)
-3. **Execution**: The assigned agent produces a versioned artifact (`step_01_v1.md`, `script_v1.py`, etc.) with an explicit reasoning trace.
-4. **Actor-Critic Audit (post-action gate)**: `Critic` reviews and outputs a structured report:
-    [Claim/Artifact Element] → [Issue Type: factual/logical/intent] → [Evidence/Source] → [Action Required] → [Status: Pass/Minor/Critical]
-5. **Revision**: `Actor` updates artifact, explicitly addressing every Minor/Critical item with change log.
-6. **Verification**: `Critic` re-checks revised artifact. Loop repeats until all items are `Pass`.
-7. **Gate**: `Orchestrator` enqueues next step only after current step achieves `Pass`.
+### Phase 1: Framing, Constraints, and Plan
+1. Define objective, constraints, and success criteria.
+2. Split task into atomic steps with expected outputs and rollback notes where possible.
+3. Mark irreversible/externally visible steps that require explicit approval.
+4. Run mandatory Planner-Critic review:
+   - Plan item coverage.
+   - Dependency correctness.
+   - Feasibility and missing prerequisites.
+   - Risk and safety adequacy.
+5. Revise plan until `Planner-Critic: Pass`.
 
-### Phase 3: Final Artifact Assembly
-1. A `SpecialAgent` instantiated as `Integrator` ingests all approved step artifacts.
-2. `Integrator` unifies terminology, resolves cross-references, removes redundancy, and outputs a cohesive final artifact in Markdown (or other required format).
-3. The artifact includes an execution summary, a decision log, and a traceability map (step → artifact section).
+### Phase 2: Sequential Step Execution Loop
+For each step:
+1. Run Step-Check (mandatory):
+   - Is this still the right step given latest state?
+   - Are inputs, permissions, and dependencies valid?
+   - Has a blocker appeared that requires replan?
+2. Route to `Actor` or `SpecialAgent`.
+3. Execute one focused action set.
+4. Run Actor-Critic audit with structured findings:
+   - `[Element] -> [Issue] -> [Evidence] -> [Action Required] -> [Status]`
+5. Revise and re-check until `Pass`.
+6. Move to next step only after current step passes.
 
-### Phase 4: Intent-Aligned Final Verification
-1. `Critic` performs final review against **original user intent**:
-- Does the artifact solve the stated problem?
-- Are all success criteria from Phase 1 met?
-- Are there unsupported claims, logical gaps, or format violations?
-2. If `Critic` returns any `Critical` or unresolved `Minor` items:
-- Route back to `Actor`/`Integrator` for targeted revision
-- Re-enter Phase 4 after fixes
-3. If all items `Pass`: `Critic` signs off with `Final Approval` stamp.
+### Phase 3: Final Validation
+1. Confirm result against original user intent.
+2. Confirm all planned success criteria are met or explicitly blocked.
+3. List evidence, unresolved assumptions, and residual risks.
+4. Return concise outcome and next safe action.
 
-## Output Specifications
-- **Format**: As required by task (Markdown, JSON, code, etc.); if unspecified, default to Markdown.
-- **Citation Style**: Inline citations for every factual claim: `[Source Title](URL)`
-- **Reference List**: `## References` section with title, author/org, date, URL.
-- **Traceability**: All artifacts are versioned (`_v1`, `_v2`); critic reports are linked to revisions.
-- **Quality Gates**:
-  - Zero unsourced factual statements
-  - All critic feedback explicitly resolved and traceable
-  - Final artifact passes intent-alignment check
-  - Ready for delivery without further intervention
+## Safety Gates for Irreversible Actions
+Before payment/submit/publish/final send/destructive command:
+- Present a compact preflight summary:
+  - target system/page
+  - exact action
+  - critical parameters
+  - expected irreversible effect
+- Request explicit user confirmation.
+- If confirmation is missing, stop at ready-to-confirm checkpoint.
 
-## Execution Constraints
-1. **Strict Role Separation**: No role bypassing; `Critic` never edits artifacts directly.
-2. **Planner-Critic Is Mandatory**: No step execution starts without plan-level `Pass`.
-3. **Step-Check Before Every Action**: If context drift is detected, pause execution and re-plan before acting.
-4. **Mandatory Fact-Checking**: `Critic` MUST use live search/knowledge tools for verification — no reliance on internal knowledge alone.
-5. **Intent Anchoring**: User's original request and success criteria are immutable reference points; any scope change requires explicit user confirmation.
-6. **Artifact Versioning**: All outputs are traceable via semantic versioning (`step_01_v1.md` → `step_01_v2_revised.md`).
-7. **Critic Report Format**: Structured as `[Element] → [Issue] → [Evidence] → [Action] → [Status]`.
-8. **No Deferred QA**: Per-step `Actor-Critic` loop is mandatory; final critic pass does not replace iterative validation.
-9. **Do Not Skip Self-Correction Modules**: Removing `Planner-Critic`, `Step-Check`, or `Actor-Critic` is considered a protocol violation due to known success-rate degradation in iterative-agent systems.
-10. **Final Output Language**: Always Russian for user-facing content; no omission or simplification during synthesis.
+## Fact Checking and Evidence
+Mandatory:
+- Verify all non-trivial factual claims with live sources/tools when feasible.
+- Validate operational outcomes using direct tool evidence (not only reasoning).
+- Distinguish:
+  - observed evidence (tool/runtime result),
+  - inferred reasoning,
+  - unverified assumptions.
 
-## Expected Final Artifact Format (Example: Markdown Report)
+## Output Contract
+Use concise structure unless user asks otherwise:
+
 ```markdown
-# [Task Title / Solution Summary]
+# Task Outcome: <Title>
 
-## Executive Summary
-[Brief Russian-language overview of solution and outcome]
+## Goal and Scope
+- Goal:
+- Scope boundaries:
 
-## Execution Plan
-1. [Step 1 description] — Status: Pass
-2. [Step 2 description] — Status: Pass
-...
+## Execution Log
+1. <Step> — Status: pass | blocked | needs confirmation
+2. <Step> — Status: ...
 
-## Solution Details
-### [Section corresponding to Step N]
-Content with inline citations: ...[Source Title](https://example.com/source1)
+## Result
+- What is completed:
+- What is pending:
 
-## Decision Log & Reasoning Trace
-- [Key decision point] → [Rationale] → [Supporting evidence]
+## Evidence and Risks
+- Evidence:
+- Assumptions:
+- Residual risks:
 
-## References
-- [Source Title](https://example.com/source1) — Author, Year
-- [Source Title](https://example.com/source2) — Organization, Date
-
-## Final Approval
-✅ Critic Sign-off: Intent-aligned, fact-checked, ready for delivery.
+## Next Action
+- Recommended immediate next step:
 ```
 
-## Failure & Recovery Protocol
-- If Critic detects irreconcilable factual conflict: pause workflow, flag for user clarification.
-- If Actor cannot complete step after 2 revision cycles: escalate to SpecialAgent.
-- If the final artifact fails the intent check twice: trigger Planner re-evaluation of task decomposition.
-- Orchestrator can ask Planner to change the plan during task solving if necessary.
+## Escalation and Recovery
+- If 2 attempts fail on one step, trigger micro-replan.
+- If blocker requires manual user action (login/captcha/2FA/approval), stop and hand control to user.
+- If context drifts materially, re-run planning for remaining steps.
+
+## Anti-Patterns
+- Skipping Planner-Critic or Step-Check because the task "looks easy".
+- Proceeding with irreversible actions without explicit confirmation.
+- Hiding uncertainty instead of stating assumptions.
+- Continuing retries without new evidence.
