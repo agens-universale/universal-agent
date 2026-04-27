@@ -1,6 +1,7 @@
 """Ставит MCP из config.yml: pip install wheel / docker compose build / npx ensure."""
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import sys
@@ -74,13 +75,105 @@ def _install_docker(name: str, pkg_path: Path) -> None:
     )
 
 
+# Pinned Node.js версия для Windows-fallback (если winget недоступен).
+# LTS, x64. Обновлять здесь при необходимости.
+_NODE_WIN_MSI_URL = "https://nodejs.org/dist/v20.18.0/node-v20.18.0-x64.msi"
+
+
+def _download_url_windows(url: str, dest: str) -> None:
+    """Скачать URL в файл на Windows. Сначала urllib, fallback на PowerShell.
+
+    urllib работает на нормальном Python (CA-bundle через системный store).
+    На embeddable Python без CA или на Windows-машинах с MITM-прокси /
+    устаревшим cert-store urllib падает на SSL handshake. PowerShell
+    Invoke-WebRequest использует Windows-store сертификатов и обычно
+    срабатывает там, где urllib не смог.
+    """
+    import urllib.error
+    import urllib.request
+
+    try:
+        urllib.request.urlretrieve(url, dest)
+        return
+    except (urllib.error.URLError, OSError) as e:
+        print(f"[download] urllib failed ({e}); retrying via PowerShell")
+
+    rc = subprocess.call([
+        "powershell", "-NoProfile", "-Command",
+        f"$ProgressPreference='SilentlyContinue'; "
+        f"Invoke-WebRequest -Uri '{url}' -OutFile '{dest}'"
+    ])
+    if rc != 0:
+        raise InstallError(
+            f"Download failed for {url} (PowerShell exit {rc}). "
+            f"Check network access or install Node.js manually from https://nodejs.org/."
+        )
+
+
+def _refresh_windows_path() -> None:
+    """Перечитать PATH из Windows-реестра в os.environ текущего процесса.
+
+    Windows-инсталляторы (winget, msiexec) пишут PATH в registry, но
+    активные процессы держат снимок переменных окружения с момента старта.
+    Без обновления `shutil.which` после установки не находит свеже-
+    поставленные программы — отсюда и берётся «still not in PATH», даже
+    если установка прошла успешно. Эта функция читает Machine + User scope
+    из реестра и переписывает os.environ["PATH"] в текущем процессе.
+
+    No-op на не-Windows платформах.
+    """
+    if sys.platform != "win32":
+        return
+    import winreg
+
+    parts: list[str] = []
+    for hive, key in [
+        (winreg.HKEY_LOCAL_MACHINE,
+         r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment"),
+        (winreg.HKEY_CURRENT_USER, r"Environment"),
+    ]:
+        try:
+            with winreg.OpenKey(hive, key) as k:
+                value, _ = winreg.QueryValueEx(k, "Path")
+                if value:
+                    parts.append(value)
+        except OSError:
+            pass
+
+    if parts:
+        os.environ["PATH"] = ";".join(parts)
+
+
+def _install_node_msi_windows() -> None:
+    """Fallback: скачать Node.js MSI с nodejs.org и поставить через msiexec /qn.
+
+    Нужен, когда winget недоступен (Windows Sandbox, Windows Server без App
+    Installer, корпоративные образы с вырезанным Microsoft Store). MSI пишет
+    в machine PATH — после установки делаем _refresh_windows_path, чтобы
+    текущий процесс видел новый PATH без перезапуска shell.
+    """
+    import tempfile
+
+    tmp = tempfile.NamedTemporaryFile(suffix=".msi", delete=False)
+    tmp.close()
+    print(f"[npx] downloading Node.js MSI from {_NODE_WIN_MSI_URL}")
+    _download_url_windows(_NODE_WIN_MSI_URL, tmp.name)
+    print(f"[npx] msiexec /i {tmp.name} /qn")
+    rc = subprocess.call(["msiexec", "/i", tmp.name, "/qn"])
+    if rc != 0:
+        raise InstallError(
+            f"msiexec failed (exit {rc}) for {tmp.name}. "
+            f"Install Node.js manually from https://nodejs.org/ and re-run."
+        )
+
+
 def _ensure_node() -> str:
     """Гарантировать, что `npx` есть в PATH. Вернуть путь до npx.
 
     Идемпотентно: если npx уже установлен — сразу выходим. Иначе пытаемся
     поставить Node.js штатным пакетным менеджером платформы:
       - macOS : brew install node
-      - Windows: winget install OpenJS.NodeJS.LTS
+      - Windows: winget → MSI с nodejs.org (fallback, если winget нет)
       - Linux  : apt-get / dnf / pacman / apk install nodejs npm (через sudo)
     Если не получилось — печатаем ссылку на nodejs.org и падаем.
     """
@@ -103,6 +196,19 @@ def _ensure_node() -> str:
                 "--accept-source-agreements",
                 "--accept-package-agreements",
             ])
+        else:
+            # Fallback для окружений без App Installer (Sandbox, Server,
+            # корпоративные образы). Прямая загрузка MSI с nodejs.org.
+            _install_node_msi_windows()
+            _refresh_windows_path()
+            npx = shutil.which("npx")
+            if not npx:
+                raise InstallError(
+                    "Node.js MSI installer finished, but `npx` still not in PATH. "
+                    "Re-open your shell (to refresh PATH) and re-run install.py."
+                )
+            print(f"[npx] installed: {npx}")
+            return npx
     else:
         # Перебираем Linux-пакетники по порядку; первый найденный выигрывает.
         for pm, args in (
@@ -130,6 +236,7 @@ def _ensure_node() -> str:
                 f"Install manually from https://nodejs.org/ and re-run."
             )
 
+    _refresh_windows_path()
     npx = shutil.which("npx")
     if not npx:
         raise InstallError(

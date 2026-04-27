@@ -11,6 +11,13 @@ from recommended_mcp import install as install_mod
 from recommended_mcp.manifest import InstallSpec, MCPEntry
 
 
+@pytest.fixture(autouse=True)
+def _no_real_path_refresh(monkeypatch: pytest.MonkeyPatch) -> None:
+    """_refresh_windows_path лезет в реальный Windows-реестр.
+    Мокаем во всех тестах, чтобы не зависеть от состояния хоста."""
+    monkeypatch.setattr(install_mod, "_refresh_windows_path", lambda: None)
+
+
 def _entry(
     name: str = "x",
     install_type: str = "wheel",
@@ -181,3 +188,107 @@ def test_ensure_node_fails_when_installer_succeeds_but_npx_still_missing() -> No
                 with pytest.raises(install_mod.InstallError,
                                    match="still not in PATH"):
                     install_mod._ensure_node()
+
+
+def test_ensure_node_windows_falls_back_to_msi_when_no_winget() -> None:
+    # Windows Sandbox / Server без App Installer: winget нет → идёт
+    # по fallback-ветке с прямой установкой MSI.
+    which = _which_from({
+        "npx": [None, "C:/Program Files/nodejs/npx.CMD"],  # до / после
+        "winget": None,
+    })
+    with patch.object(install_mod.sys, "platform", "win32"):
+        with patch("recommended_mcp.install.shutil.which", side_effect=which):
+            with patch("urllib.request.urlretrieve") as retrieve:
+                with patch("recommended_mcp.install.subprocess.call",
+                           return_value=0) as sub:
+                    result = install_mod._ensure_node()
+    assert result == "C:/Program Files/nodejs/npx.CMD"
+    # URL из константы, поддерживает будущий bump версии.
+    retrieve.assert_called_once()
+    assert retrieve.call_args.args[0] == install_mod._NODE_WIN_MSI_URL
+    # msiexec вызван с /i <msi> /qn
+    msi_cmd = sub.call_args.args[0]
+    assert msi_cmd[0] == "msiexec" and msi_cmd[1] == "/i" and msi_cmd[3] == "/qn"
+
+
+def test_ensure_node_windows_msi_uses_powershell_when_urllib_fails(
+    capsys: pytest.CaptureFixture,
+) -> None:
+    # Embeddable Python / Server без CA-bundle: urllib падает на SSL,
+    # должны откатиться на PowerShell Invoke-WebRequest.
+    which = _which_from({
+        "npx": [None, "C:/Program Files/nodejs/npx.CMD"],  # до / после
+        "winget": None,
+    })
+    with patch.object(install_mod.sys, "platform", "win32"):
+        with patch("recommended_mcp.install.shutil.which", side_effect=which):
+            with patch("urllib.request.urlretrieve",
+                       side_effect=OSError("SSL: CERTIFICATE_VERIFY_FAILED")):
+                with patch("recommended_mcp.install.subprocess.call",
+                           return_value=0) as sub:
+                    install_mod._ensure_node()
+    # Должны быть вызваны: powershell для скачивания + msiexec для установки.
+    assert sub.call_count == 2
+    ps_cmd = sub.call_args_list[0].args[0]
+    assert ps_cmd[0] == "powershell"
+    assert any("Invoke-WebRequest" in arg for arg in ps_cmd)
+    msi_cmd = sub.call_args_list[1].args[0]
+    assert msi_cmd[0] == "msiexec"
+    assert "urllib failed" in capsys.readouterr().out
+
+
+def test_ensure_node_windows_msi_fails_when_both_urllib_and_powershell_fail() -> None:
+    # urllib упал (SSL), PowerShell тоже упал (no network вовсе) —
+    # понятная ошибка без traceback'а.
+    which = _which_from({"npx": None, "winget": None})
+    with patch.object(install_mod.sys, "platform", "win32"):
+        with patch("recommended_mcp.install.shutil.which", side_effect=which):
+            with patch("urllib.request.urlretrieve",
+                       side_effect=OSError("network down")):
+                with patch("recommended_mcp.install.subprocess.call",
+                           return_value=1) as sub:
+                    with pytest.raises(install_mod.InstallError,
+                                       match="Download failed"):
+                        install_mod._ensure_node()
+    # PowerShell должен был быть вызван — иначе fallback не сработал.
+    assert sub.call_args.args[0][0] == "powershell"
+
+
+def test_ensure_node_windows_msi_fallback_fails_when_msiexec_nonzero() -> None:
+    # msiexec вернул ошибку (например, нет admin-прав на system-wide install).
+    # urllib работает, PowerShell-fallback не нужен — subprocess.call
+    # вызывается только для msiexec.
+    which = _which_from({"npx": None, "winget": None})
+    with patch.object(install_mod.sys, "platform", "win32"):
+        with patch("recommended_mcp.install.shutil.which", side_effect=which):
+            with patch("urllib.request.urlretrieve"):
+                with patch("recommended_mcp.install.subprocess.call",
+                           return_value=1603):  # типичный код msiexec fatal
+                    with pytest.raises(install_mod.InstallError,
+                                       match="msiexec failed"):
+                        install_mod._ensure_node()
+
+
+def test_ensure_node_windows_calls_path_refresh_after_msi(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # После MSI-fallback PATH в os.environ должен обновляться через
+    # _refresh_windows_path, иначе shutil.which не найдёт свеже-
+    # поставленный npx и установка завершится Windows PATH-gotcha.
+    refresh_calls: list[None] = []
+    monkeypatch.setattr(
+        install_mod, "_refresh_windows_path",
+        lambda: refresh_calls.append(None),
+    )
+    which = _which_from({
+        "npx": [None, "C:/Program Files/nodejs/npx.CMD"],
+        "winget": None,
+    })
+    with patch.object(install_mod.sys, "platform", "win32"):
+        with patch("recommended_mcp.install.shutil.which", side_effect=which):
+            with patch("urllib.request.urlretrieve"):
+                with patch("recommended_mcp.install.subprocess.call",
+                           return_value=0):
+                    install_mod._ensure_node()
+    assert refresh_calls, "_refresh_windows_path должен быть вызван после MSI"
