@@ -3,6 +3,7 @@ from typing import Dict, Any, List, Type
 from tools.subagents.abstract_subagent import AbstractSubagent
 from tools.subagents.worker import Worker
 from tools.subagents.coder import CodeGenerator
+from tools.subagents.code_planner import CodePlanner
 from tools.subagents.planner import Planner
 from tools.subagents.critic import Critic
 from tools.subagents.code_reviewer import CodeReviewer
@@ -11,6 +12,7 @@ from tools.subagents.special_agent import SpecialAgent
 SUBAGENT_CLASSES: List[Type[AbstractSubagent]] = [
     Worker,
     CodeGenerator,
+    CodePlanner,
     Planner,
     Critic,
     CodeReviewer,
