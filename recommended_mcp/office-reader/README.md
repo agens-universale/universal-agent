@@ -10,10 +10,8 @@ markdown. Все форматы парсятся в Python через `markitdow
 - **Python 3.10+.**
 - **Активный venv агента** перед запуском `install.py`.
 
-Кросс-платформенно: работает на Windows / Linux / macOS — но в манифесте
-ограничено `platforms: [win32]`, потому что в составе background-agent
-актуально только под Windows. Снимешь ограничение в `recommended_mcp/config.yml`,
-если нужно поставить на другой ОС.
+Кросс-платформенно: работает на Windows / Linux / macOS. Wheel — pure Python,
+зависимости (`markitdown` и его парсеры) тоже без нативного кода.
 
 ## Установка
 
