@@ -15,4 +15,3 @@ mcps:
     path: ./office-reader
     install:
       type: wheel
-      platforms: [ win32 ]
