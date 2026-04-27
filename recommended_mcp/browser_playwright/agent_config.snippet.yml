@@ -2,7 +2,8 @@
 # Работает с persistent_session: true — один процесс npx и один Chromium
 # живут весь цикл работы агента (см. src/tools/connect_mcp/persistent_stdio.py).
 #
-# Windows: если `command: npx` падает с "file not found", поменяй на `npx.cmd`.
+# Windows: `command: npx` работает as-is — _resolve_command в
+# src/tools/connect_mcp/transport.py резолвит через PATHEXT в `npx.cmd`/`.exe`.
 browser_playwright:
   transport: stream_stdio
   command: npx

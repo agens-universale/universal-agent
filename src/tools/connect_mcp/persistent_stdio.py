@@ -33,6 +33,7 @@ from tools.connect_mcp.transport import (
     _INIT_PAYLOAD,
     _INITIALIZED_PAYLOAD,
     _readline_with_timeout,
+    _resolve_command,
 )
 
 
@@ -50,6 +51,7 @@ def _spawn_detached_stdio_process(server_cfg: Dict[str, Any]) -> subprocess.Pope
     command = server_cfg.get("command")
     if not command:
         raise ValueError("stdio MCP server config must have 'command'")
+    command = _resolve_command(str(command))
     args = server_cfg.get("args") or []
     if not isinstance(args, list):
         args = [args]

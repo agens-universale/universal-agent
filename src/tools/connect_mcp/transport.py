@@ -6,6 +6,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import json
 import os
+import shutil
 import subprocess
 import threading
 import requests
@@ -192,11 +193,30 @@ def _readline_with_timeout(stream: "Any", timeout: float) -> str | None:
     return result[0] if result[0] is not None else None
 
 
+def _resolve_command(command: str) -> str:
+    """
+    На Windows резолвит имя команды в полный путь через PATHEXT.
+
+    `subprocess.Popen([\"npx\", ...])` на Windows не учитывает PATHEXT и не
+    найдёт ни `npx.cmd`, ни `npx.exe` — пользователю пришлось бы прописывать
+    `command: npx.cmd` в config.yml. `shutil.which` делает это корректно.
+    На POSIX возвращаем как есть: ядро/Popen сами ищут по PATH.
+    """
+    if os.name != "nt":
+        return command
+    # Уже абсолютный путь или с расширением — не трогаем.
+    if os.path.isabs(command) or os.path.splitext(command)[1]:
+        return command
+    resolved = shutil.which(command)
+    return resolved if resolved else command
+
+
 def _spawn_stdio_process(server_cfg: Dict[str, Any]) -> subprocess.Popen:
     """Запустить процесс MCP-сервера по конфигу (command, args, cwd, env)."""
     command = server_cfg.get("command")
     if not command:
         raise ValueError("stdio MCP server config must have 'command'")
+    command = _resolve_command(str(command))
     args = server_cfg.get("args")
     if args is None:
         args = []

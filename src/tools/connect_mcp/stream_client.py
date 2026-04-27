@@ -15,6 +15,7 @@ from mcp.client.stdio import StdioServerParameters, stdio_client
 from mcp.shared.exceptions import McpError
 
 from utils.ssl_config import get_verify_ssl, get_client_cert
+from tools.connect_mcp.transport import _resolve_command
 
 
 # ---------------------------------------------------------------------------
@@ -731,7 +732,7 @@ async def _list_tools_stream_stdio_async(
         args = [args]
 
     params = StdioServerParameters(
-        command=str(command),
+        command=_resolve_command(str(command)),
         args=[str(a) for a in args],
         env=server_cfg.get("env") or None,
         cwd=server_cfg.get("cwd") or None,
@@ -790,7 +791,7 @@ async def _call_tool_stream_stdio_async(
         args = [args]
 
     params = StdioServerParameters(
-        command=str(command),
+        command=_resolve_command(str(command)),
         args=[str(a) for a in args],
         env=server_cfg.get("env") or None,
         cwd=server_cfg.get("cwd") or None,
@@ -838,7 +839,7 @@ async def _call_tool_stream_stdio_persistent(
         if not isinstance(args, list):
             args = [args]
         params = StdioServerParameters(
-            command=str(command),
+            command=_resolve_command(str(command)),
             args=[str(a) for a in args],
             env=server_cfg.get("env") or None,
             cwd=server_cfg.get("cwd") or None,
