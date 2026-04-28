@@ -129,3 +129,47 @@ def test_install_without_type_raises(tmp_path: Path) -> None:
     """)
     with pytest.raises(ManifestError, match="missing 'install.type'"):
         load_manifest(f)
+
+
+def test_source_mcp(tmp_path: Path) -> None:
+    f = _write(tmp_path, """
+        mcps:
+          - name: computer
+            path: ./computer
+            install:
+              type: source
+              source: ../external/computer-mcp
+              platforms: [win32]
+    """)
+    entry = load_manifest(f)[0]
+    assert entry.install.type == "source"
+    assert entry.install.source == Path("../external/computer-mcp")
+    assert entry.install.platforms == ("win32",)
+
+
+def test_source_without_source_field_raises(tmp_path: Path) -> None:
+    f = _write(tmp_path, """
+        mcps:
+          - name: x
+            path: ./x
+            install:
+              type: source
+    """)
+    with pytest.raises(ManifestError, match="install.type=source requires install.source"):
+        load_manifest(f)
+
+
+def test_source_field_ignored_for_non_source_types(tmp_path: Path) -> None:
+    # Терпим source: в блоке wheel — это не ломка, просто избыточно.
+    # Главное чтобы не падало.
+    f = _write(tmp_path, """
+        mcps:
+          - name: x
+            path: ./x
+            install:
+              type: wheel
+              source: ../whatever
+    """)
+    entry = load_manifest(f)[0]
+    assert entry.install.type == "wheel"
+    assert entry.install.source == Path("../whatever")

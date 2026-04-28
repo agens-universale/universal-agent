@@ -16,6 +16,7 @@ class ManifestError(ValueError):
 class InstallSpec:
     type: str
     platforms: tuple[str, ...] = ()
+    source: Path | None = None
 
 
 @dataclass(frozen=True)
@@ -50,12 +51,20 @@ def _parse_entry(raw: dict[str, Any], source: Path) -> MCPEntry:
     install_raw = raw.get("install")
     if not isinstance(install_raw, dict):
         raise ManifestError(f"mcp '{name}' missing 'install' block in {source}")
+    source_raw = install_raw.get("source")
+    install_source = Path(source_raw) if source_raw else None
+
     install = InstallSpec(
         type=install_raw.get("type", ""),
         platforms=tuple(install_raw.get("platforms", ()) or ()),
+        source=install_source,
     )
     if not install.type:
         raise ManifestError(f"mcp '{name}' missing 'install.type' in {source}")
+    if install.type == "source" and install.source is None:
+        raise ManifestError(
+            f"mcp '{name}' install.type=source requires install.source in {source}"
+        )
 
     run_raw = raw.get("run")
     run: RunSpec | None = None
