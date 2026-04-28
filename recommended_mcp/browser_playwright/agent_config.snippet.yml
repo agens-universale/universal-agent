@@ -12,7 +12,7 @@
 browser_playwright:
   transport: stream_stdio
   command: ~/.local/agent/node/v18.0.0/bin/npx
-  args: ["-y", "@playwright/mcp@0.0.70"]
+  args: ["-y", "@playwright/mcp@0.0.70", "--output-dir", "/tmp/.playwright-mcp"]
   persistent_session: true
   description: Browser automation via Playwright. Use for web navigation, clicking, form filling, taking screenshots, and webscraping.
   server-name: playwright-browser
