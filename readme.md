@@ -162,6 +162,76 @@ Background и CLI-клиент для работы с агентом GigaCode: �
   ddgs-mcp --http
   ```
 
+8. **Пакет рекомендованных MCP (`recommended_mcp/`)**
+
+   В папке `recommended_mcp/` лежит готовый установщик для набора MCP-серверов,
+   которые часто нужны агенту: `office-reader` (чтение pdf/docx/xlsx/...),
+   `browser_playwright` (управление браузером через Playwright), `computer`
+   (Windows-only GUI control через UI Automation).
+
+   Манифест установки — `recommended_mcp/config.yml`. Чтобы пропустить
+   конкретный MCP, закомментируй его блок там перед запуском `install.py`.
+
+   ### Установка
+
+   Из корня проекта:
+
+   ```bash
+   python recommended_mcp/install.py
+   # или
+   uv run python recommended_mcp/install.py
+   ```
+
+   Что произойдёт:
+
+   - **office-reader** — `pip install` из приложенного wheel-файла
+     (`recommended_mcp/office-reader/dist/*.whl`). Появится консольная команда
+     `mcp-office-reader`.
+   - **browser_playwright** — скачает и распакует пиннутый Node.js
+     (по умолчанию v18.0.0) в `~/.local/agent/node/v<NODE_VERSION>/`,
+     прогреет npm-кэш `@playwright/mcp@0.0.70` и доустановит Chromium.
+     Системная Node не используется и не трогается. Бинари — в
+     `<root>/bin/` на всех ОС (Windows-zip автоматически перепаковывается),
+     поэтому в `command:` агента можно писать единый
+     `~/.local/agent/node/v18.0.0/bin/npx`.
+   - **computer** (только Windows) — `pip install` wheel'а. Появится команда
+     `gc-computer-mcp`.
+
+   Каталог для Node настраивается ключом `agent_dep_dir` в
+   `recommended_mcp/config.yml` (дефолт `~/.local/agent`). Принимаются `~`,
+   относительные и абсолютные пути.
+
+   ### Подключение в `config.yml` агента
+
+   В каждой подпапке (`browser_playwright/`, `office-reader/`, `computer/`)
+   лежит `agent_config.snippet.yml` — скопируй блок в секцию `mcp-servers:`
+   своего `config.yml`. Пути с `~` раскрываются в `_resolve_command`
+   (`src/tools/connect_mcp/transport.py`), отдельной правки под ОС не нужно.
+
+   Пример для browser_playwright (stdio, single-process, persistent):
+
+   ```yaml
+   mcp-servers:
+     browser_playwright:
+       transport: stream_stdio
+       command: ~/.local/agent/node/v18.0.0/bin/npx
+       args: ["-y", "@playwright/mcp@0.0.70"]
+       persistent_session: true
+       description: Browser automation via Playwright.
+       server-name: playwright-browser
+   ```
+
+   ### Скриншоты и медиа из MCP
+
+   `@playwright/mcp` (и любой MCP, возвращающий image/audio в content-блоках)
+   возвращает base64 — без обработки это сотни тысяч токенов на вызов.
+   Агент декодирует такие блоки и сохраняет в файл, заменяя `data` на `path`.
+
+   ### Альтернативный запуск через Docker
+   `browser_playwright` можно поднимать в контейнере (HTTP/SSE-транспорт
+   вместо stdio) — см. `recommended_mcp/browser_playwright/README.md`,
+   там же `Dockerfile` и `docker-compose.yml`.
+
 
 
 # Серверный режим (REST-обёртка поверх gc-cli)
@@ -370,34 +440,6 @@ swarm:
 
 ![Playwright MCP demo](browserforgif.gif)
 
-## Запуск локально (для разработки и отладки)
-
-Требования: Node.js 18+.
-
-```bash
-# Установить Playwright-браузеры (один раз)
-npm install -g playwright
-playwright install chromium
-
-# Запустить MCP-сервер через Makefile из корня проекта
-make start        # фоновый запуск, логи → /tmp/playwright-mcp.log
-make start-debug  # foreground с подробными логами входящих запросов
-make stop         # остановить
-make restart      # перезапустить
-make status       # проверить статус
-make logs         # смотреть логи в реальном времени
-```
-
-## Запуск в Docker
-
-```bash
-cd dockerfiles/mcp/playwright
-docker compose up -d --build   # сборка и запуск
-docker compose down            # остановить
-docker logs playwright-mcp -f  # логи входящих запросов
-```
-
-В обоих случаях сервер слушает на `http://localhost:8931/mcp`.
 
 ## Подключение в config.yml
 
@@ -421,7 +463,7 @@ mcp-servers:
 ```yaml  
   browser_playwright:
       transport: stream_stdio
-      command: npx
+      command: ~/.local/agent/node/v18.0.0/bin/npx
       args: ["-y", "@playwright/mcp@latest"]
       persistent_session: true
       persistent_session_close_tool: browser_close

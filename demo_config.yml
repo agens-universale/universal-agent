@@ -167,7 +167,7 @@ mcp-servers:
   #
   # browser_playwright:
   #   transport: stream_stdio
-  #   command: ~/.agent/node/v20.18.0/bin/npx
+  #   command: ~/.local/agent/node/v20.18.0/bin/npx
   #   args: ["-y", "@playwright/mcp@0.0.70"]
   #   persistent_session: true
   #   persistent_session_close_tool: browser_close
