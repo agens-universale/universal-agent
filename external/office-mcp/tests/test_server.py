@@ -7,7 +7,7 @@ import httpx
 import pytest
 from starlette.testclient import TestClient
 
-from mcp_office_reader.server import ServerConfig, build_asgi_app, build_server
+from office_mcp.server import ServerConfig, build_asgi_app, build_server
 
 
 def test_build_server_returns_fastmcp_instance(tmp_path):

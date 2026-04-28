@@ -4,8 +4,8 @@ import base64
 
 import pytest
 
-from mcp_office_reader.errors import ErrorCategory, OfficeReaderError
-from mcp_office_reader.writer_io import (
+from office_mcp.errors import ErrorCategory, OfficeReaderError
+from office_mcp.writer_io import (
     encode_base64_checked,
     write_bytes_checked,
 )

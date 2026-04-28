@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from mcp_office_reader.reader import read_document_from_bytes
-from mcp_office_reader.server import ServerConfig, build_server
+from office_mcp.reader import read_document_from_bytes
+from office_mcp.server import ServerConfig, build_server
 
 
 def test_xlsx_roundtrip(tmp_path):

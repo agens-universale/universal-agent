@@ -3,7 +3,7 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "mcp-office-reader"
+name = "office-mcp"
 version = "0.3.0"
 description = "MCP server for reading and writing office documents (pdf, docx, xls, xlsx, pptx, csv, html, msg) with xlsx analytics"
 requires-python = ">=3.10"
@@ -30,10 +30,10 @@ dev = [
 ]
 
 [project.scripts]
-mcp-office-reader = "mcp_office_reader.__main__:main"
+office-mcp = "office_mcp.__main__:main"
 
 [tool.setuptools.packages.find]
-include = ["mcp_office_reader*"]
+include = ["office_mcp*"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

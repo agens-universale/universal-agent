@@ -1,4 +1,4 @@
-from mcp_office_reader.errors import ErrorCategory, format_error
+from office_mcp.errors import ErrorCategory, format_error
 
 
 def test_file_not_found_message():

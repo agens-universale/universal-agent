@@ -1,4 +1,4 @@
-# mcp-office-reader
+# office-mcp
 
 MCP-сервер для чтения офисных документов и возврата содержимого в формате markdown. Поддерживает транспорты streamable-http и stdio.
 
@@ -30,20 +30,20 @@ uv sync
 streamable-http (транспорт по умолчанию):
 
 ```bash
-python -m mcp_office_reader --port 8080
+python -m office_mcp --port 8080
 ```
 
 stdio:
 
 ```bash
-python -m mcp_office_reader --transport stdio
+python -m office_mcp --transport stdio
 ```
 
 По умолчанию `read_file` может читать только из текущей рабочей директории. Используйте `--allowed-dirs` для указания разрешённых каталогов или `--allow-any` чтобы отключить whitelist.
 
 ## Конфигурация клиента
 
-Streamable-http (отдельный локальный процесс — запускается командой `python -m mcp_office_reader --port 8080`):
+Streamable-http (отдельный локальный процесс — запускается командой `python -m office_mcp --port 8080`):
 
 ```yaml
 mcp-servers:
@@ -61,7 +61,7 @@ mcp-servers:
   office-reader:
     transport: stdio
     command: python
-    args: ["-m", "mcp_office_reader", "--transport", "stdio", "--allow-any"]
+    args: ["-m", "office_mcp", "--transport", "stdio", "--allow-any"]
     description: Read office documents (pdf, docx, xls, xlsx, pptx, csv, html, msg) as markdown
     server-name: office-reader
 ```

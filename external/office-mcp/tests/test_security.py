@@ -4,8 +4,8 @@ from pathlib import Path
 
 import pytest
 
-from mcp_office_reader.errors import ErrorCategory, OfficeReaderError
-from mcp_office_reader.security import validate_path
+from office_mcp.errors import ErrorCategory, OfficeReaderError
+from office_mcp.security import validate_path
 
 
 def test_path_inside_allowed_dir(tmp_path: Path):

@@ -1,6 +1,6 @@
 import pytest
 
-from mcp_office_reader.writer_a1 import a1_cell, parse_a1_range
+from office_mcp.writer_a1 import a1_cell, parse_a1_range
 
 
 def test_single_cell():

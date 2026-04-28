@@ -4,7 +4,7 @@ from io import BytesIO
 
 from docx import Document
 
-from mcp_office_reader.writer import generate_docx
+from office_mcp.writer import generate_docx
 
 
 def _open(b: bytes) -> Document:

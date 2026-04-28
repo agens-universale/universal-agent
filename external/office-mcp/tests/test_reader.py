@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from mcp_office_reader.reader import (
+from office_mcp.reader import (
     SUPPORTED_EXTENSIONS,
     format_meta_block,
     truncate_output,
@@ -41,38 +41,38 @@ def test_truncates_and_appends_marker():
 
 
 def test_convert_docx_returns_markdown(sample_docx):
-    from mcp_office_reader.reader import _convert_with_markitdown
+    from office_mcp.reader import _convert_with_markitdown
     md = _convert_with_markitdown(sample_docx)
     assert "Sample Heading" in md
     assert len(md) > 0
 
 
 def test_convert_xlsx_returns_markdown(sample_xlsx):
-    from mcp_office_reader.reader import _convert_with_markitdown
+    from office_mcp.reader import _convert_with_markitdown
     md = _convert_with_markitdown(sample_xlsx)
     assert "alpha" in md and "beta" in md
 
 
 def test_convert_pdf_returns_markdown(sample_pdf):
-    from mcp_office_reader.reader import _convert_with_markitdown
+    from office_mcp.reader import _convert_with_markitdown
     md = _convert_with_markitdown(sample_pdf)
     assert "Sample PDF" in md
 
 
 def test_convert_pptx_returns_markdown(sample_pptx):
-    from mcp_office_reader.reader import _convert_with_markitdown
+    from office_mcp.reader import _convert_with_markitdown
     md = _convert_with_markitdown(sample_pptx)
     assert "Sample Slide" in md
 
 
 def test_convert_csv_returns_markdown(sample_csv):
-    from mcp_office_reader.reader import _convert_with_markitdown
+    from office_mcp.reader import _convert_with_markitdown
     md = _convert_with_markitdown(sample_csv)
     assert "alpha" in md and "beta" in md
 
 
 def test_convert_html_returns_markdown(sample_html):
-    from mcp_office_reader.reader import _convert_with_markitdown
+    from office_mcp.reader import _convert_with_markitdown
     md = _convert_with_markitdown(sample_html)
     assert "Sample Heading" in md
 
@@ -80,13 +80,13 @@ def test_convert_html_returns_markdown(sample_html):
 def test_convert_xls_returns_markdown(fixtures_dir):
     xls = fixtures_dir / "sample.xls"
     assert xls.exists(), "sample.xls fixture must be committed to tests/fixtures/"
-    from mcp_office_reader.reader import _convert_with_markitdown
+    from office_mcp.reader import _convert_with_markitdown
     md = _convert_with_markitdown(xls)
     assert len(md) > 0
 
 
 def test_read_file_from_disk_returns_md_with_meta(sample_docx):
-    from mcp_office_reader.reader import read_file_from_disk
+    from office_mcp.reader import read_file_from_disk
     out = read_file_from_disk(
         sample_docx,
         max_file_size=50 * 1024 * 1024,
@@ -98,8 +98,8 @@ def test_read_file_from_disk_returns_md_with_meta(sample_docx):
 
 
 def test_read_file_from_disk_unsupported_format(tmp_path):
-    from mcp_office_reader.errors import ErrorCategory, OfficeReaderError
-    from mcp_office_reader.reader import read_file_from_disk
+    from office_mcp.errors import ErrorCategory, OfficeReaderError
+    from office_mcp.reader import read_file_from_disk
     f = tmp_path / "x.rtf"
     f.write_bytes(b"x")
     with pytest.raises(OfficeReaderError) as e:
@@ -108,16 +108,16 @@ def test_read_file_from_disk_unsupported_format(tmp_path):
 
 
 def test_read_file_from_disk_file_not_found(tmp_path):
-    from mcp_office_reader.errors import ErrorCategory, OfficeReaderError
-    from mcp_office_reader.reader import read_file_from_disk
+    from office_mcp.errors import ErrorCategory, OfficeReaderError
+    from office_mcp.reader import read_file_from_disk
     with pytest.raises(OfficeReaderError) as e:
         read_file_from_disk(tmp_path / "missing.docx", 10**7, 10**6, 60)
     assert e.value.category == ErrorCategory.FILE_NOT_FOUND
 
 
 def test_read_file_from_disk_file_too_large(tmp_path):
-    from mcp_office_reader.errors import ErrorCategory, OfficeReaderError
-    from mcp_office_reader.reader import read_file_from_disk
+    from office_mcp.errors import ErrorCategory, OfficeReaderError
+    from office_mcp.reader import read_file_from_disk
     f = tmp_path / "big.docx"
     f.write_bytes(b"x" * 100)
     with pytest.raises(OfficeReaderError) as e:
@@ -126,9 +126,9 @@ def test_read_file_from_disk_file_too_large(tmp_path):
 
 
 def test_read_file_from_disk_truncates_long_output(sample_docx, monkeypatch):
-    from mcp_office_reader.reader import read_file_from_disk
+    from office_mcp.reader import read_file_from_disk
     monkeypatch.setattr(
-        "mcp_office_reader.reader._convert_with_markitdown",
+        "office_mcp.reader._convert_with_markitdown",
         lambda p: "x" * 2000,
     )
     out = read_file_from_disk(sample_docx, 10**7, max_output_chars=500, timeout_s=60)
@@ -136,13 +136,13 @@ def test_read_file_from_disk_truncates_long_output(sample_docx, monkeypatch):
 
 
 def test_read_file_from_disk_wraps_unexpected_errors_as_parse_failed(sample_docx, monkeypatch):
-    from mcp_office_reader.errors import ErrorCategory, OfficeReaderError
-    from mcp_office_reader.reader import read_file_from_disk
+    from office_mcp.errors import ErrorCategory, OfficeReaderError
+    from office_mcp.reader import read_file_from_disk
 
     def boom(p):
         raise RuntimeError("markitdown exploded")
 
-    monkeypatch.setattr("mcp_office_reader.reader._convert_with_markitdown", boom)
+    monkeypatch.setattr("office_mcp.reader._convert_with_markitdown", boom)
     with pytest.raises(OfficeReaderError) as e:
         read_file_from_disk(sample_docx, 10**7, 10**6, 60)
     assert e.value.category == ErrorCategory.PARSE_FAILED
@@ -151,7 +151,7 @@ def test_read_file_from_disk_wraps_unexpected_errors_as_parse_failed(sample_docx
 def test_read_document_valid_base64_docx(sample_docx):
     import base64
 
-    from mcp_office_reader.reader import read_document_from_bytes
+    from office_mcp.reader import read_document_from_bytes
     b64 = base64.b64encode(sample_docx.read_bytes()).decode()
     out = read_document_from_bytes(
         filename="sample.docx",
@@ -165,8 +165,8 @@ def test_read_document_valid_base64_docx(sample_docx):
 
 
 def test_read_document_invalid_base64():
-    from mcp_office_reader.errors import ErrorCategory, OfficeReaderError
-    from mcp_office_reader.reader import read_document_from_bytes
+    from office_mcp.errors import ErrorCategory, OfficeReaderError
+    from office_mcp.reader import read_document_from_bytes
     with pytest.raises(OfficeReaderError) as e:
         read_document_from_bytes("x.docx", "!!!not_base64!!!", 10**7, 10**6, 60)
     assert e.value.category == ErrorCategory.INVALID_BASE64
@@ -175,8 +175,8 @@ def test_read_document_invalid_base64():
 def test_read_document_too_large():
     import base64
 
-    from mcp_office_reader.errors import ErrorCategory, OfficeReaderError
-    from mcp_office_reader.reader import read_document_from_bytes
+    from office_mcp.errors import ErrorCategory, OfficeReaderError
+    from office_mcp.reader import read_document_from_bytes
     big = base64.b64encode(b"x" * 10_000).decode()
     with pytest.raises(OfficeReaderError) as e:
         read_document_from_bytes(
@@ -188,8 +188,8 @@ def test_read_document_too_large():
 def test_read_document_unsupported_extension():
     import base64
 
-    from mcp_office_reader.errors import ErrorCategory, OfficeReaderError
-    from mcp_office_reader.reader import read_document_from_bytes
+    from office_mcp.errors import ErrorCategory, OfficeReaderError
+    from office_mcp.reader import read_document_from_bytes
     b64 = base64.b64encode(b"x").decode()
     with pytest.raises(OfficeReaderError) as e:
         read_document_from_bytes("x.rtf", b64, 10**7, 10**6, 60)
@@ -200,8 +200,8 @@ def test_read_document_cleans_up_tempfile_on_error(sample_docx, monkeypatch):
     """When read_file_from_disk raises, the temp file must still be unlinked."""
     import base64
 
-    from mcp_office_reader.errors import ErrorCategory, OfficeReaderError
-    from mcp_office_reader.reader import read_document_from_bytes
+    from office_mcp.errors import ErrorCategory, OfficeReaderError
+    from office_mcp.reader import read_document_from_bytes
 
     seen_paths: list[Path] = []
 
@@ -209,7 +209,7 @@ def test_read_document_cleans_up_tempfile_on_error(sample_docx, monkeypatch):
         seen_paths.append(path)
         raise OfficeReaderError(ErrorCategory.PARSE_FAILED, path=str(path), fmt=".docx")
 
-    monkeypatch.setattr("mcp_office_reader.reader.read_file_from_disk", boom)
+    monkeypatch.setattr("office_mcp.reader.read_file_from_disk", boom)
     b64 = base64.b64encode(sample_docx.read_bytes()).decode()
     with pytest.raises(OfficeReaderError):
         read_document_from_bytes("sample.docx", b64, 10**7, 10**6, 60)
@@ -218,8 +218,8 @@ def test_read_document_cleans_up_tempfile_on_error(sample_docx, monkeypatch):
 
 
 def test_read_file_doc_returns_unsupported_format(tmp_path):
-    from mcp_office_reader.errors import ErrorCategory, OfficeReaderError
-    from mcp_office_reader.reader import read_file_from_disk
+    from office_mcp.errors import ErrorCategory, OfficeReaderError
+    from office_mcp.reader import read_file_from_disk
 
     src = tmp_path / "x.doc"
     src.write_bytes(b"any bytes")
@@ -234,8 +234,8 @@ def test_read_file_doc_returns_unsupported_format(tmp_path):
 def test_read_document_doc_returns_unsupported_format():
     import base64
 
-    from mcp_office_reader.errors import ErrorCategory, OfficeReaderError
-    from mcp_office_reader.reader import read_document_from_bytes
+    from office_mcp.errors import ErrorCategory, OfficeReaderError
+    from office_mcp.reader import read_document_from_bytes
 
     payload = base64.b64encode(b"x").decode("ascii")
     with pytest.raises(OfficeReaderError) as exc:

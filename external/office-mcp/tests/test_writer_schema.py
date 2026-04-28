@@ -3,7 +3,7 @@ import datetime as _dt
 import pytest
 from pydantic import ValidationError
 
-from mcp_office_reader.writer_schema import WorkbookSpec
+from office_mcp.writer_schema import WorkbookSpec
 
 
 def _minimal() -> dict:

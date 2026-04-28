@@ -5,8 +5,8 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from mcp_office_reader.analytics import load_table
-from mcp_office_reader.errors import ErrorCategory, OfficeReaderError
+from office_mcp.analytics import load_table
+from office_mcp.errors import ErrorCategory, OfficeReaderError
 
 
 @pytest.fixture
@@ -51,8 +51,8 @@ def test_load_table_missing_file_raises(tmp_path):
     assert ei.value.category == ErrorCategory.FILE_NOT_FOUND
 
 
-from mcp_office_reader.analytics import apply_filter  # noqa: E402
-from mcp_office_reader.analytics_schema import parse_filter  # noqa: E402
+from office_mcp.analytics import apply_filter  # noqa: E402
+from office_mcp.analytics_schema import parse_filter  # noqa: E402
 
 
 def test_apply_filter_eq(sample_xlsx):
@@ -142,8 +142,8 @@ def test_apply_filter_empty_returns_full_df(sample_xlsx):
     assert len(out) == len(df)
 
 
-from mcp_office_reader.analytics import apply_limit, apply_select, apply_sort  # noqa: E402
-from mcp_office_reader.analytics_schema import SortSpec  # noqa: E402
+from office_mcp.analytics import apply_limit, apply_select, apply_sort  # noqa: E402
+from office_mcp.analytics_schema import SortSpec  # noqa: E402
 
 
 def test_apply_select_subset(sample_xlsx):
@@ -210,7 +210,7 @@ def test_apply_limit_none_passes_through(sample_xlsx):
     assert len(apply_limit(df, None)) == 3
 
 
-from mcp_office_reader.analytics import apply_groupby_agg  # noqa: E402
+from office_mcp.analytics import apply_groupby_agg  # noqa: E402
 
 
 def test_groupby_single_col_single_agg(sample_xlsx):
@@ -273,7 +273,7 @@ def test_groupby_sum_on_text_column_raises(sample_xlsx):
     assert ei.value.category == ErrorCategory.INCOMPATIBLE_DTYPE
 
 
-from mcp_office_reader.analytics import apply_pivot  # noqa: E402
+from office_mcp.analytics import apply_pivot  # noqa: E402
 
 
 @pytest.fixture
@@ -327,7 +327,7 @@ def test_pivot_unknown_aggfunc_raises(pivot_xlsx):
     assert ei.value.category == ErrorCategory.UNSUPPORTED_AGGREGATION
 
 
-from mcp_office_reader.analytics import summarize_dataframe  # noqa: E402
+from office_mcp.analytics import summarize_dataframe  # noqa: E402
 
 
 def test_summarize_text_column(sample_xlsx):
@@ -369,7 +369,7 @@ from io import BytesIO  # noqa: E402
 
 from openpyxl import load_workbook  # noqa: E402
 
-from mcp_office_reader.analytics import dataframe_to_xlsx_bytes  # noqa: E402
+from office_mcp.analytics import dataframe_to_xlsx_bytes  # noqa: E402
 
 
 def test_dataframe_to_xlsx_bytes_round_trip(sample_xlsx):

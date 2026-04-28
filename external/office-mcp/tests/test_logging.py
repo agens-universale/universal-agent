@@ -1,7 +1,7 @@
 import json
 import logging
 
-from mcp_office_reader.logging_config import configure_logging, mask_base64_in_args
+from office_mcp.logging_config import configure_logging, mask_base64_in_args
 
 
 def test_mask_base64_in_args_replaces_long_content():
@@ -18,7 +18,7 @@ def test_mask_base64_keeps_other_fields_intact():
 
 def test_configure_logging_produces_json(capsys):
     configure_logging("INFO")
-    log = logging.getLogger("mcp_office_reader.test")
+    log = logging.getLogger("office_mcp.test")
     log.info("hello", extra={"event": "tool_call", "tool": "read_file"})
     captured = capsys.readouterr()
     line = captured.err.strip().splitlines()[-1]

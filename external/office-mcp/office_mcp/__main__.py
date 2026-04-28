@@ -25,7 +25,7 @@ def _parse_size(s: str) -> int:
 
 
 def main() -> None:
-    p = argparse.ArgumentParser(prog="mcp-office-reader")
+    p = argparse.ArgumentParser(prog="office-mcp")
     p.add_argument(
         "--transport",
         choices=["http", "stdio"],

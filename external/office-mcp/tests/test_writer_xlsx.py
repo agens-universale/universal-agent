@@ -5,8 +5,8 @@ from io import BytesIO
 
 from openpyxl import load_workbook
 
-from mcp_office_reader.writer import generate_xlsx
-from mcp_office_reader.writer_schema import WorkbookSpec
+from office_mcp.writer import generate_xlsx
+from office_mcp.writer_schema import WorkbookSpec
 
 
 def _open(b: bytes):
@@ -207,8 +207,8 @@ def test_cell_styles_preserve_other_font_attrs():
     from openpyxl import Workbook
     from openpyxl.styles import Font
 
-    from mcp_office_reader.writer import _apply_cell_styles
-    from mcp_office_reader.writer_schema import SheetSpec
+    from office_mcp.writer import _apply_cell_styles
+    from office_mcp.writer_schema import SheetSpec
 
     wb = Workbook()
     ws = wb.active

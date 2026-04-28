@@ -62,7 +62,7 @@ class ServerConfig:
 
 
 def build_server(cfg: ServerConfig) -> FastMCP:
-    mcp = FastMCP("mcp-office-reader")
+    mcp = FastMCP("office-mcp")
 
     @mcp.tool(name="read_file")
     def read_file_tool(path: str) -> str:

@@ -7,8 +7,8 @@ import pytest
 from docx import Document
 from openpyxl import load_workbook
 
-from mcp_office_reader.errors import ErrorCategory, OfficeReaderError
-from mcp_office_reader.server import ServerConfig, build_server
+from office_mcp.errors import ErrorCategory, OfficeReaderError
+from office_mcp.server import ServerConfig, build_server
 
 
 @pytest.fixture

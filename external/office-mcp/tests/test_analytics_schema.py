@@ -1,7 +1,7 @@
 import pytest
 from pydantic import ValidationError
 
-from mcp_office_reader.analytics_schema import FilterClause, parse_filter
+from office_mcp.analytics_schema import FilterClause, parse_filter
 
 
 def test_simple_clause_accepted():
@@ -77,7 +77,7 @@ def test_parse_filter_empty_array():
     assert parsed["children"] == []
 
 
-from mcp_office_reader.analytics_schema import (  # noqa: E402
+from office_mcp.analytics_schema import (  # noqa: E402
     AGG_FUNCS,
     OutputSpec,
     SortSpec,

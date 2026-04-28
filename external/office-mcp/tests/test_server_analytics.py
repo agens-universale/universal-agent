@@ -5,7 +5,7 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from mcp_office_reader.server import ServerConfig, build_server
+from office_mcp.server import ServerConfig, build_server
 
 
 @pytest.fixture
@@ -58,7 +58,7 @@ def test_inspect_xlsx_named_sheet(cfg, sample_path):
 
 from openpyxl import load_workbook  # noqa: E402
 
-from mcp_office_reader.errors import ErrorCategory, OfficeReaderError  # noqa: E402
+from office_mcp.errors import ErrorCategory, OfficeReaderError  # noqa: E402
 
 
 def test_query_xlsx_returns_filtered_rows_inline(cfg, sample_path):
