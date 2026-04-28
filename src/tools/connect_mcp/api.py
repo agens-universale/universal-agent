@@ -9,7 +9,12 @@ import uuid
 
 import requests
 
-from tools.connect_mcp.client import _MCP_SESSIONS, _call_mcp_tool, _get_or_init_session_id
+from config import load_config
+from tools.connect_mcp.client import (
+    _MCP_SESSIONS,
+    _call_mcp_tool,
+    _get_or_init_session_id,
+)
 from tools.connect_mcp.persistent_stdio import (
     PersistentStdioRegistry,
     is_persistent_stdio,
@@ -20,7 +25,10 @@ from tools.connect_mcp.stream_client import (
     call_tool_stream_sse,
     call_tool_stream_stdio,
 )
-from tools.connect_mcp.validation import _validate_tool_arguments, format_mcp_tool_result
+from tools.connect_mcp.validation import (
+    _validate_tool_arguments,
+    format_mcp_tool_result,
+)
 from utils.retry import retry_with_backoff
 
 logger = logging.getLogger(__name__)
@@ -89,10 +97,10 @@ def _mcp_media_save_dir() -> str:
     Порядок приоритета: env MCP_MEDIA_SAVE_DIR → cwd/mcp_media.
     Создаётся при первой записи.
     """
-    override = os.environ.get("MCP_MEDIA_SAVE_DIR", "").strip()
-    if override:
-        return override
-    return os.path.join(os.getcwd(), "mcp_media")
+    default_media_path_str = "~/.local/agent/mcp-media"
+    config = load_config()
+
+    return os.path.expanduser(config.get("mcp-meta", {}).get("media_save_dir", default_media_path_str))
 
 
 def _pick_filename(
@@ -106,7 +114,9 @@ def _pick_filename(
     ext = _MIME_EXT.get((mime or "").lower(), ".bin")
     fname: Optional[str] = None
     if isinstance(arguments, dict):
-        raw_name = arguments.get("filename") or arguments.get("file") or arguments.get("path")
+        raw_name = (
+            arguments.get("filename") or arguments.get("file") or arguments.get("path")
+        )
         if isinstance(raw_name, str) and raw_name.strip():
             fname = os.path.basename(raw_name.strip())
     if not fname:
@@ -186,7 +196,10 @@ def _wrap_mcp_result(
     error: Optional[Dict[str, Any]] = None
 
     # Common MCP pattern: {"content": ..., "isError": bool}
-    if isinstance(formatted_sanitized, dict) and formatted_sanitized.get("isError") is True:
+    if (
+        isinstance(formatted_sanitized, dict)
+        and formatted_sanitized.get("isError") is True
+    ):
         ok = False
         error = {
             "type": "mcp_tool_error",
@@ -249,7 +262,11 @@ def call_mcp_tool(
     # Берём описание тулы и метаданные.
     # Ожидаемый формат: {"tool": {...}, "metadata": {...}}.
     raw_entry = tools_registry[full_tool_name]
-    tool_entry = raw_entry.get("tool") if isinstance(raw_entry, dict) and "tool" in raw_entry else raw_entry
+    tool_entry = (
+        raw_entry.get("tool")
+        if isinstance(raw_entry, dict) and "tool" in raw_entry
+        else raw_entry
+    )
     metadata = raw_entry.get("metadata", {}) if isinstance(raw_entry, dict) else {}
 
     # Ключ сервера и реальное имя тулы на MCP‑сервере
@@ -275,7 +292,9 @@ def call_mcp_tool(
     if not stdio_like and not url:
         raise ValueError(f"MCP server '{server_key}' has no 'url' in config")
     if stdio_like and not server_cfg.get("command"):
-        raise ValueError(f"MCP server '{server_key}' ({transport}) has no 'command' in config")
+        raise ValueError(
+            f"MCP server '{server_key}' ({transport}) has no 'command' in config"
+        )
 
     # Схема параметров тулы (JSON Schema)
     tool_schema = tool_entry.get("parameters") or {}
@@ -341,7 +360,9 @@ def call_mcp_tool(
             server_key, url, server_cfg, token=token, timeout=timeout
         )
         if not session_id:
-            raise RuntimeError(f"Failed to initialize MCP session for server '{server_key}'")
+            raise RuntimeError(
+                f"Failed to initialize MCP session for server '{server_key}'"
+            )
 
         def do_call(sid: str):
             return _call_mcp_tool(
