@@ -5,11 +5,14 @@
 скрейпинг.
 
 Доставка — **через npx**, без Docker и без локальной сборки. Node.js
-ставится автоматически (см. ниже).
+ставится автоматически в изолированную папку (`~/.agent/node/v20.18.0/` по
+умолчанию, см. ниже).
 
 ## Требования
 
-- **Node.js 18+** — ставится автоматически `install.py`, см. раздел «Установка».
+- **Node.js 20.18.0** — пин под совместимость с `@playwright/mcp@0.0.70`.
+  Ставится автоматически `install.py`, **системная Node не используется**
+  и не трогается.
 - **Chromium** — качается Playwright'ом автоматически на этапе install.
 
 ## Установка
@@ -22,18 +25,24 @@ python recommended_mcp/install.py
 
 Что произойдёт:
 
-1. Если `npx` уже в PATH — шаг пропускается.
-2. Иначе ставится Node.js штатным пакетным менеджером платформы:
-   - **macOS**  — `brew install node` (требует Homebrew).
-   - **Windows** — `winget install OpenJS.NodeJS.LTS`.
-   - **Linux**  — первый найденный из `apt-get`, `dnf`, `pacman`, `apk`
-     (с `sudo`, запросит пароль).
+1. Проверяется `<agent_dep_dir>/node/v20.18.0/bin/node --version` (на Windows
+   `…/node.exe`). Если совпадает с пином — скип. `agent_dep_dir` берётся из
+   top-level ключа `agent_dep_dir` в `recommended_mcp/config.yml`, дефолт
+   `~/.agent`.
+2. Иначе скачивается архив Node под текущую платформу/архитектуру с
+   `nodejs.org/dist/v20.18.0/`:
+   - macOS arm64/x64 → `node-v20.18.0-darwin-{arch}.tar.gz`
+   - Linux x64/arm64 → `node-v20.18.0-linux-{arch}.tar.xz`
+   - Windows x64    → `node-v20.18.0-win-x64.zip`
 
-   Если ни один способ не сработал — install.py печатает ссылку
-   https://nodejs.org/ и завершает работу с ошибкой. Поставь Node.js руками
-   и повторно запусти `install.py`.
-3. `npx -y @playwright/mcp@latest --help` — прогрев npm-кэша.
-4. `npx -y playwright@latest install chromium` — пред-скачивание браузера.
+   SHA256 сверяется с `SHASUMS256.txt` оттуда же. Распаковка идёт в
+   `<agent_dep_dir>/node/v20.18.0/`.
+3. `npm install -g @playwright/mcp@0.0.70` — прогрев npm-кэша уже на нашей
+   Node.
+4. `npx -y playwright install --with-deps chromium` — пред-скачивание браузера.
+
+В конце `install.py` печатает абсолютный путь до `npx` для текущей машины —
+он понадобится в следующем шаге.
 
 ## Запуск
 
@@ -44,8 +53,21 @@ python recommended_mcp/install.py
 
 ## Подключение к агенту
 
-Скопируй содержимое `agent_config.snippet.yml` в секцию `mcp-servers:` своего
-`config.yml` агента.
+Скопируй блок из `agent_config.snippet.yml` в секцию `mcp-servers:` своего
+`config.yml`. В `command:` подойдёт `~/.agent/node/v20.18.0/bin/npx` —
+`~` раскрывает `_resolve_command()` (`src/tools/connect_mcp/transport.py`).
+Абсолютный путь, который печатает `install.py` в конце вывода, тоже
+работает. Пример:
+
+```yaml
+mcp-servers:
+  browser_playwright:
+    transport: stream_stdio
+    command: ~/.agent/node/v20.18.0/bin/npx
+    args: ["-y", "@playwright/mcp@0.0.70"]
+    persistent_session: true
+    persistent_session_close_tool: browser_close
+```
 
 ## Альтернатива: запуск в Docker
 

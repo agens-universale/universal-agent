@@ -195,16 +195,16 @@ def _readline_with_timeout(stream: "Any", timeout: float) -> str | None:
 
 def _resolve_command(command: str) -> str:
     """
-    На Windows резолвит имя команды в полный путь через PATHEXT.
+    Раскрывает `~` в `command:` и на Windows резолвит PATHEXT.
 
-    `subprocess.Popen([\"npx\", ...])` на Windows не учитывает PATHEXT и не
-    найдёт ни `npx.cmd`, ни `npx.exe` — пользователю пришлось бы прописывать
-    `command: npx.cmd` в config.yml. `shutil.which` делает это корректно.
-    На POSIX возвращаем как есть: ядро/Popen сами ищут по PATH.
+    `subprocess.Popen` не делает tilde expansion (это работа шелла), и на
+    Windows не учитывает PATHEXT (`npx` не найдёт `npx.cmd`/`.exe`). Делаем
+    оба шага здесь — единственный чокпойнт перед спавном stdio MCP.
     """
+    command = os.path.expanduser(command)
     if os.name != "nt":
         return command
-    # Уже абсолютный путь или с расширением — не трогаем.
+
     if os.path.isabs(command) or os.path.splitext(command)[1]:
         return command
     resolved = shutil.which(command)

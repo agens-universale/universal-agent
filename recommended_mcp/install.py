@@ -1,11 +1,17 @@
 """Ставит MCP из config.yml: pip install wheel / docker compose build / npx ensure."""
 from __future__ import annotations
 
+import hashlib
 import os
 import shutil
 import subprocess
 import sys
+import tarfile
+import tempfile
+import urllib.request
+import zipfile
 from pathlib import Path
+from typing import Dict, Tuple
 
 # Позволяет запускать файл напрямую: `python recommended_mcp/install.py`.
 # При `python -m recommended_mcp.install` и при import из тестов — no-op.
@@ -13,14 +19,19 @@ if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
     __package__ = "recommended_mcp"
 
-from recommended_mcp.manifest import MCPEntry, load_manifest
+from recommended_mcp.manifest import MCPEntry, load_agent_dep_dir, load_manifest
 
 
 class InstallError(RuntimeError):
     """Невозможно выполнить установку MCP."""
 
 
-def install_entry(entry: MCPEntry, root: Path) -> None:
+# Пин Node.js под @playwright/mcp. Меняется здесь — нигде больше не дублируется.
+NODE_VERSION = "18.0.0"
+_NODE_DIST_BASE = "https://nodejs.org/dist"
+
+
+def install_entry(entry: MCPEntry, root: Path, agent_dep_dir: Path) -> None:
     """Установить один MCP. root — каталог, относительно которого резолвится entry.path."""
     if entry.install.platforms and sys.platform not in entry.install.platforms:
         print(
@@ -37,7 +48,7 @@ def install_entry(entry: MCPEntry, root: Path) -> None:
     elif itype == "docker":
         _install_docker(entry.name, pkg_path)
     elif itype == "npx":
-        _install_npx(entry.name, entry.install.commands)
+        _install_npx(entry.name, entry.install.commands, agent_dep_dir)
     else:
         raise InstallError(
             f"mcp {entry.name!r} uses install.type={itype!r} which is not supported "
@@ -75,207 +86,226 @@ def _install_docker(name: str, pkg_path: Path) -> None:
     )
 
 
-# Pinned Node.js версия для Windows-fallback (если winget недоступен).
-# LTS, x64. Обновлять здесь при необходимости.
-_NODE_WIN_MSI_URL = "https://nodejs.org/dist/v20.18.0/node-v20.18.0-x64.msi"
+def _node_archive_basename() -> Tuple[str, str]:
+    """Имя архива и его расширение для текущей платформы.
 
-
-def _download_url_windows(url: str, dest: str) -> None:
-    """Скачать URL в файл на Windows. Сначала urllib, fallback на PowerShell.
-
-    urllib работает на нормальном Python (CA-bundle через системный store).
-    На embeddable Python без CA или на Windows-машинах с MITM-прокси /
-    устаревшим cert-store urllib падает на SSL handshake. PowerShell
-    Invoke-WebRequest использует Windows-store сертификатов и обычно
-    срабатывает там, где urllib не смог.
+    Возвращает (filename, extension), где extension ∈ {tar.gz, tar.xz, zip}.
+    Соответствует layout'у https://nodejs.org/dist/vX.Y.Z/.
     """
-    import urllib.error
-    import urllib.request
-
-    try:
-        urllib.request.urlretrieve(url, dest)
-        return
-    except (urllib.error.URLError, OSError) as e:
-        print(f"[download] urllib failed ({e}); retrying via PowerShell")
-
-    rc = subprocess.call([
-        "powershell", "-NoProfile", "-Command",
-        f"$ProgressPreference='SilentlyContinue'; "
-        f"Invoke-WebRequest -Uri '{url}' -OutFile '{dest}'"
-    ])
-    if rc != 0:
-        raise InstallError(
-            f"Download failed for {url} (PowerShell exit {rc}). "
-            f"Check network access or install Node.js manually from https://nodejs.org/."
-        )
-
-
-def _refresh_windows_path() -> None:
-    """Перечитать PATH из Windows-реестра в os.environ текущего процесса.
-
-    Windows-инсталляторы (winget, msiexec) пишут PATH в registry, но
-    активные процессы держат снимок переменных окружения с момента старта.
-    Без обновления `shutil.which` после установки не находит свеже-
-    поставленные программы — отсюда и берётся «still not in PATH», даже
-    если установка прошла успешно. Эта функция читает Machine + User scope
-    из реестра и переписывает os.environ["PATH"] в текущем процессе.
-
-    No-op на не-Windows платформах.
-    """
-    if sys.platform != "win32":
-        return
-    import winreg
-
-    parts: list[str] = []
-    for hive, key in [
-        (winreg.HKEY_LOCAL_MACHINE,
-         r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment"),
-        (winreg.HKEY_CURRENT_USER, r"Environment"),
-    ]:
-        try:
-            with winreg.OpenKey(hive, key) as k:
-                value, _ = winreg.QueryValueEx(k, "Path")
-                if value:
-                    parts.append(value)
-        except OSError:
-            pass
-
-    if parts:
-        os.environ["PATH"] = ";".join(parts)
-
-
-def _install_node_msi_windows() -> None:
-    """Fallback: скачать Node.js MSI с nodejs.org и поставить через msiexec /qn.
-
-    Нужен, когда winget недоступен (Windows Sandbox, Windows Server без App
-    Installer, корпоративные образы с вырезанным Microsoft Store). MSI пишет
-    в machine PATH — после установки делаем _refresh_windows_path, чтобы
-    текущий процесс видел новый PATH без перезапуска shell.
-    """
-    import tempfile
-
-    tmp = tempfile.NamedTemporaryFile(suffix=".msi", delete=False)
-    tmp.close()
-    print(f"[npx] downloading Node.js MSI from {_NODE_WIN_MSI_URL}")
-    _download_url_windows(_NODE_WIN_MSI_URL, tmp.name)
-    print(f"[npx] msiexec /i {tmp.name} /qn")
-    rc = subprocess.call(["msiexec", "/i", tmp.name, "/qn"])
-    if rc != 0:
-        raise InstallError(
-            f"msiexec failed (exit {rc}) for {tmp.name}. "
-            f"Install Node.js manually from https://nodejs.org/ and re-run."
-        )
-
-
-def _ensure_node() -> str:
-    """Гарантировать, что `npx` есть в PATH. Вернуть путь до npx.
-
-    Идемпотентно: если npx уже установлен — сразу выходим. Иначе пытаемся
-    поставить Node.js штатным пакетным менеджером платформы:
-      - macOS : brew install node
-      - Windows: winget → MSI с nodejs.org (fallback, если winget нет)
-      - Linux  : apt-get / dnf / pacman / apk install nodejs npm (через sudo)
-    Если не получилось — печатаем ссылку на nodejs.org и падаем.
-    """
-    npx = shutil.which("npx")
-    if npx:
-        print(f"[npx] already installed: {npx}")
-        return npx
-
-    print("[npx] not found in PATH — installing Node.js…")
-    installers: list[list[str]] = []
+    machine = (os.uname().machine if hasattr(os, "uname") else os.environ.get("PROCESSOR_ARCHITECTURE", "")).lower()
     if sys.platform == "darwin":
-        if shutil.which("brew"):
-            installers.append(["brew", "install", "node"])
-    elif sys.platform == "win32":
-        if shutil.which("winget"):
-            installers.append([
-                "winget", "install", "-e",
-                "--id", "OpenJS.NodeJS.LTS",
-                "--silent",
-                "--accept-source-agreements",
-                "--accept-package-agreements",
-            ])
-        else:
-            # Fallback для окружений без App Installer (Sandbox, Server,
-            # корпоративные образы). Прямая загрузка MSI с nodejs.org.
-            _install_node_msi_windows()
-            _refresh_windows_path()
-            npx = shutil.which("npx")
-            if not npx:
-                raise InstallError(
-                    "Node.js MSI installer finished, but `npx` still not in PATH. "
-                    "Re-open your shell (to refresh PATH) and re-run install.py."
-                )
-            print(f"[npx] installed: {npx}")
-            return npx
+        arch = "arm64" if machine in ("arm64", "aarch64") else "x64"
+        return f"node-v{NODE_VERSION}-darwin-{arch}.tar.gz", "tar.gz"
+    if sys.platform == "win32":
+        arch = "arm64" if "arm64" in machine else "x64"
+        return f"node-v{NODE_VERSION}-win-{arch}.zip", "zip"
+    # Linux и прочие POSIX
+    if machine in ("aarch64", "arm64"):
+        arch = "arm64"
+    elif machine in ("armv7l", "armv6l"):
+        arch = "armv7l"
     else:
-        # Перебираем Linux-пакетники по порядку; первый найденный выигрывает.
-        for pm, args in (
-            ("apt-get", ["sudo", "apt-get", "install", "-y", "nodejs", "npm"]),
-            ("dnf",     ["sudo", "dnf", "install", "-y", "nodejs", "npm"]),
-            ("pacman",  ["sudo", "pacman", "-S", "--noconfirm", "nodejs", "npm"]),
-            ("apk",     ["sudo", "apk", "add", "--no-cache", "nodejs", "npm"]),
-        ):
-            if shutil.which(pm):
-                installers.append(args)
-                break
+        arch = "x64"
+    return f"node-v{NODE_VERSION}-linux-{arch}.tar.xz", "tar.xz"
 
-    if not installers:
-        raise InstallError(
-            "Cannot auto-install Node.js on this platform. "
-            "Install it manually from https://nodejs.org/ and re-run install.py."
+
+def _node_install_paths(agent_dep_dir: Path) -> Dict[str, Path]:
+    """Абсолютные пути до бинарей внутри `<agent_dep_dir>/node/v<NODE_VERSION>/`."""
+    root = agent_dep_dir / "node" / f"v{NODE_VERSION}"
+    if sys.platform == "win32":
+        # Windows-архив раскладывает бинари в корень папки.
+        bin_dir = root
+        node = bin_dir / "node.exe"
+        npm = bin_dir / "npm.cmd"
+        npx = bin_dir / "npx.cmd"
+    else:
+        bin_dir = root / "bin"
+        node = bin_dir / "node"
+        npm = bin_dir / "npm"
+        npx = bin_dir / "npx"
+    return {"root": root, "bin": bin_dir, "node": node, "npm": npm, "npx": npx}
+
+
+def _verify_existing_node(paths: Dict[str, Path]) -> bool:
+    """True, если все три бинаря на месте и `node --version` совпадает с NODE_VERSION."""
+    if not (paths["node"].exists() and paths["npm"].exists() and paths["npx"].exists()):
+        return False
+    try:
+        result = subprocess.run(
+            [str(paths["node"]), "--version"],
+            capture_output=True, text=True, check=True, timeout=10,
         )
+    except (subprocess.SubprocessError, OSError):
+        return False
+    return result.stdout.strip() == f"v{NODE_VERSION}"
 
-    for cmd in installers:
-        print(f"[npx] {' '.join(cmd)}")
-        rc = subprocess.call(cmd)
-        if rc != 0:
+
+def _fetch_expected_sha256(archive_filename: str) -> str:
+    """Скачать SHASUMS256.txt и вытащить hash для archive_filename."""
+    url = f"{_NODE_DIST_BASE}/v{NODE_VERSION}/SHASUMS256.txt"
+    print(f"[npx] fetching SHASUMS256.txt from {url}")
+    with urllib.request.urlopen(url, timeout=60) as resp:
+        body = resp.read().decode("utf-8")
+    for line in body.splitlines():
+        # Формат: "<64hex>  <filename>"
+        parts = line.split()
+        if len(parts) == 2 and parts[1] == archive_filename:
+            return parts[0]
+    raise InstallError(
+        f"SHASUMS256.txt at {url} doesn't list {archive_filename!r}. "
+        f"Either NODE_VERSION pin is wrong or nodejs.org layout changed."
+    )
+
+
+def _sha256_of_file(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _download_archive(archive_filename: str, dest: Path) -> None:
+    url = f"{_NODE_DIST_BASE}/v{NODE_VERSION}/{archive_filename}"
+    print(f"[npx] downloading {url}")
+    urllib.request.urlretrieve(url, str(dest))
+
+
+def _extract_archive(archive_path: Path, ext: str, dest_parent: Path) -> Path:
+    """
+    Распаковать архив Node в dest_parent. Возвращает путь до распакованной
+    верхней папки (`node-vX.Y.Z-<platform>-<arch>/`).
+    """
+    if ext == "zip":
+        with zipfile.ZipFile(archive_path) as zf:
+            zf.extractall(dest_parent)
+            top = zf.namelist()[0].split("/", 1)[0]
+    elif ext in ("tar.gz", "tar.xz"):
+        mode = "r:gz" if ext == "tar.gz" else "r:xz"
+        with tarfile.open(archive_path, mode=mode) as tf:
+            tf.extractall(dest_parent)
+            top = tf.getnames()[0].split("/", 1)[0]
+    else:
+        raise InstallError(f"unsupported archive extension {ext!r}")
+    return dest_parent / top
+
+
+def _ensure_cached_node(agent_dep_dir: Path) -> Dict[str, Path]:
+    """
+    Гарантировать наличие пиннутого Node под `<agent_dep_dir>/node/v<NODE_VERSION>/`.
+
+    Идемпотентно: если бинари на месте и версия совпадает — ничего не качаем.
+    Системный Node игнорируется полностью — даже если в PATH есть Node 22,
+    мы используем только нашу копию (воспроизводимость + защита от того, что
+    апгрейд системного Node уронит MCP).
+    """
+    paths = _node_install_paths(agent_dep_dir)
+    if _verify_existing_node(paths):
+        print(f"[npx] cached Node v{NODE_VERSION} already at {paths['root']}")
+        return paths
+
+    archive_filename, ext = _node_archive_basename()
+    expected_sha = _fetch_expected_sha256(archive_filename)
+
+    # Качаем во временный файл, чтобы прерванная загрузка не оставила
+    # битый архив рядом с целью.
+    with tempfile.TemporaryDirectory() as tmp_str:
+        tmp = Path(tmp_str)
+        archive_path = tmp / archive_filename
+        _download_archive(archive_filename, archive_path)
+
+        actual_sha = _sha256_of_file(archive_path)
+        if actual_sha != expected_sha:
             raise InstallError(
-                f"Node.js installer failed (exit {rc}): {' '.join(cmd)}. "
-                f"Install manually from https://nodejs.org/ and re-run."
+                f"SHA256 mismatch for {archive_filename}: "
+                f"expected {expected_sha}, got {actual_sha}"
             )
+        print(f"[npx] sha256 verified")
 
-    _refresh_windows_path()
-    npx = shutil.which("npx")
-    if not npx:
+        extracted_top = _extract_archive(archive_path, ext, tmp)
+
+        # Кладём в `<agent_dep_dir>/node/v<NODE_VERSION>/`. На Windows shutil.move
+        # через границы дисков не падает, так как parent один (tmp может
+        # оказаться на другом диске относительно ~ — обходим через copytree+rmtree).
+        paths["root"].parent.mkdir(parents=True, exist_ok=True)
+        if paths["root"].exists():
+            shutil.rmtree(paths["root"])
+        try:
+            shutil.move(str(extracted_top), str(paths["root"]))
+        except OSError:
+            shutil.copytree(str(extracted_top), str(paths["root"]))
+            shutil.rmtree(str(extracted_top), ignore_errors=True)
+
+    if not _verify_existing_node(paths):
         raise InstallError(
-            "Node.js installer finished, but `npx` still not in PATH. "
-            "Re-open your shell (to refresh PATH) and re-run install.py."
+            f"Node install completed but {paths['node']} doesn't report v{NODE_VERSION}. "
+            f"Inspect {paths['root']} and re-run install.py."
         )
-    print(f"[npx] installed: {npx}")
-    return npx
+    print(f"[npx] installed Node v{NODE_VERSION} at {paths['root']}")
+    return paths
 
 
-def _install_npx(name: str, commands: tuple[tuple[str, ...], ...]) -> None:
-    """Установка MCP, доставляемого через npx.
+def _install_npx(
+    name: str,
+    commands: tuple[tuple[str, ...], ...],
+    agent_dep_dir: Path,
+) -> None:
+    """Установка MCP, доставляемого через npx, на нашей пиннутой Node.
 
     Шаги:
-      1. ensure Node.js/npx (идемпотентно).
-      2. прогнать install.commands из config.yml (обычно — pre-fetch npm-пакетов
-         и загрузка Playwright-браузеров). Первый элемент argv (npm/npx/yarn/...)
-         резолвится через shutil.which — на Windows .cmd-shim'ы CreateProcess
-         без shell=True не находит по bare-имени, нужен абсолютный путь.
+      1. ensure cached Node (идемпотентно).
+      2. prepend `<cache>/node/.../bin` в PATH текущего процесса — чтобы
+         внутренние вызовы npm-из-npx, node-из-npm и т.д. брали нашу версию,
+         а не системную.
+      3. прогнать install.commands из config.yml. argv[0] in {npx, npm, node}
+         подменяется на абсолютный путь из cached Node — на Windows .cmd-shim
+         напрямую запускается без shell=True, на POSIX просто абс. путь.
     """
-    _ensure_node()
+    paths = _ensure_cached_node(agent_dep_dir)
+    bin_dir = str(paths["bin"])
+    if bin_dir not in os.environ.get("PATH", ""):
+        sep = ";" if sys.platform == "win32" else ":"
+        os.environ["PATH"] = bin_dir + sep + os.environ.get("PATH", "")
+
+    binmap: Dict[str, str] = {
+        "npx": str(paths["npx"]),
+        "npm": str(paths["npm"]),
+        "node": str(paths["node"]),
+    }
+
     for cmd in commands:
         argv = list(cmd)
-        if argv:
-            resolved = shutil.which(argv[0])
-            if resolved:
-                argv[0] = resolved
+        if argv and argv[0] in binmap:
+            argv[0] = binmap[argv[0]]
         print(f"[install] {name}: {' '.join(argv)}")
         subprocess.run(argv, check=True)
 
 
 def main() -> int:
     root = Path(__file__).resolve().parent
-    manifest = load_manifest(root / "config.yml")
+    config_path = root / "config.yml"
+    manifest = load_manifest(config_path)
+    agent_dep_dir = load_agent_dep_dir(config_path)
+
     if not manifest:
         print("[info] no mcps declared in config.yml — nothing to install")
         return 0
     for entry in manifest:
-        install_entry(entry, root)
+        install_entry(entry, root, agent_dep_dir)
+
+    # Пользователь видит финальный путь — копирует его в `command:`
+    # своего config.yml (mcp-servers секция). Раскрывать ~ заранее, чтобы
+    # ничего не пришлось редактировать после копирования.
+    if any(e.install.type == "npx" for e in manifest):
+        npx_path = _node_install_paths(agent_dep_dir)["npx"]
+        print()
+        print("─" * 64)
+        print(f"Cached Node v{NODE_VERSION} ready at: {npx_path.parent}")
+        print()
+        print("Set this in your agent's config.yml under mcp-servers.<name>:")
+        print(f"  command: {npx_path}")
+        print("─" * 64)
+    
     print("[done] install complete")
     return 0
 

@@ -138,7 +138,6 @@ save_logs: true
 
 # MCP-сервера
 mcp-servers:
-<<<<<<< HEAD
   # доступные типы транспорта stdio, stream_http
   #
   # --- Playwright Browser MCP ---
@@ -157,14 +156,22 @@ mcp-servers:
   #     to URL, click elements, type text, take screenshot, get page snapshot
   #     (accessibility tree), evaluate JavaScript.
   #   server-name: playwright-browser
-    # browser_playwright:
-    #   transport: stdio
-    #   command: npx
-    #   args: ["-y", "@playwright/mcp@latest"]
-    #   persistent_session: true
-    #   persistent_session_close_tool: browser_close
-    #   description: Browser automation via Playwright. Use for web navigation, clicking, form filling, taking screenshots, and web scraping.
-    #   server-name: playwright-browser
+  #
+  # Вариант через локальную Node, поставленную `python recommended_mcp/install.py`
+  # в `~/.agent/node/v20.18.0/` (системная Node не используется — пин 20.18.0
+  # под совместимость с @playwright/mcp). `~` раскрывается _resolve_command;
+  # абсолютный путь тоже подходит. Примеры:
+  #   macOS / Linux : ~/.agent/node/v20.18.0/bin/npx
+  #   Windows       : ~\.agent\node\v20.18.0\npx.cmd
+  #
+  # browser_playwright:
+  #   transport: stream_stdio
+  #   command: ~/.agent/node/v20.18.0/bin/npx
+  #   args: ["-y", "@playwright/mcp@0.0.70"]
+  #   persistent_session: true
+  #   persistent_session_close_tool: browser_close
+  #   description: Browser automation via Playwright. Use for web navigation, clicking, form filling, taking screenshots, and web scraping.
+  #   server-name: playwright-browser
   #
   # --- Browser-use MCP (stdio) ---
   # Альтернатива Playwright MCP: Python-обёртка `browser-use` поднимается как локальный
@@ -207,14 +214,6 @@ mcp-servers:
     url: https://127.0.0.1:8091/mcp
     description: Gitverse documentation search and answer
     server-name: gitverse RAG
-=======
-  # доступные типы транспорта http, stdio, sse, stream_http, stream_sse, stream_stdio
-  # rag:
-  #  transport: http
-  #  url: https://127.0.0.1:8091/mcp
-  #  description: Company documentation search and answer
-  #  server-name: Documentation RAG
->>>>>>> feat/recommended-mcp
     # Проверка SSL-сертификата для этого MCP-сервера:
     # true  - включена (по умолчанию, если параметр не задан)
     # false - отключена (при проблемах с сертификатом или self-signed)

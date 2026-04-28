@@ -2,14 +2,17 @@
 # Работает с persistent_session: true — один процесс npx и один Chromium
 # живут весь цикл работы агента (см. src/tools/connect_mcp/persistent_stdio.py).
 #
-# Windows: `command: npx` работает as-is — _resolve_command в
-# src/tools/connect_mcp/transport.py резолвит через PATHEXT в `npx.cmd`/`.exe`.
+# `command:` — путь до npx из локально установленной Node.js
+# (recommended_mcp/install.py разворачивает её в `~/.agent/node/v20.18.0/`,
+# системная Node не используется). `~` раскрывается в _resolve_command,
+# абсолютный путь тоже подходит. Примеры:
+#   macOS / Linux : ~/.agent/node/v20.18.0/bin/npx
+#   Windows       : ~\.agent\node\v20.18.0\npx.cmd
 browser_playwright:
   transport: stream_stdio
-  command: npx
-  args: ["-y", "@playwright/mcp@latest"]
+  command: ~/.agent/node/v18.0.0/bin/npx
+  args: ["-y", "@playwright/mcp@0.0.70"]
   persistent_session: true
-  persistent_session_close_tool: browser_close
   description: Browser automation via Playwright. Use for web navigation, clicking, form filling, taking screenshots, and webscraping.
   server-name: playwright-browser
 
