@@ -155,12 +155,48 @@ Background и CLI-клиент для работы с агентом GigaCode: �
 
 7. Конкретные полезные MCP серверы
 
-  - поиск DDGS-MCP
-  Установите и запустите в отдельном процессе mcp сервер поиска. В конфиге агента проверьте, что mcp сервер указан с нужным транспортом и ендпоинтом подключения
-  ```
-  python3 -m pip install ddgs-mcp
-  ddgs-mcp --http
-  ```
+   ### Встроенные интеграции — `recommended_mcp/`
+
+   В корне репозитория есть каталог `recommended_mcp/` с готовыми рецептами
+   подключения нескольких MCP. Установка одной командой:
+
+   ```bash
+   python recommended_mcp/install.py
+   ```
+
+   После установки нужно скопировать сниппеты из
+   `recommended_mcp/<name>/agent_config.snippet.yml` в секцию `mcp-servers:`
+   своего `config.yml`. На момент написания доступны:
+
+   - **`computer`** — управление Windows GUI через UI Automation (запуск
+     приложений, клики, ввод, чтение состояния окон). Только Windows.
+     Исходники: `external/computer-mcp/`.
+   - **`office`** — чтение офисных документов (pdf, docx, xls, xlsx, pptx,
+     csv, html, msg) → markdown. Кросс-платформенно. Исходники:
+     `external/office-mcp/`.
+
+   Подробности про каждую интеграцию — в её `recommended_mcp/<name>/README.md`.
+   Общая документация по `install.py` / `run.py` / структуре каталога —
+   в `recommended_mcp/README.md`.
+
+   Для итеративной разработки наших MCP в `external/`:
+
+   ```bash
+   python recommended_mcp/install.py --editable
+   ```
+
+   ### Ручная установка (для MCP не из `recommended_mcp/`)
+
+   Если нужный MCP не входит в `recommended_mcp/` — ставь как обычный пакет
+   и подключай через `mcp-servers:`. Пример с DDGS-поиском:
+
+   ```bash
+   python3 -m pip install ddgs-mcp
+   ddgs-mcp --http
+   ```
+
+   В `config.yml` агента укажи нужный транспорт (`http`, `stream_http` и т.д.)
+   и endpoint подключения (см. раздел 6 выше).
 
 
 
