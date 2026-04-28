@@ -10,7 +10,7 @@
 #   Windows       : ~\.agent\node\v20.18.0\npx.cmd
 browser_playwright:
   transport: stream_stdio
-  command: ~/.agent/node/v18.0.0/bin/npx
+  command: ~~/.local/agent/node/v18.0.0/bin/npx
   args: ["-y", "@playwright/mcp@0.0.70"]
   persistent_session: true
   description: Browser automation via Playwright. Use for web navigation, clicking, form filling, taking screenshots, and webscraping.

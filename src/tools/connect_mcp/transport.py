@@ -200,12 +200,16 @@ def _resolve_command(command: str) -> str:
     `subprocess.Popen` не делает tilde expansion (это работа шелла), и на
     Windows не учитывает PATHEXT (`npx` не найдёт `npx.cmd`/`.exe`). Делаем
     оба шага здесь — единственный чокпойнт перед спавном stdio MCP.
+
+    На Windows `shutil.which` нужен и для bare `npx`, и для абсолютного
+    пути без расширения (`C:\\...\\npx` → `C:\\...\\npx.cmd`). Раннее
+    return делаем только если расширение уже проставлено явно.
     """
     command = os.path.expanduser(command)
     if os.name != "nt":
         return command
 
-    if os.path.isabs(command) or os.path.splitext(command)[1]:
+    if os.path.splitext(command)[1]:
         return command
     resolved = shutil.which(command)
     return resolved if resolved else command
