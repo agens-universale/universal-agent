@@ -1,8 +1,11 @@
-# computer — gc-computer-mcp
+# computer — computer-mcp
 
-Интеграция `gc-computer-mcp` в background-agent. Даёт агенту управлять
+Интеграция `computer-mcp` в background-agent. Даёт агенту управлять
 Windows GUI через UI Automation: запускать приложения, кликать, вводить
 текст, читать содержимое окон.
+
+Исходники — в `external/computer-mcp/`. Пакет ставится `install.py` через
+`pip install ./external/computer-mcp` (PEP 517 build из исходников).
 
 ## Требования
 
@@ -20,13 +23,14 @@ Windows GUI через UI Automation: запускать приложения, �
 python recommended_mcp/install.py
 ```
 
-Или вручную:
+Для разработки (live-edit исходников в `external/computer-mcp/` без
+переустановки):
 
 ```bash
-pip install recommended_mcp/computer/dist/gc_computer_mcp-*.whl
+python recommended_mcp/install.py --editable
 ```
 
-После установки в PATH активного venv появится команда `gc-computer-mcp`.
+После установки в PATH активного venv появится команда `computer-mcp`.
 
 ## Подключение к агенту
 
@@ -35,7 +39,7 @@ pip install recommended_mcp/computer/dist/gc_computer_mcp-*.whl
 
 ## Запуск
 
-Отдельного запуска не требует — агент сам спавнит `gc-computer-mcp` по stdio
+Отдельного запуска не требует — агент сам спавнит `computer-mcp` по stdio
 при первом вызове `computer_*`-тула. `run.py` этот MCP пропускает
 (в манифесте нет блока `run:`).
 
@@ -45,11 +49,11 @@ pip install recommended_mcp/computer/dist/gc_computer_mcp-*.whl
 
 | Переменная | Назначение |
 |---|---|
-| `GC_COMPUTER_MCP_READONLY` | `true` — блокирует мутирующие тулы (только `get_state` / `wait`). |
-| `GC_COMPUTER_MCP_ENABLE_VISION` | `true` — активирует vision-тулы (screenshot). |
-| `GC_COMPUTER_MCP_DISABLED_TOOLS` | CSV список, напр. `drag,shortcut` — убирает тулы из набора. |
-| `GC_COMPUTER_MCP_SESSION_ID` | Namespace state-файла. `"default"` если агент один; уникальный ID при параллельных агентах на одной машине. |
-| `GC_COMPUTER_MCP_LOG_LEVEL` | `DEBUG` / `INFO` / `WARNING` / `ERROR` / `CRITICAL`. |
+| `COMPUTER_MCP_READONLY` | `true` — блокирует мутирующие тулы (только `get_state` / `wait`). |
+| `COMPUTER_MCP_ENABLE_VISION` | `true` — активирует vision-тулы (screenshot). |
+| `COMPUTER_MCP_DISABLED_TOOLS` | CSV список, напр. `drag,shortcut` — убирает тулы из набора. |
+| `COMPUTER_MCP_SESSION_ID` | Namespace state-файла. `"default"` если агент один; уникальный ID при параллельных агентах на одной машине. |
+| `COMPUTER_MCP_LOG_LEVEL` | `DEBUG` / `INFO` / `WARNING` / `ERROR` / `CRITICAL`. |
 
 ## Инструкции для модели
 
@@ -57,8 +61,12 @@ pip install recommended_mcp/computer/dist/gc_computer_mcp-*.whl
 вызова тулов: порядок действий, работу с `element_id`, обработку ошибок.
 Модель подгружает его через `skills_load("computer-use")`.
 
-## Обновление версии
+## Обновление
 
-1. В репо `gc-computer-mcp`: `uv build` → свежий `.whl` в `dist/`.
-2. Удали старый wheel из `recommended_mcp/computer/dist/`, положи новый.
-3. Коммит: `recommended_mcp/computer: bump gc-computer-mcp to X.Y.Z`.
+Правки идут в `external/computer-mcp/`. После правок:
+
+- В обычном режиме — пере-запустить `python recommended_mcp/install.py`
+  (с бампом `version` в `external/computer-mcp/pyproject.toml`, иначе pip
+  не перетрёт уже стоящую копию).
+- В editable-режиме — изменения подхватываются на следующем запуске MCP
+  без переустановки.
