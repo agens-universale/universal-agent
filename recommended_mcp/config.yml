@@ -12,7 +12,8 @@ mcps:
       platforms: [win32]
     # run-блок отсутствует: MCP спавнится агентом через stdio.
 
-  - name: office-reader
-    path: ./office-reader
+  - name: office
+    path: ./office
     install:
-      type: wheel
+      type: source
+      source: ../external/office-mcp

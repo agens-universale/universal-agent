@@ -1,16 +1,19 @@
-# office-reader — mcp-office-reader
+# office — office-mcp
 
-Интеграция `mcp-office-reader` в background-agent. Читает офисные документы
+Интеграция `office-mcp` в background-agent. Читает офисные документы
 (pdf, docx, xls, xlsx, pptx, csv, html, msg) и возвращает содержимое в формате
 markdown. Все форматы парсятся в Python через `markitdown` — внешних бинарных
 зависимостей (LibreOffice и т.п.) нет.
+
+Исходники — в `external/office-mcp/`. Пакет ставится `install.py` через
+`pip install ./external/office-mcp` (PEP 517 build из исходников).
 
 ## Требования
 
 - **Python 3.10+.**
 - **Активный venv агента** перед запуском `install.py`.
 
-Кросс-платформенно: работает на Windows / Linux / macOS. Wheel — pure Python,
+Кросс-платформенно: работает на Windows / Linux / macOS. Пакет — pure Python,
 зависимости (`markitdown` и его парсеры) тоже без нативного кода.
 
 ## Установка
@@ -21,13 +24,13 @@ markdown. Все форматы парсятся в Python через `markitdow
 python recommended_mcp/install.py
 ```
 
-Или вручную:
+Для разработки:
 
 ```bash
-pip install recommended_mcp/office-reader/dist/mcp_office_reader-*.whl
+python recommended_mcp/install.py --editable
 ```
 
-После установки в PATH активного venv появится команда `mcp-office-reader`.
+После установки в PATH активного venv появится команда `office-mcp`.
 
 ## Подключение к агенту
 
@@ -36,9 +39,8 @@ pip install recommended_mcp/office-reader/dist/mcp_office_reader-*.whl
 
 ## Запуск
 
-Отдельного запуска не требует — агент сам спавнит `mcp-office-reader` по stdio
-при первом вызове `read_file` / `read_document`. `run.py` этот MCP пропускает
-(в манифесте нет блока `run:`).
+Отдельного запуска не требует — агент сам спавнит `office-mcp` по stdio
+при первом вызове `read_file` / `read_document`. `run.py` этот MCP пропускает.
 
 ## Тулы
 
@@ -55,8 +57,8 @@ pip install recommended_mcp/office-reader/dist/mcp_office_reader-*.whl
 
 ## Флаги CLI
 
-Можно дописать в `args:` сниппета — все флаги из `mcp-office-reader --help`
-доступны. Полезное:
+Можно дописать в `args:` сниппета — все флаги из `office-mcp --help` доступны.
+Полезное:
 
 | Флаг | По умолчанию | Описание |
 |---|---|---|
@@ -67,10 +69,12 @@ pip install recommended_mcp/office-reader/dist/mcp_office_reader-*.whl
 | `--timeout-seconds` | `60` | Таймаут обработки одного документа. |
 | `--log-level` | `INFO` | Уровень логирования. |
 
-## Обновление версии
+## Обновление
 
-1. В репо `mcp-office-reader`: бампнуть `version` в `pyproject.toml` → `uv build`
-   → свежий `.whl` в `dist/`.
-2. Удали старый wheel из `recommended_mcp/office-reader/dist/`, положи новый.
-3. `python recommended_mcp/install.py` — pip установит новую версию.
-4. Коммит: `recommended_mcp/office-reader: bump mcp-office-reader to X.Y.Z`.
+Правки идут в `external/office-mcp/`. После правок:
+
+- В обычном режиме — пере-запустить `python recommended_mcp/install.py`
+  (с бампом `version` в `external/office-mcp/pyproject.toml`, иначе pip не
+  перетрёт уже стоящую копию).
+- В editable-режиме — изменения подхватываются на следующем запуске MCP без
+  переустановки.
