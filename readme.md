@@ -182,6 +182,17 @@ Background и CLI-клиент для работы с агентом GigaCode: �
    uv run python recommended_mcp/install.py
    ```
 
+
+      ### Запуск
+
+   Из корня проекта:
+
+   ```bash
+   python recommended_mcp/run.py
+   # или
+   uv run recommended_mcp/run.py
+   ```
+
    Что произойдёт:
 
    - **office-reader** — `pip install` из приложенного wheel-файла
