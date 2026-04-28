@@ -10,14 +10,10 @@ mcps:
       type: wheel
       platforms: [win32]
   # run-блок отсутствует: MCP спавнится агентом через stdio.
-
-#  - name: office-reader
-#    path: ./office-reader
-#    install:
-#      type: docker
-#    run:
-#      type: docker-compose
-#      detach: true
+  - name: office-reader
+    path: ./office-reader
+    install:
+      type: wheel
 
   - name: browser_playwright
     path: ./browser_playwright
