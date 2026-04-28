@@ -1,0 +1,18 @@
+# Конфигурация с vision-тулами.
+# Важно: vision end-to-end в v0.1 background-agent не работает
+# (бинарные данные превращаются в строку "binary data"). Тулы готовы,
+# но включайте их осознанно, понимая это ограничение.
+mcp-servers:
+  computer:
+    transport: stream_stdio
+    command: gc-computer-mcp
+    description: "Управление GUI Windows + vision-скриншоты"
+    server-name: computer
+    env:
+      GC_COMPUTER_MCP_LOG_LEVEL: INFO
+      GC_COMPUTER_MCP_READONLY: "false"
+      GC_COMPUTER_MCP_ENABLE_VISION: "true"
+
+mcp-meta:
+  tools-cache-ttl: 3600
+  request_timeout_sec: 600

@@ -1,0 +1,16 @@
+# Минимальная конфигурация: только UIA-тулы, vision выключен.
+# Подходит для Qwen-Coder и других text-only моделей.
+mcp-servers:
+  computer:
+    transport: stream_stdio
+    command: gc-computer-mcp
+    description: "Управление GUI Windows через UI Automation"
+    server-name: computer
+    env:
+      GC_COMPUTER_MCP_LOG_LEVEL: INFO
+      GC_COMPUTER_MCP_READONLY: "false"
+      GC_COMPUTER_MCP_ENABLE_VISION: "false"
+
+mcp-meta:
+  tools-cache-ttl: 3600
+  request_timeout_sec: 600

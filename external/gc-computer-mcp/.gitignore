@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+
+# Virtual env
+.venv/
+venv/
+env/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.ruff_cache/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# Env
+.env
+.env.local
+
+# Session artifacts
+agent_*.log
+session_storage_*.json
+
+# Project-specific (per CLAUDE.md)
+.claude/
+CLAUDE.md
+docs/plans/
+.knowledge-os
