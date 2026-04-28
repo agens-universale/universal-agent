@@ -110,16 +110,20 @@ def _node_archive_basename() -> Tuple[str, str]:
 
 
 def _node_install_paths(agent_dep_dir: Path) -> Dict[str, Path]:
-    """Абсолютные пути до бинарей внутри `<agent_dep_dir>/node/v<NODE_VERSION>/`."""
+    """Абсолютные пути до бинарей внутри `<agent_dep_dir>/node/v<NODE_VERSION>/`.
+
+    Layout одинаковый на POSIX и Windows: бинари всегда в `<root>/bin/`.
+    На Windows это противоречит дефолтному zip-layout-у (бинари в корне) —
+    `_ensure_cached_node` принудительно перемещает распакованную папку
+    в `<root>/bin/`, чтобы `command:` в config.yml был кроссплатформенным.
+    """
     root = agent_dep_dir / "node" / f"v{NODE_VERSION}"
+    bin_dir = root / "bin"
     if sys.platform == "win32":
-        # Windows-архив раскладывает бинари в корень папки.
-        bin_dir = root
         node = bin_dir / "node.exe"
         npm = bin_dir / "npm.cmd"
         npx = bin_dir / "npx.cmd"
     else:
-        bin_dir = root / "bin"
         node = bin_dir / "node"
         npm = bin_dir / "npm"
         npx = bin_dir / "npx"
@@ -224,16 +228,25 @@ def _ensure_cached_node(agent_dep_dir: Path) -> Dict[str, Path]:
 
         extracted_top = _extract_archive(archive_path, ext, tmp)
 
-        # Кладём в `<agent_dep_dir>/node/v<NODE_VERSION>/`. На Windows shutil.move
-        # через границы дисков не падает, так как parent один (tmp может
-        # оказаться на другом диске относительно ~ — обходим через copytree+rmtree).
-        paths["root"].parent.mkdir(parents=True, exist_ok=True)
+        # POSIX-таркомпрессия даёт уже layout `node-vX.Y.Z-<plat>/bin/...` —
+        # двигаем extracted_top в `<root>/`. Windows-zip кладёт бинари в
+        # корень `node-vX.Y.Z-win-x64/`, без `bin/`. Чтобы layout был
+        # кроссплатформенный (`<root>/bin/npx[.cmd]` на обеих ОС), на
+        # Windows двигаем содержимое архива в `<root>/bin/`.
+        # `npm.cmd`/`npx.cmd` используют `%~dp0` для поиска `node_modules/` —
+        # перемещение всей распакованной папки целиком сохраняет относительные
+        # ссылки внутри.
+        if sys.platform == "win32":
+            target = paths["bin"]
+        else:
+            target = paths["root"]
+        target.parent.mkdir(parents=True, exist_ok=True)
         if paths["root"].exists():
             shutil.rmtree(paths["root"])
         try:
-            shutil.move(str(extracted_top), str(paths["root"]))
+            shutil.move(str(extracted_top), str(target))
         except OSError:
-            shutil.copytree(str(extracted_top), str(paths["root"]))
+            shutil.copytree(str(extracted_top), str(target))
             shutil.rmtree(str(extracted_top), ignore_errors=True)
 
     if not _verify_existing_node(paths):

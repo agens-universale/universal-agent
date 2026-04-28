@@ -160,9 +160,10 @@ mcp-servers:
   # Вариант через локальную Node, поставленную `python recommended_mcp/install.py`
   # в `~/.agent/node/v20.18.0/` (системная Node не используется — пин 20.18.0
   # под совместимость с @playwright/mcp). `~` раскрывается _resolve_command;
-  # абсолютный путь тоже подходит. Примеры:
-  #   macOS / Linux : ~/.agent/node/v20.18.0/bin/npx
-  #   Windows       : ~\.agent\node\v20.18.0\npx.cmd
+  # абсолютный путь тоже подходит. Layout кроссплатформенный — install.py
+  # принудительно кладёт бинари в `bin/` и на Windows тоже, поэтому путь
+  # одинаковый на macOS/Linux/Windows:
+  #   ~/.agent/node/v20.18.0/bin/npx
   #
   # browser_playwright:
   #   transport: stream_stdio

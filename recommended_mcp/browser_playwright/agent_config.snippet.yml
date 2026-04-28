@@ -5,12 +5,13 @@
 # `command:` — путь до npx из локально установленной Node.js
 # (recommended_mcp/install.py разворачивает её в `~/.agent/node/v20.18.0/`,
 # системная Node не используется). `~` раскрывается в _resolve_command,
-# абсолютный путь тоже подходит. Примеры:
+# абсолютный путь тоже подходит. Layout кроссплатформенный — install.py
+# принудительно кладёт бинари в `bin/` и на Windows тоже:
 #   macOS / Linux : ~/.agent/node/v20.18.0/bin/npx
-#   Windows       : ~\.agent\node\v20.18.0\npx.cmd
+#   Windows       : ~/.agent/node/v20.18.0/bin/npx (PATHEXT добьёт .cmd)
 browser_playwright:
   transport: stream_stdio
-  command: ~~/.local/agent/node/v18.0.0/bin/npx
+  command: ~/.local/agent/node/v18.0.0/bin/npx
   args: ["-y", "@playwright/mcp@0.0.70"]
   persistent_session: true
   description: Browser automation via Playwright. Use for web navigation, clicking, form filling, taking screenshots, and webscraping.
