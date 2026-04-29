@@ -378,6 +378,12 @@ class ThreadSession:
                 for x in self.meta.get("user_messages_log", [])
                 if str(x).strip()
             ]
+        if isinstance(self.meta.get("current_user_messages"), list):
+            base_meta["current_user_messages"] = [
+                str(x).strip()
+                for x in self.meta.get("current_user_messages", [])
+                if str(x).strip()
+            ]
         # Persist rendered chat/completions system prompt for transparency/debugging.
         # Must stay identical to актуальным данным: when we are in `responses`
         # mode, there is no system prompt in messages, so it must not be present in meta.
@@ -479,6 +485,12 @@ class ThreadSession:
             new_meta["user_messages_log"] = [
                 str(x).strip()
                 for x in existing_meta.get("user_messages_log", [])
+                if str(x).strip()
+            ]
+        if isinstance(existing_meta.get("current_user_messages"), list):
+            new_meta["current_user_messages"] = [
+                str(x).strip()
+                for x in existing_meta.get("current_user_messages", [])
                 if str(x).strip()
             ]
         prompt = existing_meta.get("chat_completions_system_prompt_rendered")

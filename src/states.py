@@ -77,6 +77,7 @@ class State:
         self.steps = 0
         self.stop_requested = False
         self.user_messages_log: List[str] = []
+        self.current_user_messages: List[str] = []
 
     def set_call_metadata(self):
         metadata: Dict[str, Any] = dict()
@@ -154,6 +155,12 @@ class State:
         """
         self.user_messages_log = normalize_user_log_entries(entries)
 
+    def init_current_user_messages(self, entries: Optional[List[str]]) -> None:
+        """
+        Initialize `current_user_messages` from persisted/raw entries.
+        """
+        self.current_user_messages = normalize_user_log_entries(entries)
+
     def append_user_messages_to_log(self, step_messages: List[Dict[str, Any]]) -> None:
         """
         Incrementally extend `user_messages_log` with current step messages.
@@ -166,6 +173,13 @@ class State:
         self.user_messages_log = append_user_log_entries(
             self.user_messages_log, step_messages
         )
+        self.current_user_messages = append_user_log_entries(
+            self.current_user_messages, step_messages
+        )
+
+    def clear_current_user_messages(self) -> None:
+        """Clear active user intent scope after successful turn completion."""
+        self.current_user_messages = []
 
 
 class SatesStorage:

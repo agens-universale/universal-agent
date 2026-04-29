@@ -142,6 +142,7 @@ class AgentExecutor:
         if thread_session is not None:
             meta = getattr(thread_session, "meta", None) or {}
             state.init_user_messages_log(meta.get("user_messages_log"))
+            state.init_current_user_messages(meta.get("current_user_messages"))
             state.dialog_steps_offset = int(meta.get("dialog_steps_offset", 0) or 0)
         if (
             backend_api_mode == "chat_completions"
@@ -336,6 +337,7 @@ class AgentExecutor:
                     }
                 state.append_user_messages_to_log(step_messages)
                 thread_session.meta["user_messages_log"] = state.user_messages_log
+                thread_session.meta["current_user_messages"] = state.current_user_messages
                 thread_session.meta["backend_api_mode"] = state.backend_api_mode
                 thread_session.backend_api_mode = state.backend_api_mode
                 last_backend_response_id = getattr(
@@ -422,6 +424,13 @@ class AgentExecutor:
             get_pending_messages=get_pending_messages,
             check_stop=check_stop,
         )
+        if thread_session is not None:
+            thread_session.meta["user_messages_log"] = state.user_messages_log
+            thread_session.meta["current_user_messages"] = state.current_user_messages
+            thread_session.meta["backend_api_mode"] = state.backend_api_mode
+            thread_session.persist_batch(
+                [], previous_response_id=state.previous_response_id
+            )
 
         if config_dict.get("dump_storage"):
             cur_dir = config_dict.get("logs_dump_dir") or os.getcwd()

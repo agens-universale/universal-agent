@@ -414,10 +414,17 @@ def run_agent(
                     )
                     is_main_agent = getattr(state, "parent_state_id", None) is None
                     if strict_finish_gate and is_main_agent and backend_mode == "chat_completions":
+                        active_user_messages = (
+                            getattr(state, "current_user_messages", []) or []
+                        )
+                        if not active_user_messages:
+                            active_user_messages = (
+                                getattr(state, "user_messages_log", []) or []
+                            )
                         validation = validate_final_report_vs_user_intent(
                             ctx=ctx,
                             state=state,
-                            user_messages_log=getattr(state, "user_messages_log", []) or [],
+                            user_messages_log=active_user_messages,
                             submit_solution_arguments=finish_response,
                         )
                         if not validation.ok:
@@ -433,6 +440,8 @@ def run_agent(
                                 )
                             ]
                             continue
+                    if is_main_agent:
+                        state.clear_current_user_messages()
                     return finish_response
                 messages = process_tool_calls(messages, state, ctx, run_agent_func=run_agent)
                 tool_error_cnt = 0
