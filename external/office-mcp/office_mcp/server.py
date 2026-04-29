@@ -18,6 +18,7 @@ from .analytics import (
     apply_select,
     apply_sort,
     dataframe_to_xlsx_bytes,
+    list_sheets,
     load_table,
     summarize_dataframe,
 )
@@ -318,27 +319,42 @@ def build_server(cfg: ServerConfig) -> FastMCP:
     def inspect_xlsx_tool(path: str, sheet: str | None = None) -> dict:
         """Inspect a tabular file (xlsx/xls/csv) and return schema + sample.
 
-        Returns: {sheets: [{name, n_rows, columns: [...], head: [...]}]}.
+        sheet=None — enumerate ALL sheets in the file (default for discovery).
+        sheet="<name>" — inspect that specific sheet only.
+
+        Returns: {sheets: [{name, n_rows, columns: [...], head: [...]}, ...]}.
         Each column has: {name, dtype, n_null, n_unique, sample|min/max/mean}.
-        Use this BEFORE query_xlsx/aggregate_xlsx/pivot_xlsx to discover columns.
-        Output size is fixed (does not scale with file size)."""
+        Use this BEFORE query_xlsx/aggregate_xlsx/pivot_xlsx to discover sheet
+        names and columns; pass the discovered sheet name to those tools
+        explicitly. Output size is fixed (does not scale with file size)."""
         args = {"path": path, "sheet": sheet}
         try:
             real = validate_path(path, cfg.allowed_dirs, allow_any=cfg.allow_any)
-            df = load_table(real, sheet=sheet)
-            sheet_name = sheet if sheet else "Sheet1"
-            summary = summarize_dataframe(df)
-            summary["name"] = sheet_name
+            if sheet is not None:
+                # Explicit sheet — single-sheet inspection.
+                df = load_table(real, sheet=sheet)
+                summary = summarize_dataframe(df)
+                summary["name"] = sheet
+                summaries = [summary]
+            else:
+                # Discovery mode — iterate over every sheet so the caller knows
+                # what's in the file. CSVs collapse to a single synthetic sheet.
+                summaries = []
+                for name in list_sheets(real):
+                    df = load_table(real, sheet=name)
+                    s = summarize_dataframe(df)
+                    s["name"] = name
+                    summaries.append(s)
             log.info(
                 "inspect_xlsx ok",
                 extra={
                     "event": "tool_call",
                     "tool": "inspect_xlsx",
                     "tool_args": args,
-                    "n_rows": summary["n_rows"],
+                    "n_sheets": len(summaries),
                 },
             )
-            return {"sheets": [summary]}
+            return {"sheets": summaries}
         except OfficeReaderError as e:
             log.warning(
                 "inspect_xlsx failed",

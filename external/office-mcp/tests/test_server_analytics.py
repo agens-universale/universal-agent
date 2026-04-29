@@ -56,6 +56,61 @@ def test_inspect_xlsx_named_sheet(cfg, sample_path):
     assert res["sheets"][0]["n_rows"] == 3
 
 
+@pytest.fixture
+def multi_sheet_path(tmp_path: Path) -> Path:
+    p = tmp_path / "multi.xlsx"
+    with pd.ExcelWriter(p) as writer:
+        pd.DataFrame({"a": [1, 2, 3], "b": [10, 20, 30]}).to_excel(
+            writer, index=False, sheet_name="Cheatsheet"
+        )
+        pd.DataFrame({"score": [0, 1, 2, 3], "meaning": ["bad", "weak", "ok", "good"]}).to_excel(
+            writer, index=False, sheet_name="Scoring"
+        )
+        pd.DataFrame({"tip": ["start with python", "be patient"]}).to_excel(
+            writer, index=False, sheet_name="Tips"
+        )
+    return p
+
+
+def test_inspect_xlsx_returns_all_sheets_when_sheet_is_none(cfg, multi_sheet_path):
+    """sheet=None должен возвращать ВСЕ листы файла, не только первый.
+
+    Регресс: ранее inspect_xlsx_tool при sheet=None возвращал только sheet_name=0
+    (первый лист), плюс хардкод name="Sheet1". Контракт {"sheets": [...]} с
+    множественным числом подразумевает массив всех листов — реализация теперь
+    итерирует по pd.ExcelFile.sheet_names.
+    """
+    mcp = build_server(cfg)
+    fn = _find_tool(mcp, "inspect_xlsx")
+    res = fn(str(multi_sheet_path), None)
+    assert "sheets" in res
+    assert len(res["sheets"]) == 3, (
+        f"expected 3 sheets, got {len(res['sheets'])}: "
+        f"{[s.get('name') for s in res['sheets']]}"
+    )
+    names = [s["name"] for s in res["sheets"]]
+    assert names == ["Cheatsheet", "Scoring", "Tips"]
+    by_name = {s["name"]: s for s in res["sheets"]}
+    assert by_name["Cheatsheet"]["n_rows"] == 3
+    assert by_name["Scoring"]["n_rows"] == 4
+    assert by_name["Tips"]["n_rows"] == 2
+    # Колонки тоже отдельно для каждого листа
+    cheatsheet_cols = [c["name"] for c in by_name["Cheatsheet"]["columns"]]
+    assert cheatsheet_cols == ["a", "b"]
+    scoring_cols = [c["name"] for c in by_name["Scoring"]["columns"]]
+    assert scoring_cols == ["score", "meaning"]
+
+
+def test_inspect_xlsx_explicit_sheet_returns_only_that_sheet(cfg, multi_sheet_path):
+    """При явном sheet=name поведение прежнее — один лист в массиве."""
+    mcp = build_server(cfg)
+    fn = _find_tool(mcp, "inspect_xlsx")
+    res = fn(str(multi_sheet_path), "Scoring")
+    assert len(res["sheets"]) == 1
+    assert res["sheets"][0]["name"] == "Scoring"
+    assert res["sheets"][0]["n_rows"] == 4
+
+
 from openpyxl import load_workbook  # noqa: E402
 
 from office_mcp.errors import ErrorCategory, OfficeReaderError  # noqa: E402

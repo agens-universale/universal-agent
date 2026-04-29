@@ -37,6 +37,24 @@ def load_table(path: Path | str, sheet: str | None = None) -> pd.DataFrame:
         ) from e
 
 
+def list_sheets(path: Path | str) -> list[str]:
+    """Return sheet names in an xlsx/xls file. CSV has no sheets — returns ['Sheet1']."""
+    p = Path(path)
+    if not p.exists() or not p.is_file():
+        raise OfficeReaderError(ErrorCategory.FILE_NOT_FOUND, path=str(p))
+    ext = p.suffix.lower()
+    if ext not in SUPPORTED_ANALYTIC_EXT:
+        raise OfficeReaderError(ErrorCategory.UNSUPPORTED_FORMAT, ext=ext)
+    if ext == ".csv":
+        return ["Sheet1"]
+    try:
+        return pd.ExcelFile(p).sheet_names
+    except Exception as e:
+        raise OfficeReaderError(
+            ErrorCategory.PARSE_FAILED, path=str(p), fmt=ext
+        ) from e
+
+
 def apply_filter(df: pd.DataFrame, filter_tree: dict) -> pd.DataFrame:
     """Apply a parsed filter tree (from analytics_schema.parse_filter) to df."""
     mask = _eval_node(df, filter_tree)
