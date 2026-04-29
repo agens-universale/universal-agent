@@ -425,6 +425,8 @@ def build_server(cfg: ServerConfig) -> FastMCP:
         select: list of columns to return; default = all.
         sort: list of {col, order: "asc"|"desc"}.
         limit: max rows; capped by --max-query-rows for inline (output="data").
+        Note: pagination via `offset` is NOT supported — use `limit` + `filter`
+        to narrow rows instead.
         output: "data" (default) returns rows in response,
         {path, sheet?, overwrite?} writes xlsx.
         Operators: ==, !=, >, >=, <, <=, in, not_in, contains, startswith,
