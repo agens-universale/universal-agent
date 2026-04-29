@@ -162,6 +162,37 @@ Usage:
         return False
 
     @staticmethod
+    def _is_text_like_content_type(content_type: str) -> bool:
+        ct = (content_type or "").split(";")[0].strip().lower()
+        if not ct:
+            return False
+        if ct.startswith("text/"):
+            return True
+        return ct in (
+            "application/json",
+            "application/xml",
+            "application/xhtml+xml",
+            "application/javascript",
+            "application/x-javascript",
+            "application/x-www-form-urlencoded",
+            "application/rss+xml",
+            "application/atom+xml",
+        )
+
+    @staticmethod
+    def _looks_binary_bytes(data: bytes) -> bool:
+        if not data:
+            return False
+        sample = data[:4096]
+        if b"\x00" in sample:
+            return True
+        printable = 0
+        for b in sample:
+            if b in (9, 10, 13) or 32 <= b <= 126:
+                printable += 1
+        return (printable / max(len(sample), 1)) < 0.75
+
+    @staticmethod
     def _result(
         *,
         url: str,
@@ -457,7 +488,10 @@ Usage:
         content_type = response.headers.get("Content-Type", "")
         final_url = response.url
         status_code = response.status_code
-        is_binary = self._is_binary_content_type(content_type)
+        raw_content = getattr(response, "content", b"")
+        content_type_binary = self._is_binary_content_type(content_type)
+        content_type_text = self._is_text_like_content_type(content_type)
+        is_binary = content_type_binary or (not content_type_text and self._looks_binary_bytes(raw_content))
 
         if is_binary:
             return _result(

@@ -12,7 +12,10 @@ from tools.simple_tools.memory_files import MemoryFiles
 from tools.simple_tools.submit_solution import SubmitSolution
 from tools.simple_tools.calculator import Calculator
 from tools.simple_tools.run_python_code import RunPythonCode
-from tools.simple_tools.fetch_url import FetchUrl
+try:
+    from tools.simple_tools.fetch_url import FetchUrl
+except ModuleNotFoundError:
+    from tools.simple_tools.simple_fetch_url import FetchUrl
 from typing import Dict, Any
 
 
