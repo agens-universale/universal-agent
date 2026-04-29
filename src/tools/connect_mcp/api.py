@@ -149,10 +149,12 @@ def call_mcp_tool(
     transport = server_cfg.get("transport")
     url = server_cfg.get("url") or ""
     token = server_cfg.get("token")
-    if transport != "stdio" and not url:
+    if transport not in ("stdio", "stream_stdio") and not url:
         raise ValueError(f"MCP server '{server_key}' has no 'url' in config")
-    if transport == "stdio" and not server_cfg.get("command"):
-        raise ValueError(f"MCP server '{server_key}' (stdio) has no 'command' in config")
+    if transport in ("stdio", "stream_stdio") and not server_cfg.get("command"):
+        raise ValueError(
+            f"MCP server '{server_key}' ({transport}) has no 'command' in config"
+        )
 
     # Схема параметров тулы (JSON Schema)
     tool_schema = tool_entry.get("parameters") or {}
