@@ -60,8 +60,16 @@ def _send_unicode(text: str) -> None:
     Earlier versions batched all events into a single SendInput call; on
     at least one machine that produced repeated-last-char garbage
     ("Hello, World" -> "Hello,dddddd"). Sending per-character with a tiny
-    sleep avoids any queue/batch pathology at the cost of ~1ms/char
+    sleep avoids any queue/batch pathology at the cost of ~5ms/char
     overhead — immaterial for typical text lengths.
+
+    Inter-event sleep is 5ms (not 1ms): WebView2-based apps (Win11 Notepad,
+    Edge, Teams) and Electron apps relay keystrokes through their renderer
+    process via IPC. At 1ms-per-event a burst of trailing characters can
+    saturate that pipeline and arrive partially or replaced with the last
+    keystroke (observed: cyrillic "Цыра!" tail typed into Win11 Notepad
+    rendered as five "!" — fix-window pattern at the IPC boundary). 5ms is
+    safe for these apps and still feels instantaneous in classic Win32.
     """
     import ctypes
     from ctypes import wintypes
@@ -148,11 +156,12 @@ def _send_unicode(text: str) -> None:
     for unit in code_units:
         _send_one(unit, key_up=False)
         _send_one(unit, key_up=True)
-        time.sleep(0.001)  # 1ms per char — avoids input-queue coalescing
+        time.sleep(0.005)  # 5ms per char — WebView2/Electron-safe (see docstring)
 
     # Final pause for the target window to process all events before the
-    # next MCP tool call observes state.
-    time.sleep(0.05)
+    # next MCP tool call observes state. WebView2 apps need a longer
+    # settle window than classic Win32 — 100ms covers the IPC round-trip.
+    time.sleep(0.1)
 
 
 # Win32 Virtual-Key codes for our hotkey / press_key layer.
