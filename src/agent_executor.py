@@ -144,6 +144,7 @@ class AgentExecutor:
         if thread_session is not None:
             meta = getattr(thread_session, "meta", None) or {}
             state.init_user_messages_log(meta.get("user_messages_log"))
+            state.init_current_user_messages(meta.get("current_user_messages"))
             state.dialog_steps_offset = int(meta.get("dialog_steps_offset", 0) or 0)
         if (
             backend_api_mode == "chat_completions"
@@ -252,6 +253,12 @@ class AgentExecutor:
             "content": message,
             "id": generate_message_id_func("m"),
         }
+        # Seed user_messages_log с текущим пользовательским сообщением.
+        # _persist_*_batch-коллбэки ниже получают только step_messages
+        # (ответ ассистента + tool calls/outputs); без этого seed'а
+        # finish_gate в processing_responses.py читает пустой лог и
+        # отвергает валидный submit_solution как «user intent is empty».
+        state.append_user_messages_to_log([new_user_message])
         technical_user_message = None
         _thread_mf = thread_shared.memory_files if thread_shared is not None else {}
         _has_memory = (
@@ -332,6 +339,7 @@ class AgentExecutor:
                     }
                 state.append_user_messages_to_log(step_messages)
                 thread_session.meta["user_messages_log"] = state.user_messages_log
+                thread_session.meta["current_user_messages"] = state.current_user_messages
                 thread_session.meta["backend_api_mode"] = state.backend_api_mode
                 thread_session.backend_api_mode = state.backend_api_mode
                 last_backend_response_id = getattr(

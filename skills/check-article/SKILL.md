@@ -1,7 +1,7 @@
 ---
 id: "check-article"
-name: "Article Fact-Checking and Iterative Revision"
-description: "Multi-agent skill for fact-checking articles, generating revision files, rewriting articles in multiple passes, and recovering lost context via final merging"
+name: "check-article"
+description: "Fact-checks and revises an existing article through claim verification, revision files, rewrite passes, and final merge while preserving useful original content. Use when the user provides an article or draft and asks to verify, correct, improve, fact-check, or revise it. Do not use to create a new article from scratch."
 version: "0.1.0"
 ---
 

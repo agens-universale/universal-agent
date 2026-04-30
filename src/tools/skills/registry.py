@@ -221,6 +221,17 @@ class SkillsRegistry:
     def _get_skill(self, skill_id: str) -> Skill:
         self._ensure_loaded()
         skill = self._skills_by_id.get(skill_id)
+        if not skill and isinstance(skill_id, str):
+            # Backward-compatible aliasing: accept snake_case requests for
+            # kebab-case skill ids and vice versa.
+            normalized = skill_id.strip().replace("_", "-")
+            skill = self._skills_by_id.get(normalized)
+            if not skill:
+                normalized_alt = skill_id.strip().replace("-", "_")
+                for candidate in self._skills_by_id.values():
+                    if candidate.id.replace("-", "_") == normalized_alt:
+                        skill = candidate
+                        break
         if not skill:
             raise KeyError(f"Skill '{skill_id}' not found")
         return skill

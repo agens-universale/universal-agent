@@ -1,13 +1,13 @@
 ---
 id: "skill-scaffolder"
-name: "Skill scaffolder"
-description: "Скилл для генерации каркаса новых skills в формате Anthropic."
+name: "skill-scaffolder"
+description: "Creates a new project skill skeleton with SKILL.md, scripts, references, and assets using the bundled scaffolding script. Use when the user asks to create, scaffold, initialize, or template a new skill. Do not use for editing or reviewing existing skills unless scaffolding a replacement."
 version: "0.1.0"
 ---
 
 # Skill scaffolder
 
-Этот скилл помогает автоматически создавать каркас новых skills в директории `skills_data`.
+Этот скилл помогает автоматически создавать каркас новых skills в директории `skills/`.
 
 ## Когда использовать
 
@@ -25,7 +25,7 @@ version: "0.1.0"
 ```json
 {
   "skill_id": "my-new-skill",
-  "skills_root": "/abs/path/to/skills/skills_data",
+  "skills_root": "/abs/path/to/project/skills",
   "name": "My new skill",
   "description": "Краткое описание нового скилла"
 }
@@ -35,13 +35,13 @@ version: "0.1.0"
 
 - `skill_id` (string, **обязательное**)  
   Идентификатор нового скилла. Будет использован:
-  - как имя папки в `skills_data`;
+  - как имя папки в `skills/`;
   - как значение `id` во фронтматтере `SKILL.md`, если не переопределено.
 
 - `skills_root` (string, опциональное, **абсолютный путь**)  
   Абсолютный путь к директории `skills_data`, в которой нужно создать новый skill.  
   Если не указан, скрипт использует значение по умолчанию:
-  `<project_root>/skills/skills_data`, где `project_root` — корень текущего проекта.
+  `<project_root>/skills`, где `project_root` — корень текущего проекта.
 
 - `name` (string, опциональное)  
   Человекочитаемое имя скилла. Если не задано, используется `skill_id`.

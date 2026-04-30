@@ -13,7 +13,7 @@ def _project_root() -> str:
       <project_root>/skills/skill-scaffolder/scripts/main.py
     """
     here = os.path.dirname(os.path.abspath(__file__))
-    return os.path.abspath(os.path.join(here, "..", "..", "..", ".."))
+    return os.path.abspath(os.path.join(here, "..", "..", ".."))
 
 
 def _default_skills_root() -> str:

@@ -90,7 +90,9 @@ def validate_final_report_vs_user_intent(
         "submit_solution_arguments": args if args else _to_text(submit_solution_arguments),
     }
     user_prompt = (
-        "Check final-report consistency against initial user intent.\n\n"
+        "Check final-report consistency against the active user intent scope.\n\n"
+        "IMPORTANT: Validate coverage ONLY against `user_messages_log` from this input.\n"
+        "Do not require fulfilling requests that were already completed in previous turns.\n\n"
         "Return ONLY JSON object with keys:\n"
         "{\"ok\": bool, \"coverage_score\": number, \"conflicts\": [str], "
         "\"missing_requirements\": [str], \"feedback_for_agent\": str}\n\n"

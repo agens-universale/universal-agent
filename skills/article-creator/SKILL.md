@@ -1,7 +1,7 @@
 ---
 id: "article-creator"
-name: "Article Creator"
-description: "Instruction for agent how to create article on given subject"
+name: "article-creator"
+description: "Creates publication-ready Russian Markdown articles from a subject or brief using research, outlining, section-by-section drafting, critique loops, source citation, and final fact-checking. Use when the user asks to write, draft, or generate a full article. Do not use for short answers, research briefs, or checking an existing article."
 version: "0.1.0"
 ---
 

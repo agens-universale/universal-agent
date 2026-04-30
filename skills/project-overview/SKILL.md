@@ -1,137 +1,176 @@
 ---
 id: "project-overview"
-name: "Project overview"
-description: "Инструкции для агента по обзору структуры проекта на любом языке."
-version: "0.2.0"
+name: "project-overview"
+description: "Creates a deep, evidence-backed map of an unfamiliar codebase: structure, stack, entrypoints, major components, tests, tooling, operational shape, coverage, confidence, and suggested exploration path. Use when the user asks to understand a repository, onboard to a project, inspect project structure, or get a broad overview before changes. Do not use for targeted behavior tracing, implementation, or deep architecture decisions."
+version: "0.4.0"
 ---
 
-# Project overview
+# Project Overview
 
-Этот скилл задаёт **процедуру для агента**, как получать краткий, но содержательный обзор любого проекта (на Python, C/C++, Java, Go, JS/TS и др.), используя только свои инструменты (чтение файлов, поиск, git и т.п.), **без запуска вспомогательных скриптов**.
+## Purpose
+Use this skill to build an evidence-backed map of an unfamiliar repository.
+The goal is to help a reader understand what the project is, how it is organized, how it likely runs, how quality is maintained, and where to read next.
 
-## Когда использовать
+Default outcome: a useful project map that is deep enough to support onboarding or future work. Keep the final answer concise, but do not keep the exploration shallow.
 
-- Когда нужно быстро понять структуру нового проекта.
-- Когда хочется получить компактное резюме перед тем, как вносить изменения или делать рефакторинг.
-- Когда нужно передать другому разработчику «карту» проекта в текстовом виде.
+## Use When
+- The user asks to understand a repository or codebase.
+- The user asks for onboarding context before making changes.
+- The user asks for project structure, stack, entrypoints, tests, tooling, or CI overview.
+- The user asks for a deeper project map, but not a targeted trace of one behavior.
 
-## Общие принципы
+Do not use this skill for targeted behavior tracing, implementation, architecture option design, code review, or external topic research.
 
-- Считай, что **текущий рабочий каталог — корень проекта**, который нужно проанализировать.
-- Используй **имеющиеся у тебя инструменты** (чтение/листинг файлов, поиск по содержимому, git-инструменты, semantic search), но **не полагайся на конкретные имена инструментов** — они зависят от реализации агента.
-- Всегда стремись к **краткому, но информативному обзору**, а не к полному дампу структуры.
-- Если репозиторий очень большой, **выбирай репрезентативные части** (ядро приложения, основные сервисы, модули доменной логики) и явно помечай, что обзор неполный.
-- Не делай множество чтений файлов. Через просмотр списка файлов и папок пойми основные несколько кандидатов на точки входа и проанализируй их.
+## Input Contract
+Before exploring, establish:
+- Project root: use the current working directory unless the user names another path.
+- Goal: onboarding, broad map, pre-change orientation, handoff summary, or deep project overview.
+- Scope boundaries: whole repository, one package, one service, or representative sampling for large repos.
+- Constraints: read-only exploration; do not modify files or run project code.
 
-## Шаги обзора проекта
+## Exploration Rules
+- Prefer read-only inspection: file listing, targeted file reads, search, dependency/build metadata, documentation, tests, and git metadata.
+- Do not run project code, migrations, tests, build scripts, custom helper scripts, or commands with side effects.
+- Safe read-only commands or tools may be used when available, but do not depend on specific tool names.
+- Avoid full tree dumps. Summarize structure by purpose, not by exhaustive listing.
+- For large repos, sample representative areas and clearly state coverage limits.
+- Tie important conclusions to concrete evidence: files, directories, config files, entrypoints, tests, or docs.
+- Distinguish confirmed facts from likely inferences based on naming or layout.
 
-Следуй этим шагам, адаптируя их под конкретный стек и размер репозитория.
+## Overview Depth
+Always inspect deeply enough to produce a reliable project map, not just a directory summary.
 
-### 1. Определи верхнеуровневую структуру
+Cover:
+- top-level structure and main source directories;
+- dependency/build/config files;
+- entrypoints and run commands;
+- major components/modules;
+- tests, linting, formatting, typing, CI/CD;
+- docs that explain architecture or operations;
+- package/service boundaries and ownership clues;
+- runtime shape: CLI, web server, workers, jobs, background tasks, libraries, generated assets;
+- configuration flow: env files, settings modules, feature flags, deployment configs;
+- integration boundaries: databases, APIs, queues, subprocesses, external services;
+- quality model: unit/integration/e2e split, fixtures, test utilities, CI stages;
+- operational model: logging, metrics, error handling, deployment/runtime files when visible;
+- representative modules in each major subsystem.
 
-1. Получи список **верхнеуровневых файлов и директорий** в корне проекта (без рекурсии).
-2. Кратко классифицируй директории по назначению по имени:
-   - исходный код: `src`, `app`, `lib`, `cmd`, `pkg`, `services`, `backend`, `frontend` и т.п.;
-   - тесты: `test`, `tests`, `spec`, `__tests__`;
-   - конфигурация и инфраструктура: `.github`, `.gitlab`, `infra`, `deploy`, `k8s`, `docker`, `scripts`;
-   - документация: `docs`, `documentation`.
-3. Зафиксируй в обзоре:
-   - какие есть основные директории кода;
-   - есть ли выделенные директории для тестов и документации.
+Depth does not mean reading every file. For large repositories, use representative sampling, state what was sampled, and report coverage and confidence.
 
-### 2. Определи используемые языки и стек
+## Workflow
 
-1. Просканируй (ограниченно) репозиторий на наличие характерных расширений:
-   - `.py`, `.ipynb` — Python;
-   - `.js`, `.jsx`, `.ts`, `.tsx` — JavaScript/TypeScript;
-   - `.java`, `.kt` — JVM (Java/Kotlin);
-   - `.go` — Go;
-   - `.rs` — Rust;
-   - `.c`, `.h`, `.cpp`, `.hpp`, `.cc` — C/C++;
-   - `.cs` — C#;
-   - `.php` — PHP;
-   - `.rb` — Ruby;
-   - и др. при необходимости.
-2. Найди **файлы конфигурации/управления зависимостями**, чтобы точнее угадать стек:
-   - Python: `pyproject.toml`, `poetry.lock`, `requirements.txt`, `setup.cfg`, `Pipfile`;
-   - Node.js: `package.json`, `yarn.lock`, `pnpm-lock.yaml`;
-   - Java: `pom.xml`, `build.gradle`, `build.gradle.kts`, `settings.gradle.kts`;
-   - Go: `go.mod`, `go.sum`;
-   - Rust: `Cargo.toml`, `Cargo.lock`;
-   - .NET: `.csproj`, `Directory.Build.props`, `global.json`;
-   - PHP: `composer.json`;
-   - Ruby: `Gemfile`, `Gemfile.lock`;
-   - и т.п.
-3. Сформулируй краткое резюме: **какие языки и основные технологии** используются в проекте.
+### 1) Repository Shape
+- Identify top-level directories and classify them by role: source, tests, docs, scripts, infra, generated/build artifacts, examples, assets.
+- Detect monorepo, multi-service, library, CLI, web app, backend/frontend split, plugin system, or package collection.
+- Note generated/vendor/build directories and avoid treating them as primary source.
 
-### 3. Найди предполагаемые точки входа
+Exit criteria:
+- The repository's broad shape is described without dumping the full tree.
 
-Старайся определить, **как запускается приложение** (CLI, web‑сервер, сервис, библиотека).
+### 2) Stack and Dependencies
+- Identify languages from extensions and source roots.
+- Use dependency/build files to confirm stack and tooling.
+- Look for framework markers, package scripts, build config, runtime config, lockfiles, and formatter/linter/type-checker config.
 
-Примеры (адаптируй под стек):
+Exit criteria:
+- Main languages, frameworks, dependency managers, and build/test tooling are identified or explicitly unknown.
 
-- **Python**:
-  - файлы с `if __name__ == "__main__"` в `src/` или корне;
-  - entrypoints/консольные скрипты в `pyproject.toml` или `setup.cfg`;
-  - файлы `manage.py`, `app.py`, `main.py`.
-- **Node.js / JS / TS**:
-  - поле `"main"` и `"bin"` в `package.json`;
-  - npm‑скрипты (`"scripts"`) для запуска dev/prod (`start`, `dev`, `serve`);
-  - файлы `index.js`, `index.ts`, `server.ts`, `app.ts`.
-- **Java / Kotlin**:
-  - классы с `public static void main(String[] args)` в `src/main/java` или `src/main/kotlin`;
-  - Spring Boot приложения с `@SpringBootApplication`.
-- **Go**:
-  - пакеты `main` с функцией `func main()`, особенно в `cmd/<name>/main.go`.
-- **Rust**:
-  - `src/main.rs` и файлы в `src/bin/*.rs`.
+### 3) Entrypoints and Runtime Shape
+- Find how the project starts: CLI commands, application bootstrap, web server, workers, jobs, library exports, notebooks, or package entrypoints.
+- Use manifests, scripts, main modules, route/app initialization, and docs as evidence.
+- Explain what each confirmed or likely entrypoint is for.
 
-Выведи список найденных/предполагаемых точек входа с кратким комментарием: *для чего они, как их обычно запускают*.
+Exit criteria:
+- Entrypoints are listed as confirmed, likely, or not found.
 
-### 4. Обзор структуры исходного кода
+### 4) Components and Boundaries
+- Map major source directories or packages to their responsibilities.
+- Identify cross-cutting concerns: configuration, logging, persistence, API clients, state management, auth, background work, serialization, validation.
+- For deeper overviews, inspect representative files from each major component to avoid relying only on directory names.
 
-1. Для основных директорий кода (`src`, `app`, `lib`, `backend`, `frontend`, `cmd` и др.):
-   - опиши их **назначение** (по имени и по нескольким характерным файлам/папкам внутри);
-   - перечисли **ключевые подкаталоги** (services, models, controllers, handlers, api, domain, etc.).
-2. Для каждого крупного модуля (по директории или namespace) дай короткое описание:
-   - какую часть функциональности он покрывает;
-   - есть ли внутри разделение на доменные сущности / слои (API, сервисы, репозитории, UI).
-3. Если репозиторий моно‑репо (несколько приложений или пакетов), явно отметь это и перечисли **основные пакеты/сервисы**.
+Exit criteria:
+- Key components and boundaries are explained with concrete evidence.
 
-Не нужно перечислять все файлы. Показывай только то, что помогает понять общую архитектуру.
+### 5) Tests, Quality, and CI
+- Identify test directories, test frameworks, fixtures, and test layering when visible.
+- Identify linting, formatting, static typing, code generation, pre-commit hooks, and CI/CD.
+- Note quality gaps if tests or automation are missing or unclear.
 
-### 5. Тесты, качество и инфраструктура
+Exit criteria:
+- The project quality model is summarized, including known gaps.
 
-1. Проверь, есть ли:
-   - директории и файлы тестов (`tests`, `test`, `spec`, `__tests__`, `src/test/java` и др.);
-   - упоминания тестовых фреймворков в зависимостях (pytest, JUnit, Jest, Mocha, RSpec и т.п.).
-2. Отметь, **как устроены тесты** на высоком уровне:
-   - unit/integration/e2e;
-   - привязка к модулям (зеркальное дерево директорий или нет).
-3. Проверь наличие конфигов для:
-   - линтеров/форматтеров (например, `.flake8`, `pyproject.toml` с ruff/black, `.eslintrc.*`, `.prettierrc`, `.editorconfig`, `.golangci.yml` и др.);
-   - CI/CD (`.github/workflows/*`, `.gitlab-ci.yml`, файлы в `ci/`, `deploy/`, `k8s/`).
-4. Кратко опиши, **как обеспечивается качество кода и релизы**: наличие тестов, линтинга, автоматических проверок.
+### 6) Coverage and Confidence
+- Record what was inspected and what was not.
+- Mark uncertain claims as assumptions.
+- If the repo is large, explain which parts were sampled and why.
+- Recommend the next files or subsystems to inspect for deeper understanding.
 
-### 6. Структура итогового ответа
+Exit criteria:
+- The reader can judge how complete the overview is.
 
-Структурируй ответ в нескольких секциях (заголовки могут быть скорректированы под контекст, но смысл должен сохраниться):
+## Output Template
+Use this structure unless the user requests another format:
 
-1. **High-level summary**  
-   - 1–3 предложения: что это за проект, на каких языках/технологиях, примерно каких размеров.
+```markdown
+# Project Overview: <Repository or Package>
 
-2. **Structure & components**  
-   - краткое описание основных директорий и модулей;
-   - ключевые точки входа и как их запускать;
-   - особенности архитектуры (слойность, сервисы, микросервисы, монолит, клиент+сервер).
+## High-Level Summary
+<1-3 paragraphs: what the project is, primary stack, broad runtime shape, and repository type.>
 
-3. **Tests, tooling & CI**  
-   - как организованы тесты;
-   - какие инструменты качества (линтеры, форматтеры, типизация);
-   - есть ли CI/CD и что он примерно делает.
+## Repository Shape
+- Structure:
+- Main source areas:
+- Docs/assets/infra:
+- Monorepo or package boundaries:
 
-4. **Suggested exploration path**  
-   - список конкретных файлов/директорий, с которых стоит начать чтение кода, чтобы понять проект;
-   - если есть очевидные entrypoints (CLI, web‑сервер, основной сервис) — укажи их первыми.
+## Stack and Tooling
+- Languages/frameworks:
+- Dependency/build files:
+- Run/build/test commands:
+- Formatting/linting/typing:
 
-Всегда делай ответ **конкретным и лаконичным**, без избыточных деталей и огромных списков файлов. Не закапывайся в просмотре контента файлов и не пытайся прочитать что-либо по второму разу. Тебе на анализ не более 10-20 просмотров конкретных файлов. Если нужен более детальный обзор отдельной части проекта, попроси пользователя уточнить интересующий модуль или подсистему.
+## Entrypoints and Runtime
+- Confirmed entrypoints:
+- Likely entrypoints:
+- Runtime components:
+
+## Major Components
+- `<path>`: responsibility and evidence
+- `<path>`: responsibility and evidence
+
+## Tests, Quality, and CI
+- Test structure:
+- Test frameworks/fixtures:
+- CI/CD or automation:
+- Quality gaps:
+
+## Coverage and Confidence
+- Inspected:
+- Not inspected:
+- Confidence: high | medium | low
+- Assumptions:
+
+## Suggested Exploration Path
+1. `<path>` - why read next
+2. `<path>` - why read next
+3. `<path>` - why read next
+```
+
+## Quality Gates
+Before finalizing, verify:
+- The project root and scope are clear.
+- Main stack and dependency/build files are identified.
+- Entrypoints are confirmed, likely, or explicitly not found.
+- Major components are described by responsibility, not just listed.
+- Tests, tooling, and CI/CD are covered or marked as missing/unknown.
+- Important claims are tied to concrete repository evidence.
+- Coverage, assumptions, and confidence are stated.
+- The answer does not drift into targeted behavior tracing, implementation, or architecture redesign.
+
+## Anti-Patterns
+- Dumping a file tree instead of explaining the system.
+- Reading many files without a hypothesis about project structure.
+- Treating names, comments, or docs as proof when code/config evidence is available.
+- Ignoring tests, tooling, CI, or operational files.
+- Overstating confidence for a large repo after shallow sampling.
+- Turning a project overview into a feature investigation or implementation plan.
