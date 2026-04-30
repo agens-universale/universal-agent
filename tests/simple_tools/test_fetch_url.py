@@ -91,6 +91,7 @@ def test_fetch_url_caches_full_content_and_slices(monkeypatch):
     assert first["total_chars"] == 26
     assert first["returned_chars"] == 10
     assert first["has_more"] is True
+    assert first["next_offset"] == 15
     assert first["cache_hit"] is False
     assert state.shared.fetch_url_cache["https://example.com"]["content"] == "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 
@@ -99,6 +100,7 @@ def test_fetch_url_caches_full_content_and_slices(monkeypatch):
     assert second["content"] == "UVWXYZ"
     assert second["returned_chars"] == 6
     assert second["has_more"] is False
+    assert second["next_offset"] is None
     assert second["cache_hit"] is True
     assert calls["n"] == 1
 
@@ -116,6 +118,7 @@ def test_fetch_url_offset_beyond_end_returns_empty_from_cache(monkeypatch):
     assert data["content"] == ""
     assert data["returned_chars"] == 0
     assert data["has_more"] is False
+    assert data["next_offset"] is None
     assert data["cache_hit"] is True
 
 
@@ -167,8 +170,10 @@ def test_simple_fetch_url_extracts_html_and_supports_pagination(monkeypatch):
     assert first["ok"] is True
     assert first["result_type"] == "content"
     assert first["cache_hit"] is False
+    assert first["next_offset"] == 7
     assert second["ok"] is True
     assert second["cache_hit"] is True
+    assert second["next_offset"] is None
     assert second["content"] != ""
 
 

@@ -245,6 +245,8 @@ Usage:
             payload["total_chars"] = total_chars
         if has_more is not None:
             payload["has_more"] = has_more
+        if has_more is not None and offset is not None and limit is not None:
+            payload["next_offset"] = offset + limit if has_more else None
         if cache_hit is not None:
             payload["cache_hit"] = cache_hit
         payload["content"] = content
