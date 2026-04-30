@@ -199,7 +199,7 @@ Background и CLI-клиент для работы с агентом GigaCode: �
      (`recommended_mcp/office-reader/dist/*.whl`). Появится консольная команда
      `mcp-office-reader`.
    - **browser_playwright** — скачает и распакует пиннутый Node.js
-     (по умолчанию v18.0.0) в `~/.local/agent/node/v<NODE_VERSION>/`,
+     (по умолчанию v18.0.0) в `~/.gc/node/v<NODE_VERSION>/`,
      прогреет npm-кэш `@playwright/mcp@0.0.70` и доустановит Chromium.
      Системная Node не используется и не трогается. Бинари — в
      `<root>/bin/` на всех ОС (Windows-zip автоматически перепаковывается),

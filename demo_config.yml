@@ -167,7 +167,7 @@ mcp-servers:
   #
   # browser_playwright:
   #   transport: stream_stdio
-  #   command: ~/.local/agent/node/v20.18.0/bin/npx
+  #   command: ~/.gc/node/v18.0.0/bin/npx
   #   args: ["-y", "@playwright/mcp@0.0.70"]
   #   persistent_session: true
   #   persistent_session_close_tool: browser_close
@@ -249,8 +249,8 @@ mcp-meta:
   tools-cache-ttl: 3600 
   # Таймаут запроса к MCP (секунды), по spec до ~10 минут
   request_timeout_sec: 600
-  # По умолчанию `~/.local/agent/mcp-media`.
-  media_save_dir: ~/.local/agent/mcp-media
+  # По умолчанию `~/.gc/mcp-media`.
+  media_save_dir: ~/.gc/mcp-media
   
 # Опциональный путь к файлу с пользовательскими инструкциями для агента (agent.md).
 # Рекомендуется задавать как относительный путь от корня проекта (будет резолвиться в абсолютный) или как абсолютный путь.

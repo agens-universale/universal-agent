@@ -97,7 +97,7 @@ def _mcp_media_save_dir() -> str:
     Порядок приоритета: env MCP_MEDIA_SAVE_DIR → cwd/mcp_media.
     Создаётся при первой записи.
     """
-    default_media_path_str = "~/.local/agent/mcp-media"
+    default_media_path_str = "~/.gc/mcp-media"
     config = load_config()
 
     return os.path.expanduser(config.get("mcp-meta", {}).get("media_save_dir", default_media_path_str))

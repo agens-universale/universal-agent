@@ -6,19 +6,8 @@
 # Пин под совместимость с @playwright/mcp; системная Node не используется.
 # Полный путь до runtime'а: <agent_dep_dir>/node/v<NODE_VERSION>/.
 # Принимаются `~`, относительные и абсолютные пути.
-agent_dep_dir: ~/.local/agent
+agent_dep_dir: ~/.gc/
 mcps:
-  - name: computer
-    path: ./computer
-    install:
-      type: wheel
-      platforms: [win32]
-  # run-блок отсутствует: MCP спавнится агентом через stdio.
-  - name: office-reader
-    path: ./office-reader
-    install:
-      type: wheel
-
   - name: browser_playwright
     path: ./browser_playwright
     install:
