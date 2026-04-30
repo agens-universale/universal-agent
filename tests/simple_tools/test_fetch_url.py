@@ -5,17 +5,35 @@ import requests
 
 from tools.simple_tools import fetch_url as fetch_url_module
 from tools.simple_tools.fetch_url import FetchUrl
+from tools.simple_tools.simple_fetch_url import SimpleFetchUrl
 
 
 class _Resp:
-    def __init__(self, text, content_type="text/html", status_code=200, url="https://x"):
+    def __init__(self, text, content_type="text/html", status_code=200, url="https://x", content=None):
         self.text = text
+        if content is None:
+            content = text.encode("utf-8")
+        self.content = content
         self.headers = {"Content-Type": content_type}
         self.status_code = status_code
         self.url = url
 
     def raise_for_status(self):
         return None
+
+
+class _SessionStub:
+    def __init__(self, response):
+        self._response = response
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
+
+    def get(self, *_args, **_kwargs):
+        return self._response
 
 
 def test_fetch_url_validation():
@@ -73,14 +91,16 @@ def test_fetch_url_caches_full_content_and_slices(monkeypatch):
     assert first["total_chars"] == 26
     assert first["returned_chars"] == 10
     assert first["has_more"] is True
+    assert first["next_offset"] == 15
     assert first["cache_hit"] is False
-    assert state.shared.fetch_url_cache["https://example.com"] == "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    assert state.shared.fetch_url_cache["https://example.com"]["content"] == "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 
     second = json.loads(tool(url="https://example.com", offset=20, limit=10))
     assert second["ok"] is True
     assert second["content"] == "UVWXYZ"
     assert second["returned_chars"] == 6
     assert second["has_more"] is False
+    assert second["next_offset"] is None
     assert second["cache_hit"] is True
     assert calls["n"] == 1
 
@@ -98,6 +118,7 @@ def test_fetch_url_offset_beyond_end_returns_empty_from_cache(monkeypatch):
     assert data["content"] == ""
     assert data["returned_chars"] == 0
     assert data["has_more"] is False
+    assert data["next_offset"] is None
     assert data["cache_hit"] is True
 
 
@@ -109,3 +130,91 @@ def test_fetch_url_does_not_cache_binary(monkeypatch):
     assert data["ok"] is True
     assert data["is_binary"] is True
     assert state.shared.fetch_url_cache == {}
+
+
+def test_fetch_url_marks_unknown_binary_bytes_as_binary(monkeypatch):
+    binary_payload = b"\x00\x89\x10\x02\x00"
+    monkeypatch.setattr(
+        requests,
+        "get",
+        lambda *a, **k: _Resp(
+            "",
+            content_type="",
+            url="https://example.com/blob",
+            content=binary_payload,
+        ),
+    )
+    data = json.loads(FetchUrl()(url="https://example.com/blob"))
+    assert data["ok"] is True
+    assert data["is_binary"] is True
+    assert data["result_type"] == "binary"
+
+
+def test_simple_fetch_url_extracts_html_and_supports_pagination(monkeypatch):
+    monkeypatch.setattr(
+        requests,
+        "Session",
+        lambda: _SessionStub(
+            _Resp(
+                "<html><body><div>One <b>Two</b></div><p>Three</p></body></html>",
+                content_type="text/html",
+                url="https://example.com",
+            )
+        ),
+    )
+    state = SimpleNamespace(shared=SimpleNamespace(fetch_url_cache={}))
+    tool = SimpleFetchUrl(state=state)
+    first = json.loads(tool(url="https://example.com", offset=0, limit=7))
+    second = json.loads(tool(url="https://example.com", offset=7, limit=50))
+
+    assert first["ok"] is True
+    assert first["result_type"] == "content"
+    assert first["cache_hit"] is False
+    assert first["next_offset"] == 7
+    assert second["ok"] is True
+    assert second["cache_hit"] is True
+    assert second["next_offset"] is None
+    assert second["content"] != ""
+
+
+def test_simple_fetch_url_handles_lists_headings_pre_and_tables(monkeypatch):
+    html = (
+        "<html><body>"
+        "<h2>Title</h2>"
+        "<ul><li>first</li><li>second</li></ul>"
+        "<pre>line1\nline2</pre>"
+        "<table><tr><td>a</td><td>b</td></tr></table>"
+        "</body></html>"
+    )
+    monkeypatch.setattr(
+        requests,
+        "Session",
+        lambda: _SessionStub(_Resp(html, content_type="text/html", url="https://example.com")),
+    )
+    data = json.loads(SimpleFetchUrl()(url="https://example.com"))
+    text = data["content"]
+    assert data["ok"] is True
+    assert "## Title" in text
+    assert "- first" in text and "- second" in text
+    assert "line1\nline2" in text
+    assert "a" in text and "b" in text
+
+
+def test_simple_fetch_url_does_not_mark_utf8_html_as_binary(monkeypatch):
+    html = "<html><body><p>Привет, мир!</p></body></html>"
+    monkeypatch.setattr(
+        requests,
+        "Session",
+        lambda: _SessionStub(
+            _Resp(
+                html,
+                content_type="text/html; charset=utf-8",
+                url="https://example.com",
+                content=html.encode("utf-8"),
+            )
+        ),
+    )
+    data = json.loads(SimpleFetchUrl()(url="https://example.com"))
+    assert data["ok"] is True
+    assert data["is_binary"] is False
+    assert data["result_type"] == "content"
