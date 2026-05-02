@@ -2,7 +2,11 @@ from typing import Any
 
 import arg_parser
 from agent_executor import AgentExecutor
-from config import load_config, build_auth_connector
+from config import (
+    apply_cli_overrides,
+    build_auth_connector,
+    load_config,
+)
 from run_context import RunContext, create_run_context
 
 
@@ -33,11 +37,14 @@ def main() -> Any:
     """
     config_dict = load_config(arg_parser.run_args.config)
 
-    # Переопределяем значения из config.yml аргументами командной строки вида
-    # --param value / --param=value / --flag.
-    # Значения из CLI имеют приоритет над конфигом.
-    if getattr(arg_parser, "extra_config_overrides", None):
-        config_dict.update(arg_parser.extra_config_overrides)
+    # Единая точка применения CLI-override поверх config.yml.
+    apply_cli_overrides(
+        config_dict,
+        extra_overrides=getattr(arg_parser, "extra_config_overrides", None),
+        root_box_enabled=arg_parser.run_args.root_box,
+        no_root_box=arg_parser.run_args.no_root_box,
+        command_moderation_mode=arg_parser.run_args.command_moderation,
+    )
     auth_connector = build_auth_connector(config_dict)
     ctx = create_run_context(config_dict, auth_connector=auth_connector)
 

@@ -7,6 +7,15 @@ run_args = dict()
 extra_config_overrides: Dict[str, Any] = {}
 
 
+def _parse_bool_cli(raw: str) -> bool:
+    value = str(raw).strip().lower()
+    if value == "true":
+        return True
+    if value == "false":
+        return False
+    raise argparse.ArgumentTypeError("Ожидается true или false")
+
+
 def _coerce_value(raw: str) -> Any:
     """
     Преобразовать строковое значение из CLI к более подходящему типу.
@@ -103,6 +112,25 @@ parser.add_argument(
     "--new",
     action="store_true",
     help="Начать тред заново: удалить существующие данные треда (только с -t/--thread-id)",
+)
+
+root_box_group = parser.add_mutually_exclusive_group()
+root_box_group.add_argument(
+    "--root-box",
+    type=_parse_bool_cli,
+    choices=[True, False],
+    help="Включить/выключить root_box (true|false)",
+)
+root_box_group.add_argument(
+    "--no-root-box",
+    action="store_true",
+    help="Явно отключить root_box (эквивалент --root-box false)",
+)
+
+parser.add_argument(
+    "--command-moderation",
+    choices=["allow", "ask", "deny"],
+    help="Режим модерации команд: allow|ask|deny",
 )
 
 

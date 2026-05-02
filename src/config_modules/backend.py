@@ -1,0 +1,69 @@
+from typing import Any
+
+from pydantic import BaseModel, ConfigDict, field_validator
+
+
+def parse_chat_completions_max_tokens(raw: Any, *, default: int = 8096) -> int:
+    if raw is None:
+        return default
+    if isinstance(raw, bool):
+        return default
+    if isinstance(raw, (int, float)):
+        n = int(raw)
+        return n if n >= 1 else default
+    if isinstance(raw, str):
+        s = raw.strip().lower().replace(" ", "").replace("_", "")
+        if not s:
+            return default
+        if s.endswith("k"):
+            try:
+                base = float(s[:-1])
+                n = int(base * 1000)
+            except ValueError:
+                return default
+            return n if n >= 1 else default
+        try:
+            n = int(float(s))
+        except ValueError:
+            return default
+        return n if n >= 1 else default
+    return default
+
+
+class BackendConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    api_mode: str = "responses"
+    completions_url: str = ""
+    chat_completions_max_tokens: int = 32768
+    chat_completions_auth_token: str | None = None
+    openrouter_http_referer: str | None = None
+    openrouter_x_title: str | None = None
+    use_ssl: bool = True
+    use_retry: bool = False
+
+    @field_validator("api_mode")
+    @classmethod
+    def validate_api_mode(cls, value: str) -> str:
+        normalized = str(value).strip().lower()
+        if normalized not in {"responses", "chat_completions"}:
+            raise ValueError("backend.api_mode должен быть 'responses' или 'chat_completions'")
+        return normalized
+
+    @field_validator("chat_completions_max_tokens", mode="before")
+    @classmethod
+    def normalize_tokens(cls, value: Any) -> int:
+        return parse_chat_completions_max_tokens(value, default=8096)
+
+    @field_validator(
+        "chat_completions_auth_token",
+        "openrouter_http_referer",
+        "openrouter_x_title",
+        mode="before",
+    )
+    @classmethod
+    def normalize_optional_text(cls, value: Any) -> str | None:
+        if value is None:
+            return None
+        text = str(value).strip()
+        return text or None
