@@ -148,7 +148,12 @@ def _make_httpx_factory(verify: Union[bool, str], cert: Optional[Tuple[str, str]
     """
 
     def factory(headers: Optional[Dict[str, Any]] = None, timeout: Optional[float] = None, auth: Any = None):
-        kwargs: Dict[str, Any] = dict(headers=headers, timeout=timeout, auth=auth, verify=verify)
+        kwargs: Dict[str, Any] = dict(
+            headers=headers,
+            timeout=timeout,
+            auth=auth,
+            verify=httpx.create_ssl_context(verify=verify)
+        )
         if cert is not None:
             kwargs["cert"] = cert
         return httpx.AsyncClient(**kwargs)
@@ -174,7 +179,7 @@ def _make_stream_http_client(
     kwargs: Dict[str, Any] = dict(
         headers=headers or None,
         timeout=timeout,
-        verify=verify,
+        verify=httpx.create_ssl_context(verify=verify),
     )
     if cert is not None:
         kwargs["cert"] = cert
