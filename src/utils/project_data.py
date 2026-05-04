@@ -1,8 +1,10 @@
 import os
 import shutil
 import platform
-from typing import Dict
 from datetime import datetime
+from typing import Any, Dict, List, Optional
+
+from utils.directory_write_access import directory_allows_probe_write
 
 cut_first = 100
 cut_second = 30
@@ -67,17 +69,62 @@ def get_listing(dir_path: str) -> str:
     return tpl.strip()
 
 
-def get_project_data() -> Dict[str, str]:
+def _dir_writable_probe(path: str) -> bool:
+    return directory_allows_probe_write(path)
+
+
+def _dedupe_ordered_abs_paths(paths: List[str]) -> List[str]:
+    seen: set[str] = set()
+    out: List[str] = []
+    for raw in paths:
+        candidate = os.path.abspath(os.path.expanduser(os.path.normpath(str(raw))))
+        if candidate not in seen:
+            seen.add(candidate)
+            out.append(candidate)
+    return out
+
+
+def _resolve_workspace_dir(config_dict: Optional[Dict[str, Any]]) -> str:
+    raw: Optional[Any] = None
+    if isinstance(config_dict, dict):
+        raw = config_dict.get("launch_root") or config_dict.get("project_root")
+    if raw:
+        return os.path.abspath(os.path.expanduser(os.path.normpath(str(raw))))
+    return os.path.abspath(os.getcwd())
+
+
+def _extra_write_roots(config_dict: Optional[Dict[str, Any]]) -> List[str]:
+    if not isinstance(config_dict, dict):
+        return []
+    moderation = config_dict.get("command_moderation")
+    if not isinstance(moderation, dict):
+        return []
+    root_box = moderation.get("root_box")
+    if not isinstance(root_box, dict):
+        return []
+    extra = root_box.get("extra_write_paths")
+    return [str(x) for x in (extra or []) if x is not None and str(x).strip()]
+
+
+def get_project_data(workspace_config: Optional[Dict[str, Any]] = None) -> Dict[str, str]:
     """
     return project data like
     {
       "OS": "Linux",
       "shell": "bash",
       "projectDir": "/home/user/project",
+      "projectDirWritable": "true",
+      "allowed_write_paths": "/tmp/extra_allowed",
       "currentDate": "2023-10-05",
       "isGitProject": "true",
       "projectDirListing": "folder/\nfolder/file1\nfile2..."
-	}
+    }
+
+    workspace_config: optional CLI/server config snapshot (launch_root, project_root,
+    command_moderation.root_box.extra_write_paths) used for projectDir / allowed writes.
+
+    ``allowed_write_paths`` lists only directories where a probe file can be created and removed
+    (same meaning on Linux, macOS, and Windows); non-writable roots are omitted.
     """
     os_name = platform.system()
     if os_name == "Linux":
@@ -94,18 +141,30 @@ def get_project_data() -> Dict[str, str]:
     if not shell or shell == "unknown" and os_name == "Windows":
         shell = os.environ.get("COMSPEC", "cmd.exe")
 
-    project_dir = os.getcwd()
+    project_dir = _resolve_workspace_dir(workspace_config)
+    if not os.path.isdir(project_dir):
+        project_dir = os.path.abspath(os.getcwd())
 
     # Проверка, является ли проект git-репозиторием
     is_git_project = "true" if os.path.exists(os.path.join(project_dir, ".git")) else "false"
 
     current_date = datetime.now().strftime('%Y-%m-%d')
-    project_dir_listing = get_listing(project_dir)
+    try:
+        project_dir_listing = get_listing(project_dir)
+    except OSError:
+        project_dir_listing = ""
+
+    allowed_roots = _dedupe_ordered_abs_paths([project_dir, *_extra_write_roots(workspace_config)])
+    writable_roots = [p for p in allowed_roots if _dir_writable_probe(p)]
+    allowed_write_paths = "\n".join(writable_roots)
+    project_dir_writable = "true" if _dir_writable_probe(project_dir) else "false"
 
     data = {
         'OS': os_str,
         'shell': shell,
         'projectDir': project_dir,
+        'projectDirWritable': project_dir_writable,
+        'allowed_write_paths': allowed_write_paths,
         'currentDate': current_date,
         'isGitProject': is_git_project,
         'projectDirListing': project_dir_listing
@@ -203,7 +262,16 @@ def run_tests():
 
     # Тест 6: структура данных
     data = get_project_data()
-    required_keys = ['OS', 'shell', 'projectDir', 'currentDate', 'isGitProject', 'projectDirListing']
+    required_keys = [
+        'OS',
+        'shell',
+        'projectDir',
+        'projectDirWritable',
+        'allowed_write_paths',
+        'currentDate',
+        'isGitProject',
+        'projectDirListing',
+    ]
     for k in required_keys:
         assert k in data, f"Ключ {k} отсутствует в данных проекта"
 

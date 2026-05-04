@@ -6,7 +6,7 @@ Write a concise, high-signal, implementation-ready summary.
 You may receive:
 1) <user_requests_log> - user messages and requirements in order.
 2) <dialog_history> or <dialog_history_batch> - full/partial dialogue (assistant replies, tool calls, results).
-3) <project_data> - session filesystem context aligned with the system prompt (OS, shell, projectDir, listing snapshot, etc.). Use it to ground paths and environment facts; do not invent different roots or OS details when this block is present.
+3) <project_data> - session filesystem context aligned with the system prompt (OS, shell, projectDir, projectDirWritable, allowed_write_paths, listing snapshot, etc.). Use it to ground paths and environment facts; do not invent different roots or OS details when this block is present.
 4) <previous_summary> - accumulated summary from earlier batches.
 
 If <previous_summary> is present (item 4), treat this as incremental update:

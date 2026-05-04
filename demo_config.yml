@@ -49,13 +49,23 @@ summary:
 
 security:
   command_moderation:
+    # allow: execute_command/run_python_code run without judge.
+    # ask: dangerous verdict requires explicit user confirmation.
+    # deny: dangerous verdict is blocked by policy.
     mode: deny
     root_box:
+      # When enabled, write/edit tools can modify only launch_root
+      # (the directory where gc-cli was started) and extra_write_paths.
       enabled: true
+      # Additional writable directories. Relative paths are resolved from config.yml.
       extra_write_paths: []
+    # Positive examples for the command judge. These are not a strict allowlist:
+    # they describe the expected safe command profile for this project.
     allowed_command_examples: []
     url_policy:
+      # fetch_url/simple_fetch_url validate only the original URL before request.
       allowed_schemes: ["http", "https"]
+      # Exact hosts, glob hosts (*.internal.example), or URL globs can be listed here.
       url_blacklist: []
 
 mcp:

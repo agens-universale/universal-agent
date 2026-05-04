@@ -86,6 +86,44 @@ Background и CLI-клиент для работы с агентом GigaCode: �
       - в директории для тредов создаются файлы `data_<thread_id>.jsonl` (сообщения) и `meta_<thread_id>.json` (метаданные, включая `previous_response_id`).
     - По умолчанию логи будут сохраняться в той папке, из которой запущена команда.
 
+    **Security policy (`security.command_moderation`)**
+
+    Клиент поддерживает единый контур безопасности для файловых изменений,
+    запуска команд/кода и сетевых запросов:
+
+    ```yaml
+    security:
+      command_moderation:
+        mode: deny # allow | ask | deny
+        root_box:
+          enabled: true
+          extra_write_paths: []
+        allowed_command_examples: []
+        url_policy:
+          allowed_schemes: ["http", "https"]
+          url_blacklist: []
+    ```
+
+    - `root_box.enabled` по умолчанию включён и ограничивает файловые изменения директорией запуска `gc-cli` (`launch_root`).
+      Чтение файлов не ограничивается этим периметром, но запись/создание/редактирование вне него блокируются.
+    - `root_box.extra_write_paths` — дополнительные директории, куда разрешена запись помимо `launch_root`.
+      Относительные пути разрешаются от директории `config.yml`.
+    - `mode` управляет только `execute_command` и `run_python_code`:
+      - `allow` — выполнять без judge;
+      - `ask` — безопасное выполнять, опасное выполнять только после подтверждения пользователя;
+      - `deny` — безопасное выполнять, опасное блокировать.
+    - `allowed_command_examples` — positive examples для LLM judge. Это не строгий allowlist,
+      а ориентир безопасного профиля команд проекта.
+    - `url_policy.allowed_schemes` и `url_policy.url_blacklist` проверяются для исходного URL
+      в `fetch_url`/`simple_fetch_url` до сетевого запроса. Redirect targets повторно не проверяются.
+    - Основные policy-ошибки в JSON-envelope инструментов:
+      - `root_box_violation` — файловое изменение вне разрешённых roots;
+      - `unsafe_command_blocked` — опасная команда/код заблокированы в `deny`;
+      - `unsafe_command_cancelled_by_user` — пользователь не подтвердил опасное действие в `ask`;
+      - `url_validation_failed` — URL не прошёл схему/формат;
+      - `url_blocked_by_policy` — URL совпал с blacklist.
+    - Все policy-решения пишутся в run logger как `security_policy_decision` без полного payload команды/кода.
+
 5. **Переопределение настроек config.yml из CLI**
 
     Любой параметр из `config.yml` (или новый, которого там нет) можно переопределить при запуске через дополнительные аргументы командной строки.
@@ -101,6 +139,16 @@ Background и CLI-клиент для работы с агентом GigaCode: �
       - `--client_name "my_client"` → `config_dict["client_name"] == "my_client"` (строка).
 
     **Примеры:**
+
+    - Отключить файловый периметр для разового запуска:
+      ```bash
+      gc-cli -q "..." --no-root-box
+      ```
+
+    - Переключить режим command moderation:
+      ```bash
+      gc-cli -q "..." --command-moderation ask
+      ```
 
     - Переопределить существующие ключи:
       ```bash

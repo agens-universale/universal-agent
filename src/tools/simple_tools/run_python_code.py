@@ -1,11 +1,25 @@
-import os
-import sys
-import subprocess
-import tempfile
 import json
-from typing import Optional, Dict, Any
+import os
+import subprocess
+import sys
+from pathlib import Path
+from typing import Any, Dict, Optional
 
+from security.command_moderation import effective_command_cwd, moderate_command_execution
+from security.path_policy import resolve_tool_context
 from tools.simple_tools.abstract_simple_tool import AbstractSimpleTool
+from utils.directory_write_access import directory_allows_probe_write
+
+
+def _dedupe_abs_paths_ordered(paths: list[str]) -> list[str]:
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for raw in paths:
+        abs_path = os.path.abspath(str(raw))
+        if abs_path not in seen:
+            seen.add(abs_path)
+            ordered.append(abs_path)
+    return ordered
 
 
 class RunPythonCode(AbstractSimpleTool):
@@ -24,8 +38,10 @@ class RunPythonCode(AbstractSimpleTool):
                 "properties": {
                     "code": {
                         "type": "string",
-                        "description": "The full Python code to execute. It will be written to a temporary .py file "
-                                       "and run with the current Python interpreter."
+                        "description": (
+                            "The full Python code to execute via the current Python interpreter "
+                            "(fed on standard input; no temp script file)."
+                        ),
                     },
                     "timeout_seconds": {
                         "type": "integer",
@@ -40,7 +56,13 @@ class RunPythonCode(AbstractSimpleTool):
                     },
                     "cwd": {
                         "type": "string",
-                        "description": "Optional working directory for the subprocess. Defaults to temp directory.",
+                        "description": (
+                            "Optional working directory for the subprocess (absolute or relative to the host). "
+                            "If omitted, defaults to this agent's configured project/workspace root so relative paths "
+                            "resolve under the project. If the default is missing, read-only, or unsuitable, set cwd "
+                            "explicitly. When the tool returns an error with allowed_write_paths, use one of those "
+                            "paths as cwd (they are the permitted writable locations for this run)."
+                        ),
                     },
                     "env": {
                         "type": "object",
@@ -63,8 +85,9 @@ Input schema: {"type": "object", "properties": {"code": {"type": "string", "desc
 
 Usage:
 - Use this tool to execute small, self-contained Python scripts that do not require interaction.
-- The code is written to a temporary .py file and executed with the current Python interpreter.
-- Execution happens in a temporary directory with PYTHONPATH cleared to avoid unintended imports from the project.
+- Code is executed with the current Python interpreter reading from stdin (no temp .py file).
+- Default working directory is the agent's project/workspace root; relative paths resolve there. PYTHONPATH is cleared to avoid unintended imports from the project.
+- If you need to create files and the default directory is read-only or invalid, pass cwd explicitly. If a tool error includes allowed_write_paths, choose one of those directories as cwd.
 - Do NOT use this tool for long-running tasks, interactive input, or accessing external systems in an unsafe way.
 - If execution exceeds the timeout, the process is terminated and an error message is returned.
 
@@ -115,6 +138,27 @@ Return format (JSON string):
             ensure_ascii=False,
         )
 
+    def _command_moderation_blocked_result(
+        self,
+        error: Dict[str, Any],
+        code: str,
+        timeout_seconds: Optional[int] = None,
+        max_output_chars: int = 4000,
+        cwd: Optional[str] = None,
+        env: Optional[Dict[str, Any]] = None,
+        **kwargs,
+    ) -> str:
+        return self._result(
+            ok=False,
+            return_code=None,
+            timed_out=False,
+            truncated=False,
+            stdout="",
+            stderr="",
+            error=error,
+        )
+
+    @moderate_command_execution(payload_arg="code", tool_name="run_python_code")
     def __call__(
         self,
         code: str,
@@ -169,59 +213,63 @@ Return format (JSON string):
                 error={"type": "invalid_argument", "field": "max_output_chars"},
             )
 
-        if cwd is None:
-            cwd_used = tempfile.gettempdir()
-        else:
-            cwd_used = cwd
-            if not isinstance(cwd_used, str) or not cwd_used.strip():
-                return self._result(
-                    ok=False,
-                    return_code=None,
-                    timed_out=False,
-                    truncated=False,
-                    stdout="",
-                    stderr="",
-                    error={"type": "invalid_argument", "field": "cwd"},
-                )
+        if cwd is not None and (not isinstance(cwd, str) or not cwd.strip()):
+            return self._result(
+                ok=False,
+                return_code=None,
+                timed_out=False,
+                truncated=False,
+                stdout="",
+                stderr="",
+                error={"type": "invalid_argument", "field": "cwd"},
+            )
 
-        temp_file = None
+        security_context = resolve_tool_context(self, **kwargs)
+        cwd_used = effective_command_cwd("run_python_code", {"cwd": cwd}, security_context)
+
+        if not Path(cwd_used).is_dir():
+            launch_abs = os.path.abspath(str(security_context.launch_root))
+            candidate_roots = _dedupe_abs_paths_ordered(
+                [
+                    launch_abs,
+                    *[
+                        os.path.abspath(str(extra))
+                        for extra in (security_context.root_box.extra_write_paths or [])
+                    ],
+                ]
+            )
+            allowed_write_paths = [
+                p for p in candidate_roots if Path(p).is_dir() and directory_allows_probe_write(p)
+            ]
+            return self._result(
+                ok=False,
+                return_code=None,
+                timed_out=False,
+                truncated=False,
+                stdout="",
+                stderr="",
+                error={
+                    "type": "cwd_invalid",
+                    "message": f"Working directory is not an existing directory: {cwd_used}",
+                    "cwd": cwd_used,
+                    "allowed_write_paths": allowed_write_paths,
+                    "hint": (
+                        "Pass cwd pointing to an existing directory. If allowed_write_paths is present above, "
+                        "use one of those paths — they are the writable locations allowed for this agent run."
+                    ),
+                },
+            )
+
         try:
-            with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
-                f.write(code)
-                temp_file = f.name
-
             result = subprocess.run(
-                [sys.executable, temp_file],
+                [sys.executable, "-"],
                 capture_output=True,
                 text=True,
                 timeout=effective_timeout,
                 env=_sanitize_env(env),
                 cwd=cwd_used,
+                input=code,
             )
-
-            stdout_raw = result.stdout or ""
-            stderr_raw = result.stderr or ""
-            stdout, stdout_trunc = self._truncate_text(stdout_raw.rstrip(), max_output_chars)
-            stderr, stderr_trunc = self._truncate_text(stderr_raw.rstrip(), max_output_chars)
-            truncated = stdout_trunc or stderr_trunc
-
-            return_code = result.returncode
-            ok = return_code == 0
-
-            error = None
-            if not ok:
-                error = {"type": "non_zero_exit", "message": f"Process exited with status {return_code}"}
-
-            return self._result(
-                ok=ok,
-                return_code=return_code,
-                timed_out=False,
-                truncated=truncated,
-                stdout=stdout,
-                stderr=stderr,
-                error=error,
-            )
-
         except subprocess.TimeoutExpired:
             return self._result(
                 ok=False,
@@ -242,27 +290,94 @@ Return format (JSON string):
                 stderr="",
                 error={"type": "execution_failed", "message": str(e)},
             )
-        finally:
-            if temp_file:
-                try:
-                    os.unlink(temp_file)
-                except Exception:
-                    pass
 
-        # Should not reach here
+        stdout_raw = result.stdout or ""
+        stderr_raw = result.stderr or ""
+        stdout, stdout_trunc = self._truncate_text(stdout_raw.rstrip(), max_output_chars)
+        stderr, stderr_trunc = self._truncate_text(stderr_raw.rstrip(), max_output_chars)
+        truncated = stdout_trunc or stderr_trunc
+
+        return_code = result.returncode
+        ok = return_code == 0
+
+        error = None
+        if not ok:
+            error = {"type": "non_zero_exit", "message": f"Process exited with status {return_code}"}
+
         return self._result(
-            ok=False,
-            return_code=None,
+            ok=ok,
+            return_code=return_code,
             timed_out=False,
-            truncated=False,
-            stdout="",
-            stderr="",
-            error={"type": "internal_error", "message": "Unexpected end"},
+            truncated=truncated,
+            stdout=stdout,
+            stderr=stderr,
+            error=error,
         )
 
 
+_CHILD_ENV_ALLOWLIST = frozenset(
+    {
+        "HOME",
+        "LOGNAME",
+        "USER",
+        "USERNAME",
+        "HOMEDRIVE",
+        "HOMEPATH",
+        "USERPROFILE",
+        "SHELL",
+        "TERM",
+        "LANG",
+        "LANGUAGE",
+        "LC_ALL",
+        "LC_CTYPE",
+        "LC_MESSAGES",
+        "LC_NUMERIC",
+        "LC_TIME",
+        "TZ",
+        "PATH",
+        "PATHEXT",
+        "TMPDIR",
+        "TMP",
+        "TEMP",
+        "SSL_CERT_FILE",
+        "SSL_CERT_DIR",
+        "REQUESTS_CA_BUNDLE",
+        "CURL_CA_BUNDLE",
+        "NODE_EXTRA_CA_CERTS",
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "ALL_PROXY",
+        "FTP_PROXY",
+        "NO_PROXY",
+        "http_proxy",
+        "https_proxy",
+        "all_proxy",
+        "ftp_proxy",
+        "no_proxy",
+        "PYTHONUTF8",
+        "PYTHONIOENCODING",
+        "SYSTEMROOT",
+        "WINDIR",
+        "PROGRAMFILES",
+        "PROGRAMFILES(X86)",
+        "PROGRAMDATA",
+        "APPDATA",
+        "LOCALAPPDATA",
+        "PUBLIC",
+    }
+)
+
+
+def _child_env_from_parent() -> Dict[str, str]:
+    return {
+        k: v
+        for k, v in os.environ.items()
+        if k in _CHILD_ENV_ALLOWLIST and isinstance(v, str)
+    }
+
+
 def _sanitize_env(env: Optional[Dict[str, Any]]) -> Dict[str, str]:
-    base_env = {**os.environ, "PYTHONPATH": ""}
+    base_env = {**_child_env_from_parent(), "PYTHONPATH": ""}
     if env is None:
         return base_env
     if not isinstance(env, dict):
@@ -278,5 +393,7 @@ def _sanitize_env(env: Optional[Dict[str, Any]]) -> Dict[str, str]:
             sanitized[key] = v
         else:
             sanitized[key] = str(v)
-    return {**base_env, **sanitized}
+    merged = {**base_env, **sanitized}
+    merged["PYTHONPATH"] = ""
+    return merged
 

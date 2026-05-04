@@ -119,18 +119,27 @@ root_box_group.add_argument(
     "--root-box",
     type=_parse_bool_cli,
     choices=[True, False],
-    help="Включить/выключить root_box (true|false)",
+    help=(
+        "Включить/выключить root_box (true|false): ограничение файловых "
+        "изменений launch_root и command_moderation.root_box.extra_write_paths"
+    ),
 )
 root_box_group.add_argument(
     "--no-root-box",
     action="store_true",
-    help="Явно отключить root_box (эквивалент --root-box false)",
+    help=(
+        "Явно отключить root_box (эквивалент --root-box false); "
+        "имеет приоритет над config.yml"
+    ),
 )
 
 parser.add_argument(
     "--command-moderation",
     choices=["allow", "ask", "deny"],
-    help="Режим модерации команд: allow|ask|deny",
+    help=(
+        "Режим execute_command/run_python_code: allow без judge, "
+        "ask с подтверждением опасного, deny блокирует опасное"
+    ),
 )
 
 

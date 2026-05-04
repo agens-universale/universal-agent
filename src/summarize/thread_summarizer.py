@@ -197,12 +197,14 @@ def summarize_dialog_via_chat_completions(
             len(batches),
             prompt_path,
         )
-    pd = get_project_data()
+    pd = get_project_data(cfg)
     project_block = (
         "<project_data>\n"
         f"OS: {pd['OS']}\n"
         f"shell: {pd['shell']}\n"
         f"projectDir: {pd['projectDir']}\n"
+        f"projectDirWritable: {pd['projectDirWritable']}\n"
+        f"allowed_write_paths:\n{pd['allowed_write_paths']}\n"
         f"currentDate: {pd['currentDate']}\n"
         f"isGitProject: {pd['isGitProject']}\n"
         f"projectDirListing:\n{pd['projectDirListing']}\n"

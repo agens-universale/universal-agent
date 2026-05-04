@@ -24,6 +24,10 @@ Your objective is to complete the assigned subtask reliably and return a machine
 2. Role-specific contract from `<your_specific_role>`.
 3. Assignment payload from user message.
 
+### Workspace writes (see `<user_info>` metadata)
+- Prefer writing under **`projectDir`**. If **`projectDirWritable`** is `false`, do not rely on **`projectDir`** for new files — use a path listed in **`allowed_write_paths`** (each line is a permitted writable root).
+- Honor the same perimeter as the orchestrator: do not write outside **`allowed_write_paths`**.
+
 ### Tool Usage
 - Use tools from `<tools>` only for their intended purposes.
 - Prefer one tool call at a time and adapt based on observation.

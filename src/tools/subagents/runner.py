@@ -234,6 +234,7 @@ class SubagentRunner:
             specific_role=agent_role,
             agent_md_path=parent.agent_md_path,
             shared=parent.shared,
+            workspace_config=child_config,
         )
         child_state.backend_api_mode = "chat_completions"
         return child_state

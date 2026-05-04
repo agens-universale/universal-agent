@@ -3,6 +3,8 @@ import subprocess
 import os
 import json
 
+from security.command_moderation import moderate_command_execution
+
 
 class ExecuteCommand(AbstractSimpleTool):
     """
@@ -143,6 +145,29 @@ Important Usage Rules:
             ensure_ascii=False,
         )
 
+    def _command_moderation_blocked_result(
+        self,
+        error: dict,
+        command: str,
+        timeout_seconds: int | None = None,
+        max_output_chars: int | None = None,
+        cwd: str | None = None,
+        env: dict | None = None,
+        **kwargs,
+    ) -> str:
+        return self._result(
+            ok=False,
+            command=command,
+            cwd=cwd or os.getcwd(),
+            exit_code=None,
+            timed_out=False,
+            truncated=False,
+            stdout="",
+            stderr="",
+            error=error,
+        )
+
+    @moderate_command_execution(payload_arg="command", tool_name="execute_command")
     def __call__(
         self,
         command: str,

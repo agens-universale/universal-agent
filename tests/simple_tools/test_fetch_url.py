@@ -36,6 +36,17 @@ class _SessionStub:
         return self._response
 
 
+def _url_policy_config(allowed_schemes=None, url_blacklist=None):
+    return {
+        "command_moderation": {
+            "url_policy": {
+                "allowed_schemes": allowed_schemes or ["http", "https"],
+                "url_blacklist": url_blacklist or [],
+            }
+        }
+    }
+
+
 def test_fetch_url_validation():
     tool = FetchUrl()
     assert json.loads(tool(url=""))["error"]["field"] == "url"
@@ -44,6 +55,40 @@ def test_fetch_url_validation():
     assert json.loads(tool(url="https://x", max_preview_chars=0))["error"]["field"] == "max_preview_chars"
     assert json.loads(tool(url="https://x", offset=-1))["error"]["field"] == "offset"
     assert json.loads(tool(url="https://x", limit=0))["error"]["field"] == "limit"
+
+
+def test_fetch_url_policy_blocks_before_request(monkeypatch):
+    def fail_if_called(*_args, **_kwargs):
+        raise AssertionError("request should not be executed for blocked URL")
+
+    monkeypatch.setattr(requests, "get", fail_if_called)
+
+    data = json.loads(
+        FetchUrl(config_dict=_url_policy_config(url_blacklist=["blocked.example"]))(
+            url="https://blocked.example/page"
+        )
+    )
+
+    assert data["ok"] is False
+    assert data["result_type"] == "error"
+    assert data["error"]["type"] == "url_blocked_by_policy"
+    assert data["error"]["matched_rule"] == "blocked.example"
+
+
+def test_fetch_url_policy_blocks_disallowed_scheme_before_legacy_validation(monkeypatch):
+    def fail_if_called(*_args, **_kwargs):
+        raise AssertionError("request should not be executed for blocked URL")
+
+    monkeypatch.setattr(requests, "get", fail_if_called)
+
+    data = json.loads(
+        FetchUrl(config_dict=_url_policy_config(allowed_schemes=["https"]))(
+            url="http://example.com"
+        )
+    )
+
+    assert data["ok"] is False
+    assert data["error"]["type"] == "url_validation_failed"
 
 
 def test_fetch_url_binary(monkeypatch):
@@ -175,6 +220,24 @@ def test_simple_fetch_url_extracts_html_and_supports_pagination(monkeypatch):
     assert second["cache_hit"] is True
     assert second["next_offset"] is None
     assert second["content"] != ""
+
+
+def test_simple_fetch_url_policy_blocks_before_request(monkeypatch):
+    def fail_session_if_called():
+        raise AssertionError("session should not be created for blocked URL")
+
+    monkeypatch.setattr(requests, "Session", fail_session_if_called)
+
+    data = json.loads(
+        SimpleFetchUrl(config_dict=_url_policy_config(url_blacklist=["*.internal"]))(
+            url="https://api.internal/path"
+        )
+    )
+
+    assert data["ok"] is False
+    assert data["result_type"] == "error"
+    assert data["error"]["type"] == "url_blocked_by_policy"
+    assert data["error"]["matched_rule"] == "*.internal"
 
 
 def test_simple_fetch_url_handles_lists_headings_pre_and_tables(monkeypatch):

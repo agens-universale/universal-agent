@@ -133,6 +133,7 @@ class AgentExecutor:
             "agent_md_path": config_dict.get("agent_md_path"),
             "thread_id": thread_id,
             "shared": thread_shared,
+            "workspace_config": config_dict,
         }
         if config_dict.get("use_local_subagents", False):
             state_data["specific_role"] = ORCHESTRATOR_SPECIFIC_ROLE

@@ -4,7 +4,9 @@ from typing import Dict, Any
 class AbstractSimpleTool(ABC):
 
     def __init__(self, *args, **kwargs):
-        pass
+        self._ctx = kwargs.get("ctx")
+        self._state = kwargs.get("state")
+        self._config_dict = kwargs.get("config_dict")
 
     @classmethod
     @abstractmethod

@@ -4,6 +4,7 @@ import functools
 from typing import Dict, Any
 from tools.simple_tools.abstract_simple_tool import AbstractSimpleTool
 from utils.tool_report_paths import tool_report_abspath
+from security.path_policy import enforce_root_box
 
 
 class SearchAndReplace(AbstractSimpleTool):
@@ -122,6 +123,24 @@ Update version string:
             ensure_ascii=False,
         )
 
+    def _root_box_blocked_result(
+        self,
+        error: Dict[str, Any],
+        path: str,
+        search: str,
+        replace: str,
+        **kwargs,
+    ) -> str:
+        return self._result(
+            path=path,
+            ok=False,
+            matched=False,
+            replaced=0,
+            message=error["message"],
+            error=error,
+        )
+
+    @enforce_root_box(path_arg="path", operation="search_and_replace")
     def __call__(self, path: str, search: str, replace: str, **kwargs) -> str:
         _result = functools.partial(self._result, path=path)
 

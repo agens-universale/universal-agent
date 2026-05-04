@@ -3,7 +3,7 @@ import time
 from dataclasses import dataclass, field
 from uuid import uuid4
 import json
-from typing import List, Union, Dict, Optional, Any
+from typing import Any, Dict, List, Optional, Union
 from utils.project_data import get_project_data
 from user_message_policy import (
     append_user_log_entries,
@@ -39,6 +39,7 @@ class State:
         limit_project_metadata: bool = False,
         thread_id: Optional[str] = None,
         shared: Optional["SharedStateData"] = None,
+        workspace_config: Optional[Dict[str, Any]] = None,
     ):
         self.parent_state_id = parent_state_id
         self.x_target = None
@@ -46,7 +47,7 @@ class State:
         self.specific_role = specific_role
         self.verbose = verbose
         self.default_model = model
-        self.initial_project_data = get_project_data()
+        self.initial_project_data = get_project_data(workspace_config)
         if limit_project_metadata:
             # В серверном режиме не передаём чувствительные данные о файловой системе.
             # Оставляем только дату, остальные поля будут добавлены в set_call_metadata.

@@ -1,0 +1,174 @@
+import json
+from types import SimpleNamespace
+
+import pytest
+
+from security.path_policy import (
+    RootBoxViolation,
+    check_write_path_allowed,
+    enforce_root_box,
+    is_within_root,
+    normalize_path_for_policy,
+)
+
+
+class _Logger:
+    def __init__(self):
+        self.messages = []
+
+    def info(self, message, *args):
+        self.messages.append(message % args if args else message)
+
+
+def test_normalize_path_resolves_relative_segments(tmp_path):
+    base = tmp_path / "project"
+    base.mkdir()
+
+    resolved = normalize_path_for_policy("src/../README.md", str(base))
+
+    assert resolved == base / "README.md"
+
+
+def test_check_write_path_allows_launch_root_and_extra_roots(tmp_path):
+    launch_root = tmp_path / "project"
+    launch_root.mkdir()
+    extra_root = tmp_path / "cache"
+    extra_root.mkdir()
+
+    inside = check_write_path_allowed(
+        str(launch_root / "src" / "new.py"),
+        str(launch_root),
+    )
+    extra = check_write_path_allowed(
+        str(extra_root / "artifact.txt"),
+        str(launch_root),
+        [str(extra_root)],
+    )
+
+    assert inside == launch_root / "src" / "new.py"
+    assert extra == extra_root / "artifact.txt"
+
+
+def test_check_write_path_blocks_outside_root(tmp_path):
+    launch_root = tmp_path / "project"
+    launch_root.mkdir()
+
+    with pytest.raises(RootBoxViolation) as exc:
+        check_write_path_allowed(str(tmp_path / "outside.txt"), str(launch_root))
+
+    assert exc.value.error["type"] == "root_box_violation"
+    assert exc.value.error["launch_root"] == str(launch_root)
+
+
+def test_check_write_path_blocks_symlink_escape(tmp_path):
+    launch_root = tmp_path / "project"
+    launch_root.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    link = launch_root / "linked"
+    link.symlink_to(outside, target_is_directory=True)
+
+    with pytest.raises(RootBoxViolation):
+        check_write_path_allowed(str(link / "data.txt"), str(launch_root))
+
+
+def test_is_within_root_supports_case_insensitive_comparison():
+    assert is_within_root("/PROJECT/src/file.py", "/project", case_insensitive=True)
+    assert not is_within_root("/PROJECT/src/file.py", "/project", case_insensitive=False)
+
+
+def test_enforce_root_box_returns_structured_error(tmp_path):
+    launch_root = tmp_path / "project"
+    launch_root.mkdir()
+    config_dict = {
+        "launch_root": str(launch_root),
+        "command_moderation": {"root_box": {"enabled": True}},
+    }
+
+    @enforce_root_box(path_arg="path", operation="write")
+    def write(path: str, config_dict: dict) -> str:
+        return json.dumps({"ok": True, "path": path})
+
+    result = json.loads(write(str(tmp_path / "outside.txt"), config_dict=config_dict))
+
+    assert result["ok"] is False
+    assert result["error"]["type"] == "root_box_violation"
+
+
+def test_enforce_root_box_audits_blocked_decision(tmp_path):
+    launch_root = tmp_path / "project"
+    launch_root.mkdir()
+    logger = _Logger()
+    ctx = SimpleNamespace(
+        config_dict={
+            "launch_root": str(launch_root),
+            "command_moderation": {"root_box": {"enabled": True}},
+        },
+        logger=logger,
+    )
+
+    @enforce_root_box(path_arg="path", operation="write")
+    def write(path: str, **kwargs) -> str:
+        return json.dumps({"ok": True, "path": path})
+
+    result = json.loads(write(str(tmp_path / "outside.txt"), ctx=ctx))
+
+    assert result["ok"] is False
+    assert '"decision": "blocked"' in logger.messages[-1]
+    assert '"reason_code": "policy_deny"' in logger.messages[-1]
+    assert '"error_type": "root_box_violation"' in logger.messages[-1]
+
+
+def test_enforce_root_box_uses_explicit_logger_when_provided(tmp_path):
+    launch_root = tmp_path / "project"
+    launch_root.mkdir()
+    logger = _Logger()
+
+    @enforce_root_box(path_arg="path", operation="write")
+    def write(path: str, **kwargs) -> str:
+        return json.dumps({"ok": True, "path": path})
+
+    result = json.loads(
+        write(
+            str(tmp_path / "outside.txt"),
+            logger=logger,
+            config_dict={
+                "launch_root": str(launch_root),
+                "command_moderation": {"root_box": {"enabled": True}},
+            },
+        )
+    )
+
+    assert result["ok"] is False
+    assert '"decision": "blocked"' in logger.messages[-1]
+    assert '"reason_code": "policy_deny"' in logger.messages[-1]
+
+
+def test_enforce_root_box_prefers_explicit_logger_over_context_logger(tmp_path):
+    launch_root = tmp_path / "project"
+    launch_root.mkdir()
+    explicit_logger = _Logger()
+    context_logger = _Logger()
+    ctx = SimpleNamespace(
+        config_dict={
+            "launch_root": str(launch_root),
+            "command_moderation": {"root_box": {"enabled": True}},
+        },
+        logger=context_logger,
+    )
+
+    @enforce_root_box(path_arg="path", operation="write")
+    def write(path: str, **kwargs) -> str:
+        return json.dumps({"ok": True, "path": path})
+
+    result = json.loads(
+        write(
+            str(tmp_path / "outside.txt"),
+            ctx=ctx,
+            logger=explicit_logger,
+        )
+    )
+
+    assert result["ok"] is False
+    assert '"decision": "blocked"' in explicit_logger.messages[-1]
+    assert context_logger.messages == []
