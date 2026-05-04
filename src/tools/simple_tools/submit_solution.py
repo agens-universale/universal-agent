@@ -71,6 +71,7 @@ class SubmitSolution(AbstractSimpleTool):
                         "description": "Optional. Caveats, risks, unresolved items, or suggested next steps for the user.",
                     },
                     "handoff": {
+                        "type": "object",
                         "description": "Required handoff payload for machine-readable outcomes. Tool-agnostic by design: schema is defined by the current workflow, not by submit_solution itself. Prefer any JSON-compatible value.",
                     },
                 },
