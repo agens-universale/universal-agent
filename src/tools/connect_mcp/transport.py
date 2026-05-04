@@ -2,7 +2,7 @@
 Транспортный слой MCP: один запрос — один ответ (синхронно).
 Тип транспорта задаётся в конфиге сервера (transport: http | sse | stdio).
 """
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import json
 import os
@@ -25,7 +25,7 @@ def _request_http(
     headers: Dict[str, str],
     json_payload: Dict[str, Any],
     timeout: float,
-    verify: bool = True,
+    verify: Union[bool, str] = True,
     cert: Optional[tuple] = None,
 ) -> Tuple[Dict[str, str], Dict[str, Any]]:
     """
@@ -126,7 +126,7 @@ def _request_sse(
     headers: Dict[str, str],
     json_payload: Dict[str, Any],
     timeout: float,
-    verify: bool = True,
+    verify: Union[bool, str] = True,
     cert: Optional[tuple] = None,
 ) -> Tuple[Dict[str, str], Dict[str, Any]]:
     """

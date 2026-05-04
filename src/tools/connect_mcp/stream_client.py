@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import asyncio
 import threading
@@ -141,7 +141,7 @@ class _PersistentSessionManager:
 _SESSION_MANAGER = _PersistentSessionManager()
 
 
-def _make_httpx_factory(verify: bool, cert: Optional[Tuple[str, str]] = None):
+def _make_httpx_factory(verify: Union[bool, str], cert: Optional[Tuple[str, str]] = None):
     """
     Фабрика httpx-клиентов с управляемой проверкой SSL и клиентским сертификатом.
     Совместима с сигнатурой httpx_client_factory из MCP SDK.
@@ -159,7 +159,7 @@ def _make_httpx_factory(verify: bool, cert: Optional[Tuple[str, str]] = None):
 def _make_stream_http_client(
     token: Optional[str],
     timeout: float,
-    verify: bool,
+    verify: Union[bool, str],
     cert: Optional[Tuple[str, str]] = None,
 ) -> httpx.AsyncClient:
     """
@@ -219,7 +219,7 @@ async def _list_tools_stream_sse_async(
     base_url: str,
     token: Optional[str],
     timeout: float,
-    verify: bool,
+    verify: Union[bool, str],
     cert: Optional[Tuple[str, str]] = None,
 ) -> List[Dict[str, Any]]:
     """
@@ -294,7 +294,7 @@ async def _call_tool_stream_sse_async(
     base_url: str,
     token: Optional[str],
     timeout: float,
-    verify: bool,
+    verify: Union[bool, str],
     tool_name: str,
     arguments: Dict[str, Any],
     cert: Optional[Tuple[str, str]] = None,
@@ -347,7 +347,7 @@ async def _call_tool_stream_sse_persistent(
     base_url: str,
     token: Optional[str],
     timeout: float,
-    verify: bool,
+    verify: Union[bool, str],
     tool_name: str,
     arguments: Dict[str, Any],
     cert: Optional[Tuple[str, str]] = None,
@@ -452,7 +452,7 @@ async def _list_tools_stream_http_async(
     base_url: str,
     token: Optional[str],
     timeout: float,
-    verify: bool,
+    verify: Union[bool, str],
     cert: Optional[Tuple[str, str]] = None,
 ) -> List[Dict[str, Any]]:
     """
@@ -534,7 +534,7 @@ async def _call_tool_stream_http_async(
     base_url: str,
     token: Optional[str],
     timeout: float,
-    verify: bool,
+    verify: Union[bool, str],
     tool_name: str,
     arguments: Dict[str, Any],
     cert: Optional[Tuple[str, str]] = None,
@@ -595,7 +595,7 @@ async def _call_tool_stream_http_persistent(
     base_url: str,
     token: Optional[str],
     timeout: float,
-    verify: bool,
+    verify: Union[bool, str],
     tool_name: str,
     arguments: Dict[str, Any],
     cert: Optional[Tuple[str, str]] = None,

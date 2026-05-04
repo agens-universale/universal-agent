@@ -138,7 +138,7 @@ save_logs: true
 
 # MCP-сервера
 mcp-servers:
-  # доступные типы транспорта stdio, stream_http
+  # доступные типы транспорта stdio, stream_http, sse
   #
   # --- Playwright Browser MCP ---
   # Браузерная автоматизация через @playwright/mcp (Microsoft).
