@@ -241,6 +241,22 @@ class State:
         """Clear active user intent scope after successful turn completion."""
         self.current_user_messages = []
 
+    def seed_new_user_turn(self, new_user_message: Dict[str, Any]) -> None:
+        """
+        Append current real user request to active intent scope.
+
+        Why:
+        - `current_user_messages` is the primary scope for finish-gate checks;
+        - new request should be appended only when it is a real user message
+          (non-technical), preserving existing active scope from state.
+        """
+        self.current_user_messages = append_user_log_entries(
+            self.current_user_messages, [new_user_message]
+        )
+        self.user_messages_log = append_user_log_entries(
+            self.user_messages_log, [new_user_message]
+        )
+
 
 class SatesStorage:
 

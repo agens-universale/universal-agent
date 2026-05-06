@@ -4,6 +4,7 @@ import sys
 import tempfile
 import types
 import unittest
+import json
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -178,6 +179,76 @@ class SummaryTriggersTest(unittest.TestCase):
                 self.assertEqual(result, "ok")
 
             compaction_mock.assert_not_called()
+
+    def test_thread_history_not_readded_into_current_user_messages(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            ctx = self._make_ctx(tmp_dir, backend_api_mode="chat_completions")
+            thread_id = "thr_hist"
+            data_path = os.path.join(tmp_dir, f"data_cli_{thread_id}.jsonl")
+            meta_path = os.path.join(tmp_dir, f"meta_cli_{thread_id}.json")
+
+            old_user_1 = {"role": "user", "content": "старый вопрос 1", "id": "m_old_1"}
+            old_user_2 = {"role": "user", "content": "старый вопрос 2", "id": "m_old_2"}
+            with open(data_path, "w", encoding="utf-8") as fd:
+                for idx, payload in enumerate([old_user_1, old_user_2], start=1):
+                    fd.write(
+                        json.dumps(
+                            {
+                                "type": "message",
+                                "thread_id": thread_id,
+                                "system": "cli",
+                                "seq": idx,
+                                "ts": "2026-05-06T10:00:00+00:00",
+                                "payload": payload,
+                            },
+                            ensure_ascii=False,
+                        )
+                        + "\n"
+                    )
+            with open(meta_path, "w", encoding="utf-8") as fd:
+                json.dump(
+                    {
+                        "thread_id": thread_id,
+                        "system": "cli",
+                        "schema_version": 1,
+                        "created_at": "2026-05-06T10:00:00+00:00",
+                        "updated_at": "2026-05-06T10:00:00+00:00",
+                        "messages_count": 2,
+                        "backend_api_mode": "chat_completions",
+                        "previous_response_id": None,
+                        "user_messages_log": ["старый вопрос 1", "старый вопрос 2"],
+                        "current_user_messages": [],
+                    },
+                    fd,
+                    ensure_ascii=False,
+                    indent=2,
+                )
+
+            def _fake_run_agent(messages, _state, _ctx, **kwargs):
+                persist_cb = kwargs.get("persist_messages_callback")
+                if callable(persist_cb):
+                    # Реплика реального run_agent: первый persist в chat_completions
+                    # получает весь батч (история + новый user message).
+                    persist_cb(messages)
+                return "ok"
+
+            with patch.object(
+                agent_executor_module, "get_skills_registry", return_value=_SkillsRegistryStub()
+            ), patch.object(
+                agent_executor_module, "run_agent", side_effect=_fake_run_agent
+            ):
+                executor = agent_executor_module.AgentExecutor(ctx)
+                result = executor.run(
+                    "новый вопрос",
+                    thread_id=thread_id,
+                    system="cli",
+                    verbose=False,
+                )
+                self.assertEqual(result, "ok")
+
+            with open(meta_path, "r", encoding="utf-8") as fd:
+                saved_meta = json.load(fd)
+            self.assertEqual(saved_meta.get("current_user_messages"), ["новый вопрос"])
 
 
 if __name__ == "__main__":

@@ -23,6 +23,7 @@ from summarize.summary_serialization import history_has_dialog_summary_message
 from states import State, SharedStateData, save_state, dump_storage
 from thread_store import (
     ThreadSession,
+    make_message_key,
     reset_thread_files,
     resolve_threads_dir,
 )
@@ -309,12 +310,10 @@ class AgentExecutor:
             "content": message,
             "id": generate_message_id_func("m"),
         }
-        # Seed user_messages_log с текущим пользовательским сообщением.
-        # _persist_*_batch-коллбэки ниже получают только step_messages
-        # (ответ ассистента + tool calls/outputs); без этого seed'а
-        # finish_gate в processing_responses.py читает пустой лог и
-        # отвергает валидный submit_solution как «user intent is empty».
-        state.append_user_messages_to_log([new_user_message])
+        # На старте user turn используем уже имеющийся active scope из state
+        # и дописываем в него текущий запрос (только если это реальное user
+        # сообщение, не technical). Параллельно пополняем общий user log.
+        state.seed_new_user_turn(new_user_message)
         technical_user_message = None
         _thread_mf = thread_shared.memory_files if thread_shared is not None else {}
         _has_memory = (
@@ -393,7 +392,12 @@ class AgentExecutor:
                         "memory_files": _shared.memory_files,
                         "notes_md": _shared.notes_md,
                     }
-                state.append_user_messages_to_log(step_messages)
+                known_before = set(thread_session.known_message_keys)
+                step_messages_for_user_scope = [
+                    m for m in step_messages
+                    if make_message_key(m) not in known_before
+                ]
+                state.append_user_messages_to_log(step_messages_for_user_scope)
                 thread_session.meta["user_messages_log"] = state.user_messages_log
                 thread_session.meta["current_user_messages"] = state.current_user_messages
                 thread_session.meta["backend_api_mode"] = state.backend_api_mode

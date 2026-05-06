@@ -218,3 +218,17 @@ def test_chat_completions_connection_error_does_not_lower_max_tokens(monkeypatch
         )
 
     assert max_tokens_seen == [100]
+
+
+def test_submit_solution_clears_current_user_messages_on_success():
+    state = _make_state()
+    state.current_user_messages = ["актуальный вопрос", "уточнение"]
+
+    result = run_agent(
+        [_submit_solution_call()],
+        state,
+        _make_ctx(strict_submit_solution_validation=False),
+    )
+
+    assert result == '{"ok": true}'
+    assert state.current_user_messages == []
