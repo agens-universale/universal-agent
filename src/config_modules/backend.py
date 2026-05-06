@@ -36,6 +36,7 @@ class BackendConfig(BaseModel):
     api_mode: str = "responses"
     completions_url: str = ""
     chat_completions_max_tokens: int = 32768
+    chat_completions_min_response_tokens: int = 1024
     chat_completions_auth_token: str | None = None
     openrouter_http_referer: str | None = None
     openrouter_x_title: str | None = None
@@ -54,6 +55,11 @@ class BackendConfig(BaseModel):
     @classmethod
     def normalize_tokens(cls, value: Any) -> int:
         return parse_chat_completions_max_tokens(value, default=8096)
+
+    @field_validator("chat_completions_min_response_tokens", mode="before")
+    @classmethod
+    def normalize_min_response_tokens(cls, value: Any) -> int:
+        return parse_chat_completions_max_tokens(value, default=1024)
 
     @field_validator(
         "chat_completions_auth_token",

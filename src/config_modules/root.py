@@ -9,6 +9,7 @@ from config_modules.backend import BackendConfig
 from config_modules.mcp import McpConfig
 from config_modules.paths import PathsConfig
 from config_modules.security import SecurityConfig
+from config_modules.stored_outputs import normalize_tool_output_limits
 from config_modules.summary import (
     DEFAULT_INCREMENTAL_BATCH_MULTIPLIER,
     DEFAULT_LAST_DIALOG_STEP_MESSAGE_MAX_CHARS,
@@ -78,6 +79,13 @@ def resolve_paths(cfg: AppConfig, config_dir: str) -> None:
         cfg.summary.incremental_batch_chars = (
             int(trigger * DEFAULT_INCREMENTAL_BATCH_MULTIPLIER) if trigger > 0 else 0
         )
+    (
+        cfg.agent.tool_output_inline_max_chars,
+        cfg.agent.stored_tool_outputs_max_entries,
+    ) = normalize_tool_output_limits(
+        cfg.agent.tool_output_inline_max_chars,
+        cfg.agent.stored_tool_outputs_max_entries,
+    )
     cfg.backend.completions_url = str(cfg.backend.completions_url).strip()
     root_box = cfg.security.command_moderation.root_box
     root_box.extra_write_paths = [

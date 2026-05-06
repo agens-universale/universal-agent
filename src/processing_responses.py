@@ -3,11 +3,12 @@ from types import SimpleNamespace
 
 from config import parse_chat_completions_max_tokens
 from intent_guard import validate_final_report_vs_user_intent
+from request_backend_policy import request_chat_completions_with_policy
 from tools import apply_tool, WrongFunctionArgumentsException
+from tools.stored_outputs.wrapping import maybe_store_and_wrap_tool_output
 from utils.connect_backend import create_call_headers
 from utils.connect_backend import request_backend_responses as request_backend
 from utils.connect_backend import create_call_data_responses as create_call_data
-from utils.connect_backend import request_backend_chat_completions
 from utils.connect_backend import create_call_data_completions
 from utils.convertations import (
     output_chat_completion_to_response,
@@ -28,6 +29,8 @@ from user_message_policy import (
 import logging
 
 _fallback_logger = logging.getLogger(__name__)
+
+
 def _summarize_call_data_for_log(call_data: Dict[str, Any]) -> Dict[str, Any]:
     """
     Короткая сводка запроса для корреляции с ответом backend.
@@ -68,6 +71,10 @@ def _get_backend_api_mode(ctx: Any) -> str:
     if raw_mode in {"responses", "chat_completions"}:
         return raw_mode
     raise ValueError(f"Unsupported backend_api_mode: {raw_mode!r}")
+
+
+def _mode_requires_backend_call(mode: str) -> bool:
+    return mode in {"user_ask", "function_call_output"}
 
 
 def _request_backend_canonical(
@@ -127,14 +134,23 @@ def _request_backend_canonical(
     completions_max_tokens = parse_chat_completions_max_tokens(
         cfg.get("chat_completions_max_tokens", 8096), default=8096
     )
-    call_data = create_call_data_completions(
-        sanitized_messages,
-        chat_state,
-        max_tokens=completions_max_tokens,
+    min_response_tokens = parse_chat_completions_max_tokens(
+        cfg.get("chat_completions_min_response_tokens", 1024),
+        default=1024,
     )
-    res = request_backend_chat_completions(
-        call_data,
-        call_headers,
+
+    def _create_payload(max_tokens: int) -> Dict[str, Any]:
+        return create_call_data_completions(
+            sanitized_messages,
+            chat_state,
+            max_tokens=max_tokens,
+        )
+
+    res, call_data = request_chat_completions_with_policy(
+        payload_factory=_create_payload,
+        initial_max_tokens=completions_max_tokens,
+        min_response_tokens=min_response_tokens,
+        headers=call_headers,
         url=url,
         verify=verify,
         use_retry=use_retry,
@@ -256,6 +272,14 @@ def process_tool_calls(
             state=state,
             run_agent_func=run_agent_func,
         )
+        tool_res = maybe_store_and_wrap_tool_output(
+            tool_res,
+            call_id=m["call_id"],
+            tool_name=m["name"],
+            state=state,
+            config=getattr(ctx, "config_dict", {}) or {},
+            logger=getattr(ctx, "logger", None),
+        )
         new_message = {
             "id": generate_message_id_func("fco"),
             "type": "function_call_output",
@@ -285,7 +309,7 @@ def run_agent(
     *,
     get_full_history_messages: Optional[Callable[[], List[Dict]]] = None,
     persist_messages_callback: Optional[Callable[[List[Dict]], None]] = None,
-    post_step_hook: Optional[Callable[[], None]] = None,
+    pre_backend_compaction_hook: Optional[Callable[[List[Dict], str], None]] = None,
     get_pending_messages: Optional[Callable[[], List[Dict]]] = None,
     check_stop: Optional[Callable[[], bool]] = None,
 ) -> Union[str, None]:
@@ -374,6 +398,19 @@ def run_agent(
             mode = check_mode(messages, run_logger)
             mode_for_step_count = mode
             backend_mode = _get_backend_api_mode(ctx)
+            if (
+                backend_mode == "chat_completions"
+                and _mode_requires_backend_call(mode)
+                and pre_backend_compaction_hook is not None
+            ):
+                try:
+                    pre_backend_compaction_hook(messages, mode)
+                except Exception as pre_backend_exc:
+                    run_logger.warning(
+                        "Pre-backend compaction hook warning: %s",
+                        pre_backend_exc,
+                        exc_info=True,
+                    )
             if mode == "user_ask":
                 try:
                     messages, response_id = process_user_ask(messages, state, ctx)
@@ -450,15 +487,6 @@ def run_agent(
                 if backend_mode == "responses":
                     state.previous_response_id = response_id
                 state.last_backend_response_id = response_id
-                if post_step_hook is not None:
-                    try:
-                        post_step_hook()
-                    except Exception as post_step_exc:
-                        run_logger.warning(
-                            "Post-step hook warning: %s",
-                            post_step_exc,
-                            exc_info=True,
-                        )
             else:
                 raise ValueError(f"unconventional mode: {mode}")
         except WrongFunctionArgumentsException as e:

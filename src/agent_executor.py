@@ -13,6 +13,7 @@ from typing import Any
 
 from processing_responses import run_agent
 from run_context import RunContext
+from config_modules.stored_outputs import get_stored_tool_outputs_max_entries
 from summarize.compaction import (
     history_exceeds_summary_trigger,
     run_summary_compaction,
@@ -138,6 +139,9 @@ class AgentExecutor:
         if config_dict.get("use_local_subagents", False):
             state_data["specific_role"] = ORCHESTRATOR_SPECIFIC_ROLE
         state = State(**state_data)
+        state.tool_call_outputs_store.set_max_entries(
+            get_stored_tool_outputs_max_entries(config_dict)
+        )
         state.backend_api_mode = backend_api_mode
         state.dialog_steps_offset = 0
         if thread_session is not None:
@@ -212,6 +216,59 @@ class AgentExecutor:
                     event.get("newly_summarized_message_id") or ""
                 ),
             )
+
+        def _current_backend_event_batch(
+            current_messages: list[dict], mode: str
+        ) -> list[dict]:
+            if not current_messages:
+                return []
+            if mode == "user_ask":
+                return [current_messages[-1]]
+            if mode == "function_call_output":
+                return [m for m in current_messages if isinstance(m, dict)]
+            return []
+
+        def _remove_suffix_from_state(suffix: list[dict]) -> None:
+            if not suffix:
+                return
+            current_state_messages = list(getattr(state, "messages", []) or [])
+            if len(current_state_messages) < len(suffix):
+                return
+            if current_state_messages[-len(suffix):] != suffix:
+                return
+            state.messages = current_state_messages[:-len(suffix)]
+
+        def _pre_backend_compaction_hook(
+            current_messages: list[dict], mode: str
+        ) -> None:
+            if (
+                state.backend_api_mode != "chat_completions"
+                or summary_trigger_chars <= 0
+            ):
+                return
+            if not history_exceeds_summary_trigger(
+                state=state,
+                summary_trigger_chars=summary_trigger_chars,
+            ):
+                return
+            preserved_batch = _current_backend_event_batch(current_messages, mode)
+            _remove_suffix_from_state(preserved_batch)
+            try:
+                run_summary_compaction(
+                    ctx=self._ctx,
+                    state=state,
+                    trigger_reason="pre_backend",
+                    is_cli_mode=is_cli_mode,
+                    on_summary_applied=_handle_summary_applied,
+                )
+            finally:
+                state.messages += preserved_batch
+            if thread_session is not None and preserved_batch:
+                thread_session.persist_batch(
+                    preserved_batch, previous_response_id=state.previous_response_id
+                )
+            if preserved_batch:
+                current_messages[:] = preserved_batch
 
         if backend_api_mode == "chat_completions" and summary_trigger_chars > 0:
             try:
@@ -360,51 +417,6 @@ class AgentExecutor:
 
             persist_messages_callback = _persist_runtime_batch
 
-        def _post_step_summary_hook() -> None:
-            if (
-                state.backend_api_mode != "chat_completions"
-                or summary_trigger_chars <= 0
-            ):
-                return
-            try:
-                if history_exceeds_summary_trigger(
-                    state=state,
-                    summary_trigger_chars=summary_trigger_chars,
-                ):
-                    run_summary_compaction(
-                        ctx=self._ctx,
-                        state=state,
-                        trigger_reason="post_step",
-                        is_cli_mode=is_cli_mode,
-                        on_summary_applied=_handle_summary_applied,
-                    )
-            except Exception as summarize_exc:
-                if logger is not None:
-                    if thread_session is not None:
-                        logger.warning(
-                            "summary_failed reason=post_step thread_id=%s error=%s",
-                            thread_session.thread_id,
-                            summarize_exc,
-                            exc_info=True,
-                        )
-                    else:
-                        logger.warning(
-                            "summary_failed reason=post_step error=%s",
-                            summarize_exc,
-                            exc_info=True,
-                        )
-                if is_cli_mode:
-                    if thread_session is not None:
-                        print(
-                            "[summary] Ошибка суммаризации: "
-                            f"thread={thread_session.thread_id}, error={summarize_exc}"
-                        )
-                    else:
-                        print(
-                            "[summary] Ошибка суммаризации: "
-                            f"error={summarize_exc}"
-                        )
-
         def get_pending_messages() -> list[dict]:
             with self._lock:
                 out = self._pending_messages[:]
@@ -421,7 +433,7 @@ class AgentExecutor:
             self._ctx,
             get_full_history_messages=get_full_history_messages,
             persist_messages_callback=persist_messages_callback,
-            post_step_hook=_post_step_summary_hook,
+            pre_backend_compaction_hook=_pre_backend_compaction_hook,
             get_pending_messages=get_pending_messages,
             check_stop=check_stop,
         )

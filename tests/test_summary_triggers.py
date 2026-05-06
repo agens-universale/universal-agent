@@ -94,16 +94,16 @@ class SummaryTriggersTest(unittest.TestCase):
             tools_description=[],
         )
 
-    def test_chat_completions_calls_pre_run_and_post_step_summary(self):
+    def test_chat_completions_calls_pre_run_and_pre_backend_summary(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             ctx = self._make_ctx(tmp_dir, backend_api_mode="chat_completions")
             call_order: list[str] = []
 
             def _fake_run_agent(messages, state, _ctx, **kwargs):
                 call_order.append("run_agent")
-                post_step_hook = kwargs.get("post_step_hook")
-                if post_step_hook is not None:
-                    post_step_hook()
+                pre_backend_hook = kwargs.get("pre_backend_compaction_hook")
+                if pre_backend_hook is not None:
+                    pre_backend_hook(messages, "user_ask")
                 return "ok"
 
             def _record_summary_call(**kwargs):
@@ -129,17 +129,17 @@ class SummaryTriggersTest(unittest.TestCase):
 
             self.assertEqual(call_order[0], "summary:pre_run")
             self.assertIn("run_agent", call_order)
-            self.assertIn("summary:post_step", call_order)
+            self.assertIn("summary:pre_backend", call_order)
 
-    def test_chat_completions_in_memory_calls_pre_run_and_post_step_summary(self):
+    def test_chat_completions_in_memory_calls_pre_run_and_pre_backend_summary(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             ctx = self._make_ctx(tmp_dir, backend_api_mode="chat_completions")
             calls: list[str] = []
 
             def _fake_run_agent(messages, state, _ctx, **kwargs):
-                post_step_hook = kwargs.get("post_step_hook")
-                if post_step_hook is not None:
-                    post_step_hook()
+                pre_backend_hook = kwargs.get("pre_backend_compaction_hook")
+                if pre_backend_hook is not None:
+                    pre_backend_hook(messages, "user_ask")
                 return "ok"
 
             def _record(**kwargs):
@@ -160,7 +160,7 @@ class SummaryTriggersTest(unittest.TestCase):
                 result = executor.run("hello", system="cli", verbose=False)
                 self.assertEqual(result, "ok")
 
-            self.assertEqual(calls, ["pre_run", "post_step"])
+            self.assertEqual(calls, ["pre_run", "pre_backend"])
 
     def test_responses_mode_does_not_call_summary(self):
         with tempfile.TemporaryDirectory() as tmp_dir:

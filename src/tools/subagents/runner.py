@@ -5,7 +5,11 @@ import os
 from functools import partial
 from typing import Any, Callable, Dict, List, Optional
 
-from summarize.compaction import maybe_run_summary_compaction
+from summarize.compaction import (
+    history_exceeds_summary_trigger,
+    run_summary_compaction,
+)
+from config_modules.stored_outputs import get_stored_tool_outputs_max_entries
 from summarize.config import parse_summary_trigger_chars
 from states import State, save_state
 from tools import build_tools_data
@@ -111,13 +115,13 @@ class SubagentRunner:
         )
 
         persist_messages_callback = None
-        post_step_hook = None
+        pre_backend_compaction_hook = None
         if should_enable_summary:
             persist_messages_callback = partial(
                 self._persist_runtime_step, child_state
             )
-            post_step_hook = partial(
-                self._run_post_step_summary,
+            pre_backend_compaction_hook = partial(
+                self._run_pre_backend_summary,
                 tool_name,
                 child_ctx,
                 child_state,
@@ -131,7 +135,7 @@ class SubagentRunner:
                 child_ctx,
                 check_stop=self._check_stop_requested,
                 persist_messages_callback=persist_messages_callback,
-                post_step_hook=post_step_hook,
+                pre_backend_compaction_hook=pre_backend_compaction_hook,
             )
         except Exception as exc:
             self._log_lifecycle(
@@ -191,24 +195,54 @@ class SubagentRunner:
     ) -> None:
         child_state.append_user_messages_to_log(step_messages)
 
-    def _run_post_step_summary(
+    def _current_backend_event_batch(
+        self, current_messages: List[Dict[str, Any]], mode: str
+    ) -> List[Dict[str, Any]]:
+        if not current_messages:
+            return []
+        if mode == "user_ask":
+            return [current_messages[-1]]
+        if mode == "function_call_output":
+            return [m for m in current_messages if isinstance(m, dict)]
+        return []
+
+    def _run_pre_backend_summary(
         self,
         tool_name: str,
         child_ctx: Any,
         child_state: State,
         summary_trigger_chars: int,
+        current_messages: List[Dict[str, Any]],
+        mode: str,
     ) -> None:
         try:
-            maybe_run_summary_compaction(
-                ctx=child_ctx,
+            if not history_exceeds_summary_trigger(
                 state=child_state,
                 summary_trigger_chars=summary_trigger_chars,
-                trigger_reason="subagent_post_step",
-                is_cli_mode=False,
-            )
+            ):
+                return
+            preserved_batch = self._current_backend_event_batch(current_messages, mode)
+            if preserved_batch:
+                state_messages = list(getattr(child_state, "messages", []) or [])
+                if (
+                    len(state_messages) >= len(preserved_batch)
+                    and state_messages[-len(preserved_batch):] == preserved_batch
+                ):
+                    child_state.messages = state_messages[:-len(preserved_batch)]
+            try:
+                run_summary_compaction(
+                    ctx=child_ctx,
+                    state=child_state,
+                    trigger_reason="subagent_pre_backend",
+                    is_cli_mode=False,
+                )
+            finally:
+                child_state.messages += preserved_batch
+            if preserved_batch:
+                current_messages[:] = preserved_batch
         except Exception:
             _log.warning(
-                "Subagent %s post-step summary failed",
+                "Subagent %s pre-backend summary failed",
                 tool_name,
                 exc_info=True,
             )
@@ -235,6 +269,9 @@ class SubagentRunner:
             agent_md_path=parent.agent_md_path,
             shared=parent.shared,
             workspace_config=child_config,
+        )
+        child_state.tool_call_outputs_store.set_max_entries(
+            get_stored_tool_outputs_max_entries(child_config)
         )
         child_state.backend_api_mode = "chat_completions"
         return child_state

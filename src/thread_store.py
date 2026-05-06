@@ -167,7 +167,13 @@ def load_thread_messages(
                 record = json.loads(row)
             except json.JSONDecodeError:
                 continue
-            if record.get("type") != "message":
+            # Допускаем строковую обёртку (двойной json.dumps строки записи).
+            if isinstance(record, str):
+                try:
+                    record = json.loads(record)
+                except json.JSONDecodeError:
+                    continue
+            if not isinstance(record, dict) or record.get("type") != "message":
                 continue
             seq = record.get("seq")
             if isinstance(seq, int) and seq > max_seq:

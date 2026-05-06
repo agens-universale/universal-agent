@@ -40,13 +40,16 @@ def test_chat_completions_logs_raw_backend_payload_on_conversion_error(caplog, m
     def _fake_create_call_data(_messages, _state, **_kwargs):
         return {"model": "CodeChat", "messages": [{"role": "user", "content": "ping"}], "tools": []}
 
-    def _fake_request_backend(*_args, **_kwargs):
+    def _fake_request_policy(*_args, **_kwargs):
         # Нет поля choices -> внутри конвертации будет KeyError('choices').
-        return {"id": "chat_1", "object": "chat.completion", "model": "CodeChat"}
+        return (
+            {"id": "chat_1", "object": "chat.completion", "model": "CodeChat"},
+            {"model": "CodeChat", "messages": [{"role": "user", "content": "ping"}], "tools": []},
+        )
 
     monkeypatch.setattr("processing_responses.create_call_headers", _fake_create_call_headers)
     monkeypatch.setattr("processing_responses.create_call_data_completions", _fake_create_call_data)
-    monkeypatch.setattr("processing_responses.request_backend_chat_completions", _fake_request_backend)
+    monkeypatch.setattr("processing_responses.request_chat_completions_with_policy", _fake_request_policy)
 
     logger = logging.getLogger("test_backend_payload_logging")
     ctx = SimpleNamespace(

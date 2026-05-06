@@ -21,3 +21,5 @@ class AgentConfig(BaseModel):
     dump_storage: bool = False
     save_logs: bool = True
     limit_project_metadata: bool = False
+    tool_output_inline_max_chars: int = 20000
+    stored_tool_outputs_max_entries: int = 10

@@ -58,6 +58,7 @@ def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
         "backend_api_mode": app_cfg.backend.api_mode,
         "completions_url": app_cfg.backend.completions_url,
         "chat_completions_max_tokens": app_cfg.backend.chat_completions_max_tokens,
+        "chat_completions_min_response_tokens": app_cfg.backend.chat_completions_min_response_tokens,
         "chat_completions_auth_token": app_cfg.backend.chat_completions_auth_token,
         "openrouter_http_referer": app_cfg.backend.openrouter_http_referer,
         "openrouter_x_title": app_cfg.backend.openrouter_x_title,
@@ -99,6 +100,8 @@ def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
         "dump_storage": app_cfg.agent.dump_storage,
         "save_logs": app_cfg.agent.save_logs,
         "limit_project_metadata": app_cfg.agent.limit_project_metadata,
+        "tool_output_inline_max_chars": app_cfg.agent.tool_output_inline_max_chars,
+        "stored_tool_outputs_max_entries": app_cfg.agent.stored_tool_outputs_max_entries,
         "mcp-servers": {
             name: server.model_dump(by_alias=True) for name, server in app_cfg.mcp.servers.items()
         },

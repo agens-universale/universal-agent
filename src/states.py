@@ -5,6 +5,7 @@ from uuid import uuid4
 import json
 from typing import Any, Dict, List, Optional, Union
 from utils.project_data import get_project_data
+from tools.stored_outputs.tool_call_outputs_store import ToolCallOutputsStore
 from user_message_policy import (
     append_user_log_entries,
     normalize_user_log_entries,
@@ -79,6 +80,7 @@ class State:
         self.stop_requested = False
         self.user_messages_log: List[str] = []
         self.current_user_messages: List[str] = []
+        self.tool_call_outputs_store = ToolCallOutputsStore()
 
     def set_call_metadata(self):
         metadata: Dict[str, Any] = dict()
@@ -119,8 +121,65 @@ class State:
         if x_target and self.x_target is None:
             self.x_target = x_target
 
-    def to_dict(self):
-        return vars(self).copy()
+    def to_dict(self) -> Dict[str, Any]:
+        """
+        Сериализация State для json-dump (debug/продолжение сессии).
+
+        Важно: `tool_call_outputs_store` и `shared` не являются нативно JSON-сериализуемыми,
+        поэтому их нужно представлять в виде простых dict/list.
+        """
+        raw = vars(self).copy()
+
+        shared = raw.get("shared")
+        if isinstance(shared, SharedStateData):
+            raw["shared"] = {
+                "memory_files": dict(shared.memory_files),
+                "notes_md": shared.notes_md,
+                "fetch_url_cache": dict(shared.fetch_url_cache),
+            }
+
+        store = raw.get("tool_call_outputs_store")
+        if isinstance(store, ToolCallOutputsStore):
+            raw["tool_call_outputs_store"] = store.to_dict()
+
+        return raw
+
+    @classmethod
+    def from_dict(cls, raw: Dict[str, Any]) -> "State":
+        """
+        Восстановление State из json-совместимого dict (как результат `to_dict()`).
+
+        Используем `__new__`, чтобы не зависеть от сигнатуры __init__ и не
+        исполнять сайд-эффекты (например чтение файлов для system prompt).
+        """
+        if not isinstance(raw, dict):
+            raise TypeError("State.from_dict expects dict")
+
+        # Создаём объект без вызова __init__.
+        state = cls.__new__(cls)
+        state.__dict__ = dict(raw)
+
+        shared_raw = state.__dict__.get("shared")
+        if isinstance(shared_raw, dict):
+            try:
+                state.shared = SharedStateData(
+                    memory_files=shared_raw.get("memory_files") or {},
+                    notes_md=str(shared_raw.get("notes_md") or ""),
+                    fetch_url_cache=shared_raw.get("fetch_url_cache") or {},
+                )
+            except Exception:
+                # Fallback: оставляем как есть (хуже, но не валим загрузку целиком).
+                pass
+
+        store_raw = state.__dict__.get("tool_call_outputs_store")
+        if isinstance(store_raw, dict):
+            try:
+                state.tool_call_outputs_store = ToolCallOutputsStore.from_dict(store_raw)
+            except Exception:
+                # Fallback: оставляем как есть.
+                pass
+
+        return state
 
     def add_message(self, message):
         self.messages.append(message)
@@ -208,6 +267,24 @@ class SatesStorage:
     def save_to_file(self, filepath, **kwargs):
         with open(filepath, 'w', encoding='utf-8') as fd:
             json.dump(self.to_dict(), fd, ensure_ascii=False, **kwargs)
+
+    def load_from_file(self, filepath: str) -> None:
+        """
+        Загрузить сохранённый дамп state (как результат dump_storage()).
+        """
+        with open(filepath, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if not isinstance(data, dict):
+            return
+
+        # Восстанавливаем state по ключу state_id и значению payload.
+        for state_id, payload in data.items():
+            if not isinstance(payload, dict):
+                continue
+            state = State.from_dict(payload)
+            if isinstance(state_id, str) and state_id.strip():
+                state.state_id = state_id
+            self.states[state.state_id] = state
 
 
 # Global object
