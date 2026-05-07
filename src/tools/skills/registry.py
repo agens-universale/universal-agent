@@ -18,13 +18,31 @@ def _project_root() -> str:
     return os.path.abspath(os.path.join(here, "..", "..", ".."))
 
 
-def _default_skills_root() -> str:
+def _system_skills_root() -> str:
     """
-    Определить корень skills_data.
+    Корень System-слоя — встроенные скиллы пакета.
 
     По умолчанию: <project_root>/skills.
     """
     return os.path.join(_project_root(), "skills")
+
+
+def _user_skills_root() -> str:
+    """
+    Корень User-слоя — общие пользовательские скиллы.
+    Через gc_paths()["data"] / "skills" — на Linux/macOS это
+    ~/.local/share/gc/skills/, на Windows ~/.gc/skills/.
+    """
+    from config_modules.env_vars import gc_paths
+    return str(gc_paths()["data"] / "skills")
+
+
+def _project_skills_root() -> str:
+    """
+    Корень Project-слоя — скиллы конкретного проекта.
+    <cwd>/.gc/skills/. Считается на каждом вызове (cwd может меняться).
+    """
+    return os.path.join(os.getcwd(), ".gc", "skills")
 
 
 def _parse_skill_markdown(path: str) -> tuple[Dict[str, Any], str]:
@@ -111,6 +129,7 @@ class Skill:
     has_scripts: bool
     references: Dict[str, str] = field(default_factory=dict)  # slug -> path
     assets: Dict[str, str] = field(default_factory=dict)  # slug -> path
+    source: str = "system"
 
     @property
     def references_slugs(self) -> List[str]:
@@ -126,8 +145,35 @@ class SkillsRegistry:
     Простой реестр скиллов, основанный только на файловой структуре skills_data/.
     """
 
-    def __init__(self, skills_root: Optional[str] = None) -> None:
-        self._skills_root = skills_root or _default_skills_root()
+    def __init__(
+        self,
+        skills_root: Optional[str] = None,    # legacy single-source
+        *,
+        system_root: Optional[str] = None,
+        user_root: Optional[str] = None,
+        project_root: Optional[str] = None,
+    ) -> None:
+        # Legacy: если передан skills_root и никаких новых — режим single-source.
+        # В этом режиме все скиллы помечаются как source="user".
+        if (
+            skills_root is not None
+            and system_root is None
+            and user_root is None
+            and project_root is None
+        ):
+            self._system_root = None
+            self._user_root = skills_root
+            self._project_root = None
+        else:
+            self._system_root = (
+                system_root if system_root is not None else _system_skills_root()
+            )
+            self._user_root = (
+                user_root if user_root is not None else _user_skills_root()
+            )
+            self._project_root = (
+                project_root if project_root is not None else _project_skills_root()
+            )
         self._skills_by_id: Dict[str, Skill] = {}
         self._loaded: bool = False
 
@@ -139,23 +185,24 @@ class SkillsRegistry:
 
     def _load_all_skills(self) -> None:
         self._skills_by_id.clear()
-
-        if not os.path.isdir(self._skills_root):
-            return
-
-        for entry in os.listdir(self._skills_root):
-            skill_dir = os.path.join(self._skills_root, entry)
-            if not os.path.isdir(skill_dir):
+        # Идём СНИЗУ ВВЕРХ: system → user → project.
+        # Верхний слой перетирает нижний по skill_id (silent override).
+        for source, root in (
+            ("system", self._system_root),
+            ("user", self._user_root),
+            ("project", self._project_root),
+        ):
+            if not root or not os.path.isdir(root):
                 continue
+            for entry in os.listdir(root):
+                skill_dir = os.path.join(root, entry)
+                if not os.path.isdir(skill_dir):
+                    continue
+                skill = self._load_skill_dir(skill_dir, dir_name=entry, source=source)
+                if skill is not None:
+                    self._skills_by_id[skill.id] = skill
 
-            skill = self._load_skill_dir(skill_dir, dir_name=entry)
-            if not skill:
-                continue
-
-            # Если id дублируется, последнее определение перекрывает предыдущие.
-            self._skills_by_id[skill.id] = skill
-
-    def _load_skill_dir(self, skill_dir: str, dir_name: str) -> Optional[Skill]:
+    def _load_skill_dir(self, skill_dir: str, dir_name: str, source: str) -> Optional[Skill]:
         skill_md = os.path.join(skill_dir, "SKILL.md")
         if not os.path.isfile(skill_md):
             return None
@@ -198,6 +245,7 @@ class SkillsRegistry:
             has_scripts=has_scripts,
             references=references,
             assets=assets,
+            source=source,
         )
 
     # Публичный API реестра
@@ -214,6 +262,7 @@ class SkillsRegistry:
                     "id": skill.id,
                     "name": skill.name,
                     "description": skill.description,
+                    "source": skill.source,
                 }
             )
         return result
@@ -250,6 +299,7 @@ class SkillsRegistry:
             "has_scripts": skill.has_scripts,
             "references": skill.references_slugs,
             "assets": skill.assets_slugs,
+            "source": skill.source,
         }
 
     def load_reference(self, skill_id: str, slug: str) -> Dict[str, Any]:
@@ -363,9 +413,12 @@ def get_skills_registry(config_dict: Optional[Dict[str, Any]] = None) -> SkillsR
     """
     Фабрика реестра скиллов.
 
-    - Если передан config_dict и в нём задан skills_data_path (строка, не пустая) —
-      используется этот путь как корень скиллов.
-    - Иначе используется путь по умолчанию: <project_root>/skills.
+    Поведение:
+    - Если config_dict содержит непустой "skills_data_path" — single-source режим:
+      registry видит ТОЛЬКО эту папку (escape-hatch для production-сценариев,
+      curated team set, тестов / CI с фикстурами). Все скиллы помечаются source="user".
+    - Иначе — three-layer режим: System (<repo>/skills/) + User (gc_paths()["data"]/skills)
+      + Project (<cwd>/.gc/skills/), приоритет project > user > system.
     """
     skills_root: Optional[str] = None
     if config_dict is not None:
@@ -375,7 +428,9 @@ def get_skills_registry(config_dict: Optional[Dict[str, Any]] = None) -> SkillsR
             if path:
                 skills_root = path
 
-    return SkillsRegistry(skills_root=skills_root)
+    if skills_root is not None:
+        return SkillsRegistry(skills_root=skills_root)
+    return SkillsRegistry()
 
 
 __all__ = [

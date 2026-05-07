@@ -1,3 +1,4 @@
+import os
 from typing import Any
 
 import arg_parser
@@ -8,6 +9,35 @@ from config import (
     load_config,
 )
 from run_context import RunContext, create_run_context
+
+
+def _ensure_project_gc_dir() -> None:
+    """
+    Создаёт <cwd>/.gc/ при старте gc-cli (идемпотентно через exist_ok=True).
+    Подпапка skills/ НЕ создаётся — её добавляет пользователь по необходимости
+    (project-скиллы опциональны, не каждый проект их использует).
+    На PermissionError/OSError тихо пропускает — не блокируем запуск
+    из-за отсутствия прав на запись в cwd.
+    """
+    try:
+        os.makedirs(os.path.join(os.getcwd(), ".gc"), exist_ok=True)
+    except (PermissionError, OSError):
+        pass
+
+
+def _ensure_user_skills_dir() -> None:
+    """
+    Создаёт <gc_data_dir>/skills/ при старте gc-cli (идемпотентно).
+    В отличие от project-слоя, user-слой создаём заранее: пользователь точно
+    рано или поздно захочет добавить свой скилл, и видеть готовую папку
+    в `~/.local/share/gc/` (или `~/.gc/` на Windows) — это discoverability.
+    На PermissionError/OSError тихо пропускает.
+    """
+    try:
+        from config_modules.env_vars import gc_paths
+        os.makedirs(gc_paths()["data"] / "skills", exist_ok=True)
+    except (PermissionError, OSError):
+        pass
 
 
 def run(
@@ -35,6 +65,9 @@ def main() -> Any:
     Входная точка CLI: парсинг аргументов, загрузка конфига,
     создание RunContext и запуск агента.
     """
+    _ensure_project_gc_dir()
+    _ensure_user_skills_dir()
+
     config_dict = load_config(arg_parser.run_args.config)
 
     # Единая точка применения CLI-override поверх config.yml.

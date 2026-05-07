@@ -264,6 +264,18 @@ Override через переменные окружения: `GC_HOME` (корн
 
 См. также пояснения в `demo_config.yml` (секция `paths`).
 
+## Скиллы
+
+gc-cli ищет скиллы в трёх местах (project > user > system, верхний слой перетирает нижний по `skill_id`):
+
+- **Project:** `<your-repo>/.gc/skills/<skill-id>/SKILL.md` — командные скиллы для конкретного проекта.
+- **User:** `~/.local/share/gc/skills/<skill-id>/SKILL.md` (Linux/macOS) или `~/.gc/skills/<skill-id>/SKILL.md` (Windows) — личные скиллы, доступные во всех проектах.
+- **System:** скиллы, поставляющиеся с gc-cli — read-only.
+
+Чтобы добавить project-скилл — положите `SKILL.md` в `<your-repo>/.gc/skills/<id>/`.
+
+Чтобы зафиксировать единственный источник скиллов (например, в production), задайте `paths.skills_data_path` в `config.yml` — auto-discovery трёх слоёв при этом отключается.
+
 # Серверный режим (REST-обёртка поверх gc-cli)
 
 Существует серверный режим, который добавляет поверх CLI-агента REST‑слой на FastAPI.

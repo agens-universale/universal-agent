@@ -58,8 +58,12 @@ paths:
   #   Windows:      %USERPROFILE%\.gc\projects\<project-slug>\{threads,logs}\
   # Если хочется явный путь — раскомментируй и задай абсолютный.
   # threads_data_path: ""
-  # skills_data_path: ""
   # logs_dump_dir: ""
+
+  # Обычно не задавать — gc-cli автоматически смотрит project/user/system слои.
+  # Задавайте только если нужно жёстко зафиксировать единственный источник
+  # (production sandbox, curated team set, CI с фикстурами).
+  # skills_data_path: /opt/gc/curated-skills
 
   # Для пром-стенда (с одним доступным для записи каталогом, например /tmp):
   #   запускать с GC_HOME=/tmp/gc — все runtime-данные пойдут под этот корень.
