@@ -37,9 +37,10 @@ class BackendConfig(BaseModel):
     completions_url: str = ""
     chat_completions_max_tokens: int = 32768
     chat_completions_min_response_tokens: int = 1024
-    chat_completions_auth_token: str | None = None
-    openrouter_http_referer: str | None = None
-    openrouter_x_title: str | None = None
+    chat_completion_headers: dict[str, str] = {}
+    chat_completion_kwargs: dict[str, Any] = {}
+    use_max_tokens_param: bool = False
+    openai_strict_tools_schema: bool = False
     use_ssl: bool = True
     use_retry: bool = False
 
@@ -61,15 +62,33 @@ class BackendConfig(BaseModel):
     def normalize_min_response_tokens(cls, value: Any) -> int:
         return parse_chat_completions_max_tokens(value, default=1024)
 
-    @field_validator(
-        "chat_completions_auth_token",
-        "openrouter_http_referer",
-        "openrouter_x_title",
-        mode="before",
-    )
+    @field_validator("chat_completion_kwargs", mode="before")
     @classmethod
-    def normalize_optional_text(cls, value: Any) -> str | None:
+    def normalize_chat_completion_kwargs(cls, value: Any) -> dict[str, Any]:
         if value is None:
-            return None
-        text = str(value).strip()
-        return text or None
+            return {}
+        if isinstance(value, dict):
+            return value
+        return {}
+
+    @field_validator("chat_completion_headers", mode="before")
+    @classmethod
+    def normalize_chat_completion_headers(cls, value: Any) -> dict[str, str]:
+        if value is None:
+            return {}
+        if not isinstance(value, dict):
+            return {}
+        normalized: dict[str, str] = {}
+        for key, raw_val in value.items():
+            if not isinstance(key, str):
+                continue
+            key_clean = key.strip()
+            if not key_clean:
+                continue
+            if raw_val is None:
+                continue
+            val_clean = str(raw_val).strip()
+            if not val_clean:
+                continue
+            normalized[key_clean] = val_clean
+        return normalized

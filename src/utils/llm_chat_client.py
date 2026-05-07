@@ -45,19 +45,31 @@ def request_chat_completion_text(
     request_label: str = "chat_completion",
 ) -> str:
     cfg = getattr(ctx, "config_dict", {}) or {}
-    payload = {
+    payload: Dict[str, Any] = {
         "model": getattr(state, "default_model", None) or cfg.get("model"),
         "messages": messages,
         "tools": [],
-        "temperature": 0.01,
-        "top_p": 0.8,
-        "top_k": 20,
-        "min_p": 0.0,
-        "max_tokens": max_tokens,
-        "repetition_penalty": 1.1,
-        "separate_reasoning": False,
-        "chat_template_kwargs": {"enable_thinking": False},
     }
+    if bool(cfg.get("use_max_tokens_param", False)):
+        payload["max_tokens"] = max_tokens
+    else:
+        payload["max_completion_tokens"] = max_tokens
+
+    extra = cfg.get("chat_completion_kwargs")
+    if isinstance(extra, dict) and extra:
+        protected = {
+            "model",
+            "messages",
+            "tools",
+            "tool_choice",
+            "max_tokens",
+            "max_completion_tokens",
+        }
+        for key, value in extra.items():
+            if key in protected:
+                continue
+            payload[key] = value
+
     _ = request_label  # for call-site traceability and future extension
     headers = create_call_headers(state, ctx)
     res = request_backend_chat_completions(

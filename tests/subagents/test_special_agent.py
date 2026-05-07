@@ -42,7 +42,7 @@ def _make_config(**overrides):
         "system_prompt_id": "test-prompt",
         "completions_url": "http://fake-llm/v1/chat/completions",
         "use_ssl": False,
-        "chat_completions_auth_token": "test-token",
+        "chat_completion_headers": {"Authorization": "Bearer test-token"},
     }
     cfg.update(overrides)
     return cfg
@@ -145,10 +145,10 @@ class TestSpecialAgentCreateInstance:
         assert call_data["model"] == "gpt-4o-mini"
 
     def test_config_dict_used_for_url_and_auth(self):
-        """URL and auth token from config_dict should be passed to the LLM call."""
+        """URL and Authorization header from config_dict should be passed to the LLM call."""
         cfg = _make_config(
             completions_url="http://custom-url/v1/chat/completions",
-            chat_completions_auth_token="my-secret-token",
+            chat_completion_headers={"Authorization": "Bearer my-secret-token"},
             use_ssl=False,
         )
         with patch.object(
@@ -167,7 +167,7 @@ class TestSpecialAgentCreateInstance:
 
         _, headers = mock_llm.call_args[0]
         kwargs = mock_llm.call_args[1]
-        assert "Bearer my-secret-token" in headers.get("Authorization", "")
+        assert headers.get("Authorization") == "Bearer my-secret-token"
         assert kwargs.get("url") == "http://custom-url/v1/chat/completions"
 
     def test_generate_role_failure_propagates(self):

@@ -3,10 +3,28 @@ backend:
   api_mode: chat_completions
   completions_url: "http://127.0.0.1:8014/v1/chat/completions"
   chat_completions_max_tokens: 32768
-  # Optional auth for chat_completions backend.
-  # chat_completions_auth_token: ""
-  # openrouter_http_referer: ""
-  # openrouter_x_title: ""
+  # true -> отправлять max_tokens; false -> max_completion_tokens
+  use_max_tokens_param: true
+  # Optional strict tools schema mode for OpenAI-like validators.
+  openai_strict_tools_schema: false
+  # Vendor-specific параметры. Настраивайте под свой провайдер.
+  chat_completion_kwargs:
+    temperature: 0.7
+    top_p: 0.8
+    top_k: 20
+    min_p: 0.0
+    repetition_penalty: 1.2
+    separate_reasoning: true
+    chat_template_kwargs:
+      enable_thinking: false
+    tool_choice: auto
+  # Заголовки для chat/completions (всё, что должно уйти в HTTP headers).
+  # Примеры:
+  # chat_completion_headers:
+  #   Authorization: "Bearer sk-or-v1-..."
+  #   HTTP-Referer: "https://your-app.example"
+  #   X-OpenRouter-Title: "mini-cli-pub"
+  #   X-Custom-Header: "value"
   use_ssl: false
   use_retry: true
 

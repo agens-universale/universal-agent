@@ -59,9 +59,10 @@ def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
         "completions_url": app_cfg.backend.completions_url,
         "chat_completions_max_tokens": app_cfg.backend.chat_completions_max_tokens,
         "chat_completions_min_response_tokens": app_cfg.backend.chat_completions_min_response_tokens,
-        "chat_completions_auth_token": app_cfg.backend.chat_completions_auth_token,
-        "openrouter_http_referer": app_cfg.backend.openrouter_http_referer,
-        "openrouter_x_title": app_cfg.backend.openrouter_x_title,
+        "chat_completion_headers": app_cfg.backend.chat_completion_headers,
+        "chat_completion_kwargs": app_cfg.backend.chat_completion_kwargs,
+        "use_max_tokens_param": app_cfg.backend.use_max_tokens_param,
+        "openai_strict_tools_schema": app_cfg.backend.openai_strict_tools_schema,
         "use_ssl": app_cfg.backend.use_ssl,
         "use_retry": app_cfg.backend.use_retry,
         "command_moderation": {

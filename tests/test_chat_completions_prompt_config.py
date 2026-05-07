@@ -144,25 +144,65 @@ class ChatCompletionsPromptConfigTest(unittest.TestCase):
                 cfg["summary_params"]["incremental_batch_chars"], 70000
             )
 
-    def test_chat_completions_auth_token_loaded_from_backend_section(self):
+    def test_chat_completion_authorization_header_loaded_from_backend_section(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             cfg_path = os.path.join(tmp_dir, "config.yml")
             with open(cfg_path, "w", encoding="utf-8") as fd:
                 fd.write(
                     "backend:\n"
                     "  api_mode: chat_completions\n"
-                    "  chat_completions_auth_token: 'sk-or-v1-test-token'\n"
-                    "  openrouter_http_referer: '  https://example.org/app  '\n"
-                    "  openrouter_x_title: '  my cli  '\n"
+                    "  chat_completion_headers:\n"
+                    "    Authorization: 'Bearer sk-or-v1-test-token'\n"
                 )
             cfg = load_config(cfg_path)
             self.assertEqual(
-                cfg["chat_completions_auth_token"], "sk-or-v1-test-token"
+                cfg["chat_completion_headers"]["Authorization"],
+                "Bearer sk-or-v1-test-token",
+            )
+
+    def test_chat_completion_kwargs_and_flags_loaded_from_backend_section(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            cfg_path = os.path.join(tmp_dir, "config.yml")
+            with open(cfg_path, "w", encoding="utf-8") as fd:
+                fd.write(
+                    "backend:\n"
+                    "  api_mode: chat_completions\n"
+                    "  use_max_tokens_param: true\n"
+                    "  openai_strict_tools_schema: true\n"
+                    "  chat_completion_kwargs:\n"
+                    "    temperature: 0.2\n"
+                    "    top_p: 0.9\n"
+                    "    vendor_flag: true\n"
+                )
+            cfg = load_config(cfg_path)
+            self.assertEqual(cfg["chat_completion_kwargs"]["temperature"], 0.2)
+            self.assertEqual(cfg["chat_completion_kwargs"]["top_p"], 0.9)
+            self.assertTrue(cfg["chat_completion_kwargs"]["vendor_flag"])
+            self.assertTrue(cfg["use_max_tokens_param"])
+            self.assertTrue(cfg["openai_strict_tools_schema"])
+
+    def test_chat_completion_headers_loaded_from_backend_section(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            cfg_path = os.path.join(tmp_dir, "config.yml")
+            with open(cfg_path, "w", encoding="utf-8") as fd:
+                fd.write(
+                    "backend:\n"
+                    "  api_mode: chat_completions\n"
+                    "  chat_completion_headers:\n"
+                    "    HTTP-Referer: '  https://example.org/app  '\n"
+                    "    X-OpenRouter-Title: 'mini-cli'\n"
+                    "    X-Custom: 123\n"
+                )
+            cfg = load_config(cfg_path)
+            self.assertEqual(
+                cfg["chat_completion_headers"]["HTTP-Referer"],
+                "https://example.org/app",
             )
             self.assertEqual(
-                cfg["openrouter_http_referer"], "https://example.org/app"
+                cfg["chat_completion_headers"]["X-OpenRouter-Title"],
+                "mini-cli",
             )
-            self.assertEqual(cfg["openrouter_x_title"], "my cli")
+            self.assertEqual(cfg["chat_completion_headers"]["X-Custom"], "123")
 
 
 if __name__ == "__main__":
