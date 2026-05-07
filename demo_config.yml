@@ -1,3 +1,25 @@
+# ---------------------------------------------------------------------------
+# Это глобальный config.yml для gc-cli.
+#
+# Дополнительно к нему gc-cli читает project local config из <cwd>/.gc/config.yml
+# (если файл существует) и мерджит его поверх через layered loading:
+#   - scalar:  project переопределяет global
+#   - dict:    рекурсивный deep merge
+#   - list:    конкатенация + dedup (project расширяет, не сбрасывает security-списки)
+#
+# Пример project config (<cwd>/.gc/config.yml):
+#   agent:
+#     max_steps: 200                # переопределяет global для этого проекта
+#     stop_tools: [browse_url]      # добавляется к global stop_tools
+#   mcp:
+#     servers:
+#       my_local_db:                # новый MCP только для этого проекта
+#         transport: stdio
+#         command: psql
+#
+# CLI args (--max_steps 999) — самые сильные, перебивают и global, и project.
+# ---------------------------------------------------------------------------
+
 backend:
   # responses | chat_completions
   api_mode: chat_completions

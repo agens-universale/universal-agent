@@ -276,6 +276,33 @@ gc-cli ищет скиллы в трёх местах (project > user > system, 
 
 Чтобы зафиксировать единственный источник скиллов (например, в production), задайте `paths.skills_data_path` в `config.yml` — auto-discovery трёх слоёв при этом отключается.
 
+## Project local config (опционально)
+
+Если в корне проекта есть файл `<your-repo>/.gc/config.yml`, gc-cli мерджит его поверх глобального `config.yml` через layered loading:
+
+- **scalar** (число, строка, bool) — project переопределяет global.
+- **dict** — рекурсивный deep merge: project расширяет/переопределяет ключи внутри.
+- **list / array** — конкатенация + dedup: project только **расширяет** список, не сбрасывает (важно для security-полей вроде `agent.stop_tools` или `command_moderation.url_policy.url_blacklist`).
+
+Пример проектного `<your-repo>/.gc/config.yml`:
+
+```yaml
+agent:
+  max_steps: 200             # этот проект — длиннее цепочки рассуждений
+  stop_tools: [browse_url]    # добавить локальный запрет (к глобальному списку)
+mcp:
+  servers:
+    my_local_db:               # MCP только для этого проекта
+      transport: stdio
+      command: psql
+```
+
+Файл `.gc/config.yml` следует той же схеме, что и глобальный `config.yml` — указывайте только те поля, которые хотите переопределить или дополнить. Папка `.gc/` создаётся автоматически при первом запуске `gc-cli` (та же папка, что и для project-скиллов).
+
+CLI-флаги (`--max_steps 999` и т.п.) перебивают и global, и project. Файл опционален; если его нет — используется только global.
+
+Если через `--config` явно передан тот же файл, что и `<repo>/.gc/config.yml` — gc-cli применяет его как обычный config без второго слоя (особый случай для запусков с явным путём).
+
 # Серверный режим (REST-обёртка поверх gc-cli)
 
 Существует серверный режим, который добавляет поверх CLI-агента REST‑слой на FastAPI.

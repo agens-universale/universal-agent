@@ -9,6 +9,7 @@ from config_modules.backend import parse_chat_completions_max_tokens
 from config_modules.common import (
     apply_swarm_env_overrides,
 )
+from config_modules.merge import deep_merge
 from config_modules.root import AppConfig, resolve_paths
 from config_modules.security import (
     apply_cli_command_moderation_overrides,
@@ -24,6 +25,18 @@ _DEFAULT_LAST_DIALOG_STEP_MESSAGE_MAX_CHARS = (
 def _default_config_path() -> str:
     base_dir = os.path.dirname(os.path.abspath(__file__))
     return os.path.join(base_dir, "..", "config.yml")
+
+
+def _project_local_config_path() -> Optional[str]:
+    """
+    Вернуть абсолютный путь к <cwd>/.gc/config.yml, если файл существует, иначе None.
+
+    Используется для layered loading: project local config мерджится поверх глобального.
+    """
+    candidate = os.path.abspath(os.path.join(os.getcwd(), ".gc", "config.yml"))
+    if os.path.isfile(candidate):
+        return candidate
+    return None
 
 
 def apply_cli_overrides(
@@ -50,6 +63,13 @@ def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
 
     with open(path, "r", encoding="utf-8") as file:
         raw_config = yaml.safe_load(file) or {}
+
+    # Layered loading: project <cwd>/.gc/config.yml поверх глобального.
+    project_path = _project_local_config_path()
+    if project_path is not None and os.path.abspath(project_path) != os.path.abspath(path):
+        with open(project_path, "r", encoding="utf-8") as file:
+            project_raw = yaml.safe_load(file) or {}
+        raw_config = deep_merge(raw_config, project_raw)
 
     app_cfg = AppConfig.model_validate(raw_config)
     resolve_paths(app_cfg, config_dir)
