@@ -74,7 +74,8 @@ def _read_sse_first_json(resp: "requests.Response", timeout: float) -> Dict[str,
     buffer: list[str] = []
     in_data = False
 
-    debug = os.environ.get("MCP_DEBUG", "").strip().lower() in ("1", "true", "yes")
+    from config_modules import env_vars
+    debug = env_vars.env.mcp_debug
     for line in resp.iter_lines(decode_unicode=True):
         if line is None:
             continue

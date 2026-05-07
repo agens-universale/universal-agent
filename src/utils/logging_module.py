@@ -36,7 +36,12 @@ def build_run_log_paths(
     - общий лог агента;
     - отдельный trace-лог суммаризации.
     """
-    base_dir = config_dict.get("logs_dump_dir") or os.getcwd()
+    base_dir = config_dict.get("logs_dump_dir")
+    if not isinstance(base_dir, str) or not base_dir.strip():
+        raise ValueError(
+            "logs_dump_dir пуст; "
+            "config_modules.root.resolve_paths() должен был его заполнить"
+        )
     suffix = run_id or generate_run_id()
     kind = _normalize_agent_kind(agent_kind)
     logging_path = os.path.join(base_dir, f"agent_{kind}_{suffix}.log")
@@ -71,6 +76,7 @@ def create_run_logger(
             config_dict, run_id=effective_run_id, agent_kind=kind
         )
 
+        os.makedirs(os.path.dirname(logging_path), exist_ok=True)
         handler = FlushFileHandler(logging_path, encoding="utf-8", mode="a")
         formatter = logging.Formatter(
             "%(asctime)s - %(name)s - %(levelname)s - %(message)s"

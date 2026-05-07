@@ -48,12 +48,24 @@ agent:
   save_logs: true
 
 paths:
-  # Relative paths are resolved from config.yml directory.
+  # Относительные пути резолвятся от каталога config.yml.
   agent_md_path: "prompts/demo_cli_agent.md"
   # chat_completions_system_prompt_path: "prompts/chat_completions_system_prompt.md"
+
+  # threads_data_path / logs_dump_dir / skills_data_path по умолчанию НЕ заданы —
+  # тогда runtime-данные пишутся в кросс-платформенные дефолтные каталоги:
+  #   Linux/macOS:  ~/.local/state/gc/projects/<project-slug>/{threads,logs}/
+  #   Windows:      %USERPROFILE%\.gc\projects\<project-slug>\{threads,logs}\
+  # Если хочется явный путь — раскомментируй и задай абсолютный.
   # threads_data_path: ""
   # skills_data_path: ""
   # logs_dump_dir: ""
+
+  # Для пром-стенда (с одним доступным для записи каталогом, например /tmp):
+  #   запускать с GC_HOME=/tmp/gc — все runtime-данные пойдут под этот корень.
+  # Доступные env-переменные:
+  #   GC_HOME, GC_STATE_DIR, GC_CONFIG_DIR, GC_CACHE_DIR, GC_DATA_DIR,
+  #   XDG_*_HOME (стандарт freedesktop.org, только Linux/macOS).
 
 summary:
   chat_completions_summary_trigger_chars: 200000

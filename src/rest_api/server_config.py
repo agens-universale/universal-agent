@@ -21,9 +21,11 @@ def load_server_config() -> Dict[str, Any]:
     - agent_overrides (опционально)
     - threads_cleanup (опционально)
     """
-    cfg_path = os.getenv("SERVER_CONFIG_PATH") or os.path.join(
-        PROJECT_ROOT, "config_server.yml"
-    )
+    from config_modules import env_vars
+    if env_vars.env.server_config_path is not None:
+        cfg_path = str(env_vars.env.server_config_path)
+    else:
+        cfg_path = os.path.join(PROJECT_ROOT, "config_server.yml")
     if not os.path.exists(cfg_path):
         # Минимальный дефолт, чтобы сервер мог стартовать и без файла.
         return {

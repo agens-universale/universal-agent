@@ -82,16 +82,16 @@ def resolve_threads_dir(config_dict: Dict[str, Any]) -> str:
     """
     Определить директорию для хранения тредов.
 
-    - Если threads_data_path не задан или пуст — использовать <project_root>/threads.
-    - Если задан threads_data_path — он ДОЛЖЕН быть абсолютным путём и используется как есть.
+    Контракт: config_dict["threads_data_path"] должен быть АБСОЛЮТНЫМ
+    путём, заполненным config_modules.root.resolve_paths(). Пустое значение
+    означает, что resolve_paths() не вызывался — это ошибка интеграции.
     """
-    # Корень проекта: ../ относительно этого файла (src/thread_store.py -> project_root)
-    base_dir = os.path.dirname(os.path.abspath(__file__))
-    project_root = os.path.abspath(os.path.join(base_dir, ".."))
-
     path_cfg = config_dict.get("threads_data_path")
     if not isinstance(path_cfg, str) or len(path_cfg.strip()) == 0:
-        return os.path.join(project_root, "threads")
+        raise ValueError(
+            "threads_data_path пуст; "
+            "config_modules.root.resolve_paths() должен был его заполнить"
+        )
 
     path_cfg = path_cfg.strip()
     if not os.path.isabs(path_cfg):
