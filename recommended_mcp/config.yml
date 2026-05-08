@@ -1,0 +1,19 @@
+# recommended_mcp/config.yml
+# Манифест доступных MCP-интеграций для background-agent.
+# Чтобы пропустить MCP — закомментируй его блок.
+# install.py и run.py читают этот файл.
+
+mcps:
+  - name: computer
+    path: ./computer
+    install:
+      type: source
+      source: ../external/computer-mcp
+      platforms: [win32]
+    # run-блок отсутствует: MCP спавнится агентом через stdio.
+
+  - name: office
+    path: ./office
+    install:
+      type: source
+      source: ../external/office-mcp

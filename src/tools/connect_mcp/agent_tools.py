@@ -69,7 +69,15 @@ def _normalize_schema_recursive(schema: Any, param_name: str = "") -> Any:
             "description": f"{param_name} parameter. Raw schema value: {schema!r}",
         }
 
-    if "type" not in schema:
+    # Schema-combinator constructs (anyOf / oneOf / allOf) define the type via
+    # their branches; a top-level `type` is optional in JSON Schema and adding
+    # one here breaks validation when it conflicts with the combinator.
+    # Example: {"anyOf": [{"type": "integer"}, {"type": "null"}]} for `int | None`
+    # would otherwise gain `type: "string"` here, making any value invalid
+    # (validator AND-s `type` with `anyOf`).
+    has_combinator = any(k in schema for k in ("anyOf", "oneOf", "allOf"))
+
+    if "type" not in schema and not has_combinator:
         if "properties" in schema:
             schema["type"] = "object"
         elif "items" in schema:

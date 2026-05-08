@@ -1,6 +1,7 @@
 import sys
 import types
 import json
+
 from pathlib import Path
 
 
@@ -29,6 +30,7 @@ _stub_tools_modules()
 
 from states import State  # noqa: E402
 from message_policy.user_message_policy import extract_real_user_message_text  # noqa: E402
+
 
 
 def _make_state() -> State:
@@ -112,6 +114,7 @@ def test_seed_new_user_turn_appends_to_current_scope_and_global_log():
         "active intent 1",
         "fresh request",
     ]
+
 
 
 def test_extract_real_user_message_text_skips_current_context_as_technical():

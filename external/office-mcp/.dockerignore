@@ -1,0 +1,12 @@
+.venv
+venv
+.git
+.gitignore
+__pycache__
+*.egg-info
+tests
+docs
+.claude
+CLAUDE.md
+.pytest_cache
+.ruff_cache
