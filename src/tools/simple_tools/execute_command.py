@@ -45,14 +45,23 @@ class ExecuteCommand(AbstractSimpleTool):
                         "type": "string",
                         "description": "Optional working directory. If omitted, uses current working directory.",
                     },
-                    "env": {
-                        "type": "object",
+                    "env_vars": {
+                        "type": "array",
                         "description": (
                             "Optional environment variables to add/override for this command. "
-                            "Values must be strings. If omitted, uses the current process environment."
+                            "Use [{name, value}] items. Values are converted to strings. "
+                            "If omitted, uses the current process environment."
                         ),
-                        "additionalProperties": {"type": "string"},
-                    }
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "name": {"type": "string"},
+                                "value": {"type": "string"},
+                            },
+                            "required": ["name", "value"],
+                            "additionalProperties": False,
+                        },
+                    },
                 },
                 "required": ["command"],
                 "additionalProperties": False
@@ -65,7 +74,7 @@ class ExecuteCommand(AbstractSimpleTool):
     def prompt_description(cls):
         description = ('''Tool name: execute_command
 Tool description: Executes a CLI command synchronously and returns stdout/stderr/exit_code as JSON.
-Input schema: {"type": "object", "properties": {"command": {"type": "string", "description": "The CLI command to execute."}, "timeout_seconds": {"type": "integer", "description": "Execution timeout in seconds.", "default": 30}, "max_output_chars": {"type": "integer", "description": "Max chars returned for stdout/stderr each.", "default": 4000}, "cwd": {"type": "string", "description": "Optional working directory (absolute or relative)."}, "env": {"type":"object","description":"Optional env overrides for this command. Values must be strings.","additionalProperties":{"type":"string"}}}, "required": ["command"], "additionalProperties": false}
+Input schema: {"type": "object", "properties": {"command": {"type": "string", "description": "The CLI command to execute."}, "timeout_seconds": {"type": "integer", "description": "Execution timeout in seconds.", "default": 30}, "max_output_chars": {"type": "integer", "description": "Max chars returned for stdout/stderr each.", "default": 4000}, "cwd": {"type": "string", "description": "Optional working directory (absolute or relative)."}, "env_vars": {"type":"array","description":"Optional env overrides as [{name,value}]","items":{"type":"object","properties":{"name":{"type":"string"},"value":{"type":"string"}},"required":["name","value"],"additionalProperties":false}}}, "required": ["command"], "additionalProperties": false}
 
 Return format (JSON string):
 {"tool":"execute_command","ok":true|false,"command":"...","cwd":"...","exit_code":number|null,"timed_out":true|false,"truncated":true|false,"error":null|{"type":"...","message":"..."},"stdout":"...","stderr":"..."}
@@ -152,7 +161,7 @@ Important Usage Rules:
         timeout_seconds: int | None = None,
         max_output_chars: int | None = None,
         cwd: str | None = None,
-        env: dict | None = None,
+        env_vars: list[dict] | None = None,
         **kwargs,
     ) -> str:
         return self._result(
@@ -174,7 +183,7 @@ Important Usage Rules:
         timeout_seconds: int | None = None,
         max_output_chars: int | None = None,
         cwd: str | None = None,
-        env: dict | None = None,
+        env_vars: list[dict] | None = None,
         **kwargs,
     ) -> str:
         cwd_used = cwd or os.getcwd()
@@ -262,8 +271,8 @@ Important Usage Rules:
             )
 
         merged_env = None
-        if env is not None:
-            if not isinstance(env, dict):
+        if env_vars is not None:
+            if not isinstance(env_vars, list):
                 return self._result(
                     ok=False,
                     command=command,
@@ -273,16 +282,65 @@ Important Usage Rules:
                     truncated=False,
                     stdout="",
                     stderr="",
-                    error={"type": "invalid_argument", "field": "env", "message": "env must be an object/map"}
+                    error={
+                        "type": "invalid_argument",
+                        "field": "env_vars",
+                        "message": "env_vars must be a list of key/value pairs: [{'name': 'KEY', 'value': 'VALUE'}]",
+                    },
                 )
+            env_from_pairs: dict[str, str] = {}
+            for idx, item in enumerate(env_vars):
+                if not isinstance(item, dict):
+                    return self._result(
+                        ok=False,
+                        command=command,
+                        cwd=cwd_used,
+                        exit_code=None,
+                        timed_out=False,
+                        truncated=False,
+                        stdout="",
+                        stderr="",
+                        error={
+                            "type": "invalid_argument",
+                            "field": f"env_vars[{idx}]",
+                            "message": "Each env_vars item must be an object: {'name': 'KEY', 'value': 'VALUE'}",
+                        },
+                    )
+                name = item.get("name")
+                if not isinstance(name, str) or not name.strip():
+                    return self._result(
+                        ok=False,
+                        command=command,
+                        cwd=cwd_used,
+                        exit_code=None,
+                        timed_out=False,
+                        truncated=False,
+                        stdout="",
+                        stderr="",
+                        error={"type": "invalid_argument", "field": f"env_vars[{idx}].name"},
+                    )
+                value = item.get("value")
+                if not isinstance(value, str):
+                    return self._result(
+                        ok=False,
+                        command=command,
+                        cwd=cwd_used,
+                        exit_code=None,
+                        timed_out=False,
+                        truncated=False,
+                        stdout="",
+                        stderr="",
+                        error={
+                            "type": "invalid_argument",
+                            "field": f"env_vars[{idx}].value",
+                            "message": "env_vars value must be a string",
+                        },
+                    )
+                env_from_pairs[name.strip()] = value
             # Ensure string keys and values for subprocess env
             env_sanitized: dict[str, str] = {}
-            for k, v in env.items():
-                if not isinstance(k, str):
-                    k = str(k)
-                if v is None:
-                    v = ""
-                env_sanitized[k] = v if isinstance(v, str) else str(v)
+            for k, v in env_from_pairs.items():
+                env_sanitized[str(k)] = "" if v is None else str(v)
             merged_env = {**os.environ, **env_sanitized}
 
         try:

@@ -31,8 +31,8 @@ from processing_responses import (
     _make_technical_feedback_user_message,
     _request_backend_canonical,
 )
-from user_message_policy import TECHNICAL_TYPE_ERROR_MESSAGE
-from user_message_policy import build_invalid_tool_call_feedback_message
+from message_policy.user_message_policy import TECHNICAL_TYPE_ERROR_MESSAGE
+from message_policy.user_message_policy import build_invalid_tool_call_feedback_message
 from utils.convertations import sanitize_messages_for_chat_completions
 from states import State
 from types import SimpleNamespace
@@ -98,7 +98,7 @@ def test_request_backend_canonical_sanitizes_state_history_for_chat_completions(
 
     monkeypatch.setattr("processing_responses.create_call_headers", _fake_create_call_headers)
     monkeypatch.setattr(
-        "processing_responses.request_backend_chat_completions",
+        "request_backend_policy.request_backend_chat_completions",
         _fake_request_backend_chat_completions,
     )
 

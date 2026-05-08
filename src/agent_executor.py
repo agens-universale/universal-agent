@@ -14,6 +14,7 @@ from typing import Any
 from processing_responses import run_agent
 from run_context import RunContext
 from config_modules.stored_outputs import get_stored_tool_outputs_max_entries
+from message_policy.chat_completions import repair_tool_call_pairing
 from summarize.compaction import (
     history_exceeds_summary_trigger,
     run_summary_compaction,
@@ -28,7 +29,7 @@ from thread_store import (
     resolve_threads_dir,
 )
 from tools.skills.registry import get_skills_registry
-from user_message_policy import (
+from message_policy.user_message_policy import (
     TECHNICAL_TYPE_CURRENT_CONTEXT,
     wrap_technical_user_content,
 )
@@ -87,6 +88,11 @@ class AgentExecutor:
             thread_session = ThreadSession.from_config(
                 config_dict=config_dict, system_id=system_id, thread_id=thread_id
             )
+            if backend_api_mode == "chat_completions":
+                thread_session.history_messages = repair_tool_call_pairing(
+                    thread_session.history_messages,
+                    keep_latest_unanswered=False,
+                )
             if backend_api_mode == "responses":
                 previous_response_id = thread_session.previous_response_id
             meta = getattr(thread_session, "meta", None) or {}

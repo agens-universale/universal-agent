@@ -6,7 +6,7 @@ import json
 from typing import Any, Dict, List, Optional, Union
 from utils.project_data import get_project_data
 from tools.stored_outputs.tool_call_outputs_store import ToolCallOutputsStore
-from user_message_policy import (
+from message_policy.user_message_policy import (
     append_user_log_entries,
     normalize_user_log_entries,
 )

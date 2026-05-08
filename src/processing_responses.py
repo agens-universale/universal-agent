@@ -3,6 +3,7 @@ from types import SimpleNamespace
 
 from config import parse_chat_completions_max_tokens
 from intent_guard import validate_final_report_vs_user_intent
+from message_policy.cycle_stop import append_cycle_stop_tool_outputs_for_batch
 from request_backend_policy import request_chat_completions_with_policy
 from tools import apply_tool, WrongFunctionArgumentsException
 from tools.stored_outputs.wrapping import maybe_store_and_wrap_tool_output
@@ -19,7 +20,7 @@ from utils.generate_message_id import generate_msg_id_sha256 as generate_message
 
 from states import State
 from typing import List, Dict, Union, Tuple, Any, Callable, Optional
-from user_message_policy import (
+from message_policy.user_message_policy import (
     TECHNICAL_TYPE_TECHNICAL,
     TECHNICAL_TYPE_ERROR_MESSAGE,
     wrap_technical_user_content,
@@ -231,14 +232,14 @@ def group_messages(messages: List[Dict]) -> Dict[str, List[Dict]]:
     }
 
 
-def check_trace_finished(messages: List[Dict]) -> Union[str, None]:
+def check_trace_finished(messages: List[Dict]) -> Union[Tuple[str, str], None]:
     if len(messages) == 0:
         raise ValueError('Empty messages list')
 
     grouped_messages = group_messages(messages)
     for m in grouped_messages['tool_calls']:
         if m['name'] == 'submit_solution':
-            return m['arguments']
+            return m['arguments'], m['call_id']
 
     return None
 
@@ -446,6 +447,9 @@ def run_agent(
                 # (которые пришли от бэкенда), когда mode == "function_call".
                 finish_response = check_trace_finished(messages)
                 if finish_response:
+                    finish_arguments, finish_call_id = finish_response
+                    grouped_messages = group_messages(messages)
+                    pending_tool_calls = grouped_messages.get("tool_calls", [])
                     strict_finish_gate = bool(
                         cfg.get("strict_submit_solution_validation", True)
                     )
@@ -458,12 +462,33 @@ def run_agent(
                             active_user_messages = (
                                 getattr(state, "user_messages_log", []) or []
                             )
-                        validation = validate_final_report_vs_user_intent(
-                            ctx=ctx,
-                            state=state,
-                            user_messages_log=active_user_messages,
-                            submit_solution_arguments=finish_response,
-                        )
+                        try:
+                            validation = validate_final_report_vs_user_intent(
+                                ctx=ctx,
+                                state=state,
+                                user_messages_log=active_user_messages,
+                                submit_solution_arguments=finish_arguments,
+                            )
+                        except Exception as validation_exc:
+                            run_logger.warning(
+                                "finish_gate_validation_failed; allow submit_solution "
+                                "to avoid inconsistent tool_call history: %s",
+                                validation_exc,
+                                exc_info=True,
+                            )
+                            validation = None
+                        if validation is None:
+                            append_cycle_stop_tool_outputs_for_batch(
+                                state=state,
+                                ctx=ctx,
+                                tool_calls=pending_tool_calls,
+                                run_agent_func=run_agent,
+                                persist_messages_callback=persist_messages_callback,
+                                backend_mode=backend_mode,
+                            )
+                            if is_main_agent:
+                                state.clear_current_user_messages()
+                            return finish_arguments
                         if not validation.ok:
                             run_logger.warning(
                                 "finish_gate_rejected conflicts=%s missing=%s",
@@ -477,9 +502,17 @@ def run_agent(
                                 )
                             ]
                             continue
+                    append_cycle_stop_tool_outputs_for_batch(
+                        state=state,
+                        ctx=ctx,
+                        tool_calls=pending_tool_calls,
+                        run_agent_func=run_agent,
+                        persist_messages_callback=persist_messages_callback,
+                        backend_mode=backend_mode,
+                    )
                     if is_main_agent:
                         state.clear_current_user_messages()
-                    return finish_response
+                    return finish_arguments
                 messages = process_tool_calls(messages, state, ctx, run_agent_func=run_agent)
                 tool_error_cnt = 0
             elif mode == "function_call_output":

@@ -9,7 +9,7 @@ from summarize import (
     summary_message_body,
 )
 from summarize.summary_validation import FALLBACK_SUMMARY, validate_summary_text
-from user_message_policy import normalize_user_log_entries
+from message_policy.user_message_policy import normalize_user_log_entries
 from utils.llm_chat_client import (
     log_llm_prompt_and_result,
     request_chat_completion_text,

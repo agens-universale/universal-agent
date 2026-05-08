@@ -1,6 +1,9 @@
 from typing import Any, Callable, Dict, List, Optional
 
-from user_message_policy import TECHNICAL_TYPE_DIALOG_SUMMARY, wrap_technical_user_content
+from message_policy.user_message_policy import (
+    TECHNICAL_TYPE_DIALOG_SUMMARY,
+    wrap_technical_user_content,
+)
 from utils.generate_message_id import generate_msg_id_sha256 as generate_message_id_func
 
 from summarize.summary_serialization import (

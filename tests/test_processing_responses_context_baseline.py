@@ -1,4 +1,5 @@
 import logging
+import json
 import sys
 import types
 from pathlib import Path
@@ -20,6 +21,25 @@ def _stub_tools_modules() -> None:
             return str(self)
 
     def _apply_tool(*_args, **_kwargs):
+        tool_name = _kwargs.get("tool_name")
+        if tool_name == "submit_solution":
+            arguments = _kwargs.get("arguments")
+            try:
+                payload = json.loads(arguments) if isinstance(arguments, str) else {}
+            except Exception:
+                payload = {}
+            result = {
+                "tool": "submit_solution",
+                "ok": True,
+                "status": "submitted",
+                "message": "Task outcome submitted.",
+                "error": None,
+            }
+            if isinstance(payload, dict):
+                for key in ("solution_type", "comment", "task_report", "handoff"):
+                    if key in payload:
+                        result[key] = payload[key]
+            return json.dumps(result, ensure_ascii=False)
         raise AssertionError("apply_tool should not be called in this test")
 
     tools_pkg.apply_tool = _apply_tool
@@ -78,6 +98,16 @@ def _submit_solution_call():
         "arguments": '{"ok": true}',
         "call_id": "call_finish",
         "id": "fc_finish",
+    }
+
+
+def _generic_tool_call(*, call_id: str = "call_other", name: str = "memory_files"):
+    return {
+        "type": "function_call",
+        "name": name,
+        "arguments": '{"action":"list"}',
+        "call_id": call_id,
+        "id": "fc_other",
     }
 
 
@@ -232,3 +262,56 @@ def test_submit_solution_clears_current_user_messages_on_success():
 
     assert result == '{"ok": true}'
     assert state.current_user_messages == []
+    synthetic_outputs = [
+        m
+        for m in state.messages
+        if m.get("type") == "function_call_output" and m.get("call_id") == "call_finish"
+    ]
+    assert len(synthetic_outputs) == 1
+    assert "Task outcome submitted." in synthetic_outputs[0]["output"]
+
+
+def test_submit_solution_validation_failure_fails_open(monkeypatch):
+    state = _make_state()
+    state.current_user_messages = ["актуальный вопрос"]
+
+    def _raise_validation(*_args, **_kwargs):
+        raise RuntimeError("validation backend failure")
+
+    monkeypatch.setattr(
+        processing_module,
+        "validate_final_report_vs_user_intent",
+        _raise_validation,
+    )
+
+    result = run_agent(
+        [_submit_solution_call()],
+        state,
+        _make_ctx(strict_submit_solution_validation=True),
+    )
+
+    assert result == '{"ok": true}'
+    assert state.current_user_messages == []
+    synthetic_outputs = [
+        m
+        for m in state.messages
+        if m.get("type") == "function_call_output" and m.get("call_id") == "call_finish"
+    ]
+    assert len(synthetic_outputs) == 1
+
+
+def test_cycle_stop_generates_outputs_for_all_pending_tool_calls():
+    state = _make_state()
+    result = run_agent(
+        [_submit_solution_call(), _generic_tool_call()],
+        state,
+        _make_ctx(strict_submit_solution_validation=False),
+    )
+
+    assert result == '{"ok": true}'
+    outputs = [m for m in state.messages if m.get("type") == "function_call_output"]
+    by_call = {m.get("call_id"): m for m in outputs}
+    assert "call_finish" in by_call
+    assert "call_other" in by_call
+    assert "Task outcome submitted." in by_call["call_finish"]["output"]
+    assert "skipped_on_cycle_stop" in by_call["call_other"]["output"]

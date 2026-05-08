@@ -346,8 +346,8 @@ def create_call_data_completions(
         "tools": to_send_tools,
         "tool_choice": "auto",
     }
-    # Explicit max_tokens argument is used by existing call-sites/policies.
-    if explicit_max_tokens is not None or bool(cfg.get("use_max_tokens_param", False)):
+    # Key selection is provider-driven; explicit max_tokens only sets the VALUE.
+    if bool(cfg.get("use_max_tokens_param", False)):
         data["max_tokens"] = effective_max_tokens
     else:
         data["max_completion_tokens"] = effective_max_tokens

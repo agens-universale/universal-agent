@@ -28,7 +28,7 @@ def _stub_tools_modules() -> None:
 _stub_tools_modules()
 
 from states import State  # noqa: E402
-from user_message_policy import extract_real_user_message_text  # noqa: E402
+from message_policy.user_message_policy import extract_real_user_message_text  # noqa: E402
 
 
 def _make_state() -> State:

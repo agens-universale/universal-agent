@@ -212,9 +212,12 @@ class SpecialAgent(AbstractSubagent):
         call_data = {
             "model": model,
             "messages": messages,
-            "max_tokens": 4096,
             "temperature": 0.7,
         }
+        if bool(self.config_dict.get("use_max_tokens_param", False)):
+            call_data["max_tokens"] = 4096
+        else:
+            call_data["max_completion_tokens"] = 4096
 
         res_data = request_backend_chat_completions(
             call_data, headers, url=url, verify=verify,

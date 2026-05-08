@@ -10,7 +10,10 @@ from summarize.dialog_history import (
 )
 from summarize.compaction import apply_summary_state_patch
 from summarize.thread_summarizer import summarize_dialog_via_chat_completions
-from user_message_policy import TECHNICAL_TYPE_DIALOG_SUMMARY, wrap_technical_user_content
+from message_policy.user_message_policy import (
+    TECHNICAL_TYPE_DIALOG_SUMMARY,
+    wrap_technical_user_content,
+)
 
 
 def _patch_chat_completion(monkeypatch, fake):

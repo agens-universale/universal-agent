@@ -30,9 +30,30 @@ def test_run_python_validation_and_truncation():
 def test_run_python_env_and_cwd(tmp_path):
     tool = RunPythonCode()
     code = "import os; print(os.getenv('A')); print(os.getenv('B')); print(os.getenv('PYTHONPATH'))"
-    out = json.loads(tool(code=code, env={"A": 1, "B": None}, cwd=str(tmp_path)))
+    out = json.loads(
+        tool(
+            code=code,
+            env_vars=[{"name": "A", "value": "1"}, {"name": "B", "value": ""}],
+            cwd=str(tmp_path),
+        )
+    )
     assert out["ok"] is True
     assert "1" in out["stdout"]
+
+
+def test_run_python_env_vars_validation(tmp_path):
+    tool = RunPythonCode()
+    bad_not_list = json.loads(tool(code="print(1)", env_vars="A=1"))  # type: ignore[arg-type]
+    assert bad_not_list["ok"] is False
+    assert bad_not_list["error"]["field"] == "env_vars"
+
+    bad_name = json.loads(tool(code="print(1)", env_vars=[{"name": "", "value": "1"}]))
+    assert bad_name["ok"] is False
+    assert bad_name["error"]["field"] == "env_vars[0].name"
+
+    bad_value = json.loads(tool(code="print(1)", env_vars=[{"name": "A", "value": 1}]))  # type: ignore[list-item]
+    assert bad_value["ok"] is False
+    assert bad_value["error"]["field"] == "env_vars[0].value"
 
 
 def test_sanitize_env():

@@ -64,10 +64,18 @@ class RunPythonCode(AbstractSimpleTool):
                             "paths as cwd (they are the permitted writable locations for this run)."
                         ),
                     },
-                    "env": {
-                        "type": "object",
-                        "description": "Optional environment variables to add/override. Values must be strings.",
-                        "additionalProperties": {"type": "string"},
+                    "env_vars": {
+                        "type": "array",
+                        "description": "Optional environment variables to add/override as [{'name','value'}] pairs. Values must be strings.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "name": {"type": "string"},
+                                "value": {"type": "string"},
+                            },
+                            "required": ["name", "value"],
+                            "additionalProperties": False,
+                        },
                     },
                 },
                 "required": ["code"],
@@ -81,7 +89,7 @@ class RunPythonCode(AbstractSimpleTool):
     def prompt_description(cls):
         description = '''Tool name: run_python_code
 Tool description: Runs a Python code snippet in a subprocess and returns stdout/stderr as JSON.
-Input schema: {"type": "object", "properties": {"code": {"type": "string", "description": "Python code to execute."}, "timeout_seconds": {"type": "integer", "description": "Execution timeout in seconds.", "default": 10}, "max_output_chars": {"type":"integer","description":"Max chars for stdout/stderr each.","default": 4000}, "cwd": {"type":"string","description":"Working directory (optional)"}, "env": {"type":"object","description":"Env overrides (optional)"}} , "required": ["code"], "additionalProperties": false}
+Input schema: {"type": "object", "properties": {"code": {"type": "string", "description": "Python code to execute."}, "timeout_seconds": {"type": "integer", "description": "Execution timeout in seconds.", "default": 10}, "max_output_chars": {"type":"integer","description":"Max chars for stdout/stderr each.","default": 4000}, "cwd": {"type":"string","description":"Working directory (optional)"}, "env_vars": {"type":"array","description":"Env overrides as [{'name','value'}]","items":{"type":"object","properties":{"name":{"type":"string"},"value":{"type":"string"}},"required":["name","value"],"additionalProperties":false}}} , "required": ["code"], "additionalProperties": false}
 
 Usage:
 - Use this tool to execute small, self-contained Python scripts that do not require interaction.
@@ -145,7 +153,7 @@ Return format (JSON string):
         timeout_seconds: Optional[int] = None,
         max_output_chars: int = 4000,
         cwd: Optional[str] = None,
-        env: Optional[Dict[str, Any]] = None,
+        env_vars: Optional[list[dict]] = None,
         **kwargs,
     ) -> str:
         return self._result(
@@ -165,7 +173,7 @@ Return format (JSON string):
         timeout_seconds: Optional[int] = None,
         max_output_chars: int = 4000,
         cwd: Optional[str] = None,
-        env: Optional[Dict[str, Any]] = None,
+        env_vars: Optional[list[dict]] = None,
         **kwargs,
     ) -> str:
         if not isinstance(code, str):
@@ -260,13 +268,70 @@ Return format (JSON string):
                 },
             )
 
+        env_map: Optional[Dict[str, str]] = None
+        if env_vars is not None:
+            if not isinstance(env_vars, list):
+                return self._result(
+                    ok=False,
+                    return_code=None,
+                    timed_out=False,
+                    truncated=False,
+                    stdout="",
+                    stderr="",
+                    error={
+                        "type": "invalid_argument",
+                        "field": "env_vars",
+                        "message": "env_vars must be a list of key/value pairs: [{'name': 'KEY', 'value': 'VALUE'}]",
+                    },
+                )
+            parsed: Dict[str, str] = {}
+            for idx, item in enumerate(env_vars):
+                if not isinstance(item, dict):
+                    return self._result(
+                        ok=False,
+                        return_code=None,
+                        timed_out=False,
+                        truncated=False,
+                        stdout="",
+                        stderr="",
+                        error={
+                            "type": "invalid_argument",
+                            "field": f"env_vars[{idx}]",
+                            "message": "Each env_vars item must be an object: {'name': 'KEY', 'value': 'VALUE'}",
+                        },
+                    )
+                name = item.get("name")
+                if not isinstance(name, str) or not name.strip():
+                    return self._result(
+                        ok=False,
+                        return_code=None,
+                        timed_out=False,
+                        truncated=False,
+                        stdout="",
+                        stderr="",
+                        error={"type": "invalid_argument", "field": f"env_vars[{idx}].name"},
+                    )
+                value = item.get("value")
+                if not isinstance(value, str):
+                    return self._result(
+                        ok=False,
+                        return_code=None,
+                        timed_out=False,
+                        truncated=False,
+                        stdout="",
+                        stderr="",
+                        error={"type": "invalid_argument", "field": f"env_vars[{idx}].value"},
+                    )
+                parsed[name.strip()] = value
+            env_map = parsed
+
         try:
             result = subprocess.run(
                 [sys.executable, "-"],
                 capture_output=True,
                 text=True,
                 timeout=effective_timeout,
-                env=_sanitize_env(env),
+                env=_sanitize_env(env_map),
                 cwd=cwd_used,
                 input=code,
             )

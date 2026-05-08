@@ -2,7 +2,7 @@ import json
 import re
 from typing import Any, Dict, List
 
-from user_message_policy import (
+from message_policy.user_message_policy import (
     is_dialog_summary_user_message_text,
     user_content_to_text,
 )

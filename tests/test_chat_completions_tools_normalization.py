@@ -116,9 +116,20 @@ class ChatCompletionsToolsNormalizationTest(unittest.TestCase):
         self.assertIn("tool_calls", data["messages"][0])
         self.assertEqual(len(data["messages"][0]["tool_calls"]), 1)
 
-    def test_create_call_data_completions_max_tokens_override(self):
+    def test_create_call_data_completions_explicit_max_tokens_uses_max_completion_tokens_by_default(self):
         state = SimpleNamespace(messages=[], tools=[], default_model="m")
         data = create_call_data_completions([{"role": "user", "content": "hi"}], state=state, max_tokens=12000)
+        self.assertEqual(data["max_completion_tokens"], 12000)
+        self.assertNotIn("max_tokens", data)
+
+    def test_create_call_data_completions_explicit_max_tokens_uses_max_tokens_with_flag(self):
+        state = SimpleNamespace(messages=[], tools=[], default_model="m")
+        data = create_call_data_completions(
+            [{"role": "user", "content": "hi"}],
+            state=state,
+            max_tokens=12000,
+            config_dict={"use_max_tokens_param": True},
+        )
         self.assertEqual(data["max_tokens"], 12000)
         self.assertNotIn("max_completion_tokens", data)
 
