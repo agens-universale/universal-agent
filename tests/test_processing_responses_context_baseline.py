@@ -315,3 +315,36 @@ def test_cycle_stop_generates_outputs_for_all_pending_tool_calls():
     assert "call_other" in by_call
     assert "Task outcome submitted." in by_call["call_finish"]["output"]
     assert "skipped_on_cycle_stop" in by_call["call_other"]["output"]
+
+
+def test_submit_solution_validation_receives_context_and_current_scope(monkeypatch):
+    state = _make_state()
+    state.user_messages_log = ["старый вопрос", "актуальный вопрос", "уточнение"]
+    state.current_user_messages = ["актуальный вопрос", "уточнение"]
+    captured: dict[str, object] = {}
+
+    def _fake_validation(**kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace(
+            ok=True,
+            missing_requirements=[],
+            conflicts=[],
+            coverage_score=1.0,
+            feedback_for_agent="",
+        )
+
+    monkeypatch.setattr(
+        processing_module,
+        "validate_final_report_vs_user_intent",
+        _fake_validation,
+    )
+
+    result = run_agent(
+        [_submit_solution_call()],
+        state,
+        _make_ctx(strict_submit_solution_validation=True),
+    )
+
+    assert result == '{"ok": true}'
+    assert captured["current_user_requests"] == ["актуальный вопрос", "уточнение"]
+    assert captured["context_user_messages"] == ["старый вопрос"]

@@ -458,15 +458,22 @@ def run_agent(
                         active_user_messages = (
                             getattr(state, "current_user_messages", []) or []
                         )
+                        full_user_messages_log = (
+                            getattr(state, "user_messages_log", []) or []
+                        )
                         if not active_user_messages:
-                            active_user_messages = (
-                                getattr(state, "user_messages_log", []) or []
-                            )
+                            active_user_messages = full_user_messages_log
+                        context_user_messages = [
+                            msg
+                            for msg in full_user_messages_log
+                            if msg not in set(active_user_messages)
+                        ]
                         try:
                             validation = validate_final_report_vs_user_intent(
                                 ctx=ctx,
                                 state=state,
-                                user_messages_log=active_user_messages,
+                                current_user_requests=active_user_messages,
+                                context_user_messages=context_user_messages,
                                 submit_solution_arguments=finish_arguments,
                             )
                         except Exception as validation_exc:

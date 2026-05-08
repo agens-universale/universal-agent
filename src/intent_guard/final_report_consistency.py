@@ -79,19 +79,30 @@ def validate_final_report_vs_user_intent(
     *,
     ctx: Any,
     state: Any,
-    user_messages_log: List[str],
+    current_user_requests: List[str],
+    context_user_messages: List[str] | None = None,
     submit_solution_arguments: Any,
 ) -> ValidationResult:
     args = _parse_submit_solution_args(submit_solution_arguments)
+    active_user_requests = [
+        str(x) for x in current_user_requests if isinstance(x, str)
+    ]
+    user_context = [str(x) for x in (context_user_messages or []) if isinstance(x, str)]
 
     system_prompt = _load_guard_prompt(ctx)
     payload = {
-        "user_messages_log": [str(x) for x in user_messages_log if isinstance(x, str)],
+        "user_context": user_context,
+        "current_user_requests": active_user_requests,
+        "user_messages_log": active_user_requests,
         "submit_solution_arguments": args if args else _to_text(submit_solution_arguments),
     }
     user_prompt = (
-        "Check final-report consistency against the active user intent scope.\n\n"
-        "IMPORTANT: Validate coverage ONLY against `user_messages_log` from this input.\n"
+        "Check final-report consistency against current user requests.\n\n"
+        "Input format:\n"
+        "- `user_context`: previous user messages that were already answered earlier in the dialogue; use for context only.\n"
+        "- `current_user_requests`: actual requests that must be covered now.\n\n"
+        "IMPORTANT: Validate required coverage ONLY against `current_user_requests`.\n"
+        "Use `user_context` to disambiguate intent and references.\n"
         "Do not require fulfilling requests that were already completed in previous turns.\n\n"
         "Return ONLY JSON object with keys:\n"
         "{\"ok\": bool, \"coverage_score\": number, \"conflicts\": [str], "

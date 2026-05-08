@@ -45,10 +45,7 @@ class SubmitSolution(AbstractSimpleTool):
         return json.dumps(out, ensure_ascii=False)
 
     @classmethod
-    def build_terminal_tool_output(cls) -> str:
-        """
-        Synthetic tool output to close submit_solution tool_call in chat/completions history.
-        """
+    def tool_output_on_cycle_stop(cls) -> str:
         payload: Dict[str, Any] = {
             "tool": "submit_solution",
             "ok": True,
@@ -58,10 +55,6 @@ class SubmitSolution(AbstractSimpleTool):
             "synthetic": True,
         }
         return json.dumps(payload, ensure_ascii=False)
-
-    @classmethod
-    def tool_output_on_cycle_stop(cls) -> str:
-        return cls.build_terminal_tool_output()
 
     @classmethod
     def tool_description(cls) -> Dict[str, Any]:
