@@ -17,6 +17,7 @@ import importlib
 import os
 import re
 import shlex
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -74,12 +75,35 @@ def check_callback_importable(litellm_root: Path) -> bool:
             pass
 
 
-def build_command(port: int) -> list[str]:
-    """Build the `litellm` CLI command (no shell, OS-agnostic)."""
+def find_litellm_cli() -> str:
+    """Locate the `litellm` CLI executable.
+
+    Prefer the one bundled with the current Python interpreter (venv `bin/` or
+    Windows `Scripts/`), falling back to whatever is on `$PATH`. The PyPI
+    `litellm` package does not expose `__main__`, so `python -m litellm` does
+    not work — we must call the console script directly.
+    """
+    bin_dir = Path(sys.executable).parent
+    candidates = [bin_dir / "litellm", bin_dir / "litellm.exe"]
+    for c in candidates:
+        if c.exists():
+            return str(c)
+    found = shutil.which("litellm")
+    if found:
+        return found
+    raise RunError(
+        "`litellm` CLI not found. Install with `pip install -e .` (or "
+        "`uv sync`) from repo root."
+    )
+
+
+def build_command(port: int, cli: str | None = None) -> list[str]:
+    """Build the `litellm` CLI command (no shell, OS-agnostic).
+
+    `cli` defaults to `find_litellm_cli()` — overridable for tests.
+    """
     return [
-        sys.executable,
-        "-m",
-        "litellm",
+        cli or find_litellm_cli(),
         "--config",
         "proxy_config.yaml",
         "--port",
