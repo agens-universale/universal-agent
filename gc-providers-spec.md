@@ -166,7 +166,7 @@ model_list:
 
 ## Раскладка `litellm/`
 
-LiteLLM как библиотека — **зависимость** проекта (`pyproject.toml`: `litellm[proxy]==1.83.14`), не часть исходного кода. В репо лежит только тонкая «батарейка» — конфиг + наши hooks + два кросс-платформенных Python-скрипта (зеркало паттерна `recommended_mcp/`).
+LiteLLM как библиотека — **не часть исходного кода и не объявленная зависимость в `pyproject.toml`**. Версия пиннется внутри `litellm/install.py` (константа `LITELLM_PIN = "litellm[proxy]==1.83.14"`), и сам `install.py` делает `pip install` в текущий интерпретатор. Это зеркалит паттерн `recommended_mcp/install.py` (он тоже ставит wheels сам) и не вынуждает тянуть ~200 МБ транзитивных deps LiteLLM (uvicorn / fastapi / orjson / …) тем, кто прокси не использует. В репо лежит только тонкая «батарейка» — конфиг + наши hooks + два кросс-платформенных Python-скрипта.
 
 ```
 litellm/
@@ -357,7 +357,7 @@ GigaChat — это случай, в котором задействованы �
 
 ### Низкий приоритет — UX-чистка
 
-7. **Зафиксировать в `pyproject.toml`** версию `litellm[proxy]==1.83.14` (актуальная стабильная после security incident в марте 2026; рекомендуется ≥1.83).
+7. **Зафиксировать в `litellm/install.py`** версию `litellm[proxy]==1.83.14` (актуальная стабильная после security incident в марте 2026; рекомендуется ≥1.83). В `pyproject.toml` НЕ объявляем — `install.py` сам делает `pip install` (см. раздел «Раскладка `litellm/`»).
 
 8. **Документация в `litellm/README.md`** — quick-start, таблица alias → upstream → required env vars, секция «Adding exotic provider».
 

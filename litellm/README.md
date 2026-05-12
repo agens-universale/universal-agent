@@ -1,66 +1,68 @@
-# LiteLLM Proxy Battery
+# Батарейка LiteLLM Proxy
 
-Self-contained LiteLLM Proxy setup for routing gc-cli (or any OpenAI-Chat-Completions-shaped client) to multiple LLM providers: GigaChat, YandexGPT, OpenRouter, Ollama, custom OAI-compat endpoints.
+Самодостаточная настройка LiteLLM Proxy для маршрутизации gc-cli (или любого клиента, говорящего по OpenAI Chat Completions) на несколько LLM-провайдеров: GigaChat, YandexGPT, OpenRouter, Ollama, кастомные OAI-совместимые эндпоинты.
 
-This directory is an **independent battery**. It does NOT depend on `src/` and `src/` does NOT depend on it. The only contract between agent and proxy is the HTTP URL.
+Эта директория — **независимая батарейка**. Она НЕ зависит от `src/`, и `src/` НЕ зависит от неё. Единственный контракт между агентом и прокси — HTTP-URL.
 
-## Layout
+Сам `litellm` **не объявлен в `pyproject.toml`** — `install.py` единственная точка, которая его ставит. Это зеркалит паттерн `recommended_mcp/install.py` и не тянет `litellm[proxy]` (~200 МБ транзитивных зависимостей: uvicorn/fastapi/orjson/…) тем, кто прокси не использует.
+
+## Раскладка
 
 ```
 litellm/
-├── proxy_config.yaml          # model aliases + callback registration
+├── proxy_config.yaml          # алиасы моделей + регистрация колбэка
 ├── callbacks/
 │   ├── __init__.py
-│   └── provider_normalizer.py # pre/post-call hooks (GigaChat schema + Yandex content fixes)
-├── install.py                 # cross-platform dep check + .env seed
-├── run.py                     # cross-platform launcher
-├── .env.example               # credentials template
-├── .env                       # real credentials (gitignored)
+│   └── provider_normalizer.py # pre/post-call хуки (схемы GigaChat + контент Yandex)
+├── install.py                 # кросс-платформенный pip-install + seed .env
+├── run.py                     # кросс-платформенный лончер
+├── .env.example               # шаблон credentials
+├── .env                       # реальные credentials (gitignored)
 └── .gitignore
 ```
 
-## Quick start
+## Быстрый старт
 
 ```bash
-# 1. Once — verify deps and seed .env
+# 1. Один раз — pip-install litellm[proxy] и seed .env
 python litellm/install.py
 
-# 2. Edit credentials
+# 2. Заполнить credentials
 $EDITOR litellm/.env
 
-# 3. Run proxy (foreground, keep terminal open)
+# 3. Запуск прокси (foreground, держите терминал открытым)
 python litellm/run.py
 
-# 4. Use from gc-cli (separate terminal)
+# 4. Использование из gc-cli (в отдельном терминале)
 gc-cli -q "..." --config config_gigachat_proxy.yml --model gigachat-2
 ```
 
-## Configuration
+## Конфигурация
 
 ### `proxy_config.yaml`
 
-Lists model aliases. Each alias maps to a provider+model:
+Список алиасов моделей. Каждый алиас маппится в пару провайдер+модель:
 
-- `gigachat`, `gigachat-2`, `gigachat-pro`, `gigachat-max` → native LiteLLM `gigachat/` provider
-- `yandex-gpt-lite`, `yandex-gpt` → generic `openai/` route to Yandex Cloud
-- `openrouter-qwen-coder`, `openrouter-claude` → native LiteLLM `openrouter/` provider
-- `ollama-qwen` → native LiteLLM `ollama_chat/` provider
+- `gigachat`, `gigachat-2`, `gigachat-pro`, `gigachat-max` → нативный провайдер LiteLLM `gigachat/`
+- `yandex-gpt-lite`, `yandex-gpt` → generic-маршрут `openai/` на Yandex Cloud
+- `openrouter-qwen-coder`, `openrouter-claude` → нативный провайдер LiteLLM `openrouter/`
+- `ollama-qwen` → нативный провайдер LiteLLM `ollama_chat/`
 
 ### `callbacks/provider_normalizer.py`
 
-Single file containing all vendor quirks:
+Один файл со всеми vendor-quirks:
 
-- **GigaChat pre-call:** 9-walker normalization of tool schemas (strict JSON Schema fixes)
-- **GigaChat post-call:** 3-level `_synthesize_tool_call_for_gigachat` (rescue plain-text replies into native tool_calls)
-- **Yandex pre-call:** `_backfill_empty_content` (Yandex rejects empty assistant content)
-- **Yandex post-call:** `_synthesize_tool_calls_for_yandex` (parse JSON-in-content into native tool_calls)
+- **GigaChat pre-call:** нормализация tool-схем девятью walker'ами (фиксы под strict JSON Schema)
+- **GigaChat post-call:** трёхуровневый `_synthesize_tool_call_for_gigachat` (вытаскивание plain-text ответов в нативные `tool_calls`)
+- **Yandex pre-call:** `_backfill_empty_content` (Yandex отвергает пустой assistant content)
+- **Yandex post-call:** `_synthesize_tool_calls_for_yandex` (парсинг JSON-в-контенте в нативные `tool_calls`)
 
-Routing is by `data["model"].startswith(...)` — no central provider registry. Adding a new provider = add a `model_list` entry + (optional) an `if` block in the callback.
+Роутинг по `data["model"].startswith(...)` — без центрального реестра провайдеров. Добавить нового провайдера = новая запись в `model_list` + (опционально) `if`-блок в колбэке.
 
-## Adding a new provider
+## Добавление своего провайдера
 
-See `gc-providers-spec.md` section «Подключение своего провайдера».
+См. раздел «Подключение своего провайдера» в `gc-providers-spec.md`.
 
-## License
+## Лицензия
 
-LiteLLM itself is MIT — see [github.com/BerriAI/litellm/blob/main/LICENSE](https://github.com/BerriAI/litellm/blob/main/LICENSE). We pin `litellm[proxy]==1.83.14` in the project's `pyproject.toml`. The code in this directory is part of the gc-cli-pub project and follows its repo license.
+Сам LiteLLM — MIT-лицензия, см. [github.com/BerriAI/litellm/blob/main/LICENSE](https://github.com/BerriAI/litellm/blob/main/LICENSE). Версия пиннется в `litellm/install.py` (константа `LITELLM_PIN`). Код в этой директории — часть проекта gc-cli-pub и следует его репозиторной лицензии.
