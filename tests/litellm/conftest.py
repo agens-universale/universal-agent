@@ -1,13 +1,3 @@
-"""Common fixtures for tests/litellm/ — isolated env vars and temp paths."""
-import os
-from collections.abc import Iterator
-
-import pytest
-
-
-@pytest.fixture
-def isolated_env(monkeypatch: pytest.MonkeyPatch) -> Iterator[dict[str, str]]:
-    """Empty env scoped to one test (no GIGACHAT_CREDENTIALS etc. leaking)."""
-    for var in ("GIGACHAT_CREDENTIALS", "YANDEX_API_KEY", "OPENROUTER_API_KEY"):
-        monkeypatch.delenv(var, raising=False)
-    yield dict(os.environ)
+"""Conftest for tests/litellm/. Currently empty — kept so pytest treats
+this directory as a package and our `tests/litellm/test_*.py` files
+inherit the repo-root `conftest.py` (src/-on-sys.path)."""

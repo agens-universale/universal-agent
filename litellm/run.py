@@ -11,7 +11,6 @@ The proxy keeps running in the foreground. Stop with Ctrl-C.
 The agent does NOT control this process — it only hits
 http://localhost:<PORT>/v1/chat/completions when configured.
 """
-import importlib
 import os
 import re
 import shlex
@@ -53,24 +52,29 @@ def load_env_file(path: Path) -> dict[str, str]:
     return out
 
 
+_CALLBACK_PROBE = (
+    "import callbacks.provider_normalizer as m; "
+    "assert hasattr(m, 'proxy_handler_instance'), 'proxy_handler_instance missing'"
+)
+
+
 def check_callback_importable(litellm_root: Path) -> bool:
-    """Verify `callbacks.provider_normalizer` can be imported with
-    `litellm_root` on sys.path. Returns True on success."""
-    sys.path.insert(0, str(litellm_root))
-    # Drop a previously-cached `callbacks` package from a different root.
-    cached = [m for m in sys.modules if m == "callbacks" or m.startswith("callbacks.")]
-    for m in cached:
-        del sys.modules[m]
-    try:
-        mod = importlib.import_module("callbacks.provider_normalizer")
-        return hasattr(mod, "proxy_handler_instance")
-    except ImportError:
-        return False
-    finally:
-        try:
-            sys.path.remove(str(litellm_root))
-        except ValueError:
-            pass
+    """Verify `callbacks.provider_normalizer` can be imported when the
+    process has `cwd=litellm_root` (the exact environment LiteLLM Proxy
+    will run in once started).
+
+    Runs the check in a subprocess on purpose: the parent process's
+    sys.modules / sys.path may already contain entries that mask or
+    conflict with the namespace-package resolution of `litellm` itself
+    (this directory's name shadows the PyPI package). A clean subprocess
+    mirrors the real proxy startup and gives a deterministic result.
+    """
+    proc = subprocess.run(
+        [sys.executable, "-c", _CALLBACK_PROBE],
+        cwd=str(litellm_root),
+        capture_output=True,
+    )
+    return proc.returncode == 0
 
 
 def find_litellm_cli() -> str:
