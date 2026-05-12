@@ -40,13 +40,11 @@ is importable as a top-level package). ``litellm/run.py`` runs the
 subprocess with ``cwd=litellm/`` to satisfy this.
 """
 
-from __future__ import annotations
-
 import json
 import logging
 import re
 import uuid
-from typing import Any, Optional
+from typing import Any
 
 from litellm.integrations.custom_logger import CustomLogger
 
@@ -215,7 +213,7 @@ def _strip_markdown_fence(text: str) -> str:
     return s
 
 
-def _parse_json_object(text: str) -> Optional[dict]:
+def _parse_json_object(text: str) -> dict | None:
     """Parse ``text`` as a JSON object. Return dict or None."""
     s = _strip_markdown_fence(text)
     if not (s.startswith("{") and s.endswith("}")):
@@ -229,7 +227,7 @@ def _parse_json_object(text: str) -> Optional[dict]:
 
 def _detect_tool_call_from_payload(
     payload: dict, tools: list[dict]
-) -> Optional[tuple[str, str]]:
+) -> tuple[str, str] | None:
     """Match ``payload`` keys against declared ``tools`` to identify which
     tool the model intended to call.
 
@@ -259,7 +257,7 @@ def _detect_tool_call_from_payload(
                 return name, args_str
 
     payload_keys = set(payload.keys())
-    best_name: Optional[str] = None
+    best_name: str | None = None
     best_score = -1
     for tool in tools:
         fn = tool.get("function") or {}
@@ -411,7 +409,7 @@ def _replace_superquote_tokens(text: str) -> str:
     return text.replace(_SUPERQUOTE_TOKEN, '"')
 
 
-def _find_tool_by_name(name: str, tools: list[dict]) -> Optional[dict]:
+def _find_tool_by_name(name: str, tools: list[dict]) -> dict | None:
     for tool in tools:
         fn = tool.get("function") or {}
         if fn.get("name") == name:

@@ -11,8 +11,6 @@ The proxy keeps running in the foreground. Stop with Ctrl-C.
 The agent does NOT control this process — it only hits
 http://localhost:<PORT>/v1/chat/completions when configured.
 """
-from __future__ import annotations
-
 import importlib
 import os
 import re

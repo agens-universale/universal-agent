@@ -1,6 +1,4 @@
 """Common fixtures for tests/litellm/ — isolated env vars and temp paths."""
-from __future__ import annotations
-
 import os
 from collections.abc import Iterator
 

@@ -1,6 +1,4 @@
 """Tests for litellm/run.py: env loading, callback import sanity, command build."""
-from __future__ import annotations
-
 import sys
 from pathlib import Path
 

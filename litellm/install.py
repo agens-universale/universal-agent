@@ -9,8 +9,6 @@ No Docker, no system packages — pure pip+stdlib.
 Run:
     python litellm/install.py
 """
-from __future__ import annotations
-
 import importlib
 import shutil
 import sys

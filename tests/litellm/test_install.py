@@ -1,6 +1,4 @@
 """Tests for litellm/install.py: dependency check + .env.example bootstrap."""
-from __future__ import annotations
-
 import sys
 from pathlib import Path
 from unittest.mock import patch
