@@ -112,9 +112,10 @@ class TestSubagentRunnerRun:
             result = runner.run("subagent_worker", {"task": "test"}, run_agent_func)
 
         payload = json.loads(result)
-        assert payload["ok"] is True
-        assert payload["meta"]["finish_reason"] == "stopped_by_user"
-        assert "stopped" in payload["result"].lower()
+        assert payload["ok"] is False
+        assert payload["meta"]["finish_reason"] == "error"
+        assert payload["error"]["code"] == "subagent_stopped_by_user"
+        assert "stopped" in payload["error"]["message"].lower()
 
     def test_shared_mutations_visible_to_orchestrator(self):
         """Subagent mutations on shared.memory_files are visible in orchestrator state."""

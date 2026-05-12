@@ -1,8 +1,8 @@
-import json
 import logging
 import os
 import sys
 import tempfile
+import importlib
 import unittest
 import types
 from pathlib import Path
@@ -10,10 +10,27 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 
+def _restore_tools_and_dependents() -> None:
+    for name in list(sys.modules):
+        if name in ("agent_executor", "run_summary_coordinator"):
+            sys.modules.pop(name, None)
+        elif name == "tools" or name.startswith("tools."):
+            sys.modules.pop(name, None)
+    real_tools = importlib.import_module("tools")
+    proc = sys.modules.get("processing_responses")
+    if proc is not None:
+        proc.apply_tool = real_tools.apply_tool
+        proc.WrongFunctionArgumentsException = (
+            real_tools.WrongFunctionArgumentsException
+        )
+    cycle_stop_mod = sys.modules.get("message_policy.cycle_stop")
+    if cycle_stop_mod is not None:
+        cycle_stop_mod.apply_tool = real_tools.apply_tool
+
+
 def _stub_tools_modules() -> None:
-    # В проекте используется верхнеуровневый пакет `tools`, который может
-    # конфликтовать с внешними библиотеками/плагинами. Поэтому подменяем
-    # модули принудительно, чтобы тест был детерминированным.
+    # Верхнеуровневый `tools` конфликтует с другими окружениями — минимальный stub
+    # только на время этого теста (см. _restore_tools_and_dependents).
     for name in list(sys.modules):
         if name == "tools" or name.startswith("tools."):
             sys.modules.pop(name, None)
@@ -33,8 +50,6 @@ def _stub_tools_modules() -> None:
     tools_pkg.apply_tool = _apply_tool
     tools_pkg.build_tools_data = _build_tools_data
     tools_pkg.WrongFunctionArgumentsException = _WrongFunctionArgumentsException
-    # Важно: оставляем `__path__`, чтобы другие тесты могли импортировать
-    # подпакеты (например, `tools.simple_tools`).
     root = Path(__file__).resolve().parents[1]
     tools_dir = root / "src" / "tools"
     tools_pkg.__path__ = [str(tools_dir)]
@@ -46,18 +61,9 @@ def _stub_tools_modules() -> None:
 
     registry_mod = types.ModuleType("tools.skills.registry")
 
-    def _get_skills_registry(_config_dict):
-        return _SkillsRegistryStub()
+    registry_mod.get_skills_registry = lambda _config_dict: _SkillsRegistryStub()
 
-    registry_mod.get_skills_registry = _get_skills_registry
     sys.modules["tools.skills.registry"] = registry_mod
-
-
-_stub_tools_modules()
-
-import agent_executor as agent_executor_module  # noqa: E402
-import processing_responses as processing_module  # noqa: E402
-from thread_store import load_thread_meta, resolve_threads_dir  # noqa: E402
 
 
 class _SkillsRegistryStub:
@@ -67,6 +73,15 @@ class _SkillsRegistryStub:
 
 class BackendModeSwitchTest(unittest.TestCase):
     def test_switch_responses_completions_responses_same_thread(self):
+        _stub_tools_modules()
+        try:
+            import agent_executor as agent_executor_module
+            import processing_responses as processing_module
+            from thread_store import load_thread_meta, resolve_threads_dir
+        except Exception:
+            _restore_tools_and_dependents()
+            raise
+
         responses_calls = []
         completions_calls = []
 
@@ -101,7 +116,7 @@ class BackendModeSwitchTest(unittest.TestCase):
             )
 
         def _mock_completions_backend(
-            data, headers, url, verify=True, use_retry=True, logger=None
+            data, headers, url, verify=True, use_retry=True, logger=None,
         ):
             completions_calls.append(
                 {
@@ -128,117 +143,143 @@ class BackendModeSwitchTest(unittest.TestCase):
                 ],
             }
 
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            prompt_path = os.path.join(tmp_dir, "chat_completions_system_prompt.md")
-            with open(prompt_path, "w", encoding="utf-8") as fd:
-                fd.write("SYSTEM PROMPT FOR CHAT COMPLETIONS")
-            config_dict = {
-                "verbose": False,
-                "model": "CodeChat",
-                "max_steps": 0,
-                "system_prompt_id": "v1",
-                "use_server_subagents": False,
-                "agent_md_path": None,
-                "limit_project_metadata": True,
-                "console_trace": False,
-                "dump_storage": False,
-                "threads_data_path": tmp_dir,
-                "agent_url": "http://backend.local/v1/responses",
-                "completions_url": "http://backend.local/v1/chat/completions",
-                "backend_api_mode": "responses",
-                "chat_completions_system_prompt_path": prompt_path,
-                "use_ssl": True,
-                "use_retry": False,
-                "x_cl_id": 12345,
-                "no_tool_call_max_count": 5,
-            }
-            ctx = SimpleNamespace(
-                config_dict=config_dict,
-                auth_connector=None,
-                logger=logging.getLogger("test_backend_mode_switch"),
-                logging_path=os.path.join(tmp_dir, "test.log"),
-                tools_spec=[],
-                tools_description=[],
-            )
-
-            with patch.object(
-                agent_executor_module, "get_skills_registry", return_value=_SkillsRegistryStub()
-            ), patch.object(
-                processing_module, "request_backend", side_effect=_mock_responses_backend
-            ), patch.object(
-                processing_module,
-                "request_backend_chat_completions",
-                side_effect=_mock_completions_backend,
-            ):
-                executor = agent_executor_module.AgentExecutor(ctx)
-                thread_id = "switch_mode_1"
-
-                result_step_1 = executor.run(
-                    "step one",
-                    thread_id=thread_id,
-                    system="cli",
-                    verbose=False,
-                )
-                self.assertIn("step limits", result_step_1)
-
-                config_dict["backend_api_mode"] = "chat_completions"
-                result_step_2 = executor.run(
-                    "step two",
-                    thread_id=thread_id,
-                    system="cli",
-                    verbose=False,
-                )
-                self.assertIn("step limits", result_step_2)
-
-                threads_dir = resolve_threads_dir(config_dict)
-                meta_after_chat = load_thread_meta(threads_dir, "cli", thread_id)
-                self.assertEqual(
-                    meta_after_chat.get("backend_api_mode"), "chat_completions"
-                )
-                self.assertEqual(
-                    meta_after_chat.get("chat_completions_system_prompt_rendered"),
-                    "SYSTEM PROMPT FOR CHAT COMPLETIONS",
+        try:
+            with tempfile.TemporaryDirectory() as tmp_dir:
+                prompt_path = os.path.join(tmp_dir, "chat_completions_system_prompt.md")
+                with open(prompt_path, "w", encoding="utf-8") as fd:
+                    fd.write("SYSTEM PROMPT FOR CHAT COMPLETIONS")
+                config_dict = {
+                    "verbose": False,
+                    "model": "CodeChat",
+                    "max_steps": 0,
+                    "system_prompt_id": "v1",
+                    "use_server_subagents": False,
+                    "agent_md_path": None,
+                    "limit_project_metadata": True,
+                    "console_trace": False,
+                    "dump_storage": False,
+                    "threads_data_path": tmp_dir,
+                    "agent_url": "http://backend.local/v1/responses",
+                    "completions_url": "http://backend.local/v1/chat/completions",
+                    "backend_api_mode": "responses",
+                    "chat_completions_system_prompt_path": prompt_path,
+                    "use_ssl": True,
+                    "use_retry": False,
+                    "x_cl_id": 12345,
+                    "no_tool_call_max_count": 5,
+                    "summary_params": {
+                        "chat_completions_summary_trigger_chars": 0,
+                    },
+                }
+                ctx = SimpleNamespace(
+                    config_dict=config_dict,
+                    auth_connector=None,
+                    logger=logging.getLogger("test_backend_mode_switch"),
+                    logging_path=os.path.join(tmp_dir, "test.log"),
+                    tools_spec=[],
+                    tools_description=[],
                 )
 
-                config_dict["backend_api_mode"] = "responses"
-                result_step_3 = executor.run(
-                    "step three",
-                    thread_id=thread_id,
-                    system="cli",
-                    verbose=False,
-                )
-                self.assertIn("step limits", result_step_3)
-
-                self.assertEqual(len(responses_calls), 2)
-                self.assertEqual(len(completions_calls), 1)
-
-                completions_payload = completions_calls[0]["data"]
-                self.assertIn("messages", completions_payload)
-                self.assertGreaterEqual(len(completions_payload["messages"]), 2)
-                self.assertEqual(completions_payload["messages"][0].get("role"), "system")
-                self.assertEqual(
-                    completions_payload["messages"][0].get("content"),
-                    "SYSTEM PROMPT FOR CHAT COMPLETIONS",
-                )
-                # На шаге chat/completions должна попасть история из предыдущего responses шага.
-                self.assertTrue(
-                    any(
-                        isinstance(m, dict)
-                        and m.get("role") == "assistant"
-                        and isinstance(m.get("content"), str)
-                        and "resp step 1" in m.get("content", "")
-                        for m in completions_payload["messages"]
+                def _mock_chat_completions_policy(**kwargs):
+                    payload = kwargs["payload_factory"](kwargs["initial_max_tokens"])
+                    completions_calls.append(
+                        {
+                            "data": payload,
+                            "headers": kwargs["headers"],
+                            "url": kwargs["url"],
+                        }
                     )
-                )
+                    return _mock_completions_backend(
+                        payload,
+                        kwargs["headers"],
+                        kwargs["url"],
+                        verify=kwargs["verify"],
+                        use_retry=kwargs["use_retry"],
+                        logger=kwargs.get("logger"),
+                    ), payload
 
-                threads_dir = resolve_threads_dir(config_dict)
-                meta = load_thread_meta(threads_dir, "cli", thread_id)
-                self.assertEqual(meta.get("backend_api_mode"), "responses")
-                self.assertEqual(meta.get("previous_response_id"), "resp_2")
-                self.assertEqual(meta.get("last_backend_response_id"), "resp_2")
-                self.assertNotIn(
-                    "chat_completions_system_prompt_rendered", meta
-                )
+                with patch.object(
+                    agent_executor_module,
+                    "get_skills_registry",
+                    return_value=_SkillsRegistryStub(),
+                ), patch.object(
+                    processing_module, "request_backend", side_effect=_mock_responses_backend
+                ), patch.object(
+                    processing_module,
+                    "request_chat_completions_with_policy",
+                    side_effect=_mock_chat_completions_policy,
+                ):
+                    executor = agent_executor_module.AgentExecutor(ctx)
+                    thread_id = "switch_mode_1"
+
+                    result_step_1 = executor.run(
+                        "step one",
+                        thread_id=thread_id,
+                        system="cli",
+                        verbose=False,
+                    )
+                    self.assertIn("step limits", result_step_1)
+
+                    config_dict["backend_api_mode"] = "chat_completions"
+                    result_step_2 = executor.run(
+                        "step two",
+                        thread_id=thread_id,
+                        system="cli",
+                        verbose=False,
+                    )
+                    self.assertIn("step limits", result_step_2)
+
+                    threads_dir = resolve_threads_dir(config_dict)
+                    meta_after_chat = load_thread_meta(threads_dir, "cli", thread_id)
+                    self.assertEqual(
+                        meta_after_chat.get("backend_api_mode"), "chat_completions"
+                    )
+                    self.assertEqual(
+                        meta_after_chat.get("chat_completions_system_prompt_rendered"),
+                        "SYSTEM PROMPT FOR CHAT COMPLETIONS",
+                    )
+
+                    config_dict["backend_api_mode"] = "responses"
+                    result_step_3 = executor.run(
+                        "step three",
+                        thread_id=thread_id,
+                        system="cli",
+                        verbose=False,
+                    )
+                    self.assertIn("step limits", result_step_3)
+
+                    self.assertEqual(len(responses_calls), 2)
+                    self.assertGreaterEqual(len(completions_calls), 1)
+
+                    completions_payload = completions_calls[0]["data"]
+                    self.assertIn("messages", completions_payload)
+                    self.assertGreaterEqual(len(completions_payload["messages"]), 2)
+                    self.assertEqual(completions_payload["messages"][0].get("role"), "system")
+                    self.assertEqual(
+                        completions_payload["messages"][0].get("content"),
+                        "SYSTEM PROMPT FOR CHAT COMPLETIONS",
+                    )
+                    self.assertTrue(
+                        any(
+                            isinstance(m, dict)
+                            and m.get("role") == "assistant"
+                            and isinstance(m.get("content"), str)
+                            and "resp step 1" in m.get("content", "")
+                            for m in completions_payload["messages"]
+                        )
+                    )
+
+                    threads_dir = resolve_threads_dir(config_dict)
+                    meta = load_thread_meta(threads_dir, "cli", thread_id)
+                    self.assertEqual(meta.get("backend_api_mode"), "responses")
+                    self.assertEqual(meta.get("previous_response_id"), "resp_2")
+                    self.assertEqual(meta.get("last_backend_response_id"), "resp_2")
+                    self.assertNotIn(
+                        "chat_completions_system_prompt_rendered",
+                        meta,
+                    )
+        finally:
+            _restore_tools_and_dependents()
 
 
 if __name__ == "__main__":

@@ -5,11 +5,8 @@ import os
 from functools import partial
 from typing import Any, Callable, Dict, List, Optional
 
-from summarize.compaction import (
-    history_exceeds_summary_trigger,
-    run_summary_compaction,
-)
 from config_modules.stored_outputs import get_stored_tool_outputs_max_entries
+from run_summary_coordinator import RunSummaryCoordinator
 from summarize.config import parse_summary_trigger_chars
 from states import State, save_state
 from tools import build_tools_data
@@ -120,13 +117,16 @@ class SubagentRunner:
             persist_messages_callback = partial(
                 self._persist_runtime_step, child_state
             )
-            pre_backend_compaction_hook = partial(
-                self._run_pre_backend_summary,
-                tool_name,
-                child_ctx,
-                child_state,
-                summary_trigger_chars,
+            summary = RunSummaryCoordinator(
+                ctx=child_ctx,
+                state=child_state,
+                thread_session=None,
+                summary_trigger_chars=summary_trigger_chars,
+                is_cli_mode=False,
+                pre_backend_trigger_reason="subagent_pre_backend",
+                logger=_log,
             )
+            pre_backend_compaction_hook = summary.pre_backend_compaction_hook
 
         try:
             result = run_agent_func(
@@ -194,58 +194,6 @@ class SubagentRunner:
         self, child_state: State, step_messages: List[Dict[str, Any]]
     ) -> None:
         child_state.append_user_messages_to_log(step_messages)
-
-    def _current_backend_event_batch(
-        self, current_messages: List[Dict[str, Any]], mode: str
-    ) -> List[Dict[str, Any]]:
-        if not current_messages:
-            return []
-        if mode == "user_ask":
-            return [current_messages[-1]]
-        if mode == "function_call_output":
-            return [m for m in current_messages if isinstance(m, dict)]
-        return []
-
-    def _run_pre_backend_summary(
-        self,
-        tool_name: str,
-        child_ctx: Any,
-        child_state: State,
-        summary_trigger_chars: int,
-        current_messages: List[Dict[str, Any]],
-        mode: str,
-    ) -> None:
-        try:
-            if not history_exceeds_summary_trigger(
-                state=child_state,
-                summary_trigger_chars=summary_trigger_chars,
-            ):
-                return
-            preserved_batch = self._current_backend_event_batch(current_messages, mode)
-            if preserved_batch:
-                state_messages = list(getattr(child_state, "messages", []) or [])
-                if (
-                    len(state_messages) >= len(preserved_batch)
-                    and state_messages[-len(preserved_batch):] == preserved_batch
-                ):
-                    child_state.messages = state_messages[:-len(preserved_batch)]
-            try:
-                run_summary_compaction(
-                    ctx=child_ctx,
-                    state=child_state,
-                    trigger_reason="subagent_pre_backend",
-                    is_cli_mode=False,
-                )
-            finally:
-                child_state.messages += preserved_batch
-            if preserved_batch:
-                current_messages[:] = preserved_batch
-        except Exception:
-            _log.warning(
-                "Subagent %s pre-backend summary failed",
-                tool_name,
-                exc_info=True,
-            )
 
     def _build_child_state(self, agent_role: str) -> State:
         """Создать дочерний State, наследуя общие данные от оркестратора."""

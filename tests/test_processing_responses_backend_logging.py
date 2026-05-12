@@ -1,8 +1,25 @@
+import importlib
 import logging
 import sys
 import types
 from pathlib import Path
 from types import SimpleNamespace
+
+
+def teardown_module(_module) -> None:
+    for name in list(sys.modules):
+        if name == "tools" or name.startswith("tools."):
+            sys.modules.pop(name, None)
+    real_tools = importlib.import_module("tools")
+    proc = sys.modules.get("processing_responses")
+    if proc is not None:
+        proc.apply_tool = real_tools.apply_tool
+        proc.WrongFunctionArgumentsException = (
+            real_tools.WrongFunctionArgumentsException
+        )
+    cycle_stop_mod = sys.modules.get("message_policy.cycle_stop")
+    if cycle_stop_mod is not None:
+        cycle_stop_mod.apply_tool = real_tools.apply_tool
 
 
 def _stub_tools_modules() -> None:
@@ -27,10 +44,19 @@ def _stub_tools_modules() -> None:
     sys.modules["tools"] = tools_pkg
 
 
-_stub_tools_modules()
+processing_module = None
+State = None
 
-from processing_responses import _request_backend_canonical  # noqa: E402
-from states import State  # noqa: E402
+
+def setup_module(_module) -> None:
+    global processing_module, State
+    _stub_tools_modules()
+    import processing_responses as proc
+    from states import State as St
+
+    processing_module = proc
+    proc.apply_tool = sys.modules["tools"].apply_tool
+    State = St
 
 
 def test_chat_completions_logs_raw_backend_payload_on_conversion_error(caplog, monkeypatch):
@@ -47,9 +73,17 @@ def test_chat_completions_logs_raw_backend_payload_on_conversion_error(caplog, m
             {"model": "CodeChat", "messages": [{"role": "user", "content": "ping"}], "tools": []},
         )
 
-    monkeypatch.setattr("processing_responses.create_call_headers", _fake_create_call_headers)
-    monkeypatch.setattr("processing_responses.create_call_data_completions", _fake_create_call_data)
-    monkeypatch.setattr("processing_responses.request_chat_completions_with_policy", _fake_request_policy)
+    monkeypatch.setattr(
+        processing_module, "create_call_headers", _fake_create_call_headers
+    )
+    monkeypatch.setattr(
+        processing_module, "create_call_data_completions", _fake_create_call_data
+    )
+    monkeypatch.setattr(
+        processing_module,
+        "request_chat_completions_with_policy",
+        _fake_request_policy,
+    )
 
     logger = logging.getLogger("test_backend_payload_logging")
     ctx = SimpleNamespace(
@@ -74,7 +108,7 @@ def test_chat_completions_logs_raw_backend_payload_on_conversion_error(caplog, m
 
     with caplog.at_level(logging.ERROR):
         try:
-            _request_backend_canonical(
+            processing_module._request_backend_canonical(
                 [{"role": "user", "content": "hello", "id": "m_1"}],
                 state,
                 ctx,

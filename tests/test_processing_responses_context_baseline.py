@@ -1,3 +1,4 @@
+import importlib
 import logging
 import json
 import sys
@@ -7,6 +8,46 @@ from types import SimpleNamespace
 
 import pytest
 import requests
+
+
+def teardown_module(_module) -> None:
+    # Нельзя выкидывать processing_responses: тесты вида
+    # `from processing_responses import f` держат f с устаревшим __globals__;
+    # monkeypatch затем меняет другой экземпляр модуля.
+    for name in list(sys.modules):
+        if name == "tools" or name.startswith("tools."):
+            sys.modules.pop(name, None)
+    real_tools = importlib.import_module("tools")
+    proc = sys.modules.get("processing_responses")
+    if proc is not None:
+        proc.apply_tool = real_tools.apply_tool
+        proc.WrongFunctionArgumentsException = (
+            real_tools.WrongFunctionArgumentsException
+        )
+    cycle_stop_mod = sys.modules.get("message_policy.cycle_stop")
+    if cycle_stop_mod is not None:
+        cycle_stop_mod.apply_tool = real_tools.apply_tool
+
+
+processing_module = None
+request_policy = None
+run_agent = None
+State = None
+
+
+def setup_module(module) -> None:
+    global processing_module, request_policy, run_agent, State
+    _stub_tools_modules()
+    import processing_responses as pm
+    import request_backend_policy as rq
+    from processing_responses import run_agent as ra
+    from states import State as St
+
+    processing_module = pm
+    request_policy = rq
+    run_agent = ra
+    State = St
+    pm.apply_tool = sys.modules["tools"].apply_tool
 
 
 def _stub_tools_modules() -> None:
@@ -42,23 +83,23 @@ def _stub_tools_modules() -> None:
             return json.dumps(result, ensure_ascii=False)
         raise AssertionError("apply_tool should not be called in this test")
 
+    def _build_tools_data(_config_dict):
+        return {}, [], []
+
     tools_pkg.apply_tool = _apply_tool
+    tools_pkg.build_tools_data = _build_tools_data
     tools_pkg.WrongFunctionArgumentsException = _WrongFunctionArgumentsException
     root = Path(__file__).resolve().parents[1]
     tools_dir = root / "src" / "tools"
     tools_pkg.__path__ = [str(tools_dir)]
     sys.modules["tools"] = tools_pkg
 
+    import message_policy.cycle_stop as _cycle_stop_mod
 
-_stub_tools_modules()
-
-import processing_responses as processing_module  # noqa: E402
-import request_backend_policy as request_policy  # noqa: E402
-from processing_responses import run_agent  # noqa: E402
-from states import State  # noqa: E402
+    _cycle_stop_mod.apply_tool = tools_pkg.apply_tool
 
 
-def _make_state(*, max_steps: int = 5) -> State:
+def _make_state(*, max_steps: int = 5):
     return State(
         verbose=False,
         model="CodeChat",
@@ -184,6 +225,29 @@ def test_run_agent_calls_pre_backend_hook_before_tool_output_backend(monkeypatch
 
     assert result == '{"ok": true}'
     assert order == ["pre:function_call_output", "backend"]
+
+
+def test_run_agent_responses_mode_does_not_call_pre_backend_hook(monkeypatch):
+    """Режим responses не должен вызывать pre-backend compaction (см. spec Step 0)."""
+    hook_calls: list[str] = []
+
+    def _pre_backend_hook(_messages, mode):
+        hook_calls.append(str(mode))
+
+    def _fake_process_user_ask(_messages, _state, _ctx):
+        return [_submit_solution_call()], "resp_1"
+
+    monkeypatch.setattr(processing_module, "process_user_ask", _fake_process_user_ask)
+
+    result = run_agent(
+        [{"role": "user", "content": "hello", "id": "m1"}],
+        _make_state(),
+        _make_ctx(backend_api_mode="responses"),
+        pre_backend_compaction_hook=_pre_backend_hook,
+    )
+
+    assert result == '{"ok": true}'
+    assert hook_calls == []
 
 
 def test_chat_completions_http_error_retries_with_reduced_max_tokens(monkeypatch):

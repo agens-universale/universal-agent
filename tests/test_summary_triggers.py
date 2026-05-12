@@ -1,3 +1,4 @@
+import importlib
 import logging
 import os
 import sys
@@ -8,6 +9,49 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
+
+
+def teardown_module(_module) -> None:
+    for mod in ("agent_executor", "run_summary_coordinator"):
+        sys.modules.pop(mod, None)
+    for name in list(sys.modules):
+        if name == "tools" or name.startswith("tools."):
+            sys.modules.pop(name, None)
+    real_tools = importlib.import_module("tools")
+    proc = sys.modules.get("processing_responses")
+    if proc is not None:
+        proc.apply_tool = real_tools.apply_tool
+        proc.WrongFunctionArgumentsException = (
+            real_tools.WrongFunctionArgumentsException
+        )
+    cycle_stop_mod = sys.modules.get("message_policy.cycle_stop")
+    if cycle_stop_mod is not None:
+        cycle_stop_mod.apply_tool = real_tools.apply_tool
+
+
+agent_executor_module = None
+run_summary_coordinator_module = None
+
+
+def setup_module(_module) -> None:
+    global agent_executor_module, run_summary_coordinator_module
+    _stub_tools_modules()
+    tools_pkg = sys.modules["tools"]
+    import processing_responses as pr
+
+    pr.apply_tool = tools_pkg.apply_tool
+    pr.WrongFunctionArgumentsException = tools_pkg.WrongFunctionArgumentsException
+    cycle_stop_mod = sys.modules.get("message_policy.cycle_stop")
+    if cycle_stop_mod is not None:
+        cycle_stop_mod.apply_tool = tools_pkg.apply_tool
+
+    for mod in ("agent_executor", "run_summary_coordinator"):
+        sys.modules.pop(mod, None)
+    import agent_executor as ae
+    import run_summary_coordinator as rsc
+
+    agent_executor_module = ae
+    run_summary_coordinator_module = rsc
 
 
 def _stub_tools_modules() -> None:
@@ -47,11 +91,6 @@ def _stub_tools_modules() -> None:
 class _SkillsRegistryStub:
     def list_skills(self):
         return []
-
-
-_stub_tools_modules()
-
-import agent_executor as agent_executor_module  # noqa: E402
 
 
 class SummaryTriggersTest(unittest.TestCase):
@@ -102,6 +141,8 @@ class SummaryTriggersTest(unittest.TestCase):
 
             def _fake_run_agent(messages, state, _ctx, **kwargs):
                 call_order.append("run_agent")
+                # Как в processing_responses.run_agent: сначала коммит батча в state.
+                state.messages += list(messages)
                 pre_backend_hook = kwargs.get("pre_backend_compaction_hook")
                 if pre_backend_hook is not None:
                     pre_backend_hook(messages, "user_ask")
@@ -116,11 +157,11 @@ class SummaryTriggersTest(unittest.TestCase):
             ), patch.object(
                 agent_executor_module, "run_agent", side_effect=_fake_run_agent
             ), patch.object(
-                agent_executor_module,
+                run_summary_coordinator_module,
                 "history_exceeds_summary_trigger",
                 return_value=True,
             ), patch.object(
-                agent_executor_module,
+                run_summary_coordinator_module,
                 "run_summary_compaction",
                 side_effect=_record_summary_call,
             ):
@@ -138,6 +179,7 @@ class SummaryTriggersTest(unittest.TestCase):
             calls: list[str] = []
 
             def _fake_run_agent(messages, state, _ctx, **kwargs):
+                state.messages += list(messages)
                 pre_backend_hook = kwargs.get("pre_backend_compaction_hook")
                 if pre_backend_hook is not None:
                     pre_backend_hook(messages, "user_ask")
@@ -151,11 +193,13 @@ class SummaryTriggersTest(unittest.TestCase):
             ), patch.object(
                 agent_executor_module, "run_agent", side_effect=_fake_run_agent
             ), patch.object(
-                agent_executor_module,
+                run_summary_coordinator_module,
                 "history_exceeds_summary_trigger",
                 return_value=True,
             ), patch.object(
-                agent_executor_module, "run_summary_compaction", side_effect=_record
+                run_summary_coordinator_module,
+                "run_summary_compaction",
+                side_effect=_record,
             ):
                 executor = agent_executor_module.AgentExecutor(ctx)
                 result = executor.run("hello", system="cli", verbose=False)
@@ -172,13 +216,39 @@ class SummaryTriggersTest(unittest.TestCase):
             ), patch.object(
                 agent_executor_module, "run_agent", return_value="ok"
             ), patch.object(
-                agent_executor_module, "run_summary_compaction"
+                run_summary_coordinator_module, "run_summary_compaction"
             ) as compaction_mock:
                 executor = agent_executor_module.AgentExecutor(ctx)
                 result = executor.run("hello", thread_id="thr1", system="cli", verbose=False)
                 self.assertEqual(result, "ok")
 
             compaction_mock.assert_not_called()
+
+    def test_chat_completions_passes_pre_backend_hook_to_run_agent(self):
+        """Wiring: chat/completions должен передавать pre_backend_compaction_hook в run_agent (spec Step 0)."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            ctx = self._make_ctx(tmp_dir, backend_api_mode="chat_completions")
+            captured: dict = {}
+
+            def _fake_run_agent(messages, state, _ctx, **kwargs):
+                captured.update(kwargs)
+                return "ok"
+
+            with patch.object(
+                agent_executor_module, "get_skills_registry", return_value=_SkillsRegistryStub()
+            ), patch.object(
+                agent_executor_module, "run_agent", side_effect=_fake_run_agent
+            ), patch.object(
+                run_summary_coordinator_module,
+                "history_exceeds_summary_trigger",
+                return_value=False,
+            ):
+                executor = agent_executor_module.AgentExecutor(ctx)
+                result = executor.run("hello", system="cli", verbose=False)
+                self.assertEqual(result, "ok")
+
+            hook = captured.get("pre_backend_compaction_hook")
+            self.assertTrue(callable(hook))
 
     def test_thread_history_not_readded_into_current_user_messages(self):
         with tempfile.TemporaryDirectory() as tmp_dir:

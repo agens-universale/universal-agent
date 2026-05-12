@@ -288,6 +288,8 @@ class ThreadSession:
         self.previous_response_id = previous_response_id
         self.backend_api_mode = backend_api_mode
         self.runtime_messages: List[Dict[str, Any]] = []
+        # Снимок known_message_keys до записи последнего step_messages (для compaction user_ask).
+        self.known_keys_snapshot_before_last_batch: Optional[frozenset[str]] = None
 
     @classmethod
     def from_config(
@@ -348,6 +350,7 @@ class ThreadSession:
         previous_response_id: Optional[str],
     ) -> None:
         known_before = set(self.known_message_keys)
+        self.known_keys_snapshot_before_last_batch = frozenset(known_before)
         written = append_new_thread_messages(
             self.threads_dir,
             self.system_id,

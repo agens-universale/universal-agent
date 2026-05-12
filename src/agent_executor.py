@@ -7,7 +7,6 @@ State создаётся заново при каждом run(). Возвращ�
 """
 
 import os
-import json
 import threading
 from typing import Any
 
@@ -15,10 +14,7 @@ from processing_responses import run_agent
 from run_context import RunContext
 from config_modules.stored_outputs import get_stored_tool_outputs_max_entries
 from message_policy.chat_completions import repair_tool_call_pairing
-from summarize.compaction import (
-    history_exceeds_summary_trigger,
-    run_summary_compaction,
-)
+from run_summary_coordinator import RunSummaryCoordinator
 from summarize.config import parse_summary_trigger_chars
 from summarize.summary_serialization import history_has_dialog_summary_message
 from states import State, SharedStateData, save_state, dump_storage
@@ -183,133 +179,17 @@ class AgentExecutor:
             self._state = state
             self._pending_messages = []
 
-        def _resolve_summary_trace_path() -> str:
-            path = getattr(self._ctx, "summary_trace_path", "")
-            if isinstance(path, str) and path.strip():
-                return path.strip()
-            cfg = getattr(self._ctx, "config_dict", {}) or {}
-            if not cfg.get("save_logs", False):
-                return ""
-            base_dir = cfg.get("logs_dump_dir") or os.getcwd()
-            return os.path.join(base_dir, "summary_trace.jsonl")
+        summary = RunSummaryCoordinator(
+            ctx=self._ctx,
+            state=state,
+            thread_session=thread_session,
+            summary_trigger_chars=summary_trigger_chars,
+            is_cli_mode=is_cli_mode,
+            pre_backend_trigger_reason="pre_backend",
+            logger=logger,
+        )
 
-        def _append_summary_trace(
-            *, trigger_reason: str, trace_data: dict, newly_summarized_message_id: str
-        ) -> None:
-            trace_path = _resolve_summary_trace_path()
-            if not trace_path:
-                return
-            trace_dir = os.path.dirname(trace_path)
-            if trace_dir:
-                os.makedirs(trace_dir, exist_ok=True)
-            payload = {
-                "trigger_reason": trigger_reason,
-                "summary_trace": trace_data or {},
-                "newly_summarized_message_id": newly_summarized_message_id,
-            }
-            with open(trace_path, "a", encoding="utf-8") as fd:
-                fd.write(json.dumps(payload, ensure_ascii=False))
-                fd.write("\n")
-
-        def _handle_summary_applied(event: dict[str, Any]) -> None:
-            if thread_session is not None:
-                thread_session.archive_and_compact_summary_payload(
-                    event.get("summary_payload", {})
-                )
-            _append_summary_trace(
-                trigger_reason=str(event.get("trigger_reason") or ""),
-                trace_data=event.get("summary_trace", {}),
-                newly_summarized_message_id=str(
-                    event.get("newly_summarized_message_id") or ""
-                ),
-            )
-
-        def _current_backend_event_batch(
-            current_messages: list[dict], mode: str
-        ) -> list[dict]:
-            if not current_messages:
-                return []
-            if mode == "user_ask":
-                return [current_messages[-1]]
-            if mode == "function_call_output":
-                return [m for m in current_messages if isinstance(m, dict)]
-            return []
-
-        def _remove_suffix_from_state(suffix: list[dict]) -> None:
-            if not suffix:
-                return
-            current_state_messages = list(getattr(state, "messages", []) or [])
-            if len(current_state_messages) < len(suffix):
-                return
-            if current_state_messages[-len(suffix):] != suffix:
-                return
-            state.messages = current_state_messages[:-len(suffix)]
-
-        def _pre_backend_compaction_hook(
-            current_messages: list[dict], mode: str
-        ) -> None:
-            if (
-                state.backend_api_mode != "chat_completions"
-                or summary_trigger_chars <= 0
-            ):
-                return
-            if not history_exceeds_summary_trigger(
-                state=state,
-                summary_trigger_chars=summary_trigger_chars,
-            ):
-                return
-            preserved_batch = _current_backend_event_batch(current_messages, mode)
-            _remove_suffix_from_state(preserved_batch)
-            try:
-                run_summary_compaction(
-                    ctx=self._ctx,
-                    state=state,
-                    trigger_reason="pre_backend",
-                    is_cli_mode=is_cli_mode,
-                    on_summary_applied=_handle_summary_applied,
-                )
-            finally:
-                state.messages += preserved_batch
-            if thread_session is not None and preserved_batch:
-                thread_session.persist_batch(
-                    preserved_batch, previous_response_id=state.previous_response_id
-                )
-            if preserved_batch:
-                current_messages[:] = preserved_batch
-
-        if backend_api_mode == "chat_completions" and summary_trigger_chars > 0:
-            try:
-                if history_exceeds_summary_trigger(
-                    state=state,
-                    summary_trigger_chars=summary_trigger_chars,
-                ):
-                    run_summary_compaction(
-                        ctx=self._ctx,
-                        state=state,
-                        trigger_reason="pre_run",
-                        is_cli_mode=is_cli_mode,
-                        on_summary_applied=_handle_summary_applied,
-                    )
-            except Exception as summarize_exc:
-                if logger is not None:
-                    if thread_session is not None:
-                        logger.warning(
-                            "summary_failed reason=pre_run thread_id=%s error=%s",
-                            thread_session.thread_id,
-                            summarize_exc,
-                            exc_info=True,
-                        )
-                    else:
-                        logger.warning(
-                            "summary_failed reason=pre_run error=%s",
-                            summarize_exc,
-                            exc_info=True,
-                        )
-                if is_cli_mode:
-                    print(
-                        "[summary] Ошибка суммаризации: "
-                        f"error={summarize_exc}"
-                    )
+        summary.pre_run_compact_if_needed(trigger_reason="pre_run")
 
         new_user_message = {
             "role": "user",
@@ -443,7 +323,7 @@ class AgentExecutor:
             self._ctx,
             get_full_history_messages=get_full_history_messages,
             persist_messages_callback=persist_messages_callback,
-            pre_backend_compaction_hook=_pre_backend_compaction_hook,
+            pre_backend_compaction_hook=summary.pre_backend_compaction_hook,
             get_pending_messages=get_pending_messages,
             check_stop=check_stop,
         )

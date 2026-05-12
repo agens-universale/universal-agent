@@ -93,9 +93,11 @@ class TestBuildInitialMessages:
         child = runner._build_child_state("role")
         messages = runner._build_initial_messages(child, "role", "Do the task")
 
-        assert len(messages) == 1
-        assert messages[0]["role"] == "user"
-        assert messages[0]["content"] == "Do the task"
+        # При отсутствии промпта в State подставляется дефолтный файл субагента.
+        assert len(messages) == 2
+        assert messages[0]["role"] == "system"
+        assert messages[1]["role"] == "user"
+        assert messages[1]["content"] == "Do the task"
 
     def test_empty_system_prompt_starts_with_user(self):
         orch = _make_orchestrator_state(system_prompt="   ")
@@ -104,8 +106,9 @@ class TestBuildInitialMessages:
         child = runner._build_child_state("role")
         messages = runner._build_initial_messages(child, "role", "task text")
 
-        assert len(messages) == 1
-        assert messages[0]["role"] == "user"
+        assert len(messages) == 2
+        assert messages[0]["role"] == "system"
+        assert messages[1]["role"] == "user"
 
     def test_messages_have_id_field(self):
         prompt = "System\n<specific_role>x</specific_role>"
