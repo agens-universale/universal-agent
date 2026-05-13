@@ -1,99 +1,44 @@
-# LiteLLM Proxy config — 4 providers behind one OpenAI-compatible endpoint.
-# Run:
-#   python litellm/install.py   # one-time: verify dep + seed .env from .env.example
-#   $EDITOR litellm/.env        # fill in GIGACHAT_CREDENTIALS / YANDEX_API_KEY / OPENROUTER_API_KEY
-#   python litellm/run.py       # foreground; serves litellm --config proxy_config.yaml --port 4000
-#
-# Proxy will expose:
-#   POST http://localhost:4000/v1/chat/completions
-#   GET  http://localhost:4000/v1/models
-#   GET  http://localhost:4000/health
+# LiteLLM Proxy config — GigaChat-2 and YandexGPT aliases behind one
+# OpenAI-compatible endpoint at http://localhost:4000/v1/chat/completions.
 
 model_list:
-  # ── GigaChat (native LiteLLM provider) ────────────────────────────────
-  # Через native gigachat/ маршрут. LiteLLM сам делает:
-  #   - OAuth (через GIGACHAT_CREDENTIALS, scope GIGACHAT_API_PERS)
-  #   - model 'gigachat/X' → upstream 'X'
-  #   - tools → functions (raw, без нормализации schema)
-  #   - role tool → function, tool_calls → function_call
-  # Наш callback (litellm/callbacks/provider_normalizer.py) ДОПОЛНЯЕТ
-  # этим путём 5+4 walker'а нормализации tool schemas: refs / anyOf /
-  # nullable / properties / additionalProperties / strict / reserved names
-  # / unsupported keywords. То есть LiteLLM делает то что и gpt2giga,
-  # минус schema-нормализация — её закрывает наш callback.
-  #
-  # Sber иногда отдаёт 402/429 на free tier при rate-limit — это
-  # transient, перезапускать прокси не нужно, подождать минуту.
-  - model_name: gigachat
+  - model_name: gigachat-2-lite
     litellm_params:
-      model: gigachat/GigaChat           # Lite legacy alias
+      model: gigachat/GigaChat-2
       api_key: os.environ/GIGACHAT_CREDENTIALS
       ssl_verify: false
 
-  - model_name: gigachat-2
-    litellm_params:
-      model: gigachat/GigaChat-2         # Lite v2 (рекомендуется)
-      api_key: os.environ/GIGACHAT_CREDENTIALS
-      ssl_verify: false
-
-  - model_name: gigachat-pro
+  - model_name: gigachat-2-pro
     litellm_params:
       model: gigachat/GigaChat-2-Pro
       api_key: os.environ/GIGACHAT_CREDENTIALS
       ssl_verify: false
 
-  - model_name: gigachat-max
+  - model_name: gigachat-2-max
     litellm_params:
       model: gigachat/GigaChat-2-Max
       api_key: os.environ/GIGACHAT_CREDENTIALS
       ssl_verify: false
 
-  # ── YandexGPT (via Yandex Cloud OpenAI-compat endpoint) ───────────────
   - model_name: yandex-gpt-lite
     litellm_params:
       model: openai/gpt://__YANDEX_FOLDER_ID__/yandexgpt-lite/latest
       api_base: https://llm.api.cloud.yandex.net/v1
       api_key: os.environ/YANDEX_API_KEY
 
-  - model_name: yandex-gpt
+  - model_name: yandex-gpt-pro
     litellm_params:
       model: openai/gpt://__YANDEX_FOLDER_ID__/yandexgpt/latest
       api_base: https://llm.api.cloud.yandex.net/v1
       api_key: os.environ/YANDEX_API_KEY
 
-  # ── OpenRouter (native LiteLLM provider) ──────────────────────────────
-  - model_name: openrouter-qwen-coder
-    litellm_params:
-      model: openrouter/qwen/qwen3-coder
-      api_key: os.environ/OPENROUTER_API_KEY
-      extra_headers:
-        HTTP-Referer: http://localhost
-        X-Title: gc-cli-pub-test
-
-  - model_name: openrouter-claude
-    litellm_params:
-      model: openrouter/anthropic/claude-sonnet-4.5
-      api_key: os.environ/OPENROUTER_API_KEY
-
-  # ── Ollama (local) ────────────────────────────────────────────────────
-  - model_name: ollama-qwen
-    litellm_params:
-      model: ollama_chat/qwen3:8b
-      api_base: http://localhost:11434
-
 litellm_settings:
-  drop_params: true        # silently drop provider-unsupported params (e.g. logit_bias on Ollama)
+  drop_params: true
   set_verbose: false
   num_retries: 2
   request_timeout: 600
   telemetry: false
-  # Pre-call hook: normalize requests for strict providers (GigaChat schemas,
-  # Yandex empty-content). Keeps agent code provider-neutral — all quirks live
-  # here, in the proxy, not in gc-cli-pub.
   callbacks: callbacks.provider_normalizer.proxy_handler_instance
 
 general_settings:
   master_key: sk-litellm-test-master-1234
-  database_url: null       # no DB — Admin UI disabled, but /v1/* endpoints work fine
-  # To enable Admin UI later: add Postgres + `pip install 'litellm[proxy]' prisma`,
-  # then set database_url: os.environ/DATABASE_URL and store_model_in_db: true

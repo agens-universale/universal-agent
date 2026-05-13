@@ -192,15 +192,11 @@ litellm/
 
 | Alias | Апстрим | Аутентификация | Где получить ключ |
 |---|---|---|---|
-| `gigachat` | GigaChat (Lite legacy) | OAuth, `GIGACHAT_CREDENTIALS` | https://developers.sber.ru/studio/ |
-| `gigachat-2` | GigaChat 2 (Lite v2, free Freemium) | OAuth, `GIGACHAT_CREDENTIALS` | https://developers.sber.ru/studio/ |
-| `gigachat-pro` | GigaChat 2 Pro | OAuth, `GIGACHAT_CREDENTIALS` | https://developers.sber.ru/studio/ |
-| `gigachat-max` | GigaChat 2 Max | OAuth, `GIGACHAT_CREDENTIALS` | https://developers.sber.ru/studio/ |
+| `gigachat-2-lite` | GigaChat 2 (Lite v2, free Freemium) | OAuth, `GIGACHAT_CREDENTIALS` | https://developers.sber.ru/studio/ |
+| `gigachat-2-pro` | GigaChat 2 Pro | OAuth, `GIGACHAT_CREDENTIALS` | https://developers.sber.ru/studio/ |
+| `gigachat-2-max` | GigaChat 2 Max | OAuth, `GIGACHAT_CREDENTIALS` | https://developers.sber.ru/studio/ |
 | `yandex-gpt-lite` | YandexGPT Lite (`yandexgpt-lite/latest`) | API-key в `YANDEX_API_KEY` | console.cloud.yandex.ru |
-| `yandex-gpt` | **YandexGPT 5 Pro** (`yandexgpt/latest`, flagship) | API-key в `YANDEX_API_KEY` | console.cloud.yandex.ru |
-| `openrouter-qwen-coder` | Qwen3 Coder через OpenRouter | API-key в `OPENROUTER_API_KEY` | openrouter.ai |
-| `openrouter-claude` | Claude Sonnet 4.5 через OpenRouter | API-key в `OPENROUTER_API_KEY` | openrouter.ai |
-| `ollama-qwen` | Qwen3 8B локальный Ollama | без авторизации, `http://localhost:11434` | ollama.com |
+| `yandex-gpt-pro` | **YandexGPT 5 Pro** (`yandexgpt/latest`, flagship) | API-key в `YANDEX_API_KEY` | console.cloud.yandex.ru |
 
 Поле `model` в агентском `config.yml` принимает любой из этих alias. Переключение между провайдерами — смена одного значения.
 
@@ -253,11 +249,7 @@ GigaChat — это случай, в котором задействованы �
 
 ## Преобразования тела запроса под прочих провайдеров
 
-| Провайдер | Что делает прокси |
-|---|---|
-| OpenRouter | маршрут `openrouter/...`, нативное преобразование LiteLLM (`HTTP-Referer`, `X-Title` заголовки), без колбэка |
-| Ollama | маршрут `ollama/...` с `api_base`, нативное преобразование под Ollama API, без колбэка |
-| Любой OpenAI-совместимый эндпоинт (vLLM, llama.cpp, кастомный inference) | generic-маршрут `openai/...` с `api_base`, провайдерные поля через `extra_body`, без колбэка |
+Из коробки сейчас поставляются только GigaChat и YandexGPT. Любой другой OpenAI-совместимый эндпоинт (OpenRouter, Ollama, vLLM, llama.cpp, кастомный inference) подключается одной записью в `model_list` через generic-маршрут `openai/...` либо нативный LiteLLM-маршрут (`openrouter/...`, `ollama_chat/...`) — см. раздел «Подключение своего провайдера».
 
 ## Структура агентского `config.yml`
 

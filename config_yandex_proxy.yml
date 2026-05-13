@@ -13,7 +13,7 @@ backend:
     Authorization: "Bearer sk-litellm-test-master-1234"
 
 agent:
-  model: yandex-gpt
+  model: yandex-gpt-pro
   system_prompt_id: v1
   max_steps: 30
   no_tool_call_max_count: 5

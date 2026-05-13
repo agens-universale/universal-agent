@@ -34,7 +34,7 @@ $EDITOR litellm/.env
 python litellm/run.py
 
 # 4. Использование из gc-cli (в отдельном терминале)
-gc-cli -q "..." --config config_gigachat_proxy.yml --model gigachat-2
+gc-cli -q "..." --config config_gigachat_proxy.yml --model gigachat-2-lite
 ```
 
 ## Конфигурация
@@ -43,10 +43,8 @@ gc-cli -q "..." --config config_gigachat_proxy.yml --model gigachat-2
 
 Список алиасов моделей. Каждый алиас маппится в пару провайдер+модель:
 
-- `gigachat`, `gigachat-2`, `gigachat-pro`, `gigachat-max` → нативный провайдер LiteLLM `gigachat/`
-- `yandex-gpt-lite`, `yandex-gpt` → generic-маршрут `openai/` на Yandex Cloud
-- `openrouter-qwen-coder`, `openrouter-claude` → нативный провайдер LiteLLM `openrouter/`
-- `ollama-qwen` → нативный провайдер LiteLLM `ollama_chat/`
+- `gigachat-2-lite`, `gigachat-2-pro`, `gigachat-2-max` → нативный провайдер LiteLLM `gigachat/`
+- `yandex-gpt-lite`, `yandex-gpt-pro` → generic-маршрут `openai/` на Yandex Cloud OAI-compat endpoint
 
 ### `callbacks/provider_normalizer.py`
 
