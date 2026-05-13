@@ -293,6 +293,79 @@ gc-cli ищет скиллы в трёх местах (project > user > system, 
 
 Чтобы зафиксировать единственный источник скиллов (например, в production), задайте `paths.skills_data_path` в `config.yml` — auto-discovery трёх слоёв при этом отключается.
 
+## Пакеты скиллов
+
+Пакет скиллов — это группировка связанных скиллов в подпапке `skills/<pack-id>/`,
+помеченной файлом `pack.yaml`. Скиллы пакета лежат в подпапках, каждый со своим
+`SKILL.md`. Один из internal-скиллов помечается в `pack.yaml` как `bootstrap_skill`
+и играет роль точки входа в пакет.
+
+### Геометрия
+
+```
+<repo>/skills/                         <gc_data>/skills/    <cwd>/.gc/skills/
+├── swe-task-solver/SKILL.md           (то же)              (то же)
+├── check-article/SKILL.md
+└── superpowers/                       ← пакет (содержит pack.yaml)
+    ├── pack.yaml
+    ├── README.md
+    ├── using-superpowers/SKILL.md     ← bootstrap
+    ├── brainstorming/SKILL.md
+    └── ...
+```
+
+Override-семантика та же что для обычных скиллов: `project > user > system`
+по canonical ID.
+
+### Манифест `pack.yaml`
+
+```yaml
+id: superpowers                       # default = имя папки
+name: Superpowers Methodology
+description: |
+  Process methodology for design, planning, TDD, debugging.
+version: 1.0.0
+source: https://github.com/obra/superpowers
+bootstrap_skill: using-superpowers    # обязательно для видимости в skills_list
+```
+
+### Canonical IDs
+
+- **Flat-скилл**: `<skill-id>` (без префикса), например `swe-task-solver`.
+- **Internal-скилл пакета**: `<pack-id>:<inner-id>`, например `superpowers:brainstorming`.
+
+### Видимость в `skills_list`
+
+По умолчанию `skills_list` возвращает:
+- Все flat-скиллы.
+- По **одной** записи на пакет — bootstrap-скилл (помеченный полями `is_pack_bootstrap: true` и `pack_size: N`).
+
+Internal-скиллы пакета **скрыты** в default-выдаче (чтобы не засорять системный
+промпт). Но они **всегда адресуемы** через canonical ID — `skills_load("superpowers:brainstorming")`
+работает в любом случае.
+
+Чтобы получить полный список internal-скиллов пакета:
+
+```
+skills_list(pack="superpowers")
+```
+
+### Override
+
+Чтобы переопределить конкретный internal-скилл пакета под свой проект — положить
+свой SKILL.md в той же relative-path-структуре в `.gc/skills/`:
+
+```
+<your-repo>/.gc/skills/superpowers/brainstorming/SKILL.md
+```
+
+### Встроенный пакет: superpowers
+
+В состав gc-cli встроен пакет [`superpowers`](skills/superpowers/README.md) —
+методологический набор скиллов (brainstorming, writing-plans, TDD,
+systematic-debugging, code-review discipline). Точка входа —
+`superpowers:using-superpowers`.
+
 ## Project local config (опционально)
 
 Если в корне проекта есть файл `<your-repo>/.gc/config.yml`, gc-cli мерджит его поверх глобального `config.yml` через layered loading:
