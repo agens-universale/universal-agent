@@ -13,8 +13,8 @@
 3. **Особенности API провайдеров** (требование непустого `content`, требование `properties` у объектов в схеме инструментов и т.п.) выносятся либо в LiteLLM Proxy, либо в конфигурацию пользователя.
 4. **Готовое решение под преднастроенных провайдеров** поставляется как «батарейка» — отдельная подпапка `litellm/` в репозитории с заранее настроенным прокси.
 5. **Свой экзотический провайдер** пользователь подключает рядом с прокси, не трогая код агента (`src/`):
-   - в простом случае (OpenAI-совместимый апстрим, возможно с дополнительными полями) — одной записью в `litellm/proxy_config.local.yaml`;
-   - в сложном случае (требуется структурное преобразование тела) — той же записью плюс собственный колбэк в `litellm/callbacks/user/<name>.py`.
+   - в простом случае (OpenAI-совместимый апстрим, возможно с дополнительными полями) — одной записью в `litellm/proxy_config.yaml`;
+   - в сложном случае (требуется структурное преобразование тела) — той же записью плюс собственный колбэк в `litellm/callbacks/_<name>.py`, который подключается в `litellm/callbacks/provider_normalizer.py` (dispatcher).
 
    В обоих случаях изменения изолированы в подпапке `litellm/`. Код агента не правится.
 
@@ -148,21 +148,28 @@ litellm_settings:
 
 Колбэки — это **то самое место**, где живёт знание об особенностях конкретных провайдеров. Не в коде агента, а в файле под `litellm/callbacks/`. Алгоритмы в нём универсальные (`_ensure_object_properties` рекурсивно обходит JSON Schema; `_backfill_empty_content` подменяет пустой `content` на пробел) — диспетчеризация по имени провайдера происходит только тут.
 
-### Подключение пользовательских моделей (`include`)
+### Подстановка значений из `.env` (`__VAR__` placeholders)
 
-LiteLLM поддерживает разбиение конфига на несколько файлов:
+`litellm/proxy_config.yaml` хранится в git и не должен содержать PII (account-specific identifiers, например Yandex `folder_id`). Такие значения объявляются как `__VAR__` placeholder'ы:
 
 ```yaml
-# litellm/proxy_config.yaml (под git)
-include:
-  - proxy_config.local.yaml
-
-model_list:
-  - model_name: gigachat-max
-    ...
+- model_name: yandex-gpt-pro
+  litellm_params:
+    model: openai/gpt://__YANDEX_FOLDER_ID__/yandexgpt/latest
+    api_base: https://llm.api.cloud.yandex.net/v1
+    api_key: os.environ/YANDEX_API_KEY
 ```
 
-Файл `proxy_config.local.yaml` гитом не отслеживается. Пользователь кладёт туда свои записи `model_list` под собственные провайдеры. При старте прокси склеивает оба списка. Если файла нет — прокси стартует без него, выводя предупреждение.
+При запуске `litellm/run.py`:
+
+1. Читает `litellm/.env` → `os.environ`.
+2. Сканирует `proxy_config.yaml` на `__VAR__` placeholder'ы.
+3. Подставляет значения из env → пишет результат в `litellm/proxy_config.local.yaml` (gitignored).
+4. Запускает `litellm --config proxy_config.local.yaml --port <PORT>`.
+
+Если хотя бы один placeholder отсутствует в env — `run.py` выходит с ошибкой и понятным сообщением, перечисляющим какие переменные нужно положить в `.env`.
+
+Механизм generic: любой `__FOO_BAR__` в `proxy_config.yaml` подставляется из соответствующей env переменной. Под `os.environ/X`-синтаксис LiteLLM остаётся вторичной развилкой (он работает только для отдельных полей вроде `api_key`); placeholder'ы дают единый способ для любых строковых подстановок, включая внутри `model:`.
 
 ## Раскладка `litellm/`
 
@@ -171,13 +178,18 @@ LiteLLM как библиотека — **не часть исходного к�
 ```
 litellm/
 ├── proxy_config.yaml          ← под git, канонический набор моделей + регистрация callback
+│                                Содержит __VAR__ placeholder'ы для PII (folder_id и т.п.)
+├── proxy_config.local.yaml    ← gitignored, генерируется `run.py` (placeholder'ы из .env)
 ├── callbacks/
 │   ├── __init__.py
-│   └── provider_normalizer.py ← под git, особенности GigaChat и Yandex (9 walkers + 3-level synth)
-├── install.py                 ← под git, кросс-платформенный installer (dep check + .env seed)
-├── run.py                     ← под git, кросс-платформенный launcher (subprocess litellm --config ...)
+│   ├── provider_normalizer.py ← под git, dispatcher: класс + proxy_handler_instance
+│   ├── _common.py             ← под git, vendor-agnostic helpers (JSON parse, tool_call shape, …)
+│   ├── _gigachat.py           ← под git, 9-walker pre-call + 3-level post-call synth
+│   └── _yandex.py             ← под git, backfill empty content + JSON-in-content synth
+├── install.py                 ← под git, кросс-платформенный installer (pip install + .env seed)
+├── run.py                     ← под git, кросс-платформенный launcher (render config + subprocess litellm)
 ├── README.md                  ← под git, quick-start
-├── .env.example               ← под git, шаблон credentials
+├── .env.example               ← под git, шаблон credentials и идентификаторов
 ├── .env                       ← gitignored, реальные credentials
 └── .gitignore
 ```
@@ -292,25 +304,22 @@ GigaChat — это случай, в котором задействованы �
 
 Этот код покрывает **прямой путь на OpenAI** или strict-совместимый эндпоинт. Для подключения провайдеров через прокси в `src/` дополнительных правок почти не требуется (см. раздел «Что осталось доработать»).
 
+## Реализованные блоки multi-provider
+
+1. ✅ **Подпапка `litellm/` создана** по раскладке выше: `proxy_config.yaml`, `callbacks/` (split на `_common`/`_gigachat`/`_yandex`/dispatcher), `install.py`, `run.py`, `README.md`, `.env.example`, `.gitignore`.
+
+2. ✅ **`provider_normalizer.py` реализован** как тонкий dispatcher; вся vendor-логика в модулях `callbacks/_gigachat.py` и `callbacks/_yandex.py`:
+   - GigaChat pre-call — 9 walker'ов (`_strip_strict_flag`, `_ensure_object_properties`, `_ensure_field_types`, `_normalize_additional_properties`, `_strip_unsupported_keywords`, `_resolve_refs`, `_flatten_anyof_oneof`, `_normalize_nullable_types`, `_remap_reserved_tool_names`).
+   - GigaChat post-call — 3-level synth (L1 fenced JSON / L2 `<|superquote|>` / L3 wrap в `submit_solution`).
+   - Yandex pre-call — `_backfill_empty_content`.
+   - Yandex post-call — generic `synthesize_tool_calls` (матчит payload-keys с `tools[*].function.parameters.properties.keys()`, без hardcoded имён).
+
+3. ✅ **`install.py` + `run.py` готовы**, зеркалят паттерн `recommended_mcp/`:
+   - `install.py` — `pip install 'litellm[proxy]==1.83.14'` через subprocess (idempotent при совпадении версии) + seed `.env`. Чистый stdlib, без Docker.
+   - `run.py` — читает `.env`, рендерит `proxy_config.local.yaml` с `__VAR__` подстановкой, sanity-checks `callbacks.provider_normalizer` через subprocess, запускает `litellm` CLI с `cwd=litellm/`.
+   - **НЕ зависят от `src/`** и не контролируют lifecycle из агента.
+
 ## Что осталось доработать
-
-### Высокий приоритет — multi-provider блок (через прокси)
-
-1. **Создать подпапку `litellm/`** в корне репо со структурой из раздела «Раскладка `litellm/`»:
-   - `litellm/proxy_config.yaml` (под git, `model_list` с записями для GigaChat / Yandex / OpenRouter / Ollama)
-   - `litellm/callbacks/__init__.py` + `litellm/callbacks/provider_normalizer.py` (под git, walker'ы + post-call hook)
-   - `litellm/install.py` + `litellm/run.py` (под git, кросс-платформенные скрипты — см. доработка #3)
-   - `litellm/.env.example`, `litellm/README.md`, `litellm/.gitignore`
-
-2. **Реализовать `provider_normalizer.py`**:
-   - GigaChat pre-call: `_strip_strict_flag`, `_ensure_object_properties`, `_ensure_field_types`, `_normalize_additional_properties`, `_strip_unsupported_keywords` (default/minimum/maximum/pattern/format/...)
-   - Yandex pre-call: `_backfill_empty_content`
-   - Yandex post-call hook: парсить JSON-в-content, матчить с заявленными `tools[*].function.parameters.properties.keys()`, собирать `tool_calls` массив с синтетическим `call_id`, очищать `content`, ставить `finish_reason: "tool_calls"`. Generic — никаких hardcoded имён tools.
-
-3. **Кросс-платформенные `install.py` + `run.py`** в подпапке `litellm/` (зеркало паттерна `recommended_mcp/`):
-   - `litellm/install.py` — проверка что `litellm` (PyPI-пакет) импортируется + seed `.env` из `.env.example`. Чистый stdlib, без Docker.
-   - `litellm/run.py` — читает `.env`, проверяет импорт `callbacks.provider_normalizer`, `subprocess` запускает `python -m litellm --config proxy_config.yaml --port 4000` с `cwd=litellm/`.
-   - **НЕ зависят от `src/`** и не контролируют lifecycle из агента (см. раздел «Запуск прокси»).
 
 ### Средний приоритет — фиксы для текущего поведения
 
@@ -381,76 +390,74 @@ SYSTEM_FIELDS = frozenset({
 
 Два сценария — простой (большинство OpenAI-совместимых апстримов) и сложный (требуется структурное преобразование тела).
 
-### Простой сценарий — один YAML-файл
+### Простой сценарий — одна запись в `model_list`
 
 Подходит, когда апстрим принимает запросы в формате OpenAI Chat Completions, отвечает им же, и единственное, что нужно — указать адрес и ключ. Дополнительные поля (если требуются) кладутся в `extra_body`.
 
-1. Скопировать шаблон:
-   ```bash
-   cp litellm/proxy_config.local.yaml.example litellm/proxy_config.local.yaml
-   ```
-
-2. Дописать запись в `model_list`:
+1. Дописать запись в `model_list` файла `litellm/proxy_config.yaml`:
    ```yaml
    model_list:
      - model_name: my-internal-llama
        litellm_params:
          model: openai/llama3-70b-finetuned
          api_base: http://my.internal.host:9000/v1
-         api_key: "os.environ/MY_API_KEY"
+         api_key: os.environ/MY_API_KEY
          extra_body:
            # опционально — поля, которых требует ваш апстрим
            custom_temperature_strategy: aggressive
    ```
 
-3. Прописать credentials в `litellm/.env`.
+   Любое значение вида `__VAR__` будет подставлено `run.py`-ем из `.env` — удобно для PII (folder_id, region и т.п.).
 
-4. Перезапустить прокси:
+2. Прописать credentials в `litellm/.env`.
+
+3. Перезапустить прокси:
    ```bash
    python litellm/run.py
    ```
 
-5. Использовать в агенте:
+4. Использовать в агенте:
    ```bash
    gc-cli -q "..." --model my-internal-llama
    ```
 
-### Сложный сценарий — YAML + собственный колбэк
+### Сложный сценарий — `model_list` + собственный модуль в `callbacks/`
 
 Нужен, если апстрим требует **структурных** преобразований тела запроса или ответа: рекурсивного обхода JSON Schema, подстановки пустых полей, переноса данных между полями ответа и т.п. Это нельзя выразить набором YAML-полей — алгоритм пишется на Python.
 
-К пяти шагам выше добавляются:
+К четырём шагам выше добавляются:
 
-6. Создать файл с колбэком в `litellm/callbacks/user/<name>.py` (имя произвольное):
+5. Создать файл с логикой в `litellm/callbacks/_<vendor>.py` (зеркало `_gigachat.py` / `_yandex.py`):
 
    ```python
-   from litellm.integrations.custom_logger import CustomLogger
+   # litellm/callbacks/_my_vendor.py
+   from typing import Any
 
-   class MyExoticNormalizer(CustomLogger):
-       async def async_pre_call_hook(
-           self, user_api_key_dict, cache, data, call_type
-       ):
-           model = (data.get("model") or "").lower()
-           if model.startswith("my-internal"):
-               # ваше преобразование data["messages"], data["tools"], …
-               ...
-           return data
+   from callbacks._common import (
+       get_message_field, get_message_from_choice, iter_response_choices,
+       set_choice_finish_reason, set_message_tool_call,
+   )
 
-   proxy_handler_instance = MyExoticNormalizer()
+   def pre_call(data: dict) -> None:
+       # mutate data["messages"], data["tools"], ...
+       ...
+
+   def post_call(response: Any, tools: list[dict]) -> None:
+       # mutate response in-place
+       ...
    ```
 
-7. Зарегистрировать колбэк в `proxy_config.local.yaml`:
+6. Подключить в dispatcher `litellm/callbacks/provider_normalizer.py`:
 
-   ```yaml
-   litellm_settings:
-     callbacks:
-       - callbacks.provider_normalizer.proxy_handler_instance         # наш, под преднастроенные провайдеры
-       - callbacks.user.my_exotic_normalizer.proxy_handler_instance   # ваш
+   ```python
+   from callbacks import _gigachat, _yandex, _my_vendor
+
+   # в async_pre_call_hook:
+   if model.startswith("my-vendor"):
+       _my_vendor.pre_call(data)
    ```
 
-   Колбэки складываются в цепочку — наш `provider_normalizer` для `gigachat-*` / `yandex-*` продолжает работать, ваш — для `my-internal-*`.
-
-8. Перезапустить прокси.
+7. Перезапустить прокси.
 
 В обоих сценариях правки изолированы в подпапке `litellm/`. Код агента (`src/`) не трогается.
 
@@ -515,7 +522,7 @@ gc-cli -q "..." --config config_gigachat_proxy.yml       # 4. использов
 Проверка: `grep -rE 'gigachat|yandex|sber' src/` должен возвращать пустой результат.
 
 Все знание о провайдерах — в `litellm/`:
-- `litellm/proxy_config.yaml` (наш набор) и `litellm/proxy_config.local.yaml` (пользователь);
-- `litellm/callbacks/provider_normalizer.py` (наш колбэк) и `litellm/callbacks/user/` (колбэки пользователя).
+- `litellm/proxy_config.yaml` (канонический набор моделей + регистрация callback);
+- `litellm/callbacks/provider_normalizer.py` (dispatcher) + `litellm/callbacks/_<vendor>.py` (логика конкретного провайдера).
 
 Эти файлы можно обновлять независимо от логики агента и от схемы конфигов в `src/`.
