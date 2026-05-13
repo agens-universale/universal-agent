@@ -31,6 +31,18 @@ import logging
 
 _fallback_logger = logging.getLogger(__name__)
 
+NO_TOOL_CALL_BOUNCE_MESSAGE = (
+    "There is no tool call in your response. The user does NOT see prose "
+    "written outside tool calls — only tool calls render to the user. "
+    "Retry with one of:\n"
+    "  (1) If you intended an ACTION (read files, explore, search, write, etc.), "
+    "call the appropriate tool NOW in this turn.\n"
+    "  (2) If you intended to ASK THE USER (present options, get a decision), "
+    "call ask_human(question=...) and put the FULL preceding content (tables, "
+    "diagrams, architectures, options, recommendations) INSIDE the question "
+    "parameter. Do not strip — the user must see what you wrote."
+)
+
 
 def _summarize_call_data_for_log(call_data: Dict[str, Any]) -> Dict[str, Any]:
     """
@@ -315,7 +327,7 @@ def run_agent(
     check_stop: Optional[Callable[[], bool]] = None,
 ) -> Union[str, None]:
     tool_error_cnt = 0
-    run_logger = getattr(ctx, "logger", _fallback_logger)
+    run_logger = getattr(ctx, "logger", None) or _fallback_logger
     cfg = getattr(ctx, "config_dict", {}) or {}
     console_trace = cfg.get("console_trace", True)
     max_tool_errors = cfg.get("no_tool_call_max_count", 0)
@@ -335,7 +347,7 @@ def run_agent(
             tool_error_cnt += 1
             messages = [
                 _make_technical_feedback_user_message(
-                    "There is no tool call in Agent response. Please send appropriate tool call",
+                    NO_TOOL_CALL_BOUNCE_MESSAGE,
                     technical_type=TECHNICAL_TYPE_TECHNICAL,
                 )
             ]
@@ -539,7 +551,7 @@ def run_agent(
             tool_error_cnt += 1
             messages = [
                 _make_technical_feedback_user_message(
-                    "There is no tool call in Agent response. Please send appropriate tool call",
+                    NO_TOOL_CALL_BOUNCE_MESSAGE,
                     technical_type=TECHNICAL_TYPE_TECHNICAL,
                 )
             ]
