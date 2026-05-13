@@ -55,13 +55,33 @@ def test_render_config_substitutes_placeholders(tmp_path: Path) -> None:
     assert target.read_text() == "model: openai/gpt://b1abc/yandex/latest"
 
 
-def test_render_config_reports_missing_and_does_not_write(tmp_path: Path) -> None:
+def test_render_config_reports_missing_and_still_writes(tmp_path: Path) -> None:
+    """Missing placeholders are reported but the file is still written with
+    them left as-is — aliases that don't reference them stay usable."""
     template = tmp_path / "proxy.yaml"
     template.write_text("a: __MISSING_A__\nb: __MISSING_B__\n")
     target = tmp_path / "proxy.local.yaml"
     missing = run_mod.render_config(template, target, {})
     assert sorted(missing) == ["MISSING_A", "MISSING_B"]
-    assert not target.exists()
+    # File written with placeholders left untouched (LiteLLM will choke on
+    # the affected aliases at call time; other aliases stay functional).
+    assert target.read_text() == "a: __MISSING_A__\nb: __MISSING_B__\n"
+
+
+def test_render_config_partial_substitution(tmp_path: Path) -> None:
+    """User configures only one provider — the other's placeholder is left
+    in place, both written to target file."""
+    template = tmp_path / "proxy.yaml"
+    template.write_text(
+        "- model: gigachat/X\n  api_key: real-gigachat-key\n"
+        "- model: openai/gpt://__YANDEX_FOLDER_ID__/y/latest\n"
+    )
+    target = tmp_path / "proxy.local.yaml"
+    missing = run_mod.render_config(template, target, {})
+    assert missing == ["YANDEX_FOLDER_ID"]
+    text = target.read_text()
+    assert "real-gigachat-key" in text
+    assert "__YANDEX_FOLDER_ID__" in text
 
 
 def test_render_config_passes_through_when_no_placeholders(tmp_path: Path) -> None:

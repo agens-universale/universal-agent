@@ -128,14 +128,18 @@ def render_config(template: Path, target: Path, env: dict) -> list[str]:
     """Substitute `__VAR__` placeholders in `template` from `env` and write
     the result to `target`. Returns the list of placeholder names that
     were missing from `env` (empty list = success).
+
+    The output is always written — placeholders for which env had no value
+    stay as `__VAR__` in the rendered file. Aliases referencing those
+    placeholders will fail at call time (upstream / LiteLLM error), but
+    every other alias keeps working. This lets a user configure only
+    Yandex or only GigaChat without forcing them to fill irrelevant env vars.
     """
     text = template.read_text()
     missing: list[str] = []
-    used: set[str] = set()
 
     def repl(match: re.Match[str]) -> str:
         name = match.group(1)
-        used.add(name)
         value = env.get(name)
         if value is None or value == "":
             if name not in missing:
@@ -144,8 +148,7 @@ def render_config(template: Path, target: Path, env: dict) -> list[str]:
         return value
 
     rendered = _PLACEHOLDER_RE.sub(repl, text)
-    if not missing:
-        target.write_text(rendered)
+    target.write_text(rendered)
     return missing
 
 
@@ -175,12 +178,11 @@ def main() -> int:
     )
     if missing_placeholders:
         print(
-            f"ERROR: proxy_config.yaml references placeholders missing from "
-            f"env: {', '.join(missing_placeholders)}. Fill them in litellm/.env "
-            f"(see .env.example) and re-run.",
+            f"WARNING: placeholders left unfilled: {', '.join(missing_placeholders)}. "
+            f"Aliases referencing them will fail at call time. "
+            f"Fill them in litellm/.env if you plan to use those providers.",
             file=sys.stderr,
         )
-        return 1
     print("[ok] rendered proxy_config.local.yaml")
 
     if not check_callback_importable(root):
