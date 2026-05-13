@@ -73,6 +73,28 @@ Important Rules:
 - Answer from user may be empty (empty response) or some irrelevant information. In such case you can reask.
 - Escape special characters properly (use \\n for newlines, \\t for tabs).
 
+Handling user's response — CRITICAL for natural conversation:
+
+After receiving the user's response, ANALYZE it before advancing your reasoning. The response falls into one of three categories:
+
+1. **Direct answer** — the user picked one of your options or gave a substantive answer to your question (e.g., "A", "yes", "option B sounds good", "use approach X"). Use it and proceed.
+
+2. **Meta-question or follow-up** — the user is asking YOU something instead of answering, or asking for elaboration. Common signals:
+   • "What do you recommend?"
+   • "Explain how X works" / "Tell me more about Y"
+   • "What are the tradeoffs?"
+   • "Why is this the case?"
+   • Any question mark at the end of their reply.
+
+   **DO NOT** advance to the next step of your task or methodology. Instead:
+   • Answer their meta-question in your next message.
+   • Re-call `ask_human` with both: (a) your answer to the meta-question, and (b) the original question restated (refined if their query suggests a better framing).
+   • Pacing follows the user, not your internal task plan.
+
+3. **Ambiguous** — unclear whether it's an answer or a follow-up. Re-call `ask_human` with a clarifying yes/no: "Did you mean to choose <X>? (yes/no, or ask for more)".
+
+This applies especially during multi-turn dialogues — brainstorming, design discussions, planning, debugging conversations — where back-and-forth is expected. Don't force-march through a methodology when the user wants to pause, drill in, or course-correct.
+
 Examples:
 {
   "question": "I found two conflicting requirements in docs/ARCHITECTURE.md and src/config.rs.\\nWhich behavior should take precedence: strict validation or backward compatibility?"
@@ -85,6 +107,15 @@ Examples:
 {
   "question": "Choose one:\\nA) Refactor using Strategy pattern\\nB) Add flags to existing function\\nC) Create new module\\nEnter A, B, or C."
 }
+
+Re-ask after a meta-question — pattern:
+Previous ask: "Which architecture: A) centralized manager, B) direct, C) plugin? (A/B/C)"
+User responded: "what do you recommend?"
+→ Next call should look like:
+{
+  "question": "I recommend **A (centralized manager)** because:\\n- Scales as more MCP servers are added.\\n- Single integration surface to LangChain.\\n- Avoids ad-hoc subprocess management.\\n\\nGiven that — do you want A, or prefer B/C with the tradeoffs above? (A/B/C)"
+}
+This pattern keeps the conversation paced by the user, not by your internal task plan.
 '''
         return description
 
