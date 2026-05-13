@@ -44,6 +44,63 @@ NO_TOOL_CALL_BOUNCE_MESSAGE = (
 )
 
 
+def _extract_last_assistant_text(messages: List[Dict[str, Any]]) -> str:
+    """
+    Return concatenated text from the last assistant `message` in the batch.
+    Returns empty string if there is no assistant message or the content is
+    empty/whitespace-only. Handles both string content and list-of-parts.
+    """
+    if not messages:
+        return ""
+    for message in reversed(messages):
+        if (
+            isinstance(message, dict)
+            and message.get("type") == "message"
+            and message.get("role") == "assistant"
+        ):
+            content = message.get("content")
+            if isinstance(content, str):
+                return content.strip()
+            if isinstance(content, list):
+                parts: List[str] = []
+                for part in content:
+                    if isinstance(part, dict):
+                        text = part.get("text")
+                        if isinstance(text, str) and text.strip():
+                            parts.append(text)
+                return "\n\n".join(parts).strip()
+            return ""
+    return ""
+
+
+def _format_no_tool_call_bounce(assistant_text: str) -> str:
+    """
+    Build the no-tool-call bounce message. If the assistant's just-emitted
+    text is available, inline it in a copy-paste-ready block so the model
+    doesn't have to recompose from memory. Otherwise fall back to the static
+    NO_TOOL_CALL_BOUNCE_MESSAGE constant.
+    """
+    text = (assistant_text or "").strip()
+    if not text:
+        return NO_TOOL_CALL_BOUNCE_MESSAGE
+    return (
+        "There is no tool call in your response. Here is what you just "
+        "wrote, which the user did NOT see (prose outside a tool call is "
+        "invisible):\n\n"
+        "<<<\n"
+        f"{text}\n"
+        ">>>\n\n"
+        "Retry with one of:\n"
+        "  (1) If you intended an ACTION (read files, explore, search, "
+        "write, etc.), call the appropriate tool NOW in this turn.\n"
+        "  (2) If you intended to ASK THE USER, call ask_human(question=...) "
+        "and paste the ENTIRE block above (between <<< and >>>) into the "
+        "question parameter VERBATIM. Do not paraphrase, do not summarize, "
+        "do not strip — copy as-is. Append any short clarifying question "
+        "after the pasted block if needed."
+    )
+
+
 def _summarize_call_data_for_log(call_data: Dict[str, Any]) -> Dict[str, Any]:
     """
     Короткая сводка запроса для корреляции с ответом backend.
@@ -549,9 +606,11 @@ def run_agent(
             # raise e
             run_logger.error(e, exc_info=True)
             tool_error_cnt += 1
+            assistant_text = _extract_last_assistant_text(messages)
+            bounce_msg = _format_no_tool_call_bounce(assistant_text)
             messages = [
                 _make_technical_feedback_user_message(
-                    NO_TOOL_CALL_BOUNCE_MESSAGE,
+                    bounce_msg,
                     technical_type=TECHNICAL_TYPE_TECHNICAL,
                 )
             ]
