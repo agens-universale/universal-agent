@@ -1,0 +1,40 @@
+# Конфиг gc-cli для YandexGPT (через LiteLLM Proxy).
+#
+# Запуск:
+#   gc-cli -q "..." --config config_yandex_proxy.yml
+#   gc-cli -q "..." --config config_yandex_proxy.yml --model yandex-gpt-lite
+
+backend:
+  api_mode: chat_completions
+  completions_url: http://localhost:4000/v1/chat/completions
+  chat_completions_max_tokens: 4096
+  use_ssl: false
+  use_retry: true
+  chat_completion_headers:
+    Authorization: "Bearer sk-litellm-test-master-1234"
+
+agent:
+  model: yandex-gpt-pro
+  system_prompt_id: v1
+  max_steps: 30
+  no_tool_call_max_count: 5
+  verbose: true
+  console_trace: true
+  save_logs: false
+  dump_storage: false
+  use_ask_human_tool: false
+  stop_tools: []
+  use_server_subagents: false
+  use_local_subagents: false
+
+paths:
+  agent_md_path: "./prompts/demo_cli_agent.md"
+
+mcp:
+  servers: {}
+  meta:
+    tools-cache-ttl: 3600
+    request_timeout_sec: 600
+
+summary:
+  chat_completions_summary_trigger_chars: 0
