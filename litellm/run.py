@@ -2,7 +2,13 @@
 
 Mirrors `recommended_mcp/run.py`. Reads litellm/.env, sanity-checks the
 callback package is importable as `callbacks.provider_normalizer`, then
-execs `litellm --config proxy_config.yaml --port <PORT>`.
+renders `proxy_config.yaml` into `proxy_config.local.yaml` (with
+`__VAR__` placeholders substituted from env), and execs
+`litellm --config proxy_config.local.yaml --port <PORT>`.
+
+The placeholder pass keeps any user-specific identifier (e.g.
+`YANDEX_FOLDER_ID`) out of the tracked config file — it lives in
+`litellm/.env` (gitignored) and is resolved at launch.
 
 Run:
     python litellm/run.py
@@ -99,7 +105,9 @@ def find_litellm_cli() -> str:
     )
 
 
-def build_command(port: int, cli: str | None = None) -> list[str]:
+def build_command(
+    port: int, cli: str | None = None, config_filename: str = "proxy_config.local.yaml"
+) -> list[str]:
     """Build the `litellm` CLI command (no shell, OS-agnostic).
 
     `cli` defaults to `find_litellm_cli()` — overridable for tests.
@@ -107,10 +115,38 @@ def build_command(port: int, cli: str | None = None) -> list[str]:
     return [
         cli or find_litellm_cli(),
         "--config",
-        "proxy_config.yaml",
+        config_filename,
         "--port",
         str(port),
     ]
+
+
+_PLACEHOLDER_RE = re.compile(r"__([A-Z_][A-Z0-9_]*)__")
+
+
+def render_config(template: Path, target: Path, env: dict) -> list[str]:
+    """Substitute `__VAR__` placeholders in `template` from `env` and write
+    the result to `target`. Returns the list of placeholder names that
+    were missing from `env` (empty list = success).
+    """
+    text = template.read_text()
+    missing: list[str] = []
+    used: set[str] = set()
+
+    def repl(match: re.Match[str]) -> str:
+        name = match.group(1)
+        used.add(name)
+        value = env.get(name)
+        if value is None or value == "":
+            if name not in missing:
+                missing.append(name)
+            return match.group(0)
+        return value
+
+    rendered = _PLACEHOLDER_RE.sub(repl, text)
+    if not missing:
+        target.write_text(rendered)
+    return missing
 
 
 def main() -> int:
@@ -120,17 +156,32 @@ def main() -> int:
     for k, v in env_loaded.items():
         os.environ.setdefault(k, v)
 
-    missing = [
+    missing_creds = [
         k
-        for k in ("GIGACHAT_CREDENTIALS", "YANDEX_API_KEY", "OPENROUTER_API_KEY")
+        for k in ("GIGACHAT_CREDENTIALS", "YANDEX_API_KEY")
         if not os.environ.get(k)
     ]
-    if missing:
+    if missing_creds:
         print(
-            f"WARNING: missing env vars: {', '.join(missing)} — "
+            f"WARNING: missing env vars: {', '.join(missing_creds)} — "
             f"models depending on them will fail at runtime.",
             file=sys.stderr,
         )
+
+    missing_placeholders = render_config(
+        root / "proxy_config.yaml",
+        root / "proxy_config.local.yaml",
+        os.environ,
+    )
+    if missing_placeholders:
+        print(
+            f"ERROR: proxy_config.yaml references placeholders missing from "
+            f"env: {', '.join(missing_placeholders)}. Fill them in litellm/.env "
+            f"(see .env.example) and re-run.",
+            file=sys.stderr,
+        )
+        return 1
+    print("[ok] rendered proxy_config.local.yaml")
 
     if not check_callback_importable(root):
         print(

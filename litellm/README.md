@@ -10,7 +10,8 @@
 
 ```
 litellm/
-├── proxy_config.yaml          # алиасы моделей + регистрация колбэка
+├── proxy_config.yaml          # алиасы моделей + регистрация колбэка (с placeholder'ами вроде __YANDEX_FOLDER_ID__)
+├── proxy_config.local.yaml    # рендер с подставленными env (gitignored, создаётся run.py)
 ├── callbacks/
 │   ├── __init__.py
 │   └── provider_normalizer.py # pre/post-call хуки (схемы GigaChat + контент Yandex)

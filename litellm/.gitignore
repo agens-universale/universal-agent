@@ -1,6 +1,9 @@
 # Real credentials — never check in
 .env
 
+# Rendered config (placeholders substituted from env at run time)
+proxy_config.local.yaml
+
 # Python cache
 __pycache__/
 *.pyc
