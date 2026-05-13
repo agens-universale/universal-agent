@@ -8,7 +8,7 @@
 
 ## Лицензия
 
-Используется LiteLLM под лицензией **MIT** — см. [github.com/BerriAI/litellm/blob/main/LICENSE](https://github.com/BerriAI/litellm/blob/main/LICENSE). Это позволяет коммерческое использование и модификацию при сохранении уведомления об авторских правах. Версия пиннется в `litellm/install.py` (константа `LITELLM_PIN`). Код в самой этой директории — часть проекта gc-cli-pub и следует его репозиторной лицензии.
+LiteLLM © 2023 Berri AI — [MIT](https://github.com/BerriAI/litellm/blob/main/LICENSE). Версия пиннется в `install.py`.
 
 ## Раскладка
 
