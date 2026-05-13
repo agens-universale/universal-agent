@@ -84,6 +84,26 @@ def seed_env_file(root: Path) -> bool:
     return True
 
 
+def seed_agent_configs(litellm_root: Path, repo_root: Path) -> list[str]:
+    """Copy gc-cli config templates from `litellm/agent_configs/` into the
+    repo root if the destination file does not exist yet.
+
+    Idempotent — existing files are never overwritten (user may have local
+    tweaks). Returns the list of filenames that were newly created.
+    """
+    src_dir = litellm_root / "agent_configs"
+    if not src_dir.is_dir():
+        return []
+    created: list[str] = []
+    for template in sorted(src_dir.glob("*.yml")):
+        target = repo_root / template.name
+        if target.exists():
+            continue
+        shutil.copyfile(template, target)
+        created.append(template.name)
+    return created
+
+
 def main() -> int:
     root = Path(__file__).resolve().parent
 
@@ -101,6 +121,14 @@ def main() -> int:
         print(f"[ok] seeded {root / '.env'} from .env.example — fill in credentials")
     else:
         print(f"[ok] {root / '.env'} already exists")
+
+    repo_root = root.parent
+    created_configs = seed_agent_configs(root, repo_root)
+    if created_configs:
+        for name in created_configs:
+            print(f"[ok] seeded {repo_root / name} from agent_configs/")
+    else:
+        print(f"[ok] agent configs in {repo_root} already exist")
 
     print()
     print("Next: edit litellm/.env with provider credentials, then:")

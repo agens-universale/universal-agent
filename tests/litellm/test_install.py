@@ -75,3 +75,35 @@ def test_seed_env_file_noop_when_exists(tmp_path: Path) -> None:
 def test_seed_env_file_raises_when_template_missing(tmp_path: Path) -> None:
     with pytest.raises(install_mod.InstallError, match="missing"):
         install_mod.seed_env_file(tmp_path)
+
+
+def test_seed_agent_configs_copies_each_template_when_missing(tmp_path: Path) -> None:
+    litellm_root = tmp_path / "litellm"
+    (litellm_root / "agent_configs").mkdir(parents=True)
+    (litellm_root / "agent_configs" / "config_a.yml").write_text("a: 1\n")
+    (litellm_root / "agent_configs" / "config_b.yml").write_text("b: 2\n")
+    repo_root = tmp_path
+
+    created = install_mod.seed_agent_configs(litellm_root, repo_root)
+    assert sorted(created) == ["config_a.yml", "config_b.yml"]
+    assert (repo_root / "config_a.yml").read_text() == "a: 1\n"
+    assert (repo_root / "config_b.yml").read_text() == "b: 2\n"
+
+
+def test_seed_agent_configs_skips_existing(tmp_path: Path) -> None:
+    litellm_root = tmp_path / "litellm"
+    (litellm_root / "agent_configs").mkdir(parents=True)
+    (litellm_root / "agent_configs" / "config_a.yml").write_text("template\n")
+    repo_root = tmp_path
+    (repo_root / "config_a.yml").write_text("user-tweaked\n")
+
+    created = install_mod.seed_agent_configs(litellm_root, repo_root)
+    assert created == []
+    assert (repo_root / "config_a.yml").read_text() == "user-tweaked\n"
+
+
+def test_seed_agent_configs_returns_empty_when_dir_missing(tmp_path: Path) -> None:
+    litellm_root = tmp_path / "litellm"
+    litellm_root.mkdir()
+    created = install_mod.seed_agent_configs(litellm_root, tmp_path)
+    assert created == []

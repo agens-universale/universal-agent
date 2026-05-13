@@ -1,1 +1,5 @@
 docs/plans/
+
+# Конфиги под прокси (создаются install.py-ем из litellm/agent_configs/)
+config_gigachat_proxy.yml
+config_yandex_proxy.yml

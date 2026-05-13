@@ -17,6 +17,9 @@ litellm/
 ├── proxy_config.yaml          # алиасы моделей + регистрация колбэка
 │                                Содержит __VAR__ placeholder'ы (подставляются из .env при запуске)
 ├── proxy_config.local.yaml    # gitignored, генерируется run.py из proxy_config.yaml
+├── agent_configs/             # шаблоны agent-конфигов под прокси (под git)
+│   ├── config_gigachat_proxy.yml
+│   └── config_yandex_proxy.yml
 ├── callbacks/
 │   ├── __init__.py
 │   ├── provider_normalizer.py # тонкий dispatcher: класс + proxy_handler_instance
@@ -33,7 +36,7 @@ litellm/
 ## Быстрый старт
 
 ```bash
-# 1. Один раз — pip-install litellm[proxy] и seed .env
+# 1. Один раз — pip-install litellm[proxy] + seed .env + agent-конфиги в корень репы
 python litellm/install.py
 
 # 2. Заполнить credentials и идентификаторы
