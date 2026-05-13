@@ -1,10 +1,10 @@
-# Real credentials — never check in
+# Реальные credentials — никогда не коммитим
 .env
 
-# Rendered config (placeholders substituted from env at run time)
+# Сгенерированный конфиг (placeholder'ы подставлены из env на старте)
 proxy_config.local.yaml
 
-# Python cache
+# Кэш Python
 __pycache__/
 *.pyc
 *.pyo

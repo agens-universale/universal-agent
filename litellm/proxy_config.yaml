@@ -1,5 +1,7 @@
-# LiteLLM Proxy config — GigaChat-2 and YandexGPT aliases behind one
-# OpenAI-compatible endpoint at http://localhost:4000/v1/chat/completions.
+# Конфиг LiteLLM Proxy — алиасы GigaChat-2 и YandexGPT за единым
+# OpenAI-совместимым эндпоинтом на http://localhost:4000/v1/chat/completions.
+# Placeholder'ы вида __VAR__ подставляются из litellm/.env при запуске
+# через litellm/run.py (см. README).
 
 model_list:
   - model_name: gigachat-2-lite

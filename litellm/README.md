@@ -1,24 +1,32 @@
 # Батарейка LiteLLM Proxy
 
-Самодостаточная настройка LiteLLM Proxy для маршрутизации gc-cli (или любого клиента, говорящего по OpenAI Chat Completions) на несколько LLM-провайдеров: GigaChat, YandexGPT, OpenRouter, Ollama, кастомные OAI-совместимые эндпоинты.
+Самодостаточная настройка LiteLLM Proxy для маршрутизации gc-cli (или любого клиента, говорящего по OpenAI Chat Completions) на несколько LLM-провайдеров. Из коробки заведены GigaChat-2 и YandexGPT; добавление любого OAI-совместимого апстрима — одна запись в `proxy_config.yaml`.
 
 Эта директория — **независимая батарейка**. Она НЕ зависит от `src/`, и `src/` НЕ зависит от неё. Единственный контракт между агентом и прокси — HTTP-URL.
 
 Сам `litellm` **не объявлен в `pyproject.toml`** — `install.py` единственная точка, которая его ставит. Это зеркалит паттерн `recommended_mcp/install.py` и не тянет `litellm[proxy]` (~200 МБ транзитивных зависимостей: uvicorn/fastapi/orjson/…) тем, кто прокси не использует.
 
+## Лицензия
+
+Используется LiteLLM под лицензией **MIT** — см. [github.com/BerriAI/litellm/blob/main/LICENSE](https://github.com/BerriAI/litellm/blob/main/LICENSE). Это позволяет коммерческое использование и модификацию при сохранении уведомления об авторских правах. Версия пиннется в `litellm/install.py` (константа `LITELLM_PIN`). Код в самой этой директории — часть проекта gc-cli-pub и следует его репозиторной лицензии.
+
 ## Раскладка
 
 ```
 litellm/
-├── proxy_config.yaml          # алиасы моделей + регистрация колбэка (с placeholder'ами вроде __YANDEX_FOLDER_ID__)
-├── proxy_config.local.yaml    # рендер с подставленными env (gitignored, создаётся run.py)
+├── proxy_config.yaml          # алиасы моделей + регистрация колбэка
+│                                Содержит __VAR__ placeholder'ы (подставляются из .env при запуске)
+├── proxy_config.local.yaml    # gitignored, генерируется run.py из proxy_config.yaml
 ├── callbacks/
 │   ├── __init__.py
-│   └── provider_normalizer.py # pre/post-call хуки (схемы GigaChat + контент Yandex)
+│   ├── provider_normalizer.py # тонкий dispatcher: класс + proxy_handler_instance
+│   ├── _common.py             # vendor-agnostic helpers (JSON-парсинг, tool_call shape, …)
+│   ├── _gigachat.py           # 9 walker'ов pre-call + 3-level synth post-call
+│   └── _yandex.py             # backfill пустого content + JSON-in-content → tool_calls
 ├── install.py                 # кросс-платформенный pip-install + seed .env
-├── run.py                     # кросс-платформенный лончер
-├── .env.example               # шаблон credentials
-├── .env                       # реальные credentials (gitignored)
+├── run.py                     # кросс-платформенный лончер (рендер конфига + subprocess litellm)
+├── .env.example               # шаблон credentials и идентификаторов
+├── .env                       # реальные значения (gitignored)
 └── .gitignore
 ```
 
@@ -28,7 +36,7 @@ litellm/
 # 1. Один раз — pip-install litellm[proxy] и seed .env
 python litellm/install.py
 
-# 2. Заполнить credentials
+# 2. Заполнить credentials и идентификаторы
 $EDITOR litellm/.env
 
 # 3. Запуск прокси (foreground, держите терминал открытым)
@@ -47,21 +55,17 @@ gc-cli -q "..." --config config_gigachat_proxy.yml --model gigachat-2-lite
 - `gigachat-2-lite`, `gigachat-2-pro`, `gigachat-2-max` → нативный провайдер LiteLLM `gigachat/`
 - `yandex-gpt-lite`, `yandex-gpt-pro` → generic-маршрут `openai/` на Yandex Cloud OAI-compat endpoint
 
-### `callbacks/provider_normalizer.py`
+PII-идентификаторы (например, `YANDEX_FOLDER_ID`) объявляются в конфиге как `__VAR__` placeholder'ы и подставляются из `.env` при запуске. Это позволяет хранить сам `proxy_config.yaml` в git без чувствительных значений.
 
-Один файл со всеми vendor-quirks:
+### `callbacks/`
 
-- **GigaChat pre-call:** нормализация tool-схем девятью walker'ами (фиксы под strict JSON Schema)
-- **GigaChat post-call:** трёхуровневый `_synthesize_tool_call_for_gigachat` (вытаскивание plain-text ответов в нативные `tool_calls`)
-- **Yandex pre-call:** `_backfill_empty_content` (Yandex отвергает пустой assistant content)
-- **Yandex post-call:** `_synthesize_tool_calls_for_yandex` (парсинг JSON-в-контенте в нативные `tool_calls`)
+Логика вендорных особенностей разложена по модулям:
 
-Роутинг по `data["model"].startswith(...)` — без центрального реестра провайдеров. Добавить нового провайдера = новая запись в `model_list` + (опционально) `if`-блок в колбэке.
+- **`_common.py`** — vendor-agnostic helpers (парсинг JSON, сборка tool_call envelope, доступ к pydantic/dict полям).
+- **`_gigachat.py`** — pre-call pipeline из 9 walker'ов (фиксы под strict JSON Schema GigaChat) + post-call 3-level synth (вытаскивание plain-text ответов в нативные `tool_calls`).
+- **`_yandex.py`** — pre-call `backfill_empty_content` (Yandex отвергает пустой assistant `content`) + post-call `synthesize_tool_calls` (парсинг JSON-в-контенте → нативные `tool_calls`).
+- **`provider_normalizer.py`** — тонкий dispatcher. Маршрутизация по `data["model"].startswith(...)`, без центрального реестра. Добавление нового провайдера = новый `_<vendor>.py` + `if`-блок в dispatcher.
 
 ## Добавление своего провайдера
 
 См. раздел «Подключение своего провайдера» в `gc-providers-spec.md`.
-
-## Лицензия
-
-Сам LiteLLM — MIT-лицензия, см. [github.com/BerriAI/litellm/blob/main/LICENSE](https://github.com/BerriAI/litellm/blob/main/LICENSE). Версия пиннется в `litellm/install.py` (константа `LITELLM_PIN`). Код в этой директории — часть проекта gc-cli-pub и следует его репозиторной лицензии.
