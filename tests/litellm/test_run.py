@@ -1,10 +1,27 @@
 """Tests for litellm/run.py: callback import sanity, command build."""
+import importlib.metadata
 import sys
 from pathlib import Path
+
+import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "litellm"))
 
 import run as run_mod  # type: ignore[import-not-found]
+
+
+def _litellm_pypi_installed() -> bool:
+    """PyPI `litellm` is optional; see litellm/README.md and install.py.
+
+    Do not use ``find_spec("litellm")``: the repo directory ``litellm/`` is on
+    ``sys.path`` and registers as a *namespace* shadow, without
+    ``litellm.integrations`` — that gives a false positive.
+    """
+    try:
+        importlib.metadata.version("litellm")
+    except importlib.metadata.PackageNotFoundError:
+        return False
+    return True
 
 
 def test_build_command_uses_litellm_cli() -> None:
@@ -21,6 +38,10 @@ def test_build_command_uses_given_port() -> None:
     assert "9999" in cmd
 
 
+@pytest.mark.skipif(
+    not _litellm_pypi_installed(),
+    reason="PyPI `litellm` not installed — run `uv run python litellm/install.py` once",
+)
 def test_check_callback_importable_true_for_real_layout() -> None:
     real_litellm = Path(__file__).resolve().parents[2] / "litellm"
     assert run_mod.check_callback_importable(real_litellm) is True

@@ -32,3 +32,7 @@ package-dir = {"" = "src"}  # Указываем, что код находитс
 dev = [
     "httpie>=3.2.4",
 ]
+
+[tool.pytest.ini_options]
+# Иначе pytest обходит весь репозиторий и падает на чужих conftest в agent-scratchpad/ и external/.
+testpaths = ["tests"]
