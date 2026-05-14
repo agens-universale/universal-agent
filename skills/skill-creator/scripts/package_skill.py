@@ -15,6 +15,17 @@ import sys
 import zipfile
 from datetime import date as _date
 from pathlib import Path
+
+# Force UTF-8 stdout/stderr — emoji в print()/error messages иначе ломают
+# вывод на Windows (cp1251 default) с UnicodeEncodeError. Python 3.7+ API.
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, ValueError):
+        # AttributeError: старый Python без reconfigure; ValueError:
+        # stream уже не-text (e.g. в pytest capture). Не критично.
+        pass
+
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from quick_validate import validate_skill
 
@@ -38,6 +49,35 @@ def should_exclude(rel_path: Path) -> bool:
     if name in EXCLUDE_FILES:
         return True
     return any(fnmatch.fnmatch(name, pat) for pat in EXCLUDE_GLOBS)
+
+
+# Required artifacts in _dev/ when self-check flow was started.
+# intent_brief.md служит триггером: его наличие = flow был запущен,
+# значит должны быть и остальные. Если intent_brief нет — gate skipped.
+REQUIRED_DEV_ARTIFACTS = [
+    "intent_brief.md",
+    "completion_report.md",
+    "examples/prompt_01.md",
+    "examples/prompt_02.md",
+    "examples/prompt_01_output.md",
+    "examples/prompt_02_output.md",
+]
+
+
+def _validate_dev_artifacts(skill_path: Path) -> list[str]:
+    """Return list of missing required artifacts (relative paths).
+
+    Returns empty list if validation passes OR _dev/intent_brief.md does not
+    exist (flow wasn't started — gate skipped, упаковка пройдёт без demo/).
+    """
+    dev_dir = skill_path / "_dev"
+    if not (dev_dir / "intent_brief.md").exists():
+        return []
+    missing = []
+    for rel in REQUIRED_DEV_ARTIFACTS:
+        if not (dev_dir / rel).exists():
+            missing.append(rel)
+    return missing
 
 
 def _extract_frontmatter(skill_path: Path) -> dict:
@@ -139,7 +179,8 @@ def _generate_readme(
     if has_demo:
         demo_section = (
             f"- `demo/` — артефакты разработки скилла (intent_brief, "
-            f"text_review_report, self_check_report, тестовые промпты и outputs).\n"
+            f"text_review_report, self_check_report, completion_report, "
+            f"тестовые промпты и outputs).\n"
         )
 
     return (
@@ -202,6 +243,27 @@ def package_skill(skill_path, output_dir=None, source_layer=None):
         return None
     print(f"✅ {message}\n")
 
+    # Validate _dev/ artifacts (if flow was started)
+    missing = _validate_dev_artifacts(skill_path)
+    if missing:
+        print("❌ Refusing to package: _dev/ is incomplete.\n", file=sys.stderr)
+        print(
+            "Found:    intent_brief.md (self-check flow was started)",
+            file=sys.stderr,
+        )
+        print("Missing:", file=sys.stderr)
+        for rel in missing:
+            print(f"  - _dev/{rel}", file=sys.stderr)
+        print("\nRequired artifacts when _dev/ exists:", file=sys.stderr)
+        for rel in REQUIRED_DEV_ARTIFACTS:
+            print(f"  - _dev/{rel}", file=sys.stderr)
+        print(
+            "\nДоделай self-check flow или удали _dev/intent_brief.md\n"
+            "(тогда упаковка пройдёт без demo/).",
+            file=sys.stderr,
+        )
+        return None
+
     # Determine output location
     if output_dir:
         output_path = Path(output_dir).resolve()
@@ -255,7 +317,6 @@ def package_skill(skill_path, output_dir=None, source_layer=None):
         print(f"\nSuccessfully packaged skill to: {skill_filename}")
 
         # Cleanup _dev/ after successful packaging (transient workspace)
-        dev_dir = skill_path / "_dev"
         if dev_dir.is_dir():
             try:
                 import shutil

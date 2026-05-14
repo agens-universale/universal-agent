@@ -13,6 +13,30 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 SKILL_DIR = PROJECT_ROOT / "skills" / "skill-creator"
 
 
+def _make_complete_dev_dir(skill_dir: Path) -> Path:
+    """Создать `<skill-dir>/_dev/` с полным набором required artifacts.
+
+    Используется тестами, которые тестируют другие аспекты упаковки
+    (cleanup, demo-маппинг, и т.п.) и не должны падать на _dev/ gate.
+    Required-набор:
+      - intent_brief.md
+      - completion_report.md
+      - examples/prompt_01.md + prompt_01_output.md
+      - examples/prompt_02.md + prompt_02_output.md
+    """
+    dev_dir = skill_dir / "_dev"
+    dev_dir.mkdir(exist_ok=True)
+    (dev_dir / "intent_brief.md").write_text("# intent\n", encoding="utf-8")
+    (dev_dir / "completion_report.md").write_text("# completion\n", encoding="utf-8")
+    examples_dir = dev_dir / "examples"
+    examples_dir.mkdir(exist_ok=True)
+    (examples_dir / "prompt_01.md").write_text("# prompt 1\n", encoding="utf-8")
+    (examples_dir / "prompt_01_output.md").write_text("# output 1\n", encoding="utf-8")
+    (examples_dir / "prompt_02.md").write_text("# prompt 2\n", encoding="utf-8")
+    (examples_dir / "prompt_02_output.md").write_text("# output 2\n", encoding="utf-8")
+    return dev_dir
+
+
 def _registry():
     """Build a fresh SkillsRegistry pointing at the project's skills/.
 
@@ -246,14 +270,8 @@ def test_package_skill_with_dev_folder_puts_into_demo(tmp_path):
         encoding="utf-8",
     )
 
-    # Add _dev/ with sample artifacts
-    dev_dir = skill_dir / "_dev"
-    dev_dir.mkdir()
-    (dev_dir / "intent_brief.md").write_text("# intent\n", encoding="utf-8")
-    examples_dir = dev_dir / "examples"
-    examples_dir.mkdir()
-    (examples_dir / "prompt_01.md").write_text("# prompt 1\n", encoding="utf-8")
-    (examples_dir / "prompt_01_output.md").write_text("# output 1\n", encoding="utf-8")
+    # Полный _dev/ — gate в package_skill требует все required artifacts
+    _make_complete_dev_dir(skill_dir)
 
     out_dir = tmp_path / "out"
     out_dir.mkdir()
@@ -294,9 +312,7 @@ def test_package_skill_cleans_up_dev_folder_after_success(tmp_path):
         "---\nid: test-skill\nname: test-skill\ndescription: Test\n---\n# Test\n",
         encoding="utf-8",
     )
-    dev_dir = skill_dir / "_dev"
-    dev_dir.mkdir()
-    (dev_dir / "intent_brief.md").write_text("# intent\n", encoding="utf-8")
+    dev_dir = _make_complete_dev_dir(skill_dir)
 
     out_dir = tmp_path / "out"
     out_dir.mkdir()
@@ -331,9 +347,7 @@ def test_package_skill_cleanup_permission_error_does_not_block(tmp_path, monkeyp
         "---\nid: test-skill\nname: test-skill\ndescription: Test\n---\n# Test\n",
         encoding="utf-8",
     )
-    dev_dir = skill_dir / "_dev"
-    dev_dir.mkdir()
-    (dev_dir / "intent_brief.md").write_text("# intent\n", encoding="utf-8")
+    dev_dir = _make_complete_dev_dir(skill_dir)
 
     out_dir = tmp_path / "out"
     out_dir.mkdir()
@@ -403,3 +417,121 @@ def test_package_skill_without_dev_folder(tmp_path):
         readme = zf.read("README.md").decode("utf-8")
         assert "demo/" not in readme or "Что в архиве" not in readme.split("demo/")[0]
         # (allow mention only in absence)
+
+
+def test_package_skill_refuses_incomplete_dev(tmp_path):
+    """Если в _dev/ есть intent_brief, но не хватает других required — упаковка fails."""
+    skill_dir = tmp_path / "test-skill"
+    skill_dir.mkdir()
+    (skill_dir / "SKILL.md").write_text(
+        "---\nid: test-skill\nname: test-skill\ndescription: Test\n---\n# Test\n",
+        encoding="utf-8",
+    )
+    # Только intent_brief — нет completion_report, нет examples
+    dev_dir = skill_dir / "_dev"
+    dev_dir.mkdir()
+    (dev_dir / "intent_brief.md").write_text("# intent\n", encoding="utf-8")
+
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "scripts.package_skill",
+            str(skill_dir.resolve()),
+            "--output-dir", str(out_dir),
+        ],
+        capture_output=True,
+        encoding="utf-8",
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"},
+        timeout=60,
+        cwd=str(SKILL_DIR),
+    )
+    # Должен fail с понятным сообщением
+    assert result.returncode != 0, (
+        f"Expected non-zero exit, got {result.returncode}. "
+        f"stdout={result.stdout!r} stderr={result.stderr!r}"
+    )
+    combined = (result.stderr or "") + (result.stdout or "")
+    assert "completion_report.md" in combined, combined
+    assert "examples/prompt_01.md" in combined or "prompt_01" in combined, combined
+    # Архив НЕ должен быть создан
+    assert not list(out_dir.glob("skill-*.zip")), "archive should NOT exist"
+
+
+def test_package_skill_passes_with_complete_dev(tmp_path):
+    """Полный _dev/ (все 6 required файлов) — упаковка проходит, demo/ в архиве."""
+    skill_dir = tmp_path / "test-skill"
+    skill_dir.mkdir()
+    (skill_dir / "SKILL.md").write_text(
+        "---\nid: test-skill\nname: test-skill\ndescription: Test\n---\n# Test\n",
+        encoding="utf-8",
+    )
+    _make_complete_dev_dir(skill_dir)
+
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "scripts.package_skill",
+            str(skill_dir.resolve()),
+            "--output-dir", str(out_dir),
+        ],
+        capture_output=True,
+        encoding="utf-8",
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"},
+        timeout=60,
+        cwd=str(SKILL_DIR),
+    )
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    skill_zip = next(out_dir.glob("skill-*.zip"))
+    import zipfile
+    with zipfile.ZipFile(skill_zip) as zf:
+        names = zf.namelist()
+        assert "demo/intent_brief.md" in names, names
+        assert "demo/completion_report.md" in names, names
+        assert "demo/examples/prompt_01_output.md" in names, names
+        assert "demo/examples/prompt_02_output.md" in names, names
+
+
+def test_package_skill_no_intent_brief_skips_validation(tmp_path):
+    """Если _dev/intent_brief.md нет — gate не срабатывает, упаковка без demo/."""
+    skill_dir = tmp_path / "test-skill"
+    skill_dir.mkdir()
+    (skill_dir / "SKILL.md").write_text(
+        "---\nid: test-skill\nname: test-skill\ndescription: Test\n---\n# Test\n",
+        encoding="utf-8",
+    )
+    # _dev/ существует но пуст — flow не запущен
+    dev_dir = skill_dir / "_dev"
+    dev_dir.mkdir()
+    (dev_dir / "unrelated.md").write_text("# something\n", encoding="utf-8")
+
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "scripts.package_skill",
+            str(skill_dir.resolve()),
+            "--output-dir", str(out_dir),
+        ],
+        capture_output=True,
+        encoding="utf-8",
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"},
+        timeout=60,
+        cwd=str(SKILL_DIR),
+    )
+    # Должен пройти (intent_brief нет — gate skipped)
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    skill_zip = next(out_dir.glob("skill-*.zip"))
+    # demo/ всё равно может быть (т.к. _dev есть и есть unrelated.md внутри —
+    # это попадает в demo/, но gate не активируется)
+    # Главное — упаковка не fails из-за missing required files.
