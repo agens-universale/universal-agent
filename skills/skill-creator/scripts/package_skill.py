@@ -1,24 +1,25 @@
 #!/usr/bin/env python3
 """
-Skill Packager - Creates a distributable .skill file of a skill folder
+Skill Packager - Creates a distributable skill-<id>.zip archive of a skill folder
 
 Usage:
-    python utils/package_skill.py <path/to/skill-folder> [output-directory]
+    python -m scripts.package_skill <path/to/skill-folder> [output-directory]
 
 Example:
-    python utils/package_skill.py skills/public/my-skill
-    python utils/package_skill.py skills/public/my-skill ./dist
+    python -m scripts.package_skill skills/my-skill
+    python -m scripts.package_skill skills/my-skill ./dist
 """
 
 import fnmatch
 import sys
 import zipfile
+from datetime import date as _date
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from quick_validate import validate_skill
 
 # Patterns to exclude when packaging skills.
-EXCLUDE_DIRS = {"__pycache__", "node_modules"}
+EXCLUDE_DIRS = {"__pycache__", "node_modules", "_dev"}
 EXCLUDE_GLOBS = {"*.pyc"}
 EXCLUDE_FILES = {".DS_Store"}
 # Directories excluded only at the skill root (not when nested deeper).
@@ -26,13 +27,12 @@ ROOT_EXCLUDE_DIRS = {"evals", ".eval_workspaces"}
 
 
 def should_exclude(rel_path: Path) -> bool:
-    """Check if a path should be excluded from packaging."""
+    """Check if a path should be excluded from packaging. rel_path is relative to skill_path."""
     parts = rel_path.parts
     if any(part in EXCLUDE_DIRS for part in parts):
         return True
-    # rel_path is relative to skill_path.parent, so parts[0] is the skill
-    # folder name and parts[1] (if present) is the first subdir.
-    if len(parts) > 1 and parts[1] in ROOT_EXCLUDE_DIRS:
+    # ROOT_EXCLUDE_DIRS applies to top-level only.
+    if parts and parts[0] in ROOT_EXCLUDE_DIRS:
         return True
     name = rel_path.name
     if name in EXCLUDE_FILES:
@@ -40,16 +40,141 @@ def should_exclude(rel_path: Path) -> bool:
     return any(fnmatch.fnmatch(name, pat) for pat in EXCLUDE_GLOBS)
 
 
-def package_skill(skill_path, output_dir=None):
+def _extract_frontmatter(skill_path: Path) -> dict:
+    """Return frontmatter dict from SKILL.md, or empty dict on parse error."""
+    skill_md = skill_path / "SKILL.md"
+    content = skill_md.read_text(encoding="utf-8")
+    import re
+    import yaml
+    match = re.match(r"^---\n(.*?)\n---", content, re.DOTALL)
+    if not match:
+        return {}
+    try:
+        return yaml.safe_load(match.group(1)) or {}
+    except yaml.YAMLError:
+        return {}
+
+
+def _extract_skill_id(skill_path: Path) -> str:
+    """Extract `id` from SKILL.md frontmatter, fallback to folder name."""
+    fm = _extract_frontmatter(skill_path)
+    return str(fm.get("id") or skill_path.name)
+
+
+def _detect_source_layer(skill_path: Path) -> str:
     """
-    Package a skill folder into a .skill file.
+    Detect skill source layer by inspecting the skill path against standard
+    project/user/system locations.
+
+    Order:
+    1. Under <cwd>/.gc/skills/ → 'project'
+    2. Under <user-skills-path> (gc_paths or hardcoded fallback) → 'user'
+    3. Under <repo>/skills/ → 'system' (repo = parents[3] of this script)
+    4. Otherwise → 'unknown'
+    """
+    skill_resolved = skill_path.resolve()
+
+    # 1. Project — try cwd first, then repo root (parents[3]) as fallback.
+    # cwd works for the typical case of running from the project root; repo root
+    # fallback covers running the script from a subdirectory.
+    project_candidates = [
+        Path.cwd().resolve() / ".gc" / "skills",
+        Path(__file__).resolve().parents[3] / ".gc" / "skills",
+    ]
+    for project_root in project_candidates:
+        try:
+            skill_resolved.relative_to(project_root.resolve())
+            return "project"
+        except (ValueError, OSError):
+            continue
+
+    # 2. User layer — try gc_paths() if available
+    user_skills_path = None
+    try:
+        # gc_paths() requires src/ in path; try fallback insert
+        _src = Path(__file__).resolve().parents[3] / "src"
+        if _src.is_dir() and str(_src) not in sys.path:
+            sys.path.insert(0, str(_src))
+        from config_modules.env_vars import gc_paths  # type: ignore
+        user_skills_path = (gc_paths()["data"] / "skills").resolve()
+    except Exception:
+        # Hardcoded fallback per-OS
+        home = Path.home()
+        if sys.platform.startswith(("linux", "darwin")):
+            user_skills_path = (home / ".local" / "share" / "gc" / "skills").resolve()
+        else:
+            user_skills_path = (home / ".gc" / "skills").resolve()
+
+    if user_skills_path is not None:
+        try:
+            skill_resolved.relative_to(user_skills_path)
+            return "user"
+        except ValueError:
+            pass
+
+    # 3. System (repo/skills/)
+    repo_skills = Path(__file__).resolve().parents[3] / "skills"
+    try:
+        skill_resolved.relative_to(repo_skills.resolve())
+        return "system"
+    except ValueError:
+        pass
+
+    return "unknown"
+
+
+def _generate_readme(
+    skill_path: Path,
+    skill_id: str,
+    source_layer: str,
+    has_demo: bool,
+) -> str:
+    """Generate README.md content for archive root."""
+    fm = _extract_frontmatter(skill_path)
+    version = fm.get("version") or "—"
+    description = (fm.get("description") or "").strip().replace("\n  ", " ").replace("\n", " ")
+    today = _date.today().isoformat()
+
+    demo_section = ""
+    if has_demo:
+        demo_section = (
+            f"- `demo/` — артефакты разработки скилла (intent_brief, "
+            f"text_review_report, self_check_report, тестовые промпты и outputs).\n"
+        )
+
+    return (
+        f"# Skill: {skill_id}\n\n"
+        f"**Краткое описание:**\n"
+        f"> {description}\n\n"
+        f"**Создан / упакован:** {today}\n"
+        f"**Версия:** {version}\n"
+        f"**Слой-источник:** {source_layer}\n"
+        f"**Путь источника:** `{skill_path}`\n\n"
+        f"## Как установить\n\n"
+        f"Скопируй папку `{skill_id}/` из этого архива в один из путей:\n\n"
+        f"- `<your-project>/.gc/skills/{skill_id}/` — только для одного проекта\n"
+        f"- `~/.gc/skills/{skill_id}/` (Windows) или\n"
+        f"  `~/.local/share/gc/skills/{skill_id}/` (Linux/Mac) — для всех проектов\n\n"
+        f"После копирования скилл подхватится агентом автоматически — "
+        f"перезапуск сессии не нужен.\n\n"
+        f"## Что в архиве\n\n"
+        f"- `{skill_id}/` — сам скилл, копируется как есть.\n"
+        f"{demo_section}"
+    )
+
+
+def package_skill(skill_path, output_dir=None, source_layer=None):
+    """
+    Package a skill folder into a skill-<id>.zip archive.
 
     Args:
         skill_path: Path to the skill folder
-        output_dir: Optional output directory for the .skill file (defaults to current directory)
+        output_dir: Optional output directory for the archive (defaults to current directory)
+        source_layer: Optional explicit source layer ("system" | "user" | "project");
+            filled into the generated README. Defaults to "unknown".
 
     Returns:
-        Path to the created .skill file, or None if error
+        Path to the created skill-<id>.zip archive, or None if error
     """
     skill_path = Path(skill_path).resolve()
 
@@ -78,54 +203,116 @@ def package_skill(skill_path, output_dir=None):
     print(f"✅ {message}\n")
 
     # Determine output location
-    skill_name = skill_path.name
     if output_dir:
         output_path = Path(output_dir).resolve()
         output_path.mkdir(parents=True, exist_ok=True)
     else:
         output_path = Path.cwd()
 
-    skill_filename = output_path / f"{skill_name}.skill"
+    skill_id = _extract_skill_id(skill_path)
+    if source_layer is None:
+        source_layer = _detect_source_layer(skill_path)
+    skill_filename = output_path / f"skill-{skill_id}.zip"
 
-    # Create the .skill file (zip format)
+    dev_dir = skill_path / "_dev"
+    has_demo = dev_dir.is_dir() and any(dev_dir.iterdir())
+
     try:
-        with zipfile.ZipFile(skill_filename, 'w', zipfile.ZIP_DEFLATED) as zipf:
-            # Walk through the skill directory, excluding build artifacts
-            for file_path in skill_path.rglob('*'):
+        with zipfile.ZipFile(skill_filename, "w", zipfile.ZIP_DEFLATED) as zipf:
+            # Generate README.md (always at archive root, before skill content)
+            readme_content = _generate_readme(
+                skill_path=skill_path,
+                skill_id=skill_id,
+                source_layer=source_layer or "unknown",
+                has_demo=has_demo,
+            )
+            zipf.writestr("README.md", readme_content)
+
+            for file_path in skill_path.rglob("*"):
                 if not file_path.is_file():
                     continue
-                arcname = file_path.relative_to(skill_path.parent)
-                if should_exclude(arcname):
-                    print(f"  Skipped: {arcname}")
+                rel_in_skill = file_path.relative_to(skill_path)
+                if should_exclude(rel_in_skill):
+                    print(f"  Skipped: {rel_in_skill}")
                     continue
+                arcname = str(Path(skill_id) / rel_in_skill).replace("\\", "/")
                 zipf.write(file_path, arcname)
                 print(f"  Added: {arcname}")
 
-        print(f"\n✅ Successfully packaged skill to: {skill_filename}")
+            # Bundle _dev/ as demo/ in archive
+            if dev_dir.is_dir():
+                for file_path in dev_dir.rglob("*"):
+                    if not file_path.is_file():
+                        continue
+                    rel_in_dev = file_path.relative_to(dev_dir)
+                    if should_exclude(rel_in_dev):
+                        print(f"  Skipped (demo): {rel_in_dev}")
+                        continue
+                    arcname = str(Path("demo") / rel_in_dev).replace("\\", "/")
+                    zipf.write(file_path, arcname)
+                    print(f"  Added: {arcname}")
+
+        print(f"\nSuccessfully packaged skill to: {skill_filename}")
+
+        # Cleanup _dev/ after successful packaging (transient workspace)
+        dev_dir = skill_path / "_dev"
+        if dev_dir.is_dir():
+            try:
+                import shutil
+                shutil.rmtree(dev_dir)
+                print(f"  Cleaned up: {dev_dir}")
+            except (PermissionError, OSError) as e:
+                print(
+                    f"⚠️  Warning: _dev/ remains at {dev_dir}; clean up manually if needed. ({e})",
+                    file=sys.stderr,
+                )
+
         return skill_filename
 
     except Exception as e:
-        print(f"❌ Error creating .skill file: {e}")
+        print(f"Error creating skill archive: {e}")
         return None
 
 
 def main():
-    if len(sys.argv) < 2:
-        print("Usage: python utils/package_skill.py <path/to/skill-folder> [output-directory]")
-        print("\nExample:")
-        print("  python utils/package_skill.py skills/public/my-skill")
-        print("  python utils/package_skill.py skills/public/my-skill ./dist")
-        sys.exit(1)
+    import argparse
+    parser = argparse.ArgumentParser(
+        description="Package a skill folder into skill-<id>.zip"
+    )
+    parser.add_argument("skill_path", help="Path to the skill folder")
+    parser.add_argument(
+        "output_dir_pos",
+        nargs="?",
+        default=None,
+        help="Output directory (positional, for backwards compat)",
+    )
+    parser.add_argument(
+        "--source-layer",
+        choices=["system", "user", "project"],
+        default=None,
+        help="Skill source layer (filled into README; auto-detected if omitted)",
+    )
+    parser.add_argument(
+        "--output-dir",
+        default=None,
+        help="Output directory (preferred over positional)",
+    )
+    args = parser.parse_args()
 
-    skill_path = sys.argv[1]
-    output_dir = sys.argv[2] if len(sys.argv) > 2 else None
+    output_dir = args.output_dir or args.output_dir_pos
 
-    print(f"📦 Packaging skill: {skill_path}")
+    print(f"📦 Packaging skill: {args.skill_path}")
     if output_dir:
         print(f"   Output directory: {output_dir}")
+    if args.source_layer:
+        print(f"   Source layer (explicit): {args.source_layer}")
     print()
 
-    result = package_skill(skill_path, output_dir)
+    result = package_skill(
+        args.skill_path,
+        output_dir=output_dir,
+        source_layer=args.source_layer,
+    )
 
     if result:
         sys.exit(0)
