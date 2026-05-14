@@ -63,7 +63,7 @@ Background и CLI-клиент для работы с агентом GigaCode: �
       и `openrouter_x_title` (в запросе это `HTTP-Referer` и `X-OpenRouter-Title`).
     - Для хранения истории тредов:
       - по умолчанию используется папка `threads` в корне проекта (`mini-cli-pub/threads`);
-      - опциональный параметр `threads_data_path` в `config.yml` должен быть **абсолютным путём** к директории хранения;
+      - опциональный параметр `threads_data_path` в `config.yml` должен быть **абсолютным путём** к директории хранения; если не задан — используется кросс-платформенный дефолт `<state>/projects/<project-slug>/threads/` (на Linux/macOS — `~/.local/state/gc/...`, на Windows — `~/.gc/...`);
       - параметры суммаризации в `chat_completions` задаются в секции `summary_params`:
         - `summary_params.chat_completions_summary_trigger_chars`:
           - `<= 0` (или отсутствует) — суммаризация выключена;
@@ -248,6 +248,61 @@ Background и CLI-клиент для работы с агентом GigaCode: �
 
 
 
+## Где gc-cli хранит runtime-данные
+
+Кросс-платформенная раскладка. По умолчанию:
+
+| ОС | Логи / треды / swarm | Cache | Config |
+|---|---|---|---|
+| Linux | `~/.local/state/gc/projects/<slug>/` | `~/.cache/gc/` | `~/.config/gc/` |
+| macOS | `~/.local/state/gc/projects/<slug>/` *(как Linux)* | `~/.cache/gc/` | `~/.config/gc/` |
+| Windows | `%USERPROFILE%\.gc\projects\<slug>\` | `%USERPROFILE%\.gc\cache\` | `%USERPROFILE%\.gc\` |
+
+`<slug>` — путь к проекту с заменой `/`, `\`, `:` на `-`, в стиле `~/.claude/projects/`.
+
+Override через переменные окружения: `GC_HOME` (корневой), `GC_STATE_DIR` / `GC_CONFIG_DIR` / `GC_CACHE_DIR` / `GC_DATA_DIR` (точечные). На Linux/macOS дополнительно работают `XDG_STATE_HOME` / `XDG_CONFIG_HOME` / `XDG_CACHE_HOME` / `XDG_DATA_HOME`.
+
+См. также пояснения в `demo_config.yml` (секция `paths`).
+
+## Скиллы
+
+gc-cli ищет скиллы в трёх местах (project > user > system, верхний слой перетирает нижний по `skill_id`):
+
+- **Project:** `<your-repo>/.gc/skills/<skill-id>/SKILL.md` — командные скиллы для конкретного проекта.
+- **User:** `~/.local/share/gc/skills/<skill-id>/SKILL.md` (Linux/macOS) или `~/.gc/skills/<skill-id>/SKILL.md` (Windows) — личные скиллы, доступные во всех проектах.
+- **System:** скиллы, поставляющиеся с gc-cli — read-only.
+
+Чтобы добавить project-скилл — положите `SKILL.md` в `<your-repo>/.gc/skills/<id>/`.
+
+Чтобы зафиксировать единственный источник скиллов (например, в production), задайте `paths.skills_data_path` в `config.yml` — auto-discovery трёх слоёв при этом отключается.
+
+## Project local config (опционально)
+
+Если в корне проекта есть файл `<your-repo>/.gc/config.yml`, gc-cli мерджит его поверх глобального `config.yml` через layered loading:
+
+- **scalar** (число, строка, bool) — project переопределяет global.
+- **dict** — рекурсивный deep merge: project расширяет/переопределяет ключи внутри.
+- **list / array** — конкатенация + dedup: project только **расширяет** список, не сбрасывает (важно для security-полей вроде `agent.stop_tools` или `command_moderation.url_policy.url_blacklist`).
+
+Пример проектного `<your-repo>/.gc/config.yml`:
+
+```yaml
+agent:
+  max_steps: 200             # этот проект — длиннее цепочки рассуждений
+  stop_tools: [browse_url]    # добавить локальный запрет (к глобальному списку)
+mcp:
+  servers:
+    my_local_db:               # MCP только для этого проекта
+      transport: stdio
+      command: psql
+```
+
+Файл `.gc/config.yml` следует той же схеме, что и глобальный `config.yml` — указывайте только те поля, которые хотите переопределить или дополнить. Папка `.gc/` создаётся автоматически при первом запуске `gc-cli` (та же папка, что и для project-скиллов).
+
+CLI-флаги (`--max_steps 999` и т.п.) перебивают и global, и project. Файл опционален; если его нет — используется только global.
+
+Если через `--config` явно передан тот же файл, что и `<repo>/.gc/config.yml` — gc-cli применяет его как обычный config без второго слоя (особый случай для запусков с явным путём).
+
 # Серверный режим (REST-обёртка поверх gc-cli)
 
 Существует серверный режим, который добавляет поверх CLI-агента REST‑слой на FastAPI.
@@ -333,7 +388,7 @@ Background и CLI-клиент для работы с агентом GigaCode: �
 - **Папка для хранения тредов**:
   - на файловую персистентность отвечает тот же механизм, что и в CLI (`src/thread_store.py`);
   - по умолчанию используется папка `threads` в корне проекта (`mini-cli-pub/threads`);
-  - опциональный параметр `threads_data_path` задаётся в `config.yml` и должен быть **абсолютным путём**;
+  - опциональный параметр `threads_data_path` задаётся в `config.yml` и должен быть **абсолютным путём**; если не задан — используется дефолт `<state>/projects/<project-slug>/threads/`;
   - серверный режим НЕ переопределяет этот путь, он использует те же настройки, что и CLI.
 
 - **Папка со скиллами**:
@@ -440,7 +495,7 @@ swarm:
 ### Ограничения
 
 - Лимит `max_concurrent` — без очереди; при превышении запросы отбиваются ошибкой 429/503.
-- Хранение логов — `swarm_threads/`, рабочих директорий — `.swarm_sandboxes/`.
-- Песочница удаляется **не при завершении процесса, а по истечении TTL** (вместе с данными сессии). Это гарантирует, что артефакты доступны для продления сессии и согласуется с историей в `swarm_threads/`.
+- Хранение swarm-логов и тредов — `<state>/projects/<project-slug>/swarm/threads/`, рабочих директорий — `<state>/projects/<project-slug>/swarm/sandboxes/`.
+- Песочница удаляется **не при завершении процесса, а по истечении TTL** (вместе с данными сессии). Это гарантирует, что артефакты доступны для продления сессии и согласуется с историей в `swarm/threads/`.
 - Рекомендуется cron-задача для очистки старых swarm-данных (см. `scripts/cleanup_swarm_threads.py`).
 - Bubblewrap-монтирование `/lib`, `/lib64`, `/usr` может потребовать адаптации под конкретный дистрибутив (например, на Arch Linux `/lib` → symlink на `/usr/lib`).

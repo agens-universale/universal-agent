@@ -4,6 +4,7 @@ import os
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from config_modules import env_vars
 from config_modules.agent import AgentConfig
 from config_modules.backend import BackendConfig
 from config_modules.logging_config import LoggingConfig
@@ -42,19 +43,28 @@ class AppConfig(BaseModel):
 
 def resolve_paths(cfg: AppConfig, config_dir: str) -> None:
     def to_abs(path_value: str | None) -> str | None:
-        if path_value is None:
+        if path_value is None or not str(path_value).strip():
             return None
+        path_value = str(path_value).strip()
         if os.path.isabs(path_value):
             return path_value
         return os.path.abspath(os.path.join(config_dir, path_value))
+
+    paths = env_vars.gc_paths()
+    slug = env_vars.project_slug()
+    project_state = paths["state"] / "projects" / slug
 
     cfg.paths.agent_md_path = to_abs(cfg.paths.agent_md_path) or cfg.paths.agent_md_path
     cfg.paths.chat_completions_system_prompt_path = to_abs(
         cfg.paths.chat_completions_system_prompt_path
     ) or os.path.join(config_dir, "prompts", "chat_completions_system_prompt.md")
-    cfg.paths.threads_data_path = to_abs(cfg.paths.threads_data_path)
+    cfg.paths.threads_data_path = (
+        to_abs(cfg.paths.threads_data_path) or str(project_state / "threads")
+    )
     cfg.paths.skills_data_path = to_abs(cfg.paths.skills_data_path)
-    cfg.paths.logs_dump_dir = to_abs(cfg.paths.logs_dump_dir)
+    cfg.paths.logs_dump_dir = (
+        to_abs(cfg.paths.logs_dump_dir) or str(project_state / "logs")
+    )
     cfg.summary.chat_completions_summary_prompt_path = to_abs(
         cfg.summary.chat_completions_summary_prompt_path
     ) or os.path.join(config_dir, "prompts", "chat_completions_summary_prompt.md")

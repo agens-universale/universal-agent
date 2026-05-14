@@ -1,3 +1,25 @@
+# ---------------------------------------------------------------------------
+# Это глобальный config.yml для gc-cli.
+#
+# Дополнительно к нему gc-cli читает project local config из <cwd>/.gc/config.yml
+# (если файл существует) и мерджит его поверх через layered loading:
+#   - scalar:  project переопределяет global
+#   - dict:    рекурсивный deep merge
+#   - list:    конкатенация + dedup (project расширяет, не сбрасывает security-списки)
+#
+# Пример project config (<cwd>/.gc/config.yml):
+#   agent:
+#     max_steps: 200                # переопределяет global для этого проекта
+#     stop_tools: [browse_url]      # добавляется к global stop_tools
+#   mcp:
+#     servers:
+#       my_local_db:                # новый MCP только для этого проекта
+#         transport: stdio
+#         command: psql
+#
+# CLI args (--max_steps 999) — самые сильные, перебивают и global, и project.
+# ---------------------------------------------------------------------------
+
 backend:
   # responses | chat_completions
   api_mode: chat_completions
@@ -51,12 +73,28 @@ logging:
   save_logs: true
 
 paths:
-  # Relative paths are resolved from config.yml directory.
+  # Относительные пути резолвятся от каталога config.yml.
   agent_md_path: "prompts/demo_cli_agent.md"
   # chat_completions_system_prompt_path: "prompts/chat_completions_system_prompt.md"
+
+  # threads_data_path / logs_dump_dir / skills_data_path по умолчанию НЕ заданы —
+  # тогда runtime-данные пишутся в кросс-платформенные дефолтные каталоги:
+  #   Linux/macOS:  ~/.local/state/gc/projects/<project-slug>/{threads,logs}/
+  #   Windows:      %USERPROFILE%\.gc\projects\<project-slug>\{threads,logs}\
+  # Если хочется явный путь — раскомментируй и задай абсолютный.
   # threads_data_path: ""
-  # skills_data_path: ""
   # logs_dump_dir: ""
+
+  # Обычно не задавать — gc-cli автоматически смотрит project/user/system слои.
+  # Задавайте только если нужно жёстко зафиксировать единственный источник
+  # (production sandbox, curated team set, CI с фикстурами).
+  # skills_data_path: /opt/gc/curated-skills
+
+  # Для пром-стенда (с одним доступным для записи каталогом, например /tmp):
+  #   запускать с GC_HOME=/tmp/gc — все runtime-данные пойдут под этот корень.
+  # Доступные env-переменные:
+  #   GC_HOME, GC_STATE_DIR, GC_CONFIG_DIR, GC_CACHE_DIR, GC_DATA_DIR,
+  #   XDG_*_HOME (стандарт freedesktop.org, только Linux/macOS).
 
 summary:
   chat_completions_summary_trigger_chars: 200000

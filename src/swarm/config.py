@@ -1,6 +1,7 @@
 import os
 from typing import Any, Dict
 
+from config_modules import env_vars
 from src.rest_api.server_config import PROJECT_ROOT
 
 
@@ -43,9 +44,14 @@ def build_swarm_config(server_cfg: Dict[str, Any]) -> Dict[str, Any]:
 
     enabled = bool(raw_swarm.get("enabled", False))
 
-    threads_dir = _resolve_path(raw_swarm.get("threads_dir"), "swarm_threads")
+    paths = env_vars.gc_paths()
+    slug = env_vars.project_slug()
+    swarm_root = paths["state"] / "projects" / slug / "swarm"
+    threads_dir = _resolve_path(
+        raw_swarm.get("threads_dir"), str(swarm_root / "threads")
+    )
     sandbox_root_dir = _resolve_path(
-        raw_swarm.get("sandbox_root_dir"), ".swarm_sandboxes"
+        raw_swarm.get("sandbox_root_dir"), str(swarm_root / "sandboxes")
     )
 
     max_concurrent = int(raw_swarm.get("max_concurrent", 10))
