@@ -1,6 +1,6 @@
 """Cross-platform launcher for the LiteLLM Proxy battery.
 
-Mirrors `recommended_mcp/run.py`. Reads litellm/.env, sanity-checks the
+Reads litellm/.env, sanity-checks the
 callback package is importable as `callbacks.provider_normalizer`, then
 renders `proxy_config.yaml` into `proxy_config.local.yaml` (with
 `__VAR__` placeholders substituted from env), and execs

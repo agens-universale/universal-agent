@@ -11,6 +11,10 @@ Responsibilities:
      (idempotent — skipped if already importable at the pinned version).
   2. Seed `litellm/.env` from `litellm/.env.example` if missing.
 
+Agent-side configs are NOT seeded into the repo root — they live as
+read-only examples in `litellm/agent_config_examples/`. The user copies
+or references them manually.
+
 No Docker, no system packages — pure pip+stdlib.
 
 Run:
@@ -84,26 +88,6 @@ def seed_env_file(root: Path) -> bool:
     return True
 
 
-def seed_agent_configs(litellm_root: Path, repo_root: Path) -> list[str]:
-    """Copy gc-cli config templates from `litellm/agent_configs/` into the
-    repo root if the destination file does not exist yet.
-
-    Idempotent — existing files are never overwritten (user may have local
-    tweaks). Returns the list of filenames that were newly created.
-    """
-    src_dir = litellm_root / "agent_configs"
-    if not src_dir.is_dir():
-        return []
-    created: list[str] = []
-    for template in sorted(src_dir.glob("*.yml")):
-        target = repo_root / template.name
-        if target.exists():
-            continue
-        shutil.copyfile(template, target)
-        created.append(template.name)
-    return created
-
-
 def main() -> int:
     root = Path(__file__).resolve().parent
 
@@ -122,17 +106,12 @@ def main() -> int:
     else:
         print(f"[ok] {root / '.env'} already exists")
 
-    repo_root = root.parent
-    created_configs = seed_agent_configs(root, repo_root)
-    if created_configs:
-        for name in created_configs:
-            print(f"[ok] seeded {repo_root / name} from agent_configs/")
-    else:
-        print(f"[ok] agent configs in {repo_root} already exist")
-
     print()
-    print("Next: edit litellm/.env with provider credentials, then:")
-    print("  python litellm/run.py")
+    print("Next steps:")
+    print(f"  1. Edit {root / '.env'} with provider credentials")
+    print(f"  2. (Optional) Copy a template from {root / 'agent_config_examples'}")
+    print(f"     into the repo root if you want a ready gc-cli config")
+    print("  3. python litellm/run.py")
     return 0
 
 

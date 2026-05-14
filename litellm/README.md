@@ -17,9 +17,9 @@ litellm/
 ├── proxy_config.yaml          # алиасы моделей + регистрация колбэка
 │                                Содержит __VAR__ placeholder'ы (подставляются из .env при запуске)
 ├── proxy_config.local.yaml    # gitignored, генерируется run.py из proxy_config.yaml
-├── agent_configs/             # шаблоны agent-конфигов под прокси (под git)
-│   ├── config_gigachat_proxy.yml
-│   └── config_yandex_proxy.yml
+├── agent_config_examples/     # ПРИМЕРЫ agent-конфигов под прокси (под git, read-only)
+│   ├── config_gigachat.yml
+│   └── config_yandex.yml      # копируйте/правьте под себя вручную
 ├── callbacks/
 │   ├── __init__.py
 │   ├── provider_normalizer.py # тонкий dispatcher: класс + proxy_handler_instance
@@ -36,7 +36,7 @@ litellm/
 ## Быстрый старт
 
 ```bash
-# 1. Один раз — pip-install litellm[proxy] + seed .env + agent-конфиги в корень репы
+# 1. Один раз — pip-install litellm[proxy] + seed litellm/.env из .env.example
 python litellm/install.py
 
 # 2. Заполнить credentials и идентификаторы
@@ -45,8 +45,10 @@ $EDITOR litellm/.env
 # 3. Запуск прокси (foreground, держите терминал открытым)
 python litellm/run.py
 
-# 4. Использование из gc-cli (в отдельном терминале)
-gc-cli -q "..." --config config_gigachat_proxy.yml --model gigachat-2-lite
+# 4. (Опционально) Скопировать пример agent-конфига в корень репы или использовать напрямую
+cp litellm/agent_config_examples/config_gigachat.yml config.yml      # дефолт gc-cli
+# либо без копирования:
+gc-cli -q "..." --config litellm/agent_config_examples/config_gigachat.yml --model gigachat-2-lite
 ```
 
 ## Конфигурация

@@ -1,8 +1,11 @@
-# Конфиг gc-cli для YandexGPT (через LiteLLM Proxy).
+# Пример конфига gc-cli для YandexGPT (через LiteLLM Proxy).
 #
-# Запуск:
-#   gc-cli -q "..." --config config_yandex_proxy.yml
-#   gc-cli -q "..." --config config_yandex_proxy.yml --model yandex-gpt-lite
+# Это шаблон. Скопируйте в корень репы под удобным именем, например:
+#   cp litellm/agent_config_examples/config_yandex.yml config.yml
+#   gc-cli -q "..."                       # подхватит config.yml по умолчанию
+# Либо указывайте путь явно:
+#   gc-cli -q "..." --config litellm/agent_config_examples/config_yandex.yml
+#   gc-cli -q "..." --config litellm/agent_config_examples/config_yandex.yml --model yandex-gpt-lite
 
 backend:
   api_mode: chat_completions
