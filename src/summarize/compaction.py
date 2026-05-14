@@ -161,6 +161,8 @@ def run_summary_compaction(
     """
     Выполняет compaction: LLM-сводка и ``apply_summary_state_patch``. Порог «когда» не проверяет —
     вызывающий обязан вызвать после `history_exceeds_summary_trigger` (или в тестах принудительно).
+
+    История для суммаризации всегда берётся из ``state.messages`` (без system-сообщений).
     """
     logger = getattr(ctx, "logger", None)
     thread_id = getattr(state, "thread_id", None)

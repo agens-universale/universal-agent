@@ -6,6 +6,7 @@ import tempfile
 import types
 import unittest
 import json
+from collections import deque
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -138,6 +139,10 @@ class SummaryTriggersTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             ctx = self._make_ctx(tmp_dir, backend_api_mode="chat_completions")
             call_order: list[str] = []
+            truth = deque([True, False, True])
+
+            def _hist_exceeds(**_kwargs):
+                return truth.popleft() if truth else False
 
             def _fake_run_agent(messages, state, _ctx, **kwargs):
                 call_order.append("run_agent")
@@ -151,6 +156,19 @@ class SummaryTriggersTest(unittest.TestCase):
             def _record_summary_call(**kwargs):
                 reason = str(kwargs.get("trigger_reason"))
                 call_order.append(f"summary:{reason}")
+                st = kwargs.get("state")
+                if st is None:
+                    return
+                msgs = list(st.messages)
+                sys_m = next(
+                    (
+                        m
+                        for m in msgs
+                        if str(m.get("role", "")).strip().lower() == "system"
+                    ),
+                    None,
+                )
+                st.messages = [sys_m] if sys_m else []
 
             with patch.object(
                 agent_executor_module, "get_skills_registry", return_value=_SkillsRegistryStub()
@@ -159,14 +177,14 @@ class SummaryTriggersTest(unittest.TestCase):
             ), patch.object(
                 run_summary_coordinator_module,
                 "history_exceeds_summary_trigger",
-                return_value=True,
+                side_effect=_hist_exceeds,
             ), patch.object(
                 run_summary_coordinator_module,
                 "run_summary_compaction",
                 side_effect=_record_summary_call,
             ):
                 executor = agent_executor_module.AgentExecutor(ctx)
-                result = executor.run("hello", thread_id="thr1", system="cli", verbose=False)
+                result = executor.run(["hello"], thread_id="thr1", system="cli", verbose=False)
                 self.assertEqual(result, "ok")
 
             self.assertEqual(call_order[0], "summary:pre_run")
@@ -177,6 +195,10 @@ class SummaryTriggersTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             ctx = self._make_ctx(tmp_dir, backend_api_mode="chat_completions")
             calls: list[str] = []
+            truth = deque([True, False, True])
+
+            def _hist_exceeds(**_kwargs):
+                return truth.popleft() if truth else False
 
             def _fake_run_agent(messages, state, _ctx, **kwargs):
                 state.messages += list(messages)
@@ -187,6 +209,19 @@ class SummaryTriggersTest(unittest.TestCase):
 
             def _record(**kwargs):
                 calls.append(str(kwargs.get("trigger_reason")))
+                st = kwargs.get("state")
+                if st is None:
+                    return
+                msgs = list(st.messages)
+                sys_m = next(
+                    (
+                        m
+                        for m in msgs
+                        if str(m.get("role", "")).strip().lower() == "system"
+                    ),
+                    None,
+                )
+                st.messages = [sys_m] if sys_m else []
 
             with patch.object(
                 agent_executor_module, "get_skills_registry", return_value=_SkillsRegistryStub()
@@ -195,14 +230,14 @@ class SummaryTriggersTest(unittest.TestCase):
             ), patch.object(
                 run_summary_coordinator_module,
                 "history_exceeds_summary_trigger",
-                return_value=True,
+                side_effect=_hist_exceeds,
             ), patch.object(
                 run_summary_coordinator_module,
                 "run_summary_compaction",
                 side_effect=_record,
             ):
                 executor = agent_executor_module.AgentExecutor(ctx)
-                result = executor.run("hello", system="cli", verbose=False)
+                result = executor.run(["hello"], system="cli", verbose=False)
                 self.assertEqual(result, "ok")
 
             self.assertEqual(calls, ["pre_run", "pre_backend"])
@@ -219,7 +254,7 @@ class SummaryTriggersTest(unittest.TestCase):
                 run_summary_coordinator_module, "run_summary_compaction"
             ) as compaction_mock:
                 executor = agent_executor_module.AgentExecutor(ctx)
-                result = executor.run("hello", thread_id="thr1", system="cli", verbose=False)
+                result = executor.run(["hello"], thread_id="thr1", system="cli", verbose=False)
                 self.assertEqual(result, "ok")
 
             compaction_mock.assert_not_called()
@@ -244,7 +279,7 @@ class SummaryTriggersTest(unittest.TestCase):
                 return_value=False,
             ):
                 executor = agent_executor_module.AgentExecutor(ctx)
-                result = executor.run("hello", system="cli", verbose=False)
+                result = executor.run(["hello"], system="cli", verbose=False)
                 self.assertEqual(result, "ok")
 
             hook = captured.get("pre_backend_compaction_hook")
@@ -306,10 +341,14 @@ class SummaryTriggersTest(unittest.TestCase):
                 agent_executor_module, "get_skills_registry", return_value=_SkillsRegistryStub()
             ), patch.object(
                 agent_executor_module, "run_agent", side_effect=_fake_run_agent
+            ), patch.object(
+                run_summary_coordinator_module,
+                "history_exceeds_summary_trigger",
+                return_value=False,
             ):
                 executor = agent_executor_module.AgentExecutor(ctx)
                 result = executor.run(
-                    "новый вопрос",
+                    ["новый вопрос"],
                     thread_id=thread_id,
                     system="cli",
                     verbose=False,

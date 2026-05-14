@@ -55,6 +55,27 @@ def wrap_technical_user_content(
     return f'<technical type="{technical_type}">{raw}</technical>'
 
 
+def wrap_skill_resolution_technical_instruction(skill_name: str) -> str:
+    """
+    Technical-сообщение для CLI: решать запрос через skill с данным именем;
+    при отсутствии — похожее имя (опечатка), если описание подходит; иначе fail.
+    """
+    safe = (
+        str(skill_name)
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+    )
+    body = (
+        f'For resolving user ask use skill "{safe}". '
+        "If such skill is not available, use a skill with a similar name "
+        "(user may have mistyped the skill name) if such a skill matches the "
+        "user task according to its skill description. "
+        "If no suitable skill is available, report failure and stop."
+    )
+    return wrap_technical_user_content(body)
+
+
 def is_dialog_summary_user_message_text(text: str) -> bool:
     normalized = str(text or "").strip().lower()
     if not normalized:

@@ -28,6 +28,38 @@ def ctx_stub():
     )
 
 
+def test_pre_backend_passes_full_history_including_suffix(monkeypatch, ctx_stub):
+    """Компакция читает весь несистемный хвост из state, включая preserved_batch (суффикс)."""
+    sys_m = {"role": "system", "content": "s"}
+    u1 = {"role": "user", "content": "a", "id": "1"}
+    u2 = {"role": "user", "content": "b", "id": "2"}
+    state = _minimal_state(messages=[sys_m, u1, u2])
+    captured: dict = {}
+
+    def capture(**kwargs):
+        from summarize.compaction import without_system_messages
+
+        st = kwargs["state"]
+        captured["non_system"] = without_system_messages(list(st.messages))
+        st.messages = [sys_m, {"role": "user", "content": "<summary/>", "id": "sum"}]
+
+    monkeypatch.setattr(rsc, "run_summary_compaction", capture)
+    monkeypatch.setattr(rsc, "history_exceeds_summary_trigger", lambda **_k: True)
+
+    coord = RunSummaryCoordinator(
+        ctx=ctx_stub,
+        state=state,
+        thread_session=None,
+        summary_trigger_chars=10,
+        is_cli_mode=False,
+        pre_backend_trigger_reason="pre_backend",
+    )
+    current = [u1, u2]
+    coord.pre_backend_compaction_hook(current, "user_ask")
+
+    assert captured.get("non_system") == [u1, u2]
+
+
 def test_suffix_mismatch_returns_without_changing_state(monkeypatch, ctx_stub):
     sys_m = {"role": "system", "content": "s"}
     stale = {"role": "user", "content": "stale", "id": "u0"}
@@ -80,7 +112,7 @@ def test_suffix_match_runs_and_restores_even_if_compaction_raises(monkeypatch, c
     with pytest.raises(RuntimeError, match="simulated"):
         coord.pre_backend_compaction_hook(current, "user_ask")
 
-    assert state.messages[-2:] == [u1, u2]
+    assert state.messages == [sys_m, u1, u2]
 
 
 def test_current_messages_inplace_replaced_after_hook(monkeypatch, ctx_stub):
@@ -88,7 +120,11 @@ def test_current_messages_inplace_replaced_after_hook(monkeypatch, ctx_stub):
     u1 = {"role": "user", "content": "a", "id": "1"}
     state = _minimal_state(messages=[sys_m, u1])
 
-    monkeypatch.setattr(rsc, "run_summary_compaction", lambda **_k: None)
+    def mock_compact(**kwargs):
+        st = kwargs["state"]
+        st.messages = [sys_m, {"role": "user", "content": "<summary/>", "id": "sum"}]
+
+    monkeypatch.setattr(rsc, "run_summary_compaction", mock_compact)
     monkeypatch.setattr(rsc, "history_exceeds_summary_trigger", lambda **_k: True)
 
     coord = RunSummaryCoordinator(
@@ -113,7 +149,11 @@ def test_no_orphan_outputs_in_current_after_function_call_output(monkeypatch, ct
     batch = [out_bad, call, out_ok]
     state = _minimal_state(messages=[sys_m, *batch])
 
-    monkeypatch.setattr(rsc, "run_summary_compaction", lambda **_k: None)
+    def mock_compact(**kwargs):
+        st = kwargs["state"]
+        st.messages = [sys_m, {"role": "user", "content": "<summary/>", "id": "sum"}]
+
+    monkeypatch.setattr(rsc, "run_summary_compaction", mock_compact)
     monkeypatch.setattr(rsc, "history_exceeds_summary_trigger", lambda **_k: True)
 
     coord = RunSummaryCoordinator(
@@ -138,7 +178,11 @@ def test_persist_batch_only_when_nonempty(monkeypatch, ctx_stub):
     u1 = {"role": "user", "content": "a", "id": "1"}
     state = _minimal_state(messages=[sys_m, u1])
 
-    monkeypatch.setattr(rsc, "run_summary_compaction", lambda **_k: None)
+    def mock_compact(**kwargs):
+        st = kwargs["state"]
+        st.messages = [sys_m, {"role": "user", "content": "<summary/>", "id": "sum"}]
+
+    monkeypatch.setattr(rsc, "run_summary_compaction", mock_compact)
     monkeypatch.setattr(rsc, "history_exceeds_summary_trigger", lambda **_k: True)
 
     thread = MagicMock()
@@ -183,7 +227,11 @@ def test_function_call_output_clears_current_when_preservation_empty(monkeypatch
     orphan = {"type": "function_call_output", "call_id": "solo", "output": "", "id": "o"}
     state = _minimal_state(messages=[sys_m, orphan])
 
-    monkeypatch.setattr(rsc, "run_summary_compaction", lambda **_k: None)
+    def mock_compact(**kwargs):
+        st = kwargs["state"]
+        st.messages = [sys_m, {"role": "user", "content": "<summary/>", "id": "sum"}]
+
+    monkeypatch.setattr(rsc, "run_summary_compaction", mock_compact)
     monkeypatch.setattr(rsc, "history_exceeds_summary_trigger", lambda **_k: True)
 
     coord = RunSummaryCoordinator(

@@ -12,10 +12,13 @@ agent:
   # (резолвится в абсолютный путь относительно корня проекта).
   server_agentmd_path: "./prompts/demo_server_agent.md"
 
-agent_overrides:
-  # Управление консольным трейсом:
+logging:
   # при console_trace: false агент не будет печатать пошаговые сообщения в stdout.
   console_trace: false
+  dump_storage: false
+  save_logs: false
+
+agent_overrides:
   # Список simple-tools, запрещённых в серверном режиме (чтобы не портить файлы библиотеки).
   stop_tools:
     # Отключаем тулы, которые могут повредить файлы библиотеки и работают с файловой системой веб приложения
@@ -34,8 +37,6 @@ agent_overrides:
     # - calculator
     # Отключаем интерактив в консоли
   verbose: false
-  dump_storage: false
-  save_logs: false
   use_server_subagents: true
   max_steps: 100
 

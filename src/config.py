@@ -20,6 +20,25 @@ _DEFAULT_LAST_DIALOG_STEP_MESSAGE_MAX_CHARS = (
     DEFAULT_LAST_DIALOG_STEP_MESSAGE_MAX_CHARS
 )
 
+_LOGGING_SYNC_KEYS = (
+    "full_log_backend",
+    "console_trace",
+    "dump_storage",
+    "save_logs",
+)
+
+
+def sync_logging_flat_and_params(config_dict: Dict[str, Any]) -> None:
+    """Согласовать logging_params и плоские ключи (после merge overrides и т.п.)."""
+    lp = dict(config_dict.get("logging_params") or {})
+    for key in _LOGGING_SYNC_KEYS:
+        if key in config_dict:
+            lp[key] = config_dict[key]
+    config_dict["logging_params"] = lp
+    for key in _LOGGING_SYNC_KEYS:
+        if key in lp:
+            config_dict[key] = lp[key]
+
 
 def _default_config_path() -> str:
     base_dir = os.path.dirname(os.path.abspath(__file__))
@@ -42,6 +61,7 @@ def apply_cli_overrides(
         root_box_enabled=effective_root_box_override,
         command_moderation_mode=command_moderation_mode,
     )
+    sync_logging_flat_and_params(config_dict)
 
 
 def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
@@ -78,6 +98,7 @@ def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
             },
         },
         "summary_params": app_cfg.summary.model_dump(),
+        "logging_params": app_cfg.logging.model_dump(),
         "agent_md_path": app_cfg.paths.agent_md_path,
         "chat_completions_system_prompt_path": app_cfg.paths.chat_completions_system_prompt_path,
         "threads_data_path": app_cfg.paths.threads_data_path,
@@ -97,9 +118,9 @@ def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
         "max_steps": app_cfg.agent.max_steps,
         "no_tool_call_max_count": app_cfg.agent.no_tool_call_max_count,
         "strict_submit_solution_validation": app_cfg.agent.strict_submit_solution_validation,
-        "console_trace": app_cfg.agent.console_trace,
-        "dump_storage": app_cfg.agent.dump_storage,
-        "save_logs": app_cfg.agent.save_logs,
+        "console_trace": app_cfg.logging.console_trace,
+        "dump_storage": app_cfg.logging.dump_storage,
+        "save_logs": app_cfg.logging.save_logs,
         "limit_project_metadata": app_cfg.agent.limit_project_metadata,
         "tool_output_inline_max_chars": app_cfg.agent.tool_output_inline_max_chars,
         "stored_tool_outputs_max_entries": app_cfg.agent.stored_tool_outputs_max_entries,
@@ -111,6 +132,8 @@ def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
     }
 
     apply_swarm_env_overrides(config_dict, config_dir)
+
+    sync_logging_flat_and_params(config_dict)
 
     verify = config_dict["use_ssl"]
     if verify is False:

@@ -213,7 +213,7 @@ class BackendModeSwitchTest(unittest.TestCase):
                     thread_id = "switch_mode_1"
 
                     result_step_1 = executor.run(
-                        "step one",
+                        ["step one"],
                         thread_id=thread_id,
                         system="cli",
                         verbose=False,
@@ -222,7 +222,7 @@ class BackendModeSwitchTest(unittest.TestCase):
 
                     config_dict["backend_api_mode"] = "chat_completions"
                     result_step_2 = executor.run(
-                        "step two",
+                        ["step two"],
                         thread_id=thread_id,
                         system="cli",
                         verbose=False,
@@ -241,7 +241,7 @@ class BackendModeSwitchTest(unittest.TestCase):
 
                     config_dict["backend_api_mode"] = "responses"
                     result_step_3 = executor.run(
-                        "step three",
+                        ["step three"],
                         thread_id=thread_id,
                         system="cli",
                         verbose=False,

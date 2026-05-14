@@ -450,6 +450,17 @@ def run_agent(
                     finish_arguments, finish_call_id = finish_response
                     grouped_messages = group_messages(messages)
                     pending_tool_calls = grouped_messages.get("tool_calls", [])
+                    # Один раз закрываем pending tool_calls (в т.ч. submit_solution):
+                    # chat/completions требует role=tool после assistant.tool_calls; для
+                    # других backend_mode функция no-op.
+                    append_cycle_stop_tool_outputs_for_batch(
+                        state=state,
+                        ctx=ctx,
+                        tool_calls=pending_tool_calls,
+                        run_agent_func=run_agent,
+                        persist_messages_callback=persist_messages_callback,
+                        backend_mode=backend_mode,
+                    )
                     strict_finish_gate = bool(
                         cfg.get("strict_submit_solution_validation", True)
                     )
@@ -485,14 +496,6 @@ def run_agent(
                             )
                             validation = None
                         if validation is None:
-                            append_cycle_stop_tool_outputs_for_batch(
-                                state=state,
-                                ctx=ctx,
-                                tool_calls=pending_tool_calls,
-                                run_agent_func=run_agent,
-                                persist_messages_callback=persist_messages_callback,
-                                backend_mode=backend_mode,
-                            )
                             if is_main_agent:
                                 state.clear_current_user_messages()
                             return finish_arguments
@@ -509,14 +512,6 @@ def run_agent(
                                 )
                             ]
                             continue
-                    append_cycle_stop_tool_outputs_for_batch(
-                        state=state,
-                        ctx=ctx,
-                        tool_calls=pending_tool_calls,
-                        run_agent_func=run_agent,
-                        persist_messages_callback=persist_messages_callback,
-                        backend_mode=backend_mode,
-                    )
                     if is_main_agent:
                         state.clear_current_user_messages()
                     return finish_arguments

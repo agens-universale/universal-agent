@@ -412,3 +412,68 @@ def test_submit_solution_validation_receives_context_and_current_scope(monkeypat
     assert result == '{"ok": true}'
     assert captured["current_user_requests"] == ["актуальный вопрос", "уточнение"]
     assert captured["context_user_messages"] == ["старый вопрос"]
+
+
+def test_finish_gate_rejection_still_appends_cycle_stop_tool_outputs(monkeypatch):
+    """При отклонении quality/finish gate pending tool_calls должны закрываться
+    синтетическими function_call_output (как при успехе), иначе chat/completions
+    получает невалидную цепочку assistant.tool_calls → user."""
+    recorded: list[list[str | None]] = []
+
+    def _reject_validation(**_kwargs):
+        return SimpleNamespace(
+            ok=False,
+            missing_requirements=["m"],
+            conflicts=["c"],
+            coverage_score=0.0,
+            feedback_for_agent="improve the answer",
+        )
+
+    real_append = processing_module.append_cycle_stop_tool_outputs_for_batch
+
+    def _spy_append_cycle_stop(**kwargs):
+        tool_calls = kwargs.get("tool_calls") or []
+        recorded.append([t.get("call_id") for t in tool_calls])
+        return real_append(**kwargs)
+
+    monkeypatch.setattr(
+        processing_module,
+        "validate_final_report_vs_user_intent",
+        _reject_validation,
+    )
+    monkeypatch.setattr(
+        processing_module,
+        "append_cycle_stop_tool_outputs_for_batch",
+        _spy_append_cycle_stop,
+    )
+
+    def _stub_user_ask(_messages, _state, _ctx):
+        return (
+            [
+                {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{"type": "text", "text": "done"}],
+                    "id": "m_after_gate",
+                }
+            ],
+            "rid_stub",
+        )
+
+    monkeypatch.setattr(processing_module, "process_user_ask", _stub_user_ask)
+
+    state = _make_state(max_steps=0)
+    state.user_messages_log = ["user question"]
+    state.current_user_messages = ["user question"]
+
+    run_agent(
+        [_submit_solution_call()],
+        state,
+        _make_ctx(strict_submit_solution_validation=True),
+    )
+
+    assert recorded == [["call_finish"]]
+    assert any(
+        m.get("type") == "function_call_output" and m.get("call_id") == "call_finish"
+        for m in state.messages
+    )

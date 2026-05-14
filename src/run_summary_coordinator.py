@@ -26,6 +26,15 @@ if TYPE_CHECKING:
 _FUNCTION_CALL_TYPES = frozenset({"function_call", "tool_call"})
 _FUNCTION_OUTPUT_TYPES = frozenset({"function_call_output", "tool_call_output"})
 
+_PRE_RUN_SUMMARY_MAX_ROUNDS = 20
+
+
+def _messages_tail_matches(messages: list[dict], suffix: list[dict]) -> bool:
+    """True, если ``messages`` заканчивается на ``suffix`` (поэлементное ``==``)."""
+    if not suffix or len(messages) < len(suffix):
+        return False
+    return messages[-len(suffix) :] == suffix
+
 
 def remove_exact_suffix_if_matches(messages: list[dict], suffix: list[dict]) -> bool:
     """
@@ -209,19 +218,28 @@ class RunSummaryCoordinator:
         state = self._state
         if state.backend_api_mode != "chat_completions" or self._summary_trigger_chars <= 0:
             return
+        rounds = 0
         try:
-            if not history_exceeds_summary_trigger(
+            while history_exceeds_summary_trigger(
                 state=state,
                 summary_trigger_chars=self._summary_trigger_chars,
             ):
-                return
-            run_summary_compaction(
-                ctx=self._ctx,
-                state=state,
-                trigger_reason=trigger_reason,
-                is_cli_mode=self._is_cli_mode,
-                on_summary_applied=self.on_summary_applied,
-            )
+                rounds += 1
+                if rounds > _PRE_RUN_SUMMARY_MAX_ROUNDS:
+                    if logger is not None:
+                        logger.warning(
+                            "summary_pre_run_max_rounds thread_id=%s rounds=%s",
+                            getattr(self._thread_session, "thread_id", None),
+                            _PRE_RUN_SUMMARY_MAX_ROUNDS,
+                        )
+                    break
+                run_summary_compaction(
+                    ctx=self._ctx,
+                    state=state,
+                    trigger_reason=trigger_reason,
+                    is_cli_mode=self._is_cli_mode,
+                    on_summary_applied=self.on_summary_applied,
+                )
         except Exception as summarize_exc:
             ts = self._thread_session
             if logger is not None:
@@ -276,21 +294,21 @@ class RunSummaryCoordinator:
             message_keys_already_persisted=keys_before_commit,
         )
         suffix_exact = list(current_messages)
-        if not remove_exact_suffix_if_matches(state_tail, suffix_exact):
+        if not _messages_tail_matches(state_tail, suffix_exact):
             return
 
-        try:
-            run_summary_compaction(
-                ctx=self._ctx,
-                state=state,
-                trigger_reason=self._pre_backend_trigger_reason,
-                is_cli_mode=self._is_cli_mode,
-                on_summary_applied=self.on_summary_applied,
-            )
-        finally:
-            msgs = getattr(state, "messages", None)
-            if isinstance(msgs, list):
-                msgs.extend(preserved_batch)
+        # Суммаризуем полный ``state.messages`` (включая preserved_batch); суффикс не снимаем
+        # до вызова. После компакции снова добавляем preserved_batch (сводка + сырой хвост).
+        run_summary_compaction(
+            ctx=self._ctx,
+            state=state,
+            trigger_reason=self._pre_backend_trigger_reason,
+            is_cli_mode=self._is_cli_mode,
+            on_summary_applied=self.on_summary_applied,
+        )
+        msgs = getattr(state, "messages", None)
+        if isinstance(msgs, list):
+            msgs.extend(preserved_batch)
 
         if self._thread_session is not None and preserved_batch:
             self._thread_session.persist_batch(
@@ -298,7 +316,5 @@ class RunSummaryCoordinator:
                 previous_response_id=state.previous_response_id,
             )
 
-        # Только здесь добираемся после remove_exact_suffix_if_matches + run_summary_compaction
-        # (до try/finally множественные return). То есть батч сняли с конца истории и применили
-        # суммаризацию; дальнейший шаг должен брать уже preserved_batch — и [] для режима без пар.
+        # После суммаризации + extend следующий шаг обрабатывает только preserved_batch.
         current_messages[:] = preserved_batch

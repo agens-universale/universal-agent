@@ -43,6 +43,9 @@ agent:
   max_steps: 200
   no_tool_call_max_count: 3
   strict_submit_solution_validation: true
+
+logging:
+  full_log_backend: false
   console_trace: true
   dump_storage: true
   save_logs: true

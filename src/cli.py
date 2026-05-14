@@ -7,11 +7,15 @@ from config import (
     build_auth_connector,
     load_config,
 )
+from message_policy.user_message_policy import (
+    wrap_skill_resolution_technical_instruction,
+    wrap_technical_user_content,
+)
 from run_context import RunContext, create_run_context
 
 
 def run(
-    message: str,
+    messages: list[str],
     ctx: RunContext,
     *,
     thread_id: str | None = None,
@@ -21,9 +25,12 @@ def run(
     """
     Основная функция одного запуска агента.
     Может вызываться как из CLI, так и из REST‑обёрток.
+
+    messages: непустой список строк — каждая уходит отдельным user-сообщением
+    (один запрос передавайте как ``[текст]``).
     """
     return AgentExecutor(ctx).run(
-        message,
+        messages,
         thread_id=thread_id,
         start_new_thread=start_new_thread,
         verbose=verbose,
@@ -48,14 +55,20 @@ def main() -> Any:
     auth_connector = build_auth_connector(config_dict)
     ctx = create_run_context(config_dict, auth_connector=auth_connector)
 
-    query = arg_parser.run_args.query
+    user_parts: list[str] = [arg_parser.run_args.query]
+    if arg_parser.run_args.wrap_technical:
+        user_parts[0] = wrap_technical_user_content(user_parts[0])
+    skill_name = (arg_parser.run_args.skill or "").strip()
+    if skill_name:
+        user_parts.append(wrap_skill_resolution_technical_instruction(skill_name))
+
     verbose = arg_parser.run_args.verbose
     thread_id = arg_parser.run_args.thread_id
     start_new_thread = arg_parser.run_args.new
 
     executor = AgentExecutor(ctx)
     return executor.run(
-        query,
+        user_parts,
         thread_id=thread_id,
         start_new_thread=start_new_thread,
         verbose=verbose,

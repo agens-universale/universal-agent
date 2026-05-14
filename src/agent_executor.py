@@ -8,6 +8,7 @@ State создаётся заново при каждом run(). Возвращ�
 
 import os
 import threading
+from copy import copy as _shallow_copy_msg
 from typing import Any
 
 from processing_responses import run_agent
@@ -57,14 +58,17 @@ class AgentExecutor:
 
     def run(
         self,
-        message: str,
+        messages: list[str],
         *,
         thread_id: str | None = None,
         start_new_thread: bool = False,
         system: str | None = None,
         verbose: bool | None = None,
     ) -> Any:
-        """Запускает агента. При каждом вызове state создаётся заново."""
+        """Запускает агента. При каждом вызове state создаётся заново.
+
+        messages: непустой список текстов — каждый элемент уходит отдельным user-сообщением.
+        """
         config_dict = self._ctx.config_dict
         logger = getattr(self._ctx, "logger", None)
         effective_verbose = (
@@ -179,6 +183,19 @@ class AgentExecutor:
             self._state = state
             self._pending_messages = []
 
+        if (
+            thread_session is not None
+            and backend_api_mode == "chat_completions"
+            and thread_session.history_messages
+        ):
+            state.messages.extend(
+                [
+                    _shallow_copy_msg(m)
+                    for m in thread_session.history_messages
+                    if isinstance(m, dict)
+                ]
+            )
+
         summary = RunSummaryCoordinator(
             ctx=self._ctx,
             state=state,
@@ -191,15 +208,24 @@ class AgentExecutor:
 
         summary.pre_run_compact_if_needed(trigger_reason="pre_run")
 
-        new_user_message = {
-            "role": "user",
-            "content": message,
-            "id": generate_message_id_func("m"),
-        }
+        if not messages:
+            raise ValueError(
+                "Список пользовательских сообщений не должен быть пустым."
+            )
+        user_bodies = [str(x) for x in messages]
+        new_user_messages = [
+            {
+                "role": "user",
+                "content": body,
+                "id": generate_message_id_func("m"),
+            }
+            for body in user_bodies
+        ]
         # На старте user turn используем уже имеющийся active scope из state
         # и дописываем в него текущий запрос (только если это реальное user
         # сообщение, не technical). Параллельно пополняем общий user log.
-        state.seed_new_user_turn(new_user_message)
+        for new_user_message in new_user_messages:
+            state.seed_new_user_turn(new_user_message)
         technical_user_message = None
         _thread_mf = thread_shared.memory_files if thread_shared is not None else {}
         _has_memory = (
@@ -238,7 +264,7 @@ class AgentExecutor:
                 thread_session.thread_id,
             )
 
-        messages = [new_user_message]
+        messages = list(new_user_messages)
 
         persist_messages_callback = None
         get_full_history_messages = None
@@ -259,7 +285,7 @@ class AgentExecutor:
             messages = [*base_messages]
             if technical_user_message is not None:
                 messages.append(technical_user_message)
-            messages.append(new_user_message)
+            messages.extend(new_user_messages)
 
             def _persist_thread_batch(step_messages: list[dict]) -> None:
                 # Persist notes from in-memory state into thread meta.

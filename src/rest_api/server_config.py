@@ -3,7 +3,7 @@ from typing import Any, Dict
 
 import yaml
 
-from config import load_config  # type: ignore
+from config import load_config, sync_logging_flat_and_params  # type: ignore
 
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -18,6 +18,7 @@ def load_server_config() -> Dict[str, Any]:
     - server
     - defaults
     - agent
+    - logging (опционально)
     - agent_overrides (опционально)
     - threads_cleanup (опционально)
     """
@@ -36,6 +37,7 @@ def load_server_config() -> Dict[str, Any]:
             "defaults": {"system": "generic"},
             "agent": {"server_agentmd_path": "./prompts/server_agent.md"},
             "agent_overrides": {},
+            "logging": {},
         }
 
     with open(cfg_path, "r", encoding="utf-8") as f:
@@ -57,6 +59,7 @@ def load_server_config() -> Dict[str, Any]:
         "defaults": defaults_cfg,
         "agent": agent_cfg,
         "agent_overrides": overrides_cfg,
+        "logging": raw.get("logging") or {},
         "swarm": swarm_cfg,
         "threads_cleanup": threads_cleanup_cfg,
     }
@@ -68,6 +71,8 @@ def build_agent_config_for_server(server_cfg: Dict[str, Any]) -> Dict[str, Any]:
 
     Логика:
     - Берём базовый config.yml через load_config().
+    - Если в server_cfg задана секция logging — мержим её в cfg["logging_params"]
+      и синхронизируем плоские ключи (console_trace, dump_storage, save_logs, full_log_backend).
     - Если в server_cfg.agent задан server_agentmd_path:
         - резолвим путь относительно PROJECT_ROOT (если он относительный);
         - перезаписываем cfg["agent_md_path"] значением server_agentmd_path.
@@ -75,6 +80,20 @@ def build_agent_config_for_server(server_cfg: Dict[str, Any]) -> Dict[str, Any]:
         - cfg.update(agent_overrides), как CLI-аргументы перекрывают config.yml.
     """
     cfg = load_config()
+
+    log_block = server_cfg.get("logging")
+    if isinstance(log_block, dict) and log_block:
+        lp = dict(cfg.get("logging_params") or {})
+        lp.update(log_block)
+        cfg["logging_params"] = lp
+        for key in (
+            "full_log_backend",
+            "console_trace",
+            "dump_storage",
+            "save_logs",
+        ):
+            if key in log_block:
+                cfg[key] = log_block[key]
 
     agent_cfg = server_cfg.get("agent") or {}
     server_agent_path = agent_cfg.get("server_agentmd_path")
@@ -86,6 +105,8 @@ def build_agent_config_for_server(server_cfg: Dict[str, Any]) -> Dict[str, Any]:
     overrides = server_cfg.get("agent_overrides") or {}
     if isinstance(overrides, dict) and overrides:
         cfg.update(overrides)
+
+    sync_logging_flat_and_params(cfg)
 
     # В серверном режиме ограничиваем проектные метаданные,
     # чтобы не передавать структуру файловой системы пользователя.

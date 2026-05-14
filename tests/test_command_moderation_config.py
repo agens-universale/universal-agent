@@ -102,6 +102,17 @@ class CommandModerationConfigTest(unittest.TestCase):
             self.assertFalse(cfg["command_moderation"]["root_box"]["enabled"])
             self.assertEqual(cfg["command_moderation"]["mode"], "deny")
 
+    def test_apply_cli_overrides_syncs_logging_params(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            cfg_path = os.path.join(tmp_dir, "config.yml")
+            with open(cfg_path, "w", encoding="utf-8") as fd:
+                fd.write("backend:\n  api_mode: chat_completions\n")
+            cfg = load_config(cfg_path)
+            self.assertTrue(cfg["logging_params"]["save_logs"])
+            apply_cli_overrides(cfg, extra_overrides={"save_logs": False})
+            self.assertFalse(cfg["save_logs"])
+            self.assertFalse(cfg["logging_params"]["save_logs"])
+
 
 if __name__ == "__main__":
     unittest.main()

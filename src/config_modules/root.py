@@ -6,6 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from config_modules.agent import AgentConfig
 from config_modules.backend import BackendConfig
+from config_modules.logging_config import LoggingConfig
 from config_modules.mcp import McpConfig
 from config_modules.paths import PathsConfig
 from config_modules.security import SecurityConfig
@@ -30,6 +31,7 @@ class AppConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     backend: BackendConfig = Field(default_factory=BackendConfig)
+    logging: LoggingConfig = Field(default_factory=LoggingConfig)
     security: SecurityConfig = Field(default_factory=SecurityConfig)
     summary: SummaryConfig = Field(default_factory=SummaryConfig)
     paths: PathsConfig = Field(default_factory=PathsConfig)

@@ -17,9 +17,6 @@ class AgentConfig(BaseModel):
     max_steps: int = 1000
     no_tool_call_max_count: int = 5
     strict_submit_solution_validation: bool = True
-    console_trace: bool = True
-    dump_storage: bool = False
-    save_logs: bool = True
     limit_project_metadata: bool = False
     tool_output_inline_max_chars: int = 20000
     stored_tool_outputs_max_entries: int = 10
