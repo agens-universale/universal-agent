@@ -14,9 +14,8 @@ LiteLLM © 2023 Berri AI — [MIT](https://github.com/BerriAI/litellm/blob/main/
 
 ```
 litellm/
-├── proxy_config.yaml          # алиасы моделей + регистрация колбэка
-│                                Содержит __VAR__ placeholder'ы (подставляются из .env при запуске)
-├── proxy_config.local.yaml    # gitignored, генерируется run.py из proxy_config.yaml
+├── proxy_config.example.yaml  # шаблон под git: алиасы моделей + dummy credentials
+├── proxy_config.yaml          # ЛОКАЛЬНЫЙ конфиг (gitignored), реальные api_key / folder_id
 ├── agent_config_examples/     # ПРИМЕРЫ agent-конфигов под прокси (под git, read-only)
 │   ├── config_gigachat.yml
 │   └── config_yandex.yml      # копируйте/правьте под себя вручную
@@ -26,21 +25,19 @@ litellm/
 │   ├── _common.py             # vendor-agnostic helpers (JSON-парсинг, tool_call shape, …)
 │   ├── _gigachat.py           # 9 walker'ов pre-call + 3-level synth post-call
 │   └── _yandex.py             # backfill пустого content + JSON-in-content → tool_calls
-├── install.py                 # кросс-платформенный pip-install + seed .env
-├── run.py                     # кросс-платформенный лончер (рендер конфига + subprocess litellm)
-├── .env.example               # шаблон credentials и идентификаторов
-├── .env                       # реальные значения (gitignored)
+├── install.py                 # кросс-платформенный pip-install + seed proxy_config.yaml
+├── run.py                     # кросс-платформенный лончер (sanity-check + subprocess litellm)
 └── .gitignore
 ```
 
 ## Быстрый старт
 
 ```bash
-# 1. Один раз — pip-install litellm[proxy] + seed litellm/.env из .env.example
+# 1. Один раз — pip-install litellm[proxy] + seed proxy_config.yaml из proxy_config.example.yaml
 python litellm/install.py
 
-# 2. Заполнить credentials и идентификаторы
-$EDITOR litellm/.env
+# 2. Заполнить api_key и folder_id для каждого провайдера
+$EDITOR litellm/proxy_config.yaml
 
 # 3. Запуск прокси (foreground, держите терминал открытым)
 python litellm/run.py
@@ -60,7 +57,7 @@ gc-cli -q "..." --config litellm/agent_config_examples/config_gigachat.yml --mod
 - `gigachat-2-lite`, `gigachat-2-pro`, `gigachat-2-max` → нативный провайдер LiteLLM `gigachat/`
 - `yandex-gpt-lite`, `yandex-gpt-pro` → generic-маршрут `openai/` на Yandex Cloud OAI-compat endpoint
 
-PII-идентификаторы (например, `YANDEX_FOLDER_ID`) объявляются в конфиге как `__VAR__` placeholder'ы и подставляются из `.env` при запуске. Это позволяет хранить сам `proxy_config.yaml` в git без чувствительных значений.
+Сам `proxy_config.yaml` **gitignored** — содержит реальные `api_key`, `folder_id` и прочие credentials в открытом виде. Под git лежит только шаблон `proxy_config.example.yaml` с dummy-значениями типа `<BASE64(...)>`. При первом запуске `install.py` копирует `.example.yaml` → `.yaml`, после чего юзер вписывает реальные значения руками.
 
 ### `callbacks/`
 
