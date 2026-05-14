@@ -9,7 +9,9 @@ of transitive deps (uvicorn / fastapi / orjson / …).
 Responsibilities:
   1. `pip install 'litellm[proxy]==<PIN>'` into the current interpreter
      (idempotent — skipped if already importable at the pinned version).
-  2. Seed `litellm/.env` from `litellm/.env.example` if missing.
+  2. Seed `litellm/proxy_config.yaml` from `litellm/proxy_config.example.yaml`
+     if missing. The local file is gitignored and holds real credentials;
+     the example is the template under git.
 
 Agent-side configs are NOT seeded into the repo root — they live as
 read-only examples in `litellm/agent_config_examples/`. The user copies
@@ -73,17 +75,17 @@ def ensure_litellm_installed(
     return True
 
 
-def seed_env_file(root: Path) -> bool:
-    """Copy `.env.example` to `.env` if `.env` does not exist.
+def seed_proxy_config(root: Path) -> bool:
+    """Copy `proxy_config.example.yaml` to `proxy_config.yaml` if missing.
 
-    Returns True if a new `.env` was created.
+    Returns True if a new `proxy_config.yaml` was created.
     """
-    target = root / ".env"
-    template = root / ".env.example"
+    target = root / "proxy_config.yaml"
+    template = root / "proxy_config.example.yaml"
     if target.exists():
         return False
     if not template.exists():
-        raise InstallError(f"{template} missing — cannot seed .env")
+        raise InstallError(f"{template} missing — cannot seed proxy_config.yaml")
     shutil.copyfile(template, target)
     return True
 
@@ -101,14 +103,17 @@ def main() -> int:
     else:
         print(f"[ok] litellm {LITELLM_VERSION} already present")
 
-    if seed_env_file(root):
-        print(f"[ok] seeded {root / '.env'} from .env.example — fill in credentials")
+    if seed_proxy_config(root):
+        print(
+            f"[ok] seeded {root / 'proxy_config.yaml'} from proxy_config.example.yaml "
+            f"— fill in credentials"
+        )
     else:
-        print(f"[ok] {root / '.env'} already exists")
+        print(f"[ok] {root / 'proxy_config.yaml'} already exists")
 
     print()
     print("Next steps:")
-    print(f"  1. Edit {root / '.env'} with provider credentials")
+    print(f"  1. Edit {root / 'proxy_config.yaml'} — fill api_key for each provider")
     print(f"  2. (Optional) Copy a template from {root / 'agent_config_examples'}")
     print(f"     into the repo root if you want a ready gc-cli config")
     print("  3. python litellm/run.py")

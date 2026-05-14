@@ -1,14 +1,7 @@
 """Cross-platform launcher for the LiteLLM Proxy battery.
 
-Reads litellm/.env, sanity-checks the
-callback package is importable as `callbacks.provider_normalizer`, then
-renders `proxy_config.yaml` into `proxy_config.local.yaml` (with
-`__VAR__` placeholders substituted from env), and execs
-`litellm --config proxy_config.local.yaml --port <PORT>`.
-
-The placeholder pass keeps any user-specific identifier (e.g.
-`YANDEX_FOLDER_ID`) out of the tracked config file — it lives in
-`litellm/.env` (gitignored) and is resolved at launch.
+Sanity-checks `callbacks.provider_normalizer` is importable, then execs
+`litellm --config proxy_config.yaml --port <PORT>`.
 
 Run:
     python litellm/run.py
@@ -18,7 +11,6 @@ The agent does NOT control this process — it only hits
 http://localhost:<PORT>/v1/chat/completions when configured.
 """
 import os
-import re
 import shlex
 import shutil
 import subprocess
@@ -28,34 +20,6 @@ from pathlib import Path
 
 class RunError(RuntimeError):
     """Cannot start LiteLLM Proxy."""
-
-
-_EXPORT_RE = re.compile(r"^\s*(?:export\s+)?([A-Z_][A-Z0-9_]*)\s*=\s*(.*)$")
-
-
-def load_env_file(path: Path) -> dict[str, str]:
-    """Parse a simple `export KEY=VALUE` style .env file.
-
-    Returns {} if file does not exist. Quoted values have outer quotes stripped.
-    Lines starting with `#` or empty lines are ignored.
-    """
-    if not path.exists():
-        return {}
-    out: dict[str, str] = {}
-    for raw in path.read_text().splitlines():
-        line = raw.strip()
-        if not line or line.startswith("#"):
-            continue
-        m = _EXPORT_RE.match(line)
-        if not m:
-            continue
-        key, value = m.group(1), m.group(2).strip()
-        if (value.startswith('"') and value.endswith('"')) or (
-            value.startswith("'") and value.endswith("'")
-        ):
-            value = value[1:-1]
-        out[key] = value
-    return out
 
 
 _CALLBACK_PROBE = (
@@ -106,7 +70,7 @@ def find_litellm_cli() -> str:
 
 
 def build_command(
-    port: int, cli: str | None = None, config_filename: str = "proxy_config.local.yaml"
+    port: int, cli: str | None = None, config_filename: str = "proxy_config.yaml"
 ) -> list[str]:
     """Build the `litellm` CLI command (no shell, OS-agnostic).
 
@@ -121,69 +85,17 @@ def build_command(
     ]
 
 
-_PLACEHOLDER_RE = re.compile(r"__([A-Z_][A-Z0-9_]*)__")
-
-
-def render_config(template: Path, target: Path, env: dict) -> list[str]:
-    """Substitute `__VAR__` placeholders in `template` from `env` and write
-    the result to `target`. Returns the list of placeholder names that
-    were missing from `env` (empty list = success).
-
-    The output is always written — placeholders for which env had no value
-    stay as `__VAR__` in the rendered file. Aliases referencing those
-    placeholders will fail at call time (upstream / LiteLLM error), but
-    every other alias keeps working. This lets a user configure only
-    Yandex or only GigaChat without forcing them to fill irrelevant env vars.
-    """
-    text = template.read_text()
-    missing: list[str] = []
-
-    def repl(match: re.Match[str]) -> str:
-        name = match.group(1)
-        value = env.get(name)
-        if value is None or value == "":
-            if name not in missing:
-                missing.append(name)
-            return match.group(0)
-        return value
-
-    rendered = _PLACEHOLDER_RE.sub(repl, text)
-    target.write_text(rendered)
-    return missing
-
-
 def main() -> int:
     root = Path(__file__).resolve().parent
 
-    env_loaded = load_env_file(root / ".env")
-    for k, v in env_loaded.items():
-        os.environ.setdefault(k, v)
-
-    missing_creds = [
-        k
-        for k in ("GIGACHAT_CREDENTIALS", "YANDEX_API_KEY")
-        if not os.environ.get(k)
-    ]
-    if missing_creds:
+    if not (root / "proxy_config.yaml").exists():
         print(
-            f"WARNING: missing env vars: {', '.join(missing_creds)} — "
-            f"models depending on them will fail at runtime.",
+            "ERROR: litellm/proxy_config.yaml not found. "
+            "Copy litellm/proxy_config.example.yaml → litellm/proxy_config.yaml "
+            "and fill in credentials, then re-run.",
             file=sys.stderr,
         )
-
-    missing_placeholders = render_config(
-        root / "proxy_config.yaml",
-        root / "proxy_config.local.yaml",
-        os.environ,
-    )
-    if missing_placeholders:
-        print(
-            f"WARNING: placeholders left unfilled: {', '.join(missing_placeholders)}. "
-            f"Aliases referencing them will fail at call time. "
-            f"Fill them in litellm/.env if you plan to use those providers.",
-            file=sys.stderr,
-        )
-    print("[ok] rendered proxy_config.local.yaml")
+        return 1
 
     if not check_callback_importable(root):
         print(
@@ -201,10 +113,9 @@ def main() -> int:
     print()
 
     # cd into litellm/ so that `callbacks.provider_normalizer` is importable
-    # via cwd-as-sys.path[0]. Pass env explicitly so the subprocess sees
-    # the credentials we loaded.
+    # via cwd-as-sys.path[0].
     try:
-        proc = subprocess.run(cmd, cwd=str(root), env=os.environ.copy())
+        proc = subprocess.run(cmd, cwd=str(root))
         return proc.returncode
     except KeyboardInterrupt:
         return 130

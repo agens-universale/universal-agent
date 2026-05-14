@@ -1,4 +1,4 @@
-"""Tests for litellm/install.py: pip install + .env.example bootstrap."""
+"""Tests for litellm/install.py: pip install + proxy_config.yaml bootstrap."""
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -57,21 +57,21 @@ def test_pip_install_litellm_raises_on_nonzero_exit() -> None:
             install_mod.pip_install_litellm("litellm[proxy]==1.83.14")
 
 
-def test_seed_env_file_copies_when_missing(tmp_path: Path) -> None:
-    (tmp_path / ".env.example").write_text("GIGACHAT_CREDENTIALS=\n")
-    created = install_mod.seed_env_file(tmp_path)
+def test_seed_proxy_config_copies_when_missing(tmp_path: Path) -> None:
+    (tmp_path / "proxy_config.example.yaml").write_text("model_list: []\n")
+    created = install_mod.seed_proxy_config(tmp_path)
     assert created is True
-    assert (tmp_path / ".env").read_text() == "GIGACHAT_CREDENTIALS=\n"
+    assert (tmp_path / "proxy_config.yaml").read_text() == "model_list: []\n"
 
 
-def test_seed_env_file_noop_when_exists(tmp_path: Path) -> None:
-    (tmp_path / ".env.example").write_text("X=1\n")
-    (tmp_path / ".env").write_text("Y=2\n")
-    created = install_mod.seed_env_file(tmp_path)
+def test_seed_proxy_config_noop_when_exists(tmp_path: Path) -> None:
+    (tmp_path / "proxy_config.example.yaml").write_text("template\n")
+    (tmp_path / "proxy_config.yaml").write_text("user-edited\n")
+    created = install_mod.seed_proxy_config(tmp_path)
     assert created is False
-    assert (tmp_path / ".env").read_text() == "Y=2\n"
+    assert (tmp_path / "proxy_config.yaml").read_text() == "user-edited\n"
 
 
-def test_seed_env_file_raises_when_template_missing(tmp_path: Path) -> None:
+def test_seed_proxy_config_raises_when_template_missing(tmp_path: Path) -> None:
     with pytest.raises(install_mod.InstallError, match="missing"):
-        install_mod.seed_env_file(tmp_path)
+        install_mod.seed_proxy_config(tmp_path)

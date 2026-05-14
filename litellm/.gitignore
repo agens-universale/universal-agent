@@ -1,8 +1,6 @@
-# Реальные credentials — никогда не коммитим
-.env
-
-# Сгенерированный конфиг (placeholder'ы подставлены из env на старте)
-proxy_config.local.yaml
+# Реальный конфиг с credentials — никогда не коммитим.
+# Шаблон proxy_config.example.yaml остаётся под git.
+proxy_config.yaml
 
 # Кэш Python
 __pycache__/
