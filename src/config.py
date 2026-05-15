@@ -132,7 +132,6 @@ def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
         "client_name": app_cfg.agent.client_name,
         "x_cl_id": app_cfg.agent.x_cl_id,
         "verbose": app_cfg.agent.verbose,
-        "use_ask_human_tool": app_cfg.agent.use_ask_human_tool,
         "stop_tools": app_cfg.agent.stop_tools,
         "server_tool_prefix": app_cfg.agent.server_tool_prefix,
         "max_steps": app_cfg.agent.max_steps,

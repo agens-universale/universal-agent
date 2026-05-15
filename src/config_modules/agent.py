@@ -11,7 +11,6 @@ class AgentConfig(BaseModel):
     client_name: str = "mini_cli_pub_agent_1"
     x_cl_id: str = "12345"
     verbose: bool = True
-    use_ask_human_tool: bool = False
     stop_tools: list[str] = Field(default_factory=list)
     server_tool_prefix: str = "system"
     max_steps: int = 1000

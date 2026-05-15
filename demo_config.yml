@@ -59,8 +59,7 @@ agent:
   client_name: mini_cli_pub_agent_1
   x_cl_id: "12345"
   verbose: true
-  use_ask_human_tool: false
-  stop_tools: []
+  stop_tools: [ask_human]
   server_tool_prefix: system
   max_steps: 200
   no_tool_call_max_count: 3
