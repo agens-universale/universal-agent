@@ -94,3 +94,35 @@ def test_format_contains_two_retry_paths():
     assert "(1)" in msg and "(2)" in msg
     assert "action" in msg.lower() or "ACTION" in msg
     assert "ask_human" in msg
+
+
+# --- decoupled from ask_human-cram wording ---
+
+CRAM_MARKERS = (
+    "FULL preceding content",
+    "INSIDE the question parameter",
+    "Do not strip",
+    "tables, diagrams, architectures, options, recommendations",
+    "paste the ENTIRE block above",
+)
+
+
+def test_static_bounce_has_no_cram_wording():
+    for marker in CRAM_MARKERS:
+        assert marker not in NO_TOOL_CALL_BOUNCE_MESSAGE, marker
+
+
+def test_inlined_bounce_has_no_cram_wording():
+    msg = _format_no_tool_call_bounce("some assistant prose")
+    for marker in CRAM_MARKERS:
+        assert marker not in msg, marker
+
+
+def test_bounce_keeps_robustness_signal():
+    static = NO_TOOL_CALL_BOUNCE_MESSAGE
+    inlined = _format_no_tool_call_bounce("X")
+    for msg in (static, inlined):
+        assert "(1)" in msg and "(2)" in msg
+        assert "ask_human" in msg
+    assert "<<<\nX\n>>>" in inlined
+    assert "VERBATIM" in inlined

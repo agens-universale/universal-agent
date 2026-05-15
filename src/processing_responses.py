@@ -38,9 +38,7 @@ NO_TOOL_CALL_BOUNCE_MESSAGE = (
     "  (1) If you intended an ACTION (read files, explore, search, write, etc.), "
     "call the appropriate tool NOW in this turn.\n"
     "  (2) If you intended to ASK THE USER (present options, get a decision), "
-    "call ask_human(question=...) and put the FULL preceding content (tables, "
-    "diagrams, architectures, options, recommendations) INSIDE the question "
-    "parameter. Do not strip — the user must see what you wrote."
+    "call ask_human(question=...) with a clear, self-contained question."
 )
 
 
@@ -93,11 +91,9 @@ def _format_no_tool_call_bounce(assistant_text: str) -> str:
         "Retry with one of:\n"
         "  (1) If you intended an ACTION (read files, explore, search, "
         "write, etc.), call the appropriate tool NOW in this turn.\n"
-        "  (2) If you intended to ASK THE USER, call ask_human(question=...) "
-        "and paste the ENTIRE block above (between <<< and >>>) into the "
-        "question parameter VERBATIM. Do not paraphrase, do not summarize, "
-        "do not strip — copy as-is. Append any short clarifying question "
-        "after the pasted block if needed."
+        "  (2) If you intended to ASK THE USER, call ask_human(question=...). "
+        "Reuse the relevant part of the block above VERBATIM where it is the "
+        "content the user must react to — do not paraphrase or summarize it."
     )
 
 
