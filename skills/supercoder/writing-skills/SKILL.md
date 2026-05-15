@@ -85,8 +85,9 @@ mechanism itself (e.g. the next-step chaining above).
 
 - Bootstrap / entry skills: ≤ 50 lines.
 - Methodology / process skills: 60-120 lines.
-- Domain orchestrators (e.g. `swe-task-solver`): up to 250 lines if genuinely
-  needed. Anything longer is probably two skills.
+- Domain orchestrators (a single skill driving a whole multi-step
+  delivery/workflow): up to 250 lines if genuinely needed. Anything longer
+  is probably two skills.
 
 Long skills won't get followed. The agent's attention budget is finite.
 

@@ -304,7 +304,7 @@ gc-cli ищет скиллы в трёх местах (project > user > system, 
 
 ```
 <repo>/skills/                         <gc_data>/skills/    <cwd>/.gc/skills/
-├── swe-task-solver/SKILL.md           (то же)              (то же)
+├── project-overview/SKILL.md          (то же)              (то же)
 ├── check-article/SKILL.md
 └── supercoder/                        ← пакет (содержит pack.yaml)
     ├── pack.yaml
@@ -331,7 +331,7 @@ bootstrap_skill: using-supercoder     # обязательно для видим
 
 ### Canonical IDs
 
-- **Flat-скилл**: `<skill-id>` (без префикса), например `swe-task-solver`.
+- **Flat-скилл**: `<skill-id>` (без префикса), например `project-overview`.
 - **Internal-скилл пакета**: `<pack-id>:<inner-id>`, например `supercoder:brainstorming`.
 
 ### Видимость в `skills_list`
