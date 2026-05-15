@@ -166,3 +166,13 @@ def gc_paths() -> dict[str, Path]:
         "cache": env.gc_cache_dir or defaults["cache"],
         "data": env.gc_data_dir or defaults["data"],
     }
+
+
+def project_gc_dir(cwd: str | None = None) -> Path:
+    """Папка project-local артефактов: <cwd>/.gc/.
+
+    Единый source of truth для всех проектных `.gc/`-путей (config overlay,
+    project skills, long memory). Резолвит cwd на каждый вызов — симметрично
+    с инлайн `os.path.join(os.getcwd(), '.gc', ...)`, который этот хелпер заменяет.
+    """
+    return Path(cwd or os.getcwd()) / ".gc"

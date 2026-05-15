@@ -187,7 +187,7 @@ def apply_tool(
         allow_empty_for_empty_schema=True,
     )
 
-    tool = tool_fabric(**kwargs)
+    tool = tool_fabric(ctx=ctx, **kwargs)
     # log.debug(
     #    "apply_tool log:\nkwargs:\n%s\narguments:\n %s\ntool_fabric:\n%s\ntool:\n%s",
     #    kwargs,

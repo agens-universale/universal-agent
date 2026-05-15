@@ -178,6 +178,7 @@ class BackendModeSwitchTest(unittest.TestCase):
                     logging_path=os.path.join(tmp_dir, "test.log"),
                     tools_spec=[],
                     tools_description=[],
+                    project_gc_dir=Path(tmp_dir) / ".gc",
                 )
 
                 def _mock_chat_completions_policy(**kwargs):

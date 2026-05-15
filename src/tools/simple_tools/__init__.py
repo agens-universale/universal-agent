@@ -9,6 +9,7 @@ from tools.simple_tools.search_and_replace import SearchAndReplace
 from tools.simple_tools.think import Think
 from tools.simple_tools.thread_notes import ThreadNotes
 from tools.simple_tools.memory_files import MemoryFiles
+from tools.simple_tools.long_memory import LongMemory
 from tools.simple_tools.submit_solution import SubmitSolution
 from tools.simple_tools.calculator import Calculator
 from tools.simple_tools.run_python_code import RunPythonCode
@@ -71,6 +72,11 @@ def get_simple_tools_data(config_dict: Dict[str, Any]) -> Dict[str, Dict[str, An
             'tool_fabric': MemoryFiles,
             'spec': MemoryFiles.tool_description(),
             'description': MemoryFiles.prompt_description(config_dict),
+        },
+        'long_memory': {
+            'tool_fabric': LongMemory,
+            'spec': LongMemory.tool_description(),
+            'description': LongMemory.prompt_description(),
         },
         'think': {
             'tool_fabric': Think,

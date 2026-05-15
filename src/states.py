@@ -1,6 +1,7 @@
 import os
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 from uuid import uuid4
 import json
 from typing import Any, Dict, List, Optional, Union
@@ -41,6 +42,7 @@ class State:
         thread_id: Optional[str] = None,
         shared: Optional["SharedStateData"] = None,
         workspace_config: Optional[Dict[str, Any]] = None,
+        project_gc_dir: Optional[Path] = None,
     ):
         self.parent_state_id = parent_state_id
         self.x_target = None
@@ -66,6 +68,7 @@ class State:
         else:
             self.chat_completions_system_prompt = None
         self.agent_md_path = agent_md_path
+        self.project_gc_dir = project_gc_dir
         self.thread_id = thread_id
         self.shared: SharedStateData = shared if isinstance(shared, SharedStateData) else SharedStateData()
         self.call_metadata = self.set_call_metadata()
@@ -86,6 +89,16 @@ class State:
         metadata: Dict[str, Any] = dict()
         metadata["systemPromptId"] = self.system_prompt_id
         metadata["promptVariables"] = self.initial_project_data
+        # Long memory status nudge for the agent. Path/tool name intentionally absent.
+        gcd = getattr(self, "project_gc_dir", None)
+        if gcd is not None:
+            try:
+                from long_memory import build_long_memory_status
+                metadata["promptVariables"]["longMemoryStatus"] = (
+                    build_long_memory_status(Path(gcd) / "long_memory.md")
+                )
+            except Exception:  # pragma: no cover — long memory must never break metadata
+                pass
         if self.skills_list:
             skills_template = (
                 "For solving task you can use skills.\n"
@@ -142,6 +155,10 @@ class State:
         if isinstance(store, ToolCallOutputsStore):
             raw["tool_call_outputs_store"] = store.to_dict()
 
+        gcd = raw.get("project_gc_dir")
+        if isinstance(gcd, Path):
+            raw["project_gc_dir"] = str(gcd)
+
         return raw
 
     @classmethod
@@ -178,6 +195,10 @@ class State:
             except Exception:
                 # Fallback: оставляем как есть.
                 pass
+
+        gcd_raw = state.__dict__.get("project_gc_dir")
+        if isinstance(gcd_raw, str):
+            state.project_gc_dir = Path(gcd_raw)
 
         return state
 

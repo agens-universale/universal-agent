@@ -142,6 +142,7 @@ class AgentExecutor:
             "thread_id": thread_id,
             "shared": thread_shared,
             "workspace_config": config_dict,
+            "project_gc_dir": self._ctx.project_gc_dir,
         }
         if config_dict.get("use_local_subagents", False):
             state_data["specific_role"] = ORCHESTRATOR_SPECIFIC_ROLE

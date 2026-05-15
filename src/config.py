@@ -5,6 +5,7 @@ import urllib3
 import yaml
 
 from config_modules.auth import build_auth_connector
+from config_modules.env_vars import project_gc_dir
 from config_modules.backend import parse_chat_completions_max_tokens
 from config_modules.common import (
     apply_swarm_env_overrides,
@@ -52,7 +53,7 @@ def _project_local_config_path() -> Optional[str]:
 
     Используется для layered loading: project local config мерджится поверх глобального.
     """
-    candidate = os.path.abspath(os.path.join(os.getcwd(), ".gc", "config.yml"))
+    candidate = str((project_gc_dir() / "config.yml").resolve())
     if os.path.isfile(candidate):
         return candidate
     return None
