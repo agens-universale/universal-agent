@@ -86,7 +86,7 @@ Good:
 ## Next step
 
 If verified clean and ready for code review:
-- `skills_load("superpowers:requesting-code-review")`.
+- `skills_load("supercoder:requesting-code-review")`.
 
 If verification surfaced issues, return to the relevant fix skill
 (`test-driven-development` or `systematic-debugging`).

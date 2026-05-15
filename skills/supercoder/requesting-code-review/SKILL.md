@@ -91,4 +91,4 @@ A short message / PR description following the structure in step 5.
 ## Next step
 
 After the reviewer responds:
-- `skills_load("superpowers:receiving-code-review")`.
+- `skills_load("supercoder:receiving-code-review")`.

@@ -71,7 +71,7 @@ Fix issues inline. No need to re-review.
 
 ## Output
 
-Plan saved to `docs/superpowers/plans/YYYY-MM-DD-<feature-name>-plan.md`.
+Plan saved to `docs/supercoder/plans/YYYY-MM-DD-<feature-name>-plan.md`.
 
 Commit the plan file before starting execution (the design+plan commit makes
 the spec traceable in git history).
@@ -79,7 +79,7 @@ the spec traceable in git history).
 ## Next step
 
 After the user reviews and approves the plan, load
-`skills_load("superpowers:executing-plans")` to run it task by task. Do NOT
+`skills_load("supercoder:executing-plans")` to run it task by task. Do NOT
 start executing in the same turn that wrote the plan — let the user review
 the plan file first.
 

@@ -107,9 +107,9 @@ Either:
 ## Next step
 
 If the review surfaced bugs or missing tests:
-- `skills_load("superpowers:test-driven-development")` or
-  `skills_load("superpowers:systematic-debugging")`.
+- `skills_load("supercoder:test-driven-development")` or
+  `skills_load("supercoder:systematic-debugging")`.
 
 If everything is resolved:
-- `skills_load("superpowers:verification-before-completion")` before the
+- `skills_load("supercoder:verification-before-completion")` before the
   final "ready to merge" signal.

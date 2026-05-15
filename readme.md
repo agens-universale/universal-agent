@@ -306,10 +306,10 @@ gc-cli ищет скиллы в трёх местах (project > user > system, 
 <repo>/skills/                         <gc_data>/skills/    <cwd>/.gc/skills/
 ├── swe-task-solver/SKILL.md           (то же)              (то же)
 ├── check-article/SKILL.md
-└── superpowers/                       ← пакет (содержит pack.yaml)
+└── supercoder/                        ← пакет (содержит pack.yaml)
     ├── pack.yaml
     ├── README.md
-    ├── using-superpowers/SKILL.md     ← bootstrap
+    ├── using-supercoder/SKILL.md      ← bootstrap
     ├── brainstorming/SKILL.md
     └── ...
 ```
@@ -320,19 +320,19 @@ Override-семантика та же что для обычных скилло�
 ### Манифест `pack.yaml`
 
 ```yaml
-id: superpowers                       # default = имя папки
-name: Superpowers Methodology
+id: supercoder                        # default = имя папки
+name: Supercoder Methodology
 description: |
   Process methodology for design, planning, TDD, debugging.
 version: 1.0.0
 source: https://github.com/obra/superpowers
-bootstrap_skill: using-superpowers    # обязательно для видимости в skills_list
+bootstrap_skill: using-supercoder     # обязательно для видимости в skills_list
 ```
 
 ### Canonical IDs
 
 - **Flat-скилл**: `<skill-id>` (без префикса), например `swe-task-solver`.
-- **Internal-скилл пакета**: `<pack-id>:<inner-id>`, например `superpowers:brainstorming`.
+- **Internal-скилл пакета**: `<pack-id>:<inner-id>`, например `supercoder:brainstorming`.
 
 ### Видимость в `skills_list`
 
@@ -341,13 +341,13 @@ bootstrap_skill: using-superpowers    # обязательно для видим
 - По **одной** записи на пакет — bootstrap-скилл (помеченный полями `is_pack_bootstrap: true` и `pack_size: N`).
 
 Internal-скиллы пакета **скрыты** в default-выдаче (чтобы не засорять системный
-промпт). Но они **всегда адресуемы** через canonical ID — `skills_load("superpowers:brainstorming")`
+промпт). Но они **всегда адресуемы** через canonical ID — `skills_load("supercoder:brainstorming")`
 работает в любом случае.
 
 Чтобы получить полный список internal-скиллов пакета:
 
 ```
-skills_list(pack="superpowers")
+skills_list(pack="supercoder")
 ```
 
 ### Override
@@ -356,15 +356,15 @@ skills_list(pack="superpowers")
 свой SKILL.md в той же relative-path-структуре в `.gc/skills/`:
 
 ```
-<your-repo>/.gc/skills/superpowers/brainstorming/SKILL.md
+<your-repo>/.gc/skills/supercoder/brainstorming/SKILL.md
 ```
 
-### Встроенный пакет: superpowers
+### Встроенный пакет: supercoder
 
-В состав gc-cli встроен пакет [`superpowers`](skills/superpowers/README.md) —
+В состав gc-cli встроен пакет [`supercoder`](skills/supercoder/README.md) —
 методологический набор скиллов (brainstorming, writing-plans, TDD,
 systematic-debugging, code-review discipline). Точка входа —
-`superpowers:using-superpowers`.
+`supercoder:using-supercoder`.
 
 ## Project local config (опционально)
 

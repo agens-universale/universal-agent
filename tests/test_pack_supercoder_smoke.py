@@ -1,9 +1,9 @@
-"""Smoke tests for the bundled superpowers pack content (new geometry).
+"""Smoke tests for the bundled supercoder pack content (new geometry).
 
 Verifies:
 - pack.yaml exists and has the expected manifest fields
 - all 10 SKILL.md files are present with valid frontmatter
-- the using-superpowers (bootstrap) skill mentions all other 9 canonical pack ids
+- the using-supercoder (bootstrap) skill mentions all other 9 canonical pack ids
 - all reference files exist
 - the registry discovers all 10 skills, filters them per the new API
 - bootstrap entry has is_pack_bootstrap=true and pack_size=10
@@ -15,10 +15,10 @@ import pytest
 import yaml
 
 
-PACK_DIR = Path(__file__).resolve().parents[1] / "skills" / "superpowers"
+PACK_DIR = Path(__file__).resolve().parents[1] / "skills" / "supercoder"
 
 EXPECTED_SKILL_IDS = {
-    "using-superpowers",
+    "using-supercoder",
     "brainstorming",
     "writing-plans",
     "executing-plans",
@@ -48,8 +48,8 @@ def test_pack_manifest_present_and_valid():
     manifest_path = PACK_DIR / "pack.yaml"
     assert manifest_path.is_file()
     m = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
-    assert m["id"] == "superpowers"
-    assert m["bootstrap_skill"] == "using-superpowers"
+    assert m["id"] == "supercoder"
+    assert m["bootstrap_skill"] == "using-supercoder"
     assert isinstance(m["name"], str) and m["name"].strip()
     assert isinstance(m["description"], str) and m["description"].strip()
     assert isinstance(m["version"], str) and m["version"].strip()
@@ -59,9 +59,9 @@ def test_pack_has_readme():
     readme = PACK_DIR / "README.md"
     assert readme.is_file()
     body = readme.read_text(encoding="utf-8")
-    assert "Superpowers" in body
+    assert "Supercoder" in body
     assert "skills_load" in body
-    assert "using-superpowers" in body
+    assert "using-supercoder" in body
 
 
 @pytest.mark.parametrize("skill_id", sorted(EXPECTED_SKILL_IDS))
@@ -74,12 +74,12 @@ def test_skill_md_present_with_valid_frontmatter(skill_id):
     assert isinstance(fm["description"], str) and fm["description"].strip()
 
 
-def test_using_superpowers_mentions_all_other_skill_ids():
-    skill_md = PACK_DIR / "using-superpowers" / "SKILL.md"
+def test_using_supercoder_mentions_all_other_skill_ids():
+    skill_md = PACK_DIR / "using-supercoder" / "SKILL.md"
     body = skill_md.read_text(encoding="utf-8")
-    other_skills = EXPECTED_SKILL_IDS - {"using-superpowers"}
-    missing = [sid for sid in other_skills if f"superpowers:{sid}" not in body]
-    assert not missing, f"using-superpowers body missing references to: {missing}"
+    other_skills = EXPECTED_SKILL_IDS - {"using-supercoder"}
+    missing = [sid for sid in other_skills if f"supercoder:{sid}" not in body]
+    assert not missing, f"using-supercoder body missing references to: {missing}"
 
 
 @pytest.mark.parametrize(
@@ -98,7 +98,7 @@ def test_reference_file_present(skill_id, slug):
 
 
 def test_registry_default_list_returns_only_bootstrap(tmp_path):
-    """default list_skills() возвращает bootstrap superpowers + flat-скиллы. Internal скрыты."""
+    """default list_skills() возвращает bootstrap supercoder + flat-скиллы. Internal скрыты."""
     from tools.skills.registry import SkillsRegistry
 
     repo_skills = PACK_DIR.parent  # <repo>/skills
@@ -107,16 +107,15 @@ def test_registry_default_list_returns_only_bootstrap(tmp_path):
         user_root=str(tmp_path / "u_empty"),
         project_root=str(tmp_path / "p_empty"),
     )
-    items = {i["id"]: i for i in reg.list_skills() if i.get("pack_id") == "superpowers"}
-    # В default списке только bootstrap
-    assert set(items.keys()) == {"superpowers:using-superpowers"}
-    bootstrap = items["superpowers:using-superpowers"]
+    items = {i["id"]: i for i in reg.list_skills() if i.get("pack_id") == "supercoder"}
+    assert set(items.keys()) == {"supercoder:using-supercoder"}
+    bootstrap = items["supercoder:using-supercoder"]
     assert bootstrap["is_pack_bootstrap"] is True
     assert bootstrap["pack_size"] == 10
 
 
 def test_registry_pack_param_returns_all_10_internals(tmp_path):
-    """list_skills(pack='superpowers') возвращает все 10 internal."""
+    """list_skills(pack='supercoder') возвращает все 10 internal."""
     from tools.skills.registry import SkillsRegistry
 
     repo_skills = PACK_DIR.parent
@@ -125,6 +124,6 @@ def test_registry_pack_param_returns_all_10_internals(tmp_path):
         user_root=str(tmp_path / "u_empty"),
         project_root=str(tmp_path / "p_empty"),
     )
-    items = reg.list_skills(pack="superpowers")
-    canonical_ids = {f"superpowers:{sid}" for sid in EXPECTED_SKILL_IDS}
+    items = reg.list_skills(pack="supercoder")
+    canonical_ids = {f"supercoder:{sid}" for sid in EXPECTED_SKILL_IDS}
     assert {i["id"] for i in items} == canonical_ids

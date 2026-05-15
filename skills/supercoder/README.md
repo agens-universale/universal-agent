@@ -1,4 +1,4 @@
-# Superpowers Methodology Pack
+# Supercoder Methodology Pack
 
 Адаптация [obra/superpowers](https://github.com/obra/superpowers) для gc-cli:
 набор process-скиллов, формирующих workflow для нетривиальной разработки —
@@ -21,10 +21,10 @@ brainstorming, writing-plans, TDD, debugging, code-review discipline.
 ### 1. Прямой canonical ID
 
 ```
-gc-cli -q "use skill superpowers:brainstorming for designing feature X"
+gc-cli -q "use skill supercoder:brainstorming for designing feature X"
 ```
 
-Агент видит canonical ID в реплике → вызывает `skills_load("superpowers:brainstorming")`.
+Агент видит canonical ID в реплике → вызывает `skills_load("supercoder:brainstorming")`.
 
 ### 2. Short alias (если уникальный)
 
@@ -32,7 +32,7 @@ gc-cli -q "use skill superpowers:brainstorming for designing feature X"
 gc-cli -q "use skill brainstorming for designing feature X"
 ```
 
-Резолвер найдёт `superpowers:brainstorming` если такой skill-сегмент уникален
+Резолвер найдёт `supercoder:brainstorming` если такой skill-сегмент уникален
 в реестре. При коллизии (два пакета с одинаковым inner-id) — структурная
 ошибка с кандидатами.
 
@@ -42,41 +42,41 @@ gc-cli -q "use skill brainstorming for designing feature X"
 gc-cli -q "help me design a new feature"
 ```
 
-Агент видит entry-скилл `superpowers:using-superpowers` в `skills_list`,
+Агент видит entry-скилл `supercoder:using-supercoder` в `skills_list`,
 читает описание, понимает что нужен design workflow → загружает его, по
-таблице триггеров переходит к `superpowers:brainstorming`.
+таблице триггеров переходит к `supercoder:brainstorming`.
 
 ## Скиллы внутри пакета
 
 | Canonical ID | Назначение |
 |---|---|
-| `superpowers:using-superpowers` | **Entry-скилл** (bootstrap). Карта пакета: триггер → нужный скилл. |
-| `superpowers:brainstorming` | Сократический рефайнмент идеи в дизайн ДО любого кода. Hard-gate. |
-| `superpowers:writing-plans` | План реализации с задачами 2-5 минут, конкретным кодом, exact-путями. |
-| `superpowers:executing-plans` | Исполнение плана task-by-task с checkpoint'ами. |
-| `superpowers:test-driven-development` | RED-GREEN-REFACTOR цикл. С reference `testing-anti-patterns`. |
-| `superpowers:systematic-debugging` | 4-фазный root-cause процесс. 3 references. |
-| `superpowers:verification-before-completion` | Запрет claim'а «готово» без верифицирующего артефакта. |
-| `superpowers:requesting-code-review` | Pre-review self-check. |
-| `superpowers:receiving-code-review` | Дисциплина ответа на фидбек. |
-| `superpowers:writing-skills` | Best-practices написания SKILL.md (для skill-scaffolder и для авторов). |
+| `supercoder:using-supercoder` | **Entry-скилл** (bootstrap). Карта пакета: триггер → нужный скилл. |
+| `supercoder:brainstorming` | Сократический рефайнмент идеи в дизайн ДО любого кода. Hard-gate. |
+| `supercoder:writing-plans` | План реализации с задачами 2-5 минут, конкретным кодом, exact-путями. |
+| `supercoder:executing-plans` | Исполнение плана task-by-task с checkpoint'ами. |
+| `supercoder:test-driven-development` | RED-GREEN-REFACTOR цикл. С reference `testing-anti-patterns`. |
+| `supercoder:systematic-debugging` | 4-фазный root-cause процесс. 3 references. |
+| `supercoder:verification-before-completion` | Запрет claim'а «готово» без верифицирующего артефакта. |
+| `supercoder:requesting-code-review` | Pre-review self-check. |
+| `supercoder:receiving-code-review` | Дисциплина ответа на фидбек. |
+| `supercoder:writing-skills` | Best-practices написания SKILL.md (для skill-scaffolder и для авторов). |
 
 ## Просмотр списка из CLI
 
 ```
-gc-cli -q "list skills in the superpowers pack"
+gc-cli -q "list skills in the supercoder pack"
 ```
 
-Агент вызовет `skills_list(pack="superpowers")` и покажет все internal.
+Агент вызовет `skills_list(pack="supercoder")` и покажет все internal.
 
 ## Override под свой проект
 
 Чтобы переопределить конкретный скилл пакета — положить SKILL.md в той же
 relative-path-структуре в свой layer. Например, чтобы переопределить
-`superpowers:brainstorming` для текущего проекта:
+`supercoder:brainstorming` для текущего проекта:
 
 ```
-<your-repo>/.gc/skills/superpowers/brainstorming/SKILL.md
+<your-repo>/.gc/skills/supercoder/brainstorming/SKILL.md
 ```
 
 При наличии файла в project-слое он выигрывает у system-слоя.
@@ -84,7 +84,7 @@ relative-path-структуре в свой layer. Например, чтобы
 Чтобы переопределить **манифест** пакета (например, изменить `bootstrap_skill`):
 
 ```
-<your-repo>/.gc/skills/superpowers/pack.yaml
+<your-repo>/.gc/skills/supercoder/pack.yaml
 ```
 
 ## Что не входит в пакет

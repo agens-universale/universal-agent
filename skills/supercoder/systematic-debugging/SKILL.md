@@ -46,7 +46,7 @@ Stop guessing. Find the root cause, not a symptom. Four phases, in order.
 - Root-cause fix: "the input shape was wrong because earlier validation
   was missing — add it at the entry point".
 - Add a regression test that fails on the old code, passes on the new one.
-  This belongs to the `superpowers:test-driven-development` cycle.
+  This belongs to the `supercoder:test-driven-development` cycle.
 
 ## Hard rules
 
@@ -71,5 +71,5 @@ Stop guessing. Find the root cause, not a symptom. Four phases, in order.
 ## Next step
 
 After the fix is in and the regression test is GREEN:
-- `skills_load("superpowers:verification-before-completion")` before claiming
+- `skills_load("supercoder:verification-before-completion")` before claiming
   the bug is fixed.

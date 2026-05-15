@@ -7,7 +7,7 @@ version: 1.0.0
 
 # Executing Implementation Plans
 
-You have a plan file (e.g. `docs/superpowers/plans/<date>-<feature>-plan.md`).
+You have a plan file (e.g. `docs/supercoder/plans/<date>-<feature>-plan.md`).
 Each task in it is a single commit. Your job is to execute them mechanically
 and verify each completes before moving to the next.
 
@@ -63,7 +63,7 @@ Before marking a task done:
 
 After the last task is committed:
 
-- Load `skills_load("superpowers:verification-before-completion")` for the
+- Load `skills_load("supercoder:verification-before-completion")` for the
   final sanity check before claiming done.
-- Then `skills_load("superpowers:requesting-code-review")` if the user is
+- Then `skills_load("supercoder:requesting-code-review")` if the user is
   ready to hand off for review.

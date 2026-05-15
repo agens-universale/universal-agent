@@ -1,13 +1,13 @@
 ---
-id: using-superpowers
-name: Using Superpowers
-description: Entry point of the Superpowers methodology pack. Load FIRST when starting non-trivial coding work (feature, bugfix, refactor, design, planning) or hitting a tricky bug. Maps user intent to the right inner skill from this pack — see the body for the trigger table.
+id: using-supercoder
+name: Using Supercoder
+description: Entry point of the Supercoder methodology pack. Load FIRST when starting non-trivial coding work (feature, bugfix, refactor, design, planning) or hitting a tricky bug. Maps user intent to the right inner skill from this pack — see the body for the trigger table.
 version: 1.0.0
 ---
 
-# Using Superpowers
+# Using Supercoder
 
-You are operating inside the **superpowers methodology pack**. This pack
+You are operating inside the **supercoder methodology pack**. This pack
 contains process skills that guide non-trivial coding work: brainstorming,
 planning, TDD, debugging, code review.
 
@@ -22,21 +22,21 @@ and rework. Trust the process.
 
 | User intent (signals) | Skill to load via skills_load |
 |---|---|
-| New feature, refactor, change of behavior, "let's build X" | `superpowers:brainstorming` |
-| Design approved, need a concrete TDD-style plan | `superpowers:writing-plans` |
-| Plan exists, ready to execute task by task | `superpowers:executing-plans` |
-| Writing tests, implementing a feature | `superpowers:test-driven-development` |
-| Bug, test failure, "X doesn't work", flaky output | `superpowers:systematic-debugging` |
-| About to claim "done" / commit / open PR | `superpowers:verification-before-completion` |
-| About to ask for code review | `superpowers:requesting-code-review` |
-| Just received review feedback, need to respond | `superpowers:receiving-code-review` |
-| Creating a new project skill | `superpowers:writing-skills` |
+| New feature, refactor, change of behavior, "let's build X" | `supercoder:brainstorming` |
+| Design approved, need a concrete TDD-style plan | `supercoder:writing-plans` |
+| Plan exists, ready to execute task by task | `supercoder:executing-plans` |
+| Writing tests, implementing a feature | `supercoder:test-driven-development` |
+| Bug, test failure, "X doesn't work", flaky output | `supercoder:systematic-debugging` |
+| About to claim "done" / commit / open PR | `supercoder:verification-before-completion` |
+| About to ask for code review | `supercoder:requesting-code-review` |
+| Just received review feedback, need to respond | `supercoder:receiving-code-review` |
+| Creating a new project skill | `supercoder:writing-skills` |
 
 ## How to proceed
 
 1. **Identify** the matching skill by intent (table above).
 2. **Load it immediately — hard-gate.** Your very next tool call MUST be
-   `skills_load("superpowers:<skill-id>")`. Do NOT ask the user questions,
+   `skills_load("supercoder:<skill-id>")`. Do NOT ask the user questions,
    do NOT explore files, do NOT call any other tool before this load. The
    inner skill defines when and how to do those things; without it loaded,
    you are improvising outside the methodology.

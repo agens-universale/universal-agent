@@ -63,7 +63,7 @@ be presented and approved.
   summary in the chat is enough.
 - **Multi-step task** (multiple files, non-obvious sequencing): a design doc
   MUST be saved to
-  `docs/superpowers/specs/YYYY-MM-DD-<topic>-design.md` and committed before
+  `docs/supercoder/specs/YYYY-MM-DD-<topic>-design.md` and committed before
   moving on.
 
 For design docs, structure:
@@ -77,7 +77,7 @@ For design docs, structure:
 After the user approves the design:
 
 - **Trivial task** (single function, one-screen change): proceed directly with
-  `superpowers:test-driven-development` for the implementation. No separate
+  `supercoder:test-driven-development` for the implementation. No separate
   plan needed.
 
 - **Multi-step task** (multiple files, non-obvious sequencing) —
@@ -85,14 +85,14 @@ After the user approves the design:
   acknowledged by the user first. Your next tool calls, in order:
 
   1. `write_to_file` (or `append_to_file`) — save the validated design to
-     `docs/superpowers/specs/YYYY-MM-DD-<topic>-design.md` with the sections
+     `docs/supercoder/specs/YYYY-MM-DD-<topic>-design.md` with the sections
      described in "Output" above.
   2. `ask_human` — show the user the saved path and ask them to review and
      confirm: e.g. "Design saved to <path>. Review it and reply 'ok' to
      proceed to the plan, or describe changes."
-  3. ONLY after the user confirms: `skills_load("superpowers:writing-plans")`.
+  3. ONLY after the user confirms: `skills_load("supercoder:writing-plans")`.
 
-  Do NOT call `skills_load("superpowers:writing-plans")` before the spec
+  Do NOT call `skills_load("supercoder:writing-plans")` before the spec
   file exists on disk AND the user has acknowledged it. Skipping this
   hard-gate means the plan is generated from informal in-chat design —
   exactly the unexamined-assumption antipattern this skill exists to

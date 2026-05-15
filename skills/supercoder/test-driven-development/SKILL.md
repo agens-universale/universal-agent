@@ -56,7 +56,7 @@ non-negotiable evidence.
 ## When NOT to use TDD
 
 - Pure exploration / spike code that won't ship.
-- Print-statement debugging (use `superpowers:systematic-debugging` instead).
+- Print-statement debugging (use `supercoder:systematic-debugging` instead).
 - Schema-only changes (config tweaks, dependency bumps).
 - Documentation / typo fixes.
 
@@ -71,4 +71,4 @@ skills_load_reference("test-driven-development", "testing-anti-patterns")
 ## Next step
 
 After feature/fix is GREEN and committed:
-- `skills_load("superpowers:verification-before-completion")` before claiming done.
+- `skills_load("supercoder:verification-before-completion")` before claiming done.

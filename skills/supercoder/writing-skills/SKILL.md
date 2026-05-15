@@ -124,4 +124,4 @@ then load it on a real task and observe whether you actually follow it. If
 you don't follow your own skill, neither will the agent.
 
 For packaging multiple new skills as a coherent pack, refer to the spec at
-`docs/superpowers/specs/2026-05-12-skills-packs-and-superpowers-pack.md`.
+`docs/supercoder/specs/2026-05-12-skills-packs-and-supercoder-pack.md`.
