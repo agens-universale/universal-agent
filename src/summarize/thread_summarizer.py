@@ -1,8 +1,8 @@
 from typing import Any, Dict, List
 
 from config import _DEFAULT_LAST_DIALOG_STEP_MESSAGE_MAX_CHARS
+import message_format.dialog_history as dialog_history
 from summarize import (
-    dialog_history,
     memory_suggestions,
     prompt_loading,
     summary_llm_steps,

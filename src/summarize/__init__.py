@@ -7,7 +7,7 @@
    - Быстрая, дешёвая проверка объёма: **как сообщения есть в истории**, без
      форматирования под промпт (без обёрток, склейки в текст и т.п.).
      Реализация: ``compaction.history_exceeds_summary_trigger`` →
-     ``summary_serialization.calc_history_chars_for_trigger`` (сумма длин
+     ``message_format.serialization.calc_history_chars_for_trigger`` (сумма длин
      полезной нагрузки полей, без ``[role]`` и тегов вызова).
    - Если порог по длине **превышен** — вызывается ``compaction.run_summary_compaction``
      (см. ``agent_executor``). В логах рядом пишется ``serialized_chars`` для сравнения
@@ -16,7 +16,7 @@
      для тестов и скриптов; контроллер использует явную пару проверка/запуск.
 
 2. Внутри суммаризации (когда уже решили суммаризировать)
-   Цепочка в коде: ``dialog_history.trim_history_to_max_dialogue_chars`` →
+   Цепочка в коде: ``message_format.dialog_history.trim_history_to_max_dialogue_chars`` →
    ``group_into_turns`` → ``split_turns_into_char_batches`` → текст промпта
    (сборка через ``build_history_text`` — блоки ``<message n=\"…\">``; для батчей без доп. построчного лимита).
    а) **Форматирование всей истории**: приведение к единому текстовому виду для
@@ -57,9 +57,8 @@
 - ``compaction`` — ``history_exceeds_summary_trigger``, ``run_summary_compaction``,
   ``maybe_run_summary_compaction``, ``apply_summary_state_patch``;
 - ``thread_summarizer`` — сценарий батчей LLM и сборка результата;
-- ``dialog_history`` — такты, батчи, текст истории для промпта;
+- ``message_format`` (отдельный пакет) — такты, батчи, сериализация сообщений для промпта;
 - ``summary_validation`` — эвристики пригодности сводки;
-- ``summary_serialization`` — текст сообщений для промпта/метрик, признак dialog summary в истории;
 - ``summary_message_body`` — тело сообщения-резюме;
 - ``summary_llm_steps`` — сжатие и починка сводки (отдельные вызовы LLM);
 - ``memory_suggestions`` — шаг предложений для долговременной памяти;
