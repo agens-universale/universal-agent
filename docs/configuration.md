@@ -5,7 +5,12 @@
 ## Конфиг клиента
 
 - Требуется запущенный GigaCode Agent с API `v1/responses` или с режимом `backend_api_mode: chat_completions`. Адрес сервиса задаётся в `config.yml`.
-- **Где ищется конфиг:** по умолчанию — файл `config.yml` рядом с установленным пакетом (каталог, откуда был выполнен `pip install -e .`, подкаталог `src`). Чтобы использовать конфиг из текущей папки или указать свой путь:
+- **Где ищется базовый `config.yml`** (первый найденный источник побеждает):
+  1. путь из `--config` (если задан);
+  2. иначе `config.yml` в каталоге «Config» из таблицы [«Где gc-cli хранит runtime-данные»](#где-gc-cli-хранит-runtime-данные) — `~/.config/gc/config.yml` на Linux/macOS, `%USERPROFILE%\.gc\config.yml` на Windows (учитывает `GC_CONFIG_DIR` / `XDG_CONFIG_HOME` / `GC_HOME`). Это **полная база** (кладите полный конфиг — частичный файл здесь потеряет пакетные дефолты);
+  3. иначе `config.yml` рядом с установленным пакетом (каталог, откуда был выполнен `pip install -e .`, подкаталог `src`).
+
+  Поверх выбранной базы дополнительно deep-merge'ится project-local `<cwd>/.gc/config.yml` (см. [«Project local config (опционально)»](#project-local-config-опционально)). Чтобы указать свой путь явно:
   ```commandline
   gc-cli -q "ваш вопрос" --config ./config.yml
   ```
@@ -211,6 +216,8 @@ ddgs-mcp --http
 `<slug>` — путь к проекту с заменой `/`, `\`, `:` на `-`, в стиле `~/.claude/projects/`.
 
 Override через переменные окружения: `GC_HOME` (корневой), `GC_STATE_DIR` / `GC_CONFIG_DIR` / `GC_CACHE_DIR` / `GC_DATA_DIR` (точечные). На Linux/macOS дополнительно работают `XDG_STATE_HOME` / `XDG_CONFIG_HOME` / `XDG_CACHE_HOME` / `XDG_DATA_HOME`.
+
+Каталог «Config» — это где `gc-cli` ищет базовый `config.yml` (tier между `--config` и пакетным дефолтом; подробнее — [«Где ищется базовый config.yml»](#конфиг-клиента) в начале страницы).
 
 См. также пояснения в `demo_config.yml` (секция `paths`).
 
