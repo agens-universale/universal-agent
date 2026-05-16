@@ -1,0 +1,8 @@
+id: articles
+name: Article Authoring
+description: |
+  Author and fact-check publication-ready Russian Markdown articles:
+  create a new article from a subject/brief, or verify and revise an
+  existing one.
+version: 1.0.0
+bootstrap_skill: using-articles
