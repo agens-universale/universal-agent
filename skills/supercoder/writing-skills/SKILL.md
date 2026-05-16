@@ -71,19 +71,15 @@ After <observable state>:
 This creates a text-based workflow chain across skills. No engine needed —
 the agent's reading is the engine.
 
-## Local tool vocabulary (for gc-cli)
+## Tool-agnostic body
 
-Use local tool names in the body, not external ones:
+Describe actions in plain language, not by tool name: "read the file",
+"run the tests", "save progress notes", "finalize the result". Do not
+hardcode runtime tool names — skills must stay portable across runtimes.
 
-| Action | gc-cli tool | NOT |
-|---|---|---|
-| Read a file | `read_file` | `Read` |
-| Write a file | `write_to_file`, `append_to_file` | `Write` |
-| Run a command | `execute_command` | `Bash` |
-| Persistent notes | `memory_files` | `TodoWrite` |
-| Finalize | `submit_solution` | (no analog) |
-
-A skill that references external tool names won't trigger correctly in this runtime.
+The only tools you may name explicitly are the skill-discovery tools
+`skills_load` and `skills_list`, because they are intrinsic to the skills
+mechanism itself (e.g. the next-step chaining above).
 
 ## Length budget
 

@@ -15,8 +15,8 @@ Stop guessing. Find the root cause, not a symptom. Four phases, in order.
   a reproduction yet — find the trigger.
 - Capture the EXACT input that triggers the bug, the EXACT command/sequence
   that exercises it, and the EXACT observed output.
-- Format the repro as `steps -> observed -> expected`. Save to `memory_files`
-  so it survives summarization.
+- Format the repro as `steps -> observed -> expected`. Save it to durable
+  storage that survives context summarization.
 - If you can't reproduce — STOP. Don't propose fixes for bugs you can't
   trigger. Ask the user for more context.
 
@@ -24,13 +24,13 @@ Stop guessing. Find the root cause, not a symptom. Four phases, in order.
 
 - Bisect: narrow the failing path to the smallest set of code/data involved.
 - Strip away anything that doesn't matter. Confirm the bug still reproduces.
-- Use `execute_command "git log -10 <file>"` or `git bisect` to find the
+- Use `git log -10 <file>` or `git bisect` to find the
   introducing commit if regression.
 - Output of this phase: a minimal repro the user could read in 30 seconds.
 
 ## Phase 3 — Understand
 
-- Read the relevant code via `read_file`. Trace data flow from input to point
+- Read the relevant code. Trace data flow from input to point
   of failure.
 - For each unexpected behavior, ask: "What is the proximate cause of THIS
   observed state?" Walk up the chain.

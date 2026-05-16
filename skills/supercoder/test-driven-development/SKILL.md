@@ -22,7 +22,7 @@ non-negotiable evidence.
 ### 1. RED — write a failing test
 
 - Write the test that would pass IF the feature/fix were complete.
-- Run it via `execute_command "pytest tests/path/test_x.py::test_name -v"`.
+- Run it via `pytest tests/path/test_x.py::test_name -v`.
 - Verify it actually fails, and fails for the expected reason (e.g.
   `AttributeError: function not defined`, not an unrelated import error).
 - If the test passes immediately — STOP. Either the feature already works

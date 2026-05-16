@@ -38,7 +38,7 @@ For factual claims:
 - If they claim a bug: write a test that would catch it. Does the test fail
   on your current code? If yes — they're right. If no — gather evidence.
 - If they claim a contract violation: read the spec/docs and check.
-- If they claim a missed edge case: try it in `execute_command`.
+- If they claim a missed edge case: try it by running the code.
 
 For stylistic claims:
 
@@ -81,7 +81,7 @@ Better:
 > You: "It's been working in prod for months, I'm not going to touch it."
 
 Better:
-> You: "Let me check — `execute_command "pytest -k 'test_empty'"` → 0 tests
+> You: "Let me check — `pytest -k 'test_empty'` → 0 tests
 > exist for empty input. I'll add one to confirm. *test added, passes* —
 > looks like it's actually handled because of the early `if not items:` at
 > line 12. Adding the test for regression coverage."

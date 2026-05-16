@@ -21,15 +21,15 @@ Run the relevant test suite. Observe the output. If a single test fails — don'
 request review. Fix or explain in the PR description (with rationale).
 
 ```
-execute_command "pytest tests/<area>/ -v"
+pytest tests/<area>/ -v
 ```
 
 ### 2. Diff is in scope
 
 Run:
 ```
-execute_command "git diff <base-branch>..HEAD --stat"
-execute_command "git diff <base-branch>..HEAD --name-only"
+git diff <base-branch>..HEAD --stat
+git diff <base-branch>..HEAD --name-only
 ```
 
 For every file in the diff, ask:
@@ -50,7 +50,7 @@ Search for:
 ### 4. Commit messages are useful
 
 ```
-execute_command "git log <base-branch>..HEAD --oneline"
+git log <base-branch>..HEAD --oneline
 ```
 
 Each line should be readable a year from now. "fix bug" / "wip" / "more changes"

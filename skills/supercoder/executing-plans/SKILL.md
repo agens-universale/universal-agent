@@ -13,18 +13,18 @@ and verify each completes before moving to the next.
 
 ## Process
 
-1. **Read the plan once via `read_file`.** Note the total task count. Use
-   `memory_files` to track your position (e.g. `task_pointer: 3` and
-   `tasks_remaining: 11`) so progress survives summarization.
+1. **Read the plan once.** Note the total task count. Record your position
+   in durable storage that survives context summarization (e.g.
+   `task_pointer: 3` and `tasks_remaining: 11`) so progress is not lost.
 
 2. **For each task, in order:**
    a. Load that task's text into context (re-read if needed).
    b. Execute its steps in sequence. Each step is one action.
-   c. After test steps, verify the expected outcome via `execute_command`
+   c. After test steps, verify the expected outcome by running the test
       (e.g. `pytest tests/test_x.py::test_y -v`).
    d. After implementation steps, re-run the test to confirm GREEN.
    e. Commit when the task's last step says so.
-   f. Update `memory_files` with the new task_pointer.
+   f. Update that durable position record with the new task_pointer.
 
 3. **Checkpoint every 3-5 tasks.** Pause and run the full project test
    suite (or the relevant subset) to catch regressions early. Report a
@@ -44,7 +44,8 @@ and verify each completes before moving to the next.
 - **TDD discipline.** When a task says "run test, see it fail" — actually run
   it. Don't skip to implementation because "you know it would fail".
 - **Don't drift from plan.** If you notice the plan could be improved while
-  executing, NOTE it (e.g. in `memory_files`), do not modify in-flight. The
+  executing, NOTE it (in durable storage that survives summarization), do
+  not modify in-flight. The
   plan is the contract.
 - **Commit messages from the plan, verbatim.** Don't paraphrase.
 - **No silent expansion of scope.** If the plan touches files A and B and you

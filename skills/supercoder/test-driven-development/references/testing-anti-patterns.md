@@ -50,7 +50,7 @@ Symptom: written after the code, no proof the test would have caught the bug.
 
 Cause: skipping the failing-first step "because it's obvious".
 
-Fix: every new test goes through `execute_command "pytest ... -v"` BEFORE the
+Fix: every new test goes through `pytest ... -v` BEFORE the
 implementation exists. Verify the failure mode.
 
 ## 6. Sleeping instead of waiting

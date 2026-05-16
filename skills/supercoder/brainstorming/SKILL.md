@@ -24,8 +24,8 @@ you MUST present it and get approval.
 ## Process
 
 1. **Explore project context** — current files, existing patterns, recent
-   commits in the relevant area. Use `read_file`, `list_files`,
-   `execute_command "git log --oneline -20"` as needed.
+   commits in the relevant area. Read the relevant files, list the directory,
+   and check `git log --oneline -20` as needed.
 
 2. **Clarifying questions, one at a time** — prefer multiple choice when
    possible. Don't overwhelm with a numbered list of 6 questions. Cover:
@@ -84,7 +84,7 @@ After the user approves the design:
   **Hard-gate before `writing-plans`:** spec file MUST exist on disk and be
   acknowledged by the user first. Your next tool calls, in order:
 
-  1. `write_to_file` (or `append_to_file`) — save the validated design to
+  1. Save the validated design to disk at
      `docs/supercoder/specs/YYYY-MM-DD-<topic>-design.md` with the sections
      described in "Output" above.
   2. `ask_human` — show the user the saved path and ask them to review and
