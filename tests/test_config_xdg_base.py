@@ -120,9 +120,13 @@ def test_falls_back_to_package_when_no_xdg_file(
 
 
 def test_no_env_override_uses_package_default(
-    monkeypatch, fake_pkg_default, isolated_cwd
+    monkeypatch, fake_pkg_default, isolated_cwd, tmp_path
 ):
-    """No GC_CONFIG_DIR/XDG/GC_HOME at all -> back-compat: package default base."""
+    """No discoverable XDG config.yml -> back-compat: package default base.
+
+    gc_config_dir points at an empty tmp dir (no config.yml) so the lookup is
+    filesystem-neutral and does not reach the real ~/.config/gc/.
+    """
     for _k in (
         "GC_HOME",
         "GC_STATE_DIR", "GC_CONFIG_DIR", "GC_CACHE_DIR", "GC_DATA_DIR",
@@ -130,7 +134,7 @@ def test_no_env_override_uses_package_default(
     ):
         monkeypatch.delenv(_k, raising=False)
     monkeypatch.setattr("sys.platform", "linux")
-    monkeypatch.setattr(env_vars, "env", EnvVars())  # all overrides None
+    monkeypatch.setattr(env_vars, "env", EnvVars(gc_config_dir=tmp_path))
     from config import load_config
 
     cfg = load_config()
