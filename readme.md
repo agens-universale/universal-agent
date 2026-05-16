@@ -54,7 +54,7 @@ Background и CLI-клиент для работы с агентом GigaCode: �
     | `-q`, `--query` | Текст запроса к агенту (**обязателен**). |
     | `-v`, `--verbose` | Подробный вывод о ходе запроса. |
     | `-T`, `--technical` | Обернуть запрос в теги `<technical type="technical">…</technical>`. чтобы при суммаризации это сообщение не считалось как интент пользователя. нужно например, чтобы продолжить прерванную сессию |
-    | `-s`, `--skill` *SKILL_NAME* | Указать skill по имени: агент решает задачу через него; при отсутствии — поиск похожего имени (опечатка), иначе ошибка и остановка. |
+    | `-s`, `--skill` *SKILL_NAME* | Решать задачу через указанный skill. Резолвится детерминированно **до старта агента**: точный canonical / `<pack-id>` → bootstrap пакета (напр. `supercoder` → `supercoder:using-supercoder`) / краткое имя / единственное близкое при опечатке. Неоднозначность / промах / сбой каталога → `warning:` в stderr и **мягкий фолбэк**: имя передаётся агенту как есть, агент стартует (`-s` — подсказка-намерение, не жёсткий контракт). Пустой `-s` — no-op. |
     | `--config` *путь* | Путь к файлу `config.yml` вместо дефолтного. |
     | `-t`, `--thread-id` *id* | Продолжить диалог в существующем треде. |
     | `-n`, `--new` | Начать тред с тем же `thread-id` заново (удалить старые `data_*`/`meta_*`). Разрешён **только вместе** с `-t` / `--thread-id`. |
@@ -304,14 +304,25 @@ gc-cli ищет скиллы в трёх местах (project > user > system, 
 
 ```
 <repo>/skills/                         <gc_data>/skills/    <cwd>/.gc/skills/
-├── project-overview/SKILL.md          (то же)              (то же)
-├── check-article/SKILL.md
-└── supercoder/                        ← пакет (содержит pack.yaml)
+├── complex-task-solver/SKILL.md       (то же)              (то же)
+├── topic-research/SKILL.md
+├── sbertrack-analyst/SKILL.md
+├── ...                                ← прочие flat-скиллы
+├── supercoder/                        ← пакет (содержит pack.yaml)
+│   ├── pack.yaml
+│   ├── using-supercoder/SKILL.md      ← bootstrap
+│   ├── brainstorming/SKILL.md
+│   └── ...
+├── codebase/                          ← пакет
+│   ├── pack.yaml
+│   ├── using-codebase/SKILL.md        ← bootstrap
+│   ├── project-overview/SKILL.md
+│   └── project-investigation/SKILL.md
+└── articles/                          ← пакет
     ├── pack.yaml
-    ├── README.md
-    ├── using-supercoder/SKILL.md      ← bootstrap
-    ├── brainstorming/SKILL.md
-    └── ...
+    ├── using-articles/SKILL.md        ← bootstrap
+    ├── article-creator/SKILL.md
+    └── check-article/SKILL.md
 ```
 
 Override-семантика та же что для обычных скиллов: `project > user > system`
@@ -331,7 +342,7 @@ bootstrap_skill: using-supercoder     # обязательно для видим
 
 ### Canonical IDs
 
-- **Flat-скилл**: `<skill-id>` (без префикса), например `project-overview`.
+- **Flat-скилл**: `<skill-id>` (без префикса), например `topic-research`.
 - **Internal-скилл пакета**: `<pack-id>:<inner-id>`, например `supercoder:brainstorming`.
 
 ### Видимость в `skills_list`
@@ -359,12 +370,19 @@ skills_list(pack="supercoder")
 <your-repo>/.gc/skills/supercoder/brainstorming/SKILL.md
 ```
 
-### Встроенный пакет: supercoder
+### Встроенные пакеты
 
-В состав gc-cli встроен пакет [`supercoder`](skills/supercoder/README.md) —
-методологический набор скиллов (brainstorming, writing-plans, TDD,
-systematic-debugging, code-review discipline). Точка входа —
-`supercoder:using-supercoder`.
+В состав gc-cli встроены три пакета:
+
+- [`supercoder`](skills/supercoder/README.md) — методологический набор
+  (brainstorming, writing-plans, TDD, systematic-debugging, code-review
+  discipline). Точка входа — `supercoder:using-supercoder`.
+- `codebase` — read-only-понимание кода: `project-overview` (карта
+  репозитория) и `project-investigation` (трассировка поведения/потока).
+  Точка входа — `codebase:using-codebase`.
+- `articles` — авторинг русских Markdown-статей: `article-creator`
+  (создать новую) и `check-article` (фактчек/правка существующей).
+  Точка входа — `articles:using-articles`.
 
 ## Project local config (опционально)
 
