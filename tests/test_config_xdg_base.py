@@ -123,6 +123,12 @@ def test_no_env_override_uses_package_default(
     monkeypatch, fake_pkg_default, isolated_cwd
 ):
     """No GC_CONFIG_DIR/XDG/GC_HOME at all -> back-compat: package default base."""
+    for _k in (
+        "GC_HOME",
+        "GC_STATE_DIR", "GC_CONFIG_DIR", "GC_CACHE_DIR", "GC_DATA_DIR",
+        "XDG_STATE_HOME", "XDG_CONFIG_HOME", "XDG_CACHE_HOME", "XDG_DATA_HOME",
+    ):
+        monkeypatch.delenv(_k, raising=False)
     monkeypatch.setattr("sys.platform", "linux")
     monkeypatch.setattr(env_vars, "env", EnvVars())  # all overrides None
     from config import load_config
