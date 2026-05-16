@@ -518,6 +518,33 @@ class SkillsRegistry:
             "pack_id": skill.pack_id,
         }
 
+    def skill_catalog(self) -> "SkillCatalog":
+        """Read-only snapshot for the CLI -s resolver (skill_arg_resolver).
+
+        Built from the public list_skills(include_all=True); does not expose
+        private internals. Local import avoids import-time coupling between
+        the registry and the pure resolver module.
+        """
+        from skill_arg_resolver import SkillCatalog
+
+        entries = self.list_skills(include_all=True)
+        canonical = frozenset(e["id"] for e in entries)
+        bare: dict[str, list[str]] = {}
+        for e in entries:
+            sid = e["id"]
+            tail = sid.split(":", 1)[1] if ":" in sid else sid
+            bare.setdefault(tail, []).append(sid)
+        pack_bootstrap = {
+            e["pack_id"]: e["id"]
+            for e in entries
+            if e.get("is_pack_bootstrap") and e.get("pack_id")
+        }
+        return SkillCatalog(
+            canonical_ids=canonical,
+            bare_to_canonical={k: tuple(sorted(v)) for k, v in bare.items()},
+            pack_bootstrap=pack_bootstrap,
+        )
+
     def load_reference(self, skill_id: str, slug: str) -> Dict[str, Any]:
         """
         Загрузить reference по slug.
