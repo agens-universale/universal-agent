@@ -10,12 +10,16 @@ def test_skill_catalog_shape_on_real_pack():
     # internal canonical ids present
     assert "supercoder:brainstorming" in cat.canonical_ids
     # a flat skill present and bare-addressable
-    assert "project-overview" in cat.canonical_ids
-    assert cat.bare_to_canonical.get("project-overview") == ("project-overview",)
+    assert "codebase:project-overview" in cat.canonical_ids
+    assert cat.bare_to_canonical.get("project-overview") == ("codebase:project-overview",)
     # bare tail maps to canonical
     assert "supercoder:brainstorming" in cat.bare_to_canonical.get("brainstorming", ())
     # pack folder name itself is NOT a canonical skill id
     assert "supercoder" not in cat.canonical_ids
+    # codebase pack present, bootstrap mapped, inner canonical, folder not a skill
+    assert cat.pack_bootstrap.get("codebase") == "codebase:using-codebase"
+    assert "codebase:project-investigation" in cat.canonical_ids
+    assert "codebase" not in cat.canonical_ids
 
     # invariants the resolver relies on (content-independent)
     assert set(cat.pack_bootstrap.values()) <= cat.canonical_ids
@@ -29,6 +33,7 @@ def test_skill_catalog_shape_on_real_pack():
 def test_resolver_outputs_are_loadable_against_real_registry():
     reg = SkillsRegistry()
     cat = reg.skill_catalog()
+    # "project-overview" is now a pack-inner skill: bare tail -> codebase:project-overview
     for raw in ["supercoder", "brainstorming", "supercoder:brainstorming",
                 "suprcoder", "project-overview"]:
         r = resolve_skill_arg(raw, cat)
