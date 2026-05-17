@@ -53,6 +53,26 @@ def _registry():
     return SkillsRegistry(skills_root=str(PROJECT_ROOT / "skills"))
 
 
+def _sample_skill() -> tuple[Path, str]:
+    """Pick a deterministic existing skill dir (with SKILL.md), pack-agnostically.
+
+    Globs every skills/**/SKILL.md (flat skill, pack bootstrap, or pack inner),
+    excludes the skill-creator skill itself (self-packaging quirks), takes the
+    first sorted candidate. skill_id is computed by package_skill's own
+    _extract_skill_id so skill-<id>.zip / <id>/SKILL.md assertions stay
+    consistent with the script regardless of flat-vs-pack layout.
+    """
+    sys.path.insert(0, str(SKILL_DIR / "scripts"))
+    import package_skill as _ps  # noqa: E402
+
+    for cand in sorted((PROJECT_ROOT / "skills").glob("**/SKILL.md")):
+        skill_dir = cand.parent
+        if skill_dir == SKILL_DIR or SKILL_DIR in skill_dir.parents:
+            continue
+        return skill_dir, _ps._extract_skill_id(skill_dir)
+    raise AssertionError("no sample skill with SKILL.md found under skills/")
+
+
 def test_skill_creator_loads_via_registry():
     """skill-creator must be discoverable in the registry with correct metadata.
 
@@ -72,11 +92,11 @@ def test_skill_creator_loads_via_registry():
 
 def test_quick_validate_runs_on_existing_skill():
     """quick_validate.py must validate an existing project skill (after the Task 3 adaptations)."""
-    target = PROJECT_ROOT / "skills" / "article-creator"
-    assert target.is_dir()
+    sample_dir, _sample_id = _sample_skill()
+    assert sample_dir.is_dir()
 
     result = subprocess.run(
-        [sys.executable, "-m", "scripts.quick_validate", str(target.resolve())],
+        [sys.executable, "-m", "scripts.quick_validate", str(sample_dir.resolve())],
         capture_output=True,
         encoding="utf-8",
         env={**os.environ, "PYTHONIOENCODING": "utf-8"},
@@ -90,15 +110,15 @@ def test_quick_validate_runs_on_existing_skill():
 
 def test_package_skill_produces_zip_with_correct_structure(tmp_path):
     """package_skill.py must produce skill-<id>.zip with <id>/SKILL.md inside."""
-    target = PROJECT_ROOT / "skills" / "article-creator"
-    assert target.is_dir()
+    sample_dir, sample_id = _sample_skill()
+    assert sample_dir.is_dir()
 
     result = subprocess.run(
         [
             sys.executable,
             "-m",
             "scripts.package_skill",
-            str(target.resolve()),
+            str(sample_dir.resolve()),
             str(tmp_path),
         ],
         capture_output=True,
@@ -113,24 +133,24 @@ def test_package_skill_produces_zip_with_correct_structure(tmp_path):
     assert candidates, f"no skill-*.zip produced; stdout={result.stdout}"
 
     skill_zip = candidates[0]
-    assert skill_zip.name == "skill-article-creator.zip", skill_zip.name
+    assert skill_zip.name == f"skill-{sample_id}.zip", skill_zip.name
 
     import zipfile
     with zipfile.ZipFile(skill_zip) as zf:
         names = zf.namelist()
-        assert "article-creator/SKILL.md" in names, names
+        assert f"{sample_id}/SKILL.md" in names, names
 
 
 def test_package_skill_includes_readme_with_metadata(tmp_path):
     """Archive must contain README.md at root with id, version, description from frontmatter."""
-    target = PROJECT_ROOT / "skills" / "article-creator"
+    sample_dir, sample_id = _sample_skill()
 
     result = subprocess.run(
         [
             sys.executable,
             "-m",
             "scripts.package_skill",
-            str(target.resolve()),
+            str(sample_dir.resolve()),
             str(tmp_path),
         ],
         capture_output=True,
@@ -147,21 +167,21 @@ def test_package_skill_includes_readme_with_metadata(tmp_path):
     with zipfile.ZipFile(skill_zip) as zf:
         assert "README.md" in zf.namelist()
         readme_content = zf.read("README.md").decode("utf-8")
-        assert "article-creator" in readme_content
+        assert sample_id in readme_content
         assert "Как установить" in readme_content
         assert "demo/" in readme_content or "Что в архиве" in readme_content
 
 
 def test_package_skill_explicit_source_layer(tmp_path):
     """--source-layer flag should propagate into README."""
-    target = PROJECT_ROOT / "skills" / "article-creator"
+    sample_dir, _sample_id = _sample_skill()
 
     result = subprocess.run(
         [
             sys.executable,
             "-m",
             "scripts.package_skill",
-            str(target.resolve()),
+            str(sample_dir.resolve()),
             "--source-layer", "user",
             "--output-dir", str(tmp_path),
         ],
