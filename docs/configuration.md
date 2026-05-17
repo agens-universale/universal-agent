@@ -207,17 +207,19 @@ ddgs-mcp --http
 
 Кросс-платформенная раскладка. По умолчанию:
 
-| ОС | Логи / треды / swarm | Cache | Config |
-|---|---|---|---|
-| Linux | `~/.local/state/gc/projects/<slug>/` | `~/.cache/gc/` | `~/.config/gc/` |
-| macOS | `~/.local/state/gc/projects/<slug>/` *(как Linux)* | `~/.cache/gc/` | `~/.config/gc/` |
-| Windows | `%USERPROFILE%\.gc\projects\<slug>\` | `%USERPROFILE%\.gc\cache\` | `%USERPROFILE%\.gc\` |
+| ОС | Логи / треды / swarm | Cache (пока не используется)          | Config |
+|---|---|---------------------------------------|---|
+| Linux | `~/.local/state/gc/projects/<slug>/` | `~/.cache/gc/` *(резерв)*             | `~/.config/gc/` |
+| macOS | `~/.local/state/gc/projects/<slug>/` *(как Linux)* | `~/.cache/gc/` *(резерв)*             | `~/.config/gc/` |
+| Windows | `%USERPROFILE%\.gc\projects\<slug>\` | `%USERPROFILE%\.gc\cache\` *(резерв)* | `%USERPROFILE%\.gc\` |
 
 `<slug>` — путь к проекту с заменой `/`, `\`, `:` на `-`, в стиле `~/.claude/projects/`.
 
 Override через переменные окружения: `GC_HOME` (корневой), `GC_STATE_DIR` / `GC_CONFIG_DIR` / `GC_CACHE_DIR` / `GC_DATA_DIR` (точечные). На Linux/macOS дополнительно работают `XDG_STATE_HOME` / `XDG_CONFIG_HOME` / `XDG_CACHE_HOME` / `XDG_DATA_HOME`.
 
 Каталог «Config» — это где `gc-cli` ищет базовый `config.yml` (tier между `--config` и пакетным дефолтом; подробнее — [«Где ищется базовый config.yml»](#конфиг-клиента) в начале страницы).
+
+Каталог «Cache» — зарезервирован в кросс-платформенной XDG-раскладке, но `gc-cli` **пока не использует файловый кэш**: путь вычисляется (и переопределяется `GC_CACHE_DIR` / `XDG_CACHE_HOME`), но каталог не создаётся и в него ничего не пишется.
 
 См. также пояснения в `demo_config.yml` (секция `paths`).
 
