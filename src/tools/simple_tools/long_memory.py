@@ -10,7 +10,7 @@ import json
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from long_memory import compaction, storage  # noqa: F401 — compaction imported for Task 12
+from long_memory import compaction, storage
 from long_memory.compaction import SOFT_APPEND_INPUT_LIMIT_CHARS
 from long_memory.storage import MAX_CHARS, LongMemoryError
 from tools.simple_tools.abstract_simple_tool import AbstractSimpleTool
@@ -37,27 +37,18 @@ class LongMemory(AbstractSimpleTool):
         gc_dir: Optional[Path] = getattr(ctx, "project_gc_dir", None)
         self._path: Optional[Path] = (Path(gc_dir) / _FILE_NAME) if gc_dir else None
 
-    # ------------------------------------------------------------------
-    # Descriptors
-    # ------------------------------------------------------------------
-
     @classmethod
     def tool_description(cls) -> Dict[str, Any]:
         return {
             "type": "function",
             "name": "long_memory",
             "description": (
-                "Durable project memory on DISK (unlike `memory_files` which is "
-                "session-RAM and lost on exit). Writes to a single markdown file "
-                "per project; survives CLI restarts, process kills, machine reboots. "
-                "Use for any fact a future session must know: project conventions, "
-                "naming rules, architectural decisions, infrastructure choices, "
-                "deadlines, durable user preferences. "
-                "Do NOT use `memory_files` for such facts — it is wiped when the "
-                "CLI process exits and a future session will silently lose them. "
-                "Workflow: read at start of a new session if Project Info reports "
-                "the project has long memory; append on each new durable fact "
-                "(short delta, not chain-of-thought); write only to rewrite from scratch (rare)."
+                "Persistent project-scoped markdown memory. "
+                "Survives CLI restarts, process kills, machine reboots. "
+                "Three actions: read (load full content), append (add a short "
+                "delta), write (replace entirely; rare). "
+                "Use for project conventions, decisions, constraints, naming "
+                "rules — anything a future session must know."
             ),
             "parameters": {
                 "type": "object",
@@ -127,10 +118,6 @@ Return format (JSON string):
 }
 '''
 
-    # ------------------------------------------------------------------
-    # Result helpers
-    # ------------------------------------------------------------------
-
     def _ok(
         self,
         *,
@@ -166,10 +153,6 @@ Return format (JSON string):
             },
             ensure_ascii=False,
         )
-
-    # ------------------------------------------------------------------
-    # Entry point
-    # ------------------------------------------------------------------
 
     def __call__(self, action: str, content: str = "", **kwargs: Any) -> str:
         if self._path is None:

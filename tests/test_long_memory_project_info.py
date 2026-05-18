@@ -23,7 +23,7 @@ def test_set_call_metadata_injects_empty_status_when_file_absent(tmp_path):
     state = _make_state(tmp_path)
     pv = state.call_metadata["promptVariables"]
     assert "longMemoryStatus" in pv
-    assert "doesn't have long memory" in pv["longMemoryStatus"]
+    assert "doesn't have long memory yet" in pv["longMemoryStatus"]
 
 
 def test_set_call_metadata_injects_populated_status(tmp_path):
@@ -34,6 +34,8 @@ def test_set_call_metadata_injects_populated_status(tmp_path):
     pv = state.call_metadata["promptVariables"]
     assert "project has long memory" in pv["longMemoryStatus"]
     assert f"{len(body)} chars" in pv["longMemoryStatus"]
+    assert "MUST call the appropriate memory tool with action=read" in pv["longMemoryStatus"]
+    assert "AS YOUR FIRST STEP" in pv["longMemoryStatus"]
 
 
 def test_status_does_not_leak_path_or_tool_name(tmp_path):
@@ -62,7 +64,7 @@ def test_set_call_metadata_safe_when_project_gc_dir_missing(tmp_path):
     pv = state.call_metadata["promptVariables"]
     # Either the key is absent, or it carries the empty status. Both are acceptable.
     if "longMemoryStatus" in pv:
-        assert "doesn't have long memory" in pv["longMemoryStatus"]
+        assert "doesn't have long memory yet" in pv["longMemoryStatus"]
 
 
 def test_main_prompt_template_renders_long_memory_status(tmp_path):
@@ -87,6 +89,7 @@ def test_main_prompt_template_renders_long_memory_status(tmp_path):
     )
 
     assert "project has long memory" in rendered
+    assert "MUST call the appropriate memory tool with action=read" in rendered
     assert "seeded body" not in rendered  # body content must NOT be inlined
 
 
@@ -108,4 +111,4 @@ def test_subagent_prompt_template_renders_long_memory_status(tmp_path):
         specific_role=None,
     )
 
-    assert "doesn't have long memory" in rendered
+    assert "doesn't have long memory yet" in rendered
