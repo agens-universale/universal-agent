@@ -306,7 +306,6 @@ gc-cli ищет скиллы в трёх местах (project > user > system, 
 <repo>/skills/                         <gc_data>/skills/    <cwd>/.gc/skills/
 ├── complex-task-solver/SKILL.md       (то же)              (то же)
 ├── topic-research/SKILL.md
-├── sbertrack-analyst/SKILL.md
 ├── ...                                ← прочие flat-скиллы
 ├── supercoder/                        ← пакет (содержит pack.yaml)
 │   ├── pack.yaml
