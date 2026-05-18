@@ -104,6 +104,18 @@ What NOT to put in:
 - Guesses presented as facts.
 - Transient task state that is irrelevant to future sessions.
 
+DURABLE vs SESSION-SCOPED memory — DO NOT CONFUSE:
+- Use `long_memory` (THIS tool) for facts that MUST survive CLI restarts:
+  project conventions, naming rules, architectural decisions, infrastructure
+  choices, deadlines, anything you want a future session to remember.
+- Do NOT use `memory_files` for such facts. `memory_files` is session-scoped
+  scratchpad used by the summarization pipeline (`journal` and similar files).
+  Its contents are wiped when the CLI process exits — useless for cross-session
+  knowledge.
+- When the user states a project convention or a durable rule
+  ("we use X", "always do Y", "in our project Z"), call `long_memory action=append`
+  with a concise fact. Never use `memory_files` for that — it will be silently lost.
+
 Input schema: {"type":"object","properties":{"action":{"type":"string","enum":["read","append","write"]},"content":{"type":"string"}},"required":["action"],"additionalProperties":false}
 
 Return format (JSON string):
