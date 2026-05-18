@@ -135,6 +135,14 @@ mcp:
       token: ""
       server-name: DuckDuckGo search
       description: Common web and News search
+    
+    # browser_playwright:
+    #     transport: stream_stdio
+    #     command: ~/.gc/node/v18.0.0/bin/npx
+    #     args: ["-y", "@playwright/mcp@0.0.70"]
+    #     persistent_session: true
+    #     description: Browser automation via Playwright.
+    #     server-name: playwright-browser
       # command: python3
       # args: ["server.py"]
       # cwd: ""
