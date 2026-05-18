@@ -25,3 +25,5 @@ class AgentConfig(BaseModel):
     limit_project_metadata: bool = False
     tool_output_inline_max_chars: int = 20000
     stored_tool_outputs_max_entries: int = 10
+    # Синтетические поля tool schema: имя → description. Отсутствует или {} — без инжекта.
+    inject_tool_fields: dict[str, str] = Field(default_factory=dict)

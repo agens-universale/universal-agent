@@ -48,9 +48,9 @@ def format_type_functions_call(message):
     tmpl = f"\n\n>>>>>>>>>>\ncall_id: {message['call_id']}:\n{message['name']}\n"
     try:
         args = []
-        for k,v in json.loads(message['arguments']).items():
+        for k, v in json.loads(message["arguments"]).items():
             v_ = cut_message_f(v)
-            args.append(f'{k}: {v_}')
+            args.append(f"{k}: {v_}")
         tmpl += '\n'.join(args)
     except Exception as e:
         tmpl += str(e) + '\n'

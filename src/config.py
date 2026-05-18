@@ -147,6 +147,7 @@ def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
         "limit_project_metadata": app_cfg.agent.limit_project_metadata,
         "tool_output_inline_max_chars": app_cfg.agent.tool_output_inline_max_chars,
         "stored_tool_outputs_max_entries": app_cfg.agent.stored_tool_outputs_max_entries,
+        "inject_tool_fields": dict(app_cfg.agent.inject_tool_fields),
         "mcp-servers": {
             name: server.model_dump(by_alias=True) for name, server in app_cfg.mcp.servers.items()
         },
