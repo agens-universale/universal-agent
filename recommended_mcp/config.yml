@@ -14,7 +14,7 @@ mcps:
       type: source
       source: ../external/computer-mcp
       platforms: [win32]
-    # run-блок отсутствует: MCP спавнится агентом через stdio.
+    run-блок отсутствует: MCP спавнится агентом через stdio.
 
   - name: office
     path: ./office
