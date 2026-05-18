@@ -47,14 +47,14 @@ class LongMemory(AbstractSimpleTool):
             "type": "function",
             "name": "long_memory",
             "description": (
-                "Persistent project-scoped markdown memory ON DISK. Survives CLI restarts. "
-                "One memory per project. "
-                "USE THIS for durable facts that future sessions should remember: "
-                "project conventions, naming rules, architectural decisions, "
-                "infrastructure choices, deadlines. "
-                "DO NOT CONFUSE with `memory_files` — that is a session-scoped scratchpad "
-                "used by the summarization pipeline and is wiped when the CLI process exits; "
-                "never use it for cross-session knowledge. "
+                "Durable project memory on DISK (unlike `memory_files` which is "
+                "session-RAM and lost on exit). Writes to a single markdown file "
+                "per project; survives CLI restarts, process kills, machine reboots. "
+                "Use for any fact a future session must know: project conventions, "
+                "naming rules, architectural decisions, infrastructure choices, "
+                "deadlines, durable user preferences. "
+                "Do NOT use `memory_files` for such facts — it is wiped when the "
+                "CLI process exits and a future session will silently lose them. "
                 "Workflow: read at start of a new session if Project Info reports "
                 "the project has long memory; append on each new durable fact "
                 "(short delta, not chain-of-thought); write only to rewrite from scratch (rare)."

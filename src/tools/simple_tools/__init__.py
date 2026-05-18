@@ -68,15 +68,18 @@ def get_simple_tools_data(config_dict: Dict[str, Any]) -> Dict[str, Dict[str, An
         #     'spec': ThreadNotes.tool_description(),
         #     'description': ThreadNotes.prompt_description(),
         # },
-        'memory_files': {
-            'tool_fabric': MemoryFiles,
-            'spec': MemoryFiles.tool_description(),
-            'description': MemoryFiles.prompt_description(config_dict),
-        },
+        # long_memory listed BEFORE memory_files: early-position bias helps the model
+        # pick the right tool for cross-session durable facts (per Adaline Labs research
+        # on tool-call dispatch failures).
         'long_memory': {
             'tool_fabric': LongMemory,
             'spec': LongMemory.tool_description(),
             'description': LongMemory.prompt_description(),
+        },
+        'memory_files': {
+            'tool_fabric': MemoryFiles,
+            'spec': MemoryFiles.tool_description(),
+            'description': MemoryFiles.prompt_description(config_dict),
         },
         'think': {
             'tool_fabric': Think,
