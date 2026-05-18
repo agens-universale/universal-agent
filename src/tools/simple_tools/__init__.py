@@ -68,6 +68,11 @@ def get_simple_tools_data(config_dict: Dict[str, Any]) -> Dict[str, Dict[str, An
         #     'spec': ThreadNotes.tool_description(),
         #     'description': ThreadNotes.prompt_description(),
         # },
+        'memory_files': {
+            'tool_fabric': MemoryFiles,
+            'spec': MemoryFiles.tool_description(),
+            'description': MemoryFiles.prompt_description(config_dict),
+        },
         'long_memory': {
             'tool_fabric': LongMemory,
             'spec': LongMemory.tool_description(),

@@ -59,6 +59,21 @@ find the right tool by description in the tools list.
 - If `fetch_url` returns `result_type = "error"` or the extracted content looks garbled/unreadable, do not treat it as factual ground truth.
 - Use `result_type` and `extracted_source` to track where the text came from (for example: `trafilatura`, `readability_*`, `stripped_html`).
 
+## Persistent Memory with `memory_files`
+- The tool `memory_files` provides named persistent registers for the current thread.
+- Default register is `journal` — a chronological log of decisions and facts.
+- At the start of each new user turn, call `memory_files(action="list")` to see available files, then read the ones relevant to the task.
+- Store canonical facts in appropriate memory files. Store uncertainty as an explicit "Open question" or "Hypothesis".
+- Create topic-specific files as needed: `architecture`, `api_contracts`, `bugs`, `decisions`, etc.
+- Decision duplication rule: if `think` led you to a useful Decision / Canonical target / Plan completed / Verified fact, you MUST record only that "useful outcome" into memory_files (as `append`) without saving the entire thinking text.
+
+### Recommended Journal Format
+Use a lightweight structure to make notes easy to reuse:
+- Canonical target: <name> (<url>) + meaning in this task
+- Evidence: list URLs/files you fetched and key outcomes with `result_type`
+- Decisions: what you decided and why
+- Open questions: what is still uncertain and what would resolve it
+
 ## `submit_solution` Gate (When to Call)
 Call `submit_solution` only when ALL of the following are true:
 - The current user turn objective is completed or clearly blocked.
@@ -99,19 +114,21 @@ Call `submit_solution` only when ALL of the following are true:
 ## Tool Checklist (Suggested Workflow)
 Use this as a default strategy and adjust to the task:
 1. If Project Info reports long memory exists, call the appropriate memory tool with `action=read` FIRST.
-2. Identify canonical target and decide what "done" means for this turn.
-3. If web/repo info is needed, use search tools to shortlist sources.
-4. Use `fetch_url` to confirm the canonical target and extract key details.
-5. On any new durable fact verified in this session, append it via the memory tool.
-6. Produce requested artifacts (for example: `write_to_file`) and ensure they match the user request.
-7. Call `submit_solution` exactly once at the end of the current turn.
+2. Call `memory_files(action="list")` and read the registers relevant to the task.
+3. Identify canonical target and decide what "done" means for this turn.
+4. If web/repo info is needed, use search tools to shortlist sources.
+5. Use `fetch_url` to confirm the canonical target and extract key details.
+6. Update memory files with verified canonical facts and evidence; on any new durable fact, also append it to long memory.
+7. Produce requested artifacts (for example: `write_to_file`) and ensure they match the user request.
+8. Call `submit_solution` exactly once at the end of the current turn.
 
 ## Example (Technical Report to a File)
 - User: "Write a technical report about X into report.txt"
 - Agent:
   - if Project Info reports long memory exists → call memory tool `action=read` first
+  - `memory_files(action="list")` → then read necessary registers (i.e. journal or other)
   - shortlist sources
   - `fetch_url` for README/primary files
-  - append any new durable facts to long memory
+  - update memory files with canonical target + evidence; append new durable facts to long memory
   - `write_to_file` with a structured, evidence-based report
   - `submit_solution(full_solution)` with a concise `task_report`
