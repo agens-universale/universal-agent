@@ -8,8 +8,11 @@ to the model. The agent learns *that* a memory exists and *roughly how big it is
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Optional
 
 from long_memory import storage
+
+_FILE_NAME = "long_memory.md"
 
 _EMPTY_STATUS = (
     "project doesn't have long memory yet. "
@@ -17,6 +20,36 @@ _EMPTY_STATUS = (
     "architectural decision, user preference), use the appropriate memory tool "
     "with action=append/write to persist it for future sessions."
 )
+
+
+def build_long_memory_status_for_cwd(cwd: Optional[str] = None) -> str:
+    """Resolve the project-local memory path and build the status string.
+
+    Callers that have no business knowing where memory lives use this entry
+    point — internal file name and directory layout stay encapsulated.
+    """
+    from config_modules.env_vars import project_gc_dir
+
+    return build_long_memory_status(project_gc_dir(cwd) / _FILE_NAME)
+
+
+def attach_status_to_prompt_vars(
+    prompt_vars: dict, cwd: Optional[str] = None
+) -> None:
+    """Add `longMemoryStatus` to the given prompt-variables dict.
+
+    Sole entry point for integrating long memory into the system prompt;
+    keeps the prompt-variable key name, the file name, the directory
+    layout and any rendering policy inside this module so that callers
+    (State / AgentExecutor / tests) stay decoupled from internals.
+
+    Safe by contract: any failure is swallowed so memory issues never
+    break system-prompt assembly.
+    """
+    try:
+        prompt_vars["longMemoryStatus"] = build_long_memory_status_for_cwd(cwd)
+    except Exception:  # pragma: no cover — memory must never break metadata
+        return
 
 
 def build_long_memory_status(path: Path) -> str:

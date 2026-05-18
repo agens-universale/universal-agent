@@ -3,7 +3,11 @@ from long_memory.compaction import (
     SOFT_APPEND_INPUT_LIMIT_CHARS,
     compact_text,
 )
-from long_memory.status import build_long_memory_status
+from long_memory.status import (
+    attach_status_to_prompt_vars,
+    build_long_memory_status,
+    build_long_memory_status_for_cwd,
+)
 from long_memory.storage import (
     LongMemoryError,
     LongMemoryStat,
@@ -21,7 +25,9 @@ __all__ = [
     "MAX_CHARS",
     "SOFT_APPEND_INPUT_LIMIT_CHARS",
     "append",
+    "attach_status_to_prompt_vars",
     "build_long_memory_status",
+    "build_long_memory_status_for_cwd",
     "compact_text",
     "read",
     "stat",

@@ -1,82 +1,68 @@
+"""Integration of the long-memory status nudge into the system prompt.
+
+State no longer knows anything about long memory — the injection lives in
+`long_memory.attach_status_to_prompt_vars`, called by the agent runtime
+after state construction. These tests pin that contract and the resulting
+rendered prompt.
+"""
 from pathlib import Path
 
-import pytest
-
-from states import State
+from long_memory import attach_status_to_prompt_vars
 
 
-def _make_state(tmp_path: Path) -> State:
-    return State(
-        verbose=False,
-        model="test-model",
-        tools_spec=[],
-        tools_descr=[],
-        skills_list=[],
-        max_steps=1,
-        system_prompt_id="test",
-        use_server_subagents=False,
-        project_gc_dir=tmp_path / ".gc",
-    )
+def test_attach_status_with_no_memory_file(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    prompt_vars: dict = {}
+    attach_status_to_prompt_vars(prompt_vars)
+    assert "longMemoryStatus" in prompt_vars
+    assert "doesn't have long memory yet" in prompt_vars["longMemoryStatus"]
 
 
-def test_set_call_metadata_injects_empty_status_when_file_absent(tmp_path):
-    state = _make_state(tmp_path)
-    pv = state.call_metadata["promptVariables"]
-    assert "longMemoryStatus" in pv
-    assert "doesn't have long memory yet" in pv["longMemoryStatus"]
-
-
-def test_set_call_metadata_injects_populated_status(tmp_path):
+def test_attach_status_with_populated_memory(tmp_path, monkeypatch):
     (tmp_path / ".gc").mkdir()
     body = "saved fact one\n\nsaved fact two"
     (tmp_path / ".gc" / "long_memory.md").write_text(body, encoding="utf-8")
-    state = _make_state(tmp_path)
-    pv = state.call_metadata["promptVariables"]
-    assert "project has long memory" in pv["longMemoryStatus"]
-    assert f"{len(body)} chars" in pv["longMemoryStatus"]
-    assert "MUST call the appropriate memory tool with action=read" in pv["longMemoryStatus"]
-    assert "AS YOUR FIRST STEP" in pv["longMemoryStatus"]
+    monkeypatch.chdir(tmp_path)
+    prompt_vars: dict = {}
+    attach_status_to_prompt_vars(prompt_vars)
+    assert "project has long memory" in prompt_vars["longMemoryStatus"]
+    assert f"{len(body)} chars" in prompt_vars["longMemoryStatus"]
+    assert "MUST call the appropriate memory tool with action=read" in prompt_vars["longMemoryStatus"]
+    assert "AS YOUR FIRST STEP" in prompt_vars["longMemoryStatus"]
 
 
-def test_status_does_not_leak_path_or_tool_name(tmp_path):
+def test_attach_status_with_explicit_cwd(tmp_path):
+    (tmp_path / ".gc").mkdir()
+    (tmp_path / ".gc" / "long_memory.md").write_text("seeded", encoding="utf-8")
+    prompt_vars: dict = {}
+    attach_status_to_prompt_vars(prompt_vars, cwd=str(tmp_path))
+    assert "project has long memory" in prompt_vars["longMemoryStatus"]
+
+
+def test_attach_status_does_not_leak_path_or_tool_name(tmp_path, monkeypatch):
     (tmp_path / ".gc").mkdir()
     (tmp_path / ".gc" / "long_memory.md").write_text("body", encoding="utf-8")
-    state = _make_state(tmp_path)
-    text = state.call_metadata["promptVariables"]["longMemoryStatus"]
+    monkeypatch.chdir(tmp_path)
+    prompt_vars: dict = {}
+    attach_status_to_prompt_vars(prompt_vars)
+    text = prompt_vars["longMemoryStatus"]
     assert ".gc" not in text
     assert ".md" not in text
     assert "long_memory" not in text
 
 
-def test_set_call_metadata_safe_when_project_gc_dir_missing(tmp_path):
-    """If State is constructed without project_gc_dir (legacy callers), no crash."""
-    state = State(
-        verbose=False,
-        model="test-model",
-        tools_spec=[],
-        tools_descr=[],
-        skills_list=[],
-        max_steps=1,
-        system_prompt_id="test",
-        use_server_subagents=False,
-        # project_gc_dir omitted on purpose
-    )
-    pv = state.call_metadata["promptVariables"]
-    # Either the key is absent, or it carries the empty status. Both are acceptable.
-    if "longMemoryStatus" in pv:
-        assert "doesn't have long memory yet" in pv["longMemoryStatus"]
-
-
-def test_main_prompt_template_renders_long_memory_status(tmp_path):
-    """Render the full chat_completions_system_prompt.md and assert the status text appears."""
+def test_main_prompt_template_renders_long_memory_status(tmp_path, monkeypatch):
+    """End-to-end: attach status + render full system prompt template."""
     from utils.local_render_system_prompt import render_system_prompt
-    from pathlib import Path as _P
 
     (tmp_path / ".gc").mkdir()
     (tmp_path / ".gc" / "long_memory.md").write_text("seeded body", encoding="utf-8")
-    state = _make_state(tmp_path)
+    monkeypatch.chdir(tmp_path)
 
-    repo_root = _P(__file__).resolve().parent.parent
+    prompt_vars: dict = {}
+    attach_status_to_prompt_vars(prompt_vars)
+
+    repo_root = Path(__file__).resolve().parent.parent
     template = (repo_root / "prompts" / "chat_completions_system_prompt.md").read_text(
         encoding="utf-8"
     )
@@ -84,7 +70,7 @@ def test_main_prompt_template_renders_long_memory_status(tmp_path):
     rendered = render_system_prompt(
         system_prompt=template,
         tools_spec=[],
-        project_info=state.call_metadata["promptVariables"],
+        project_info=prompt_vars,
         specific_role=None,
     )
 
@@ -93,13 +79,14 @@ def test_main_prompt_template_renders_long_memory_status(tmp_path):
     assert "seeded body" not in rendered  # body content must NOT be inlined
 
 
-def test_subagent_prompt_template_renders_long_memory_status(tmp_path):
+def test_subagent_prompt_template_renders_empty_status(tmp_path, monkeypatch):
     from utils.local_render_system_prompt import render_system_prompt
-    from pathlib import Path as _P
 
-    state = _make_state(tmp_path)  # no file → empty status
+    monkeypatch.chdir(tmp_path)
+    prompt_vars: dict = {}
+    attach_status_to_prompt_vars(prompt_vars)
 
-    repo_root = _P(__file__).resolve().parent.parent
+    repo_root = Path(__file__).resolve().parent.parent
     template = (
         repo_root / "prompts" / "chat_completions_subagent_system_prompt.md"
     ).read_text(encoding="utf-8")
@@ -107,7 +94,7 @@ def test_subagent_prompt_template_renders_long_memory_status(tmp_path):
     rendered = render_system_prompt(
         system_prompt=template,
         tools_spec=[],
-        project_info=state.call_metadata["promptVariables"],
+        project_info=prompt_vars,
         specific_role=None,
     )
 
