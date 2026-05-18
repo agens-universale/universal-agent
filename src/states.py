@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from uuid import uuid4
 import json
 from typing import Any, Dict, List, Optional, Union
+from long_memory import attach_status_to_prompt_vars
 from utils.project_data import get_project_data
 from tools.stored_outputs.tool_call_outputs_store import ToolCallOutputsStore
 from message_policy.user_message_policy import (
@@ -86,7 +87,6 @@ class State:
         metadata: Dict[str, Any] = dict()
         metadata["systemPromptId"] = self.system_prompt_id
         metadata["promptVariables"] = self.initial_project_data
-        from long_memory import attach_status_to_prompt_vars
         attach_status_to_prompt_vars(metadata["promptVariables"])
         if self.skills_list:
             skills_template = (
