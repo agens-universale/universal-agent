@@ -1,17 +1,23 @@
 from __future__ import annotations
 
+import logging
 import os
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from config_modules import env_vars
-from config_modules.agent import AgentConfig
+from config_modules.agent import (
+    AgentConfig,
+    DEFAULT_FINISH_GATE_MAX_ITERATIONS,
+    DEFAULT_SUBAGENT_FINISH_GATE_MAX_ITERATIONS,
+)
 from config_modules.backend import BackendConfig
 from config_modules.logging_config import LoggingConfig
 from config_modules.mcp import McpConfig
 from config_modules.paths import PathsConfig
 from config_modules.security import SecurityConfig
 from config_modules.stored_outputs import normalize_tool_output_limits
+from config_modules.quality_gate import QualityGateConfig, normalize_quality_gate_config
 from config_modules.summary import (
     DEFAULT_INCREMENTAL_BATCH_MULTIPLIER,
     DEFAULT_LAST_DIALOG_STEP_MESSAGE_MAX_CHARS,
@@ -35,6 +41,7 @@ class AppConfig(BaseModel):
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
     security: SecurityConfig = Field(default_factory=SecurityConfig)
     summary: SummaryConfig = Field(default_factory=SummaryConfig)
+    quality_gate: QualityGateConfig = Field(default_factory=QualityGateConfig)
     paths: PathsConfig = Field(default_factory=PathsConfig)
     agent: AgentConfig = Field(default_factory=AgentConfig)
     mcp: McpConfig = Field(default_factory=McpConfig)
@@ -90,6 +97,23 @@ def resolve_paths(cfg: AppConfig, config_dir: str) -> None:
         trigger = cfg.summary.chat_completions_summary_trigger_chars
         cfg.summary.incremental_batch_chars = (
             int(trigger * DEFAULT_INCREMENTAL_BATCH_MULTIPLIER) if trigger > 0 else 0
+        )
+    normalize_quality_gate_config(cfg.quality_gate)
+    if cfg.agent.finish_gate_max_iterations < 1:
+        logging.getLogger(__name__).warning(
+            "finish_gate_reject_limit_invalid finish_gate_max_iterations=%s; using %s",
+            cfg.agent.finish_gate_max_iterations,
+            DEFAULT_FINISH_GATE_MAX_ITERATIONS,
+        )
+        cfg.agent.finish_gate_max_iterations = DEFAULT_FINISH_GATE_MAX_ITERATIONS
+    if cfg.agent.subagent_finish_gate_max_iterations < 1:
+        logging.getLogger(__name__).warning(
+            "finish_gate_reject_limit_invalid subagent_finish_gate_max_iterations=%s; using %s",
+            cfg.agent.subagent_finish_gate_max_iterations,
+            DEFAULT_SUBAGENT_FINISH_GATE_MAX_ITERATIONS,
+        )
+        cfg.agent.subagent_finish_gate_max_iterations = (
+            DEFAULT_SUBAGENT_FINISH_GATE_MAX_ITERATIONS
         )
     (
         cfg.agent.tool_output_inline_max_chars,

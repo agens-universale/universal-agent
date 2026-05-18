@@ -64,6 +64,10 @@ agent:
   max_steps: 200
   no_tool_call_max_count: 3
   strict_submit_solution_validation: true
+  # Finish gate (quality gate): макс. reject submit_solution за user turn / subagent run
+  finish_gate_max_iterations: 10
+  subagent_finish_gate_max_iterations: 3
+  # finish_gate_use_rule_hints: false  # rule-layer без LLM — вне v1
 
 logging:
   full_log_backend: false
@@ -94,6 +98,11 @@ paths:
   # Доступные env-переменные:
   #   GC_HOME, GC_STATE_DIR, GC_CONFIG_DIR, GC_CACHE_DIR, GC_DATA_DIR,
   #   XDG_*_HOME (стандарт freedesktop.org, только Linux/macOS).
+
+# Лимиты trace digest для finish gate (отдельно от summary; см. docs_md/quality_gate/SPEC.md)
+quality_gate:
+  max_dialogue_chars: 200000
+  max_message_chars: 5000
 
 summary:
   chat_completions_summary_trigger_chars: 200000

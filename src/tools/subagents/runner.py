@@ -86,7 +86,13 @@ class SubagentRunner:
             )
         save_state(child_state)
 
-        messages = self._build_initial_messages(child_state, agent_role, initial_message)
+        user_message = {
+            "role": "user",
+            "content": initial_message,
+            "id": generate_message_id_func("m_user_sub"),
+        }
+        messages = self._build_initial_messages(child_state, agent_role, user_message)
+        child_state.seed_new_user_turn(user_message)
 
         try:
             child_ctx = self._build_child_ctx(tool_name=tool_name)
@@ -263,9 +269,12 @@ class SubagentRunner:
         return self._orchestrator_state.chat_completions_system_prompt
 
     def _build_initial_messages(
-        self, child_state: State, agent_role: str, initial_user_message: str,
+        self,
+        child_state: State,
+        agent_role: str,
+        user_message: Dict[str, Any],
     ) -> List[Dict[str, Any]]:
-        """Сформировать начальные сообщения (system + user) и записать их в child_state."""
+        """Сформировать начальный transcript (system + user) в child_state.messages."""
         messages: List[Dict[str, Any]] = []
 
         system_prompt = child_state.chat_completions_system_prompt
@@ -282,12 +291,7 @@ class SubagentRunner:
                 "id": generate_message_id_func("m_sys_sub"),
             })
 
-        messages.append({
-            "role": "user",
-            "content": initial_user_message,
-            "id": generate_message_id_func("m_user_sub"),
-        })
-
+        messages.append(user_message)
         child_state.messages = messages.copy()
         return messages
 

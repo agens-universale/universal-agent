@@ -80,6 +80,7 @@ class State:
         self.stop_requested = False
         self.user_messages_log: List[str] = []
         self.current_user_messages: List[str] = []
+        self.finish_gate_rejection_count: int = 0
         self.tool_call_outputs_store = ToolCallOutputsStore()
 
     def set_call_metadata(self):
@@ -250,6 +251,7 @@ class State:
         - new request should be appended only when it is a real user message
           (non-technical), preserving existing active scope from state.
         """
+        self.finish_gate_rejection_count = 0
         self.current_user_messages = append_user_log_entries(
             self.current_user_messages, [new_user_message]
         )
