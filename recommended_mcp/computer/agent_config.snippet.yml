@@ -2,11 +2,11 @@
 # См. README.md в этой папке — подробнее про транспорт, env-переменные, ограничения.
 computer:
   transport: stream_stdio
-  command: gc-computer-mcp
+  command: computer-mcp
   description: "Windows GUI control via UI Automation"
   server-name: computer
   env:
-    GC_COMPUTER_MCP_LOG_LEVEL: INFO
-    GC_COMPUTER_MCP_READONLY: "false"
-    GC_COMPUTER_MCP_ENABLE_VISION: "false"
-    GC_COMPUTER_MCP_SESSION_ID: "default"
+    COMPUTER_MCP_LOG_LEVEL: INFO
+    COMPUTER_MCP_READONLY: "false"
+    COMPUTER_MCP_ENABLE_VISION: "false"
+    COMPUTER_MCP_SESSION_ID: "default"

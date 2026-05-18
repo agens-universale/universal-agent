@@ -1,0 +1,16 @@
+# Только чтение экрана — никаких мутаций.
+# Удобно для диагностики, аудита, разработки промптов.
+mcp-servers:
+  computer:
+    transport: stream_stdio
+    command: computer-mcp
+    description: "Чтение состояния Windows GUI (readonly)"
+    server-name: computer
+    env:
+      COMPUTER_MCP_LOG_LEVEL: DEBUG
+      COMPUTER_MCP_READONLY: "true"
+      COMPUTER_MCP_ENABLE_VISION: "false"
+
+mcp-meta:
+  tools-cache-ttl: 3600
+  request_timeout_sec: 600

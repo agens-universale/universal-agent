@@ -1,6 +1,29 @@
+import importlib
 import sys
 import types
 from pathlib import Path
+
+from message_policy.user_message_policy import TECHNICAL_TYPE_ERROR_MESSAGE
+from message_policy.user_message_policy import build_invalid_tool_call_feedback_message
+from states import State
+from types import SimpleNamespace
+from utils.convertations import sanitize_messages_for_chat_completions
+
+
+def teardown_module(_module) -> None:
+    for name in list(sys.modules):
+        if name == "tools" or name.startswith("tools."):
+            sys.modules.pop(name, None)
+    real_tools = importlib.import_module("tools")
+    proc = sys.modules.get("processing_responses")
+    if proc is not None:
+        proc.apply_tool = real_tools.apply_tool
+        proc.WrongFunctionArgumentsException = (
+            real_tools.WrongFunctionArgumentsException
+        )
+    cycle_stop_mod = sys.modules.get("message_policy.cycle_stop")
+    if cycle_stop_mod is not None:
+        cycle_stop_mod.apply_tool = real_tools.apply_tool
 
 
 def _stub_tools_modules() -> None:
@@ -25,21 +48,20 @@ def _stub_tools_modules() -> None:
     sys.modules["tools"] = tools_pkg
 
 
-_stub_tools_modules()
+processing_module = None
 
-from processing_responses import (
-    _make_technical_feedback_user_message,
-    _request_backend_canonical,
-)
-from user_message_policy import TECHNICAL_TYPE_ERROR_MESSAGE
-from user_message_policy import build_invalid_tool_call_feedback_message
-from utils.convertations import sanitize_messages_for_chat_completions
-from states import State
-from types import SimpleNamespace
+
+def setup_module(_module) -> None:
+    global processing_module
+    _stub_tools_modules()
+    import processing_responses as pm
+
+    processing_module = pm
+    pm.apply_tool = sys.modules["tools"].apply_tool
 
 
 def test_make_technical_feedback_message_wraps_generic_feedback():
-    msg = _make_technical_feedback_user_message(
+    msg = processing_module._make_technical_feedback_user_message(
         "There is no tool call in Agent response. Please send appropriate tool call"
     )
     assert msg["role"] == "user"
@@ -48,7 +70,7 @@ def test_make_technical_feedback_message_wraps_generic_feedback():
 
 
 def test_make_technical_feedback_message_wraps_schema_errors_as_error_message():
-    msg = _make_technical_feedback_user_message(
+    msg = processing_module._make_technical_feedback_user_message(
         "Tool Argument Validation Failed. Expected schema: {'type': 'object'}",
         technical_type=TECHNICAL_TYPE_ERROR_MESSAGE,
     )
@@ -96,9 +118,11 @@ def test_request_backend_canonical_sanitizes_state_history_for_chat_completions(
             ],
         }
 
-    monkeypatch.setattr("processing_responses.create_call_headers", _fake_create_call_headers)
     monkeypatch.setattr(
-        "processing_responses.request_backend_chat_completions",
+        processing_module, "create_call_headers", _fake_create_call_headers
+    )
+    monkeypatch.setattr(
+        "request_backend_policy.request_backend_chat_completions",
         _fake_request_backend_chat_completions,
     )
 
@@ -132,7 +156,7 @@ def test_request_backend_canonical_sanitizes_state_history_for_chat_completions(
         logger=None,
     )
 
-    _request_backend_canonical(
+    processing_module._request_backend_canonical(
         [{"role": "user", "content": "next", "id": "m_1"}],
         state,
         ctx,

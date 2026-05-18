@@ -6,7 +6,7 @@ from summarize.summary_validation import (
     is_valid_summary_text,
     validate_summary_text,
 )
-from user_message_policy import append_user_log_entries
+from message_policy.user_message_policy import append_user_log_entries
 
 
 class ThreadSummarizerTest(unittest.TestCase):

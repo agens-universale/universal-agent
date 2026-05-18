@@ -1,6 +1,7 @@
 from typing import Dict, Any
 import json
 from tools.simple_tools.abstract_simple_tool import AbstractSimpleTool
+from utils.arg_decorators import parse_json_object_argument
 
 
 SOLUTION_TYPES = (
@@ -13,6 +14,8 @@ SOLUTION_TYPES = (
 )
 
 class SubmitSolution(AbstractSimpleTool):
+    TERMINAL_TOOL_OUTPUT_MESSAGE = "Dialog turn finished. Waiting for new user questions."
+
     @staticmethod
     def _result(
         *,
@@ -40,6 +43,18 @@ class SubmitSolution(AbstractSimpleTool):
             out["handoff"] = handoff
         out["task_report"] = task_report
         return json.dumps(out, ensure_ascii=False)
+
+    @classmethod
+    def tool_output_on_cycle_stop(cls) -> str:
+        payload: Dict[str, Any] = {
+            "tool": "submit_solution",
+            "ok": True,
+            "status": "submitted",
+            "message": cls.TERMINAL_TOOL_OUTPUT_MESSAGE,
+            "error": None,
+            "synthetic": True,
+        }
+        return json.dumps(payload, ensure_ascii=False)
 
     @classmethod
     def tool_description(cls) -> Dict[str, Any]:
@@ -71,8 +86,12 @@ class SubmitSolution(AbstractSimpleTool):
                         "description": "Optional. Caveats, risks, unresolved items, or suggested next steps for the user.",
                     },
                     "handoff": {
-                        "type": "object",
-                        "description": "Required handoff payload for machine-readable outcomes. Tool-agnostic by design: schema is defined by the current workflow, not by submit_solution itself. Prefer any JSON-compatible value.",
+                        "type": "string",
+                        "description": (
+                            "Required machine-readable handoff payload as a JSON object string. "
+                            "Must decode to a JSON object (dictionary), not an array/string/number. "
+                            "Example: '{\"result\":\"ok\",\"artifacts\":[\"report.md\"]}'."
+                        ),
                     },
                 },
                 "required": ["solution_type", "task_report", "handoff"],
@@ -93,7 +112,7 @@ Input schema:
   "solution_type": "full_solution" | "partial_solution" | "answer_question" | "couldnt_solve" | "need_additional_info" | "abandoned",
   "task_report": "string (required)",
   "comment": "string (optional)",
-  "handoff": { ... arbitrary JSON object ... } (required)
+  "handoff": "{\"key\":\"value\"}" (required JSON object string)
 }
 
 Handoff policy:
@@ -133,7 +152,25 @@ Return format (JSON string): {"tool":"submit_solution","ok":true,"status":"...",
         solution_type: str,
         task_report: str,
         comment: str | None = None,
-        handoff: Dict[str, Any] | None = None,
+        handoff: str | None = None,
+        handoff_data: Dict[str, Any] | None = None,
+        **kwargs: Any,
+    ) -> str:
+        return self._submit(
+            solution_type=solution_type,
+            task_report=task_report,
+            comment=comment,
+            handoff=handoff,
+            handoff_data=handoff_data,
+            **kwargs,
+        )
+
+    @parse_json_object_argument(source_arg="handoff", target_arg="handoff_data")
+    def _submit(
+        self,
+        solution_type: str,
+        task_report: str,
+        comment: str | None = None,
         **kwargs: Any,
     ) -> str:
         # Validate solution_type
@@ -200,6 +237,20 @@ Return format (JSON string): {"tool":"submit_solution","ok":true,"status":"...",
                 },
             )
 
+        handoff_data = kwargs.get("handoff_data")
+        if not isinstance(handoff_data, dict):
+            return self._result(
+                ok=False,
+                status="rejected",
+                message="Validation failed.",
+                task_report="",
+                error={
+                    "type": "invalid_argument",
+                    "field": "handoff",
+                    "message": "handoff is required and must be a JSON object string.",
+                },
+            )
+
         # Validate comment (optional)
         if comment is not None:
             if not isinstance(comment, str):
@@ -237,7 +288,7 @@ Return format (JSON string): {"tool":"submit_solution","ok":true,"status":"...",
             task_report=task_report_norm,
             solution_type=solution_type,
             comment=comment_norm,
-            handoff=handoff,
+            handoff=handoff_data,
             error=None,
         )
 

@@ -1,21 +1,44 @@
 import os
-from typing import Optional, Dict, Any
-from uuid import uuid4
+from typing import Any, Dict, Optional
 
 import urllib3
 import yaml
 
-from utils.prod_auth import AuthConnector
+from config_modules.auth import build_auth_connector
+from config_modules.backend import parse_chat_completions_max_tokens
+from config_modules.common import (
+    apply_swarm_env_overrides,
+)
+from config_modules.merge import deep_merge
+from config_modules.root import AppConfig, resolve_paths
+from config_modules.security import (
+    apply_cli_command_moderation_overrides,
+)
+from config_modules.summary import DEFAULT_LAST_DIALOG_STEP_MESSAGE_MAX_CHARS
+
+# Backward compatibility for existing imports.
+_DEFAULT_LAST_DIALOG_STEP_MESSAGE_MAX_CHARS = (
+    DEFAULT_LAST_DIALOG_STEP_MESSAGE_MAX_CHARS
+)
+
+_LOGGING_SYNC_KEYS = (
+    "full_log_backend",
+    "console_trace",
+    "dump_storage",
+    "save_logs",
+)
 
 
-_DEFAULT_LAST_DIALOG_STEPS_COUNT = 5
-# Лимит символов на одно сообщение в <last_dialog_steps> (сообщение после compaction).
-_DEFAULT_LAST_DIALOG_STEP_MESSAGE_MAX_CHARS = 1500
-_DEFAULT_MAX_MESSAGE_CHARS = 50000
-_DEFAULT_MAX_DIALOGUE_CHARS = 1000000
-_DEFAULT_MAX_ACCUMULATED_SUMMARY_CHARS = 20000
-_DEFAULT_ORIGINAL_USER_MESSAGES_MAX_CHARS = 20000
-_DEFAULT_INCREMENTAL_BATCH_MULTIPLIER = 1.4
+def sync_logging_flat_and_params(config_dict: Dict[str, Any]) -> None:
+    """Согласовать logging_params и плоские ключи (после merge overrides и т.п.)."""
+    lp = dict(config_dict.get("logging_params") or {})
+    for key in _LOGGING_SYNC_KEYS:
+        if key in config_dict:
+            lp[key] = config_dict[key]
+    config_dict["logging_params"] = lp
+    for key in _LOGGING_SYNC_KEYS:
+        if key in lp:
+            config_dict[key] = lp[key]
 
 
 def _default_config_path() -> str:
@@ -23,286 +46,120 @@ def _default_config_path() -> str:
     return os.path.join(base_dir, "..", "config.yml")
 
 
-def _resolve_path_from_config_dir(path_value: str, config_dir: str) -> str:
-    if os.path.isabs(path_value):
-        return path_value
-    return os.path.join(config_dir, path_value)
+def _project_local_config_path() -> Optional[str]:
+    """
+    Вернуть абсолютный путь к <cwd>/.gc/config.yml, если файл существует, иначе None.
+
+    Используется для layered loading: project local config мерджится поверх глобального.
+    """
+    candidate = os.path.abspath(os.path.join(os.getcwd(), ".gc", "config.yml"))
+    if os.path.isfile(candidate):
+        return candidate
+    return None
 
 
-def _maybe_override_and_resolve(
-    maybe_env_value: Optional[str], key: str, config_dict: Dict[str, Any], config_dir: str
+def apply_cli_overrides(
+    config_dict: Dict[str, Any],
+    *,
+    extra_overrides: Optional[Dict[str, Any]] = None,
+    root_box_enabled: Optional[bool] = None,
+    no_root_box: bool = False,
+    command_moderation_mode: Optional[str] = None,
 ) -> None:
-    if not isinstance(maybe_env_value, str):
-        return
-    env_value = maybe_env_value.strip()
-    if not env_value:
-        return
-    config_dict[key] = _resolve_path_from_config_dir(env_value, config_dir)
-
-
-def _safe_int(value: Any, default: int) -> int:
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return default
-
-
-def parse_chat_completions_max_tokens(raw: Any, *, default: int = 8096) -> int:
-    """
-    Значение chat_completions_max_tokens из YAML: int, float или строки вида "16k".
-    Булевы и прочий мусор → default; ноль и отрицательные → default.
-    """
-    if raw is None:
-        return default
-    if isinstance(raw, bool):
-        return default
-    if isinstance(raw, (int, float)):
-        n = int(raw)
-        return n if n >= 1 else default
-    if isinstance(raw, str):
-        s = raw.strip().lower().replace(" ", "").replace("_", "")
-        if not s:
-            return default
-        if s.endswith("k"):
-            try:
-                base = float(s[:-1])
-                n = int(base * 1000)
-            except ValueError:
-                return default
-            return n if n >= 1 else default
-        try:
-            n = int(float(s))
-        except ValueError:
-            return default
-        return n if n >= 1 else default
-    return default
-
-
-def _normalize_agent_md_path(config_dict: Dict[str, Any], config_dir: str) -> None:
-    agent_md_path = config_dict.get("agent_md_path")
-    if (
-        isinstance(agent_md_path, str)
-        and agent_md_path.strip()
-        and not os.path.isabs(agent_md_path)
-    ):
-        config_dict["agent_md_path"] = os.path.join(config_dir, agent_md_path)
-
-
-def _normalize_chat_system_prompt_path(config_dict: Dict[str, Any], config_dir: str) -> None:
-    chat_prompt_path = config_dict.get("chat_completions_system_prompt_path")
-    if isinstance(chat_prompt_path, str) and chat_prompt_path.strip():
-        config_dict["chat_completions_system_prompt_path"] = _resolve_path_from_config_dir(
-            chat_prompt_path.strip(), config_dir
-        )
-    else:
-        config_dict["chat_completions_system_prompt_path"] = os.path.join(
-            config_dir, "prompts", "chat_completions_system_prompt.md"
-        )
-
-
-def _normalize_backend_api_mode(config_dict: Dict[str, Any]) -> None:
-    backend_api_mode_raw = config_dict.get("backend_api_mode", "responses")
-    backend_api_mode = str(backend_api_mode_raw).strip().lower()
-    if backend_api_mode not in {"responses", "chat_completions"}:
-        raise ValueError(
-            "backend_api_mode должен быть 'responses' или 'chat_completions'"
-        )
-    config_dict["backend_api_mode"] = backend_api_mode
-
-
-def _normalize_chat_completions_auth(config_dict: Dict[str, Any]) -> None:
-    auth_token_raw = config_dict.get("chat_completions_auth_token")
-    openrouter_api_key_raw = config_dict.get("openrouter_api_key")
-    # Для удобства поддерживаем openrouter_api_key как алиас универсального
-    # chat_completions_auth_token.
-    effective_token_raw = (
-        auth_token_raw if auth_token_raw is not None else openrouter_api_key_raw
+    if extra_overrides:
+        config_dict.update(extra_overrides)
+    effective_root_box_override = False if no_root_box else root_box_enabled
+    apply_cli_command_moderation_overrides(
+        config_dict,
+        root_box_enabled=effective_root_box_override,
+        command_moderation_mode=command_moderation_mode,
     )
-    if isinstance(effective_token_raw, str) and effective_token_raw.strip():
-        config_dict["chat_completions_auth_token"] = effective_token_raw.strip()
-    else:
-        config_dict["chat_completions_auth_token"] = None
-
-    http_referer_raw = config_dict.get("openrouter_http_referer")
-    if isinstance(http_referer_raw, str) and http_referer_raw.strip():
-        config_dict["openrouter_http_referer"] = http_referer_raw.strip()
-    else:
-        config_dict["openrouter_http_referer"] = None
-
-    x_title_raw = config_dict.get("openrouter_x_title")
-    if isinstance(x_title_raw, str) and x_title_raw.strip():
-        config_dict["openrouter_x_title"] = x_title_raw.strip()
-    else:
-        config_dict["openrouter_x_title"] = None
-
-
-def _normalize_summary_params(config_dict: Dict[str, Any], config_dir: str) -> None:
-    summary_params_raw = config_dict.get("summary_params")
-    summary_params = summary_params_raw if isinstance(summary_params_raw, dict) else {}
-
-    summary_prompt_path = summary_params.get("chat_completions_summary_prompt_path")
-    if isinstance(summary_prompt_path, str) and summary_prompt_path.strip():
-        normalized_summary_prompt_path = _resolve_path_from_config_dir(
-            summary_prompt_path.strip(), config_dir
-        )
-    else:
-        normalized_summary_prompt_path = os.path.join(
-            config_dir,
-            "prompts",
-            "chat_completions_summary_prompt.md",
-        )
-
-    summary_trigger = _safe_int(
-        summary_params.get("chat_completions_summary_trigger_chars", 0), 0
-    )
-    steps_count = _safe_int(
-        summary_params.get(
-            "last_dialog_steps_count", _DEFAULT_LAST_DIALOG_STEPS_COUNT
-        ),
-        _DEFAULT_LAST_DIALOG_STEPS_COUNT,
-    )
-    max_message_chars = _safe_int(
-        summary_params.get("max_message_chars", _DEFAULT_MAX_MESSAGE_CHARS),
-        _DEFAULT_MAX_MESSAGE_CHARS,
-    )
-    max_dialogue_chars = _safe_int(
-        summary_params.get("max_dialogue_chars", _DEFAULT_MAX_DIALOGUE_CHARS),
-        _DEFAULT_MAX_DIALOGUE_CHARS,
-    )
-    max_accum_summary_chars = _safe_int(
-        summary_params.get(
-            "max_accumulated_summary_chars", _DEFAULT_MAX_ACCUMULATED_SUMMARY_CHARS
-        ),
-        _DEFAULT_MAX_ACCUMULATED_SUMMARY_CHARS,
-    )
-    original_user_messages_max_chars = _safe_int(
-        summary_params.get(
-            "original_user_messages_max_chars",
-            _DEFAULT_ORIGINAL_USER_MESSAGES_MAX_CHARS,
-        ),
-        _DEFAULT_ORIGINAL_USER_MESSAGES_MAX_CHARS,
-    )
-    incremental_batch_chars_raw = summary_params.get("incremental_batch_chars")
-    derived_incremental_default = int(
-        summary_trigger * _DEFAULT_INCREMENTAL_BATCH_MULTIPLIER
-    )
-    incremental_batch_chars = _safe_int(
-        incremental_batch_chars_raw, derived_incremental_default
-    )
-
-    if steps_count <= 0:
-        steps_count = _DEFAULT_LAST_DIALOG_STEPS_COUNT
-
-    last_dialog_step_message_max_chars = _safe_int(
-        summary_params.get(
-            "last_dialog_step_message_max_chars",
-            _DEFAULT_LAST_DIALOG_STEP_MESSAGE_MAX_CHARS,
-        ),
-        _DEFAULT_LAST_DIALOG_STEP_MESSAGE_MAX_CHARS,
-    )
-    if last_dialog_step_message_max_chars <= 0:
-        last_dialog_step_message_max_chars = (
-            _DEFAULT_LAST_DIALOG_STEP_MESSAGE_MAX_CHARS
-        )
-
-    if max_message_chars <= 0:
-        max_message_chars = _DEFAULT_MAX_MESSAGE_CHARS
-    if max_dialogue_chars <= 0:
-        max_dialogue_chars = _DEFAULT_MAX_DIALOGUE_CHARS
-    if max_accum_summary_chars <= 0:
-        max_accum_summary_chars = _DEFAULT_MAX_ACCUMULATED_SUMMARY_CHARS
-    if original_user_messages_max_chars <= 0:
-        original_user_messages_max_chars = _DEFAULT_ORIGINAL_USER_MESSAGES_MAX_CHARS
-    if incremental_batch_chars <= 0:
-        incremental_batch_chars = (
-            int(summary_trigger * _DEFAULT_INCREMENTAL_BATCH_MULTIPLIER)
-            if summary_trigger > 0
-            else 0
-        )
-
-    config_dict["summary_params"] = {
-        "chat_completions_summary_prompt_path": normalized_summary_prompt_path,
-        "chat_completions_summary_trigger_chars": summary_trigger,
-        "incremental_batch_chars": incremental_batch_chars,
-        "last_dialog_steps_count": steps_count,
-        "last_dialog_step_message_max_chars": last_dialog_step_message_max_chars,
-        "max_message_chars": max_message_chars,
-        "max_dialogue_chars": max_dialogue_chars,
-        "max_accumulated_summary_chars": max_accum_summary_chars,
-        "original_user_messages_max_chars": original_user_messages_max_chars,
-    }
-
-
-def _apply_swarm_env_overrides(config_dict: Dict[str, Any], config_dir: str) -> None:
-    _maybe_override_and_resolve(
-        os.environ.get("SWARM_AGENTMD_PATH"), "agent_md_path", config_dict, config_dir
-    )
-    _maybe_override_and_resolve(
-        os.environ.get("SWARM_THREADS_DIR"), "threads_data_path", config_dict, config_dir
-    )
-    _maybe_override_and_resolve(
-        os.environ.get("SWARM_SKILLS_DIR"), "skills_data_path", config_dict, config_dir
-    )
+    sync_logging_flat_and_params(config_dict)
 
 
 def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
-    """
-    Загрузить конфигурацию из YAML-файла.
-
-    - Если config_path не задан, используется путь по умолчанию:
-      <project_root>/config.yml (как и раньше).
-    - При use_ssl == False отключаются предупреждения urllib3.
-    """
     path = config_path or _default_config_path()
     config_dir = os.path.dirname(os.path.abspath(path))
 
     with open(path, "r", encoding="utf-8") as file:
-        config_dict = yaml.safe_load(file) or {}
-    _normalize_agent_md_path(config_dict, config_dir)
-    _normalize_chat_system_prompt_path(config_dict, config_dir)
-    _normalize_summary_params(config_dict, config_dir)
-    _apply_swarm_env_overrides(config_dict, config_dir)
+        raw_config = yaml.safe_load(file) or {}
 
-    verify = config_dict.get("use_ssl", True)
+    # Layered loading: project <cwd>/.gc/config.yml поверх глобального.
+    project_path = _project_local_config_path()
+    if project_path is not None and os.path.abspath(project_path) != os.path.abspath(path):
+        with open(project_path, "r", encoding="utf-8") as file:
+            project_raw = yaml.safe_load(file) or {}
+        raw_config = deep_merge(raw_config, project_raw)
+
+    app_cfg = AppConfig.model_validate(raw_config)
+    resolve_paths(app_cfg, config_dir)
+
+    config_dict: Dict[str, Any] = {
+        "backend_api_mode": app_cfg.backend.api_mode,
+        "completions_url": app_cfg.backend.completions_url,
+        "chat_completions_max_tokens": app_cfg.backend.chat_completions_max_tokens,
+        "chat_completions_min_response_tokens": app_cfg.backend.chat_completions_min_response_tokens,
+        "chat_completion_headers": app_cfg.backend.chat_completion_headers,
+        "chat_completion_kwargs": app_cfg.backend.chat_completion_kwargs,
+        "use_max_tokens_param": app_cfg.backend.use_max_tokens_param,
+        "openai_strict_tools_schema": app_cfg.backend.openai_strict_tools_schema,
+        "use_ssl": app_cfg.backend.use_ssl,
+        "use_retry": app_cfg.backend.use_retry,
+        "command_moderation": {
+            "mode": app_cfg.security.command_moderation.mode,
+            "allowed_command_examples": app_cfg.security.command_moderation.allowed_command_examples,
+            "root_box": {
+                "enabled": app_cfg.security.command_moderation.root_box.enabled,
+                "extra_write_paths": app_cfg.security.command_moderation.root_box.extra_write_paths,
+            },
+            "url_policy": {
+                "allowed_schemes": app_cfg.security.command_moderation.url_policy.allowed_schemes,
+                "url_blacklist": app_cfg.security.command_moderation.url_policy.url_blacklist,
+            },
+        },
+        "summary_params": app_cfg.summary.model_dump(),
+        "logging_params": app_cfg.logging.model_dump(),
+        "agent_md_path": app_cfg.paths.agent_md_path,
+        "chat_completions_system_prompt_path": app_cfg.paths.chat_completions_system_prompt_path,
+        "threads_data_path": app_cfg.paths.threads_data_path,
+        "skills_data_path": app_cfg.paths.skills_data_path,
+        "logs_dump_dir": app_cfg.paths.logs_dump_dir,
+        "model": app_cfg.agent.model,
+        "system_prompt_id": app_cfg.agent.system_prompt_id,
+        "use_server_subagents": app_cfg.agent.use_server_subagents,
+        "use_local_subagents": app_cfg.agent.use_local_subagents,
+        "subagent_max_steps": app_cfg.agent.subagent_max_steps,
+        "client_name": app_cfg.agent.client_name,
+        "x_cl_id": app_cfg.agent.x_cl_id,
+        "verbose": app_cfg.agent.verbose,
+        "use_ask_human_tool": app_cfg.agent.use_ask_human_tool,
+        "stop_tools": app_cfg.agent.stop_tools,
+        "server_tool_prefix": app_cfg.agent.server_tool_prefix,
+        "max_steps": app_cfg.agent.max_steps,
+        "no_tool_call_max_count": app_cfg.agent.no_tool_call_max_count,
+        "strict_submit_solution_validation": app_cfg.agent.strict_submit_solution_validation,
+        "console_trace": app_cfg.logging.console_trace,
+        "dump_storage": app_cfg.logging.dump_storage,
+        "save_logs": app_cfg.logging.save_logs,
+        "limit_project_metadata": app_cfg.agent.limit_project_metadata,
+        "tool_output_inline_max_chars": app_cfg.agent.tool_output_inline_max_chars,
+        "stored_tool_outputs_max_entries": app_cfg.agent.stored_tool_outputs_max_entries,
+        "mcp-servers": {
+            name: server.model_dump(by_alias=True) for name, server in app_cfg.mcp.servers.items()
+        },
+        "mcp-meta": app_cfg.mcp.meta.model_dump(by_alias=True),
+        "agent_auth": app_cfg.agent_auth.model_dump() if app_cfg.agent_auth else {},
+    }
+
+    apply_swarm_env_overrides(config_dict, config_dir)
+
+    sync_logging_flat_and_params(config_dict)
+
+    verify = config_dict["use_ssl"]
     if verify is False:
         urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-    _normalize_backend_api_mode(config_dict)
-    _normalize_chat_completions_auth(config_dict)
 
     return config_dict
-
-
-def build_auth_connector(config_dict: Dict[str, Any]) -> Optional[AuthConnector]:
-    """
-    Построить AuthConnector на основе секции agent_auth из config_dict.
-
-    Если секция agent_auth отсутствует, возвращает None.
-    """
-    verify = config_dict.get("use_ssl", True)
-    auth_cfg = config_dict.get("agent_auth") or {}
-    if not auth_cfg:
-        return None
-
-    entry_point = auth_cfg["auth_endpoint"]
-    env_name = auth_cfg.get("env_name", "surface_cli")
-    env_version = auth_cfg.get("env_version", "0.0.1")
-    plugin_name = auth_cfg.get("plugin_name", "surf-cli-plugin")
-    plugin_version = auth_cfg.get("plugin_version", "0.0.1")
-    device_code = auth_cfg.get("device_code", str(uuid4()))
-    device_code_hex = auth_cfg.get("device_code_hex")
-    login = auth_cfg.get("login", "login")
-
-    return AuthConnector(
-        entry_point=entry_point,
-        env_name=env_name,
-        env_version=env_version,
-        plugin_name=plugin_name,
-        plugin_version=plugin_version,
-        device_code=device_code,
-        device_code_hex=device_code_hex,
-        login=login,
-        verify=verify,
-    )
 
 
 if __name__ == "__main__":

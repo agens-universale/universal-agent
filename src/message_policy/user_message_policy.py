@@ -55,6 +55,27 @@ def wrap_technical_user_content(
     return f'<technical type="{technical_type}">{raw}</technical>'
 
 
+def wrap_skill_resolution_technical_instruction(skill_name: str) -> str:
+    """
+    Technical-сообщение для CLI: решать запрос через skill с данным именем;
+    при отсутствии — похожее имя (опечатка), если описание подходит; иначе fail.
+    """
+    safe = (
+        str(skill_name)
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+    )
+    body = (
+        f'For resolving user ask use skill "{safe}". '
+        "If such skill is not available, use a skill with a similar name "
+        "(user may have mistyped the skill name) if such a skill matches the "
+        "user task according to its skill description. "
+        "If no suitable skill is available, report failure and stop."
+    )
+    return wrap_technical_user_content(body)
+
+
 def is_dialog_summary_user_message_text(text: str) -> bool:
     normalized = str(text or "").strip().lower()
     if not normalized:
@@ -86,24 +107,8 @@ def user_content_to_text(content: Any) -> str:
         return ""
     return str(content)
 
+
 def extract_real_user_message_text(message: Any) -> str:
-    """
-    Extract a "real" user request text from a raw message.
-
-    In this module, "real" means user-provided business/request content
-    (what the user actually asks for), not technical/runtime service signals
-    such as context-injection hints, validation errors, or summary markers.
-
-    Selection rules:
-    - accept only dict-like messages with `role == "user"`;
-    - convert `content` to plain text via `user_content_to_text`;
-    - trim whitespace and drop empty values;
-    - drop messages recognized as technical by `is_technical_user_message_text`.
-
-    Returns:
-    - raw user text for `state.user_messages_log` when message is accepted;
-    - empty string when message should be skipped.
-    """
     if not isinstance(message, dict):
         return ""
     if str(message.get("role", "")).strip().lower() != "user":
@@ -117,9 +122,6 @@ def extract_real_user_message_text(message: Any) -> str:
 
 
 def resolve_technical_user_content_type(content: str) -> str:
-    """
-    Classify technical user content into canonical technical type.
-    """
     normalized = str(content or "").strip().lower()
     if (
         "tool argument validation failed" in normalized
@@ -139,12 +141,6 @@ def resolve_technical_user_content_type(content: str) -> str:
 
 
 def normalize_user_log_entries(entries: Any) -> List[str]:
-    """
-    Normalize `user_messages_log` to `list[str]`:
-    - keep only non-empty strings;
-    - drop technical messages;
-    - deduplicate by exact text preserving first occurrence order.
-    """
     out: List[str] = []
     if not isinstance(entries, list):
         return out
@@ -160,15 +156,6 @@ def normalize_user_log_entries(entries: Any) -> List[str]:
 
 
 def append_user_log_entries(existing: List[str], step_messages: List[Dict[str, Any]]) -> List[str]:
-    """
-    Append only new real user messages to existing log.
-
-    Logic:
-    - keep existing entries as baseline (without re-normalization);
-    - iterate over new step messages;
-    - extract candidate via `extract_real_user_message_text`;
-    - append candidate only when it is non-empty and absent in existing/result.
-    """
     out = list(existing) if isinstance(existing, list) else []
     seen = set(out)
     for message in step_messages:
@@ -196,7 +183,7 @@ def build_invalid_tool_call_feedback_message(message: dict) -> dict:
         mitigation = (
             "\n\nRegenerate with valid JSON. For large file bodies, follow the tool "
             "descriptions: brief `write_to_file` then multiple `append_to_file` calls "
-            "with moderate chunks—not one oversized `arguments` payload."
+            "with moderate chunks-not one oversized `arguments` payload."
         )
 
     feedback = (
@@ -216,4 +203,3 @@ def build_invalid_tool_call_feedback_message(message: dict) -> dict:
             feedback, technical_type=TECHNICAL_TYPE_ERROR_MESSAGE
         ),
     }
-

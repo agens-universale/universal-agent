@@ -1,0 +1,9 @@
+# Скопируй этот блок в секцию mcp-servers: твоего config.yml агента.
+# Агент сам спавнит office-mcp по stdio при первом вызове read_*-тула.
+# См. README.md в этой папке — про --allowed-dirs, --allow-any и ограничения.
+office:
+  transport: stdio
+  command: office-mcp
+  args: ["--transport", "stdio", "--allow-any"]
+  description: Read office documents (pdf, docx, xls, xlsx, pptx, csv, html, msg) as markdown
+  server-name: office

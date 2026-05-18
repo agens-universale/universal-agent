@@ -239,33 +239,27 @@ def create_call_headers(state, ctx) -> Dict[str, str]:
     if state.x_target is not None:
         call_headers["x-target"] = state.x_target
 
-    chat_completions_auth_token = config_dict.get("chat_completions_auth_token")
-    use_chat_completions_token = (
-        backend_mode == "chat_completions"
-        and isinstance(chat_completions_auth_token, str)
-        and bool(chat_completions_auth_token.strip())
-    )
-    if use_chat_completions_token:
-        call_headers["Authorization"] = (
-            f"Bearer {chat_completions_auth_token.strip()}"
-        )
-    elif auth_connector is not None:
+    if auth_connector is not None:
         token = auth_connector.get_token()
         call_headers["Authorization"] = f"Bearer {token}"
 
-    # OpenRouter рекомендует передавать HTTP-Referer и X-OpenRouter-Title
-    # приложения. Эти заголовки опциональны и применяются только для
-    # chat/completions режима.
+    # Дополнительные заголовки для chat/completions передаются
+    # универсально через backend.chat_completion_headers.
     if backend_mode == "chat_completions":
-        openrouter_http_referer = config_dict.get("openrouter_http_referer")
-        if isinstance(openrouter_http_referer, str) and openrouter_http_referer.strip():
-            call_headers["HTTP-Referer"] = openrouter_http_referer.strip()
-        openrouter_x_title = config_dict.get("openrouter_x_title")
-        if isinstance(openrouter_x_title, str) and openrouter_x_title.strip():
-            title = openrouter_x_title.strip()
-            call_headers["X-OpenRouter-Title"] = title
-            # Оставляем совместимость со старым алиасом заголовка.
-            call_headers["X-Title"] = title
+        extra_headers = config_dict.get("chat_completion_headers")
+        if isinstance(extra_headers, dict):
+            for key, raw_val in extra_headers.items():
+                if not isinstance(key, str):
+                    continue
+                k = key.strip()
+                if not k:
+                    continue
+                if raw_val is None:
+                    continue
+                v = str(raw_val).strip()
+                if not v:
+                    continue
+                call_headers[k] = v
     return call_headers
 
 
@@ -293,8 +287,16 @@ def create_call_data_completions(
     model: Optional[str] = None,
     *args,
     max_tokens: Optional[int] = None,
+    config_dict: Optional[Dict] = None,
     **kwargs,
 ) -> Dict:
+    def _safe_positive_int(raw: object) -> Optional[int]:
+        try:
+            value = int(raw)  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            return None
+        return value if value >= 1 else None
+
     def _message_key(message: Dict) -> str:
         msg_id = message.get("id")
         if isinstance(msg_id, str) and msg_id:
@@ -333,29 +335,37 @@ def create_call_data_completions(
     if effective_model is None and state is not None:
         effective_model = state.default_model
 
-    effective_max_tokens = 8096
-    if max_tokens is not None:
-        try:
-            effective_max_tokens = int(max_tokens)
-        except (TypeError, ValueError):
-            effective_max_tokens = 8096
-        if effective_max_tokens < 1:
-            effective_max_tokens = 8096
+    cfg = config_dict if isinstance(config_dict, dict) else {}
+    explicit_max_tokens = _safe_positive_int(max_tokens)
+    configured_max_tokens = _safe_positive_int(cfg.get("chat_completions_max_tokens"))
+    effective_max_tokens = explicit_max_tokens or configured_max_tokens or 8096
 
     data = {
         "model": effective_model,
         "messages": to_send_messages_formatted,
         "tools": to_send_tools,
-        "temperature": 0.7,
         "tool_choice": "auto",
-        "top_p": 0.8,
-        "top_k": 20,
-        "min_p": 0.0,
-        "max_tokens": effective_max_tokens,
-        "repetition_penalty": 1.2,
-        "separate_reasoning": True,
-        "chat_template_kwargs": {"enable_thinking": False},
     }
+    # Key selection is provider-driven; explicit max_tokens only sets the VALUE.
+    if bool(cfg.get("use_max_tokens_param", False)):
+        data["max_tokens"] = effective_max_tokens
+    else:
+        data["max_completion_tokens"] = effective_max_tokens
+
+    extra = cfg.get("chat_completion_kwargs")
+    if isinstance(extra, dict) and extra:
+        protected = {
+            "model",
+            "messages",
+            "tools",
+            "tool_choice",
+            "max_tokens",
+            "max_completion_tokens",
+        }
+        for key, value in extra.items():
+            if key in protected:
+                continue
+            data[key] = value
 
     return data
     

@@ -7,6 +7,8 @@ from states import State, SharedStateData, save_state
 from tools.subagents import runner as runner_module
 from tools.subagents.runner import SubagentRunner
 
+import run_summary_coordinator as run_summary_coordinator_module
+
 
 def _make_orchestrator_state():
     state = State(
@@ -55,7 +57,7 @@ def _make_ctx(cfg):
 
 
 class TestRunnerSummary:
-    def test_passes_summary_hooks_to_run_agent(self):
+    def test_passes_summary_hook_to_run_agent(self):
         orch = _make_orchestrator_state()
         cfg = _make_config(trigger=10)
         runner = SubagentRunner(_make_ctx(cfg), orch, cfg)
@@ -67,38 +69,49 @@ class TestRunnerSummary:
 
         with (
             patch.object(runner, "_build_child_ctx", return_value=SimpleNamespace()),
-            patch.object(runner_module, "maybe_run_summary_compaction", return_value=False),
         ):
             runner.run("subagent_worker", {"task": "short task"}, fake_run_agent)
 
         assert callable(captured.get("persist_messages_callback"))
-        assert callable(captured.get("post_step_hook"))
+        assert callable(captured.get("pre_backend_compaction_hook"))
+        assert "post_step_hook" not in captured
 
-    def test_runs_only_post_step_summary_check(self):
+    def test_runs_pre_backend_summary_check(self):
         orch = _make_orchestrator_state()
         cfg = _make_config(trigger=10)
         runner = SubagentRunner(_make_ctx(cfg), orch, cfg)
         calls = []
 
-        def fake_maybe_run_summary_compaction(**kwargs):
+        def fake_run_summary_compaction(**kwargs):
             calls.append(kwargs.get("trigger_reason"))
-            return False
 
         def fake_run_agent(messages, child_state, child_ctx, **kwargs):
-            kwargs["post_step_hook"]()
+            child_state.messages = [
+                {"role": "user", "content": "old"},
+                {"role": "user", "content": "new"},
+            ]
+            kwargs["pre_backend_compaction_hook"](
+                [{"role": "user", "content": "new"}],
+                "user_ask",
+            )
             return "done"
 
         with (
             patch.object(runner, "_build_child_ctx", return_value=SimpleNamespace()),
             patch.object(
-                runner_module,
-                "maybe_run_summary_compaction",
-                side_effect=fake_maybe_run_summary_compaction,
+                run_summary_coordinator_module,
+                "history_exceeds_summary_trigger",
+                return_value=True,
+            ),
+            patch.object(
+                run_summary_coordinator_module,
+                "run_summary_compaction",
+                side_effect=fake_run_summary_compaction,
             ),
         ):
             runner.run("subagent_worker", {"task": "long task"}, fake_run_agent)
 
-        assert "subagent_post_step" in calls
+        assert "subagent_pre_backend" in calls
         assert "subagent_pre_run" not in calls
 
     def test_summary_disabled_when_trigger_zero(self):
@@ -111,12 +124,9 @@ class TestRunnerSummary:
             captured.update(kwargs)
             return "ok"
 
-        with (
-            patch.object(runner, "_build_child_ctx", return_value=SimpleNamespace()),
-            patch.object(runner_module, "maybe_run_summary_compaction", return_value=False) as mock_summary,
-        ):
+        with patch.object(runner, "_build_child_ctx", return_value=SimpleNamespace()):
             runner.run("subagent_worker", {"task": "task"}, fake_run_agent)
 
         assert captured.get("persist_messages_callback") is None
-        assert captured.get("post_step_hook") is None
-        mock_summary.assert_not_called()
+        assert captured.get("pre_backend_compaction_hook") is None
+        assert "post_step_hook" not in captured

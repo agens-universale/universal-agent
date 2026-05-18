@@ -1,0 +1,8 @@
+# Реальный конфиг с credentials — никогда не коммитим.
+# Шаблон proxy_config.example.yaml остаётся под git.
+proxy_config.yaml
+
+# Кэш Python
+__pycache__/
+*.pyc
+*.pyo

@@ -33,6 +33,25 @@ def _ensure_spec_has_required(spec: Dict[str, Any]) -> None:
         params["required"] = params.get("required") or []
 
 
+def _apply_openai_strict_tools_schema(spec: Dict[str, Any]) -> None:
+    """
+    OpenAI-like validators can require object schema to have:
+    - explicit required list
+    - required covering all properties keys
+    """
+    if not isinstance(spec, dict):
+        return
+    params = spec.get("parameters")
+    if not isinstance(params, dict) or params.get("type") != "object":
+        return
+    props = params.get("properties")
+    if not isinstance(props, dict) or not props:
+        return
+    params["required"] = list(props.keys())
+    if "additionalProperties" not in params:
+        params["additionalProperties"] = False
+
+
 def build_tools_data(
     config_dict: Dict[str, Any],
 ) -> Tuple[Dict[str, Dict[str, Any]], list, list]:
@@ -67,11 +86,15 @@ def build_tools_data(
     # при создании RunContext, когда logger ещё не привязан к контексту.
     _fallback_logger.debug("Collected tools_data: %s", tools_data)
 
+    openai_strict = bool(config_dict.get("openai_strict_tools_schema", False))
+
     # Бэкенд требует parameters.required — нормализуем все spec'и
     for v in tools_data.values():
         spec = v.get("spec")
         if isinstance(spec, dict):
             _ensure_spec_has_required(spec)
+            if openai_strict:
+                _apply_openai_strict_tools_schema(spec)
 
     tools_spec = [v["spec"] for v in tools_data.values()]
     tools_description = [v["description"] for v in tools_data.values()]

@@ -11,6 +11,8 @@ import logging
 from typing import Any, Dict, Optional
 
 from tools.skills.registry import SkillsRegistry
+from utils.arg_decorators import parse_json_object_argument
+from utils.json_arg_parser import JsonArgParseError
 
 logger = logging.getLogger(__name__)
 
@@ -107,25 +109,31 @@ class RunSkillScriptTool:
     def __init__(self, registry: SkillsRegistry, *args: Any, **kwargs: Any) -> None:
         self._registry = registry
 
+    @parse_json_object_argument(
+        source_arg="args",
+        target_arg="args_data",
+        error_handler_method="_json_arg_error",
+    )
     def __call__(
         self,
         skill_id: str,
         script_name: str | None = None,
-        args: Dict[str, Any] | None = None,
+        args: str | None = None,
+        args_data: Dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> Dict[str, Any]:
         try:
             result = self._registry.run_script(
                 skill_id=skill_id,
                 script_name=script_name,
-                args=args,
+                args=args_data,
             )
             return _wrap(
                 tool="skills_run_script",
                 ok=True,
                 skill_id=skill_id,
                 script_name=script_name,
-                args=args,
+                args=args_data,
                 result=result,
             )
         except FileNotFoundError as exc:
@@ -134,7 +142,7 @@ class RunSkillScriptTool:
                 ok=False,
                 skill_id=skill_id,
                 script_name=script_name,
-                args=args,
+                args=args_data,
                 result=None,
                 error={"code": "SCRIPT_NOT_FOUND", "message": str(exc)},
             )
@@ -145,13 +153,24 @@ class RunSkillScriptTool:
                 ok=False,
                 skill_id=skill_id,
                 script_name=script_name,
-                args=args,
+                args=args_data,
                 result=None,
                 error={
                     "code": "SCRIPT_EXECUTION_FAILED",
                     "message": f"skills_run_script failed: {exc}",
                 },
             )
+
+    def _json_arg_error(self, exc: JsonArgParseError, call_kwargs: Dict[str, Any]) -> str:
+        return _wrap(
+            tool="skills_run_script",
+            ok=False,
+            skill_id=call_kwargs.get("skill_id"),
+            script_name=call_kwargs.get("script_name"),
+            args=call_kwargs.get("args"),
+            result=None,
+            error={"code": "INVALID_ARGUMENT", "field": exc.field, "message": exc.message},
+        )
 
 
 class LoadReferenceTool:
@@ -325,9 +344,11 @@ def get_skills_tools_data(skills_registry: SkillsRegistry) -> Dict[str, Dict[str
                             ),
                         },
                         "args": {
-                            "type": "object",
+                            "type": "string",
                             "description": (
-                                "Optional JSON object with arguments to pass to the script via stdin."
+                                "Optional JSON object string with script arguments passed via stdin. "
+                                "Must decode to a JSON object (dictionary), not an array/string/number. "
+                                "Example: '{\"input\":\"hello\",\"limit\":3}'."
                             ),
                         },
                     },
@@ -340,13 +361,13 @@ def get_skills_tools_data(skills_registry: SkillsRegistry) -> Dict[str, Dict[str
                 "Tool name: skills_run_script\n"
                 "Tool description: Runs a Python script of a specific skill.\n"
                 "Input schema: {\"type\": \"object\", \"properties\": {\"skill_id\": {\"type\": \"string\"}, "
-                "\"script_name\": {\"type\": \"string\"}, \"args\": {\"type\": \"object\"}}, "
+                "\"script_name\": {\"type\": \"string\"}, \"args\": {\"type\": \"string\"}}, "
                 "\"required\": [\"skill_id\"], \"additionalProperties\": false}\n"
                 "\n"
                 "Usage:\n"
                 "- Use this tool when a skill defines executable logic in its scripts/ directory.\n"
                 "- If you don't know the script name, omit it to run scripts/main.py by default.\n"
-                "- Provide any arguments the script expects inside the 'args' JSON object.\n"
+                "- Provide any arguments the script expects inside the 'args' JSON object string.\n"
                 "- The result includes stdout, stderr and the exit code."
             ),
         },

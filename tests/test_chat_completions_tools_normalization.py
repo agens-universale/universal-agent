@@ -116,10 +116,68 @@ class ChatCompletionsToolsNormalizationTest(unittest.TestCase):
         self.assertIn("tool_calls", data["messages"][0])
         self.assertEqual(len(data["messages"][0]["tool_calls"]), 1)
 
-    def test_create_call_data_completions_max_tokens_override(self):
+    def test_create_call_data_completions_explicit_max_tokens_uses_max_completion_tokens_by_default(self):
         state = SimpleNamespace(messages=[], tools=[], default_model="m")
         data = create_call_data_completions([{"role": "user", "content": "hi"}], state=state, max_tokens=12000)
+        self.assertEqual(data["max_completion_tokens"], 12000)
+        self.assertNotIn("max_tokens", data)
+
+    def test_create_call_data_completions_explicit_max_tokens_uses_max_tokens_with_flag(self):
+        state = SimpleNamespace(messages=[], tools=[], default_model="m")
+        data = create_call_data_completions(
+            [{"role": "user", "content": "hi"}],
+            state=state,
+            max_tokens=12000,
+            config_dict={"use_max_tokens_param": True},
+        )
         self.assertEqual(data["max_tokens"], 12000)
+        self.assertNotIn("max_completion_tokens", data)
+
+    def test_create_call_data_completions_uses_max_completion_tokens_by_default(self):
+        state = SimpleNamespace(messages=[], tools=[], default_model="m")
+        data = create_call_data_completions(
+            [{"role": "user", "content": "hi"}],
+            state=state,
+            config_dict={"chat_completions_max_tokens": 7777},
+        )
+        self.assertEqual(data["max_completion_tokens"], 7777)
+        self.assertNotIn("max_tokens", data)
+
+    def test_create_call_data_completions_honors_use_max_tokens_param_flag(self):
+        state = SimpleNamespace(messages=[], tools=[], default_model="m")
+        data = create_call_data_completions(
+            [{"role": "user", "content": "hi"}],
+            state=state,
+            config_dict={
+                "chat_completions_max_tokens": 5555,
+                "use_max_tokens_param": True,
+            },
+        )
+        self.assertEqual(data["max_tokens"], 5555)
+        self.assertNotIn("max_completion_tokens", data)
+
+    def test_create_call_data_completions_merges_chat_completion_kwargs_safely(self):
+        state = SimpleNamespace(messages=[], tools=[], default_model="m")
+        data = create_call_data_completions(
+            [{"role": "user", "content": "hi"}],
+            state=state,
+            config_dict={
+                "chat_completion_kwargs": {
+                    "temperature": 0.2,
+                    "top_p": 0.9,
+                    "model": "must_not_override",
+                    "messages": [{"role": "user", "content": "override"}],
+                    "max_tokens": 1,
+                    "tool_choice": "required",
+                }
+            },
+        )
+        self.assertEqual(data["temperature"], 0.2)
+        self.assertEqual(data["top_p"], 0.9)
+        self.assertEqual(data["model"], "m")
+        self.assertEqual(len(data["messages"]), 1)
+        self.assertEqual(data["tool_choice"], "auto")
+        self.assertNotEqual(data.get("max_tokens"), 1)
 
 
 if __name__ == "__main__":

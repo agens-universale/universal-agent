@@ -116,8 +116,9 @@ class TestStopRequestedPropagation:
             result = runner.run("subagent_worker", {"task": "test"}, fake_run_agent)
 
         payload = json.loads(result)
-        assert payload["ok"] is True
-        assert "stop" in payload["result"].lower()
+        assert payload["ok"] is False
+        assert payload["meta"]["finish_reason"] == "error"
+        assert "stop" in payload["error"]["message"].lower()
 
     def test_normal_run_check_stop_returns_false(self):
         """check_stop returns False when orchestrator is not stopped."""

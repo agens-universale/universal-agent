@@ -46,7 +46,24 @@ Background и CLI-клиент для работы с агентом GigaCode: �
     Пиши быстрый код с кешированием. Скажи, чему равно 1000-е число Фибоначчи,
     умноженное на 3."
     ```
-   
+
+    **Ключи запуска gc-cli** (см. `src/arg_parser.py`):
+
+    | Ключ | Описание |
+    |------|----------|
+    | `-q`, `--query` | Текст запроса к агенту (**обязателен**). |
+    | `-v`, `--verbose` | Подробный вывод о ходе запроса. |
+    | `-T`, `--technical` | Обернуть запрос в теги `<technical type="technical">…</technical>`. чтобы при суммаризации это сообщение не считалось как интент пользователя. нужно например, чтобы продолжить прерванную сессию |
+    | `-s`, `--skill` *SKILL_NAME* | Указать skill по имени: агент решает задачу через него; при отсутствии — поиск похожего имени (опечатка), иначе ошибка и остановка. |
+    | `--config` *путь* | Путь к файлу `config.yml` вместо дефолтного. |
+    | `-t`, `--thread-id` *id* | Продолжить диалог в существующем треде. |
+    | `-n`, `--new` | Начать тред с тем же `thread-id` заново (удалить старые `data_*`/`meta_*`). Разрешён **только вместе** с `-t` / `--thread-id`. |
+    | `--root-box` | Включить или выключить root_box: значение `true` или `false` (ограничение записи в `launch_root` и `command_moderation.root_box.extra_write_paths`). Не сочетать с `--no-root-box`. |
+    | `--no-root-box` | Явно отключить root_box (эквивалент `--root-box false`), приоритет над значением из конфига. |
+    | `--command-moderation` | Режим для `execute_command` / `run_python_code`: значение `allow`, `ask` или `deny` (без judge, с подтверждением опасного, блокировка опасного). |
+
+    Любые **дополнительные** аргументы вида `--имя_ключа значение`, `--имя_ключа=значение` или одиночный `--флаг` (→ `true` в конфиге) трактуются как переопределения полей `config.yml` и имеют наивысший приоритет; типы значений разбираются через `yaml.safe_load` (подробнее — п. 5 ниже).
+
 4. **Конфигурация клиента**
 
     - Требуется запущенный GigaCode Agent с API `v1/responses` или с режимом `backend_api_mode: chat_completions`. Адрес сервиса задаётся в `config.yml`.
@@ -63,7 +80,7 @@ Background и CLI-клиент для работы с агентом GigaCode: �
       и `openrouter_x_title` (в запросе это `HTTP-Referer` и `X-OpenRouter-Title`).
     - Для хранения истории тредов:
       - по умолчанию используется папка `threads` в корне проекта (`mini-cli-pub/threads`);
-      - опциональный параметр `threads_data_path` в `config.yml` должен быть **абсолютным путём** к директории хранения;
+      - опциональный параметр `threads_data_path` в `config.yml` должен быть **абсолютным путём** к директории хранения; если не задан — используется кросс-платформенный дефолт `<state>/projects/<project-slug>/threads/` (на Linux/macOS — `~/.local/state/gc/...`, на Windows — `~/.gc/...`);
       - параметры суммаризации в `chat_completions` задаются в секции `summary_params`:
         - `summary_params.chat_completions_summary_trigger_chars`:
           - `<= 0` (или отсутствует) — суммаризация выключена;
@@ -86,6 +103,44 @@ Background и CLI-клиент для работы с агентом GigaCode: �
       - в директории для тредов создаются файлы `data_<thread_id>.jsonl` (сообщения) и `meta_<thread_id>.json` (метаданные, включая `previous_response_id`).
     - По умолчанию логи будут сохраняться в той папке, из которой запущена команда.
 
+    **Security policy (`security.command_moderation`)**
+
+    Клиент поддерживает единый контур безопасности для файловых изменений,
+    запуска команд/кода и сетевых запросов:
+
+    ```yaml
+    security:
+      command_moderation:
+        mode: deny # allow | ask | deny
+        root_box:
+          enabled: true
+          extra_write_paths: []
+        allowed_command_examples: []
+        url_policy:
+          allowed_schemes: ["http", "https"]
+          url_blacklist: []
+    ```
+
+    - `root_box.enabled` по умолчанию включён и ограничивает файловые изменения директорией запуска `gc-cli` (`launch_root`).
+      Чтение файлов не ограничивается этим периметром, но запись/создание/редактирование вне него блокируются.
+    - `root_box.extra_write_paths` — дополнительные директории, куда разрешена запись помимо `launch_root`.
+      Относительные пути разрешаются от директории `config.yml`.
+    - `mode` управляет только `execute_command` и `run_python_code`:
+      - `allow` — выполнять без judge;
+      - `ask` — безопасное выполнять, опасное выполнять только после подтверждения пользователя;
+      - `deny` — безопасное выполнять, опасное блокировать.
+    - `allowed_command_examples` — positive examples для LLM judge. Это не строгий allowlist,
+      а ориентир безопасного профиля команд проекта.
+    - `url_policy.allowed_schemes` и `url_policy.url_blacklist` проверяются для исходного URL
+      в `fetch_url`/`simple_fetch_url` до сетевого запроса. Redirect targets повторно не проверяются.
+    - Основные policy-ошибки в JSON-envelope инструментов:
+      - `root_box_violation` — файловое изменение вне разрешённых roots;
+      - `unsafe_command_blocked` — опасная команда/код заблокированы в `deny`;
+      - `unsafe_command_cancelled_by_user` — пользователь не подтвердил опасное действие в `ask`;
+      - `url_validation_failed` — URL не прошёл схему/формат;
+      - `url_blocked_by_policy` — URL совпал с blacklist.
+    - Все policy-решения пишутся в run logger как `security_policy_decision` без полного payload команды/кода.
+
 5. **Переопределение настроек config.yml из CLI**
 
     Любой параметр из `config.yml` (или новый, которого там нет) можно переопределить при запуске через дополнительные аргументы командной строки.
@@ -101,6 +156,16 @@ Background и CLI-клиент для работы с агентом GigaCode: �
       - `--client_name "my_client"` → `config_dict["client_name"] == "my_client"` (строка).
 
     **Примеры:**
+
+    - Отключить файловый периметр для разового запуска:
+      ```bash
+      gc-cli -q "..." --no-root-box
+      ```
+
+    - Переключить режим command moderation:
+      ```bash
+      gc-cli -q "..." --command-moderation ask
+      ```
 
     - Переопределить существующие ключи:
       ```bash
@@ -155,12 +220,48 @@ Background и CLI-клиент для работы с агентом GigaCode: �
 
 7. Конкретные полезные MCP серверы
 
-  - поиск DDGS-MCP
-  Установите и запустите в отдельном процессе mcp сервер поиска. В конфиге агента проверьте, что mcp сервер указан с нужным транспортом и ендпоинтом подключения
-  ```
-  python3 -m pip install ddgs-mcp
-  ddgs-mcp --http
-  ```
+   ### Встроенные интеграции — `recommended_mcp/`
+
+   В корне репозитория есть каталог `recommended_mcp/` с готовыми рецептами
+   подключения нескольких MCP. Установка одной командой:
+
+   ```bash
+   python recommended_mcp/install.py
+   ```
+
+   После установки нужно скопировать сниппеты из
+   `recommended_mcp/<name>/agent_config.snippet.yml` в секцию `mcp-servers:`
+   своего `config.yml`. На момент написания доступны:
+
+   - **`computer`** — управление Windows GUI через UI Automation (запуск
+     приложений, клики, ввод, чтение состояния окон). Только Windows.
+     Исходники: `external/computer-mcp/`.
+   - **`office`** — чтение офисных документов (pdf, docx, xls, xlsx, pptx,
+     csv, html, msg) → markdown. Кросс-платформенно. Исходники:
+     `external/office-mcp/`.
+
+   Подробности про каждую интеграцию — в её `recommended_mcp/<name>/README.md`.
+   Общая документация по `install.py` / `run.py` / структуре каталога —
+   в `recommended_mcp/README.md`.
+
+   Для итеративной разработки наших MCP в `external/`:
+
+   ```bash
+   python recommended_mcp/install.py --editable
+   ```
+
+   ### Ручная установка (для MCP не из `recommended_mcp/`)
+
+   Если нужный MCP не входит в `recommended_mcp/` — ставь как обычный пакет
+   и подключай через `mcp-servers:`. Пример с DDGS-поиском:
+
+   ```bash
+   python3 -m pip install ddgs-mcp
+   ddgs-mcp --http
+   ```
+
+   В `config.yml` агента укажи нужный транспорт (`http`, `stream_http` и т.д.)
+   и endpoint подключения (см. раздел 6 выше).
 
 8. **Пакет рекомендованных MCP (`recommended_mcp/`)**
 
@@ -244,6 +345,61 @@ Background и CLI-клиент для работы с агентом GigaCode: �
    там же `Dockerfile` и `docker-compose.yml`.
 
 
+
+## Где gc-cli хранит runtime-данные
+
+Кросс-платформенная раскладка. По умолчанию:
+
+| ОС | Логи / треды / swarm | Cache | Config |
+|---|---|---|---|
+| Linux | `~/.local/state/gc/projects/<slug>/` | `~/.cache/gc/` | `~/.config/gc/` |
+| macOS | `~/.local/state/gc/projects/<slug>/` *(как Linux)* | `~/.cache/gc/` | `~/.config/gc/` |
+| Windows | `%USERPROFILE%\.gc\projects\<slug>\` | `%USERPROFILE%\.gc\cache\` | `%USERPROFILE%\.gc\` |
+
+`<slug>` — путь к проекту с заменой `/`, `\`, `:` на `-`, в стиле `~/.claude/projects/`.
+
+Override через переменные окружения: `GC_HOME` (корневой), `GC_STATE_DIR` / `GC_CONFIG_DIR` / `GC_CACHE_DIR` / `GC_DATA_DIR` (точечные). На Linux/macOS дополнительно работают `XDG_STATE_HOME` / `XDG_CONFIG_HOME` / `XDG_CACHE_HOME` / `XDG_DATA_HOME`.
+
+См. также пояснения в `demo_config.yml` (секция `paths`).
+
+## Скиллы
+
+gc-cli ищет скиллы в трёх местах (project > user > system, верхний слой перетирает нижний по `skill_id`):
+
+- **Project:** `<your-repo>/.gc/skills/<skill-id>/SKILL.md` — командные скиллы для конкретного проекта.
+- **User:** `~/.local/share/gc/skills/<skill-id>/SKILL.md` (Linux/macOS) или `~/.gc/skills/<skill-id>/SKILL.md` (Windows) — личные скиллы, доступные во всех проектах.
+- **System:** скиллы, поставляющиеся с gc-cli — read-only.
+
+Чтобы добавить project-скилл — положите `SKILL.md` в `<your-repo>/.gc/skills/<id>/`.
+
+Чтобы зафиксировать единственный источник скиллов (например, в production), задайте `paths.skills_data_path` в `config.yml` — auto-discovery трёх слоёв при этом отключается.
+
+## Project local config (опционально)
+
+Если в корне проекта есть файл `<your-repo>/.gc/config.yml`, gc-cli мерджит его поверх глобального `config.yml` через layered loading:
+
+- **scalar** (число, строка, bool) — project переопределяет global.
+- **dict** — рекурсивный deep merge: project расширяет/переопределяет ключи внутри.
+- **list / array** — конкатенация + dedup: project только **расширяет** список, не сбрасывает (важно для security-полей вроде `agent.stop_tools` или `command_moderation.url_policy.url_blacklist`).
+
+Пример проектного `<your-repo>/.gc/config.yml`:
+
+```yaml
+agent:
+  max_steps: 200             # этот проект — длиннее цепочки рассуждений
+  stop_tools: [browse_url]    # добавить локальный запрет (к глобальному списку)
+mcp:
+  servers:
+    my_local_db:               # MCP только для этого проекта
+      transport: stdio
+      command: psql
+```
+
+Файл `.gc/config.yml` следует той же схеме, что и глобальный `config.yml` — указывайте только те поля, которые хотите переопределить или дополнить. Папка `.gc/` создаётся автоматически при первом запуске `gc-cli` (та же папка, что и для project-скиллов).
+
+CLI-флаги (`--max_steps 999` и т.п.) перебивают и global, и project. Файл опционален; если его нет — используется только global.
+
+Если через `--config` явно передан тот же файл, что и `<repo>/.gc/config.yml` — gc-cli применяет его как обычный config без второго слоя (особый случай для запусков с явным путём).
 
 # Серверный режим (REST-обёртка поверх gc-cli)
 
@@ -330,7 +486,7 @@ Background и CLI-клиент для работы с агентом GigaCode: �
 - **Папка для хранения тредов**:
   - на файловую персистентность отвечает тот же механизм, что и в CLI (`src/thread_store.py`);
   - по умолчанию используется папка `threads` в корне проекта (`mini-cli-pub/threads`);
-  - опциональный параметр `threads_data_path` задаётся в `config.yml` и должен быть **абсолютным путём**;
+  - опциональный параметр `threads_data_path` задаётся в `config.yml` и должен быть **абсолютным путём**; если не задан — используется дефолт `<state>/projects/<project-slug>/threads/`;
   - серверный режим НЕ переопределяет этот путь, он использует те же настройки, что и CLI.
 
 - **Папка со скиллами**:
@@ -437,8 +593,8 @@ swarm:
 ### Ограничения
 
 - Лимит `max_concurrent` — без очереди; при превышении запросы отбиваются ошибкой 429/503.
-- Хранение логов — `swarm_threads/`, рабочих директорий — `.swarm_sandboxes/`.
-- Песочница удаляется **не при завершении процесса, а по истечении TTL** (вместе с данными сессии). Это гарантирует, что артефакты доступны для продления сессии и согласуется с историей в `swarm_threads/`.
+- Хранение swarm-логов и тредов — `<state>/projects/<project-slug>/swarm/threads/`, рабочих директорий — `<state>/projects/<project-slug>/swarm/sandboxes/`.
+- Песочница удаляется **не при завершении процесса, а по истечении TTL** (вместе с данными сессии). Это гарантирует, что артефакты доступны для продления сессии и согласуется с историей в `swarm/threads/`.
 - Рекомендуется cron-задача для очистки старых swarm-данных (см. `scripts/cleanup_swarm_threads.py`).
 - Bubblewrap-монтирование `/lib`, `/lib64`, `/usr` может потребовать адаптации под конкретный дистрибутив (например, на Arch Linux `/lib` → symlink на `/usr/lib`).
 

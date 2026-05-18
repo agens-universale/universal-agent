@@ -19,6 +19,7 @@ class InstallSpec:
     # Для type=npx: команды post-ensure для прогрева npm-кэша/расширений.
     # Каждая запись — argv-список; вызывается как subprocess.run(cmd, check=True).
     commands: tuple[tuple[str, ...], ...] = ()
+    source: Path | None = None
 
 
 @dataclass(frozen=True)

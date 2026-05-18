@@ -7,6 +7,15 @@ run_args = dict()
 extra_config_overrides: Dict[str, Any] = {}
 
 
+def _parse_bool_cli(raw: str) -> bool:
+    value = str(raw).strip().lower()
+    if value == "true":
+        return True
+    if value == "false":
+        return False
+    raise argparse.ArgumentTypeError("Ожидается true или false")
+
+
 def _coerce_value(raw: str) -> Any:
     """
     Преобразовать строковое значение из CLI к более подходящему типу.
@@ -86,6 +95,27 @@ parser.add_argument(
 )
 
 parser.add_argument(
+    "-T",
+    "--technical",
+    action="store_true",
+    dest="wrap_technical",
+    help='Обернуть запрос в теги <technical type="technical">…</technical>',
+)
+
+parser.add_argument(
+    "-s",
+    "--skill",
+    metavar="SKILL_NAME",
+    type=str,
+    default=None,
+    help=(
+        "Добавить техническое указание: решать запрос через skill с данным "
+        "именем; при отсутствии — похожее имя (опечатка), если описание "
+        "подходит к задаче; иначе сообщить об ошибке и остановиться"
+    ),
+)
+
+parser.add_argument(
     "--config",
     type=str,
     help="Путь к кастомному конфигурационному файлу",
@@ -103,6 +133,34 @@ parser.add_argument(
     "--new",
     action="store_true",
     help="Начать тред заново: удалить существующие данные треда (только с -t/--thread-id)",
+)
+
+root_box_group = parser.add_mutually_exclusive_group()
+root_box_group.add_argument(
+    "--root-box",
+    type=_parse_bool_cli,
+    choices=[True, False],
+    help=(
+        "Включить/выключить root_box (true|false): ограничение файловых "
+        "изменений launch_root и command_moderation.root_box.extra_write_paths"
+    ),
+)
+root_box_group.add_argument(
+    "--no-root-box",
+    action="store_true",
+    help=(
+        "Явно отключить root_box (эквивалент --root-box false); "
+        "имеет приоритет над config.yml"
+    ),
+)
+
+parser.add_argument(
+    "--command-moderation",
+    choices=["allow", "ask", "deny"],
+    help=(
+        "Режим execute_command/run_python_code: allow без judge, "
+        "ask с подтверждением опасного, deny блокирует опасное"
+    ),
 )
 
 

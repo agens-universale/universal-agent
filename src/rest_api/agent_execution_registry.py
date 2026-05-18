@@ -102,7 +102,7 @@ class AgentRunRegistry:
                 nonlocal run_ref
                 try:
                     result = executor.run(
-                        initial_user_message,
+                        [initial_user_message],
                         thread_id=thread_id,
                         system=system,
                         verbose=verbose,

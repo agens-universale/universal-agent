@@ -2,7 +2,10 @@
 
 from typing import Any, Callable, Dict, List, TypeVar
 
-from user_message_policy import is_dialog_summary_user_message_text, user_content_to_text
+from message_policy.user_message_policy import (
+    is_dialog_summary_user_message_text,
+    user_content_to_text,
+)
 
 from summarize.summary_serialization import (
     message_text_for_summary,

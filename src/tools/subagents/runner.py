@@ -5,7 +5,8 @@ import os
 from functools import partial
 from typing import Any, Callable, Dict, List, Optional
 
-from summarize.compaction import maybe_run_summary_compaction
+from config_modules.stored_outputs import get_stored_tool_outputs_max_entries
+from run_summary_coordinator import RunSummaryCoordinator
 from summarize.config import parse_summary_trigger_chars
 from states import State, save_state
 from tools import build_tools_data
@@ -111,18 +112,21 @@ class SubagentRunner:
         )
 
         persist_messages_callback = None
-        post_step_hook = None
+        pre_backend_compaction_hook = None
         if should_enable_summary:
             persist_messages_callback = partial(
                 self._persist_runtime_step, child_state
             )
-            post_step_hook = partial(
-                self._run_post_step_summary,
-                tool_name,
-                child_ctx,
-                child_state,
-                summary_trigger_chars,
+            summary = RunSummaryCoordinator(
+                ctx=child_ctx,
+                state=child_state,
+                thread_session=None,
+                summary_trigger_chars=summary_trigger_chars,
+                is_cli_mode=False,
+                pre_backend_trigger_reason="subagent_pre_backend",
+                logger=_log,
             )
+            pre_backend_compaction_hook = summary.pre_backend_compaction_hook
 
         try:
             result = run_agent_func(
@@ -131,7 +135,7 @@ class SubagentRunner:
                 child_ctx,
                 check_stop=self._check_stop_requested,
                 persist_messages_callback=persist_messages_callback,
-                post_step_hook=post_step_hook,
+                pre_backend_compaction_hook=pre_backend_compaction_hook,
             )
         except Exception as exc:
             self._log_lifecycle(
@@ -191,28 +195,6 @@ class SubagentRunner:
     ) -> None:
         child_state.append_user_messages_to_log(step_messages)
 
-    def _run_post_step_summary(
-        self,
-        tool_name: str,
-        child_ctx: Any,
-        child_state: State,
-        summary_trigger_chars: int,
-    ) -> None:
-        try:
-            maybe_run_summary_compaction(
-                ctx=child_ctx,
-                state=child_state,
-                summary_trigger_chars=summary_trigger_chars,
-                trigger_reason="subagent_post_step",
-                is_cli_mode=False,
-            )
-        except Exception:
-            _log.warning(
-                "Subagent %s post-step summary failed",
-                tool_name,
-                exc_info=True,
-            )
-
     def _build_child_state(self, agent_role: str) -> State:
         """Создать дочерний State, наследуя общие данные от оркестратора."""
         child_config = {**self._config, "use_local_subagents": False}
@@ -234,6 +216,10 @@ class SubagentRunner:
             specific_role=agent_role,
             agent_md_path=parent.agent_md_path,
             shared=parent.shared,
+            workspace_config=child_config,
+        )
+        child_state.tool_call_outputs_store.set_max_entries(
+            get_stored_tool_outputs_max_entries(child_config)
         )
         child_state.backend_api_mode = "chat_completions"
         return child_state

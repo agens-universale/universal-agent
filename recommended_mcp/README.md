@@ -2,6 +2,20 @@
 
 Каталог рекомендованных MCP-интеграций для background-agent.
 
+Здесь лежат «рецепты» сборки и подключения MCP — то, что нужно агенту, чтобы
+поднять интеграцию: snippet для `config.yml` и (опционально) сборочные
+артефакты. Сами исходники наших MCP живут в [`../external/`](../external/).
+
+## Что доступно
+
+| MCP | Источник | Установка |
+|---|---|---|
+| `computer` | `external/computer-mcp/` (исходники в monorepo) | `pip install` из source |
+| `office` | `external/office-mcp/` (исходники в monorepo) | `pip install` из source |
+
+При расширении сюда же подключаются публичные MCP — npx-based (`@playwright/mcp`),
+PyPI-пакеты, docker-образы из реестра. Список — в `config.yml`.
+
 ## Как пользоваться
 
 ### 1. Активируй venv агента
@@ -20,8 +34,24 @@ source .venv/bin/activate
 python recommended_mcp/install.py
 ```
 
-Для `install.type: wheel` — `pip install` в активный venv.
-Для `install.type: docker` — `docker compose build`.
+Для каждого `install.type` — свой шаг:
+
+| `install.type` | Что делает |
+|---|---|
+| `source` | `pip install <path>` из `external/<name>/` (PEP 517 build из исходников) |
+| `wheel` | `pip install` локального wheel из `<name>/dist/*.whl` |
+| `docker` | `docker compose -f <name>/docker-compose.yml build` (локальный билд образа) |
+| `npx` | bootstrap Node.js (если нет) + прогрев `npm install -g` / `npx` команд |
+
+Для итеративной разработки наших MCP (`source`-тип):
+
+```bash
+python recommended_mcp/install.py --editable
+```
+
+В этом режиме `pip install -e <path>` — изменения в `external/<name>/`
+подхватываются на следующем запуске MCP без переустановки. Для `wheel/docker/npx`
+флаг игнорируется.
 
 ### 3. Запустить долгоживущие MCP
 
@@ -29,7 +59,7 @@ python recommended_mcp/install.py
 python recommended_mcp/run.py
 ```
 
-MCP с блоком `run:` поднимаются через `docker compose up -d`.
+MCP с блоком `run:` (например `docker-compose`) поднимаются как daemon.
 MCP без блока `run:` пропускаются — агент спавнит их по stdio сам.
 
 ### 4. Подключить MCP к агенту
@@ -71,6 +101,8 @@ mcps:
 
 - `install.py` ставит пакеты в **активный Python** (`sys.executable`). Если venv
   не активирован — установка пойдёт в system-python, чего обычно не хочется.
-- Wheel-файлы хранятся в git как бинарные артефакты (~50-200KB каждый).
-- Docker-образы собираются локально из `Dockerfile`; ни один MCP не пулится из
-  docker registry. Нужен установленный Docker + docker compose v2.
+- При `type: source` без бампа `version` в `pyproject.toml` pip не перетрёт
+  уже стоящую копию. При итеративной разработке используй `--editable`.
+- Docker-образы по умолчанию собираются локально из `Dockerfile`; для pull'а
+  из реестра нужен соответствующий `install.type` (на момент написания —
+  не реализован, реализовать по необходимости).

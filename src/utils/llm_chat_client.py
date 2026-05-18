@@ -1,8 +1,27 @@
 """Shared chat/completions client helpers for controller-level modules."""
 
+import json
 from typing import Any, Dict, List
 
 from utils.connect_backend import create_call_headers, request_backend_chat_completions
+
+
+def _log_completion_response_meta(*, logger: Any, label: str, res: Any) -> None:
+    """Полный сырой ответ backend chat/completions."""
+    if logger is None:
+        return
+    try:
+        logger.info(
+            "chat/completions text-only raw response: label=%s response=%s",
+            label,
+            json.dumps(res, ensure_ascii=False),
+        )
+    except Exception:
+        logger.info(
+            "chat/completions text-only raw response: label=%s response=%r",
+            label,
+            res,
+        )
 
 
 def shorten_for_log(text: str, max_chars: int = 500) -> str:
@@ -45,20 +64,37 @@ def request_chat_completion_text(
     request_label: str = "chat_completion",
 ) -> str:
     cfg = getattr(ctx, "config_dict", {}) or {}
-    payload = {
+    log_params = cfg.get("logging_params")
+    full_log_backend = (
+        bool(log_params.get("full_log_backend", False))
+        if isinstance(log_params, dict)
+        else False
+    )
+    payload: Dict[str, Any] = {
         "model": getattr(state, "default_model", None) or cfg.get("model"),
         "messages": messages,
         "tools": [],
-        "temperature": 0.01,
-        "top_p": 0.8,
-        "top_k": 20,
-        "min_p": 0.0,
-        "max_tokens": max_tokens,
-        "repetition_penalty": 1.1,
-        "separate_reasoning": False,
-        "chat_template_kwargs": {"enable_thinking": False},
     }
-    _ = request_label  # for call-site traceability and future extension
+    if bool(cfg.get("use_max_tokens_param", False)):
+        payload["max_tokens"] = max_tokens
+    else:
+        payload["max_completion_tokens"] = max_tokens
+
+    extra = cfg.get("chat_completion_kwargs")
+    if isinstance(extra, dict) and extra:
+        protected = {
+            "model",
+            "messages",
+            "tools",
+            "tool_choice",
+            "max_tokens",
+            "max_completion_tokens",
+        }
+        for key, value in extra.items():
+            if key in protected:
+                continue
+            payload[key] = value
+
     headers = create_call_headers(state, ctx)
     res = request_backend_chat_completions(
         payload,
@@ -68,6 +104,9 @@ def request_chat_completion_text(
         use_retry=cfg.get("use_retry", False),
         logger=getattr(ctx, "logger", None),
     )
+    logger = getattr(ctx, "logger", None)
+    if logger is not None and full_log_backend:
+        _log_completion_response_meta(logger=logger, label=request_label, res=res)
     text = (
         res.get("choices", [{}])[0].get("message", {}).get("content")
         if isinstance(res, dict)

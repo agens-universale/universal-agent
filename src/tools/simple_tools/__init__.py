@@ -13,6 +13,7 @@ from tools.simple_tools.submit_solution import SubmitSolution
 from tools.simple_tools.calculator import Calculator
 from tools.simple_tools.run_python_code import RunPythonCode
 from tools.simple_tools.save_base64_file import SaveBase64File
+from tools.stored_outputs.read_stored_tool_output import ReadStoredToolOutput
 try:
     from tools.simple_tools.fetch_url import FetchUrl
 except ModuleNotFoundError:
@@ -86,6 +87,11 @@ def get_simple_tools_data(config_dict: Dict[str, Any]) -> Dict[str, Dict[str, An
             'tool_fabric': RunPythonCode,
             'spec': RunPythonCode.tool_description(),
             'description': RunPythonCode.prompt_description(),
+        },
+        'read_stored_tool_output': {
+            'tool_fabric': ReadStoredToolOutput,
+            'spec': ReadStoredToolOutput.tool_description(),
+            'description': ReadStoredToolOutput.prompt_description(),
         },
         'fetch_url': {
             'tool_fabric': FetchUrl,

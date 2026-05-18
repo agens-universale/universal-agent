@@ -1,0 +1,92 @@
+backend:
+  # responses | chat_completions
+  api_mode: chat_completions
+  completions_url: "https://api.openai.com/v1/chat/completions"
+  chat_completions_max_tokens: 32768
+  # OpenAI для ряда моделей требует max_completion_tokens, а не max_tokens.
+  use_max_tokens_param: false
+  # Для OpenAI включаем strict-нормализацию tools schema.
+  openai_strict_tools_schema: true
+
+  # OpenAI-specific параметры тела запроса.
+  chat_completion_kwargs:
+    # Для некоторых OpenAI-моделей (например, gpt-5.5) поддерживается только
+    # дефолтное значение temperature (1).
+    temperature: 1.0
+    top_p: 1.0
+
+  # HTTP headers для chat/completions.
+  chat_completion_headers:
+    Authorization: "Bearer <YOUR_OPENAI_API_KEY>"
+
+  use_ssl: true
+  use_retry: true
+
+agent:
+  model: gpt-5.5
+  system_prompt_id: v1
+  use_server_subagents: false
+  use_local_subagents: true
+  subagent_max_steps: 100
+  client_name: mini_cli_pub_agent_1
+  x_cl_id: "12345"
+  verbose: true
+  use_ask_human_tool: true
+  stop_tools: []
+  server_tool_prefix: system
+  max_steps: 1000
+  no_tool_call_max_count: 5
+  strict_submit_solution_validation: true
+  tool_output_inline_max_chars: 20000
+  stored_tool_outputs_max_entries: 10
+
+logging:
+  full_log_backend: false
+  console_trace: true
+  dump_storage: false
+  save_logs: true
+
+paths:
+  # Relative paths are resolved from config.yml directory.
+  agent_md_path: "prompts/demo_cli_agent.md"
+  # chat_completions_system_prompt_path: "prompts/chat_completions_system_prompt.md"
+  # threads_data_path: ""
+  # skills_data_path: ""
+  # logs_dump_dir: ""
+
+summary:
+  chat_completions_summary_trigger_chars: 200000
+  incremental_batch_chars: 280000
+  max_message_chars: 30000
+  max_dialogue_chars: 1000000
+  max_accumulated_summary_chars: 60000
+  original_user_messages_max_chars: 20000
+  last_dialog_steps_count: 4
+  last_dialog_step_message_max_chars: 6000
+
+security:
+  command_moderation:
+    mode: deny
+    root_box:
+      enabled: true
+      extra_write_paths: []
+    allowed_command_examples: []
+    url_policy:
+      allowed_schemes: ["http", "https"]
+      url_blacklist: []
+
+mcp:
+  servers:
+    search:
+      transport: sse
+      url: http://127.0.0.1:10090/mcp
+      token: ""
+      server-name: DuckDuckGo search
+      description: Common web and News search
+      # command: python3
+      # args: ["server.py"]
+      # cwd: ""
+      # env: {}
+  meta:
+    tools-cache-ttl: 3600
+    request_timeout_sec: 600

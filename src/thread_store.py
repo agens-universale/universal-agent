@@ -4,7 +4,7 @@ import re
 from datetime import datetime, timezone
 from typing import Dict, List, Tuple, Any, Set, Optional
 
-from user_message_policy import (
+from message_policy.user_message_policy import (
     TECHNICAL_TYPE_DIALOG_SUMMARY,
     wrap_technical_user_content,
 )
@@ -82,16 +82,16 @@ def resolve_threads_dir(config_dict: Dict[str, Any]) -> str:
     """
     Определить директорию для хранения тредов.
 
-    - Если threads_data_path не задан или пуст — использовать <project_root>/threads.
-    - Если задан threads_data_path — он ДОЛЖЕН быть абсолютным путём и используется как есть.
+    Контракт: config_dict["threads_data_path"] должен быть АБСОЛЮТНЫМ
+    путём, заполненным config_modules.root.resolve_paths(). Пустое значение
+    означает, что resolve_paths() не вызывался — это ошибка интеграции.
     """
-    # Корень проекта: ../ относительно этого файла (src/thread_store.py -> project_root)
-    base_dir = os.path.dirname(os.path.abspath(__file__))
-    project_root = os.path.abspath(os.path.join(base_dir, ".."))
-
     path_cfg = config_dict.get("threads_data_path")
     if not isinstance(path_cfg, str) or len(path_cfg.strip()) == 0:
-        return os.path.join(project_root, "threads")
+        raise ValueError(
+            "threads_data_path пуст; "
+            "config_modules.root.resolve_paths() должен был его заполнить"
+        )
 
     path_cfg = path_cfg.strip()
     if not os.path.isabs(path_cfg):
@@ -167,7 +167,13 @@ def load_thread_messages(
                 record = json.loads(row)
             except json.JSONDecodeError:
                 continue
-            if record.get("type") != "message":
+            # Допускаем строковую обёртку (двойной json.dumps строки записи).
+            if isinstance(record, str):
+                try:
+                    record = json.loads(record)
+                except json.JSONDecodeError:
+                    continue
+            if not isinstance(record, dict) or record.get("type") != "message":
                 continue
             seq = record.get("seq")
             if isinstance(seq, int) and seq > max_seq:
@@ -282,6 +288,8 @@ class ThreadSession:
         self.previous_response_id = previous_response_id
         self.backend_api_mode = backend_api_mode
         self.runtime_messages: List[Dict[str, Any]] = []
+        # Снимок known_message_keys до записи последнего step_messages (для compaction user_ask).
+        self.known_keys_snapshot_before_last_batch: Optional[frozenset[str]] = None
 
     @classmethod
     def from_config(
@@ -342,6 +350,7 @@ class ThreadSession:
         previous_response_id: Optional[str],
     ) -> None:
         known_before = set(self.known_message_keys)
+        self.known_keys_snapshot_before_last_batch = frozenset(known_before)
         written = append_new_thread_messages(
             self.threads_dir,
             self.system_id,

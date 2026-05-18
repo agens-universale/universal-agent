@@ -8,6 +8,7 @@ from typing import Any, Dict, Optional
 import requests
 
 from tools.simple_tools.abstract_simple_tool import AbstractSimpleTool
+from security.url_policy import enforce_url_policy
 
 
 class SimpleFetchUrl(AbstractSimpleTool):
@@ -311,6 +312,20 @@ class SimpleFetchUrl(AbstractSimpleTool):
         has_more = offset + returned_chars < total_chars
         return {"content": chunk, "returned_chars": returned_chars, "total_chars": total_chars, "has_more": has_more}
 
+    def _url_policy_blocked_result(
+        self,
+        error: Dict[str, Any],
+        url: str,
+        **kwargs: Any,
+    ) -> str:
+        return self._result(
+            url=url,
+            ok=False,
+            result_type="error",
+            error=error,
+        )
+
+    @enforce_url_policy(url_arg="url")
     def __call__(
         self,
         url: str,

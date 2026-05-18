@@ -1,0 +1,44 @@
+# Пример конфига gc-cli для GigaChat (через LiteLLM Proxy).
+#
+# Это шаблон. Скопируйте в корень репы под удобным именем, например:
+#   cp litellm/agent_config_examples/config_gigachat.yml config.yml
+#   gc-cli -q "..."                       # подхватит config.yml по умолчанию
+# Либо указывайте путь явно:
+#   gc-cli -q "..." --config litellm/agent_config_examples/config_gigachat.yml
+#   gc-cli -q "..." --config litellm/agent_config_examples/config_gigachat.yml --model gigachat-2-pro
+#   gc-cli -q "..." --config litellm/agent_config_examples/config_gigachat.yml --model gigachat-2-max
+
+backend:
+  api_mode: chat_completions
+  completions_url: http://localhost:4000/v1/chat/completions
+  chat_completions_max_tokens: 4096
+  use_ssl: false
+  use_retry: true
+  chat_completion_headers:
+    Authorization: "Bearer sk-litellm-test-master-1234"
+
+agent:
+  model: gigachat-2-lite
+  system_prompt_id: v1
+  max_steps: 30
+  no_tool_call_max_count: 5
+  verbose: true
+  console_trace: true
+  save_logs: false
+  dump_storage: false
+  use_ask_human_tool: false
+  stop_tools: []
+  use_server_subagents: false
+  use_local_subagents: false
+
+paths:
+  agent_md_path: "./prompts/demo_cli_agent.md"
+
+mcp:
+  servers: {}
+  meta:
+    tools-cache-ttl: 3600
+    request_timeout_sec: 600
+
+summary:
+  chat_completions_summary_trigger_chars: 0

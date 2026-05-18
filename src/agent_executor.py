@@ -7,28 +7,28 @@ State создаётся заново при каждом run(). Возвращ�
 """
 
 import os
-import json
 import threading
+from copy import copy as _shallow_copy_msg
 from typing import Any
 
 from processing_responses import run_agent
 from run_context import RunContext
-from summarize.compaction import (
-    history_exceeds_summary_trigger,
-    run_summary_compaction,
-)
+from config_modules.stored_outputs import get_stored_tool_outputs_max_entries
+from message_policy.chat_completions import repair_tool_call_pairing
+from run_summary_coordinator import RunSummaryCoordinator
 from summarize.config import parse_summary_trigger_chars
 from summarize.summary_serialization import history_has_dialog_summary_message
 from states import State, SharedStateData, save_state, dump_storage
 from thread_store import (
     ThreadSession,
+    make_message_key,
     reset_thread_files,
     resolve_threads_dir,
 )
 from tools.connect_mcp.persistent_stdio import PersistentStdioRegistry
 from tools.connect_mcp.stream_client import _SESSION_MANAGER as _STREAM_SESSION_MANAGER
 from tools.skills.registry import get_skills_registry
-from user_message_policy import (
+from message_policy.user_message_policy import (
     TECHNICAL_TYPE_CURRENT_CONTEXT,
     wrap_technical_user_content,
 )
@@ -60,14 +60,17 @@ class AgentExecutor:
 
     def run(
         self,
-        message: str,
+        messages: list[str],
         *,
         thread_id: str | None = None,
         start_new_thread: bool = False,
         system: str | None = None,
         verbose: bool | None = None,
     ) -> Any:
-        """Запускает агента. При каждом вызове state создаётся заново."""
+        """Запускает агента. При каждом вызове state создаётся заново.
+
+        messages: непустой список текстов — каждый элемент уходит отдельным user-сообщением.
+        """
         config_dict = self._ctx.config_dict
         logger = getattr(self._ctx, "logger", None)
         effective_verbose = (
@@ -87,6 +90,11 @@ class AgentExecutor:
             thread_session = ThreadSession.from_config(
                 config_dict=config_dict, system_id=system_id, thread_id=thread_id
             )
+            if backend_api_mode == "chat_completions":
+                thread_session.history_messages = repair_tool_call_pairing(
+                    thread_session.history_messages,
+                    keep_latest_unanswered=False,
+                )
             if backend_api_mode == "responses":
                 previous_response_id = thread_session.previous_response_id
             meta = getattr(thread_session, "meta", None) or {}
@@ -135,10 +143,14 @@ class AgentExecutor:
             "agent_md_path": config_dict.get("agent_md_path"),
             "thread_id": thread_id,
             "shared": thread_shared,
+            "workspace_config": config_dict,
         }
         if config_dict.get("use_local_subagents", False):
             state_data["specific_role"] = ORCHESTRATOR_SPECIFIC_ROLE
         state = State(**state_data)
+        state.tool_call_outputs_store.set_max_entries(
+            get_stored_tool_outputs_max_entries(config_dict)
+        )
         state.backend_api_mode = backend_api_mode
         state.dialog_steps_offset = 0
         if thread_session is not None:
@@ -173,92 +185,49 @@ class AgentExecutor:
             self._state = state
             self._pending_messages = []
 
-        def _resolve_summary_trace_path() -> str:
-            path = getattr(self._ctx, "summary_trace_path", "")
-            if isinstance(path, str) and path.strip():
-                return path.strip()
-            cfg = getattr(self._ctx, "config_dict", {}) or {}
-            if not cfg.get("save_logs", False):
-                return ""
-            base_dir = cfg.get("logs_dump_dir") or os.getcwd()
-            return os.path.join(base_dir, "summary_trace.jsonl")
-
-        def _append_summary_trace(
-            *, trigger_reason: str, trace_data: dict, newly_summarized_message_id: str
-        ) -> None:
-            trace_path = _resolve_summary_trace_path()
-            if not trace_path:
-                return
-            trace_dir = os.path.dirname(trace_path)
-            if trace_dir:
-                os.makedirs(trace_dir, exist_ok=True)
-            payload = {
-                "trigger_reason": trigger_reason,
-                "summary_trace": trace_data or {},
-                "newly_summarized_message_id": newly_summarized_message_id,
-            }
-            with open(trace_path, "a", encoding="utf-8") as fd:
-                fd.write(json.dumps(payload, ensure_ascii=False))
-                fd.write("\n")
-
-        def _handle_summary_applied(event: dict[str, Any]) -> None:
-            if thread_session is not None:
-                thread_session.archive_and_compact_summary_payload(
-                    event.get("summary_payload", {})
-                )
-            _append_summary_trace(
-                trigger_reason=str(event.get("trigger_reason") or ""),
-                trace_data=event.get("summary_trace", {}),
-                newly_summarized_message_id=str(
-                    event.get("newly_summarized_message_id") or ""
-                ),
+        if (
+            thread_session is not None
+            and backend_api_mode == "chat_completions"
+            and thread_session.history_messages
+        ):
+            state.messages.extend(
+                [
+                    _shallow_copy_msg(m)
+                    for m in thread_session.history_messages
+                    if isinstance(m, dict)
+                ]
             )
 
-        if backend_api_mode == "chat_completions" and summary_trigger_chars > 0:
-            try:
-                if history_exceeds_summary_trigger(
-                    state=state,
-                    summary_trigger_chars=summary_trigger_chars,
-                ):
-                    run_summary_compaction(
-                        ctx=self._ctx,
-                        state=state,
-                        trigger_reason="pre_run",
-                        is_cli_mode=is_cli_mode,
-                        on_summary_applied=_handle_summary_applied,
-                    )
-            except Exception as summarize_exc:
-                if logger is not None:
-                    if thread_session is not None:
-                        logger.warning(
-                            "summary_failed reason=pre_run thread_id=%s error=%s",
-                            thread_session.thread_id,
-                            summarize_exc,
-                            exc_info=True,
-                        )
-                    else:
-                        logger.warning(
-                            "summary_failed reason=pre_run error=%s",
-                            summarize_exc,
-                            exc_info=True,
-                        )
-                if is_cli_mode:
-                    print(
-                        "[summary] Ошибка суммаризации: "
-                        f"error={summarize_exc}"
-                    )
+        summary = RunSummaryCoordinator(
+            ctx=self._ctx,
+            state=state,
+            thread_session=thread_session,
+            summary_trigger_chars=summary_trigger_chars,
+            is_cli_mode=is_cli_mode,
+            pre_backend_trigger_reason="pre_backend",
+            logger=logger,
+        )
 
-        new_user_message = {
-            "role": "user",
-            "content": message,
-            "id": generate_message_id_func("m"),
-        }
-        # Seed user_messages_log с текущим пользовательским сообщением.
-        # _persist_*_batch-коллбэки ниже получают только step_messages
-        # (ответ ассистента + tool calls/outputs); без этого seed'а
-        # finish_gate в processing_responses.py читает пустой лог и
-        # отвергает валидный submit_solution как «user intent is empty».
-        state.append_user_messages_to_log([new_user_message])
+        summary.pre_run_compact_if_needed(trigger_reason="pre_run")
+
+        if not messages:
+            raise ValueError(
+                "Список пользовательских сообщений не должен быть пустым."
+            )
+        user_bodies = [str(x) for x in messages]
+        new_user_messages = [
+            {
+                "role": "user",
+                "content": body,
+                "id": generate_message_id_func("m"),
+            }
+            for body in user_bodies
+        ]
+        # На старте user turn используем уже имеющийся active scope из state
+        # и дописываем в него текущий запрос (только если это реальное user
+        # сообщение, не technical). Параллельно пополняем общий user log.
+        for new_user_message in new_user_messages:
+            state.seed_new_user_turn(new_user_message)
         technical_user_message = None
         _thread_mf = thread_shared.memory_files if thread_shared is not None else {}
         _has_memory = (
@@ -297,7 +266,7 @@ class AgentExecutor:
                 thread_session.thread_id,
             )
 
-        messages = [new_user_message]
+        messages = list(new_user_messages)
 
         persist_messages_callback = None
         get_full_history_messages = None
@@ -318,7 +287,7 @@ class AgentExecutor:
             messages = [*base_messages]
             if technical_user_message is not None:
                 messages.append(technical_user_message)
-            messages.append(new_user_message)
+            messages.extend(new_user_messages)
 
             def _persist_thread_batch(step_messages: list[dict]) -> None:
                 # Persist notes from in-memory state into thread meta.
@@ -337,7 +306,12 @@ class AgentExecutor:
                         "memory_files": _shared.memory_files,
                         "notes_md": _shared.notes_md,
                     }
-                state.append_user_messages_to_log(step_messages)
+                known_before = set(thread_session.known_message_keys)
+                step_messages_for_user_scope = [
+                    m for m in step_messages
+                    if make_message_key(m) not in known_before
+                ]
+                state.append_user_messages_to_log(step_messages_for_user_scope)
                 thread_session.meta["user_messages_log"] = state.user_messages_log
                 thread_session.meta["current_user_messages"] = state.current_user_messages
                 thread_session.meta["backend_api_mode"] = state.backend_api_mode
@@ -361,51 +335,6 @@ class AgentExecutor:
 
             persist_messages_callback = _persist_runtime_batch
 
-        def _post_step_summary_hook() -> None:
-            if (
-                state.backend_api_mode != "chat_completions"
-                or summary_trigger_chars <= 0
-            ):
-                return
-            try:
-                if history_exceeds_summary_trigger(
-                    state=state,
-                    summary_trigger_chars=summary_trigger_chars,
-                ):
-                    run_summary_compaction(
-                        ctx=self._ctx,
-                        state=state,
-                        trigger_reason="post_step",
-                        is_cli_mode=is_cli_mode,
-                        on_summary_applied=_handle_summary_applied,
-                    )
-            except Exception as summarize_exc:
-                if logger is not None:
-                    if thread_session is not None:
-                        logger.warning(
-                            "summary_failed reason=post_step thread_id=%s error=%s",
-                            thread_session.thread_id,
-                            summarize_exc,
-                            exc_info=True,
-                        )
-                    else:
-                        logger.warning(
-                            "summary_failed reason=post_step error=%s",
-                            summarize_exc,
-                            exc_info=True,
-                        )
-                if is_cli_mode:
-                    if thread_session is not None:
-                        print(
-                            "[summary] Ошибка суммаризации: "
-                            f"thread={thread_session.thread_id}, error={summarize_exc}"
-                        )
-                    else:
-                        print(
-                            "[summary] Ошибка суммаризации: "
-                            f"error={summarize_exc}"
-                        )
-
         def get_pending_messages() -> list[dict]:
             with self._lock:
                 out = self._pending_messages[:]
@@ -415,7 +344,6 @@ class AgentExecutor:
         def check_stop() -> bool:
             with self._lock:
                 return self._state.stop_requested if self._state is not None else False
-
         try:
             response = run_agent(
                 messages,
@@ -423,10 +351,17 @@ class AgentExecutor:
                 self._ctx,
                 get_full_history_messages=get_full_history_messages,
                 persist_messages_callback=persist_messages_callback,
-                post_step_hook=_post_step_summary_hook,
+                pre_backend_compaction_hook=summary.pre_backend_compaction_hook,
                 get_pending_messages=get_pending_messages,
                 check_stop=check_stop,
             )
+            if thread_session is not None:
+                thread_session.meta["user_messages_log"] = state.user_messages_log
+                thread_session.meta["current_user_messages"] = state.current_user_messages
+                thread_session.meta["backend_api_mode"] = state.backend_api_mode
+                thread_session.persist_batch(
+                    [], previous_response_id=state.previous_response_id
+                )
         finally:
             # Закрываем долгоживущие stdio MCP-сессии (напр. browser-use + Chromium),
             # чтобы они не переживали конкретный запуск агента.

@@ -10,7 +10,7 @@ class ChatCompletionsPromptConfigTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             cfg_path = os.path.join(tmp_dir, "config.yml")
             with open(cfg_path, "w", encoding="utf-8") as fd:
-                fd.write("backend_api_mode: chat_completions\n")
+                fd.write("backend:\n  api_mode: chat_completions\n")
 
             cfg = load_config(cfg_path)
             self.assertEqual(
@@ -28,9 +28,9 @@ class ChatCompletionsPromptConfigTest(unittest.TestCase):
             cfg_path = os.path.join(tmp_dir, "config.yml")
             with open(cfg_path, "w", encoding="utf-8") as fd:
                 fd.write(
-                    "backend_api_mode: chat_completions\n"
-                    "chat_completions_system_prompt_path: prompts/chat.md\n"
-                    "summary_params:\n"
+                    "backend:\n  api_mode: chat_completions\n"
+                    "paths:\n  chat_completions_system_prompt_path: prompts/chat.md\n"
+                    "summary:\n"
                     "  chat_completions_summary_prompt_path: prompts/summary.md\n"
                 )
 
@@ -48,20 +48,24 @@ class ChatCompletionsPromptConfigTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             cfg_path = os.path.join(tmp_dir, "config.yml")
             with open(cfg_path, "w", encoding="utf-8") as fd:
-                fd.write("backend_api_mode: chat_completions\n")
+                fd.write("backend:\n  api_mode: chat_completions\n")
             cfg = load_config(cfg_path)
             self.assertEqual(
                 cfg["summary_params"]["chat_completions_summary_trigger_chars"], 0
             )
             self.assertEqual(cfg["summary_params"]["incremental_batch_chars"], 0)
+            self.assertFalse(cfg["logging_params"]["full_log_backend"])
+            self.assertTrue(cfg["logging_params"]["console_trace"])
+            self.assertFalse(cfg["logging_params"]["dump_storage"])
+            self.assertTrue(cfg["logging_params"]["save_logs"])
 
     def test_summary_trigger_chars_is_normalized_to_int(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             cfg_path = os.path.join(tmp_dir, "config.yml")
             with open(cfg_path, "w", encoding="utf-8") as fd:
                 fd.write(
-                    "backend_api_mode: chat_completions\n"
-                    "summary_params:\n"
+                    "backend:\n  api_mode: chat_completions\n"
+                    "summary:\n"
                     "  chat_completions_summary_trigger_chars: '123'\n"
                 )
             cfg = load_config(cfg_path)
@@ -74,7 +78,7 @@ class ChatCompletionsPromptConfigTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             cfg_path = os.path.join(tmp_dir, "config.yml")
             with open(cfg_path, "w", encoding="utf-8") as fd:
-                fd.write("backend_api_mode: chat_completions\n")
+                fd.write("backend:\n  api_mode: chat_completions\n")
             cfg = load_config(cfg_path)
             self.assertEqual(cfg["summary_params"]["last_dialog_steps_count"], 5)
             self.assertEqual(
@@ -95,8 +99,8 @@ class ChatCompletionsPromptConfigTest(unittest.TestCase):
             cfg_path = os.path.join(tmp_dir, "config.yml")
             with open(cfg_path, "w", encoding="utf-8") as fd:
                 fd.write(
-                    "backend_api_mode: chat_completions\n"
-                    "summary_params:\n"
+                    "backend:\n  api_mode: chat_completions\n"
+                    "summary:\n"
                     "  chat_completions_summary_trigger_chars: '200'\n"
                     "  incremental_batch_chars: '260'\n"
                     "  chat_completions_summary_prompt_path: prompts/summary.md\n"
@@ -135,8 +139,8 @@ class ChatCompletionsPromptConfigTest(unittest.TestCase):
             cfg_path = os.path.join(tmp_dir, "config.yml")
             with open(cfg_path, "w", encoding="utf-8") as fd:
                 fd.write(
-                    "backend_api_mode: chat_completions\n"
-                    "summary_params:\n"
+                    "backend:\n  api_mode: chat_completions\n"
+                    "summary:\n"
                     "  chat_completions_summary_trigger_chars: 50000\n"
                 )
             cfg = load_config(cfg_path)
@@ -144,24 +148,68 @@ class ChatCompletionsPromptConfigTest(unittest.TestCase):
                 cfg["summary_params"]["incremental_batch_chars"], 70000
             )
 
-    def test_chat_completions_auth_token_alias_from_openrouter(self):
+    def test_chat_completion_authorization_header_loaded_from_backend_section(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             cfg_path = os.path.join(tmp_dir, "config.yml")
             with open(cfg_path, "w", encoding="utf-8") as fd:
                 fd.write(
-                    "backend_api_mode: chat_completions\n"
-                    "openrouter_api_key: '  sk-or-v1-test-token  '\n"
-                    "openrouter_http_referer: '  https://example.org/app  '\n"
-                    "openrouter_x_title: '  my cli  '\n"
+                    "backend:\n"
+                    "  api_mode: chat_completions\n"
+                    "  chat_completion_headers:\n"
+                    "    Authorization: 'Bearer sk-or-v1-test-token'\n"
                 )
             cfg = load_config(cfg_path)
             self.assertEqual(
-                cfg["chat_completions_auth_token"], "sk-or-v1-test-token"
+                cfg["chat_completion_headers"]["Authorization"],
+                "Bearer sk-or-v1-test-token",
+            )
+
+    def test_chat_completion_kwargs_and_flags_loaded_from_backend_section(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            cfg_path = os.path.join(tmp_dir, "config.yml")
+            with open(cfg_path, "w", encoding="utf-8") as fd:
+                fd.write(
+                    "backend:\n"
+                    "  api_mode: chat_completions\n"
+                    "  use_max_tokens_param: true\n"
+                    "  openai_strict_tools_schema: true\n"
+                    "  chat_completion_kwargs:\n"
+                    "    temperature: 0.2\n"
+                    "    top_p: 0.9\n"
+                    "    vendor_flag: true\n"
+                    "logging:\n"
+                    "  full_log_backend: true\n"
+                )
+            cfg = load_config(cfg_path)
+            self.assertEqual(cfg["chat_completion_kwargs"]["temperature"], 0.2)
+            self.assertEqual(cfg["chat_completion_kwargs"]["top_p"], 0.9)
+            self.assertTrue(cfg["chat_completion_kwargs"]["vendor_flag"])
+            self.assertTrue(cfg["logging_params"]["full_log_backend"])
+            self.assertTrue(cfg["use_max_tokens_param"])
+            self.assertTrue(cfg["openai_strict_tools_schema"])
+
+    def test_chat_completion_headers_loaded_from_backend_section(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            cfg_path = os.path.join(tmp_dir, "config.yml")
+            with open(cfg_path, "w", encoding="utf-8") as fd:
+                fd.write(
+                    "backend:\n"
+                    "  api_mode: chat_completions\n"
+                    "  chat_completion_headers:\n"
+                    "    HTTP-Referer: '  https://example.org/app  '\n"
+                    "    X-OpenRouter-Title: 'mini-cli'\n"
+                    "    X-Custom: 123\n"
+                )
+            cfg = load_config(cfg_path)
+            self.assertEqual(
+                cfg["chat_completion_headers"]["HTTP-Referer"],
+                "https://example.org/app",
             )
             self.assertEqual(
-                cfg["openrouter_http_referer"], "https://example.org/app"
+                cfg["chat_completion_headers"]["X-OpenRouter-Title"],
+                "mini-cli",
             )
-            self.assertEqual(cfg["openrouter_x_title"], "my cli")
+            self.assertEqual(cfg["chat_completion_headers"]["X-Custom"], "123")
 
 
 if __name__ == "__main__":

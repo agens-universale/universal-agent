@@ -10,14 +10,35 @@ class _StateStub:
 
 
 class ChatCompletionsHeadersTest(unittest.TestCase):
-    def test_uses_chat_completions_token_and_openrouter_headers(self):
+    def test_uses_generic_chat_completion_headers(self):
         ctx = SimpleNamespace(
             config_dict={
                 "x_cl_id": 12345,
                 "backend_api_mode": "chat_completions",
-                "chat_completions_auth_token": "sk-or-v1-token",
-                "openrouter_http_referer": "https://example.org",
-                "openrouter_x_title": "mini-cli",
+                "chat_completion_headers": {
+                    "HTTP-Referer": "https://example.org",
+                    "X-OpenRouter-Title": "mini-cli",
+                    "X-Custom": "v1",
+                },
+            },
+            auth_connector=None,
+        )
+        headers = create_call_headers(_StateStub(), ctx)
+        self.assertEqual(headers.get("HTTP-Referer"), "https://example.org")
+        self.assertEqual(headers.get("X-OpenRouter-Title"), "mini-cli")
+        self.assertEqual(headers.get("X-Custom"), "v1")
+
+    def test_uses_chat_completions_token_and_generic_headers(self):
+        ctx = SimpleNamespace(
+            config_dict={
+                "x_cl_id": 12345,
+                "backend_api_mode": "chat_completions",
+                "chat_completion_headers": {
+                    "Authorization": "Bearer sk-or-v1-token",
+                    "HTTP-Referer": "https://example.org",
+                    "X-OpenRouter-Title": "mini-cli",
+                    "X-Title": "mini-cli",
+                },
             },
             auth_connector=None,
         )
@@ -36,7 +57,7 @@ class ChatCompletionsHeadersTest(unittest.TestCase):
             config_dict={
                 "x_cl_id": 12345,
                 "backend_api_mode": "chat_completions",
-                "chat_completions_auth_token": "chat-token",
+                "chat_completion_headers": {"Authorization": "Bearer chat-token"},
             },
             auth_connector=_AuthStub(),
         )

@@ -1,6 +1,7 @@
 """Tests for SpecialAgent create_instance and integration with SubagentRunner."""
 
 import asyncio
+import json
 from types import SimpleNamespace
 from unittest.mock import patch, MagicMock
 
@@ -42,7 +43,7 @@ def _make_config(**overrides):
         "system_prompt_id": "test-prompt",
         "completions_url": "http://fake-llm/v1/chat/completions",
         "use_ssl": False,
-        "chat_completions_auth_token": "test-token",
+        "chat_completion_headers": {"Authorization": "Bearer test-token"},
     }
     cfg.update(overrides)
     return cfg
@@ -101,8 +102,8 @@ class TestSpecialAgentCreateInstance:
             )
 
         agent_role, task = instance.get_initial_data()
-        assert agent_role == "Custom role"
-        assert task == "Analyze data"
+        assert agent_role.startswith("Custom role")
+        assert "Analyze data" in task
 
     def test_llm_receives_role_in_prompt(self):
         """The LLM prompt should contain role name and description."""
@@ -145,10 +146,10 @@ class TestSpecialAgentCreateInstance:
         assert call_data["model"] == "gpt-4o-mini"
 
     def test_config_dict_used_for_url_and_auth(self):
-        """URL and auth token from config_dict should be passed to the LLM call."""
+        """URL and Authorization header from config_dict should be passed to the LLM call."""
         cfg = _make_config(
             completions_url="http://custom-url/v1/chat/completions",
-            chat_completions_auth_token="my-secret-token",
+            chat_completion_headers={"Authorization": "Bearer my-secret-token"},
             use_ssl=False,
         )
         with patch.object(
@@ -167,7 +168,7 @@ class TestSpecialAgentCreateInstance:
 
         _, headers = mock_llm.call_args[0]
         kwargs = mock_llm.call_args[1]
-        assert "Bearer my-secret-token" in headers.get("Authorization", "")
+        assert headers.get("Authorization") == "Bearer my-secret-token"
         assert kwargs.get("url") == "http://custom-url/v1/chat/completions"
 
     def test_generate_role_failure_propagates(self):
@@ -216,7 +217,9 @@ class TestSpecialAgentWithRunner:
                 run_agent_func,
             )
 
-        assert result == "Special agent done"
+        parsed = json.loads(result)
+        assert parsed["ok"] is True
+        assert parsed["result"] == "Special agent done"
         run_agent_func.assert_called_once()
 
         call_args = run_agent_func.call_args

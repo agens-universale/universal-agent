@@ -3,11 +3,13 @@ from types import SimpleNamespace
 
 from config import parse_chat_completions_max_tokens
 from intent_guard import validate_final_report_vs_user_intent
+from message_policy.cycle_stop import append_cycle_stop_tool_outputs_for_batch
+from request_backend_policy import request_chat_completions_with_policy
 from tools import apply_tool, WrongFunctionArgumentsException
+from tools.stored_outputs.wrapping import maybe_store_and_wrap_tool_output
 from utils.connect_backend import create_call_headers
 from utils.connect_backend import request_backend_responses as request_backend
 from utils.connect_backend import create_call_data_responses as create_call_data
-from utils.connect_backend import request_backend_chat_completions
 from utils.connect_backend import create_call_data_completions
 from utils.convertations import (
     output_chat_completion_to_response,
@@ -18,7 +20,7 @@ from utils.generate_message_id import generate_msg_id_sha256 as generate_message
 
 from states import State
 from typing import List, Dict, Union, Tuple, Any, Callable, Optional
-from user_message_policy import (
+from message_policy.user_message_policy import (
     TECHNICAL_TYPE_TECHNICAL,
     TECHNICAL_TYPE_ERROR_MESSAGE,
     wrap_technical_user_content,
@@ -28,6 +30,8 @@ from user_message_policy import (
 import logging
 
 _fallback_logger = logging.getLogger(__name__)
+
+
 def _summarize_call_data_for_log(call_data: Dict[str, Any]) -> Dict[str, Any]:
     """
     Короткая сводка запроса для корреляции с ответом backend.
@@ -68,6 +72,11 @@ def _get_backend_api_mode(ctx: Any) -> str:
     if raw_mode in {"responses", "chat_completions"}:
         return raw_mode
     raise ValueError(f"Unsupported backend_api_mode: {raw_mode!r}")
+
+
+def _mode_requires_backend_call(mode: str) -> bool:
+    return mode in {"user_ask", "function_call_output"}
+
 
 def _request_backend_canonical(
     messages: List[Dict],
@@ -126,14 +135,23 @@ def _request_backend_canonical(
     completions_max_tokens = parse_chat_completions_max_tokens(
         cfg.get("chat_completions_max_tokens", 8096), default=8096
     )
-    call_data = create_call_data_completions(
-        sanitized_messages,
-        chat_state,
-        max_tokens=completions_max_tokens,
+    min_response_tokens = parse_chat_completions_max_tokens(
+        cfg.get("chat_completions_min_response_tokens", 1024),
+        default=1024,
     )
-    res = request_backend_chat_completions(
-        call_data,
-        call_headers,
+
+    def _create_payload(max_tokens: int) -> Dict[str, Any]:
+        return create_call_data_completions(
+            sanitized_messages,
+            chat_state,
+            max_tokens=max_tokens,
+        )
+
+    res, call_data = request_chat_completions_with_policy(
+        payload_factory=_create_payload,
+        initial_max_tokens=completions_max_tokens,
+        min_response_tokens=min_response_tokens,
+        headers=call_headers,
         url=url,
         verify=verify,
         use_retry=use_retry,
@@ -216,14 +234,14 @@ def group_messages(messages: List[Dict]) -> Dict[str, List[Dict]]:
     }
 
 
-def check_trace_finished(messages: List[Dict]) -> Union[str, None]:
+def check_trace_finished(messages: List[Dict]) -> Union[Tuple[str, str], None]:
     if len(messages) == 0:
         raise ValueError('Empty messages list')
 
     grouped_messages = group_messages(messages)
     for m in grouped_messages['tool_calls']:
         if m['name'] == 'submit_solution':
-            return m['arguments']
+            return m['arguments'], m['call_id']
 
     return None
 
@@ -257,6 +275,14 @@ def process_tool_calls(
             state=state,
             run_agent_func=run_agent_func,
         )
+        tool_res = maybe_store_and_wrap_tool_output(
+            tool_res,
+            call_id=m["call_id"],
+            tool_name=m["name"],
+            state=state,
+            config=getattr(ctx, "config_dict", {}) or {},
+            logger=getattr(ctx, "logger", None),
+        )
         new_message = {
             "id": generate_message_id_func("fco"),
             "type": "function_call_output",
@@ -286,7 +312,7 @@ def run_agent(
     *,
     get_full_history_messages: Optional[Callable[[], List[Dict]]] = None,
     persist_messages_callback: Optional[Callable[[List[Dict]], None]] = None,
-    post_step_hook: Optional[Callable[[], None]] = None,
+    pre_backend_compaction_hook: Optional[Callable[[List[Dict], str], None]] = None,
     get_pending_messages: Optional[Callable[[], List[Dict]]] = None,
     check_stop: Optional[Callable[[], bool]] = None,
 ) -> Union[str, None]:
@@ -375,6 +401,19 @@ def run_agent(
             mode = check_mode(messages, run_logger)
             mode_for_step_count = mode
             backend_mode = _get_backend_api_mode(ctx)
+            if (
+                backend_mode == "chat_completions"
+                and _mode_requires_backend_call(mode)
+                and pre_backend_compaction_hook is not None
+            ):
+                try:
+                    pre_backend_compaction_hook(messages, mode)
+                except Exception as pre_backend_exc:
+                    run_logger.warning(
+                        "Pre-backend compaction hook warning: %s",
+                        pre_backend_exc,
+                        exc_info=True,
+                    )
             if mode == "user_ask":
                 try:
                     messages, response_id = process_user_ask(messages, state, ctx)
@@ -410,6 +449,20 @@ def run_agent(
                 # (которые пришли от бэкенда), когда mode == "function_call".
                 finish_response = check_trace_finished(messages)
                 if finish_response:
+                    finish_arguments, finish_call_id = finish_response
+                    grouped_messages = group_messages(messages)
+                    pending_tool_calls = grouped_messages.get("tool_calls", [])
+                    # Один раз закрываем pending tool_calls (в т.ч. submit_solution):
+                    # chat/completions требует role=tool после assistant.tool_calls; для
+                    # других backend_mode функция no-op.
+                    append_cycle_stop_tool_outputs_for_batch(
+                        state=state,
+                        ctx=ctx,
+                        tool_calls=pending_tool_calls,
+                        run_agent_func=run_agent,
+                        persist_messages_callback=persist_messages_callback,
+                        backend_mode=backend_mode,
+                    )
                     strict_finish_gate = bool(
                         cfg.get("strict_submit_solution_validation", True)
                     )
@@ -418,16 +471,36 @@ def run_agent(
                         active_user_messages = (
                             getattr(state, "current_user_messages", []) or []
                         )
-                        if not active_user_messages:
-                            active_user_messages = (
-                                getattr(state, "user_messages_log", []) or []
-                            )
-                        validation = validate_final_report_vs_user_intent(
-                            ctx=ctx,
-                            state=state,
-                            user_messages_log=active_user_messages,
-                            submit_solution_arguments=finish_response,
+                        full_user_messages_log = (
+                            getattr(state, "user_messages_log", []) or []
                         )
+                        if not active_user_messages:
+                            active_user_messages = full_user_messages_log
+                        context_user_messages = [
+                            msg
+                            for msg in full_user_messages_log
+                            if msg not in set(active_user_messages)
+                        ]
+                        try:
+                            validation = validate_final_report_vs_user_intent(
+                                ctx=ctx,
+                                state=state,
+                                current_user_requests=active_user_messages,
+                                context_user_messages=context_user_messages,
+                                submit_solution_arguments=finish_arguments,
+                            )
+                        except Exception as validation_exc:
+                            run_logger.warning(
+                                "finish_gate_validation_failed; allow submit_solution "
+                                "to avoid inconsistent tool_call history: %s",
+                                validation_exc,
+                                exc_info=True,
+                            )
+                            validation = None
+                        if validation is None:
+                            if is_main_agent:
+                                state.clear_current_user_messages()
+                            return finish_arguments
                         if not validation.ok:
                             run_logger.warning(
                                 "finish_gate_rejected conflicts=%s missing=%s",
@@ -443,7 +516,7 @@ def run_agent(
                             continue
                     if is_main_agent:
                         state.clear_current_user_messages()
-                    return finish_response
+                    return finish_arguments
                 messages = process_tool_calls(messages, state, ctx, run_agent_func=run_agent)
                 tool_error_cnt = 0
             elif mode == "function_call_output":
@@ -451,15 +524,6 @@ def run_agent(
                 if backend_mode == "responses":
                     state.previous_response_id = response_id
                 state.last_backend_response_id = response_id
-                if post_step_hook is not None:
-                    try:
-                        post_step_hook()
-                    except Exception as post_step_exc:
-                        run_logger.warning(
-                            "Post-step hook warning: %s",
-                            post_step_exc,
-                            exc_info=True,
-                        )
             elif mode == "text_response":
                 run_logger.warning("Agent returned text response without tool call, requesting tool call")
                 tool_error_cnt += 1

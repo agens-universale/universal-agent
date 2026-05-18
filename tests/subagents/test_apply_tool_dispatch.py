@@ -97,14 +97,14 @@ class TestSubagentDispatch:
 
             apply_tool(
                 tool_name="subagent_worker",
-                arguments={"task": "hello"},
+                arguments={"task": "hello", "reason": "test"},
                 ctx=ctx,
                 state=state,
                 run_agent_func=run_agent_func,
             )
 
         instance.run.assert_called_once_with(
-            "subagent_worker", {"task": "hello"}, run_agent_func,
+            "subagent_worker", {"task": "hello", "reason": "test"}, run_agent_func,
         )
 
     def test_regular_tool_not_affected(self):

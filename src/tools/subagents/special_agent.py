@@ -193,18 +193,31 @@ class SpecialAgent(AbstractSubagent):
 
         url = self.config_dict.get("completions_url", "")
         verify = self.config_dict.get("use_ssl", True)
-        auth_token = self.config_dict.get("chat_completions_auth_token")
-
         headers: Dict[str, str] = {}
-        if isinstance(auth_token, str) and auth_token.strip():
-            headers["Authorization"] = f"Bearer {auth_token.strip()}"
+        raw_headers = self.config_dict.get("chat_completion_headers")
+        if isinstance(raw_headers, dict):
+            for key, raw_val in raw_headers.items():
+                if not isinstance(key, str):
+                    continue
+                k = key.strip()
+                if not k:
+                    continue
+                if raw_val is None:
+                    continue
+                v = str(raw_val).strip()
+                if not v:
+                    continue
+                headers[k] = v
 
         call_data = {
             "model": model,
             "messages": messages,
-            "max_tokens": 4096,
             "temperature": 0.7,
         }
+        if bool(self.config_dict.get("use_max_tokens_param", False)):
+            call_data["max_tokens"] = 4096
+        else:
+            call_data["max_completion_tokens"] = 4096
 
         res_data = request_backend_chat_completions(
             call_data, headers, url=url, verify=verify,
