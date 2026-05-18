@@ -7,6 +7,7 @@ from uuid import uuid4
 from typing import List, Dict, Optional, Tuple
 
 
+from message_policy.chat_completions import prepare_chat_completion_messages_for_api
 from utils.convertations import output_chat_completion_to_response
 from utils.format_messages import format_message_chat_completions_to_send_backend
 from utils.retry import retry_with_backoff
@@ -328,9 +329,13 @@ def create_call_data_completions(
 
     to_send_messages_formatted = []
     for m in to_send_messages:
-        to_send_messages_formatted.append(
-            format_message_chat_completions_to_send_backend(m)
-        )
+        formatted = format_message_chat_completions_to_send_backend(m)
+        if formatted is not None:
+            to_send_messages_formatted.append(formatted)
+    to_send_messages_formatted = prepare_chat_completion_messages_for_api(
+        to_send_messages_formatted,
+        keep_latest_unanswered=True,
+    )
     effective_model = model
     if effective_model is None and state is not None:
         effective_model = state.default_model
