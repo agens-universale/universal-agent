@@ -19,6 +19,10 @@ class SharedStateData:
     notes_md: str = ""
     fetch_url_cache: Dict[str, str] = field(default_factory=dict)
 
+    def to_dict(self):
+        import dataclasses
+        return dataclasses.asdict(self)
+
 
 class State:
     def __init__(

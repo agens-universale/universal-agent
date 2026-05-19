@@ -203,6 +203,8 @@ def check_mode(messages, logger) -> Union[str, None]:
     for message in messages:
         if message.get('type', None) == 'function_call_output':
             return 'function_call_output'
+    if messages[-1].get('role', None) == 'assistant':
+        return 'text_response'
 
     logger.debug('Got Undefined mode for messages:')
     logger.debug(str(messages))
@@ -486,6 +488,15 @@ def run_agent(
                 if backend_mode == "responses":
                     state.previous_response_id = response_id
                 state.last_backend_response_id = response_id
+            elif mode == "text_response":
+                run_logger.warning("Agent returned text response without tool call, requesting tool call")
+                tool_error_cnt += 1
+                messages = [
+                    _make_technical_feedback_user_message(
+                        "There is no tool call in Agent response. Please send appropriate tool call",
+                        technical_type=TECHNICAL_TYPE_TECHNICAL,
+                    )
+                ]
             else:
                 raise ValueError(f"unconventional mode: {mode}")
         except WrongFunctionArgumentsException as e:

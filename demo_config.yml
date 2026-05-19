@@ -145,6 +145,18 @@ mcp:
       token: ""
       server-name: DuckDuckGo search
       description: Common web and News search
+    
+    # Перед включением: python recommended_mcp/install.py
+    # command и --output-dir — из строк [paths] в выводе install.py.
+    # Linux/macOS command: ~/.local/share/gc/node/v18.0.0/bin/npx
+    # Windows command:     ~/.gc/node/v18.0.0/bin/npx
+    # browser_playwright:
+    #   transport: stream_stdio
+    #   command: <путь из install.py>
+    #   args: ["-y", "@playwright/mcp@0.0.70", "--output-dir", "<cache>/playwright-mcp"]
+    #   persistent_session: true
+    #   description: Browser automation via Playwright.
+    #   server-name: playwright-browser
       # command: python3
       # args: ["server.py"]
       # cwd: ""
