@@ -42,7 +42,8 @@ def _project_skills_root() -> str:
     Корень Project-слоя — скиллы конкретного проекта.
     <cwd>/.gc/skills/. Считается на каждом вызове (cwd может меняться).
     """
-    return os.path.join(os.getcwd(), ".gc", "skills")
+    from config_modules.env_vars import project_gc_dir
+    return str(project_gc_dir() / "skills")
 
 
 def _parse_skill_markdown(path: str) -> tuple[Dict[str, Any], str]:

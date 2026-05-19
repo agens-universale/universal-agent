@@ -133,6 +133,7 @@ class SummaryTriggersTest(unittest.TestCase):
             logging_path=os.path.join(tmp_dir, "test.log"),
             tools_spec=[],
             tools_description=[],
+            project_gc_dir=Path(tmp_dir) / ".gc",
         )
 
     def test_chat_completions_calls_pre_run_and_pre_backend_summary(self):

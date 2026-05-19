@@ -207,7 +207,7 @@ def apply_tool(
         injected_fields=entry.get("injected_fields") or [],
     )
 
-    tool = tool_fabric(**kwargs)
+    tool = tool_fabric(ctx=ctx, **kwargs)
     # log.debug(
     #    "apply_tool log:\nkwargs:\n%s\narguments:\n %s\ntool_fabric:\n%s\ntool:\n%s",
     #    kwargs,
