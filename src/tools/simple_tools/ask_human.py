@@ -3,6 +3,42 @@ import json
 from typing import Optional, Dict, Any
 from tools.simple_tools.abstract_simple_tool import AbstractSimpleTool
 
+# Shown on every successful ask_human observation (agent-visible JSON).
+_RESPONSE_HINT = (
+    "Classify the reply before advancing. "
+    "Direct answer (specific choice or instruction) → use it and proceed. "
+    "Delegation (user leaves the call to you: 'you decide', 'your call', "
+    "'как считаешь', 'на твоё усмотрение') → do not decide silently. "
+    "Investigate/weigh with other tools, then ask_human with your proposed choice, "
+    "reasoning, and explicit confirmation; proceed only after they agree — not a black box. "
+    "Meta-question (user asks you back, e.g. 'what do you recommend?') → "
+    "do not skip to the next task step. If you need facts, investigate with other tools "
+    "first; reflect, then ask_human in one turn with your answer, reasoning, and "
+    "ask whether they agree or want to settle the original choice — not a snap reply. "
+    "Ambiguous, empty, or off-topic → ask_human again to clarify. "
+    "If still insufficient and the user did not delegate, keep asking — do not guess."
+)
+
+_TOOL_DESCRIPTION = (
+    "Send a message to the human user and wait for their free-form reply. "
+    "Use whenever you need human input to continue: clarification, confirmation, "
+    "subjective judgment, design discussion, or continuing a dialogue. "
+    "The question field may be a short prompt or a longer turn — context, "
+    "reasoning, partial findings, then what you need from the user. "
+    "When a finite choice set fits, prefer a closed-form question with explicit "
+    "options (A/B/C, numbered list, yes/no); use an open question when options "
+    "would be incomplete, misleading, or worse than free-form. "
+    "After each reply, classify it: (1) direct answer — proceed; "
+    "(2) delegation — user defers to you: research, then ask_human with a declared "
+    "proposal and confirmation before acting; "
+    "(3) meta-question or follow-up — investigate/reflect if needed, then ask_human "
+    "with your answer and ask for confirmation on the open decision; "
+    "do not advance the methodology; "
+    "(4) ambiguous/empty — ask_human again to clarify. "
+    "If still insufficient and they did not delegate, keep asking; "
+    "pacing follows the user, not your plan."
+)
+
 
 class AskHuman(AbstractSimpleTool):
     @staticmethod
@@ -12,17 +48,18 @@ class AskHuman(AbstractSimpleTool):
         question: str,
         response: str,
         error: Optional[Dict[str, Any]] = None,
+        hint: Optional[str] = None,
     ) -> str:
-        return json.dumps(
-            {
-                "tool": "ask_human",
-                "ok": ok,
-                "error": error,
-                "question": question,
-                "response": response,
-            },
-            ensure_ascii=False,
-        )
+        payload: Dict[str, Any] = {
+            "tool": "ask_human",
+            "ok": ok,
+            "error": error,
+            "question": question,
+            "response": response,
+        }
+        if hint:
+            payload["hint"] = hint
+        return json.dumps(payload, ensure_ascii=False)
 
     """
     Tool that allows the AI agent to ask a question and receive input from a human user.
@@ -34,13 +71,17 @@ class AskHuman(AbstractSimpleTool):
         return {
             "type": "function",
             "name": "ask_human",
-            "description": "Ask a question to the human user and wait for their response. Use this when clarification, confirmation, or subjective input is needed. The question must be clear, concise, and include necessary context. Avoid vague phrasing; prefer open-ended questions or multiple-choice options to minimize follow-up.",
+            "description": _TOOL_DESCRIPTION,
             "parameters": {
                 "type": "object",
                 "properties": {
                     "question": {
                         "type": "string",
-                        "description": "The clear, concise question to ask the human. Should be self-contained and include relevant context if needed (e.g., code snippets, options). Keep under 100 words when possible."
+                        "description": (
+                            "What to show the human: question, request, or full conversational "
+                            "turn (markdown ok). Prefer listed answer options when the decision "
+                            "is essentially among known choices; otherwise ask openly."
+                        ),
                     }
                 },
                 "required": ["question"],
@@ -51,6 +92,8 @@ class AskHuman(AbstractSimpleTool):
 
     @classmethod
     def prompt_description(cls) -> str:
+        # Legacy channel (tools_descr); not wired to API today — reserved for a future
+        # tool_help-style meta-tool. Agent-facing spec: tool_description + result hint.
         description = '''Tool name: ask_human  
 Tool description: Asks a question to the human user and waits for their textual response. Essential for resolving ambiguity, confirming critical actions, or gathering subjective opinions.
 Input schema: {"type": "object", "properties": {"question": {"type": "string", "description": "The clear, concise question to ask the human. Should be self-contained."}}, "required": ["question"], "additionalProperties": false}
@@ -59,7 +102,7 @@ Usage:
 - Use this tool **only** when you cannot proceed confidently without human input.
 - The human will read your question and type a free-form answer.
 - Always phrase questions clearly and unambiguously.
-- Avoid yes/no unless necessary; prefer open-ended or multiple-choice when context helps.
+- When a finite set of answers fits, prefer closed-form with explicit options (A/B/C, numbered, yes/no); use open-ended only when options would be incomplete or misleading.
 - Include relevant context in the question (e.g., code snippets, options). In this case format your question with markdown.
 - Do **not** use this tool for routine operations, searching, or debugging — use appropriate tools instead.
 
@@ -75,11 +118,13 @@ Important Rules:
 
 Handling user's response — CRITICAL for natural conversation:
 
-After receiving the user's response, ANALYZE it before advancing your reasoning. The response falls into one of three categories:
+After receiving the user's response, ANALYZE it before advancing your reasoning. The response falls into one of four categories:
 
 1. **Direct answer** — the user picked one of your options or gave a substantive answer to your question (e.g., "A", "yes", "option B sounds good", "use approach X"). Use it and proceed.
 
-2. **Meta-question or follow-up** — the user is asking YOU something instead of answering, or asking for elaboration. Common signals:
+2. **Delegation to you** — the user leaves the decision to the agent (e.g., "you decide", "your call", "как считаешь", "на твоё усмотрение"). This is **not** permission to act silently. Investigate and weigh options (other tools as needed), then call `ask_human` with your **proposed** choice, tradeoffs, and ask for explicit confirmation. Proceed only after they agree — stay visible, not a black box.
+
+3. **Meta-question or follow-up** — the user is asking YOU something instead of answering, or asking for elaboration. Common signals:
    • "What do you recommend?"
    • "Explain how X works" / "Tell me more about Y"
    • "What are the tradeoffs?"
@@ -87,11 +132,11 @@ After receiving the user's response, ANALYZE it before advancing your reasoning.
    • Any question mark at the end of their reply.
 
    **DO NOT** advance to the next step of your task or methodology. Instead:
-   • Answer their meta-question in your next message.
-   • Re-call `ask_human` with both: (a) your answer to the meta-question, and (b) the original question restated (refined if their query suggests a better framing).
+   • If their question needs evidence (code, docs, state), use other tools first — do not guess in ask_human.
+   • Reflect, then re-call `ask_human` in **one** turn: your answer, brief reasoning, and ask whether they agree or want to close the original choice (refined framing ok). Same dialogue thread; not a one-line snap reply.
    • Pacing follows the user, not your internal task plan.
 
-3. **Ambiguous** — unclear whether it's an answer or a follow-up. Re-call `ask_human` with a clarifying yes/no: "Did you mean to choose <X>? (yes/no, or ask for more)".
+4. **Ambiguous** — unclear whether it's an answer, delegation, or a follow-up. Re-call `ask_human` with a clarifying yes/no: "Did you mean to choose <X>, or should I decide? (yes/no, or ask for more)".
 
 This applies especially during multi-turn dialogues — brainstorming, design discussions, planning, debugging conversations — where back-and-forth is expected. Don't force-march through a methodology when the user wants to pause, drill in, or course-correct.
 
@@ -111,11 +156,11 @@ Examples:
 Re-ask after a meta-question — pattern:
 Previous ask: "Which architecture: A) centralized manager, B) direct, C) plugin? (A/B/C)"
 User responded: "what do you recommend?"
-→ Next call should look like:
+→ First: read relevant code/config if needed (other tools), then ask_human, e.g.:
 {
-  "question": "I recommend **A (centralized manager)** because:\\n- Scales as more MCP servers are added.\\n- Single integration surface to LangChain.\\n- Avoids ad-hoc subprocess management.\\n\\nGiven that — do you want A, or prefer B/C with the tradeoffs above? (A/B/C)"
+  "question": "I looked at how MCP servers are wired today. I recommend **A (centralized manager)** because:\\n- Scales as more MCP servers are added.\\n- Single integration surface.\\n\\nDoes A work for you, or should we compare B/C in more detail?"
 }
-This pattern keeps the conversation paced by the user, not by your internal task plan.
+Not: a one-line opinion without looking, and not advancing to implementation before they confirm.
 '''
         return description
 
@@ -191,6 +236,7 @@ This pattern keeps the conversation paced by the user, not by your internal task
                 question=question,
                 response=response,
                 error=None,
+                hint=_RESPONSE_HINT,
             )
 
         except KeyboardInterrupt:
