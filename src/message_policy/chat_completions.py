@@ -85,3 +85,104 @@ def repair_tool_call_pairing(
 
     normalized_reversed.reverse()
     return normalized_reversed
+
+
+def _assistant_content_text(message: Dict) -> str:
+    content = message.get("content")
+    if content in (None, "", []):
+        return ""
+    return str(content)
+
+
+def coalesce_consecutive_assistant_tool_calls(messages: List[Dict]) -> List[Dict]:
+    """
+    Схлопывает подряд идущие assistant-сообщения с tool_calls в одно.
+
+    Канонический формат (отдельный function_call на каждый вызов) при конвертации
+    в chat/completions даёт несколько assistant подряд без role=tool между ними —
+    OpenAI отклоняет такой payload (400).
+    """
+    if not isinstance(messages, list) or not messages:
+        return messages
+
+    result: List[Dict] = []
+    i = 0
+    n = len(messages)
+
+    while i < n:
+        message = messages[i]
+        if not isinstance(message, dict):
+            i += 1
+            continue
+
+        leading_content = ""
+        if (
+            message.get("role") == "assistant"
+            and not message.get("tool_calls")
+            and i + 1 < n
+        ):
+            nxt = messages[i + 1]
+            if (
+                isinstance(nxt, dict)
+                and nxt.get("role") == "assistant"
+                and isinstance(nxt.get("tool_calls"), list)
+                and nxt["tool_calls"]
+            ):
+                leading_content = _assistant_content_text(message)
+                i += 1
+                message = messages[i]
+
+        tool_calls = message.get("tool_calls") if isinstance(message, dict) else None
+        if not (
+            message.get("role") == "assistant"
+            and isinstance(tool_calls, list)
+            and tool_calls
+        ):
+            result.append(message)
+            i += 1
+            continue
+
+        content_parts: List[str] = []
+        if leading_content:
+            content_parts.append(leading_content)
+
+        merged_tool_calls: List[Dict] = []
+        j = i
+        while j < n:
+            cur = messages[j]
+            if not isinstance(cur, dict) or cur.get("role") != "assistant":
+                break
+            cur_tool_calls = cur.get("tool_calls")
+            if not (isinstance(cur_tool_calls, list) and cur_tool_calls):
+                break
+            merged_tool_calls.extend(cur_tool_calls)
+            cur_content = _assistant_content_text(cur)
+            if cur_content:
+                content_parts.append(cur_content)
+            j += 1
+
+        merged: Dict = {
+            "role": "assistant",
+            "content": "\n\n".join(content_parts),
+        }
+        if merged_tool_calls:
+            merged["tool_calls"] = merged_tool_calls
+        result.append(merged)
+        i = j
+
+    return result
+
+
+def prepare_chat_completion_messages_for_api(
+    messages: List[Dict],
+    *,
+    keep_latest_unanswered: bool = False,
+) -> List[Dict]:
+    """
+    Нормализация истории перед отправкой в chat/completions API.
+    """
+    coalesced = coalesce_consecutive_assistant_tool_calls(messages)
+    return repair_tool_call_pairing(
+        coalesced,
+        keep_latest_unanswered=keep_latest_unanswered,
+    )

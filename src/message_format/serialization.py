@@ -1,3 +1,5 @@
+"""Каноничное текстовое представление сообщений треда для LLM-промптов и метрик длины."""
+
 import json
 import re
 from typing import Any, Dict, List
@@ -17,8 +19,8 @@ def strip_original_user_messages_block(summary_text: str) -> str:
     """
     Удаляет из текста фрагмент ``<original_user_messages>...</original_user_messages>``.
 
-    Зачем: при **входе в LLM-суммаризацию** этот блок дублирует то, что уже передаётся отдельным полем
-    ``<user_requests_log>`` в user-промпте 
+    Зачем: при **входе в LLM-промпт** этот блок дублирует то, что уже передаётся отдельным полем
+    ``<user_requests_log>`` в user-промпте.
 
     Аргументы:
         summary_text: исходная строка саммари. Не-``str`` трактуется как отсутствие данных.
@@ -38,14 +40,6 @@ def history_has_dialog_summary_message(messages: List[Dict[str, Any]]) -> bool:
 
     Зачем: оркестратор (например, ``agent_executor``) различает «сырой» тред и тред после compaction —
     без этого легко повторить суммаризацию или неверно обработать загруженный из persistence трейс.
-
-    Что делает: проходит по списку и вызывает ``is_dialog_summary_message`` для каждого элемента.
-
-    Аргументы:
-        messages: последовательность сообщений (как в OpenAI-совместимом API). Не-словари пропускаются.
-
-    Возвращает:
-        ``True``, если найдено непустое user-сообщение, распознаваемое как dialog summary; иначе ``False``.
     """
     for msg in messages:
         if not isinstance(msg, dict):
@@ -61,21 +55,6 @@ def history_has_dialog_summary_message(messages: List[Dict[str, Any]]) -> bool:
 
 
 def _message_content_to_text(content: Any) -> str:
-    """
-    Приводит поле ``content`` (или payload tool-вызова) к одной строке для встраивания в текст саммари.
-
-    Зачем: ``message_text_for_summary`` должен работать и с чистой строкой, и с multimodal-списком,
-    и с произвольным JSON — без дублирования правил в нескольких ветках.
-
-    Что делает: строка возвращается как есть; список — конкатенация текстовых частей и JSON остального;
-    dict — ``json.dumps``; ``None`` — ``""``; прочие типы — ``str(...)``.
-
-    Аргументы:
-        content: произвольное значение из тела сообщения или аргументов/вывода function_call.
-
-    Возвращает:
-        Скалярную строку без побочных эффектов.
-    """
     if isinstance(content, str):
         return content
     if isinstance(content, list):
@@ -97,19 +76,9 @@ def _message_content_to_text(content: Any) -> str:
 
 def message_text_for_summary(message: Dict[str, Any]) -> str:
     """
-    Строит каноничное текстовое представление одного сообщения для LLM-суммаризации и метрик размера.
+    Строит каноничное текстовое представление одного сообщения для LLM-промптов и метрик размера.
 
-    Зачем: ``dialog_history`` / оркестратор суммаризации и ``calc_messages_chars_total`` должны смотреть на один и тот же
-    сериализованный вид, иначе пороги по символам и текст для модели разъедутся.
-
-    Что делает: для ``function_call`` / ``tool_call`` и вывода инструмента формирует помеченные блоки;
-    для обычных сообщений — ``[<role>]`` плюс текст из ``_message_content_to_text``.
-
-    Аргументы:
-        message: одно сообщение треда. Не-словарь даёт ``""``.
-
-    Возвращает:
-        Одна строка — текстовый снимок сообщения для промпта суммаризатора и ``len()`` в метриках.
+    Используется ``message_format.dialog_history``, суммаризацией и finish gate (trace digest).
     """
     if not isinstance(message, dict):
         return ""
@@ -129,12 +98,7 @@ def message_text_for_summary(message: Dict[str, Any]) -> str:
 
 
 def message_raw_payload_chars_for_trigger(message: Dict[str, Any]) -> int:
-    """
-    Оценка длины содержимого сообщения для порога суммаризации (§1): без префиксов ``[role]``, без склейки в промпт.
-
-    Суммируются поля полезной нагрузки (текст content, имя и аргументы вызова, вывод инструмента) через
-    ``_message_content_to_text``; служебные обёртки вида ``[function_call]`` не включаются.
-    """
+    """Оценка длины содержимого сообщения для порога суммаризации: без префиксов ``[role]``."""
     if not isinstance(message, dict):
         return 0
     msg_type = str(message.get("type") or "message")
@@ -148,25 +112,12 @@ def message_raw_payload_chars_for_trigger(message: Dict[str, Any]) -> int:
 
 
 def calc_history_chars_for_trigger(messages: List[Dict[str, Any]]) -> int:
-    """Суммарный объём истории в «сырых» символах для сравнения с ``chat_completions_summary_trigger_chars``."""
+    """Суммарный объём истории в «сырых» символах для ``chat_completions_summary_trigger_chars``."""
     return sum(message_raw_payload_chars_for_trigger(m) for m in messages)
 
 
 def calc_messages_chars_total(messages: List[Dict[str, Any]]) -> int:
-    """
-    Считает суммарную длину в символах сериализованного трека (каноничный вид для промпта LLM).
-
-    Зачем: метрики до/после схлопывания и согласование с оценкой длины в ``dialog_history``; **не** используется для
-    порога запуска (см. ``calc_history_chars_for_trigger``).
-
-    Что делает: для каждого элемента списка берёт ``len(message_text_for_summary(message))`` и суммирует.
-
-    Аргументы:
-        messages: список сообщений того же вида, что обходит pipeline суммаризации.
-
-    Возвращает:
-        Неотрицательное целое — суммарное число символов по всем сообщениям.
-    """
+    """Суммарная длина сериализованного треда (каноничный вид для промпта LLM)."""
     total = 0
     for message in messages:
         total += len(message_text_for_summary(message))

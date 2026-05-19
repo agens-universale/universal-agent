@@ -1,6 +1,6 @@
 import types
 
-from summarize.dialog_history import (
+from message_format.dialog_history import (
     build_history_text,
     group_into_turns,
     message_text_limited,
@@ -435,7 +435,7 @@ def test_summarize_pipeline_calls_build_history_text_with_max_chars_disabled(mon
         return build_history_text(*args, **kwargs)
 
     monkeypatch.setattr(
-        "summarize.thread_summarizer.dialog_history.build_history_text",
+        "message_format.dialog_history.build_history_text",
         wrapped,
     )
 

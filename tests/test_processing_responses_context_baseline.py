@@ -6,8 +6,11 @@ import types
 from pathlib import Path
 from types import SimpleNamespace
 
+import intent_guard.guard as intent_guard_guard
 import pytest
 import requests
+
+from intent_guard.validation_result import ValidationResult
 
 
 def teardown_module(_module) -> None:
@@ -343,7 +346,7 @@ def test_submit_solution_validation_failure_fails_open(monkeypatch):
         raise RuntimeError("validation backend failure")
 
     monkeypatch.setattr(
-        processing_module,
+        intent_guard_guard,
         "validate_final_report_vs_user_intent",
         _raise_validation,
     )
@@ -389,8 +392,13 @@ def test_submit_solution_validation_receives_context_and_current_scope(monkeypat
 
     def _fake_validation(**kwargs):
         captured.update(kwargs)
-        return SimpleNamespace(
+        return ValidationResult(
             ok=True,
+            action="accept",
+            trace_ok=True,
+            report_ok=True,
+            trace_gaps=[],
+            report_mismatches=[],
             missing_requirements=[],
             conflicts=[],
             coverage_score=1.0,
@@ -398,7 +406,7 @@ def test_submit_solution_validation_receives_context_and_current_scope(monkeypat
         )
 
     monkeypatch.setattr(
-        processing_module,
+        intent_guard_guard,
         "validate_final_report_vs_user_intent",
         _fake_validation,
     )
@@ -414,6 +422,51 @@ def test_submit_solution_validation_receives_context_and_current_scope(monkeypat
     assert captured["context_user_messages"] == ["старый вопрос"]
 
 
+def test_finish_gate_builds_trace_digest_from_state_messages(monkeypatch):
+    from unittest.mock import patch
+
+    from intent_guard.trace_digest import FinishGateTraceDigest
+
+    state = _make_state()
+    state.messages = [
+        {"role": "user", "content": "сделай X"},
+        {
+            "type": "function_call",
+            "call_id": "t1",
+            "name": "read_file",
+            "arguments": {"path": "x.py"},
+        },
+    ]
+    state.current_user_messages = ["сделай X"]
+    state.user_messages_log = ["сделай X"]
+    digest = FinishGateTraceDigest(
+        trace_digest_text='<message n="1">\n[user] сделай X\n</message>',
+        digest_chars=30,
+    )
+    validator_json = (
+        '{"action":"accept","trace_ok":true,"report_ok":true,'
+        '"trace_gaps":[],"report_mismatches":[]}'
+    )
+
+    with patch(
+        "intent_guard.final_report_consistency.build_finish_gate_trace_digest",
+        return_value=digest,
+    ) as mock_build:
+        with patch(
+            "intent_guard.final_report_consistency.request_chat_completion_text",
+            return_value=validator_json,
+        ):
+            run_agent(
+                [_submit_solution_call()],
+                state,
+                _make_ctx(strict_submit_solution_validation=True),
+            )
+
+    mock_build.assert_called_once()
+    call_state = mock_build.call_args.kwargs.get("state") or mock_build.call_args[0][0]
+    assert call_state is state
+
+
 def test_finish_gate_rejection_still_appends_cycle_stop_tool_outputs(monkeypatch):
     """При отклонении quality/finish gate pending tool_calls должны закрываться
     синтетическими function_call_output (как при успехе), иначе chat/completions
@@ -421,8 +474,13 @@ def test_finish_gate_rejection_still_appends_cycle_stop_tool_outputs(monkeypatch
     recorded: list[list[str | None]] = []
 
     def _reject_validation(**_kwargs):
-        return SimpleNamespace(
+        return ValidationResult(
             ok=False,
+            action="fix_report_and_continue",
+            trace_ok=False,
+            report_ok=False,
+            trace_gaps=["m"],
+            report_mismatches=["c"],
             missing_requirements=["m"],
             conflicts=["c"],
             coverage_score=0.0,
@@ -437,7 +495,7 @@ def test_finish_gate_rejection_still_appends_cycle_stop_tool_outputs(monkeypatch
         return real_append(**kwargs)
 
     monkeypatch.setattr(
-        processing_module,
+        intent_guard_guard,
         "validate_final_report_vs_user_intent",
         _reject_validation,
     )

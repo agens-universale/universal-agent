@@ -263,6 +263,84 @@ Background и CLI-клиент для работы с агентом GigaCode: �
    В `config.yml` агента укажи нужный транспорт (`http`, `stream_http` и т.д.)
    и endpoint подключения (см. раздел 6 выше).
 
+8. **Пакет рекомендованных MCP (`recommended_mcp/`)**
+
+   В папке `recommended_mcp/` лежит готовый установщик для набора MCP-серверов,
+   которые часто нужны агенту: `office-reader` (чтение pdf/docx/xlsx/...),
+   `browser_playwright` (управление браузером через Playwright), `computer`
+   (Windows-only GUI control через UI Automation).
+
+   Манифест установки — `recommended_mcp/config.yml`. Чтобы пропустить
+   конкретный MCP, закомментируй его блок там перед запуском `install.py`.
+
+   ### Установка
+
+   Из корня проекта:
+
+   ```bash
+   python recommended_mcp/install.py
+   # или
+   uv run python recommended_mcp/install.py
+   ```
+
+
+      ### Запуск
+
+   Из корня проекта:
+
+   ```bash
+   python recommended_mcp/run.py
+   # или
+   uv run recommended_mcp/run.py
+   ```
+
+   Что произойдёт:
+
+   - **office-reader** — `pip install` из приложенного wheel-файла
+     (`recommended_mcp/office-reader/dist/*.whl`). Появится консольная команда
+     `mcp-office-reader`.
+   - **browser_playwright** — скачает и распакует пиннутый Node.js
+     (v18.0.0) в `<gc_paths()['data']>/node/v18.0.0/` (Linux:
+     `~/.local/share/gc/node/...`, Windows: `~/.gc/node/...`), прогреет npm-кэш
+     `@playwright/mcp@0.0.70` и доустановит Chromium. Системная Node не
+     используется. В конце `install.py` печатает `command:` для `config.yml`.
+   - **computer** (только Windows) — `pip install` wheel'а. Появится команда
+     `gc-computer-mcp`.
+
+   Каталог для Node по умолчанию — `gc_paths()['data']`; переопределение —
+   опциональный `agent_dep_dir` в `recommended_mcp/config.yml`.
+
+   ### Подключение в `config.yml` агента
+
+   В каждой подпапке (`browser_playwright/`, `office-reader/`, `computer/`)
+   лежит `agent_config.snippet.yml` — скопируй блок в секцию `mcp-servers:`
+   своего `config.yml`. Пути с `~` раскрываются в `_resolve_command`
+   (`src/tools/connect_mcp/transport.py`), отдельной правки под ОС не нужно.
+
+   Пример для browser_playwright (stdio, single-process, persistent):
+
+   ```yaml
+   mcp-servers:
+     browser_playwright:
+       transport: stream_stdio
+       command: ~/.local/share/gc/node/v18.0.0/bin/npx
+       args: ["-y", "@playwright/mcp@0.0.70", "--output-dir", "~/.cache/gc/playwright-mcp"]
+       persistent_session: true
+       description: Browser automation via Playwright.
+       server-name: playwright-browser
+   ```
+
+   ### Скриншоты и медиа из MCP
+
+   `@playwright/mcp` (и любой MCP, возвращающий image/audio в content-блоках)
+   возвращает base64 — без обработки это сотни тысяч токенов на вызов.
+   Агент декодирует такие блоки и сохраняет в файл, заменяя `data` на `path`.
+
+   ### Альтернативный запуск через Docker
+   `browser_playwright` можно поднимать в контейнере (HTTP/SSE-транспорт
+   вместо stdio) — см. `recommended_mcp/browser_playwright/README.md`,
+   там же `Dockerfile` и `docker-compose.yml`.
+
 
 
 ## Где gc-cli хранит runtime-данные
@@ -516,3 +594,40 @@ swarm:
 - Песочница удаляется **не при завершении процесса, а по истечении TTL** (вместе с данными сессии). Это гарантирует, что артефакты доступны для продления сессии и согласуется с историей в `swarm/threads/`.
 - Рекомендуется cron-задача для очистки старых swarm-данных (см. `scripts/cleanup_swarm_threads.py`).
 - Bubblewrap-монтирование `/lib`, `/lib64`, `/usr` может потребовать адаптации под конкретный дистрибутив (например, на Arch Linux `/lib` → symlink на `/usr/lib`).
+
+---
+
+# Playwright MCP (браузер)
+
+Агент умеет управлять браузером через MCP-сервер `@playwright/mcp`. Доступные инструменты:
+навигация, клики, ввод текста, скриншоты, снапшот accessibility-дерева страницы, выполнение JS.
+
+## Подключение в config.yml
+
+```yaml
+mcp-servers:
+  browser:
+    transport: stream_http
+    url: http://localhost:8931/mcp
+    server-name: playwright-browser
+    persistent_session: true
+```
+
+```yaml
+  browser_playwright:
+    transport: stream_sse
+    url: http://localhost:8931
+    description: Browser automation via Playwright. Use for web navigation, clicking, form filling, taking screenshots, and web scraping.
+    server-name: playwright-browser
+    persistent_session: true
+```
+```yaml  
+  browser_playwright:
+      transport: stream_stdio
+      command: ~/.local/share/gc/node/v18.0.0/bin/npx
+      args: ["-y", "@playwright/mcp@0.0.70", "--output-dir", "~/.cache/gc/playwright-mcp"]
+      persistent_session: true
+      persistent_session_close_tool: browser_close
+      description: Browser automation via Playwright. Use for web navigation, clicking, form filling, taking screenshots, and webscraping.
+      server-name: playwright-browser
+```

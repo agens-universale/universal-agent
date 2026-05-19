@@ -1,17 +1,34 @@
 from typing import Any, Dict, Optional
 
+import base64
 import json
 import logging
+import os
+import time
+import uuid
+
 import requests
 
-from tools.connect_mcp.client import _MCP_SESSIONS, _call_mcp_tool, _get_or_init_session_id
+from config import load_config
+from tools.connect_mcp.client import (
+    _MCP_SESSIONS,
+    _call_mcp_tool,
+    _get_or_init_session_id,
+)
+from tools.connect_mcp.persistent_stdio import (
+    PersistentStdioRegistry,
+    is_persistent_stdio,
+)
 from tools.connect_mcp.registry import get_all_tools
 from tools.connect_mcp.stream_client import (
     call_tool_stream_http,
     call_tool_stream_sse,
     call_tool_stream_stdio,
 )
-from tools.connect_mcp.validation import _validate_tool_arguments, format_mcp_tool_result
+from tools.connect_mcp.validation import (
+    _validate_tool_arguments,
+    format_mcp_tool_result,
+)
 from utils.retry import retry_with_backoff
 
 logger = logging.getLogger(__name__)
@@ -23,13 +40,29 @@ def _json_sanitize(value: Any) -> Any:
     - bytes/bytearray -> "binary data"
     - dict/list/tuple -> recursive
     - everything else -> keep as is when possible; fallback to string repr
+
+    Также вырезает base64-полезную нагрузку из MCP image/audio content-блоков:
+    такие блоки приходят рядом с text-блоком, в котором уже есть путь/описание,
+    а сырой base64 раздувает историю на ~100k+ токенов за один скриншот и
+    пробивает контекст backend-модели.
     """
     if value is None:
         return None
     if isinstance(value, (bytes, bytearray)):
         return "binary data"
     if isinstance(value, dict):
-        out: Dict[str, Any] = {}
+        ctype = value.get("type")
+        if ctype in ("image", "audio") and isinstance(value.get("data"), str):
+            size = len(value["data"])
+            out: Dict[str, Any] = {}
+            for k, v in value.items():
+                key = k if isinstance(k, str) else str(k)
+                if k == "data":
+                    out[key] = f"<{ctype} data stripped: {size} base64 chars>"
+                else:
+                    out[key] = _json_sanitize(v)
+            return out
+        out = {}
         for k, v in value.items():
             # JSON keys must be strings
             key = k if isinstance(k, str) else str(k)
@@ -46,6 +79,112 @@ def _json_sanitize(value: Any) -> Any:
     return str(value)
 
 
+_MIME_EXT = {
+    "image/png": ".png",
+    "image/jpeg": ".jpg",
+    "image/jpg": ".jpg",
+    "image/webp": ".webp",
+    "image/gif": ".gif",
+    "audio/wav": ".wav",
+    "audio/mpeg": ".mp3",
+    "audio/ogg": ".ogg",
+}
+
+
+def _default_mcp_media_dir() -> str:
+    """Дефолт: gc_paths()['cache'] / mcp-media (XDG на Linux, ~/.gc/cache на Windows)."""
+    from config_modules.env_vars import gc_paths
+
+    return str(gc_paths()["cache"] / "mcp-media")
+
+
+def _mcp_media_save_dir() -> str:
+    """Куда складывать декодированные image/audio.
+
+    Приоритет: config `mcp-meta.media_save_dir` → gc_paths()['cache']/mcp-media.
+    Создаётся при первой записи.
+    """
+    config = load_config()
+    raw = config.get("mcp-meta", {}).get("media_save_dir")
+    if raw:
+        return os.path.expanduser(str(raw))
+    return _default_mcp_media_dir()
+
+
+def _pick_filename(
+    arguments: Dict[str, Any],
+    base_tool_name: str,
+    mime: str,
+) -> str:
+    """Имя файла: из arguments.filename (только basename), иначе autogen.
+    Всегда форсим расширение по mimeType, чтобы не было `.png` на jpeg и наоборот.
+    """
+    ext = _MIME_EXT.get((mime or "").lower(), ".bin")
+    fname: Optional[str] = None
+    if isinstance(arguments, dict):
+        raw_name = (
+            arguments.get("filename") or arguments.get("file") or arguments.get("path")
+        )
+        if isinstance(raw_name, str) and raw_name.strip():
+            fname = os.path.basename(raw_name.strip())
+    if not fname:
+        fname = f"{base_tool_name}_{int(time.time())}_{uuid.uuid4().hex[:6]}"
+    stem, had_ext = os.path.splitext(fname)
+    return stem + ext
+
+
+def _save_media_block(
+    block: Dict[str, Any],
+    arguments: Dict[str, Any],
+    base_tool_name: str,
+) -> Dict[str, Any]:
+    """Декодировать base64 MCP image/audio content и сохранить на диск.
+
+    В случае успеха удаляем поле `data` и добавляем `path`/`size_bytes`.
+    В случае ошибки возвращаем блок как есть — дальше `_json_sanitize`
+    сам обрежет `data`, чтобы не взорвать контекст.
+    """
+    data = block.get("data")
+    if not isinstance(data, str) or not data:
+        return block
+    mime = str(block.get("mimeType") or "")
+    save_dir = _mcp_media_save_dir()
+    try:
+        os.makedirs(save_dir, exist_ok=True)
+        fname = _pick_filename(arguments, base_tool_name, mime)
+        path = os.path.join(save_dir, fname)
+        raw_bytes = base64.b64decode(data, validate=False)
+        with open(path, "wb") as f:
+            f.write(raw_bytes)
+    except Exception as e:
+        logger.warning("Failed to save MCP media block: %s", e)
+        return block
+
+    out: Dict[str, Any] = {k: v for k, v in block.items() if k != "data"}
+    out["path"] = path
+    out["size_bytes"] = len(raw_bytes)
+    return out
+
+
+def _rewrite_media_blocks(
+    raw: Any,
+    arguments: Dict[str, Any],
+    base_tool_name: str,
+) -> Any:
+    """Рекурсивно обходит result, декодирует и сохраняет image/audio блоки,
+    заменяя base64 `data` на ссылку `path` на хостовой ФС."""
+    if isinstance(raw, dict):
+        if raw.get("type") in ("image", "audio") and isinstance(raw.get("data"), str):
+            return _save_media_block(raw, arguments, base_tool_name)
+        return {
+            k: _rewrite_media_blocks(v, arguments, base_tool_name)
+            for k, v in raw.items()
+        }
+    if isinstance(raw, list):
+        return [_rewrite_media_blocks(v, arguments, base_tool_name) for v in raw]
+    return raw
+
+
 def _wrap_mcp_result(
     *,
     full_tool_name: str,
@@ -57,6 +196,7 @@ def _wrap_mcp_result(
     """
     Normalize ANY MCP tool output into a stable JSON envelope.
     """
+    raw = _rewrite_media_blocks(raw, arguments, base_tool_name)
     formatted = format_mcp_tool_result(raw) if isinstance(raw, dict) else raw
     formatted_sanitized = _json_sanitize(formatted)
 
@@ -64,7 +204,10 @@ def _wrap_mcp_result(
     error: Optional[Dict[str, Any]] = None
 
     # Common MCP pattern: {"content": ..., "isError": bool}
-    if isinstance(formatted_sanitized, dict) and formatted_sanitized.get("isError") is True:
+    if (
+        isinstance(formatted_sanitized, dict)
+        and formatted_sanitized.get("isError") is True
+    ):
         ok = False
         error = {
             "type": "mcp_tool_error",
@@ -127,7 +270,11 @@ def call_mcp_tool(
     # Берём описание тулы и метаданные.
     # Ожидаемый формат: {"tool": {...}, "metadata": {...}}.
     raw_entry = tools_registry[full_tool_name]
-    tool_entry = raw_entry.get("tool") if isinstance(raw_entry, dict) and "tool" in raw_entry else raw_entry
+    tool_entry = (
+        raw_entry.get("tool")
+        if isinstance(raw_entry, dict) and "tool" in raw_entry
+        else raw_entry
+    )
     metadata = raw_entry.get("metadata", {}) if isinstance(raw_entry, dict) else {}
 
     # Ключ сервера и реальное имя тулы на MCP‑сервере
@@ -149,9 +296,10 @@ def call_mcp_tool(
     transport = server_cfg.get("transport")
     url = server_cfg.get("url") or ""
     token = server_cfg.get("token")
-    if transport not in ("stdio", "stream_stdio") and not url:
+    stdio_like = transport in ("stdio", "stream_stdio")
+    if not stdio_like and not url:
         raise ValueError(f"MCP server '{server_key}' has no 'url' in config")
-    if transport in ("stdio", "stream_stdio") and not server_cfg.get("command"):
+    if stdio_like and not server_cfg.get("command"):
         raise ValueError(
             f"MCP server '{server_key}' ({transport}) has no 'command' in config"
         )
@@ -164,13 +312,24 @@ def call_mcp_tool(
 
     use_retry = bool(server_cfg.get("use_retry", default_use_retry))
 
+    # persistent_session унифицирован для всех транспортов: для легаси `sse`/`http`
+    # (one-shot через transport.py) своего пула соединений нет, поэтому при флаге
+    # true роутим через SDK-клиент `stream_sse`/`stream_http` — там уже живёт
+    # `_PersistentSessionManager` с длинной ClientSession.
+    effective_transport = transport
+    if server_cfg.get("persistent_session"):
+        if transport == "sse":
+            effective_transport = "stream_sse"
+        elif transport == "http":
+            effective_transport = "stream_http"
+
     @retry_with_backoff(
         operation_name=f"MCP tool call ({server_key}:{base_tool_name})",
         retry_log_level=logging.ERROR,
         no_more_retries_log_level=logging.ERROR,
     )
     def _do_mcp_call() -> Any:
-        if transport == "stream_sse":
+        if effective_transport == "stream_sse":
             return call_tool_stream_sse(
                 url=url,
                 server_cfg=server_cfg,
@@ -179,7 +338,7 @@ def call_mcp_tool(
                 tool_name=base_tool_name,
                 arguments=arguments_obj,
             )
-        if transport == "stream_http":
+        if effective_transport == "stream_http":
             return call_tool_stream_http(
                 url=url,
                 server_cfg=server_cfg,
@@ -195,12 +354,23 @@ def call_mcp_tool(
                 tool_name=base_tool_name,
                 arguments=arguments_obj,
             )
+        if is_persistent_stdio(server_cfg):
+            session = PersistentStdioRegistry.instance().get_or_create(
+                server_key, server_cfg
+            )
+            return session.call(
+                "tools/call",
+                {"name": base_tool_name, "arguments": arguments_obj},
+                timeout,
+            )
 
         session_id = _get_or_init_session_id(
             server_key, url, server_cfg, token=token, timeout=timeout
         )
         if not session_id:
-            raise RuntimeError(f"Failed to initialize MCP session for server '{server_key}'")
+            raise RuntimeError(
+                f"Failed to initialize MCP session for server '{server_key}'"
+            )
 
         def do_call(sid: str):
             return _call_mcp_tool(

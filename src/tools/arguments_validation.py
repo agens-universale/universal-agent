@@ -22,25 +22,68 @@ class WrongFunctionArgumentsException(Exception):
         """
         Формирует четкое и структурированное сообщение об ошибке для LLM.
         """
-        feedback = "❌ **Tool Argument Validation Failed**\n\n"
+        tool_label = f"`{self.tool_name}`" if self.tool_name else "tool"
+        feedback = f"❌ Wrong arguments for {tool_label}: {self.message}\n\n"
 
-        if self.tool_name:
-            feedback += f"**Tool:** `{self.tool_name}`\n\n"
-        feedback += f"**Error:** {self.message}\n\n"
+        args_display = self.received_args if self.received_args else "(empty)"
+        feedback += f"You sent: `{args_display}`\n\n"
 
-        args_display = self.received_args if self.received_args else "(empty or missing)"
-        feedback += f"**Received Arguments:**\n```json\n{args_display}\n```\n\n"
+        # Special hint: model is trying to write a filesystem file via memory_files
+        if self.tool_name == "memory_files" and self.received_args:
+            try:
+                import json as _json
+                _sent = _json.loads(self.received_args) if isinstance(self.received_args, str) else self.received_args
+                if isinstance(_sent, dict) and "path" in _sent:
+                    feedback += (
+                        "💡 Hint: `memory_files` is for INTERNAL AGENT MEMORY only — it does NOT write files to disk.\n"
+                        "To create files on the filesystem (e.g. fibonacci.py, test_fibonacci.py, data.json), "
+                        "use the `write_to_file` tool with `path` (absolute path) and `content` arguments.\n\n"
+                    )
+            except Exception:
+                pass
 
         if self.expected_schema:
-            feedback += f"**Expected Schema:**\n```json\n{self.expected_schema}\n```\n\n"
+            params = self.expected_schema.get("parameters", {}) if isinstance(self.expected_schema, dict) else {}
+            properties = params.get("properties", {}) or {}
+            required_fields = params.get("required", []) or []
+            required_entries = []
+            optional_entries = []
+            for field, spec in properties.items():
+                ftype = spec.get("type", "any")
+                fdesc = spec.get("description", "")
+                fdesc_short = fdesc.split(".")[0] if fdesc else ""
+                entry = f'  "{field}": <{ftype}>'
+                if fdesc_short:
+                    entry += f"  // {fdesc_short}"
+                if field in required_fields:
+                    required_entries.append(entry)
+                else:
+                    optional_entries.append(entry)
+            if required_entries or optional_entries:
+                all_field_entries = required_entries + optional_entries
+                all_field_lines = []
+                if required_entries:
+                    all_field_lines.append("  // REQUIRED")
+                    all_field_lines.extend(required_entries)
+                if optional_entries:
+                    all_field_lines.append("  // OPTIONAL")
+                    all_field_lines.extend(optional_entries)
+                # Add comma after each field entry (non-comment lines), except the last one
+                body_lines = []
+                last_field_idx = max(
+                    i for i, line in enumerate(all_field_lines) if not line.strip().startswith("//")
+                )
+                for i, line in enumerate(all_field_lines):
+                    is_comment = line.strip().startswith("//")
+                    is_last_field = (not is_comment and i == last_field_idx)
+                    if is_comment or is_last_field:
+                        body_lines.append(line)
+                    else:
+                        body_lines.append(line + ",")
+                body = "\n".join(body_lines)
+                feedback += f"Correct call format:\n```json\n{{\n{body}\n}}\n```\n\n"
 
-        feedback += (
-            "**Action Required:**\n"
-            "1. Review the error message and schema above.\n"
-            "2. Correct the JSON arguments to match the expected schema.\n"
-            "3. Ensure all required fields are present and have the correct types.\n"
-            "4. Retry the tool call with the fixed arguments."
-        )
+        feedback += "Fix the arguments and retry the tool call."
         return feedback
 
 
