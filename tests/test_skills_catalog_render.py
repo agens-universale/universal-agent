@@ -1,4 +1,4 @@
-from states import render_skills_catalog
+from tools.skills.skills_policy import render_skills_catalog
 
 B_ALPHA = {"id": "alpha:using-alpha", "name": "Using Alpha",
            "description": "Alpha entry.", "pack_id": "alpha",

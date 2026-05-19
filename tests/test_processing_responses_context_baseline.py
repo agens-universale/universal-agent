@@ -285,7 +285,41 @@ def test_chat_completions_http_error_retries_with_reduced_max_tokens(monkeypatch
     assert response["id"] == "chatcmpl_test"
     assert payload["max_tokens"] == 30
     assert max_tokens_seen == [100, 50, 30]
-    assert use_retry_seen == [True, False, False]
+    assert use_retry_seen == [True, True, True]
+
+
+def test_run_agent_propagates_backend_connection_error(monkeypatch):
+    """После исчерпания transport-ретраев не подменяем ошибку no-tool-call bounce."""
+
+    def _failing_process_user_ask(_messages, _state, _ctx):
+        raise requests.exceptions.ConnectionError("network is down")
+
+    monkeypatch.setattr(
+        processing_module, "process_user_ask", _failing_process_user_ask
+    )
+
+    with pytest.raises(requests.exceptions.ConnectionError, match="network is down"):
+        run_agent(
+            [{"role": "user", "content": "hello", "id": "m1"}],
+            _make_state(),
+            _make_ctx(),
+        )
+
+
+def test_run_agent_propagates_backend_http_error(monkeypatch):
+    def _failing_process_user_ask(_messages, _state, _ctx):
+        raise _http_error(503)
+
+    monkeypatch.setattr(
+        processing_module, "process_user_ask", _failing_process_user_ask
+    )
+
+    with pytest.raises(requests.exceptions.HTTPError):
+        run_agent(
+            [{"role": "user", "content": "hello", "id": "m1"}],
+            _make_state(),
+            _make_ctx(),
+        )
 
 
 def test_chat_completions_connection_error_does_not_lower_max_tokens(monkeypatch):

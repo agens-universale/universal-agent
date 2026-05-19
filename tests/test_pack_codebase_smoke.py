@@ -1,5 +1,5 @@
 from skill_arg_resolver import resolve_skill_arg, Resolved
-from states import render_skills_catalog
+from tools.skills.skills_policy import render_skills_catalog
 from tools.skills.registry import SkillsRegistry
 
 
