@@ -92,6 +92,49 @@ class ChatCompletionsToolsNormalizationTest(unittest.TestCase):
             '{"path": "/tmp/demo.md"',
         )
 
+    def test_create_call_data_completions_coalesces_parallel_function_calls(self):
+        state = SimpleNamespace(
+            messages=[
+                {"role": "user", "content": "task"},
+                {
+                    "id": "fc_1",
+                    "type": "function_call",
+                    "call_id": "call_1",
+                    "name": "search_web_search",
+                    "arguments": "{}",
+                },
+                {
+                    "id": "fc_2",
+                    "type": "function_call",
+                    "call_id": "call_2",
+                    "name": "search_web_search",
+                    "arguments": "{}",
+                },
+                {
+                    "id": "fco_1",
+                    "type": "function_call_output",
+                    "call_id": "call_1",
+                    "output": "r1",
+                },
+                {
+                    "id": "fco_2",
+                    "type": "function_call_output",
+                    "call_id": "call_2",
+                    "output": "r2",
+                },
+            ],
+            tools=[],
+            default_model="test-model",
+        )
+        data = create_call_data_completions([], state=state)
+        assistants_with_tools = [
+            m
+            for m in data["messages"]
+            if m.get("role") == "assistant" and m.get("tool_calls")
+        ]
+        self.assertEqual(len(assistants_with_tools), 1)
+        self.assertEqual(len(assistants_with_tools[0]["tool_calls"]), 2)
+
     def test_create_call_data_completions_keeps_valid_tool_call(self):
         state = SimpleNamespace(
             messages=[],

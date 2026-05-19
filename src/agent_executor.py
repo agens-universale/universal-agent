@@ -17,7 +17,7 @@ from config_modules.stored_outputs import get_stored_tool_outputs_max_entries
 from message_policy.chat_completions import repair_tool_call_pairing
 from run_summary_coordinator import RunSummaryCoordinator
 from summarize.config import parse_summary_trigger_chars
-from summarize.summary_serialization import history_has_dialog_summary_message
+from message_format.serialization import history_has_dialog_summary_message
 from states import State, SharedStateData, save_state, dump_storage
 from thread_store import (
     ThreadSession,
