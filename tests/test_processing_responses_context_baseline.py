@@ -285,7 +285,7 @@ def test_chat_completions_http_error_retries_with_reduced_max_tokens(monkeypatch
     assert response["id"] == "chatcmpl_test"
     assert payload["max_tokens"] == 30
     assert max_tokens_seen == [100, 50, 30]
-    assert use_retry_seen == [True, True, True]
+    assert use_retry_seen == [True, False, False]
 
 
 def test_run_agent_propagates_backend_connection_error(monkeypatch):
