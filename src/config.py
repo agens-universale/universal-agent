@@ -16,6 +16,7 @@ from config_modules.security import (
     apply_cli_command_moderation_overrides,
 )
 from config_modules.summary import DEFAULT_LAST_DIALOG_STEP_MESSAGE_MAX_CHARS
+from config_modules import env_vars
 
 # Backward compatibility for existing imports.
 _DEFAULT_LAST_DIALOG_STEP_MESSAGE_MAX_CHARS = (
@@ -59,6 +60,24 @@ def _project_local_config_path() -> Optional[str]:
     return None
 
 
+def _xdg_config_path() -> Optional[str]:
+    """
+    Вернуть абсолютный путь к <gc_paths()["config"]>/config.yml, если файл
+    существует, иначе None.
+
+    Базовый tier между --config и пакетным дефолтом. Каталог берётся из
+    gc_paths()["config"] (XDG-config: ~/.config/gc/ на Linux/macOS,
+    %USERPROFILE%\\.gc\\ на Windows; учитывает GC_CONFIG_DIR / XDG_CONFIG_HOME
+    / GC_HOME). Полная база-замена, НЕ слой: частичный файл здесь теряет
+    пакетные дефолты (project-local <cwd>/.gc/config.yml по-прежнему
+    мерджится поверх выбранной базы).
+    """
+    candidate = os.path.abspath(str(env_vars.gc_paths()["config"] / "config.yml"))
+    if os.path.isfile(candidate):
+        return candidate
+    return None
+
+
 def apply_cli_overrides(
     config_dict: Dict[str, Any],
     *,
@@ -79,7 +98,7 @@ def apply_cli_overrides(
 
 
 def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
-    path = config_path or _default_config_path()
+    path = config_path or _xdg_config_path() or _default_config_path()
     config_dir = os.path.dirname(os.path.abspath(path))
 
     with open(path, "r", encoding="utf-8") as file:
