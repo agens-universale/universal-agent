@@ -63,7 +63,8 @@ def test_prompt_description_includes_meta_response_handling():
 
 
 def test_success_result_includes_hint(monkeypatch):
-    monkeypatch.setattr(builtins, "input", lambda: "yes")
+    answers = iter(["yes", ""])
+    monkeypatch.setattr(builtins, "input", lambda: next(answers))
     out = json.loads(AskHuman()(question="Proceed?"))
     assert out["ok"] is True
     assert "hint" in out
