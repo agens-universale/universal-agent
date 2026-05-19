@@ -67,7 +67,7 @@ class LongMemory(AbstractSimpleTool):
                         "description": (
                             "Markdown text for append/write. "
                             "For append: ONLY the new delta. "
-                            "For write: the FULL updated markdown. Ignored for read."
+                            "For write: the FULL updated markdown. Parameter is ignored for read action."
                         ),
                     },
                 },
