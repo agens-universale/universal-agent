@@ -3,6 +3,32 @@ import json
 from typing import Optional, Dict, Any
 from tools.simple_tools.abstract_simple_tool import AbstractSimpleTool
 
+# Shown on every successful ask_human observation (agent-visible JSON).
+_RESPONSE_HINT = (
+    "Classify the reply before advancing. "
+    "Direct answer (specific choice or instruction) → use it and proceed. "
+    "Delegation (user leaves the call to you: 'you decide', 'your call', "
+    "'как считаешь', 'на твоё усмотрение') → do not decide silently. "
+    "Investigate/weigh with other tools, then ask_human with your proposed choice, "
+    "reasoning, and explicit confirmation; proceed only after they agree — not a black box. "
+    "Meta-question (user asks you back, e.g. 'what do you recommend?') → "
+    "do not skip to the next task step. If you need facts, investigate with other tools "
+    "first; reflect, then ask_human in one turn with your answer, reasoning, and "
+    "ask whether they agree or want to settle the original choice — not a snap reply. "
+    "Ambiguous, empty, or off-topic → ask_human again to clarify. "
+    "If still insufficient and the user did not delegate, keep asking — do not guess."
+)
+
+_TOOL_DESCRIPTION = (
+    "Ask the human user and wait for their free-form reply. "
+    "Use for clarification, confirmation, subjective judgment, or continuing a dialogue. "
+    "Be clear and include necessary context; avoid vague questions. "
+    "The question may be a short prompt or a longer turn (background, reasoning, what you need). "
+    "When a finite choice set fits, prefer explicit options (A/B/C, numbered list, yes/no) "
+    "to minimize follow-up; otherwise ask openly. "
+    "After each call, follow the hint field in the tool result to handle the user's reply."
+)
+
 
 class AskHuman(AbstractSimpleTool):
     @staticmethod
@@ -12,17 +38,18 @@ class AskHuman(AbstractSimpleTool):
         question: str,
         response: str,
         error: Optional[Dict[str, Any]] = None,
+        hint: Optional[str] = None,
     ) -> str:
-        return json.dumps(
-            {
-                "tool": "ask_human",
-                "ok": ok,
-                "error": error,
-                "question": question,
-                "response": response,
-            },
-            ensure_ascii=False,
-        )
+        payload: Dict[str, Any] = {
+            "tool": "ask_human",
+            "ok": ok,
+            "error": error,
+            "question": question,
+            "response": response,
+        }
+        if hint:
+            payload["hint"] = hint
+        return json.dumps(payload, ensure_ascii=False)
 
     """
     Tool that allows the AI agent to ask a question and receive input from a human user.
@@ -34,13 +61,16 @@ class AskHuman(AbstractSimpleTool):
         return {
             "type": "function",
             "name": "ask_human",
-            "description": "Ask a question to the human user and wait for their response. Use this when clarification, confirmation, or subjective input is needed. The question must be clear, concise, and include necessary context. Avoid vague phrasing; prefer open-ended questions or multiple-choice options to minimize follow-up.",
+            "description": _TOOL_DESCRIPTION,
             "parameters": {
                 "type": "object",
                 "properties": {
                     "question": {
                         "type": "string",
-                        "description": "The clear, concise question to ask the human. Should be self-contained and include relevant context if needed (e.g., code snippets, options). Keep under 100 words when possible."
+                        "description": (
+                            "Clear message to the human (markdown ok): question, context, and "
+                            "preferably explicit answer options when choices are known."
+                        ),
                     }
                 },
                 "required": ["question"],
@@ -51,40 +81,78 @@ class AskHuman(AbstractSimpleTool):
 
     @classmethod
     def prompt_description(cls) -> str:
-        description = '''Tool name: ask_human  
-Tool description: Asks a question to the human user and waits for their textual response. Essential for resolving ambiguity, confirming critical actions, or gathering subjective opinions.
-Input schema: {"type": "object", "properties": {"question": {"type": "string", "description": "The clear, concise question to ask the human. Should be self-contained."}}, "required": ["question"], "additionalProperties": false}
+        # Legacy channel (tools_descr); not wired to API today — reserved for a future
+        # tool_help-style meta-tool. Agent-facing spec: tool_description + result hint.
+        description = '''Tool name: ask_human
 
-Usage:
-- Use this tool **only** when you cannot proceed confidently without human input.
-- The human will read your question and type a free-form answer.
-- Always phrase questions clearly and unambiguously.
-- Avoid yes/no unless necessary; prefer open-ended or multiple-choice when context helps.
-- Include relevant context in the question (e.g., code snippets, options). In this case format your question with markdown.
-- Do **not** use this tool for routine operations, searching, or debugging — use appropriate tools instead.
+Overview:
+Ask the human user and wait for a free-form textual reply. Use for clarification,
+confirmation, subjective judgment, design discussion, or continuing a dialogue.
 
-Important Rules:
-- **NEVER** ask vague or overly broad questions like "What should I do?".
-- Make your questions as short as possible. You have limit for length of question about 100 words, but less is better.
-- If necessary provide **context**: reference files, code, or prior steps.
-- Phrase questions so they can be answered with minimal back-and-forth.
-- Avoid asking for trivial information available via other tools.
-- Never ask the same question twice if you got answer earlier.
-- Answer from user may be empty (empty response) or some irrelevant information. In such case you can reask.
-- Escape special characters properly (use \\n for newlines, \\t for tabs).
+What the agent actually sees (today):
+- **tool_description** (function spec in the tools list) — when and how to ask; points to the result hint.
+- **hint** field on each successful tool result — how to classify and handle the user's reply (canonical at runtime).
+- **prompt_description** (this document) — full reference for tools_descr / a future tool_help meta-tool; not injected into the API prompt today.
 
-Examples:
+Input schema:
+{"type": "object", "properties": {"question": {"type": "string", "description": "Clear message to the human (markdown ok): question, context, preferably explicit answer options when choices are known."}}, "required": ["question"], "additionalProperties": false}
+
+When to use:
+- You cannot proceed confidently without human input.
+- You need confirmation before a consequential action.
+- The user is in a back-and-forth (brainstorming, planning, debugging) and you need their next turn.
+
+When NOT to use:
+- Routine work other tools can do (read files, search, run commands, fetch URLs).
+- Guessing facts you could look up first — investigate, then ask if still unclear.
+
+How to formulate `question`:
+- Be clear; include necessary context; avoid vague prompts like "What should I do?".
+- May be **short** or a **longer conversational turn**: background, your reasoning so far, partial findings, then what you need.
+- When a finite choice set fits, prefer **closed-form** with explicit options (A/B/C, numbered list, yes/no) to minimize follow-up.
+- Use an **open** question when options would be incomplete, misleading, or worse than free-form.
+- Markdown is fine (code snippets, lists). Hard limit: 4096 characters per question.
+
+After each call — read `response` and the result **`hint`**:
+Classify the reply before advancing. Same rules as the live hint; four categories:
+
+1. **Direct answer** — substantive choice or instruction (e.g. "A", "yes", "use approach X"). Use it and proceed.
+
+2. **Delegation to you** — user defers (e.g. "you decide", "your call", "как считаешь", "на твоё усмотрение").
+   **Not** permission to act silently. Investigate/weigh with other tools, then `ask_human` with your **proposed** choice, tradeoffs, and explicit confirmation. Proceed only after they agree — not a black box.
+
+3. **Meta-question or follow-up** — user asks YOU back ("what do you recommend?", "explain X", trailing "?").
+   Do **not** skip to the next methodology step. If facts are needed, use other tools first; reflect; then one `ask_human` turn with your answer, reasoning, and ask to close the original choice — not a snap reply. Pacing follows the user.
+
+4. **Ambiguous / empty / off-topic** — `ask_human` again to clarify (e.g. "Did you mean <X>, or should I propose options?").
+
+Do not re-ask the same question if you already got a usable direct answer. Empty or irrelevant replies → clarify or reask.
+
+Examples — asking (closed-form):
 {
-  "question": "I found two conflicting requirements in docs/ARCHITECTURE.md and src/config.rs.\\nWhich behavior should take precedence: strict validation or backward compatibility?"
+  "question": "Choose one:\\nA) Refactor using Strategy pattern\\nB) Add flags to existing function\\nC) Create new module\\nReply A, B, or C."
 }
 
+Examples — asking (open, with context):
 {
-  "question": "Should I delete the deprecated function `legacy_auth()`? It's unused but referenced in comments.\\nReply 'yes' to remove or 'no' to keep."
+  "question": "I found conflicting requirements in docs/ARCHITECTURE.md and src/config.rs.\\nWhich behavior should take precedence: strict validation or backward compatibility?"
 }
 
+Example — after meta-question (investigate first, then one turn):
+Previous ask: "Which architecture: A) centralized manager, B) direct, C) plugin?"
+User: "what do you recommend?"
+→ Read relevant code if needed, then:
 {
-  "question": "Choose one:\\nA) Refactor using Strategy pattern\\nB) Add flags to existing function\\nC) Create new module\\nEnter A, B, or C."
+  "question": "From the current wiring I recommend **A (centralized manager)** because it scales with more MCP servers and keeps one integration surface.\\n\\nDoes A work for you, or compare B/C in more detail?"
 }
+
+Example — after delegation (propose, then confirm):
+User: "you decide"
+→ Research/weigh, then:
+{
+  "question": "Given the tradeoffs above, I propose **B (direct wiring)** for this repo size: less indirection, easier debugging.\\n\\nConfirm B, or prefer A/C?"
+}
+Do not implement until they confirm.
 '''
         return description
 
@@ -160,6 +228,7 @@ Examples:
                 question=question,
                 response=response,
                 error=None,
+                hint=_RESPONSE_HINT,
             )
 
         except KeyboardInterrupt:

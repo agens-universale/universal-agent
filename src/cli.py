@@ -1,4 +1,5 @@
 import os
+import sys
 from typing import Any
 
 import arg_parser
@@ -68,6 +69,47 @@ def run(
     )
 
 
+def _resolve_forced_skill(skill_name: str, config_dict: dict) -> str | None:
+    """Resolve the -s/--skill flag deterministically (pack-aware).
+
+    Returns the exact canonical skill id when resolved; the raw name as a
+    soft fallback when it can't be resolved (unresolvable / ambiguous, or the
+    catalog can't be built); or None when no -s was given. The agent always
+    starts — an unresolved -s is a hint, not a hard contract — but the user
+    is loudly warned on stderr so an explicitly requested -s is never
+    silently dropped.
+    """
+    name = (skill_name or "").strip()
+    if not name:
+        return None
+    from tools.skills.skill_arg_resolver import resolve_skill_arg, Resolved, Failed
+    from tools.skills.registry import get_skills_registry
+
+    try:
+        catalog = get_skills_registry(config_dict).skill_catalog()
+    except Exception as exc:  # noqa: BLE001 - surface as warning, not traceback
+        print(
+            f"warning: не удалось построить каталог скиллов для -s ({exc}); "
+            f"агент стартует, '-s {name}' передан агенту как есть.",
+            file=sys.stderr,
+        )
+        return name
+
+    res = resolve_skill_arg(name, catalog)
+    if isinstance(res, Failed):
+        msg = (
+            f"warning: -s '{name}' не разрешён детерминированно "
+            f"({res.reason}); агент стартует, имя передано агенту как есть."
+        )
+        if res.suggestions:
+            msg += " Возможно: " + ", ".join(res.suggestions) + "."
+        print(msg, file=sys.stderr)
+        return name
+    if res.note:
+        print(f"note: {res.note}", file=sys.stderr)
+    return res.canonical_id
+
+
 def main() -> Any:
     """
     Входная точка CLI: парсинг аргументов, загрузка конфига,
@@ -86,15 +128,20 @@ def main() -> Any:
         no_root_box=arg_parser.run_args.no_root_box,
         command_moderation_mode=arg_parser.run_args.command_moderation,
     )
+    forced_skill_id = _resolve_forced_skill(
+        arg_parser.run_args.skill, config_dict
+    )
+
     auth_connector = build_auth_connector(config_dict)
     ctx = create_run_context(config_dict, auth_connector=auth_connector)
 
     user_parts: list[str] = [arg_parser.run_args.query]
     if arg_parser.run_args.wrap_technical:
         user_parts[0] = wrap_technical_user_content(user_parts[0])
-    skill_name = (arg_parser.run_args.skill or "").strip()
-    if skill_name:
-        user_parts.append(wrap_skill_resolution_technical_instruction(skill_name))
+    if forced_skill_id:
+        user_parts.append(
+            wrap_skill_resolution_technical_instruction(forced_skill_id)
+        )
 
     verbose = arg_parser.run_args.verbose
     thread_id = arg_parser.run_args.thread_id

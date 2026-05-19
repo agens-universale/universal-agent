@@ -11,6 +11,7 @@ from message_policy.user_message_policy import (
     append_user_log_entries,
     normalize_user_log_entries,
 )
+from tools.skills.skills_policy import render_skills_catalog
 
 
 @dataclass
@@ -94,13 +95,9 @@ class State:
         metadata["promptVariables"] = self.initial_project_data
         attach_status_to_prompt_vars(metadata["promptVariables"])
         if self.skills_list:
-            skills_template = (
-                "For solving task you can use skills.\n"
-                "Use skills tools for loading skills data and skills resources.\n"
-                "Available skills list:\n"
+            metadata["promptVariables"]["available_skills"] = render_skills_catalog(
+                self.skills_list
             )
-            skills_template += json.dumps(self.skills_list, ensure_ascii=False)
-            metadata["promptVariables"]["available_skills"] = skills_template
         agent_md_path = getattr(self, "agent_md_path", None)
         if agent_md_path:
             try:

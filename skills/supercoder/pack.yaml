@@ -1,0 +1,9 @@
+id: supercoder
+name: Supercoder Methodology
+description: |
+  Process methodology for design, planning, debugging, TDD, and code review.
+  Use when starting non-trivial coding work (feature, bugfix, refactor) or
+  hitting a tricky bug.
+version: 1.0.0
+source: https://github.com/obra/superpowers
+bootstrap_skill: using-supercoder

@@ -20,6 +20,11 @@ from utils.generate_message_id import generate_msg_id_sha256 as generate_message
 
 from states import State
 from typing import List, Dict, Union, Tuple, Any, Callable, Optional
+from message_policy.no_tool_call_bounce import (
+    NO_TOOL_CALL_BOUNCE_MESSAGE,
+    extract_last_assistant_text,
+    format_no_tool_call_bounce,
+)
 from message_policy.user_message_policy import (
     TECHNICAL_TYPE_TECHNICAL,
     TECHNICAL_TYPE_ERROR_MESSAGE,
@@ -317,7 +322,7 @@ def run_agent(
     check_stop: Optional[Callable[[], bool]] = None,
 ) -> Union[str, None]:
     tool_error_cnt = 0
-    run_logger = getattr(ctx, "logger", _fallback_logger)
+    run_logger = getattr(ctx, "logger", None) or _fallback_logger
     cfg = getattr(ctx, "config_dict", {}) or {}
     console_trace = cfg.get("console_trace", True)
     max_tool_errors = cfg.get("no_tool_call_max_count", 0)
@@ -337,13 +342,15 @@ def run_agent(
             tool_error_cnt += 1
             messages = [
                 _make_technical_feedback_user_message(
-                    "There is no tool call in Agent response. Please send appropriate tool call",
+                    NO_TOOL_CALL_BOUNCE_MESSAGE,
                     technical_type=TECHNICAL_TYPE_TECHNICAL,
                 )
             ]
             state.steps += 1
             continue
         mode_for_step_count = None
+        mode = None
+        backend_mode = _get_backend_api_mode(ctx)
         try:
             for m in messages:
                 m_formatted = format_message_responses(m)
@@ -400,7 +407,6 @@ def run_agent(
 
             mode = check_mode(messages, run_logger)
             mode_for_step_count = mode
-            backend_mode = _get_backend_api_mode(ctx)
             if (
                 backend_mode == "chat_completions"
                 and _mode_requires_backend_call(mode)
@@ -414,110 +420,118 @@ def run_agent(
                         pre_backend_exc,
                         exc_info=True,
                     )
-            if mode == "user_ask":
-                try:
-                    messages, response_id = process_user_ask(messages, state, ctx)
-                except Exception as user_ask_exc:
-                    can_retry_with_full_history = (
-                        backend_mode == "responses"
-                        and state.previous_response_id is not None
-                        and get_full_history_messages is not None
-                        and _is_previous_response_cache_miss(user_ask_exc)
-                    )
-                    if not can_retry_with_full_history:
-                        raise
-
-                    run_logger.warning(
-                        "Cache miss for previous_response_id=%s. Retry with full history.",
-                        state.previous_response_id,
-                    )
-                    full_history_messages = get_full_history_messages()
-                    state.previous_response_id = None
-                    messages, response_id, _ = _request_backend_canonical(
-                        full_history_messages,
-                        state,
-                        ctx,
-                        set_previous_response_id=False,
-                    )
-                if backend_mode == "responses":
-                    state.previous_response_id = response_id
-                state.last_backend_response_id = response_id
-            elif mode == "function_call":
-                # `submit_solution` должен завершать ТЕКУЩИЙ user turn,
-                # а не сразу срабатывать по истории предыдущих тактов.
-                # Поэтому проверяем только на этапе обработки новых function_call
-                # (которые пришли от бэкенда), когда mode == "function_call".
-                finish_response = check_trace_finished(messages)
-                if finish_response:
-                    finish_arguments, finish_call_id = finish_response
-                    grouped_messages = group_messages(messages)
-                    pending_tool_calls = grouped_messages.get("tool_calls", [])
-                    # Один раз закрываем pending tool_calls (в т.ч. submit_solution):
-                    # chat/completions требует role=tool после assistant.tool_calls; для
-                    # других backend_mode функция no-op.
-                    append_cycle_stop_tool_outputs_for_batch(
-                        state=state,
-                        ctx=ctx,
-                        tool_calls=pending_tool_calls,
-                        run_agent_func=run_agent,
-                        persist_messages_callback=persist_messages_callback,
-                        backend_mode=backend_mode,
-                    )
-                    if backend_mode == "chat_completions":
-                        gate = FinishGateGuard(ctx=ctx, state=state, logger=run_logger)
-                        decision = gate.evaluate_submit_solution(
-                            submit_solution_arguments=finish_arguments,
-                        )
-                        if decision.outcome == "reject":
-                            messages = [
-                                _make_technical_feedback_user_message(
-                                    decision.feedback_text,
-                                    technical_type=TECHNICAL_TYPE_TECHNICAL,
-                                )
-                            ]
-                            continue
-                        if decision.outcome in ("fail_open_error", "fail_open_limit"):
-                            state.clear_current_user_messages()
-                            return finish_arguments
-                    state.clear_current_user_messages()
-                    return finish_arguments
-                messages = process_tool_calls(messages, state, ctx, run_agent_func=run_agent)
-                tool_error_cnt = 0
-            elif mode == "function_call_output":
-                messages, response_id = process_tool_outputs(messages, state, ctx)
-                if backend_mode == "responses":
-                    state.previous_response_id = response_id
-                state.last_backend_response_id = response_id
-            elif mode == "text_response":
-                run_logger.warning("Agent returned text response without tool call, requesting tool call")
-                tool_error_cnt += 1
-                messages = [
-                    _make_technical_feedback_user_message(
-                        "There is no tool call in Agent response. Please send appropriate tool call",
-                        technical_type=TECHNICAL_TYPE_TECHNICAL,
-                    )
-                ]
-            else:
-                raise ValueError(f"unconventional mode: {mode}")
-        except WrongFunctionArgumentsException as e:
-            run_logger.error(e, exc_info=True)
-            tool_error_cnt += 1
-            messages = [
-                _make_technical_feedback_user_message(
-                    e.to_llm_feedback(),
-                    technical_type=TECHNICAL_TYPE_ERROR_MESSAGE,
-                )
-            ]
         except Exception as e:
-            # raise e
+            # Ошибки до успешного разбора батча (санитайз, check_mode, …) — bounce.
             run_logger.error(e, exc_info=True)
             tool_error_cnt += 1
+            assistant_text = extract_last_assistant_text(messages)
+            bounce_msg = format_no_tool_call_bounce(assistant_text)
             messages = [
                 _make_technical_feedback_user_message(
-                    "There is no tool call in Agent response. Please send appropriate tool call",
+                    bounce_msg,
                     technical_type=TECHNICAL_TYPE_TECHNICAL,
                 )
             ]
+        else:
+            # Вызовы backend не ловим здесь: после исчерпания transport/adaptive
+            # ретраев исключение уходит наверх как есть.
+            try:
+                if mode == "user_ask":
+                    try:
+                        messages, response_id = process_user_ask(messages, state, ctx)
+                    except Exception as user_ask_exc:
+                        can_retry_with_full_history = (
+                            backend_mode == "responses"
+                            and state.previous_response_id is not None
+                            and get_full_history_messages is not None
+                            and _is_previous_response_cache_miss(user_ask_exc)
+                        )
+                        if not can_retry_with_full_history:
+                            raise
+
+                        run_logger.warning(
+                            "Cache miss for previous_response_id=%s. Retry with full history.",
+                            state.previous_response_id,
+                        )
+                        full_history_messages = get_full_history_messages()
+                        state.previous_response_id = None
+                        messages, response_id, _ = _request_backend_canonical(
+                            full_history_messages,
+                            state,
+                            ctx,
+                            set_previous_response_id=False,
+                        )
+                    if backend_mode == "responses":
+                        state.previous_response_id = response_id
+                    state.last_backend_response_id = response_id
+                elif mode == "function_call":
+                    # `submit_solution` должен завершать ТЕКУЩИЙ user turn,
+                    # а не сразу срабатывать по истории предыдущих тактов.
+                    # Поэтому проверяем только на этапе обработки новых function_call
+                    # (которые пришли от бэкенда), когда mode == "function_call".
+                    finish_response = check_trace_finished(messages)
+                    if finish_response:
+                        finish_arguments, finish_call_id = finish_response
+                        grouped_messages = group_messages(messages)
+                        pending_tool_calls = grouped_messages.get("tool_calls", [])
+                        # Один раз закрываем pending tool_calls (в т.ч. submit_solution):
+                        # chat/completions требует role=tool после assistant.tool_calls; для
+                        # других backend_mode функция no-op.
+                        append_cycle_stop_tool_outputs_for_batch(
+                            state=state,
+                            ctx=ctx,
+                            tool_calls=pending_tool_calls,
+                            run_agent_func=run_agent,
+                            persist_messages_callback=persist_messages_callback,
+                            backend_mode=backend_mode,
+                        )
+                        if backend_mode == "chat_completions":
+                            gate = FinishGateGuard(ctx=ctx, state=state, logger=run_logger)
+                            decision = gate.evaluate_submit_solution(
+                                submit_solution_arguments=finish_arguments,
+                            )
+                            if decision.outcome == "reject":
+                                messages = [
+                                    _make_technical_feedback_user_message(
+                                        decision.feedback_text,
+                                        technical_type=TECHNICAL_TYPE_TECHNICAL,
+                                    )
+                                ]
+                                continue
+                            if decision.outcome in ("fail_open_error", "fail_open_limit"):
+                                state.clear_current_user_messages()
+                                return finish_arguments
+                        state.clear_current_user_messages()
+                        return finish_arguments
+                    messages = process_tool_calls(messages, state, ctx, run_agent_func=run_agent)
+                    tool_error_cnt = 0
+                elif mode == "function_call_output":
+                    messages, response_id = process_tool_outputs(messages, state, ctx)
+                    if backend_mode == "responses":
+                        state.previous_response_id = response_id
+                    state.last_backend_response_id = response_id
+                elif mode == "text_response":
+                    run_logger.warning(
+                        "Agent returned text response without tool call, requesting tool call"
+                    )
+                    tool_error_cnt += 1
+                    messages = [
+                        _make_technical_feedback_user_message(
+                            "There is no tool call in Agent response. Please send appropriate tool call",
+                            technical_type=TECHNICAL_TYPE_TECHNICAL,
+                        )
+                    ]
+                else:
+                    raise ValueError(f"unconventional mode: {mode}")
+            except WrongFunctionArgumentsException as e:
+                run_logger.error(e, exc_info=True)
+                tool_error_cnt += 1
+                messages = [
+                    _make_technical_feedback_user_message(
+                        e.to_llm_feedback(),
+                        technical_type=TECHNICAL_TYPE_ERROR_MESSAGE,
+                    )
+                ]
 
         # На первом `user_ask`-цикле при продолжении диалога по `-t` мы
         # отправляем бэкенду всю историю треда. Чтобы старые сообщения
