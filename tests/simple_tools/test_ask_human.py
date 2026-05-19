@@ -37,28 +37,28 @@ def test_ask_human_validation():
     assert bad_type["ok"] is False and bad_type["error"]["field"] == "question"
 
 
-def test_tool_description_includes_meta_response_handling():
-    """Agent sees tool_description in API spec."""
+def test_tool_description_focuses_on_asking_not_reply_taxonomy():
+    """API spec: how to ask; reply handling is in the result hint only."""
     desc = AskHuman.tool_description()["description"]
-    assert "meta-question" in desc.lower()
-    assert "delegation" in desc.lower()
-    assert "confirm" in desc.lower()
-    assert "ask_human" in desc.lower()
-    assert "insufficient" in desc.lower()
+    assert "hint" in desc.lower()
+    assert "options" in desc.lower() or "a/b/c" in desc.lower()
+    assert "delegation" not in desc.lower()
+    assert "meta-question" not in desc.lower()
+    assert len(desc) < 550
 
 
-def test_prompt_description_includes_meta_response_handling():
-    """Full text kept for legacy tools_descr / future tool_help."""
+def test_prompt_description_is_full_reference_doc():
+    """Legacy tools_descr / future tool_help — aligned with tool_description + hint."""
     desc = AskHuman.prompt_description()
-    assert "Handling user's response" in desc
+    assert "hint" in desc.lower()
+    assert "tool_description" in desc.lower()
     assert "four categories" in desc
     assert "Direct answer" in desc
     assert "Delegation to you" in desc
     assert "black box" in desc.lower()
     assert "Meta-question" in desc or "meta-question" in desc
-    assert "Ambiguous" in desc
-    assert "DO NOT" in desc and "advance" in desc.lower()
-    assert "Re-call `ask_human`" in desc or "re-call ask_human" in desc.lower()
+    assert "4096" in desc
+    assert "longer conversational turn" in desc.lower() or "longer turn" in desc.lower()
     assert "Pacing follows the user" in desc
 
 

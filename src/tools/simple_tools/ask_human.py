@@ -20,23 +20,13 @@ _RESPONSE_HINT = (
 )
 
 _TOOL_DESCRIPTION = (
-    "Send a message to the human user and wait for their free-form reply. "
-    "Use whenever you need human input to continue: clarification, confirmation, "
-    "subjective judgment, design discussion, or continuing a dialogue. "
-    "The question field may be a short prompt or a longer turn — context, "
-    "reasoning, partial findings, then what you need from the user. "
-    "When a finite choice set fits, prefer a closed-form question with explicit "
-    "options (A/B/C, numbered list, yes/no); use an open question when options "
-    "would be incomplete, misleading, or worse than free-form. "
-    "After each reply, classify it: (1) direct answer — proceed; "
-    "(2) delegation — user defers to you: research, then ask_human with a declared "
-    "proposal and confirmation before acting; "
-    "(3) meta-question or follow-up — investigate/reflect if needed, then ask_human "
-    "with your answer and ask for confirmation on the open decision; "
-    "do not advance the methodology; "
-    "(4) ambiguous/empty — ask_human again to clarify. "
-    "If still insufficient and they did not delegate, keep asking; "
-    "pacing follows the user, not your plan."
+    "Ask the human user and wait for their free-form reply. "
+    "Use for clarification, confirmation, subjective judgment, or continuing a dialogue. "
+    "Be clear and include necessary context; avoid vague questions. "
+    "The question may be a short prompt or a longer turn (background, reasoning, what you need). "
+    "When a finite choice set fits, prefer explicit options (A/B/C, numbered list, yes/no) "
+    "to minimize follow-up; otherwise ask openly. "
+    "After each call, follow the hint field in the tool result to handle the user's reply."
 )
 
 
@@ -78,9 +68,8 @@ class AskHuman(AbstractSimpleTool):
                     "question": {
                         "type": "string",
                         "description": (
-                            "What to show the human: question, request, or full conversational "
-                            "turn (markdown ok). Prefer listed answer options when the decision "
-                            "is essentially among known choices; otherwise ask openly."
+                            "Clear message to the human (markdown ok): question, context, and "
+                            "preferably explicit answer options when choices are known."
                         ),
                     }
                 },
@@ -94,73 +83,76 @@ class AskHuman(AbstractSimpleTool):
     def prompt_description(cls) -> str:
         # Legacy channel (tools_descr); not wired to API today — reserved for a future
         # tool_help-style meta-tool. Agent-facing spec: tool_description + result hint.
-        description = '''Tool name: ask_human  
-Tool description: Asks a question to the human user and waits for their textual response. Essential for resolving ambiguity, confirming critical actions, or gathering subjective opinions.
-Input schema: {"type": "object", "properties": {"question": {"type": "string", "description": "The clear, concise question to ask the human. Should be self-contained."}}, "required": ["question"], "additionalProperties": false}
+        description = '''Tool name: ask_human
 
-Usage:
-- Use this tool **only** when you cannot proceed confidently without human input.
-- The human will read your question and type a free-form answer.
-- Always phrase questions clearly and unambiguously.
-- When a finite set of answers fits, prefer closed-form with explicit options (A/B/C, numbered, yes/no); use open-ended only when options would be incomplete or misleading.
-- Include relevant context in the question (e.g., code snippets, options). In this case format your question with markdown.
-- Do **not** use this tool for routine operations, searching, or debugging — use appropriate tools instead.
+Overview:
+Ask the human user and wait for a free-form textual reply. Use for clarification,
+confirmation, subjective judgment, design discussion, or continuing a dialogue.
 
-Important Rules:
-- **NEVER** ask vague or overly broad questions like "What should I do?".
-- Make your questions as short as possible. You have limit for length of question about 100 words, but less is better.
-- If necessary provide **context**: reference files, code, or prior steps.
-- Phrase questions so they can be answered with minimal back-and-forth.
-- Avoid asking for trivial information available via other tools.
-- Never ask the same question twice if you got answer earlier.
-- Answer from user may be empty (empty response) or some irrelevant information. In such case you can reask.
-- Escape special characters properly (use \\n for newlines, \\t for tabs).
+What the agent actually sees (today):
+- **tool_description** (function spec in the tools list) — when and how to ask; points to the result hint.
+- **hint** field on each successful tool result — how to classify and handle the user's reply (canonical at runtime).
+- **prompt_description** (this document) — full reference for tools_descr / a future tool_help meta-tool; not injected into the API prompt today.
 
-Handling user's response — CRITICAL for natural conversation:
+Input schema:
+{"type": "object", "properties": {"question": {"type": "string", "description": "Clear message to the human (markdown ok): question, context, preferably explicit answer options when choices are known."}}, "required": ["question"], "additionalProperties": false}
 
-After receiving the user's response, ANALYZE it before advancing your reasoning. The response falls into one of four categories:
+When to use:
+- You cannot proceed confidently without human input.
+- You need confirmation before a consequential action.
+- The user is in a back-and-forth (brainstorming, planning, debugging) and you need their next turn.
 
-1. **Direct answer** — the user picked one of your options or gave a substantive answer to your question (e.g., "A", "yes", "option B sounds good", "use approach X"). Use it and proceed.
+When NOT to use:
+- Routine work other tools can do (read files, search, run commands, fetch URLs).
+- Guessing facts you could look up first — investigate, then ask if still unclear.
 
-2. **Delegation to you** — the user leaves the decision to the agent (e.g., "you decide", "your call", "как считаешь", "на твоё усмотрение"). This is **not** permission to act silently. Investigate and weigh options (other tools as needed), then call `ask_human` with your **proposed** choice, tradeoffs, and ask for explicit confirmation. Proceed only after they agree — stay visible, not a black box.
+How to formulate `question`:
+- Be clear; include necessary context; avoid vague prompts like "What should I do?".
+- May be **short** or a **longer conversational turn**: background, your reasoning so far, partial findings, then what you need.
+- When a finite choice set fits, prefer **closed-form** with explicit options (A/B/C, numbered list, yes/no) to minimize follow-up.
+- Use an **open** question when options would be incomplete, misleading, or worse than free-form.
+- Markdown is fine (code snippets, lists). Hard limit: 4096 characters per question.
 
-3. **Meta-question or follow-up** — the user is asking YOU something instead of answering, or asking for elaboration. Common signals:
-   • "What do you recommend?"
-   • "Explain how X works" / "Tell me more about Y"
-   • "What are the tradeoffs?"
-   • "Why is this the case?"
-   • Any question mark at the end of their reply.
+After each call — read `response` and the result **`hint`**:
+Classify the reply before advancing. Same rules as the live hint; four categories:
 
-   **DO NOT** advance to the next step of your task or methodology. Instead:
-   • If their question needs evidence (code, docs, state), use other tools first — do not guess in ask_human.
-   • Reflect, then re-call `ask_human` in **one** turn: your answer, brief reasoning, and ask whether they agree or want to close the original choice (refined framing ok). Same dialogue thread; not a one-line snap reply.
-   • Pacing follows the user, not your internal task plan.
+1. **Direct answer** — substantive choice or instruction (e.g. "A", "yes", "use approach X"). Use it and proceed.
 
-4. **Ambiguous** — unclear whether it's an answer, delegation, or a follow-up. Re-call `ask_human` with a clarifying yes/no: "Did you mean to choose <X>, or should I decide? (yes/no, or ask for more)".
+2. **Delegation to you** — user defers (e.g. "you decide", "your call", "как считаешь", "на твоё усмотрение").
+   **Not** permission to act silently. Investigate/weigh with other tools, then `ask_human` with your **proposed** choice, tradeoffs, and explicit confirmation. Proceed only after they agree — not a black box.
 
-This applies especially during multi-turn dialogues — brainstorming, design discussions, planning, debugging conversations — where back-and-forth is expected. Don't force-march through a methodology when the user wants to pause, drill in, or course-correct.
+3. **Meta-question or follow-up** — user asks YOU back ("what do you recommend?", "explain X", trailing "?").
+   Do **not** skip to the next methodology step. If facts are needed, use other tools first; reflect; then one `ask_human` turn with your answer, reasoning, and ask to close the original choice — not a snap reply. Pacing follows the user.
 
-Examples:
+4. **Ambiguous / empty / off-topic** — `ask_human` again to clarify (e.g. "Did you mean <X>, or should I propose options?").
+
+Do not re-ask the same question if you already got a usable direct answer. Empty or irrelevant replies → clarify or reask.
+
+Examples — asking (closed-form):
 {
-  "question": "I found two conflicting requirements in docs/ARCHITECTURE.md and src/config.rs.\\nWhich behavior should take precedence: strict validation or backward compatibility?"
+  "question": "Choose one:\\nA) Refactor using Strategy pattern\\nB) Add flags to existing function\\nC) Create new module\\nReply A, B, or C."
 }
 
+Examples — asking (open, with context):
 {
-  "question": "Should I delete the deprecated function `legacy_auth()`? It's unused but referenced in comments.\\nReply 'yes' to remove or 'no' to keep."
+  "question": "I found conflicting requirements in docs/ARCHITECTURE.md and src/config.rs.\\nWhich behavior should take precedence: strict validation or backward compatibility?"
 }
 
+Example — after meta-question (investigate first, then one turn):
+Previous ask: "Which architecture: A) centralized manager, B) direct, C) plugin?"
+User: "what do you recommend?"
+→ Read relevant code if needed, then:
 {
-  "question": "Choose one:\\nA) Refactor using Strategy pattern\\nB) Add flags to existing function\\nC) Create new module\\nEnter A, B, or C."
+  "question": "From the current wiring I recommend **A (centralized manager)** because it scales with more MCP servers and keeps one integration surface.\\n\\nDoes A work for you, or compare B/C in more detail?"
 }
 
-Re-ask after a meta-question — pattern:
-Previous ask: "Which architecture: A) centralized manager, B) direct, C) plugin? (A/B/C)"
-User responded: "what do you recommend?"
-→ First: read relevant code/config if needed (other tools), then ask_human, e.g.:
+Example — after delegation (propose, then confirm):
+User: "you decide"
+→ Research/weigh, then:
 {
-  "question": "I looked at how MCP servers are wired today. I recommend **A (centralized manager)** because:\\n- Scales as more MCP servers are added.\\n- Single integration surface.\\n\\nDoes A work for you, or should we compare B/C in more detail?"
+  "question": "Given the tradeoffs above, I propose **B (direct wiring)** for this repo size: less indirection, easier debugging.\\n\\nConfirm B, or prefer A/C?"
 }
-Not: a one-line opinion without looking, and not advancing to implementation before they confirm.
+Do not implement until they confirm.
 '''
         return description
 
