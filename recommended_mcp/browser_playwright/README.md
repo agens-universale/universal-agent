@@ -5,12 +5,12 @@
 скрейпинг.
 
 Доставка — **через npx**, без Docker и без локальной сборки. Node.js
-ставится автоматически в изолированную папку (`~/.agent/node/v20.18.0/` по
-умолчанию, см. ниже).
+ставится в `gc_paths()['data']/node/v18.0.0/` (Linux: `~/.local/share/gc/...`,
+Windows: `~/.gc/...`).
 
 ## Требования
 
-- **Node.js 20.18.0** — пин под совместимость с `@playwright/mcp@0.0.70`.
+- **Node.js 18.0.0** — пин под совместимость с `@playwright/mcp@0.0.70`.
   Ставится автоматически `install.py`, **системная Node не используется**
   и не трогается.
 - **Chromium** — качается Playwright'ом автоматически на этапе install.
@@ -25,18 +25,12 @@ python recommended_mcp/install.py
 
 Что произойдёт:
 
-1. Проверяется `<agent_dep_dir>/node/v20.18.0/bin/node --version` (на Windows
-   `…/node.exe`). Если совпадает с пином — скип. `agent_dep_dir` берётся из
-   top-level ключа `agent_dep_dir` в `recommended_mcp/config.yml`, дефолт
-   `~/.agent`.
-2. Иначе скачивается архив Node под текущую платформу/архитектуру с
-   `nodejs.org/dist/v20.18.0/`:
-   - macOS arm64/x64 → `node-v20.18.0-darwin-{arch}.tar.gz`
-   - Linux x64/arm64 → `node-v20.18.0-linux-{arch}.tar.xz`
-   - Windows x64    → `node-v20.18.0-win-x64.zip`
+1. Проверяется `<agent_dep_dir>/node/v18.0.0/bin/node --version` (на Windows
+   `…/node.exe`). Если совпадает с пином — скип. Дефолт `agent_dep_dir` —
+   `gc_paths()['data']` (опционально переопределяется в `recommended_mcp/config.yml`).
+2. Иначе скачивается архив Node с `nodejs.org/dist/v18.0.0/` под текущую ОС.
 
-   SHA256 сверяется с `SHASUMS256.txt` оттуда же. Распаковка идёт в
-   `<agent_dep_dir>/node/v20.18.0/`.
+   SHA256 сверяется с `SHASUMS256.txt`. Распаковка в `<agent_dep_dir>/node/v18.0.0/`.
 3. `npm install -g @playwright/mcp@0.0.70` — прогрев npm-кэша уже на нашей
    Node.
 4. `npx -y playwright install --with-deps chromium` — пред-скачивание браузера.
@@ -54,19 +48,16 @@ python recommended_mcp/install.py
 ## Подключение к агенту
 
 Скопируй блок из `agent_config.snippet.yml` в секцию `mcp-servers:` своего
-`config.yml`. В `command:` подойдёт `~/.agent/node/v20.18.0/bin/npx` —
-`~` раскрывает `_resolve_command()` (`src/tools/connect_mcp/transport.py`).
-Абсолютный путь, который печатает `install.py` в конце вывода, тоже
-работает. Пример:
+`config.yml`, либо возьми путь из строк `[paths] config command:` в выводе
+`install.py`. Пример (Linux):
 
 ```yaml
 mcp-servers:
   browser_playwright:
     transport: stream_stdio
-    command: ~/.agent/node/v20.18.0/bin/npx
-    args: ["-y", "@playwright/mcp@0.0.70"]
+    command: ~/.local/share/gc/node/v18.0.0/bin/npx
+    args: ["-y", "@playwright/mcp@0.0.70", "--output-dir", "~/.cache/gc/playwright-mcp"]
     persistent_session: true
-    persistent_session_close_tool: browser_close
 ```
 
 ## Альтернатива: запуск в Docker

@@ -380,6 +380,14 @@ def main() -> int:
             install_source_entry(entry, root, editable=True)
         else:
             install_entry(entry, root, agent_dep_dir)
+    paths = _node_install_paths(agent_dep_dir)
+    if paths["npx"].exists():
+        from config_modules.env_vars import gc_paths
+
+        cache = gc_paths()["cache"]
+        print(f"[paths] config command: {paths['npx']}")
+        print(f"[paths] playwright --output-dir: {cache / 'playwright-mcp'}")
+        print(f"[paths] MCP media (agent default): {cache / 'mcp-media'}")
     print("[done] install complete")
     return 0
 

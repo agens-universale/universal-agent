@@ -300,18 +300,15 @@ Background и CLI-клиент для работы с агентом GigaCode: �
      (`recommended_mcp/office-reader/dist/*.whl`). Появится консольная команда
      `mcp-office-reader`.
    - **browser_playwright** — скачает и распакует пиннутый Node.js
-     (по умолчанию v18.0.0) в `~/.gc/node/v<NODE_VERSION>/`,
-     прогреет npm-кэш `@playwright/mcp@0.0.70` и доустановит Chromium.
-     Системная Node не используется и не трогается. Бинари — в
-     `<root>/bin/` на всех ОС (Windows-zip автоматически перепаковывается),
-     поэтому в `command:` агента можно писать единый
-     `~/.local/agent/node/v18.0.0/bin/npx`.
+     (v18.0.0) в `<gc_paths()['data']>/node/v18.0.0/` (Linux:
+     `~/.local/share/gc/node/...`, Windows: `~/.gc/node/...`), прогреет npm-кэш
+     `@playwright/mcp@0.0.70` и доустановит Chromium. Системная Node не
+     используется. В конце `install.py` печатает `command:` для `config.yml`.
    - **computer** (только Windows) — `pip install` wheel'а. Появится команда
      `gc-computer-mcp`.
 
-   Каталог для Node настраивается ключом `agent_dep_dir` в
-   `recommended_mcp/config.yml` (дефолт `~/.local/agent`). Принимаются `~`,
-   относительные и абсолютные пути.
+   Каталог для Node по умолчанию — `gc_paths()['data']`; переопределение —
+   опциональный `agent_dep_dir` в `recommended_mcp/config.yml`.
 
    ### Подключение в `config.yml` агента
 
@@ -326,8 +323,8 @@ Background и CLI-клиент для работы с агентом GigaCode: �
    mcp-servers:
      browser_playwright:
        transport: stream_stdio
-       command: ~/.local/agent/node/v18.0.0/bin/npx
-       args: ["-y", "@playwright/mcp@0.0.70"]
+       command: ~/.local/share/gc/node/v18.0.0/bin/npx
+       args: ["-y", "@playwright/mcp@0.0.70", "--output-dir", "~/.cache/gc/playwright-mcp"]
        persistent_session: true
        description: Browser automation via Playwright.
        server-name: playwright-browser
@@ -630,8 +627,8 @@ mcp-servers:
 ```yaml  
   browser_playwright:
       transport: stream_stdio
-      command: ~/.local/agent/node/v18.0.0/bin/npx
-      args: ["-y", "@playwright/mcp@latest"]
+      command: ~/.local/share/gc/node/v18.0.0/bin/npx
+      args: ["-y", "@playwright/mcp@0.0.70", "--output-dir", "~/.cache/gc/playwright-mcp"]
       persistent_session: true
       persistent_session_close_tool: browser_close
       description: Browser automation via Playwright. Use for web navigation, clicking, form filling, taking screenshots, and webscraping.

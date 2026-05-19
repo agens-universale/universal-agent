@@ -91,16 +91,24 @@ _MIME_EXT = {
 }
 
 
+def _default_mcp_media_dir() -> str:
+    """Дефолт: gc_paths()['cache'] / mcp-media (XDG на Linux, ~/.gc/cache на Windows)."""
+    from config_modules.env_vars import gc_paths
+
+    return str(gc_paths()["cache"] / "mcp-media")
+
+
 def _mcp_media_save_dir() -> str:
     """Куда складывать декодированные image/audio.
 
-    Порядок приоритета: env MCP_MEDIA_SAVE_DIR → cwd/mcp_media.
+    Приоритет: config `mcp-meta.media_save_dir` → gc_paths()['cache']/mcp-media.
     Создаётся при первой записи.
     """
-    default_media_path_str = "~/.gc/mcp-media"
     config = load_config()
-
-    return os.path.expanduser(config.get("mcp-meta", {}).get("media_save_dir", default_media_path_str))
+    raw = config.get("mcp-meta", {}).get("media_save_dir")
+    if raw:
+        return os.path.expanduser(str(raw))
+    return _default_mcp_media_dir()
 
 
 def _pick_filename(

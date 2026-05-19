@@ -3,10 +3,8 @@
 # Чтобы пропустить MCP — закомментируй его блок.
 # install.py и run.py читают этот файл.
 # Куда install.py разворачивает изолированную Node.js (для type: npx).
-# Пин под совместимость с @playwright/mcp; системная Node не используется.
-# Полный путь до runtime'а: <agent_dep_dir>/node/v<NODE_VERSION>/.
-# Принимаются `~`, относительные и абсолютные пути.
-agent_dep_dir: ~/.gc/
+# По умолчанию — gc_paths()['data']: Linux ~/.local/share/gc, Windows ~/.gc.
+# Переопределение (опционально): agent_dep_dir: /custom/path
 mcps:
   - name: computer
     path: ./computer
@@ -14,7 +12,7 @@ mcps:
       type: source
       source: ../external/computer-mcp
       platforms: [win32]
-    run-блок отсутствует: MCP спавнится агентом через stdio.
+    # run-блок отсутствует: MCP спавнится агентом через stdio.
 
   - name: office
     path: ./office

@@ -2,17 +2,15 @@
 # Работает с persistent_session: true — один процесс npx и один Chromium
 # живут весь цикл работы агента (см. src/tools/connect_mcp/persistent_stdio.py).
 #
-# `command:` — путь до npx из локально установленной Node.js
-# (recommended_mcp/install.py разворачивает её в `~/.agent/node/v20.18.0/`,
-# системная Node не используется). `~` раскрывается в _resolve_command,
-# абсолютный путь тоже подходит. Layout кроссплатформенный — install.py
-# принудительно кладёт бинари в `bin/` и на Windows тоже:
-#   macOS / Linux : ~/.agent/node/v20.18.0/bin/npx
-#   Windows       : ~/.agent/node/v20.18.0/bin/npx (PATHEXT добьёт .cmd)
+# `command:` — путь до npx после `python recommended_mcp/install.py`
+# (install печатает готовый путь в конце). Node лежит в gc_paths()['data']:
+#   Linux/macOS: ~/.local/share/gc/node/v18.0.0/bin/npx
+#   Windows:     ~/.gc/node/v18.0.0/bin/npx
+# `--output-dir` — gc_paths()['cache']/playwright-mcp (см. readme).
 browser_playwright:
   transport: stream_stdio
-  command: ~/.gc/node/v18.0.0/bin/npx
-  args: ["-y", "@playwright/mcp@0.0.70", "--output-dir", " ~/.gc/.playwright-mcp"]
+  command: ~/.local/share/gc/node/v18.0.0/bin/npx
+  args: ["-y", "@playwright/mcp@0.0.70", "--output-dir", "~/.cache/gc/playwright-mcp"]
   persistent_session: true
   description: Browser automation via Playwright. Use for web navigation, clicking, form filling, taking screenshots, and webscraping.
   server-name: playwright-browser

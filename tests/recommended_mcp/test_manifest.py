@@ -10,6 +10,8 @@ from recommended_mcp.manifest import (
     InstallSpec,
     ManifestError,
     RunSpec,
+    default_agent_dep_dir,
+    load_agent_dep_dir,
     load_manifest,
 )
 
@@ -157,6 +159,50 @@ def test_source_without_source_field_raises(tmp_path: Path) -> None:
     """)
     with pytest.raises(ManifestError, match="install.type=source requires install.source"):
         load_manifest(f)
+
+
+def test_load_agent_dep_dir_default_uses_gc_data(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    f = _write(tmp_path, "mcps: []\n")
+    fake_data = tmp_path / "share" / "gc"
+    monkeypatch.setattr(
+        "config_modules.env_vars.gc_paths",
+        lambda: {
+            "state": tmp_path / "state" / "gc",
+            "config": tmp_path / "config" / "gc",
+            "cache": tmp_path / "cache" / "gc",
+            "data": fake_data,
+        },
+    )
+    assert load_agent_dep_dir(f) == fake_data.resolve()
+
+
+def test_load_agent_dep_dir_explicit_override(tmp_path: Path) -> None:
+    f = _write(
+        tmp_path,
+        """
+        agent_dep_dir: /opt/my-node
+        mcps: []
+        """,
+    )
+    assert load_agent_dep_dir(f) == Path("/opt/my-node")
+
+
+def test_default_agent_dep_dir_matches_gc_paths(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    fake_data = tmp_path / "data" / "gc"
+    monkeypatch.setattr(
+        "config_modules.env_vars.gc_paths",
+        lambda: {
+            "state": tmp_path / "state",
+            "config": tmp_path / "config",
+            "cache": tmp_path / "cache",
+            "data": fake_data,
+        },
+    )
+    assert default_agent_dep_dir() == fake_data
 
 
 def test_source_field_ignored_for_non_source_types(tmp_path: Path) -> None:

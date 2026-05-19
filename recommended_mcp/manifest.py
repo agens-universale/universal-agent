@@ -44,18 +44,25 @@ def load_manifest(path: Path) -> list[MCPEntry]:
     return [_parse_entry(m, path) for m in raw_mcps]
 
 
+def default_agent_dep_dir() -> Path:
+    """Корень для Node/npx: `gc_paths()['data']` (XDG на Linux, `~/.gc` на Windows)."""
+    from config_modules.env_vars import gc_paths
+
+    return gc_paths()["data"]
+
+
 def load_agent_dep_dir(path: Path) -> Path:
     """
     Прочитать top-level `agent_dep_dir` из config.yml.
 
-    Дефолт — `~/.agent`. Куда install.py распакует Node под
-    `<agent_dep_dir>/node/vX.Y.Z/`. Принимает `~`, относительные и абсолютные
-    пути; возвращает абсолютный resolved.
+    Если ключ не задан — `default_agent_dep_dir()` (`gc_paths()['data']`).
+    Куда install.py распакует Node под `<agent_dep_dir>/node/vX.Y.Z/`.
+    Принимает `~`, относительные и абсолютные пути; возвращает абсолютный resolved.
     """
     data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
     raw = data.get("agent_dep_dir")
     if raw is None or (isinstance(raw, str) and not raw.strip()):
-        return Path("~/.agent").expanduser().resolve()
+        return default_agent_dep_dir()
     if not isinstance(raw, str):
         raise ManifestError(
             f"'agent_dep_dir' must be a string in {path}, got {type(raw).__name__}"
