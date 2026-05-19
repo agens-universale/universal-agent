@@ -3,7 +3,7 @@
 
 Стандартный stdio-транспорт спавнит отдельный процесс MCP-сервера на каждый
 вызов tools/list и tools/call. Для серверов, которые внутри себя держат тяжёлый
-ресурс (например, browser-use с Chromium), это приводит к запуску нового
+ресурс (например, @playwright/mcp с Chromium), это приводит к запуску нового
 браузера на каждый tool_call. Эта же схема убирает такую стоимость: процесс
 запускается один раз, handshake выполняется один раз, все последующие вызовы
 идут через живой stdin/stdout.
@@ -42,7 +42,7 @@ def _spawn_detached_stdio_process(server_cfg: Dict[str, Any]) -> subprocess.Pope
     Запуск stdio MCP-сервера как лидера собственной сессии/process group.
 
     Это принципиально для persistent-сессии: сервер может форкать тяжёлых
-    детей (например, browser-use поднимает Chromium через Playwright).
+    детей (например, @playwright/mcp поднимает Chromium).
     Если отправить SIGTERM только родителю, дети становятся orphan'ами
     и продолжают жить после завершения агента. Вывод целиком (parent + все
     дети) лечится только групповым сигналом, для которого нужен отдельный
@@ -185,7 +185,7 @@ class PersistentStdioSession:
             if proc is None:
                 return
             # Некоторые MCP-серверы поднимают внешних, detached-потомков:
-            # например browser-use на macOS запускает системный Google Chrome
+            # например @playwright/mcp на macOS может запустить системный Google Chrome
             # (ppid=1, не в нашей process group), поэтому killpg до него не
             # дотянется. Сначала даём серверу шанс погасить их штатно через
             # собственный MCP-тул (например browser_close_all) — CDP-коннект

@@ -363,7 +363,7 @@ class AgentExecutor:
                     [], previous_response_id=state.previous_response_id
                 )
         finally:
-            # Закрываем долгоживущие stdio MCP-сессии (напр. browser-use + Chromium),
+            # Закрываем долгоживущие stdio MCP-сессии (напр. @playwright/mcp + Chromium),
             # чтобы они не переживали конкретный запуск агента.
             PersistentStdioRegistry.instance().close_all()
             # И persistent-сессии stream_* транспортов (stream_stdio/stream_sse/stream_http):
