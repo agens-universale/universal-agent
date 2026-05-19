@@ -82,7 +82,7 @@ def _resolve_forced_skill(skill_name: str, config_dict: dict) -> str | None:
     name = (skill_name or "").strip()
     if not name:
         return None
-    from skill_arg_resolver import resolve_skill_arg, Resolved, Failed
+    from tools.skills.skill_arg_resolver import resolve_skill_arg, Resolved, Failed
     from tools.skills.registry import get_skills_registry
 
     try:

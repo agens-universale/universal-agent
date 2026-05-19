@@ -8,7 +8,7 @@ sys.argv = ["gc-cli", "-q", "x"]
 import pytest
 
 import cli
-from skill_arg_resolver import SkillCatalog
+from tools.skills.skill_arg_resolver import SkillCatalog
 
 
 class _FakeReg:

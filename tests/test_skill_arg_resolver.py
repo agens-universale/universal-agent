@@ -1,6 +1,6 @@
 import pytest
 
-from skill_arg_resolver import (
+from tools.skills.skill_arg_resolver import (
     SkillCatalog,
     Resolved,
     Failed,

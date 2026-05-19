@@ -526,7 +526,7 @@ class SkillsRegistry:
         private internals. Local import avoids import-time coupling between
         the registry and the pure resolver module.
         """
-        from skill_arg_resolver import SkillCatalog
+        from tools.skills.skill_arg_resolver import SkillCatalog
 
         entries = self.list_skills(include_all=True)
         canonical = frozenset(e["id"] for e in entries)

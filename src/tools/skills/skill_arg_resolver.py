@@ -4,6 +4,8 @@ Pure: no I/O, no dependency on the registry or cli. Takes a SkillCatalog
 snapshot + the raw flag value, returns a Resolved (exact canonical skill id)
 or a Failed (the caller — cli.py — decides process exit).
 """
+from __future__ import annotations
+
 import difflib
 from dataclasses import dataclass
 

@@ -1,4 +1,4 @@
-from skill_arg_resolver import SkillCatalog, resolve_skill_arg, Resolved
+from tools.skills.skill_arg_resolver import SkillCatalog, resolve_skill_arg, Resolved
 from tools.skills.registry import SkillsRegistry
 
 
