@@ -602,9 +602,6 @@ swarm:
 Агент умеет управлять браузером через MCP-сервер `@playwright/mcp`. Доступные инструменты:
 навигация, клики, ввод текста, скриншоты, снапшот accessibility-дерева страницы, выполнение JS.
 
-![Playwright MCP demo](browserforgif.gif)
-
-
 ## Подключение в config.yml
 
 ```yaml
