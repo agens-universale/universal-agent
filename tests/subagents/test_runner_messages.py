@@ -51,6 +51,10 @@ def _make_ctx(config_dict=None):
     )
 
 
+def _user_msg(content: str) -> dict:
+    return {"role": "user", "content": content, "id": "m_user_sub"}
+
+
 class TestBuildInitialMessages:
     def test_with_system_prompt_has_system_and_user(self):
         prompt = "You are a helpful assistant.\n<specific_role>default</specific_role>"
@@ -58,7 +62,9 @@ class TestBuildInitialMessages:
         cfg = _make_config()
         runner = SubagentRunner(_make_ctx(cfg), orch, cfg)
         child = runner._build_child_state("Expert planner")
-        messages = runner._build_initial_messages(child, "Expert planner", "Do the task")
+        messages = runner._build_initial_messages(
+            child, "Expert planner", _user_msg("Do the task")
+        )
 
         assert len(messages) == 2
         assert messages[0]["role"] == "system"
@@ -70,7 +76,9 @@ class TestBuildInitialMessages:
         cfg = _make_config()
         runner = SubagentRunner(_make_ctx(cfg), orch, cfg)
         child = runner._build_child_state("Expert planner")
-        messages = runner._build_initial_messages(child, "Expert planner", "Do the task")
+        messages = runner._build_initial_messages(
+            child, "Expert planner", _user_msg("Do the task")
+        )
 
         assert "Expert planner" in messages[0]["content"]
 
@@ -80,7 +88,9 @@ class TestBuildInitialMessages:
         cfg = _make_config()
         runner = SubagentRunner(_make_ctx(cfg), orch, cfg)
         child = runner._build_child_state("role")
-        messages = runner._build_initial_messages(child, "role", "Implement feature X")
+        messages = runner._build_initial_messages(
+            child, "role", _user_msg("Implement feature X")
+        )
 
         user_msg = [m for m in messages if m["role"] == "user"]
         assert len(user_msg) == 1
@@ -91,7 +101,7 @@ class TestBuildInitialMessages:
         cfg = _make_config()
         runner = SubagentRunner(_make_ctx(cfg), orch, cfg)
         child = runner._build_child_state("role")
-        messages = runner._build_initial_messages(child, "role", "Do the task")
+        messages = runner._build_initial_messages(child, "role", _user_msg("Do the task"))
 
         # При отсутствии промпта в State подставляется дефолтный файл субагента.
         assert len(messages) == 2
@@ -104,7 +114,7 @@ class TestBuildInitialMessages:
         cfg = _make_config()
         runner = SubagentRunner(_make_ctx(cfg), orch, cfg)
         child = runner._build_child_state("role")
-        messages = runner._build_initial_messages(child, "role", "task text")
+        messages = runner._build_initial_messages(child, "role", _user_msg("task text"))
 
         assert len(messages) == 2
         assert messages[0]["role"] == "system"
@@ -116,7 +126,7 @@ class TestBuildInitialMessages:
         cfg = _make_config()
         runner = SubagentRunner(_make_ctx(cfg), orch, cfg)
         child = runner._build_child_state("role")
-        messages = runner._build_initial_messages(child, "role", "task")
+        messages = runner._build_initial_messages(child, "role", _user_msg("task"))
 
         for msg in messages:
             assert "id" in msg and isinstance(msg["id"], str) and len(msg["id"]) > 0
@@ -127,7 +137,22 @@ class TestBuildInitialMessages:
         cfg = _make_config()
         runner = SubagentRunner(_make_ctx(cfg), orch, cfg)
         child = runner._build_child_state("role")
-        messages = runner._build_initial_messages(child, "role", "task")
+        messages = runner._build_initial_messages(child, "role", _user_msg("task"))
 
         assert len(child.messages) >= 1
         assert child.messages[0]["role"] == "system"
+
+    def test_run_seeds_assignment_into_current_user_messages(self):
+        """Как в SubagentRunner.run: transcript и finish-gate scope раздельно."""
+        prompt = "System prompt\n<specific_role>x</specific_role>"
+        orch = _make_orchestrator_state(system_prompt=prompt)
+        cfg = _make_config()
+        runner = SubagentRunner(_make_ctx(cfg), orch, cfg)
+        child = runner._build_child_state("role")
+        user_message = _user_msg("Implement feature X")
+        runner._build_initial_messages(child, "role", user_message)
+        child.seed_new_user_turn(user_message)
+
+        assert child.current_user_messages == ["Implement feature X"]
+        assert "Implement feature X" in child.user_messages_log
+        assert child.finish_gate_rejection_count == 0

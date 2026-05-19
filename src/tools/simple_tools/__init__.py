@@ -9,9 +9,12 @@ from tools.simple_tools.search_and_replace import SearchAndReplace
 from tools.simple_tools.think import Think
 from tools.simple_tools.thread_notes import ThreadNotes
 from tools.simple_tools.memory_files import MemoryFiles
+from tools.simple_tools.long_memory import LongMemory
 from tools.simple_tools.submit_solution import SubmitSolution
 from tools.simple_tools.calculator import Calculator
+from tools.simple_tools.sleep_tool import Sleep
 from tools.simple_tools.run_python_code import RunPythonCode
+from tools.simple_tools.save_base64_file import SaveBase64File
 from tools.stored_outputs.read_stored_tool_output import ReadStoredToolOutput
 try:
     from tools.simple_tools.fetch_url import FetchUrl
@@ -24,7 +27,7 @@ def get_simple_tools_data(config_dict: Dict[str, Any]) -> Dict[str, Dict[str, An
     """
     Собрать словарь simple‑tools в формате tools_data.
 
-    В зависимости от config_dict может быть добавлен инструмент ask_human.
+    Инструменты из stop_tools исключаются из результата.
     """
     simple_tools_data: Dict[str, Dict[str, Any]] = {
         'write_to_file': {
@@ -72,6 +75,11 @@ def get_simple_tools_data(config_dict: Dict[str, Any]) -> Dict[str, Dict[str, An
             'spec': MemoryFiles.tool_description(),
             'description': MemoryFiles.prompt_description(config_dict),
         },
+        'long_memory': {
+            'tool_fabric': LongMemory,
+            'spec': LongMemory.tool_description(),
+            'description': LongMemory.prompt_description(),
+        },
         'think': {
             'tool_fabric': Think,
             'spec': Think.tool_description(),
@@ -81,6 +89,11 @@ def get_simple_tools_data(config_dict: Dict[str, Any]) -> Dict[str, Dict[str, An
             'tool_fabric': Calculator,
             'spec': Calculator.tool_description(),
             'description': Calculator.prompt_description(),
+        },
+        'sleep': {
+            'tool_fabric': Sleep,
+            'spec': Sleep.tool_description(),
+            'description': Sleep.prompt_description(),
         },
         'run_python_code': {
             'tool_fabric': RunPythonCode,
@@ -102,14 +115,17 @@ def get_simple_tools_data(config_dict: Dict[str, Any]) -> Dict[str, Dict[str, An
             'spec': SubmitSolution.tool_description(),
             'description': SubmitSolution.prompt_description(),
         },
-    }
-
-    if config_dict.get('use_ask_human_tool', False):
-        simple_tools_data['ask_human'] = {
+        'save_base64_file': {
+            'tool_fabric': SaveBase64File,
+            'spec': SaveBase64File.tool_description(),
+            'description': SaveBase64File.prompt_description(),
+        },
+        'ask_human': {
             'tool_fabric': AskHuman,
             'spec': AskHuman.tool_description(),
             'description': AskHuman.prompt_description(),
-        }
+        },
+    }
 
     stop_tools_cfg = config_dict.get('stop_tools', [])
     if isinstance(stop_tools_cfg, list):

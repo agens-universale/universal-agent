@@ -1,6 +1,6 @@
 import unittest
 
-from summarize.dialog_history import format_last_dialog_steps, group_into_turns, split_turns_into_char_batches
+from message_format.dialog_history import format_last_dialog_steps, group_into_turns, split_turns_into_char_batches
 from summarize.summary_validation import (
     _section_marker_hit,
     is_valid_summary_text,

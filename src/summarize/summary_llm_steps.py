@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from summarize import dialog_history
+import message_format.dialog_history as dialog_history
 from utils.llm_chat_client import log_llm_prompt_and_result, request_chat_completion_text
 
 

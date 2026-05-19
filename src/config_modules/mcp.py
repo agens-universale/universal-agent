@@ -15,6 +15,8 @@ class McpServerConfig(BaseModel):
     args: list[str] = Field(default_factory=list)
     cwd: str | None = None
     env: dict[str, str] = Field(default_factory=dict)
+    persistent_session: bool = False
+    persistent_session_close_tool: str | None = None
 
     @field_validator(
         "url", "token", "server_name", "description", "command", "cwd", mode="before"

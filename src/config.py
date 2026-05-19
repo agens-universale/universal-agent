@@ -5,6 +5,7 @@ import urllib3
 import yaml
 
 from config_modules.auth import build_auth_connector
+from config_modules.env_vars import project_gc_dir
 from config_modules.backend import parse_chat_completions_max_tokens
 from config_modules.common import (
     apply_swarm_env_overrides,
@@ -52,7 +53,7 @@ def _project_local_config_path() -> Optional[str]:
 
     Используется для layered loading: project local config мерджится поверх глобального.
     """
-    candidate = os.path.abspath(os.path.join(os.getcwd(), ".gc", "config.yml"))
+    candidate = str((project_gc_dir() / "config.yml").resolve())
     if os.path.isfile(candidate):
         return candidate
     return None
@@ -118,6 +119,7 @@ def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
             },
         },
         "summary_params": app_cfg.summary.model_dump(),
+        "quality_gate_params": app_cfg.quality_gate.model_dump(),
         "logging_params": app_cfg.logging.model_dump(),
         "agent_md_path": app_cfg.paths.agent_md_path,
         "chat_completions_system_prompt_path": app_cfg.paths.chat_completions_system_prompt_path,
@@ -132,18 +134,21 @@ def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
         "client_name": app_cfg.agent.client_name,
         "x_cl_id": app_cfg.agent.x_cl_id,
         "verbose": app_cfg.agent.verbose,
-        "use_ask_human_tool": app_cfg.agent.use_ask_human_tool,
         "stop_tools": app_cfg.agent.stop_tools,
         "server_tool_prefix": app_cfg.agent.server_tool_prefix,
         "max_steps": app_cfg.agent.max_steps,
         "no_tool_call_max_count": app_cfg.agent.no_tool_call_max_count,
         "strict_submit_solution_validation": app_cfg.agent.strict_submit_solution_validation,
+        "finish_gate_max_iterations": app_cfg.agent.finish_gate_max_iterations,
+        "subagent_finish_gate_max_iterations": app_cfg.agent.subagent_finish_gate_max_iterations,
+        "finish_gate_use_rule_hints": app_cfg.agent.finish_gate_use_rule_hints,
         "console_trace": app_cfg.logging.console_trace,
         "dump_storage": app_cfg.logging.dump_storage,
         "save_logs": app_cfg.logging.save_logs,
         "limit_project_metadata": app_cfg.agent.limit_project_metadata,
         "tool_output_inline_max_chars": app_cfg.agent.tool_output_inline_max_chars,
         "stored_tool_outputs_max_entries": app_cfg.agent.stored_tool_outputs_max_entries,
+        "inject_tool_fields": dict(app_cfg.agent.inject_tool_fields),
         "mcp-servers": {
             name: server.model_dump(by_alias=True) for name, server in app_cfg.mcp.servers.items()
         },

@@ -2,7 +2,7 @@ import json
 from types import SimpleNamespace
 
 from config import parse_chat_completions_max_tokens
-from intent_guard import validate_final_report_vs_user_intent
+from intent_guard.guard import FinishGateGuard
 from message_policy.cycle_stop import append_cycle_stop_tool_outputs_for_batch
 from request_backend_policy import request_chat_completions_with_policy
 from tools import apply_tool, WrongFunctionArgumentsException
@@ -268,6 +268,8 @@ def check_mode(messages, logger) -> Union[str, None]:
     for message in messages:
         if message.get('type', None) == 'function_call_output':
             return 'function_call_output'
+    if messages[-1].get('role', None) == 'assistant':
+        return 'text_response'
 
     logger.debug('Got Undefined mode for messages:')
     logger.debug(str(messages))
@@ -526,59 +528,23 @@ def run_agent(
                         persist_messages_callback=persist_messages_callback,
                         backend_mode=backend_mode,
                     )
-                    strict_finish_gate = bool(
-                        cfg.get("strict_submit_solution_validation", True)
-                    )
-                    is_main_agent = getattr(state, "parent_state_id", None) is None
-                    if strict_finish_gate and is_main_agent and backend_mode == "chat_completions":
-                        active_user_messages = (
-                            getattr(state, "current_user_messages", []) or []
+                    if backend_mode == "chat_completions":
+                        gate = FinishGateGuard(ctx=ctx, state=state, logger=run_logger)
+                        decision = gate.evaluate_submit_solution(
+                            submit_solution_arguments=finish_arguments,
                         )
-                        full_user_messages_log = (
-                            getattr(state, "user_messages_log", []) or []
-                        )
-                        if not active_user_messages:
-                            active_user_messages = full_user_messages_log
-                        context_user_messages = [
-                            msg
-                            for msg in full_user_messages_log
-                            if msg not in set(active_user_messages)
-                        ]
-                        try:
-                            validation = validate_final_report_vs_user_intent(
-                                ctx=ctx,
-                                state=state,
-                                current_user_requests=active_user_messages,
-                                context_user_messages=context_user_messages,
-                                submit_solution_arguments=finish_arguments,
-                            )
-                        except Exception as validation_exc:
-                            run_logger.warning(
-                                "finish_gate_validation_failed; allow submit_solution "
-                                "to avoid inconsistent tool_call history: %s",
-                                validation_exc,
-                                exc_info=True,
-                            )
-                            validation = None
-                        if validation is None:
-                            if is_main_agent:
-                                state.clear_current_user_messages()
-                            return finish_arguments
-                        if not validation.ok:
-                            run_logger.warning(
-                                "finish_gate_rejected conflicts=%s missing=%s",
-                                validation.conflicts,
-                                validation.missing_requirements,
-                            )
+                        if decision.outcome == "reject":
                             messages = [
                                 _make_technical_feedback_user_message(
-                                    validation.feedback_for_agent,
+                                    decision.feedback_text,
                                     technical_type=TECHNICAL_TYPE_TECHNICAL,
                                 )
                             ]
                             continue
-                    if is_main_agent:
-                        state.clear_current_user_messages()
+                        if decision.outcome in ("fail_open_error", "fail_open_limit"):
+                            state.clear_current_user_messages()
+                            return finish_arguments
+                    state.clear_current_user_messages()
                     return finish_arguments
                 messages = process_tool_calls(messages, state, ctx, run_agent_func=run_agent)
                 tool_error_cnt = 0
@@ -587,6 +553,15 @@ def run_agent(
                 if backend_mode == "responses":
                     state.previous_response_id = response_id
                 state.last_backend_response_id = response_id
+            elif mode == "text_response":
+                run_logger.warning("Agent returned text response without tool call, requesting tool call")
+                tool_error_cnt += 1
+                messages = [
+                    _make_technical_feedback_user_message(
+                        "There is no tool call in Agent response. Please send appropriate tool call",
+                        technical_type=TECHNICAL_TYPE_TECHNICAL,
+                    )
+                ]
             else:
                 raise ValueError(f"unconventional mode: {mode}")
         except WrongFunctionArgumentsException as e:

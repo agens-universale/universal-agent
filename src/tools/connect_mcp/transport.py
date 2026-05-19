@@ -2,10 +2,11 @@
 Транспортный слой MCP: один запрос — один ответ (синхронно).
 Тип транспорта задаётся в конфиге сервера (transport: http | sse | stdio).
 """
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import json
 import os
+import shutil
 import subprocess
 import threading
 import requests
@@ -24,7 +25,7 @@ def _request_http(
     headers: Dict[str, str],
     json_payload: Dict[str, Any],
     timeout: float,
-    verify: bool = True,
+    verify: Union[bool, str] = True,
     cert: Optional[tuple] = None,
 ) -> Tuple[Dict[str, str], Dict[str, Any]]:
     """
@@ -126,7 +127,7 @@ def _request_sse(
     headers: Dict[str, str],
     json_payload: Dict[str, Any],
     timeout: float,
-    verify: bool = True,
+    verify: Union[bool, str] = True,
     cert: Optional[tuple] = None,
 ) -> Tuple[Dict[str, str], Dict[str, Any]]:
     """
@@ -193,11 +194,34 @@ def _readline_with_timeout(stream: "Any", timeout: float) -> str | None:
     return result[0] if result[0] is not None else None
 
 
+def _resolve_command(command: str) -> str:
+    """
+    Раскрывает `~` в `command:` и на Windows резолвит PATHEXT.
+
+    `subprocess.Popen` не делает tilde expansion (это работа шелла), и на
+    Windows не учитывает PATHEXT (`npx` не найдёт `npx.cmd`/`.exe`). Делаем
+    оба шага здесь — единственный чокпойнт перед спавном stdio MCP.
+
+    На Windows `shutil.which` нужен и для bare `npx`, и для абсолютного
+    пути без расширения (`C:\\...\\npx` → `C:\\...\\npx.cmd`). Раннее
+    return делаем только если расширение уже проставлено явно.
+    """
+    command = os.path.expanduser(command)
+    if os.name != "nt":
+        return command
+
+    if os.path.splitext(command)[1]:
+        return command
+    resolved = shutil.which(command)
+    return resolved if resolved else command
+
+
 def _spawn_stdio_process(server_cfg: Dict[str, Any]) -> subprocess.Popen:
     """Запустить процесс MCP-сервера по конфигу (command, args, cwd, env)."""
     command = server_cfg.get("command")
     if not command:
         raise ValueError("stdio MCP server config must have 'command'")
+    command = _resolve_command(str(command))
     args = server_cfg.get("args")
     if args is None:
         args = []

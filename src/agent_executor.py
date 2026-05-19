@@ -17,7 +17,7 @@ from config_modules.stored_outputs import get_stored_tool_outputs_max_entries
 from message_policy.chat_completions import repair_tool_call_pairing
 from run_summary_coordinator import RunSummaryCoordinator
 from summarize.config import parse_summary_trigger_chars
-from summarize.summary_serialization import history_has_dialog_summary_message
+from message_format.serialization import history_has_dialog_summary_message
 from states import State, SharedStateData, save_state, dump_storage
 from thread_store import (
     ThreadSession,
@@ -25,6 +25,8 @@ from thread_store import (
     reset_thread_files,
     resolve_threads_dir,
 )
+from tools.connect_mcp.persistent_stdio import PersistentStdioRegistry
+from tools.connect_mcp.stream_client import _SESSION_MANAGER as _STREAM_SESSION_MANAGER
 from tools.skills.registry import get_skills_registry
 from message_policy.user_message_policy import (
     TECHNICAL_TYPE_CURRENT_CONTEXT,
@@ -342,24 +344,34 @@ class AgentExecutor:
         def check_stop() -> bool:
             with self._lock:
                 return self._state.stop_requested if self._state is not None else False
-
-        response = run_agent(
-            messages,
-            state,
-            self._ctx,
-            get_full_history_messages=get_full_history_messages,
-            persist_messages_callback=persist_messages_callback,
-            pre_backend_compaction_hook=summary.pre_backend_compaction_hook,
-            get_pending_messages=get_pending_messages,
-            check_stop=check_stop,
-        )
-        if thread_session is not None:
-            thread_session.meta["user_messages_log"] = state.user_messages_log
-            thread_session.meta["current_user_messages"] = state.current_user_messages
-            thread_session.meta["backend_api_mode"] = state.backend_api_mode
-            thread_session.persist_batch(
-                [], previous_response_id=state.previous_response_id
+        try:
+            response = run_agent(
+                messages,
+                state,
+                self._ctx,
+                get_full_history_messages=get_full_history_messages,
+                persist_messages_callback=persist_messages_callback,
+                pre_backend_compaction_hook=summary.pre_backend_compaction_hook,
+                get_pending_messages=get_pending_messages,
+                check_stop=check_stop,
             )
+            if thread_session is not None:
+                thread_session.meta["user_messages_log"] = state.user_messages_log
+                thread_session.meta["current_user_messages"] = state.current_user_messages
+                thread_session.meta["backend_api_mode"] = state.backend_api_mode
+                thread_session.persist_batch(
+                    [], previous_response_id=state.previous_response_id
+                )
+        finally:
+            # Закрываем долгоживущие stdio MCP-сессии (напр. @playwright/mcp + Chromium),
+            # чтобы они не переживали конкретный запуск агента.
+            PersistentStdioRegistry.instance().close_all()
+            # И persistent-сессии stream_* транспортов (stream_stdio/stream_sse/stream_http):
+            # закрываем все открытые ClientSession в их фоновом event loop и гасим loop.
+            try:
+                _STREAM_SESSION_MANAGER.close_all()
+            except Exception:
+                pass
 
         if config_dict.get("dump_storage"):
             cur_dir = config_dict.get("logs_dump_dir") or os.getcwd()

@@ -9,6 +9,7 @@ from config import (
     build_auth_connector,
     load_config,
 )
+from config_modules.env_vars import project_gc_dir
 from message_policy.user_message_policy import (
     wrap_skill_resolution_technical_instruction,
     wrap_technical_user_content,
@@ -25,7 +26,7 @@ def _ensure_project_gc_dir() -> None:
     из-за отсутствия прав на запись в cwd.
     """
     try:
-        os.makedirs(os.path.join(os.getcwd(), ".gc"), exist_ok=True)
+        os.makedirs(project_gc_dir(), exist_ok=True)
     except (PermissionError, OSError):
         pass
 
