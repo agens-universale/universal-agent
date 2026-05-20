@@ -10,11 +10,8 @@ from summarize import (
 )
 from summarize.summary_validation import FALLBACK_SUMMARY, validate_summary_text
 from message_policy.user_message_policy import normalize_user_log_entries
-from utils.llm_chat_client import (
-    log_llm_prompt_and_result,
-    request_chat_completion_text,
-    shorten_for_log,
-)
+from summarize.llm import request_summary_text
+from utils.llm_chat_client import log_llm_prompt_and_result, shorten_for_log
 from utils.project_data import get_project_data
 
 
@@ -25,7 +22,7 @@ def summarize_dialog_via_chat_completions(
     full_history_messages: List[Dict[str, Any]],
     current_memory: str = "",
     user_messages_log: List[str] | None = None,
-    max_tokens: int = 2500,
+    max_tokens: int | None = None,
     steps_offset: int = 0,
 ) -> Dict[str, Any]:
     """Строит структурированную сводку диалога через chat completions (в т.ч. батчами).
@@ -277,12 +274,12 @@ def summarize_dialog_via_chat_completions(
                 len(batches),
                 request_messages,
             )
-        text = request_chat_completion_text(
+        text = request_summary_text(
             ctx=ctx,
             state=state,
             messages=request_messages,
-            max_tokens=max_tokens,
             request_label=f"summary_batch_{batch_index}",
+            max_tokens=max_tokens,
         )
         log_llm_prompt_and_result(
             logger=logger,

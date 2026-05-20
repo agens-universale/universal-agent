@@ -93,6 +93,12 @@ class ChatCompletionsPromptConfigTest(unittest.TestCase):
             self.assertEqual(
                 cfg["summary_params"]["original_user_messages_max_chars"], 20000
             )
+            self.assertEqual(cfg["summary_params"]["llm"]["max_tokens"], 8192)
+            self.assertEqual(cfg["summary_params"]["llm"]["completion_kwargs"], {})
+            from config_modules.summary import SummaryLlmConfig
+
+            self.assertIsInstance(cfg["summary_llm"], SummaryLlmConfig)
+            self.assertEqual(cfg["summary_llm"].max_tokens, 8192)
 
     def test_summary_params_normalization(self):
         with tempfile.TemporaryDirectory() as tmp_dir:

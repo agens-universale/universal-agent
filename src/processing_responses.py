@@ -511,13 +511,15 @@ def run_agent(
                         state.previous_response_id = response_id
                     state.last_backend_response_id = response_id
                 elif mode == "text_response":
+                    assistant_text = extract_last_assistant_text(messages)
                     run_logger.warning(
                         "Agent returned text response without tool call, requesting tool call"
                     )
                     tool_error_cnt += 1
+                    bounce_msg = format_no_tool_call_bounce(assistant_text)
                     messages = [
                         _make_technical_feedback_user_message(
-                            "There is no tool call in Agent response. Please send appropriate tool call",
+                            bounce_msg,
                             technical_type=TECHNICAL_TYPE_TECHNICAL,
                         )
                     ]

@@ -5,9 +5,9 @@ import re
 from dataclasses import dataclass
 from typing import Any, Dict, List
 
+from summarize.llm import request_summary_text
 from utils.llm_chat_client import (
     log_llm_prompt_and_result,
-    request_chat_completion_text,
     shorten_for_log,
 )
 
@@ -74,7 +74,7 @@ def suggest_updated_journal(
 
     Поведение: system из файла промпта; user с блоками ``<dialog_history>``,
     ``<current_summary>``, ``<current_journal>``; вызов
-    ``utils.llm_chat_client.request_chat_completion_text``; логирование; разбор
+    ``summarize.llm.request_summary_text``; логирование; разбор
     ``<updated_journal>`` → поле ``updated_journal`` в ``UpdatedJournalResult``.
 
     Args:
@@ -132,11 +132,10 @@ def suggest_updated_journal(
         {"role": "user", "content": user_prompt},
     ]
     request_label = "journal_update_after_summary"
-    raw_llm_response = request_chat_completion_text(
+    raw_llm_response = request_summary_text(
         ctx=ctx,
         state=state,
         messages=request_messages,
-        max_tokens=1200,
         request_label=request_label,
     )
     log_llm_prompt_and_result(

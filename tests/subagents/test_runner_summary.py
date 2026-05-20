@@ -39,6 +39,10 @@ def _make_config(trigger=100):
         "system_prompt_id": "test-prompt",
         "summary_params": {
             "chat_completions_summary_trigger_chars": trigger,
+            "llm": {
+                "max_tokens": 8192,
+                "completion_kwargs": {},
+            },
         },
     }
 

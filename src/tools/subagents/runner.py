@@ -298,6 +298,7 @@ class SubagentRunner:
     def _build_child_ctx(self, tool_name: str) -> Any:
         """Построить RunContext для дочернего агента (без субагентов в tools)."""
         from run_context import RunContext
+        from config_modules.summary import summary_llm_from_summary_params
         from utils.logging_module import create_run_logger
 
         child_config = {**self._config, "use_local_subagents": False}
@@ -317,6 +318,7 @@ class SubagentRunner:
             logger=child_logger,
             logging_path=child_log_path,
             summary_trace_path=child_summary_trace_path,
+            summary_llm=summary_llm_from_summary_params(child_config.get("summary_params")),
             tools_data=child_tools_data,
             tools_spec=child_tools_spec,
             tools_description=child_tools_descr,

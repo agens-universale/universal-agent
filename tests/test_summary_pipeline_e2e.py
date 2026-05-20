@@ -10,8 +10,8 @@ from thread_store import ThreadSession, append_new_thread_messages, load_thread_
 
 
 def _patch_chat_completion(monkeypatch, fake):
-    monkeypatch.setattr("summarize.thread_summarizer.request_chat_completion_text", fake)
-    monkeypatch.setattr("summarize.summary_llm_steps.request_chat_completion_text", fake)
+    monkeypatch.setattr("summarize.thread_summarizer.request_summary_text", fake)
+    monkeypatch.setattr("summarize.summary_llm_steps.request_summary_text", fake)
 
 
 def _ctx():
@@ -26,6 +26,10 @@ def _ctx():
                 "original_user_messages_max_chars": 20000,
                 "last_dialog_steps_count": 5,
                 "last_dialog_step_message_max_chars": 5000,
+                "llm": {
+                    "max_tokens": 8192,
+                    "completion_kwargs": {},
+                },
             },
         },
         logger=None,

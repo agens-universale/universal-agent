@@ -115,6 +115,12 @@ summary:
   original_user_messages_max_chars: 20000
   last_dialog_steps_count: 4
   last_dialog_step_message_max_chars: 5000
+  llm:
+    max_tokens: 8192
+    completion_kwargs:
+      separate_reasoning: false
+      chat_template_kwargs:
+        enable_thinking: false
 
 security:
   command_moderation:

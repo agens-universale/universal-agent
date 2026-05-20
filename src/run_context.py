@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from config_modules.summary import SummaryLlmConfig, summary_llm_from_summary_params
 from utils.prod_auth import AuthConnector
 from utils.logging_module import create_run_logger
 from utils.logging_module import generate_run_id
@@ -21,6 +22,7 @@ class RunContext:
     - auth_connector — коннектор авторизации для бэкенда;
     - logger / logging_path — логгер и путь к файлу логов для этого запуска;
     - summary_trace_path — отдельный файл trace для суммаризации;
+    - summary_llm — LLM-параметры суммаризации (из summary.llm в config);
     - tools_data / tools_spec / tools_description — подготовленные данные о тулах;
     - project_gc_dir — папка project-local артефактов (<cwd>/.gc/).
     """
@@ -31,6 +33,7 @@ class RunContext:
     logger: logging.Logger
     logging_path: str
     summary_trace_path: str
+    summary_llm: SummaryLlmConfig
     tools_data: Dict[str, Dict[str, Any]]
     tools_spec: List[Dict[str, Any]]
     tools_description: List[str]
@@ -63,6 +66,12 @@ def create_run_context(
     #    json.dumps(tools_spec, ensure_ascii=False, indent=2),
     #)
 
+    raw_summary_llm = config_dict.get("summary_llm")
+    if isinstance(raw_summary_llm, SummaryLlmConfig):
+        summary_llm = raw_summary_llm
+    else:
+        summary_llm = summary_llm_from_summary_params(config_dict.get("summary_params"))
+
     ctx = RunContext(
         config_dict=config_dict,
         run_id=effective_run_id,
@@ -70,6 +79,7 @@ def create_run_context(
         logger=run_logger,
         logging_path=logging_path,
         summary_trace_path=summary_trace_path,
+        summary_llm=summary_llm,
         tools_data=tools_data,
         tools_spec=tools_spec,
         tools_description=tools_description,

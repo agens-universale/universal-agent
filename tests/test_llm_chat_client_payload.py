@@ -3,6 +3,24 @@ from types import SimpleNamespace
 from utils import llm_chat_client
 
 
+def _patch_policy(monkeypatch):
+    captured = {}
+
+    def _fake_policy(*, payload_factory, initial_max_tokens, **kwargs):
+        payload = payload_factory(initial_max_tokens)
+        captured["payload"] = payload
+        captured["initial_max_tokens"] = initial_max_tokens
+        return {"choices": [{"message": {"content": "ok"}}]}, payload
+
+    monkeypatch.setattr(
+        llm_chat_client,
+        "request_chat_completions_with_policy",
+        _fake_policy,
+    )
+    monkeypatch.setattr(llm_chat_client, "create_call_headers", lambda _s, _c: {})
+    return captured
+
+
 def test_request_chat_completion_text_raw_logging_controlled_by_config(monkeypatch):
     logs = []
 
@@ -10,18 +28,7 @@ def test_request_chat_completion_text_raw_logging_controlled_by_config(monkeypat
         def info(self, fmt, *args):
             logs.append((fmt, args))
 
-    def _fake_headers(_state, _ctx):
-        return {}
-
-    def _fake_request(*_a, **_k):
-        return {"choices": [{"message": {"content": "ok"}}]}
-
-    monkeypatch.setattr(llm_chat_client, "create_call_headers", _fake_headers)
-    monkeypatch.setattr(
-        llm_chat_client,
-        "request_backend_chat_completions",
-        _fake_request,
-    )
+    _patch_policy(monkeypatch)
 
     state = SimpleNamespace(default_model="m")
 
@@ -63,23 +70,7 @@ def test_request_chat_completion_text_raw_logging_controlled_by_config(monkeypat
 
 
 def test_request_chat_completion_text_uses_max_completion_tokens_and_safe_kwargs(monkeypatch):
-    captured = {}
-
-    def _fake_headers(_state, _ctx):
-        return {"Authorization": "Bearer fake"}
-
-    def _fake_request(payload, headers, **kwargs):
-        captured["payload"] = payload
-        captured["headers"] = headers
-        captured["kwargs"] = kwargs
-        return {"choices": [{"message": {"content": "ok"}}]}
-
-    monkeypatch.setattr(llm_chat_client, "create_call_headers", _fake_headers)
-    monkeypatch.setattr(
-        llm_chat_client,
-        "request_backend_chat_completions",
-        _fake_request,
-    )
+    captured = _patch_policy(monkeypatch)
 
     ctx = SimpleNamespace(
         config_dict={
@@ -102,6 +93,7 @@ def test_request_chat_completion_text_uses_max_completion_tokens_and_safe_kwargs
     )
 
     assert result == "ok"
+    assert captured["initial_max_tokens"] == 321
     assert captured["payload"]["model"] == "test-model"
     assert captured["payload"]["max_completion_tokens"] == 321
     assert "max_tokens" not in captured["payload"]
@@ -109,21 +101,7 @@ def test_request_chat_completion_text_uses_max_completion_tokens_and_safe_kwargs
 
 
 def test_request_chat_completion_text_uses_max_tokens_when_flag_enabled(monkeypatch):
-    captured = {}
-
-    def _fake_headers(_state, _ctx):
-        return {"Authorization": "Bearer fake"}
-
-    def _fake_request(payload, headers, **kwargs):
-        captured["payload"] = payload
-        return {"choices": [{"message": {"content": "ok"}}]}
-
-    monkeypatch.setattr(llm_chat_client, "create_call_headers", _fake_headers)
-    monkeypatch.setattr(
-        llm_chat_client,
-        "request_backend_chat_completions",
-        _fake_request,
-    )
+    captured = _patch_policy(monkeypatch)
 
     ctx = SimpleNamespace(
         config_dict={

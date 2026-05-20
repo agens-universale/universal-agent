@@ -18,8 +18,8 @@ from message_policy.user_message_policy import (
 
 def _patch_chat_completion(monkeypatch, fake):
     """Патчит имя там, где оно связано после `from ... import ...`."""
-    monkeypatch.setattr("summarize.thread_summarizer.request_chat_completion_text", fake)
-    monkeypatch.setattr("summarize.summary_llm_steps.request_chat_completion_text", fake)
+    monkeypatch.setattr("summarize.thread_summarizer.request_summary_text", fake)
+    monkeypatch.setattr("summarize.summary_llm_steps.request_summary_text", fake)
 
 
 def _ctx(trigger_chars: int = 120000):
@@ -35,6 +35,10 @@ def _ctx(trigger_chars: int = 120000):
                 "original_user_messages_max_chars": 20000,
                 "last_dialog_steps_count": 5,
                 "last_dialog_step_message_max_chars": 5000,
+                "llm": {
+                    "max_tokens": 8192,
+                    "completion_kwargs": {},
+                },
             },
         },
         logger=None,
