@@ -1,0 +1,8 @@
+# Copy this block into the mcp-servers: section of your agent config.yml.
+# science-mcp runs as a daemon. Start it BEFORE gc-cli:
+#   science-mcp --transport http
+science:
+  transport: stream_http
+  url: http://127.0.0.1:8765/mcp
+  description: "Unified scientific literature search across 10 public APIs"
+  server-name: science
