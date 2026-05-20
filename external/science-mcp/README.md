@@ -1,57 +1,59 @@
 # science-mcp
 
-MCP server for unified scientific literature search. Wraps 10 public APIs
-(OpenAlex, CrossRef, PubMed/PMC, arXiv, Semantic Scholar, DBLP, CORE,
-OpenCitations, bioRxiv/medRxiv) behind 7 normalized tools.
+MCP-сервер для унифицированного поиска научной литературы. Оборачивает 10
+публичных API (OpenAlex, CrossRef, PubMed/PMC, arXiv, Semantic Scholar, DBLP,
+CORE, OpenCitations, bioRxiv/medRxiv) в 7 нормализованных tools.
 
-## Install
+## Установка
 
-From the parent repo (`background-agent/`):
+Из корня родительского репозитория (`background-agent/`):
 
 ```bash
 python recommended_mcp/install.py
 ```
 
-Or directly:
+Или напрямую:
 
 ```bash
 pip install /Users/gkave/SberAI/background-agent/external/science-mcp
 ```
 
-After install, the `science-mcp` entry-point is on `$PATH` of the venv.
+После установки entry-point `science-mcp` доступен в `$PATH` виртуального
+окружения.
 
-## Run the daemon
+## Запуск daemon
 
-science-mcp runs as a long-lived process so in-memory throttling persists
-across agent calls. Default: HTTP on `127.0.0.1:8765`, endpoint path `/mcp`.
+science-mcp работает как долгоживущий процесс — это нужно, чтобы in-memory
+троттлинг переживал между вызовами агента. По умолчанию: HTTP на
+`127.0.0.1:8765`, endpoint `/mcp`.
 
 ```bash
-# Foreground (default transport is http)
+# Foreground (транспорт по умолчанию — http)
 science-mcp --transport http
 
-# Custom bind
+# Кастомный bind
 science-mcp --transport http --host 0.0.0.0 --port 9000
 
 # Background
 nohup science-mcp --transport http > /tmp/science-mcp.log 2>&1 &
 ```
 
-Stdio mode is kept as a legacy fallback for one-shot debugging (process
-spawned per agent call, no shared throttling):
+Stdio оставлен как legacy fallback для разовой отладки (процесс спавнится на
+каждый вызов агента, без shared-throttler):
 
 ```bash
 science-mcp --transport stdio
 ```
 
-## Configure
+## Конфигурация
 
-Primary source: YAML config file. Env vars remain as fallback (useful in
-systemd/docker where editing files is awkward). Lookup order per field:
-**YAML key > env var > built-in default**.
+Основной источник — YAML-файл. Env переменные остаются как fallback (удобно в
+systemd/docker, где править файлы неудобно). Порядок lookup-а для каждого
+поля: **YAML > env > встроенный default**.
 
-### YAML (recommended)
+### YAML (рекомендуется)
 
-Copy the tracked template and fill in what applies:
+Скопируй tracked-шаблон и впиши свои значения:
 
 ```bash
 cp science-mcp.example.yaml science-mcp.yaml
@@ -59,34 +61,34 @@ $EDITOR science-mcp.yaml
 science-mcp --transport http --config ./science-mcp.yaml
 ```
 
-If `--config` is omitted, the daemon auto-discovers `./science-mcp.yaml` then
-`~/.config/science-mcp.yaml`. `science-mcp.yaml` is gitignored — only the
-`.example` template is tracked.
+Если `--config` не передан, daemon сам ищет `./science-mcp.yaml`, потом
+`~/.config/science-mcp.yaml`. Реальный `science-mcp.yaml` — в `.gitignore`,
+коммитим только `.example`-шаблон.
 
-Available keys (see `science-mcp.example.yaml` for full annotated example):
+Доступные ключи (полный аннотированный пример — в `science-mcp.example.yaml`):
 
-| Key | Default | Purpose |
+| Ключ | По умолчанию | Назначение |
 |---|---|---|
 | `mailto` | `team@company.example` | OpenAlex polite-pool + CrossRef UA |
-| `host` | `127.0.0.1` | Daemon bind host |
-| `port` | `8765` | Daemon bind port |
-| `ncbi_api_key` | `null` | Raises NCBI rate limit 3/s → 10/s |
-| `semantic_scholar_api_key` | `null` | Required for usable S2 (no-key = instant 429) |
-| `core_api_key` | `null` | More stable CORE access |
-| `cache_dir` | `~/.cache/science-mcp` | Disk JSON cache directory |
-| `cache_enabled` | `true` | `false` disables disk cache |
-| `http_timeout_sec` | `15` | Default per-request timeout, seconds |
-| `queue_timeout_sec` | `120` | Max wait in throttler queue, seconds |
+| `host` | `127.0.0.1` | Bind-адрес daemon |
+| `port` | `8765` | Порт daemon |
+| `ncbi_api_key` | `null` | Поднимает лимит NCBI с 3/s до 10/s |
+| `semantic_scholar_api_key` | `null` | Без ключа S2 моментально отдаёт 429 |
+| `core_api_key` | `null` | Стабильный доступ к CORE |
+| `cache_dir` | `~/.cache/science-mcp` | Папка disk JSON cache |
+| `cache_enabled` | `true` | `false` отключает disk cache |
+| `http_timeout_sec` | `15` | Per-request timeout, секунды |
+| `queue_timeout_sec` | `120` | Макс. ожидание в очереди троттлера, секунды |
 
-Unknown keys in YAML raise loudly — typo guard.
+Неизвестные ключи в YAML — падают с понятным `ValueError` (typo guard).
 
-### Env vars (fallback)
+### Env переменные (fallback)
 
-Useful for docker/systemd. Each YAML key has a matching env var with the
-`SCIENCE_MCP_` prefix (or, for keys, the canonical `NCBI_API_KEY` /
-`SEMANTIC_SCHOLAR_API_KEY` / `CORE_API_KEY`):
+Полезны для docker/systemd. Каждому YAML-ключу соответствует env с префиксом
+`SCIENCE_MCP_` (или каноничные `NCBI_API_KEY` / `SEMANTIC_SCHOLAR_API_KEY` /
+`CORE_API_KEY` для ключей API):
 
-| Variable | Maps to |
+| Переменная | Соответствует |
 |---|---|
 | `SCIENCE_MCP_MAILTO` | `mailto` |
 | `SCIENCE_MCP_HOST` | `host` |
@@ -99,29 +101,34 @@ Useful for docker/systemd. Each YAML key has a matching env var with the
 | `SCIENCE_MCP_HTTP_TIMEOUT` | `http_timeout_sec` |
 | `SCIENCE_MCP_QUEUE_TIMEOUT` | `queue_timeout_sec` |
 
-## Connect to agent
+## Подключение к агенту
 
-Copy `recommended_mcp/science/agent_config.snippet.yml` (in the parent repo)
-into the `mcp-servers:` section of your agent's `config.yml`. Default
-connection: `transport: stream_http`, `url: http://127.0.0.1:8765/mcp`.
+Скопируй блок из `recommended_mcp/science/agent_config.snippet.yml` (в
+родительском репозитории) в секцию `mcp-servers:` своего agent `config.yml`.
+Дефолтное подключение: `transport: stream_http`,
+`url: http://127.0.0.1:8765/mcp`.
 
-## Documentation
+## Архитектура
 
-Implementation plan and design: `.docs/superpowers/plans/2026-05-19-science-mcp-implementation.md`.
+Слоистая: `utilities → adapters → tools → server`. Никаких reverse-imports.
 
-## Architecture
+- `utils` — `cache.py`, `throttle.py`, `http_client.py`, `errors.py`,
+  `models.py`, `normalize.py`, `config.py`. Технический слой, бизнес-логики
+  нет.
+- `adapters/` — по одному модулю на провайдера (10 шт.). Знают про конкретный
+  upstream API + нормализуют ответ.
+- `tools/` — 7 MCP-tools (`literature_search`, `work_lookup`, `ncbi_fetch`,
+  `citations_by_doi`, `preprint_search`, `open_access_search`,
+  `explain_sources`). Оркестрация, выбор источников, dedup.
+- `server.py` — регистрация tools в FastMCP, транспорт.
 
-Layered: utilities → adapters → tools → server. See
-`.docs/superpowers/plans/2026-05-19-science-mcp-implementation.md` for the
-full implementation plan.
+## Операционные ограничения (из live-probes 2026-05-18)
 
-## Operational constraints (from live probes 2026-05-18)
-
-- Semantic Scholar without an API key returns immediate 429 — adapter raises `unauthorized`.
-- CrossRef `filter=member:246` includes CSHL journals, not only preprints — `cshl_preprints` adapter secondary-filters by DOI prefix `10.1101/YYYY.MM.DD.NNNNNN`.
-- PMC `efetch` returns full-text XML up to 236KB — `ncbi_fetch` defaults to `summary`; `fetch` mode capped at 50KB.
-- OpenCitations `citations` returns ~5MB for popular DOIs — disk cache TTL 24h is mandatory.
-- arXiv enforces 1 req / 3s; `preprint_search` is isolated from `literature_search`.
-- CORE endpoint requires trailing slash: `/v3/search/works/?q=...`.
-- OpenCitations endpoint moved: `https://api.opencitations.net/index/v1/...`.
-- `stream_stdio` transport in `gc-cli-pub` whitelists inherited env to `HOME/LOGNAME/PATH/SHELL/TERM/USER` — list all `SCIENCE_MCP_*` and provider keys explicitly under `env:` in agent config. HTTP transport bypasses this — daemon inherits its own shell env.
+- Semantic Scholar без API-key моментально отдаёт 429 — адаптер raise-ит `unauthorized`.
+- CrossRef `filter=member:246` отдаёт не только препринты, но и журналы CSHL — `cshl_preprints` доп. фильтрует по DOI-префиксу `10.1101/YYYY.MM.DD.NNNNNN`.
+- PMC `efetch` возвращает full-text XML до 236KB — `ncbi_fetch` по умолчанию работает в `summary`; режим `fetch` capped на 50KB.
+- OpenCitations `citations` возвращает ~5MB для популярных DOI — disk cache TTL 24h обязателен.
+- arXiv держит лимит 1 req / 3s; `preprint_search` изолирован от `literature_search`.
+- CORE endpoint требует trailing slash: `/v3/search/works/?q=...`.
+- OpenCitations endpoint переехал: `https://api.opencitations.net/index/v1/...`.
+- `stream_stdio` транспорт в `gc-cli-pub` whitelist-ит унаследованный env до `HOME/LOGNAME/PATH/SHELL/TERM/USER` — нужно явно перечислять все `SCIENCE_MCP_*` и provider-ключи в `env:` агентского config. HTTP-транспорт это обходит — daemon наследует свой собственный shell env.
