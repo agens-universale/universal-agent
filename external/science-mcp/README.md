@@ -43,20 +43,61 @@ spawned per agent call, no shared throttling):
 science-mcp --transport stdio
 ```
 
-## Configure (env)
+## Configure
 
-| Variable | Default | Purpose |
+Primary source: YAML config file. Env vars remain as fallback (useful in
+systemd/docker where editing files is awkward). Lookup order per field:
+**YAML key > env var > built-in default**.
+
+### YAML (recommended)
+
+Copy the tracked template and fill in what applies:
+
+```bash
+cp science-mcp.example.yaml science-mcp.yaml
+$EDITOR science-mcp.yaml
+science-mcp --transport http --config ./science-mcp.yaml
+```
+
+If `--config` is omitted, the daemon auto-discovers `./science-mcp.yaml` then
+`~/.config/science-mcp.yaml`. `science-mcp.yaml` is gitignored — only the
+`.example` template is tracked.
+
+Available keys (see `science-mcp.example.yaml` for full annotated example):
+
+| Key | Default | Purpose |
 |---|---|---|
-| `SCIENCE_MCP_MAILTO` | `team@company.example` | OpenAlex polite-pool + CrossRef UA |
-| `SCIENCE_MCP_HOST` | `127.0.0.1` | Daemon bind host |
-| `SCIENCE_MCP_PORT` | `8765` | Daemon bind port |
-| `NCBI_API_KEY` | unset | Raises NCBI rate limit 3/s → 10/s |
-| `SEMANTIC_SCHOLAR_API_KEY` | unset | Required for usable S2 (no-key = instant 429) |
-| `CORE_API_KEY` | unset | More stable CORE access |
-| `SCIENCE_MCP_CACHE_DIR` | `~/.cache/science-mcp` | Disk JSON cache |
-| `SCIENCE_MCP_CACHE` | `1` | `0` disables disk cache |
-| `SCIENCE_MCP_HTTP_TIMEOUT` | `15` | Default per-request timeout, seconds |
-| `SCIENCE_MCP_QUEUE_TIMEOUT` | `120` | Max wait in throttler queue, seconds |
+| `mailto` | `team@company.example` | OpenAlex polite-pool + CrossRef UA |
+| `host` | `127.0.0.1` | Daemon bind host |
+| `port` | `8765` | Daemon bind port |
+| `ncbi_api_key` | `null` | Raises NCBI rate limit 3/s → 10/s |
+| `semantic_scholar_api_key` | `null` | Required for usable S2 (no-key = instant 429) |
+| `core_api_key` | `null` | More stable CORE access |
+| `cache_dir` | `~/.cache/science-mcp` | Disk JSON cache directory |
+| `cache_enabled` | `true` | `false` disables disk cache |
+| `http_timeout_sec` | `15` | Default per-request timeout, seconds |
+| `queue_timeout_sec` | `120` | Max wait in throttler queue, seconds |
+
+Unknown keys in YAML raise loudly — typo guard.
+
+### Env vars (fallback)
+
+Useful for docker/systemd. Each YAML key has a matching env var with the
+`SCIENCE_MCP_` prefix (or, for keys, the canonical `NCBI_API_KEY` /
+`SEMANTIC_SCHOLAR_API_KEY` / `CORE_API_KEY`):
+
+| Variable | Maps to |
+|---|---|
+| `SCIENCE_MCP_MAILTO` | `mailto` |
+| `SCIENCE_MCP_HOST` | `host` |
+| `SCIENCE_MCP_PORT` | `port` |
+| `NCBI_API_KEY` | `ncbi_api_key` |
+| `SEMANTIC_SCHOLAR_API_KEY` | `semantic_scholar_api_key` |
+| `CORE_API_KEY` | `core_api_key` |
+| `SCIENCE_MCP_CACHE_DIR` | `cache_dir` |
+| `SCIENCE_MCP_CACHE` | `cache_enabled` (`0` → false) |
+| `SCIENCE_MCP_HTTP_TIMEOUT` | `http_timeout_sec` |
+| `SCIENCE_MCP_QUEUE_TIMEOUT` | `queue_timeout_sec` |
 
 ## Connect to agent
 

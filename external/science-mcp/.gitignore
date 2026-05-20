@@ -27,6 +27,9 @@ htmlcov/
 .env
 .env.local
 
+# Local config — holds real API keys; tracked template is science-mcp.example.yaml
+science-mcp.yaml
+
 # Session artifacts
 agent_*.log
 science-mcp.log

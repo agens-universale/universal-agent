@@ -5,6 +5,7 @@ import dataclasses
 import logging
 import os
 import sys
+from pathlib import Path
 
 from science_mcp.config import load_config
 from science_mcp.logging_config import configure_logging
@@ -38,12 +39,23 @@ def main() -> None:
         default=int(os.environ.get("SCIENCE_MCP_PORT", "8765")),
         help="Bind port for http transport (default: env SCIENCE_MCP_PORT or 8765).",
     )
+    p.add_argument(
+        "--config",
+        type=Path,
+        default=None,
+        help=(
+            "Path to YAML config (primary source for mailto, api keys, "
+            "cache, timeouts, host/port). Env vars used as fallback. "
+            "If omitted, ./science-mcp.yaml or ~/.config/science-mcp.yaml is "
+            "auto-loaded when present."
+        ),
+    )
     p.add_argument("--log-level", default="INFO")
     args = p.parse_args()
     configure_logging(args.log_level)
 
     # Override config host/port from CLI args before building runtime.
-    cfg = load_config()
+    cfg = load_config(yaml_path=args.config)
     if args.transport == "http":
         cfg = dataclasses.replace(cfg, host=args.host, port=args.port)
 
