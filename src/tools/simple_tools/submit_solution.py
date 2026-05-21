@@ -1,7 +1,11 @@
-from typing import Dict, Any
+from typing import Any, Dict, Optional, TYPE_CHECKING
 import json
 from tools.simple_tools.abstract_simple_tool import AbstractSimpleTool
 from utils.arg_decorators import parse_json_object_argument
+from utils.json_arg_parser import JsonArgParseError, parse_json_object_arg
+
+if TYPE_CHECKING:
+    from intent_guard.guard import FinishGateDecision
 
 
 SOLUTION_TYPES = (
@@ -14,7 +18,6 @@ SOLUTION_TYPES = (
 )
 
 class SubmitSolution(AbstractSimpleTool):
-    TERMINAL_TOOL_OUTPUT_MESSAGE = "Dialog turn finished. Waiting for new user questions."
 
     @staticmethod
     def _result(
@@ -45,15 +48,124 @@ class SubmitSolution(AbstractSimpleTool):
         return json.dumps(out, ensure_ascii=False)
 
     @classmethod
-    def tool_output_on_cycle_stop(cls) -> str:
-        payload: Dict[str, Any] = {
-            "tool": "submit_solution",
-            "ok": True,
-            "status": "submitted",
-            "message": cls.TERMINAL_TOOL_OUTPUT_MESSAGE,
-            "error": None,
-            "synthetic": True,
+    def _parse_handoff_from_arguments(cls, payload: Dict[str, Any]) -> Dict[str, Any] | None:
+        handoff_data = payload.get("handoff_data")
+        if isinstance(handoff_data, dict):
+            return handoff_data
+        if "handoff" not in payload:
+            return None
+        raw = payload.get("handoff")
+        if isinstance(raw, dict):
+            return raw
+        try:
+            return parse_json_object_arg(raw, field="handoff")
+        except JsonArgParseError:
+            return None
+
+    @classmethod
+    def output_from_cycle_stop_arguments(cls, tool_arguments: str) -> Optional[str]:
+        """
+        Build ``function_call_output`` JSON from ``function_call.arguments`` on cycle_stop.
+
+        Best-effort parse without re-running full tool validation (finish gate already ran).
+        """
+        if not isinstance(tool_arguments, str) or not tool_arguments.strip():
+            return None
+        try:
+            payload = json.loads(tool_arguments)
+        except json.JSONDecodeError:
+            return None
+        if not isinstance(payload, dict):
+            return None
+
+        solution_type = payload.get("solution_type")
+        if solution_type is not None and not isinstance(solution_type, str):
+            solution_type = str(solution_type)
+
+        task_report = payload.get("task_report")
+        if not isinstance(task_report, str):
+            task_report = "" if task_report is None else str(task_report)
+
+        comment = payload.get("comment")
+        if comment is not None and not isinstance(comment, str):
+            comment = str(comment)
+
+        handoff = cls._parse_handoff_from_arguments(payload)
+
+        return cls._result(
+            ok=True,
+            status="submitted",
+            message="Task outcome submitted.",
+            task_report=task_report,
+            solution_type=solution_type,
+            comment=comment if isinstance(comment, str) and comment.strip() else None,
+            handoff=handoff,
+            error=None,
+        )
+
+    @classmethod
+    def cycle_stop_output_error(cls, *, detail: str) -> str:
+        return cls._result(
+            ok=False,
+            status="cycle_stop_output_error",
+            message=detail,
+            task_report="",
+            error={"type": "cycle_stop", "message": detail},
+        )
+
+    @staticmethod
+    def _finish_gate_block_from_validation(validation: Any) -> Dict[str, Any]:
+        return {
+            "action": validation.action,
+            "ok": validation.ok,
+            "trace_ok": validation.trace_ok,
+            "report_ok": validation.report_ok,
+            "trace_gaps": list(validation.trace_gaps),
+            "report_mismatches": list(validation.report_mismatches),
+            "missing_requirements": list(validation.missing_requirements),
+            "conflicts": list(validation.conflicts),
+            "coverage_score": validation.coverage_score,
         }
+
+    @classmethod
+    def apply_finish_gate_decision(
+        cls,
+        tool_output_json: str,
+        decision: "FinishGateDecision",
+    ) -> str:
+        """Patch submit_solution JSON after quality/finish gate (intent_guard)."""
+        try:
+            payload = json.loads(tool_output_json)
+        except json.JSONDecodeError:
+            return tool_output_json
+        if not isinstance(payload, dict):
+            return tool_output_json
+
+        from intent_guard.feedback import build_finish_gate_feedback
+
+        if decision.outcome == "reject" and decision.validation is not None:
+            validation = decision.validation
+            feedback = (decision.feedback_text or "").strip() or build_finish_gate_feedback(
+                validation
+            )
+            payload["ok"] = False
+            payload["status"] = "rejected_by_finish_gate"
+            payload["message"] = feedback
+            payload["finish_gate"] = cls._finish_gate_block_from_validation(validation)
+        elif decision.validation is not None:
+            payload["finish_gate"] = cls._finish_gate_block_from_validation(
+                decision.validation
+            )
+            if decision.outcome == "accept":
+                payload.setdefault("ok", True)
+                payload.setdefault("status", "submitted")
+            elif decision.outcome == "fail_open_limit":
+                payload["finish_gate"]["runtime_outcome"] = "fail_open_limit"
+            elif decision.outcome == "fail_open_error":
+                payload["finish_gate"]["runtime_outcome"] = "fail_open_error"
+        elif decision.outcome in ("fail_open_limit", "fail_open_error"):
+            payload["finish_gate"] = {"runtime_outcome": decision.outcome}
+
         return json.dumps(payload, ensure_ascii=False)
 
     @classmethod

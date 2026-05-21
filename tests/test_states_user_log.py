@@ -18,18 +18,13 @@ def _make_state() -> State:
     )
 
 
-def test_new_state_has_empty_user_messages_log():
-    """Fresh State always starts with an empty user_messages_log."""
+def test_new_state_has_empty_user_intent_log():
     state = _make_state()
-    assert state.user_messages_log == []
+    assert state.user_intent_log == []
+    assert state.current_user_intent == []
 
 
-def test_append_user_messages_to_log_seeds_initial_user_turn():
-    """Regression for finish_gate rejecting valid submit_solution with
-    'user_messages_log is empty'. agent_executor.run_agent must seed
-    the log with the current user message BEFORE run_step/finish_gate;
-    the _persist_*_batch callbacks only see step_messages from subsequent
-    assistant turns, never the initiating user message."""
+def test_append_current_user_intent_from_messages_only_updates_current():
     state = _make_state()
     new_user_message = {
         "role": "user",
@@ -37,56 +32,107 @@ def test_append_user_messages_to_log_seeds_initial_user_turn():
         "id": "m_abc",
     }
 
-    state.append_user_messages_to_log([new_user_message])
+    state.append_current_user_intent_from_messages([new_user_message])
 
-    assert state.user_messages_log == [
+    assert state.current_user_intent == [
         "открой приложение Jazz и создай видеовстречу",
     ]
+    assert state.user_intent_log == []
 
 
-def test_append_user_messages_to_log_is_idempotent_for_same_message():
-    """Calling append twice with the same message must not duplicate it —
-    safe to re-seed on branches that may run the init path more than once."""
+def test_append_current_user_intent_from_messages_is_idempotent_for_same_message():
     state = _make_state()
     msg = {"role": "user", "content": "ping", "id": "m_1"}
-    state.append_user_messages_to_log([msg])
-    state.append_user_messages_to_log([msg])
-    assert state.user_messages_log == ["ping"]
+    state.append_current_user_intent_from_messages([msg])
+    state.append_current_user_intent_from_messages([msg])
+    assert state.current_user_intent == ["ping"]
 
 
-def test_append_user_messages_to_log_preserves_initial_across_step_batches():
-    """After seeding with the initial user turn, subsequent step_messages
-    batches (assistant output + tool calls) must NOT wipe the initial entry."""
+def test_append_current_user_intent_preserves_initial_across_step_batches():
     state = _make_state()
     initial = {"role": "user", "content": "do the thing", "id": "m_user"}
-    state.append_user_messages_to_log([initial])
+    state.append_current_user_intent_from_messages([initial])
 
-    # Subsequent step batch: assistant reply + tool call — no real user msg.
     step_batch = [
         {"role": "assistant", "content": "working on it", "id": "m_a1"},
         {"type": "function_call", "name": "some_tool", "arguments": "{}",
          "call_id": "c1", "id": "fc_1"},
     ]
-    state.append_user_messages_to_log(step_batch)
+    state.append_current_user_intent_from_messages(step_batch)
 
-    assert state.user_messages_log == ["do the thing"]
+    assert state.current_user_intent == ["do the thing"]
+    assert state.user_intent_log == []
 
 
-def test_seed_new_user_turn_appends_to_current_scope_and_global_log():
+def test_init_subagent_current_user_intent_without_policy_filter():
+    assignment = (
+        'Assignment:\n{"task": "fix foo"}\n\n'
+        "<current_context>scope hint</current_context>"
+    )
     state = _make_state()
-    state.current_user_messages = ["active intent 1"]
-    state.user_messages_log = ["old intent 1", "active intent 1"]
+    state.init_subagent_current_user_intent(assignment)
+
+    assert state.current_user_intent == [assignment]
+    assert state.user_intent_log == []
+    assert state.finish_gate_rejection_count == 0
+
+    state2 = _make_state()
+    state2.seed_new_user_turn(
+        {"role": "user", "content": assignment, "id": "m_sub"}
+    )
+    assert state2.current_user_intent == []
+
+
+def test_seed_new_user_turn_appends_only_to_current():
+    state = _make_state()
+    state.current_user_intent = ["active intent 1"]
+    state.user_intent_log = ["old intent 1"]
     new_user_message = {"role": "user", "content": "fresh request", "id": "m_new"}
 
     state.seed_new_user_turn(new_user_message)
 
-    assert state.current_user_messages == ["active intent 1", "fresh request"]
-    assert state.user_messages_log == [
-        "old intent 1",
-        "active intent 1",
-        "fresh request",
-    ]
+    assert state.current_user_intent == ["active intent 1", "fresh request"]
+    assert state.user_intent_log == ["old intent 1"]
 
+
+def test_multiple_seed_new_user_turn_at_open_turn_like_agent_executor():
+    """Как agent_executor: несколько CLI user в начале одного открытого хода."""
+    state = _make_state()
+    bodies = ["первый запрос", "второй запрос", "третий запрос"]
+    for idx, body in enumerate(bodies):
+        state.seed_new_user_turn(
+            {"role": "user", "content": body, "id": f"m_user_{idx}"}
+        )
+
+    assert state.current_user_intent == bodies
+    assert state.user_intent_log == []
+    assert state.finish_gate_rejection_count == 0
+
+    state.seed_new_user_turn(
+        {"role": "user", "content": "второй запрос", "id": "m_user_dup"}
+    )
+    assert state.current_user_intent == bodies
+
+
+def test_commit_closed_user_turn_flushes_current_to_log_without_dedup():
+    state = _make_state()
+    state.user_intent_log = ["closed turn"]
+    state.current_user_intent = ["line a", "line b", "line a"]
+
+    state.commit_closed_user_turn_to_intent_log()
+
+    assert state.current_user_intent == []
+    assert state.user_intent_log == ["closed turn", "line a", "line b", "line a"]
+
+
+def test_append_intent_scope_delta_dedups_within_current():
+    state = _make_state()
+    state.append_intent_scope_delta("first", source="ask_human")
+    state.append_intent_scope_delta("first", source="ask_human")
+    state.append_intent_scope_delta("second", source="submit_solution")
+
+    assert state.current_user_intent == ["first", "second"]
+    assert state.user_intent_log == []
 
 
 def test_extract_real_user_message_text_skips_current_context_as_technical():
@@ -119,7 +165,6 @@ def test_state_to_dict_roundtrip_is_json_serializable_and_restores_shared_and_st
     state.shared.notes_md = "notes"
     state.shared.fetch_url_cache["https://example.com"] = {"content": "ok"}
 
-    # Наполняем store, чтобы проверить его сериализацию/десериализацию.
     from tools.stored_outputs.tool_call_outputs_store import (  # noqa: E402
         ToolCallOutputRecord,
     )
@@ -149,7 +194,6 @@ def test_state_to_dict_roundtrip_is_json_serializable_and_restores_shared_and_st
 
 
 def test_state_roundtrip_with_monster_payload_preserves_core_runtime_fields():
-    """Проверка round-trip на максимально насыщенном state payload."""
     state = State(
         verbose=True,
         model="CodeChat-Pro",
@@ -176,8 +220,8 @@ def test_state_roundtrip_with_monster_payload_preserves_core_runtime_fields():
     state.last_backend_response_id = "resp_last"
     state.steps = 42
     state.stop_requested = True
-    state.user_messages_log = ["msg one", "msg two"]
-    state.current_user_messages = ["active one", "active two"]
+    state.user_intent_log = ["msg one", "msg two"]
+    state.current_user_intent = ["active one", "active two"]
     state.call_metadata["extra"] = {
         "nested": [{"k": "v"}, {"n": 1}, {"flags": [True, False, None]}],
         "meta": {"a": 1, "b": "x"},
@@ -234,7 +278,6 @@ def test_state_roundtrip_with_monster_payload_preserves_core_runtime_fields():
     blob = json.dumps(raw, ensure_ascii=False)
     restored = State.from_dict(json.loads(blob))
 
-    # Core scalar/runtime fields.
     assert restored.verbose is True
     assert restored.default_model == "CodeChat-Pro"
     assert restored.system_prompt_id == "v2-monster"
@@ -251,20 +294,17 @@ def test_state_roundtrip_with_monster_payload_preserves_core_runtime_fields():
     assert restored.stop_requested is True
     assert restored.max_steps == 99
 
-    # Complex collections.
     assert len(restored.messages) == 3
     assert restored.messages[1]["tokens"]["output"] == 55
-    assert restored.user_messages_log == ["msg one", "msg two"]
-    assert restored.current_user_messages == ["active one", "active two"]
+    assert restored.user_intent_log == ["msg one", "msg two"]
+    assert restored.current_user_intent == ["active one", "active two"]
     assert restored.call_metadata["extra"]["nested"][2]["flags"] == [True, False, None]
 
-    # Shared dataclass and nested maps.
     assert restored.shared.memory_files["journal"] == "line1\nline2"
     assert restored.shared.memory_files["arch"] == "decision: keep explicit serializers"
     assert restored.shared.notes_md == "# Notes\n- item1\n- item2"
     assert restored.shared.fetch_url_cache["https://example.com/b"]["content"] == "BBB"
 
-    # Tool output store.
     assert restored.tool_call_outputs_store.max_entries == 5
     rec_alpha = restored.tool_call_outputs_store.peek("out_alpha")
     rec_beta = restored.tool_call_outputs_store.peek("out_beta")

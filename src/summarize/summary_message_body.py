@@ -57,17 +57,29 @@ _MEMORY_FILES_HINT = (
     "Continue to append or update registers as the thread progresses."
 )
 
+_USER_INTENT_LOG_HINT = (
+    "Prior completed user turns in this thread. "
+    "Does not include the open turn (see <current_user_intent>). "
+    "The user may repeat similar wording in a later turn."
+)
 
-def _render_user_messages_log_section(user_messages_log: List[str]) -> str:
-    """Рендерит блок с журналом исходных пользовательских запросов."""
-    if not user_messages_log:
+_CURRENT_USER_INTENT_HINT = (
+    "Open user turn: what the user wants in the current step, including clarifications "
+    "from the ongoing exchange."
+)
+
+
+def _render_intent_lines_section(tag: str, lines: List[str], *, hint: str) -> str:
+    """Рендерит блок списка intent-строк с подсказкой под тегом."""
+    items = [str(item or "").strip() for item in lines]
+    items = [item for item in items if item]
+    if not items:
         return ""
-    parts: List[str] = ["<user_messages_log>"]
-    for item in user_messages_log:
-        text = str(item or "").strip()
-        if text:
-            parts.append(f"- {text}")
-    parts.append("</user_messages_log>")
+    parts: List[str] = [f"<{tag}>"]
+    for text in items:
+        parts.append(f"- {text}")
+    parts.append(f"</{tag}>")
+    parts.append(hint)
     return "\n".join(parts)
 
 
@@ -75,7 +87,8 @@ def build_dialog_summary_content(
     summary_text: str,
     last_dialog_steps: str,
     memory_files: Dict[str, str] | None = None,
-    user_messages_log: List[str] | None = None,
+    user_intent_log: List[str] | None = None,
+    current_user_intent: List[str] | None = None,
 ) -> str:
     """Собирает итоговое тело сообщения-резюме треда для подстановки в историю чата.
 
@@ -86,7 +99,8 @@ def build_dialog_summary_content(
         summary_text: Основной текст суммаризации (сводка LLM).
         last_dialog_steps: Отформатированный хвост диалога.
         memory_files: Dict[str, str] с содержимым memory-файлов (может быть пустым).
-        user_messages_log: Список "живых" пользовательских запросов (без техсообщений).
+        user_intent_log: Закрытые user turn'ы (flush после accept submit_solution).
+        current_user_intent: Открытый user turn (до commit).
 
     Returns:
         Единая строка с размеченными секциями.
@@ -102,14 +116,22 @@ def build_dialog_summary_content(
         lines.append(mem_section)
         lines.append(_MEMORY_FILES_HINT)
 
-    user_log = user_messages_log or []
-    user_log_section = _render_user_messages_log_section(user_log)
-    if user_log_section:
+    log_section = _render_intent_lines_section(
+        "user_intent_log",
+        user_intent_log or [],
+        hint=_USER_INTENT_LOG_HINT,
+    )
+    current_section = _render_intent_lines_section(
+        "current_user_intent",
+        current_user_intent or [],
+        hint=_CURRENT_USER_INTENT_HINT,
+    )
+    if log_section:
         lines.append("")
-        lines.append(user_log_section)
-        lines.append(
-            "Treat this block as the authoritative source of original user intent."
-        )
+        lines.append(log_section)
+    if current_section:
+        lines.append("")
+        lines.append(current_section)
 
     lines.append("")
     lines.append("<last_dialog_steps>")

@@ -92,7 +92,7 @@ class SubagentRunner:
             "id": generate_message_id_func("m_user_sub"),
         }
         messages = self._build_initial_messages(child_state, agent_role, user_message)
-        child_state.seed_new_user_turn(user_message)
+        child_state.init_subagent_current_user_intent(initial_message)
 
         try:
             child_ctx = self._build_child_ctx(tool_name=tool_name)
@@ -199,7 +199,7 @@ class SubagentRunner:
     def _persist_runtime_step(
         self, child_state: State, step_messages: List[Dict[str, Any]]
     ) -> None:
-        child_state.append_user_messages_to_log(step_messages)
+        child_state.append_current_user_intent_from_messages(step_messages)
 
     def _build_child_state(self, agent_role: str) -> State:
         """Создать дочерний State, наследуя общие данные от оркестратора."""
@@ -298,6 +298,7 @@ class SubagentRunner:
     def _build_child_ctx(self, tool_name: str) -> Any:
         """Построить RunContext для дочернего агента (без субагентов в tools)."""
         from run_context import RunContext
+        from config_modules.intent_scope import intent_scope_from_config_dict
         from config_modules.summary import summary_llm_from_summary_params
         from utils.logging_module import create_run_logger
 
@@ -319,6 +320,7 @@ class SubagentRunner:
             logging_path=child_log_path,
             summary_trace_path=child_summary_trace_path,
             summary_llm=summary_llm_from_summary_params(child_config.get("summary_params")),
+            intent_scope=intent_scope_from_config_dict(child_config),
             tools_data=child_tools_data,
             tools_spec=child_tools_spec,
             tools_description=child_tools_descr,

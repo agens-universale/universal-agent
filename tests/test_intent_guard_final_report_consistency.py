@@ -29,7 +29,7 @@ class ValidateFinalReportConsistencyTest(unittest.TestCase):
         )
 
     @patch("intent_guard.final_report_consistency.request_chat_completion_text")
-    def test_payload_includes_trace_digest_and_no_user_messages_log(self, mock_llm) -> None:
+    def test_payload_includes_trace_digest_and_no_user_intent_log(self, mock_llm) -> None:
         mock_llm.return_value = _validator_json()
         validate_final_report_vs_user_intent(
             ctx=self.ctx,
@@ -42,7 +42,7 @@ class ValidateFinalReportConsistencyTest(unittest.TestCase):
         user_content = mock_llm.call_args.kwargs["messages"][1]["content"]
         self.assertIn("trace_digest_text", user_content)
         self.assertIn("<dialog_history>", user_content)
-        self.assertNotIn("user_messages_log", user_content)
+        self.assertNotIn("user_intent_log", user_content)
 
     @patch("intent_guard.final_report_consistency.request_chat_completion_text")
     def test_uses_two_axis_parser_fix_report(self, mock_llm) -> None:

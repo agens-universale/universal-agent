@@ -58,18 +58,29 @@ def test_empty_memory_files_skips_section_and_hint():
     assert "tail" in body
 
 
-def test_user_messages_log_section_added_with_intent_hint():
+def test_user_intent_log_and_current_sections_with_hints():
     body = build_dialog_summary_content(
         summary_text="S",
         last_dialog_steps="tail",
         memory_files={},
-        user_messages_log=[
-            "пока не правь код, только анализ",
-            "сделай только план",
-        ],
+        user_intent_log=["закрытый ход: только план"],
+        current_user_intent=["открытый ход: уточнение"],
     )
-    assert "<user_messages_log>" in body
-    assert "- пока не правь код, только анализ" in body
-    assert "- сделай только план" in body
-    assert "authoritative source of original user intent" in body
-    assert "</user_messages_log>" in body
+    assert "<user_intent_log>" in body
+    assert "- закрытый ход: только план" in body
+    assert "Prior completed user turns" in body
+    assert "<current_user_intent>" in body
+    assert "- открытый ход: уточнение" in body
+    assert "Open user turn" in body
+    assert "<user_messages_log>" not in body
+
+
+def test_empty_current_skips_current_section():
+    body = build_dialog_summary_content(
+        summary_text="S",
+        last_dialog_steps="",
+        user_intent_log=["closed only"],
+        current_user_intent=[],
+    )
+    assert "<user_intent_log>" in body
+    assert "\n<current_user_intent>\n" not in body

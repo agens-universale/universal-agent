@@ -17,6 +17,7 @@ from config_modules.mcp import McpConfig
 from config_modules.paths import PathsConfig
 from config_modules.security import SecurityConfig
 from config_modules.stored_outputs import normalize_tool_output_limits
+from config_modules.intent_scope import IntentScopeConfig, normalize_intent_scope_config
 from config_modules.quality_gate import QualityGateConfig, normalize_quality_gate_config
 from config_modules.summary import (
     DEFAULT_INCREMENTAL_BATCH_MULTIPLIER,
@@ -42,6 +43,7 @@ class AppConfig(BaseModel):
     security: SecurityConfig = Field(default_factory=SecurityConfig)
     summary: SummaryConfig = Field(default_factory=SummaryConfig)
     quality_gate: QualityGateConfig = Field(default_factory=QualityGateConfig)
+    intent_scope: IntentScopeConfig = Field(default_factory=IntentScopeConfig)
     paths: PathsConfig = Field(default_factory=PathsConfig)
     agent: AgentConfig = Field(default_factory=AgentConfig)
     mcp: McpConfig = Field(default_factory=McpConfig)
@@ -99,6 +101,10 @@ def resolve_paths(cfg: AppConfig, config_dir: str) -> None:
             int(trigger * DEFAULT_INCREMENTAL_BATCH_MULTIPLIER) if trigger > 0 else 0
         )
     normalize_quality_gate_config(cfg.quality_gate)
+    normalize_intent_scope_config(cfg.intent_scope)
+    cfg.intent_scope.intent_scope_tool_summary_prompt_path = to_abs(
+        cfg.intent_scope.intent_scope_tool_summary_prompt_path
+    ) or os.path.join(config_dir, "prompts", "intent_scope_tool_summary_prompt.md")
     if cfg.agent.finish_gate_max_iterations < 1:
         logging.getLogger(__name__).warning(
             "finish_gate_reject_limit_invalid finish_gate_max_iterations=%s; using %s",

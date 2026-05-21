@@ -155,8 +155,8 @@ class AgentExecutor:
         state.dialog_steps_offset = 0
         if thread_session is not None:
             meta = getattr(thread_session, "meta", None) or {}
-            state.init_user_messages_log(meta.get("user_messages_log"))
-            state.init_current_user_messages(meta.get("current_user_messages"))
+            state.init_user_intent_log(meta.get("user_intent_log"))
+            state.init_current_user_intent(meta.get("current_user_intent"))
             state.dialog_steps_offset = int(meta.get("dialog_steps_offset", 0) or 0)
         if (
             backend_api_mode == "chat_completions"
@@ -223,9 +223,9 @@ class AgentExecutor:
             }
             for body in user_bodies
         ]
-        # На старте user turn используем уже имеющийся active scope из state
-        # и дописываем в него текущий запрос (только если это реальное user
-        # сообщение, не technical). Параллельно пополняем общий user log.
+        # На старте user turn дописываем текущий CLI-запрос в current_user_intent
+        # (только реальные user-сообщения, не technical). user_intent_log — только
+        # после commit_closed_user_turn_to_intent_log при accept submit_solution.
         for new_user_message in new_user_messages:
             state.seed_new_user_turn(new_user_message)
         technical_user_message = None
@@ -311,9 +311,11 @@ class AgentExecutor:
                     m for m in step_messages
                     if make_message_key(m) not in known_before
                 ]
-                state.append_user_messages_to_log(step_messages_for_user_scope)
-                thread_session.meta["user_messages_log"] = state.user_messages_log
-                thread_session.meta["current_user_messages"] = state.current_user_messages
+                state.append_current_user_intent_from_messages(
+                    step_messages_for_user_scope
+                )
+                thread_session.meta["user_intent_log"] = state.user_intent_log
+                thread_session.meta["current_user_intent"] = state.current_user_intent
                 thread_session.meta["backend_api_mode"] = state.backend_api_mode
                 thread_session.backend_api_mode = state.backend_api_mode
                 last_backend_response_id = getattr(
@@ -331,7 +333,7 @@ class AgentExecutor:
             get_full_history_messages = thread_session.get_full_history_messages
         elif backend_api_mode == "chat_completions" and summary_trigger_chars > 0:
             def _persist_runtime_batch(step_messages: list[dict]) -> None:
-                state.append_user_messages_to_log(step_messages)
+                state.append_current_user_intent_from_messages(step_messages)
 
             persist_messages_callback = _persist_runtime_batch
 
@@ -356,8 +358,8 @@ class AgentExecutor:
                 check_stop=check_stop,
             )
             if thread_session is not None:
-                thread_session.meta["user_messages_log"] = state.user_messages_log
-                thread_session.meta["current_user_messages"] = state.current_user_messages
+                thread_session.meta["user_intent_log"] = state.user_intent_log
+                thread_session.meta["current_user_intent"] = state.current_user_intent
                 thread_session.meta["backend_api_mode"] = state.backend_api_mode
                 thread_session.persist_batch(
                     [], previous_response_id=state.previous_response_id

@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from config_modules.intent_scope import IntentScopeConfig, intent_scope_from_config_dict
 from config_modules.summary import SummaryLlmConfig, summary_llm_from_summary_params
 from utils.prod_auth import AuthConnector
 from utils.logging_module import create_run_logger
@@ -23,6 +24,7 @@ class RunContext:
     - logger / logging_path — логгер и путь к файлу логов для этого запуска;
     - summary_trace_path — отдельный файл trace для суммаризации;
     - summary_llm — LLM-параметры суммаризации (из summary.llm в config);
+    - intent_scope — параметры intent-scope hook (из intent_scope в config);
     - tools_data / tools_spec / tools_description — подготовленные данные о тулах;
     - project_gc_dir — папка project-local артефактов (<cwd>/.gc/).
     """
@@ -34,6 +36,7 @@ class RunContext:
     logging_path: str
     summary_trace_path: str
     summary_llm: SummaryLlmConfig
+    intent_scope: IntentScopeConfig
     tools_data: Dict[str, Dict[str, Any]]
     tools_spec: List[Dict[str, Any]]
     tools_description: List[str]
@@ -80,6 +83,7 @@ def create_run_context(
         logging_path=logging_path,
         summary_trace_path=summary_trace_path,
         summary_llm=summary_llm,
+        intent_scope=intent_scope_from_config_dict(config_dict),
         tools_data=tools_data,
         tools_spec=tools_spec,
         tools_description=tools_description,

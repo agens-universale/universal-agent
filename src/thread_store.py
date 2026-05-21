@@ -13,7 +13,7 @@ from utils.generate_message_id import generate_msg_id_sha256 as generate_message
 
 _THREAD_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]+$")
 _SYSTEM_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]+$")
-_META_SCHEMA_VERSION = 1
+_META_SCHEMA_VERSION = 2
 
 
 def _utc_now_iso() -> str:
@@ -381,16 +381,16 @@ class ThreadSession:
             base_meta["shared"] = self.meta["shared"]
         if isinstance(self.meta.get("last_backend_response_id"), str):
             base_meta["last_backend_response_id"] = self.meta.get("last_backend_response_id")
-        if isinstance(self.meta.get("user_messages_log"), list):
-            base_meta["user_messages_log"] = [
+        if isinstance(self.meta.get("user_intent_log"), list):
+            base_meta["user_intent_log"] = [
                 str(x).strip()
-                for x in self.meta.get("user_messages_log", [])
+                for x in self.meta.get("user_intent_log", [])
                 if str(x).strip()
             ]
-        if isinstance(self.meta.get("current_user_messages"), list):
-            base_meta["current_user_messages"] = [
+        if isinstance(self.meta.get("current_user_intent"), list):
+            base_meta["current_user_intent"] = [
                 str(x).strip()
-                for x in self.meta.get("current_user_messages", [])
+                for x in self.meta.get("current_user_intent", [])
                 if str(x).strip()
             ]
         # Persist rendered chat/completions system prompt for transparency/debugging.
@@ -409,7 +409,7 @@ class ThreadSession:
         summary_payload: Dict[str, Any],
     ) -> Dict[str, Any]:
         summary_text = str(summary_payload.get("summary_message_content") or "").strip()
-        user_messages_log = summary_payload.get("user_messages_log")
+        user_intent_log = summary_payload.get("user_intent_log")
         dialog_steps_offset = summary_payload.get("dialog_steps_offset", 0)
         data_path, meta_path = _thread_paths(self.threads_dir, self.system_id, self.thread_id)
         ts_suffix = _utc_now_suffix()
@@ -486,20 +486,20 @@ class ThreadSession:
         if effective_steps_offset < 0:
             effective_steps_offset = 0
         new_meta["dialog_steps_offset"] = effective_steps_offset
-        if isinstance(user_messages_log, list):
-            new_meta["user_messages_log"] = [
-                str(x).strip() for x in user_messages_log if str(x).strip()
+        if isinstance(user_intent_log, list):
+            new_meta["user_intent_log"] = [
+                str(x).strip() for x in user_intent_log if str(x).strip()
             ]
-        elif isinstance(existing_meta.get("user_messages_log"), list):
-            new_meta["user_messages_log"] = [
+        elif isinstance(existing_meta.get("user_intent_log"), list):
+            new_meta["user_intent_log"] = [
                 str(x).strip()
-                for x in existing_meta.get("user_messages_log", [])
+                for x in existing_meta.get("user_intent_log", [])
                 if str(x).strip()
             ]
-        if isinstance(existing_meta.get("current_user_messages"), list):
-            new_meta["current_user_messages"] = [
+        if isinstance(existing_meta.get("current_user_intent"), list):
+            new_meta["current_user_intent"] = [
                 str(x).strip()
-                for x in existing_meta.get("current_user_messages", [])
+                for x in existing_meta.get("current_user_intent", [])
                 if str(x).strip()
             ]
         prompt = existing_meta.get("chat_completions_system_prompt_rendered")

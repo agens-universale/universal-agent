@@ -47,8 +47,8 @@ class FinishGateGuardTest(unittest.TestCase):
         )
         state = SimpleNamespace(
             parent_state_id=None,
-            current_user_messages=["x"],
-            user_messages_log=["x"],
+            current_user_intent=["x"],
+            user_intent_log=["x"],
             finish_gate_rejection_count=2,
         )
         guard = FinishGateGuard(ctx=ctx, state=state)
@@ -66,8 +66,8 @@ class FinishGateGuardTest(unittest.TestCase):
         )
         state = SimpleNamespace(
             parent_state_id=None,
-            current_user_messages=["x"],
-            user_messages_log=["x"],
+            current_user_intent=["x"],
+            user_intent_log=["x"],
             finish_gate_rejection_count=0,
         )
 
@@ -105,8 +105,8 @@ class FinishGateGuardTest(unittest.TestCase):
         )
         state = SimpleNamespace(
             parent_state_id=None,
-            current_user_messages=["x"],
-            user_messages_log=["x"],
+            current_user_intent=["x"],
+            user_intent_log=["x"],
             finish_gate_rejection_count=0,
         )
 

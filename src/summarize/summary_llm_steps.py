@@ -71,7 +71,7 @@ def repair_summary_text(
     ctx: Any,
     state: Any,
     history_text: str,
-    user_requests_text: str,
+    intent_blocks_prefix: str,
     invalid_summary: str,
     reason: str,
     max_tokens: int,
@@ -86,7 +86,7 @@ def repair_summary_text(
         ctx: Контекст выполнения.
         state: Состояние сессии.
         history_text: Текст истории батча, на котором сорвалась валидация.
-        user_requests_text: Отформатированный список пользовательских запросов.
+        intent_blocks_prefix: Блоки ``<user_intent_log>`` и ``<current_user_intent>`` (как в основном батче).
         invalid_summary: Исходный невалидный ответ.
         reason: Код от `validate_summary_text` для включения в user-промпт.
         max_tokens: Лимит длины исправленной сводки.
@@ -102,9 +102,7 @@ def repair_summary_text(
     )
     user = (
         f"Previous summary is invalid. Reason: {reason}.\n\n"
-        "<user_requests_log>\n"
-        f"{user_requests_text}\n"
-        "</user_requests_log>\n\n"
+        f"{intent_blocks_prefix}"
         "<dialog_history>\n"
         f"{history_text}\n"
         "</dialog_history>\n\n"

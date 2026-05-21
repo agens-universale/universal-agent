@@ -472,7 +472,7 @@ def test_summarize_pipeline_calls_build_history_text_with_max_chars_disabled(mon
     assert all(k.get("max_chars") == 0 for k in captured)
 
 
-def test_summarize_merges_existing_user_messages_log(monkeypatch):
+def test_summarize_merges_existing_user_intent_log(monkeypatch):
     history = _flatten_turns([_make_turn("new user request", "assistant reply")])
 
     def _fake_request(**_kwargs):
@@ -487,9 +487,9 @@ def test_summarize_merges_existing_user_messages_log(monkeypatch):
         state=_state(),
         full_history_messages=history,
         current_memory="",
-        user_messages_log=["older user request", "new user request"],
+        user_intent_log=["older user request", "new user request"],
     )
-    assert result["user_messages_log"] == [
+    assert result["user_intent_log"] == [
         "older user request",
         "new user request",
     ]
@@ -509,7 +509,7 @@ def test_summarize_merges_existing_user_messages_log(monkeypatch):
     assert "<original_user_messages>" not in built
 
 
-def test_summarize_preserves_user_messages_log_chronological_order(monkeypatch):
+def test_summarize_preserves_user_intent_log_chronological_order(monkeypatch):
     history = _flatten_turns(
         [
             _make_turn("third user request", "assistant 1"),
@@ -529,7 +529,7 @@ def test_summarize_preserves_user_messages_log_chronological_order(monkeypatch):
         state=_state(),
         full_history_messages=history,
         current_memory="",
-        user_messages_log=[
+        user_intent_log=[
             "first user request",
             "second user request",
             "third user request",
@@ -537,7 +537,7 @@ def test_summarize_preserves_user_messages_log_chronological_order(monkeypatch):
         ],
     )
 
-    assert result["user_messages_log"] == [
+    assert result["user_intent_log"] == [
         "first user request",
         "second user request",
         "third user request",
@@ -545,7 +545,7 @@ def test_summarize_preserves_user_messages_log_chronological_order(monkeypatch):
     ]
 
 
-def test_summarize_filters_technical_messages_from_user_messages_log(monkeypatch):
+def test_summarize_filters_technical_messages_from_user_intent_log(monkeypatch):
     history = _flatten_turns([_make_turn("real request", "assistant")])
 
     def _fake_request(**_kwargs):
@@ -560,12 +560,12 @@ def test_summarize_filters_technical_messages_from_user_messages_log(monkeypatch
         state=_state(),
         full_history_messages=history,
         current_memory="",
-        user_messages_log=[
+        user_intent_log=[
             '<current_context>client has non-empty memory files; call `memory_files` with action="list" to see available files, then read what you need.</current_context>',
             "real request",
         ],
     )
-    assert result["user_messages_log"] == ["real request"]
+    assert result["user_intent_log"] == ["real request"]
 
 
 def test_invalid_summary_triggers_one_repair_retry(monkeypatch):

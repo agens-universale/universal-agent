@@ -26,8 +26,8 @@ def _make_orchestrator_state():
         shared=SharedStateData(),
     )
     state.backend_api_mode = "chat_completions"
-    state.current_user_messages = ["создай приложение для бухгалтерии"]
-    state.user_messages_log = ["создай приложение для бухгалтерии"]
+    state.current_user_intent = ["создай приложение для бухгалтерии"]
+    state.user_intent_log = []
     save_state(state)
     return state
 
@@ -67,7 +67,7 @@ def test_subagent_gate_validates_assignment_not_orchestrator_cli_intent():
     assignment = "измени foo.py"
     user_message = _user_msg(assignment)
     runner._build_initial_messages(child, "worker", user_message)
-    child.seed_new_user_turn(user_message)
+    child.init_subagent_current_user_intent(assignment)
 
     captured: dict[str, object] = {}
 
@@ -115,8 +115,9 @@ def test_subagent_seed_keeps_orchestrator_cli_scope_unchanged():
     task_text = "добавь тесты в foo.py"
     user_message = _user_msg(task_text)
     runner._build_initial_messages(child, "worker", user_message)
-    child.seed_new_user_turn(user_message)
+    child.init_subagent_current_user_intent(task_text)
 
-    assert child.current_user_messages == [task_text]
+    assert child.current_user_intent == [task_text]
     assert child.parent_state_id == orch.state_id
-    assert orch.current_user_messages == ["создай приложение для бухгалтерии"]
+    assert orch.current_user_intent == ["создай приложение для бухгалтерии"]
+    assert orch.user_intent_log == []

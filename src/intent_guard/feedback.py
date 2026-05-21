@@ -12,9 +12,9 @@ def _bullet_block(title: str, items: list[str]) -> list[str]:
 
 def build_finish_gate_feedback(result: ValidationResult) -> str:
     """
-    Текст для technical user при reject (`_make_technical_feedback_user_message`).
+    Текст reject finish gate → поле `message` в JSON `function_call_output` submit_solution.
 
-    Не использовать сырой `feedback_for_agent` из JSON LLM — §7.3.
+    Не использовать сырой `feedback_for_agent` из JSON LLM — quality_gate §7.3.
     """
     action = result.action
     lines: list[str] = [f"Finish gate: {action}."]

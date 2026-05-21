@@ -4,12 +4,13 @@ Your summary will be the only persistent context for another assistant to contin
 Write a concise, high-signal, implementation-ready summary.
 
 You may receive:
-1) <user_requests_log> - user messages and requirements in order.
-2) <dialog_history> or <dialog_history_batch> - full/partial dialogue (assistant replies, tool calls, results).
-3) <project_data> - session filesystem context aligned with the system prompt (OS, shell, projectDir, projectDirWritable, allowed_write_paths, listing snapshot, etc.). Use it to ground paths and environment facts; do not invent different roots or OS details when this block is present.
-4) <previous_summary> - accumulated summary from earlier batches.
+1) <user_intent_log> - prior completed user turns in this thread (not the open turn; see item 2).
+2) <current_user_intent> - open user turn: current goals and clarifications from the ongoing exchange.
+3) <dialog_history> or <dialog_history_batch> - full/partial dialogue (assistant replies, tool calls, results).
+4) <project_data> - workspace and environment context for this session. Use it to ground paths and platform facts; do not invent locations or OS details that contradict this block.
+5) <previous_summary> - accumulated summary from earlier batches.
 
-If <previous_summary> is present (item 4), treat this as incremental update:
+If <previous_summary> is present (item 5), treat this as incremental update:
 - preserve all still-valid critical information from previous_summary;
 - merge new facts from the current batch;
 - resolve conflicts in favor of the latest explicit user instruction or latest confirmed result.

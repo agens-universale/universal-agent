@@ -21,7 +21,8 @@ def summarize_dialog_via_chat_completions(
     state: Any,
     full_history_messages: List[Dict[str, Any]],
     current_memory: str = "",
-    user_messages_log: List[str] | None = None,
+    user_intent_log: List[str] | None = None,
+    current_user_intent: List[str] | None = None,
     max_tokens: int | None = None,
     steps_offset: int = 0,
 ) -> Dict[str, Any]:
@@ -54,9 +55,9 @@ def summarize_dialog_via_chat_completions(
         full_history_messages: Полная история сообщений треда.
         current_memory: Актуальные заметки/память для вставки в итоговое сообщение
             и в шаг памяти.
-        user_messages_log: Внешний журнал реплик пользователя (`None` допустим):
-            нормализуется и усекается, затем входит в блок `<user_requests_log>`;
-            при пустом результате в промпт подставляется маркер `- not found`.
+        user_intent_log: Закрытые user turn'ы (`None` допустим): нормализуется и усекается,
+            затем входит в блок `<user_intent_log>`; при пустом — `- not found`.
+        current_user_intent: Открытый user turn: блок `<current_user_intent>`; при пустом — `- not found`.
         max_tokens: Лимит ответа LLM на батч и связанные вызовы (сжатие/починка).
         steps_offset: Сдвиг нумерации в `dialog_history.format_last_dialog_steps` (инкрементальные сценарии).
 
@@ -65,7 +66,7 @@ def summarize_dialog_via_chat_completions(
             ``raw_summary`` — текст сводки без блока предложенной памяти;
             ``summary_message_content`` — для непустой истории пустая строка; итоговое тело строит
                 ``apply_summary_state_patch``. Для пустой истории — готовое тело без вызова compaction;
-            ``user_messages_log`` — очищенный список пользовательских строк;
+            ``user_intent_log`` / ``current_user_intent`` — нормализованные снимки для persisted summary;
             ``memory_additions`` — устаревшее имя ключа; то же, что ``updated_journal`` (полный текст
                 journal после LLM-переписывания) или пусто;
             ``updated_journal`` — полная актуализированная версия journal (не дельта) или пусто;
@@ -99,7 +100,8 @@ def summarize_dialog_via_chat_completions(
         return {
             "raw_summary": "",
             "summary_message_content": summary_content,
-            "user_messages_log": [],
+            "user_intent_log": [],
+            "current_user_intent": [],
             "memory_additions": "",
             "last_dialog_steps": "",
             "num_batches": 0,
@@ -175,15 +177,27 @@ def summarize_dialog_via_chat_completions(
         max_chars=0,
         max_message_chars=max_message_chars,
     )
-    # `state.user_messages_log` is expected to be already filtered and deduplicated by State
-    # via user_message_policy. We still normalize defensively here because this function can be
-    # called with persisted/raw data in tests and integrations.
-    user_requests = normalize_user_log_entries(user_messages_log)
-    user_requests = dialog_history.trim_original_user_messages_to_max_chars(
-        user_requests, original_user_messages_max_chars
+    closed_intent = normalize_user_log_entries(user_intent_log)
+    closed_intent = dialog_history.trim_original_user_messages_to_max_chars(
+        closed_intent, original_user_messages_max_chars
     )
-    user_requests_text = (
-        "\n".join(f"- {x}" for x in user_requests) if user_requests else "- not found"
+    open_intent = normalize_user_log_entries(current_user_intent)
+    open_intent = dialog_history.trim_original_user_messages_to_max_chars(
+        open_intent, original_user_messages_max_chars
+    )
+    closed_intent_text = (
+        "\n".join(f"- {x}" for x in closed_intent) if closed_intent else "- not found"
+    )
+    open_intent_text = (
+        "\n".join(f"- {x}" for x in open_intent) if open_intent else "- not found"
+    )
+    intent_blocks_prefix = (
+        "<user_intent_log>\n"
+        f"{closed_intent_text}\n"
+        "</user_intent_log>\n\n"
+        "<current_user_intent>\n"
+        f"{open_intent_text}\n"
+        "</current_user_intent>\n\n"
     )
     batches = dialog_history.split_turns_into_char_batches(
         dialog_history.group_into_turns(history_for_summary),
@@ -231,9 +245,7 @@ def summarize_dialog_via_chat_completions(
             )
         if batch_index == 1:
             user_prompt = (
-                "<user_requests_log>\n"
-                f"{user_requests_text}\n"
-                "</user_requests_log>\n\n"
+                f"{intent_blocks_prefix}"
                 "<dialog_history>\n"
                 f"{batch_history_text}\n"
                 "</dialog_history>\n\n"
@@ -242,9 +254,7 @@ def summarize_dialog_via_chat_completions(
             )
         else:
             user_prompt = (
-                "<user_requests_log>\n"
-                f"{user_requests_text}\n"
-                "</user_requests_log>\n\n"
+                f"{intent_blocks_prefix}"
                 "<previous_summary>\n"
                 f"{accumulated_summary}\n"
                 "</previous_summary>\n\n"
@@ -312,14 +322,14 @@ def summarize_dialog_via_chat_completions(
                     len(batches),
                     reason,
                     len(batch_history_text),
-                    len(user_requests_text),
+                    len(intent_blocks_prefix),
                     len(text or ""),
                 )
             repaired = summary_llm_steps.repair_summary_text(
                 ctx=ctx,
                 state=state,
                 history_text=batch_history_text,
-                user_requests_text=user_requests_text,
+                intent_blocks_prefix=intent_blocks_prefix,
                 invalid_summary=text,
                 reason=reason,
                 max_tokens=max_tokens,
@@ -431,7 +441,8 @@ def summarize_dialog_via_chat_completions(
     return {
         "raw_summary": text,
         "summary_message_content": "",
-        "user_messages_log": user_requests,
+        "user_intent_log": closed_intent,
+        "current_user_intent": open_intent,
         "memory_additions": updated_journal,
         "updated_journal": updated_journal,
         "last_dialog_steps": last_dialog_steps,

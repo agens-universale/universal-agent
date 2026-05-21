@@ -3,6 +3,11 @@ from types import SimpleNamespace
 
 from config import parse_chat_completions_max_tokens
 from intent_guard.guard import FinishGateGuard
+from intent_guard.submit_solution_emit import (
+    apply_finish_gate_to_submit_output_in_state,
+    get_function_call_output_text,
+)
+from intent_scope.hook import maybe_update_intent_scope_from_tool
 from message_policy.cycle_stop import append_cycle_stop_tool_outputs_for_batch
 from request_backend_policy import request_chat_completions_with_policy
 from tools import apply_tool, WrongFunctionArgumentsException
@@ -273,21 +278,31 @@ def process_tool_calls(
 
     tools_outputs = []
     for m in grouped_messages["tool_calls"]:
-        tool_res = apply_tool(
-            tool_name=m["name"],
-            arguments=m["arguments"],
+        tool_name = str(m.get("name") or "")
+        tool_arguments = str(m.get("arguments", ""))
+        tool_res_raw = apply_tool(
+            tool_name=tool_name,
+            arguments=tool_arguments,
             ctx=ctx,
             state=state,
             run_agent_func=run_agent_func,
         )
         tool_res = maybe_store_and_wrap_tool_output(
-            tool_res,
+            tool_res_raw,
             call_id=m["call_id"],
-            tool_name=m["name"],
+            tool_name=tool_name,
             state=state,
             config=getattr(ctx, "config_dict", {}) or {},
             logger=getattr(ctx, "logger", None),
         )
+        if tool_name != "submit_solution":
+            maybe_update_intent_scope_from_tool(
+                tool_name=tool_name,
+                tool_output_raw=tool_res_raw,
+                tool_arguments=tool_arguments,
+                state=state,
+                ctx=ctx,
+            )
         new_message = {
             "id": generate_message_id_func("fco"),
             "type": "function_call_output",
@@ -490,18 +505,42 @@ def run_agent(
                             decision = gate.evaluate_submit_solution(
                                 submit_solution_arguments=finish_arguments,
                             )
+                            apply_finish_gate_to_submit_output_in_state(
+                                state=state,
+                                finish_call_id=finish_call_id,
+                                decision=decision,
+                                logger=run_logger,
+                                persist_messages_callback=persist_messages_callback,
+                            )
+                            final_submit_output = get_function_call_output_text(
+                                state.messages, finish_call_id
+                            )
+                            maybe_update_intent_scope_from_tool(
+                                tool_name="submit_solution",
+                                tool_output_raw=final_submit_output or "",
+                                tool_arguments=finish_arguments or "",
+                                state=state,
+                                ctx=ctx,
+                            )
                             if decision.outcome == "reject":
-                                messages = [
-                                    _make_technical_feedback_user_message(
-                                        decision.feedback_text,
-                                        technical_type=TECHNICAL_TYPE_TECHNICAL,
-                                    )
-                                ]
-                                continue
-                            if decision.outcome in ("fail_open_error", "fail_open_limit"):
-                                state.clear_current_user_messages()
+                                messages, response_id = process_user_ask(
+                                    [], state, ctx
+                                )
+                                state.last_backend_response_id = response_id
+                            elif decision.outcome in (
+                                "fail_open_error",
+                                "fail_open_limit",
+                            ):
+                                state.current_user_intent = []
                                 return finish_arguments
-                        state.clear_current_user_messages()
+                            elif decision.outcome == "accept":
+                                state.commit_closed_user_turn_to_intent_log()
+                                return finish_arguments
+                            else:
+                                state.commit_closed_user_turn_to_intent_log()
+                                return finish_arguments
+                        else:
+                            state.current_user_intent = []
                         return finish_arguments
                     messages = process_tool_calls(messages, state, ctx, run_agent_func=run_agent)
                     tool_error_cnt = 0

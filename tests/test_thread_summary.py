@@ -92,7 +92,7 @@ class ThreadSummaryTest(unittest.TestCase):
                         "memory_files": {"journal": "## Thread summary\n\ncompressed summary"},
                         "notes_md": "",
                     },
-                    "user_messages_log": ["req1", "req2"],
+                    "user_intent_log": ["req1", "req2"],
                     "dialog_steps_offset": 12,
                 }
             )
@@ -122,7 +122,7 @@ class ThreadSummaryTest(unittest.TestCase):
             self.assertEqual(meta.get("backend_api_mode"), "chat_completions")
             self.assertEqual(meta.get("messages_count"), 1)
             self.assertEqual(meta.get("dialog_steps_offset"), 12)
-            self.assertEqual(meta.get("user_messages_log"), ["req1", "req2"])
+            self.assertEqual(meta.get("user_intent_log"), ["req1", "req2"])
             self.assertIsNone(meta.get("previous_response_id"))
             self.assertEqual(meta.get("chat_completions_system_prompt_rendered"), "SYSTEM")
             self.assertEqual(meta.get("created_at"), "2026-01-01T00:00:00+00:00")

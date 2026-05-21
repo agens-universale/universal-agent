@@ -142,7 +142,7 @@ class TestBuildInitialMessages:
         assert len(child.messages) >= 1
         assert child.messages[0]["role"] == "system"
 
-    def test_run_seeds_assignment_into_current_user_messages(self):
+    def test_run_seeds_assignment_into_current_user_intent(self):
         """Как в SubagentRunner.run: transcript и finish-gate scope раздельно."""
         prompt = "System prompt\n<specific_role>x</specific_role>"
         orch = _make_orchestrator_state(system_prompt=prompt)
@@ -151,8 +151,8 @@ class TestBuildInitialMessages:
         child = runner._build_child_state("role")
         user_message = _user_msg("Implement feature X")
         runner._build_initial_messages(child, "role", user_message)
-        child.seed_new_user_turn(user_message)
+        child.init_subagent_current_user_intent("Implement feature X")
 
-        assert child.current_user_messages == ["Implement feature X"]
-        assert "Implement feature X" in child.user_messages_log
+        assert child.current_user_intent == ["Implement feature X"]
+        assert child.user_intent_log == []
         assert child.finish_gate_rejection_count == 0

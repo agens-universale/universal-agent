@@ -84,8 +84,8 @@ class State:
         self.max_steps = max_steps
         self.steps = 0
         self.stop_requested = False
-        self.user_messages_log: List[str] = []
-        self.current_user_messages: List[str] = []
+        self.user_intent_log: List[str] = []
+        self.current_user_intent: List[str] = []
         self.finish_gate_rejection_count: int = 0
         self.tool_call_outputs_store = ToolCallOutputsStore()
 
@@ -208,58 +208,75 @@ class State:
                 return True
         return False
 
-    def init_user_messages_log(self, entries: Optional[List[str]]) -> None:
+    def init_user_intent_log(self, entries: Optional[List[str]]) -> None:
         """
-        Initialize `user_messages_log` from persisted/raw entries.
+        Initialize `user_intent_log` from persisted meta (closed user turns).
+        """
+        self.user_intent_log = normalize_user_log_entries(entries)
 
-        Назначение:
-        - восстановить лог при старте/продолжении сессии;
-        - нормализовать вход в стабильный `list[str]`;
-        - удалить пустые и дубли, сохранив порядок первых вхождений.
-        """
-        self.user_messages_log = normalize_user_log_entries(entries)
+    def init_current_user_intent(self, entries: Optional[List[str]]) -> None:
+        """Initialize `current_user_intent` from persisted meta (open user turn)."""
+        self.current_user_intent = normalize_user_log_entries(entries)
 
-    def init_current_user_messages(self, entries: Optional[List[str]]) -> None:
+    @staticmethod
+    def append_intent_line(intent_list: List[str], text: str) -> List[str]:
         """
-        Initialize `current_user_messages` from persisted/raw entries.
+        Append one intent line if non-empty and not already in the list (dedup in-scope).
         """
-        self.current_user_messages = normalize_user_log_entries(entries)
+        line = str(text or "").strip()
+        if not line or line in intent_list:
+            return intent_list
+        return [*intent_list, line]
 
-    def append_user_messages_to_log(self, step_messages: List[Dict[str, Any]]) -> None:
-        """
-        Incrementally extend `user_messages_log` with current step messages.
-
-        Назначение:
-        - поддерживать ленту пользовательских запросов в runtime-state;
-        - добавлять только user-сообщения в каноничном формате;
-        - сохранять уникальность записей (без повторов).
-        """
-        self.user_messages_log = append_user_log_entries(
-            self.user_messages_log, step_messages
-        )
-        self.current_user_messages = append_user_log_entries(
-            self.current_user_messages, step_messages
+    def append_intent_scope_delta(self, summary_line: str, *, source: str = "") -> None:
+        """Append tool-derived intent delta to the open turn (`current_user_intent` only)."""
+        _ = source
+        self.current_user_intent = self.append_intent_line(
+            self.current_user_intent, summary_line
         )
 
-    def clear_current_user_messages(self) -> None:
-        """Clear active user intent scope after successful turn completion."""
-        self.current_user_messages = []
+    def commit_closed_user_turn_to_intent_log(self) -> None:
+        """Flush `current_user_intent` → `user_intent_log` after accept submit_solution."""
+        for line in self.current_user_intent:
+            stripped = str(line or "").strip()
+            if stripped:
+                self.user_intent_log.append(stripped)
+        self.current_user_intent = []
+
+    def append_current_user_intent_from_messages(
+        self, step_messages: List[Dict[str, Any]]
+    ) -> None:
+        """
+        Extend active intent scope with real CLI user messages from a persist batch.
+        Does not touch `user_intent_log` (closed turns only via commit).
+        """
+        self.current_user_intent = append_user_log_entries(
+            self.current_user_intent, step_messages
+        )
+
+    def init_subagent_current_user_intent(self, assignment_text: str) -> None:
+        """
+        Initialize child subagent intent scope from assignment (§4.4).
+
+        Does not use ``append_user_log_entries`` / policy filter — assignment must
+        land in ``current_user_intent`` as-is. ``user_intent_log`` stays empty at start.
+        """
+        self.user_intent_log = []
+        self.finish_gate_rejection_count = 0
+        self.current_user_intent = []
+        line = str(assignment_text or "").strip()
+        if line:
+            self.current_user_intent = self.append_intent_line(
+                self.current_user_intent, line
+            )
 
     def seed_new_user_turn(self, new_user_message: Dict[str, Any]) -> None:
         """
-        Append current real user request to active intent scope.
-
-        Why:
-        - `current_user_messages` is the primary scope for finish-gate checks;
-        - new request should be appended only when it is a real user message
-          (non-technical), preserving existing active scope from state.
+        Append current real user request to active intent scope (open turn only).
         """
         self.finish_gate_rejection_count = 0
-        self.current_user_messages = append_user_log_entries(
-            self.current_user_messages, [new_user_message]
-        )
-        self.user_messages_log = append_user_log_entries(
-            self.user_messages_log, [new_user_message]
+        self.current_user_intent = append_user_log_entries(
+            self.current_user_intent, [new_user_message]
         )
 
 

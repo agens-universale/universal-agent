@@ -35,6 +35,41 @@ def test_request_summary_text_uses_ctx_summary_llm(monkeypatch):
     assert captured["payload_overrides"] == {"reasoning_effort": "none"}
 
 
+def test_request_summary_text_merges_optional_payload_overrides(monkeypatch):
+    captured = {}
+
+    def _fake_request(*, payload_overrides=None, **kwargs):
+        captured["payload_overrides"] = payload_overrides
+        return "ok"
+
+    monkeypatch.setattr(summary_llm, "request_chat_completion_text", _fake_request)
+
+    ctx = SimpleNamespace(
+        summary_llm=SimpleNamespace(
+            max_tokens=100,
+            completion_kwargs={
+                "separate_reasoning": True,
+                "chat_template_kwargs": {"enable_thinking": True},
+            },
+        ),
+        config_dict={},
+    )
+    summary_llm.request_summary_text(
+        ctx=ctx,
+        state=SimpleNamespace(default_model="m"),
+        messages=[{"role": "user", "content": "hi"}],
+        request_label="intent_scope:ask_human",
+        payload_overrides={
+            "separate_reasoning": False,
+            "chat_template_kwargs": {"enable_thinking": False},
+        },
+    )
+    assert captured["payload_overrides"]["separate_reasoning"] is False
+    assert captured["payload_overrides"]["chat_template_kwargs"] == {
+        "enable_thinking": False
+    }
+
+
 def test_request_summary_text_requires_summary_llm_on_ctx():
     with pytest.raises(RuntimeError, match="summary_llm"):
         summary_llm.request_summary_text(

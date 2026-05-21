@@ -140,6 +140,8 @@ def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
         "summary_params": app_cfg.summary.model_dump(),
         "summary_llm": app_cfg.summary.llm,
         "quality_gate_params": app_cfg.quality_gate.model_dump(),
+        "intent_scope": app_cfg.intent_scope,
+        "intent_scope_params": app_cfg.intent_scope.model_dump(),
         "logging_params": app_cfg.logging.model_dump(),
         "agent_md_path": app_cfg.paths.agent_md_path,
         "chat_completions_system_prompt_path": app_cfg.paths.chat_completions_system_prompt_path,

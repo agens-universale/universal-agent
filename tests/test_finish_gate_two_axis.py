@@ -125,9 +125,11 @@ def _submit_solution_call(
     solution_type: str = "full_solution",
     handoff: dict | None = None,
 ):
-    args: dict = {"solution_type": solution_type, "task_report": "done"}
-    if handoff is not None:
-        args["handoff"] = handoff
+    args: dict = {
+        "solution_type": solution_type,
+        "task_report": "done",
+        "handoff": json.dumps(handoff if handoff is not None else {}, ensure_ascii=False),
+    }
     return {
         "type": "function_call",
         "name": "submit_solution",
@@ -173,8 +175,8 @@ def test_guard_reject_uses_structured_feedback_not_raw_llm(monkeypatch):
         _scenario_12_validation,
     )
     state = _make_state()
-    state.current_user_messages = ["спроси меня что нибудь"]
-    state.user_messages_log = ["спроси меня что нибудь"]
+    state.current_user_intent = ["спроси меня что нибудь"]
+    state.user_intent_log = ["спроси меня что нибудь"]
     guard = FinishGateGuard(ctx=_make_ctx(), state=state)
     decision = guard.evaluate_submit_solution(
         submit_solution_arguments={"solution_type": "full_solution"},
@@ -209,8 +211,8 @@ def test_run_agent_rejects_submit_with_fix_report_feedback(monkeypatch):
     monkeypatch.setattr(processing_module, "process_user_ask", _stub_user_ask)
 
     state = _make_state(max_steps=0)
-    state.current_user_messages = ["спроси меня что нибудь"]
-    state.user_messages_log = ["спроси меня что нибудь"]
+    state.current_user_intent = ["спроси меня что нибудь"]
+    state.user_intent_log = ["спроси меня что нибудь"]
 
     run_agent(
         [_submit_solution_call()],
@@ -218,19 +220,21 @@ def test_run_agent_rejects_submit_with_fix_report_feedback(monkeypatch):
         _make_ctx(),
     )
 
-    technical = [
+    tool_output = next(
         m
         for m in state.messages
-        if m.get("role") == "user" and "Finish gate:" in (m.get("content") or "")
-    ]
-    assert technical, "ожидали technical user с feedback finish gate"
-    text = technical[-1]["content"]
-    assert "fix_report" in text
-    assert "задай вопрос" not in text.lower()
-    assert "снова вызови ask_human" not in text.lower()
+        if m.get("type") == "function_call_output" and m.get("call_id") == "call_finish"
+    )
+    payload = json.loads(tool_output["output"])
+    assert payload["ok"] is False
+    assert payload["status"] == "rejected_by_finish_gate"
+    assert "fix_report" in payload["message"]
+    assert payload["finish_gate"]["action"] == "fix_report"
+    assert "задай вопрос" not in payload["message"].lower()
+    assert "снова вызови ask_human" not in payload["message"].lower()
 
 
-def test_run_agent_accept_clears_current_user_messages_for_subagent(monkeypatch):
+def test_run_agent_accept_clears_current_user_intent_for_subagent(monkeypatch):
     def _accept(**_kwargs):
         return ValidationResult(
             ok=True,
@@ -252,8 +256,8 @@ def test_run_agent_accept_clears_current_user_messages_for_subagent(monkeypatch)
     )
 
     state = _make_state(parent_state_id="orch-parent")
-    state.current_user_messages = ["subagent task"]
-    state.user_messages_log = ["subagent task"]
+    state.current_user_intent = ["subagent task"]
+    state.user_intent_log = ["subagent task"]
 
     result = run_agent(
         [_submit_solution_call(solution_type="answer_question")],
@@ -262,7 +266,7 @@ def test_run_agent_accept_clears_current_user_messages_for_subagent(monkeypatch)
     )
 
     assert result is not None
-    assert state.current_user_messages == []
+    assert state.current_user_intent == []
 
 
 def _continue_work_validation(**_kwargs):
@@ -324,8 +328,8 @@ def test_run_agent_continue_work_feedback_lists_trace_gaps(monkeypatch):
     monkeypatch.setattr(processing_module, "process_user_ask", _stub_user_ask)
 
     state = _make_state(max_steps=0)
-    state.current_user_messages = ["создай report.md"]
-    state.user_messages_log = ["создай report.md"]
+    state.current_user_intent = ["создай report.md"]
+    state.user_intent_log = ["создай report.md"]
 
     run_agent(
         [_submit_solution_call()],
@@ -333,12 +337,15 @@ def test_run_agent_continue_work_feedback_lists_trace_gaps(monkeypatch):
         _make_ctx(),
     )
 
-    technical = [
+    tool_output = next(
         m
         for m in state.messages
-        if m.get("role") == "user" and "Finish gate:" in (m.get("content") or "")
-    ]
-    text = technical[-1]["content"]
+        if m.get("type") == "function_call_output" and m.get("call_id") == "call_finish"
+    )
+    payload = json.loads(tool_output["output"])
+    assert payload["ok"] is False
+    assert payload["status"] == "rejected_by_finish_gate"
+    text = payload["message"]
     assert "continue_work" in text.lower()
     assert "write_to_file" in text
     assert "report.md" in text
@@ -372,11 +379,8 @@ def test_main_accept_after_ask_human_trace(monkeypatch):
 
     state = _make_state(max_steps=0)
     state.messages = _ask_human_scenario_messages(include_pending_submit=False)
-    state.current_user_messages = ["спроси меня что нибудь"]
-    state.user_messages_log = [
-        "предыдущий запрос в треде",
-        "спроси меня что нибудь",
-    ]
+    state.current_user_intent = ["спроси меня что нибудь"]
+    state.user_intent_log = ["предыдущий запрос в треде"]
 
     result = run_agent(
         [_submit_solution_call(solution_type="answer_question")],
@@ -385,7 +389,11 @@ def test_main_accept_after_ask_human_trace(monkeypatch):
     )
 
     assert result is not None
-    assert state.current_user_messages == []
+    assert state.current_user_intent == []
+    assert state.user_intent_log == [
+        "предыдущий запрос в треде",
+        "спроси меня что нибудь",
+    ]
 
 
 def test_run_agent_handoff_phantom_artifact_fix_report(monkeypatch):
@@ -411,8 +419,8 @@ def test_run_agent_handoff_phantom_artifact_fix_report(monkeypatch):
     monkeypatch.setattr(processing_module, "process_user_ask", _stub_user_ask)
 
     state = _make_state(max_steps=0)
-    state.current_user_messages = ["спроси меня что нибудь"]
-    state.user_messages_log = ["спроси меня что нибудь"]
+    state.current_user_intent = ["спроси меня что нибудь"]
+    state.user_intent_log = ["спроси меня что нибудь"]
 
     run_agent(
         [
@@ -424,10 +432,12 @@ def test_run_agent_handoff_phantom_artifact_fix_report(monkeypatch):
         _make_ctx(),
     )
 
-    text = next(
-        m["content"]
+    tool_output = next(
+        m
         for m in state.messages
-        if m.get("role") == "user" and "Finish gate:" in (m.get("content") or "")
+        if m.get("type") == "function_call_output" and m.get("call_id") == "call_finish"
     )
-    assert "fix_report" in text
-    assert "phantom_plan.md" in text
+    payload = json.loads(tool_output["output"])
+    assert payload["ok"] is False
+    assert "fix_report" in payload["message"]
+    assert "phantom_plan.md" in payload["message"]

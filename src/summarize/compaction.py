@@ -98,7 +98,8 @@ def apply_summary_state_patch(
         summary_text=str(raw_summary or ""),
         last_dialog_steps=str(last_dialog_steps or ""),
         memory_files=mf,
-        user_messages_log=list(getattr(state, "user_messages_log", []) or []),
+        user_intent_log=list(getattr(state, "user_intent_log", []) or []),
+        current_user_intent=list(getattr(state, "current_user_intent", []) or []),
     )
     prev_offset = int(getattr(state, "dialog_steps_offset", 0) or 0)
     state.dialog_steps_offset = prev_offset + max(0, int(summarized_messages_count or 0))
@@ -185,10 +186,16 @@ def run_summary_compaction(
             f"serialized_chars={serialized_chars}"
         )
 
-    source_user_log = getattr(state, "user_messages_log", None)
+    source_user_log = getattr(state, "user_intent_log", None)
     source_user_log = (
         [str(x) for x in source_user_log if isinstance(x, str)]
         if isinstance(source_user_log, list)
+        else []
+    )
+    source_current_intent = getattr(state, "current_user_intent", None)
+    source_current_intent = (
+        [str(x) for x in source_current_intent if isinstance(x, str)]
+        if isinstance(source_current_intent, list)
         else []
     )
     summary_result = summarize_dialog_via_chat_completions(
@@ -196,7 +203,8 @@ def run_summary_compaction(
         state=state,
         full_history_messages=full_messages,
         current_memory=_journal_text(state),
-        user_messages_log=source_user_log,
+        user_intent_log=source_user_log,
+        current_user_intent=source_current_intent,
         steps_offset=int(getattr(state, "dialog_steps_offset", 0) or 0),
     )
     raw_summary = str(summary_result.get("raw_summary") or "")
@@ -231,7 +239,8 @@ def run_summary_compaction(
             "memory_files": dict(getattr(_shared, "memory_files", None) or {}) if _shared else {},
             "notes_md": str(getattr(_shared, "notes_md", "") or "") if _shared else "",
         },
-        "user_messages_log": list(getattr(state, "user_messages_log", []) or []),
+        "user_intent_log": list(getattr(state, "user_intent_log", []) or []),
+        "current_user_intent": list(getattr(state, "current_user_intent", []) or []),
         "dialog_steps_offset": int(getattr(state, "dialog_steps_offset", 0) or 0),
     }
     if on_summary_applied is not None:

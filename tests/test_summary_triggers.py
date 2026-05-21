@@ -286,7 +286,7 @@ class SummaryTriggersTest(unittest.TestCase):
             hook = captured.get("pre_backend_compaction_hook")
             self.assertTrue(callable(hook))
 
-    def test_thread_history_not_readded_into_current_user_messages(self):
+    def test_thread_history_not_readded_into_current_user_intent(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             ctx = self._make_ctx(tmp_dir, backend_api_mode="chat_completions")
             thread_id = "thr_hist"
@@ -322,8 +322,8 @@ class SummaryTriggersTest(unittest.TestCase):
                         "messages_count": 2,
                         "backend_api_mode": "chat_completions",
                         "previous_response_id": None,
-                        "user_messages_log": ["старый вопрос 1", "старый вопрос 2"],
-                        "current_user_messages": [],
+                        "user_intent_log": ["старый вопрос 1", "старый вопрос 2"],
+                        "current_user_intent": [],
                     },
                     fd,
                     ensure_ascii=False,
@@ -358,7 +358,7 @@ class SummaryTriggersTest(unittest.TestCase):
 
             with open(meta_path, "r", encoding="utf-8") as fd:
                 saved_meta = json.load(fd)
-            self.assertEqual(saved_meta.get("current_user_messages"), ["новый вопрос"])
+            self.assertEqual(saved_meta.get("current_user_intent"), ["новый вопрос"])
 
 
 if __name__ == "__main__":
