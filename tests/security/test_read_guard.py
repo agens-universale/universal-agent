@@ -172,12 +172,22 @@ def test_parse_disabled_when_no_command_moderation():
     assert parsed.enabled is False
 
 
-def test_parse_default_enabled_when_command_moderation_present():
+def test_parse_default_disabled_when_read_guard_block_absent():
     """
-    Если есть command_moderation (даже без явного read_guard блока),
-    read_guard включается по умолчанию.
+    Safe-by-default-OFF: даже если command_moderation присутствует,
+    read_guard выключен без явного `read_guard.enabled: true`.
     """
     parsed = parse_read_guard_config({"command_moderation": {"mode": "deny"}})
+    assert parsed.enabled is False
+
+    parsed = parse_read_guard_config({
+        "command_moderation": {"read_guard": {"mode": "deny"}}  # без enabled
+    })
+    assert parsed.enabled is False
+
+    parsed = parse_read_guard_config({
+        "command_moderation": {"read_guard": {"enabled": True}}
+    })
     assert parsed.enabled is True
 
 

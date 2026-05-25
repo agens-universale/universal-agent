@@ -147,21 +147,24 @@ def resolve_tool_context(*args: Any, **kwargs: Any) -> ToolSecurityContext:
         or (project_data or {}).get("projectDir")
         or os.getcwd()
     )
-    moderation_configured = isinstance(config_dict.get("command_moderation"), dict)
+    # Safe-by-default-OFF: каждый security-слой включается ТОЛЬКО явным
+    # `enabled: true` (или для url_policy — непустым `url_blacklist`/нестандартными
+    # `allowed_schemes`). Если ключа нет в конфиге — слой выключен. Так пользователь
+    # не получает "тихо включённую" защиту от наличия родительского блока.
     moderation = config_dict.get("command_moderation") or {}
     root_box_cfg = moderation.get("root_box") or {}
     url_policy_cfg = moderation.get("url_policy") or {}
     return ToolSecurityContext(
         launch_root=str(launch_root),
         root_box=RootBoxConfig(
-            enabled=bool(root_box_cfg.get("enabled", moderation_configured)),
+            enabled=bool(root_box_cfg.get("enabled", False)),
             extra_write_paths=list(root_box_cfg.get("extra_write_paths") or []),
         ),
-        command_moderation_mode=str(moderation.get("mode", "deny")).strip().lower(),
+        command_moderation_mode=str(moderation.get("mode", "allow")).strip().lower(),
         allowed_command_examples=list(moderation.get("allowed_command_examples") or []),
         url_allowed_schemes=list(url_policy_cfg.get("allowed_schemes") or ["http", "https"]),
         url_blacklist=list(url_policy_cfg.get("url_blacklist") or []),
-        url_policy_enabled=moderation_configured,
+        url_policy_enabled=bool(moderation.get("url_policy")),
         ctx=ctx,
         state=state,
         logger=logger,

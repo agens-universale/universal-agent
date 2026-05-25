@@ -93,20 +93,18 @@ def parse_read_guard_config(config_dict: dict[str, Any]) -> ReadGuardConfig:
     """
     Достаёт read_guard блок из config_dict["command_moderation"]["read_guard"].
 
-    Семантика по аналогии с root_box (см. resolve_tool_context в path_policy.py):
-    если в config_dict вообще нет блока `command_moderation` — фреймворк
-    считает что security‑слой не сконфигурирован, и read_guard выключен
-    (`enabled=False`). Это нужно для unit‑тестов и legacy‑окружений,
-    где тулы вызываются без ctx/config.
+    Safe-by-default-OFF: read_guard включается ТОЛЬКО явным `enabled: true`.
+    Если ключа `read_guard` нет вообще — слой выключен. Это симметрично с
+    `root_box` (см. resolve_tool_context в path_policy.py).
     """
-    cm_raw = config_dict.get("command_moderation")
-    moderation_configured = isinstance(cm_raw, dict)
-    cm = cm_raw if moderation_configured else {}
+    cm = config_dict.get("command_moderation")
+    if not isinstance(cm, dict):
+        cm = {}
     raw = cm.get("read_guard") or {}
     if not isinstance(raw, dict):
         raw = {}
     return ReadGuardConfig(
-        enabled=bool(raw.get("enabled", moderation_configured)),
+        enabled=bool(raw.get("enabled", False)),
         mode=str(raw.get("mode", "deny")).strip().lower(),
         allowed_read_roots=list(raw.get("allowed_read_roots") or []),
         allowed_read_paths=list(raw.get("allowed_read_paths") or []),

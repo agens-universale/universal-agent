@@ -48,7 +48,7 @@ security:
 
 ## `root_box` — write-периметр
 
-По умолчанию включён, ограничивает write-операции директорией `launch_root`. Относительные пути в `extra_write_paths` разрешаются от каталога `config.yml`.
+**Safe-by-default-OFF**: включается только явным `enabled: true`. При включении ограничивает write-операции директорией `launch_root` + `extra_write_paths`. Относительные пути в `extra_write_paths` разрешаются от каталога `config.yml`.
 
 Пример с дополнительной writable-папкой:
 
