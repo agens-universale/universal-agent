@@ -6,7 +6,18 @@ from summarize import llm as summary_llm
 from utils import llm_chat_client
 
 
-def test_request_summary_text_uses_ctx_summary_llm(monkeypatch):
+def test_auxiliary_llm_completion_kwargs_matches_chat_completions_llm():
+    ctx = SimpleNamespace(
+        chat_completions_llm=SimpleNamespace(
+            completion_kwargs={"reasoning_effort": "none"},
+        )
+    )
+    assert summary_llm.auxiliary_llm_completion_kwargs(ctx) == {
+        "reasoning_effort": "none"
+    }
+
+
+def test_request_summary_text_uses_ctx_chat_completions_llm(monkeypatch):
     captured = {}
 
     def _fake_request(*, max_tokens=None, payload_overrides=None, **kwargs):
@@ -17,7 +28,7 @@ def test_request_summary_text_uses_ctx_summary_llm(monkeypatch):
     monkeypatch.setattr(summary_llm, "request_chat_completion_text", _fake_request)
 
     ctx = SimpleNamespace(
-        summary_llm=SimpleNamespace(
+        chat_completions_llm=SimpleNamespace(
             max_tokens=7777,
             completion_kwargs={"reasoning_effort": "none"},
         ),
@@ -45,12 +56,9 @@ def test_request_summary_text_merges_optional_payload_overrides(monkeypatch):
     monkeypatch.setattr(summary_llm, "request_chat_completion_text", _fake_request)
 
     ctx = SimpleNamespace(
-        summary_llm=SimpleNamespace(
+        chat_completions_llm=SimpleNamespace(
             max_tokens=100,
-            completion_kwargs={
-                "separate_reasoning": True,
-                "chat_template_kwargs": {"enable_thinking": True},
-            },
+            completion_kwargs={"reasoning_effort": "none"},
         ),
         config_dict={},
     )
@@ -58,20 +66,17 @@ def test_request_summary_text_merges_optional_payload_overrides(monkeypatch):
         ctx=ctx,
         state=SimpleNamespace(default_model="m"),
         messages=[{"role": "user", "content": "hi"}],
-        request_label="intent_scope:ask_human",
-        payload_overrides={
-            "separate_reasoning": False,
-            "chat_template_kwargs": {"enable_thinking": False},
-        },
+        request_label="summary_batch_1",
+        payload_overrides={"temperature": 0.2},
     )
-    assert captured["payload_overrides"]["separate_reasoning"] is False
-    assert captured["payload_overrides"]["chat_template_kwargs"] == {
-        "enable_thinking": False
+    assert captured["payload_overrides"] == {
+        "reasoning_effort": "none",
+        "temperature": 0.2,
     }
 
 
-def test_request_summary_text_requires_summary_llm_on_ctx():
-    with pytest.raises(RuntimeError, match="summary_llm"):
+def test_request_summary_text_requires_chat_completions_llm_on_ctx():
+    with pytest.raises(RuntimeError, match="chat_completions_llm"):
         summary_llm.request_summary_text(
             ctx=SimpleNamespace(config_dict={}),
             state=SimpleNamespace(default_model="m"),

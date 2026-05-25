@@ -2,6 +2,8 @@ import os
 import tempfile
 import unittest
 
+from pydantic import ValidationError
+
 from config import load_config  # noqa: E402
 
 
@@ -93,12 +95,12 @@ class ChatCompletionsPromptConfigTest(unittest.TestCase):
             self.assertEqual(
                 cfg["summary_params"]["original_user_messages_max_chars"], 20000
             )
-            self.assertEqual(cfg["summary_params"]["llm"]["max_tokens"], 8192)
-            self.assertEqual(cfg["summary_params"]["llm"]["completion_kwargs"], {})
-            from config_modules.summary import SummaryLlmConfig
+            self.assertNotIn("llm", cfg["summary_params"])
+            from config_modules.chat_completions import ChatCompletionsLlmConfig
 
-            self.assertIsInstance(cfg["summary_llm"], SummaryLlmConfig)
-            self.assertEqual(cfg["summary_llm"].max_tokens, 8192)
+            self.assertIsInstance(cfg["chat_completions_llm"], ChatCompletionsLlmConfig)
+            self.assertEqual(cfg["chat_completions_llm"].max_tokens, 8192)
+            self.assertEqual(cfg["chat_completions_llm"].completion_kwargs, {})
 
     def test_summary_params_normalization(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -169,6 +171,19 @@ class ChatCompletionsPromptConfigTest(unittest.TestCase):
                 cfg["chat_completion_headers"]["Authorization"],
                 "Bearer sk-or-v1-test-token",
             )
+
+    def test_summary_llm_in_yaml_is_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            cfg_path = os.path.join(tmp_dir, "config.yml")
+            with open(cfg_path, "w", encoding="utf-8") as fd:
+                fd.write(
+                    "backend:\n  api_mode: chat_completions\n"
+                    "summary:\n"
+                    "  llm:\n"
+                    "    max_tokens: 4096\n"
+                )
+            with self.assertRaises(ValidationError):
+                load_config(cfg_path)
 
     def test_chat_completion_kwargs_and_flags_loaded_from_backend_section(self):
         with tempfile.TemporaryDirectory() as tmp_dir:

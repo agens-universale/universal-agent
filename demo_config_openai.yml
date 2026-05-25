@@ -22,6 +22,13 @@ backend:
   use_ssl: true
   use_retry: true
 
+# Вспомогательные LLM (summary, finish gate, intent scope).
+chat_completions:
+  llm:
+    max_tokens: 8192
+    completion_kwargs:
+      reasoning_effort: none
+
 agent:
   model: gpt-5.5
   system_prompt_id: v1
@@ -74,10 +81,6 @@ summary:
   original_user_messages_max_chars: 20000
   last_dialog_steps_count: 4
   last_dialog_step_message_max_chars: 6000
-  llm:
-    max_tokens: 8192
-    completion_kwargs:
-      reasoning_effort: none
 
 security:
   command_moderation:

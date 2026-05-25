@@ -4,7 +4,6 @@ import logging
 import os
 from typing import Any, Dict, List, Optional
 
-from config_modules.merge import deep_merge
 from intent_scope.agent_logging import (
     log_intent_scope_summary_done,
     log_intent_scope_summary_start,
@@ -21,22 +20,6 @@ _PROJECT_ROOT = os.path.abspath(os.path.join(_BASE_DIR, "..", ".."))
 _DEFAULT_PROMPT_PATH = os.path.join(
     _PROJECT_ROOT, "prompts", "intent_scope_tool_summary_prompt.md"
 )
-
-_INTENT_SCOPE_COMPLETION_OVERRIDES: Dict[str, Any] = {
-    "separate_reasoning": False,
-    "chat_template_kwargs": {"enable_thinking": False},
-}
-
-
-def build_intent_scope_payload_overrides(ctx: Any) -> Dict[str, Any]:
-    summary_llm = getattr(ctx, "summary_llm", None)
-    base: Dict[str, Any] = {}
-    if summary_llm is not None:
-        completion_kwargs = getattr(summary_llm, "completion_kwargs", None)
-        if isinstance(completion_kwargs, dict):
-            base = dict(completion_kwargs)
-    return deep_merge(base, _INTENT_SCOPE_COMPLETION_OVERRIDES)
-
 
 def _scope_cfg(ctx: Any) -> IntentScopeConfig:
     cfg = getattr(ctx, "intent_scope", None)
@@ -137,7 +120,6 @@ def summarize_tool_intent_line(
             state=state,
             messages=request_messages,
             request_label=request_label,
-            payload_overrides=build_intent_scope_payload_overrides(ctx),
         )
     except Exception as exc:
         log.warning(

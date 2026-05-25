@@ -321,7 +321,7 @@ class SubagentRunner:
         """Построить RunContext для дочернего агента (без субагентов в tools)."""
         from run_context import RunContext
         from config_modules.intent_scope import intent_scope_from_config_dict
-        from config_modules.summary import summary_llm_from_summary_params
+        from config_modules.chat_completions import chat_completions_llm_from_config_dict
         from utils.logging_module import create_run_logger
 
         child_config = {**self._config, "use_local_subagents": False}
@@ -341,7 +341,7 @@ class SubagentRunner:
             logger=child_logger,
             logging_path=child_log_path,
             summary_trace_path=child_summary_trace_path,
-            summary_llm=summary_llm_from_summary_params(child_config.get("summary_params")),
+            chat_completions_llm=chat_completions_llm_from_config_dict(child_config),
             intent_scope=intent_scope_from_config_dict(child_config),
             tools_data=child_tools_data,
             tools_spec=child_tools_spec,

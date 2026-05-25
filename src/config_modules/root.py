@@ -26,6 +26,7 @@ from config_modules.memory_messages import (
     normalize_long_memory_messages_config,
     normalize_memory_gate_config,
 )
+from config_modules.chat_completions import ChatCompletionsConfig
 from config_modules.summary import (
     DEFAULT_INCREMENTAL_BATCH_MULTIPLIER,
     DEFAULT_LAST_DIALOG_STEP_MESSAGE_MAX_CHARS,
@@ -46,6 +47,7 @@ class AppConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     backend: BackendConfig = Field(default_factory=BackendConfig)
+    chat_completions: ChatCompletionsConfig = Field(default_factory=ChatCompletionsConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
     security: SecurityConfig = Field(default_factory=SecurityConfig)
     summary: SummaryConfig = Field(default_factory=SummaryConfig)

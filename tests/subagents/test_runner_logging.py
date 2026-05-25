@@ -38,7 +38,7 @@ def _make_config(tmp_path):
         "mcp_servers": [],
         "model": "test-model",
         "system_prompt_id": "test-prompt",
-        "summary_params": {
+        "chat_completions_params": {
             "llm": {
                 "max_tokens": 8192,
                 "completion_kwargs": {},

@@ -3,28 +3,27 @@ from types import SimpleNamespace
 import pytest
 
 from intent_scope import summarizer
+from summarize.llm import auxiliary_llm_completion_kwargs
 
 
-def test_build_intent_scope_payload_overrides_merges_thinking_off(monkeypatch):
+def test_auxiliary_llm_completion_kwargs_from_chat_completions_llm():
     ctx = SimpleNamespace(
-        summary_llm=SimpleNamespace(
+        chat_completions_llm=SimpleNamespace(
             completion_kwargs={
-                "temperature": 0.5,
-                "separate_reasoning": True,
-                "chat_template_kwargs": {"enable_thinking": True, "keep": 1},
+                "reasoning_effort": "none",
+                "separate_reasoning": False,
+                "chat_template_kwargs": {"enable_thinking": False},
             }
         )
     )
-    overrides = summarizer.build_intent_scope_payload_overrides(ctx)
-    assert overrides["temperature"] == 0.5
-    assert overrides["separate_reasoning"] is False
-    assert overrides["chat_template_kwargs"] == {
-        "enable_thinking": False,
-        "keep": 1,
+    assert auxiliary_llm_completion_kwargs(ctx) == {
+        "reasoning_effort": "none",
+        "separate_reasoning": False,
+        "chat_template_kwargs": {"enable_thinking": False},
     }
 
 
-def test_summarize_tool_intent_line_uses_payload_overrides(monkeypatch):
+def test_summarize_tool_intent_line_uses_chat_completions_llm_completion_kwargs(monkeypatch):
     captured = {}
 
     def _fake_request_summary_text(*, payload_overrides=None, **kwargs):
@@ -45,9 +44,9 @@ def test_summarize_tool_intent_line_uses_payload_overrides(monkeypatch):
             max_summary_chars=500,
             max_tool_output_chars=1000,
         ),
-        summary_llm=SimpleNamespace(
+        chat_completions_llm=SimpleNamespace(
             max_tokens=100,
-            completion_kwargs={"separate_reasoning": True},
+            completion_kwargs={"reasoning_effort": "none"},
         ),
         logger=None,
     )
@@ -63,10 +62,8 @@ def test_summarize_tool_intent_line_uses_payload_overrides(monkeypatch):
 
     assert line == "User wants a README section on install."
     assert captured["label"] == "intent_scope:ask_human"
-    assert captured["payload_overrides"]["separate_reasoning"] is False
-    assert captured["payload_overrides"]["chat_template_kwargs"] == {
-        "enable_thinking": False
-    }
+    # Intent scope не передаёт свои overrides — только chat_completions.llm в request_summary_text.
+    assert captured.get("payload_overrides") is None
 
 
 def test_summarize_tool_intent_line_fail_open_on_llm_error(monkeypatch):
@@ -81,7 +78,7 @@ def test_summarize_tool_intent_line_fail_open_on_llm_error(monkeypatch):
 
     ctx = SimpleNamespace(
         intent_scope=IntentScopeConfig(tools=["ask_human"]),
-        summary_llm=SimpleNamespace(
+        chat_completions_llm=SimpleNamespace(
             max_tokens=100, completion_kwargs={}
         ),
         logger=None,

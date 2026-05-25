@@ -8,6 +8,7 @@ from intent_guard.validation_result import (
     fail_open_validation_result,
     parse_validator_response,
 )
+from summarize.llm import auxiliary_llm_completion_kwargs
 from utils.llm_chat_client import log_llm_prompt_and_result, request_chat_completion_text
 
 _BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -111,6 +112,7 @@ def validate_final_report_vs_user_intent(
         messages=request_messages,
         max_tokens=_FINISH_GATE_MAX_TOKENS,
         request_label="intent_guard_finish_gate",
+        payload_overrides=auxiliary_llm_completion_kwargs(ctx),
     )
     log_llm_prompt_and_result(
         logger=getattr(ctx, "logger", None),

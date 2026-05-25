@@ -22,7 +22,14 @@ def _validator_json(**overrides: object) -> str:
 class ValidateFinalReportConsistencyTest(unittest.TestCase):
     def setUp(self) -> None:
         self.state = SimpleNamespace(messages=[{"role": "user", "content": "спроси меня"}])
-        self.ctx = SimpleNamespace(config_dict={}, logger=None)
+        self.ctx = SimpleNamespace(
+            config_dict={},
+            logger=None,
+            chat_completions_llm=SimpleNamespace(
+                max_tokens=8192,
+                completion_kwargs={"reasoning_effort": "none"},
+            ),
+        )
         self.digest = FinishGateTraceDigest(
             trace_digest_text='<message n="1">\n[user] спроси меня\n</message>',
             digest_chars=40,
@@ -76,6 +83,21 @@ class ValidateFinalReportConsistencyTest(unittest.TestCase):
         )
         self.assertTrue(result.ok)
         self.assertEqual(result.action, "accept")
+
+    @patch("intent_guard.final_report_consistency.request_chat_completion_text")
+    def test_uses_chat_completions_llm_completion_kwargs(self, mock_llm) -> None:
+        mock_llm.return_value = _validator_json()
+        validate_final_report_vs_user_intent(
+            ctx=self.ctx,
+            state=self.state,
+            current_user_requests=["x"],
+            submit_solution_arguments={},
+            trace_digest=self.digest,
+        )
+        self.assertEqual(
+            mock_llm.call_args.kwargs["payload_overrides"],
+            {"reasoning_effort": "none"},
+        )
 
     @patch("intent_guard.final_report_consistency.request_chat_completion_text")
     def test_request_label_finish_gate(self, mock_llm) -> None:
