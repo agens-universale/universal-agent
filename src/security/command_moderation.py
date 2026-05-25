@@ -153,11 +153,15 @@ def decide_command_execution(
             reason="command_moderation.mode=allow",
         )
     if not judge_available or judge_result is None:
+        # Fail-closed: при недоступности судьи в режимах ask/deny — блокируем.
+        # Это изменение от AS-IS, где было fail-open (см. T114-finding).
+        # Режим allow до этой ветки не доходит — он выходит раньше (см. выше).
         return ExecutionDecision(
-            allowed=True,
-            decision="executed",
+            allowed=False,
+            decision="blocked",
             reason_code="judge_unavailable",
-            reason="Judge is unavailable; fail-open policy allows execution.",
+            reason="Judge is unavailable; fail-closed policy blocks execution.",
+            error_type="unsafe_command_blocked",
         )
     if judge_result.verdict == SAFE_VERDICT:
         return ExecutionDecision(
@@ -232,6 +236,17 @@ def moderate_command_execution(
         @functools.wraps(func)
         def wrapper(*args: Any, **kwargs: Any) -> str:
             context = resolve_tool_context(*args, **kwargs)
+            # Если в config_dict отсутствует блок command_moderation вообще —
+            # модерация не сконфигурирована, пропускаем (legacy / unit-test поведение,
+            # симметрично root_box.enabled default'у).
+            from security.path_policy import _extract_config_dict
+            _cfg = _extract_config_dict(
+                args[0] if args else None,
+                getattr(context, "ctx", None),
+                kwargs,
+            )
+            if not isinstance(_cfg.get("command_moderation"), dict):
+                return func(*args, **kwargs)
             try:
                 payload = _extract_payload(func, args, kwargs, payload_arg, payload_extractor)
             except ValueError:

@@ -61,7 +61,14 @@ def test_decide_command_execution_matrix():
     dangerous = JudgeResult("potentially_dangerous", ["bad"], ["privilege_escalation"], 1.0)
 
     assert decide_command_execution("allow", None, False, None).allowed is True
-    assert decide_command_execution("deny", None, False, None).allowed is True
+    # Fail-CLOSED: при недоступности судьи в режимах ask/deny — блокируем.
+    deny_no_judge = decide_command_execution("deny", None, False, None)
+    assert deny_no_judge.allowed is False
+    assert deny_no_judge.reason_code == "judge_unavailable"
+    assert deny_no_judge.error_type == "unsafe_command_blocked"
+    ask_no_judge = decide_command_execution("ask", None, False, None)
+    assert ask_no_judge.allowed is False
+    assert ask_no_judge.error_type == "unsafe_command_blocked"
     assert decide_command_execution("deny", safe, True, None).allowed is True
 
     denied = decide_command_execution("deny", dangerous, True, None)
@@ -170,7 +177,12 @@ def test_moderate_command_execution_blocks_dangerous_payload(tmp_path):
     assert result["error"]["risk_flags"] == ["privilege_escalation"]
 
 
-def test_moderate_command_execution_fail_open_when_judge_unavailable(tmp_path):
+def test_moderate_command_execution_fail_closed_when_judge_unavailable(tmp_path):
+    """
+    Fail-CLOSED: при недоступности судьи в режимах ask/deny выполнение
+    блокируется. Это изменение от AS-IS (которое было fail-open) — см.
+    T114-finding в hardening_findings_20260518.md.
+    """
     config_dict = {
         "launch_root": str(tmp_path),
         "command_moderation": {"mode": "deny"},
@@ -182,7 +194,12 @@ def test_moderate_command_execution_fail_open_when_judge_unavailable(tmp_path):
 
     result = json.loads(run("echo ok", config_dict=config_dict))
 
-    assert result["ok"] is True
+    assert result["ok"] is False
+    assert result["error"]["type"] == "unsafe_command_blocked"
+    # envelope error от make_block_error содержит mode/reason/risk_flags,
+    # но reason_code остаётся в audit-логе, а не в envelope. Проверяем reason.
+    assert "judge" in result["error"].get("reason", "").lower() \
+        or "fail-closed" in result["error"].get("reason", "").lower()
 
 
 def test_moderate_command_execution_audits_without_payload_leak(tmp_path):

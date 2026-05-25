@@ -88,41 +88,278 @@ Background и CLI-клиент для работы с агентом GigaCode: �
 
     **Security policy (`security.command_moderation`)**
 
-    Клиент поддерживает единый контур безопасности для файловых изменений,
-    запуска команд/кода и сетевых запросов:
+    Клиент поддерживает четыре независимых слоя безопасности под одной секцией `security.command_moderation`:
+
+    | Слой | Что блокирует | Тулы под защитой | Error type |
+    |---|---|---|---|
+    | `mode` | опасные команды/код через LLM-судью; fail-CLOSED если judge недоступен | `execute_command`, `run_python_code` | `unsafe_command_blocked`, `unsafe_command_cancelled_by_user` |
+    | `root_box` | запись вне `launch_root` + `extra_write_paths` | `write_to_file`, `append_to_file`, `search_and_replace`, write-fragments в `execute_command` | `root_box_violation` |
+    | `read_guard` | чтение вне `allowed_read_roots`, в `denied_*`, по запрещённым паттернам/расширениям | `read_file`, `list_files`, `search_files` | `read_guard_violation` |
+    | `url_policy` | URL по схеме или `url_blacklist` (включая SSRF-подсети) | `fetch_url`, `simple_fetch_url` | `url_validation_failed`, `url_blocked_by_policy` |
+
+    Слои **независимы**: read_guard блокирует чтение в любом `command_moderation.mode` (даже `allow`); url_policy не зависит от mode; root_box работает независимо от read_guard. Полная подробная спецификация read_guard — в [`read-guard-spec.md`](read-guard-spec.md).
+
+    **Базовый пример конфига:**
 
     ```yaml
     security:
       command_moderation:
-        mode: deny # allow | ask | deny
+        mode: deny                       # allow | ask | deny
+        allowed_command_examples: []
         root_box:
           enabled: true
-          extra_write_paths: []
-        allowed_command_examples: []
+          extra_write_paths: []          # дополнительные writable dirs
+        read_guard:
+          enabled: true
+          mode: deny
+          allowed_read_roots: []         # пусто → [launch_root]; "*" → allow-by-default
+          allowed_read_paths: []         # exception-override над denied_*
+          denied_read_paths: []          # см. рекомендованный список ниже
+          denied_file_patterns: []       # fnmatch по basename
+          denied_extensions: []          # точное совпадение расширения
         url_policy:
           allowed_schemes: ["http", "https"]
-          url_blacklist: []
+          url_blacklist: []              # exact host, glob host (*.example), или URL glob
     ```
 
-    - `root_box.enabled` по умолчанию включён и ограничивает файловые изменения директорией запуска `gc-cli` (`launch_root`).
-      Чтение файлов не ограничивается этим периметром, но запись/создание/редактирование вне него блокируются.
-    - `root_box.extra_write_paths` — дополнительные директории, куда разрешена запись помимо `launch_root`.
-      Относительные пути разрешаются от директории `config.yml`.
-    - `mode` управляет только `execute_command` и `run_python_code`:
-      - `allow` — выполнять без judge;
-      - `ask` — безопасное выполнять, опасное выполнять только после подтверждения пользователя;
-      - `deny` — безопасное выполнять, опасное блокировать.
-    - `allowed_command_examples` — positive examples для LLM judge. Это не строгий allowlist,
-      а ориентир безопасного профиля команд проекта.
-    - `url_policy.allowed_schemes` и `url_policy.url_blacklist` проверяются для исходного URL
-      в `fetch_url`/`simple_fetch_url` до сетевого запроса. Redirect targets повторно не проверяются.
-    - Основные policy-ошибки в JSON-envelope инструментов:
-      - `root_box_violation` — файловое изменение вне разрешённых roots;
-      - `unsafe_command_blocked` — опасная команда/код заблокированы в `deny`;
-      - `unsafe_command_cancelled_by_user` — пользователь не подтвердил опасное действие в `ask`;
-      - `url_validation_failed` — URL не прошёл схему/формат;
-      - `url_blocked_by_policy` — URL совпал с blacklist.
-    - Все policy-решения пишутся в run logger как `security_policy_decision` без полного payload команды/кода.
+    ### `mode` — судья команд/кода
+
+    Управляет только `execute_command` и `run_python_code`:
+
+    - `allow` — выполнять без judge (документированная дыра — judge просто отключён);
+    - `ask` — безопасное выполнять, опасное → запрос подтверждения пользователя;
+    - `deny` — безопасное выполнять, опасное → блок с `unsafe_command_blocked`.
+
+    **Fail-CLOSED поведение**: если judge недоступен (нет бэкенда, timeout), выполнение блокируется (`reason: "Judge is unavailable; fail-closed policy blocks execution"`). Это закрывает класс атак через python escape: `print(open('/etc/passwd').read())` блокируется в `deny`/`ask` даже если read_guard декорирует только `read_file` (см. T111 в test matrix).
+
+    `allowed_command_examples` — positive examples для LLM judge (ориентир безопасного профиля проекта, не строгий allowlist).
+
+    ### `root_box` — write-периметр
+
+    По умолчанию включён, ограничивает write-операции директорией `launch_root`. Относительные пути в `extra_write_paths` разрешаются от каталога `config.yml`.
+
+    Пример с дополнительной writable-папкой:
+
+    ```yaml
+    root_box:
+      enabled: true
+      extra_write_paths:
+        - "./build"                      # относительно config.yml
+        - "/tmp/agent-scratch"           # абсолютный
+        - "~/Downloads/agent-out"        # ~ резолвится
+    ```
+
+    ### `read_guard` — read-периметр
+
+    Симметричен root_box, но для чтения. См. [`read-guard-spec.md`](read-guard-spec.md) для полной спецификации.
+
+    **Рекомендованный продакшен-конфиг** (защита системных секретов; в дефолтном `config.yml` пустой):
+
+    ```yaml
+    read_guard:
+      enabled: true
+      mode: deny
+      allowed_read_roots: []             # = [launch_root]
+      allowed_read_paths:
+        - "~/.local/state/gc/skills"     # exceptions для скиллов внутри gc/
+        - "<launch_root>/.gc/skills"
+      denied_read_paths:
+        - "~/.ssh"
+        - "~/.aws"
+        - "~/.config/gcloud"
+        - "~/.gnupg"
+        - "/etc/ssl/private"
+        - "/proc"
+        - "/sys"
+        - "~/.local/state/gc"            # state cli (треды, auth-токены)
+        - "<launch_root>/.gc"            # project-local state
+      denied_file_patterns:
+        - ".env"
+        - ".env.*"
+        - "*id_rsa*"
+        - "*id_ed25519*"
+        - "*.pem"
+        - "*credentials*.json"
+        - "*.sqlite"
+      denied_extensions:
+        - ".key"
+        - ".pfx"
+        - ".jks"
+    ```
+
+    **Альтернативный «открытый» режим** (для диагностики всей машины):
+
+    ```yaml
+    read_guard:
+      enabled: true
+      mode: deny
+      allowed_read_roots: ["*"]          # allow-by-default; denied_* по-прежнему режут
+    ```
+
+    Особенности:
+    - Плейсхолдеры `~`, `%USERPROFILE%`, `<launch_root>` резолвятся в путях `denied_*` / `allowed_*`.
+    - Symlink защита: путь нормализуется через `realpath` до проверки.
+    - Скиллы (`<launch_root>/skills/`, `<launch_root>/.gc/skills/`, `~/.local/state/gc/skills/`) **автоматически readable** через `_resolve_skills_root`, даже если они вне `allowed_read_roots`.
+
+    ### `url_policy` — schema + SSRF-blacklist
+
+    Проверяется для **исходного** URL в `fetch_url`/`simple_fetch_url` до сетевого запроса. Redirect targets валидируются per-hop **только в `simple_fetch_url`**.
+
+    Пример с защитой от SSRF к internal-сетям (link-local IMDS, loopback, RFC1918):
+
+    ```yaml
+    url_policy:
+      allowed_schemes: ["http", "https"]
+      url_blacklist:
+        - "169.254.*"                    # link-local + AWS/GCP IMDS 169.254.169.254
+        - "127.*"                        # loopback
+        - "10.*"                         # RFC1918
+        - "192.168.*"
+        - "172.1[6-9].*"                 # RFC1918 172.16-19
+        - "172.2[0-9].*"                 # 172.20-29
+        - "172.3[0-1].*"                 # 172.30-31
+        - "0.0.0.0"
+        - "localhost"
+        - "*.internal.example"           # glob на suffix
+    ```
+
+    Матчинг через `fnmatch` по host и по полному URL (case-insensitive).
+
+    ### CLI override'ы
+
+    Любую секцию security можно переключить флагом без правки `config.yml`:
+
+    ```bash
+    # Полностью выключить write-периметр (опасно):
+    gc-cli -q "..." --no-root-box
+
+    # Полностью выключить read_guard:
+    gc-cli -q "..." --no-read-guard
+    # или
+    gc-cli -q "..." --read-guard false
+
+    # Поменять режим read_guard без правки config:
+    gc-cli -q "..." --read-guard-mode ask
+
+    # Переключить command moderation:
+    gc-cli -q "..." --command-moderation ask
+    # или
+    gc-cli -q "..." --command-moderation deny
+
+    # Включить root_box обратно из CLI:
+    gc-cli -q "..." --root-box true
+    ```
+
+    Приоритет: **CLI override → `config.yml` → дефолт в коде**.
+
+    ### Формат ошибок (JSON envelope тулов)
+
+    Все блокировки возвращают envelope с `ok: false`, `status: "blocked"` (или специфичным) и структурированной `error`. Примеры:
+
+    ```json
+    // read_guard блокировал /etc/hosts вне allowed_read_roots
+    {
+      "tool": "read_file",
+      "ok": false,
+      "status": "blocked",
+      "error": {
+        "type": "read_guard_violation",
+        "path": "/etc/hosts",
+        "operation": "read",
+        "reason": "path is outside allowed_read_roots: ['/work/orchestrator/scratchpad/lab']",
+        "matched_rule": "allowed_read_roots",
+        "mode": "deny"
+      }
+    }
+
+    // url_policy блокировал SSRF к IMDS
+    {
+      "tool": "fetch_url",
+      "ok": false,
+      "error": {
+        "type": "url_blocked_by_policy",
+        "url": "http://169.254.169.254/latest/meta-data",
+        "reason": "URL host or URL matched blacklist rule.",
+        "matched_rule": "169.254.*"
+      }
+    }
+
+    // command_moderation fail-closed (judge offline)
+    {
+      "tool": "run_python_code",
+      "ok": false,
+      "error": {
+        "type": "unsafe_command_blocked",
+        "mode": "ask",
+        "reason": "Judge is unavailable; fail-closed policy blocks execution.",
+        "code_preview": "print(open('/etc/passwd').read()[:200])"
+      }
+    }
+
+    // root_box блокировал write outside launch_root
+    {
+      "tool": "write_to_file",
+      "ok": false,
+      "error": {
+        "type": "root_box_violation",
+        "launch_root": "/work/lab",
+        "allowed_write_roots": ["/work/lab"],
+        "path": "/etc/passwd",
+        "operation": "write"
+      }
+    }
+    ```
+
+    Все policy-решения дополнительно пишутся в run logger как `security_policy_decision` (без полного payload команды/кода).
+
+    ### Полный сценарий: hardened-конфиг для продакшен-агента
+
+    ```yaml
+    security:
+      command_moderation:
+        mode: deny
+        allowed_command_examples:
+          - "ls -la"
+          - "git status"
+          - "pytest tests/"
+        root_box:
+          enabled: true
+          extra_write_paths:
+            - "./build"
+        read_guard:
+          enabled: true
+          mode: deny
+          denied_read_paths:
+            - "~/.ssh"
+            - "~/.aws"
+            - "~/.config/gcloud"
+            - "/proc"
+            - "/sys"
+            - "<launch_root>/.gc"
+          allowed_read_paths:
+            - "<launch_root>/.gc/skills"
+          denied_file_patterns:
+            - ".env"
+            - ".env.*"
+            - "*.pem"
+            - "*id_rsa*"
+            - "*credentials*.json"
+          denied_extensions:
+            - ".key"
+        url_policy:
+          allowed_schemes: ["https"]
+          url_blacklist:
+            - "169.254.*"
+            - "127.*"
+            - "10.*"
+            - "192.168.*"
+            - "172.1[6-9].*"
+            - "172.2[0-9].*"
+            - "172.3[0-1].*"
+            - "localhost"
+    ```
+
+    Этот конфиг закрывает: SSRF к internal IP, чтение системных секретов, write вне проекта, любые опасные shell-команды и python escape через `run_python_code`.
 
 5. **Переопределение настроек config.yml из CLI**
 

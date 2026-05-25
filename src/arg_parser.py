@@ -142,6 +142,34 @@ parser.add_argument(
     ),
 )
 
+read_guard_group = parser.add_mutually_exclusive_group()
+read_guard_group.add_argument(
+    "--read-guard",
+    type=_parse_bool_cli,
+    choices=[True, False],
+    help=(
+        "Включить/выключить read_guard (true|false): ограничение чтения файлов "
+        "по allowed_read_roots/denied_*"
+    ),
+)
+read_guard_group.add_argument(
+    "--no-read-guard",
+    action="store_true",
+    help=(
+        "Явно отключить read_guard (эквивалент --read-guard false); "
+        "имеет приоритет над config.yml"
+    ),
+)
+
+parser.add_argument(
+    "--read-guard-mode",
+    choices=["allow", "ask", "deny"],
+    help=(
+        "Режим read_guard: allow выполняет без проверок, "
+        "ask запрашивает подтверждение для подозрительного, deny блокирует"
+    ),
+)
+
 
 parsed_args, unknown_args = parser.parse_known_args()
 if parsed_args.new and not parsed_args.thread_id:

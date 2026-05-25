@@ -33,14 +33,20 @@ def apply_cli_overrides(
     root_box_enabled: Optional[bool] = None,
     no_root_box: bool = False,
     command_moderation_mode: Optional[str] = None,
+    read_guard_enabled: Optional[bool] = None,
+    no_read_guard: bool = False,
+    read_guard_mode: Optional[str] = None,
 ) -> None:
     if extra_overrides:
         config_dict.update(extra_overrides)
     effective_root_box_override = False if no_root_box else root_box_enabled
+    effective_read_guard_override = False if no_read_guard else read_guard_enabled
     apply_cli_command_moderation_overrides(
         config_dict,
         root_box_enabled=effective_root_box_override,
         command_moderation_mode=command_moderation_mode,
+        read_guard_enabled=effective_read_guard_override,
+        read_guard_mode=read_guard_mode,
     )
 
 
@@ -76,6 +82,7 @@ def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
                 "allowed_schemes": app_cfg.security.command_moderation.url_policy.allowed_schemes,
                 "url_blacklist": app_cfg.security.command_moderation.url_policy.url_blacklist,
             },
+            "read_guard": app_cfg.security.command_moderation.read_guard.model_dump(),
         },
         "summary_params": app_cfg.summary.model_dump(),
         "agent_md_path": app_cfg.paths.agent_md_path,

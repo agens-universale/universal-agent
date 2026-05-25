@@ -44,6 +44,9 @@ def main() -> Any:
         root_box_enabled=arg_parser.run_args.root_box,
         no_root_box=arg_parser.run_args.no_root_box,
         command_moderation_mode=arg_parser.run_args.command_moderation,
+        read_guard_enabled=getattr(arg_parser.run_args, "read_guard", None),
+        no_read_guard=getattr(arg_parser.run_args, "no_read_guard", False),
+        read_guard_mode=getattr(arg_parser.run_args, "read_guard_mode", None),
     )
     auth_connector = build_auth_connector(config_dict)
     ctx = create_run_context(config_dict, auth_connector=auth_connector)

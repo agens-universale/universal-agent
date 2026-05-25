@@ -8,7 +8,14 @@ from typing import Any, Dict, Optional
 import requests
 
 from tools.simple_tools.abstract_simple_tool import AbstractSimpleTool
-from security.url_policy import enforce_url_policy
+from security.url_policy import enforce_url_policy, validate_url_policy, UrlPolicyDecision
+
+
+class _RedirectBlocked(Exception):
+    """Внутреннее исключение для срыва redirect-цикла при policy-блокировке."""
+    def __init__(self, decision: UrlPolicyDecision) -> None:
+        super().__init__(decision.reason or "redirect blocked")
+        self.decision = decision
 
 
 class SimpleFetchUrl(AbstractSimpleTool):
@@ -417,12 +424,67 @@ class SimpleFetchUrl(AbstractSimpleTool):
 
         response = None
         attempts = 1 + self.max_retries
+        # Извлекаем url_policy для per-hop redirect-валидации.
+        # Берём из ToolSecurityContext (тот же путь что и enforce_url_policy).
+        _cfg = getattr(self, "_ctx", None)
+        _cfg = getattr(_cfg, "config_dict", {}) or {}
+        _cm = _cfg.get("command_moderation") or {}
+        _up = _cm.get("url_policy") or {}
+        _allowed_schemes = list(_up.get("allowed_schemes") or ["http", "https"])
+        _url_blacklist = list(_up.get("url_blacklist") or [])
+        _max_redirects = 10
+
+        def _fetch_with_redirect_validation(session, start_url, headers, timeout):
+            """Manual redirect loop с per-hop validate_url_policy."""
+            current = start_url
+            for _ in range(_max_redirects + 1):
+                resp = session.get(current, headers=headers, timeout=timeout, allow_redirects=False)
+                status = getattr(resp, "status_code", 0) or 0
+                # 3xx redirect codes. Используем status_code чтобы не зависеть
+                # от Response.is_redirect (отсутствует в тест-stubах).
+                if not (300 <= status < 400):
+                    return resp
+                next_url = getattr(resp, "headers", {}).get("Location") if hasattr(resp, "headers") else None
+                if not next_url:
+                    return resp
+                # Абсолютизируем относительный Location.
+                from urllib.parse import urljoin
+                next_abs = urljoin(current, next_url)
+                # ВАЛИДИРУЕМ КАЖДЫЙ HOP. AS-IS spec говорил «redirect не перепроверяется» —
+                # это и было дырой. Теперь перепроверяется.
+                decision = validate_url_policy(next_abs, _allowed_schemes, _url_blacklist)
+                if not decision.allowed:
+                    raise _RedirectBlocked(decision)
+                current = next_abs
+            raise _RedirectBlocked(
+                UrlPolicyDecision(
+                    allowed=False, url=current,
+                    error_type="too_many_redirects",
+                    reason=f"Exceeded {_max_redirects} redirects.",
+                )
+            )
+
         with requests.Session() as session:
             for attempt in range(1, attempts + 1):
                 try:
-                    response = session.get(normalized_url, headers=headers, timeout=effective_timeout, allow_redirects=True)
+                    response = _fetch_with_redirect_validation(session, normalized_url, headers, effective_timeout)
                     response.raise_for_status()
                     break
+                except _RedirectBlocked as redirect_exc:
+                    _decision = redirect_exc.decision
+                    return _result(
+                        ok=False,
+                        final_url=_decision.url,
+                        status_code=None,
+                        content_type=None,
+                        result_type="error",
+                        error={
+                            "type": _decision.error_type or "url_blocked_by_policy",
+                            "reason": _decision.reason,
+                            "matched_rule": _decision.matched_rule,
+                            "blocked_on_redirect": True,
+                        },
+                    )
                 except requests.RequestException as exc:
                     status = getattr(getattr(exc, "response", None), "status_code", None)
                     retryable = status is None or status in (429,) or status >= 500

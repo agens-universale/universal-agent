@@ -187,7 +187,16 @@ def apply_tool(
         allow_empty_for_empty_schema=True,
     )
 
-    tool = tool_fabric(**kwargs)
+    # Пробрасываем ctx/config_dict в kwargs тула: AbstractSimpleTool.__init__
+    # читает их через kwargs.get(...), и security‑декораторы (root_box,
+    # read_guard, url_policy, command_moderation) резолвят политику через
+    # self._ctx.config_dict. Без этого декораторы получают пустой
+    # config_dict и считают security‑слой не сконфигурированным.
+    fabric_kwargs = dict(kwargs)
+    fabric_kwargs.setdefault("ctx", ctx)
+    if config_dict:
+        fabric_kwargs.setdefault("config_dict", config_dict)
+    tool = tool_fabric(**fabric_kwargs)
     # log.debug(
     #    "apply_tool log:\nkwargs:\n%s\narguments:\n %s\ntool_fabric:\n%s\ntool:\n%s",
     #    kwargs,

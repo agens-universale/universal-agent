@@ -150,12 +150,17 @@ def test_execute_command_ask_mode_cancels_when_user_rejects(tmp_path):
     assert not marker.exists()
 
 
-def test_command_moderation_fail_open_when_judge_unavailable(tmp_path):
+def test_command_moderation_fail_closed_when_judge_unavailable(tmp_path):
+    """
+    Fail-CLOSED: при недоступности судьи в режимах ask/deny выполнение
+    блокируется. Это hardening-изменение от AS-IS fail-open (см. T114-finding).
+    """
     result = json.loads(
         ExecuteCommand(config_dict=_config(tmp_path, "deny"))(
             command=f'"{sys.executable}" -c "print(789)"'
         )
     )
 
-    assert result["ok"] is True
-    assert result["stdout"] == "789"
+    assert result["ok"] is False
+    assert result["error"]["type"] == "unsafe_command_blocked"
+    assert result["error"]["mode"] == "deny"
