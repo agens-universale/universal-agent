@@ -13,6 +13,7 @@ from typing import Any, Dict, Optional
 from long_memory import compaction, storage
 from long_memory.compaction import SOFT_APPEND_INPUT_LIMIT_CHARS
 from long_memory.storage import MAX_CHARS, LongMemoryError
+from message_policy.long_memory_notice.policy import touch_long_memory_baseline
 from tools.simple_tools.abstract_simple_tool import AbstractSimpleTool
 
 _FILE_NAME = "long_memory.md"
@@ -81,26 +82,17 @@ class LongMemory(AbstractSimpleTool):
     def prompt_description(cls) -> str:
         return '''Tool name: long_memory
 Tool description: Persistent project-scoped markdown memory. Survives CLI restarts.
-The model reads it at the start of a new session if Project Info reports the project
-has long memory; appends short factual deltas as it learns new things; rewrites in
-full only when prior memory is wholesale wrong.
+Use read when Project Info reports long memory and conventions or durable facts may matter.
+Append short factual deltas; write only for rare full rewrites.
 
-Mandatory workflow:
-- START of a new session: if Project Info says the project has long memory,
-  call long_memory action=read to load it.
-- WHEN you discover/verify something durable for the project: call action=append
-  with ONLY the new delta (a short factual paragraph or bullets — not chain-of-thought).
-- USE action=write only to rewrite the memory from scratch (rare; e.g. previous
-  memory turned out to be wrong).
-
-What to put in:
-- Verified facts, decisions, constraints, paths, identifiers, gotchas.
-- Short. Bullet-style preferred.
+What to put in (any task domain):
+- Purpose/scope, standing requirements, conventions, stable decisions, preferences.
+- Verified reference facts, names, dates, constraints, gotchas. Short bullets.
 
 What NOT to put in:
 - Long brainstorming or step-by-step reasoning.
 - Guesses presented as facts.
-- Transient task state that is irrelevant to future sessions.
+- Transient turn-only state or ongoing dialogue (use thread memory for that).
 
 Input schema: {"type":"object","properties":{"action":{"type":"string","enum":["read","append","write"]},"content":{"type":"string"}},"required":["action"],"additionalProperties":false}
 
@@ -173,10 +165,15 @@ Return format (JSON string):
             message=f"unknown action: {action!r}. expected one of read|append|write.",
         )
 
+    def _sync_baseline_after_mutation(self) -> None:
+        if self._ctx is not None and self._state is not None:
+            touch_long_memory_baseline(self._state, self._ctx)
+
     def _handle_read(self) -> str:
         info = storage.stat(self._path)
         text = storage.read(self._path)
         is_empty = (not info.exists) or (not text.strip())
+        self._sync_baseline_after_mutation()
         return self._ok(
             action="read",
             length=info.chars if info.exists else 0,
@@ -216,6 +213,7 @@ Return format (JSON string):
                 info = storage.append(self._path, delta_stripped)
             except LongMemoryError as e:
                 return self._err(action="append", error_type=e.code, message=e.message)
+            self._sync_baseline_after_mutation()
             return self._ok(action="append", length=info.chars, lines=info.lines)
         # Overflow path: compact existing + delta together; LLM decides what to keep.
         result = compaction.compact_text(combined, self._ctx, self._state)
@@ -235,6 +233,7 @@ Return format (JSON string):
             info = storage.write(self._path, result.text)
         except LongMemoryError as e:
             return self._err(action="append", error_type=e.code, message=e.message)
+        self._sync_baseline_after_mutation()
         return self._ok(
             action="append",
             length=info.chars,
@@ -269,6 +268,7 @@ Return format (JSON string):
             info = storage.write(self._path, text_stripped)
         except LongMemoryError as e:
             return self._err(action="write", error_type=e.code, message=e.message)
+        self._sync_baseline_after_mutation()
         return self._ok(action="write", length=info.chars, lines=info.lines)
 
 

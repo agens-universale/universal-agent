@@ -53,6 +53,18 @@ paths:
   # skills_data_path: ""
   # logs_dump_dir: ""
 
+memory_files:
+  max_file_chars: 20000
+  total_budget_chars: 50000
+  max_files: 5
+
+memory_gate:
+  enable_memory_file_notice: true
+  cooldown_messages: 30
+long_memory:
+  enable_long_memory_notice: true
+  check_interval_messages: 5
+
 summary:
   chat_completions_summary_trigger_chars: 200000
   incremental_batch_chars: 280000

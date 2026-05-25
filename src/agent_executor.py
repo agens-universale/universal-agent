@@ -17,7 +17,6 @@ from config_modules.stored_outputs import get_stored_tool_outputs_max_entries
 from message_policy.chat_completions import repair_tool_call_pairing
 from run_summary_coordinator import RunSummaryCoordinator
 from summarize.config import parse_summary_trigger_chars
-from message_format.serialization import history_has_dialog_summary_message
 from states import State, SharedStateData, save_state, dump_storage
 from thread_store import (
     ThreadSession,
@@ -28,10 +27,7 @@ from thread_store import (
 from tools.connect_mcp.persistent_stdio import PersistentStdioRegistry
 from tools.connect_mcp.stream_client import _SESSION_MANAGER as _STREAM_SESSION_MANAGER
 from tools.skills.registry import get_skills_registry
-from message_policy.user_message_policy import (
-    TECHNICAL_TYPE_CURRENT_CONTEXT,
-    wrap_technical_user_content,
-)
+from message_policy.memory_messages_notice.state import persist_memory_messages_state
 from utils.generate_message_id import generate_msg_id_sha256 as generate_message_id_func
 from utils.local_render_system_prompt import render_system_prompt
 
@@ -157,6 +153,7 @@ class AgentExecutor:
             meta = getattr(thread_session, "meta", None) or {}
             state.init_user_intent_log(meta.get("user_intent_log"))
             state.init_current_user_intent(meta.get("current_user_intent"))
+            state.init_memory_messages_from_meta(meta)
             state.dialog_steps_offset = int(meta.get("dialog_steps_offset", 0) or 0)
         if (
             backend_api_mode == "chat_completions"
@@ -228,43 +225,6 @@ class AgentExecutor:
         # после commit_closed_user_turn_to_intent_log при accept submit_solution.
         for new_user_message in new_user_messages:
             state.seed_new_user_turn(new_user_message)
-        technical_user_message = None
-        _thread_mf = thread_shared.memory_files if thread_shared is not None else {}
-        _has_memory = (
-            isinstance(_thread_mf, dict)
-            and any(v.strip() for v in _thread_mf.values() if isinstance(v, str))
-        )
-        if (
-            thread_session is not None
-            and _has_memory
-            and not history_has_dialog_summary_message(thread_session.history_messages)
-        ):
-            technical_user_message = {
-                "role": "user",
-                "content": wrap_technical_user_content(
-                    (
-                        'client has non-empty memory files; call `memory_files` '
-                        'with action="list" to see available files, then read what you need.'
-                    ),
-                    technical_type=TECHNICAL_TYPE_CURRENT_CONTEXT,
-                ),
-                "id": generate_message_id_func("m"),
-            }
-            if logger is not None:
-                logger.info(
-                    "summary_context_message_added thread_id=%s reason=memory_files_present_no_dialog_summary",
-                    thread_session.thread_id,
-                )
-        elif (
-            thread_session is not None
-            and _has_memory
-            and history_has_dialog_summary_message(thread_session.history_messages)
-            and logger is not None
-        ):
-            logger.info(
-                "summary_context_message_skipped thread_id=%s reason=dialog_summary_already_present",
-                thread_session.thread_id,
-            )
 
         messages = list(new_user_messages)
 
@@ -284,10 +244,7 @@ class AgentExecutor:
             # не "сдвигались" из-за старых сообщений, будем пропускать инкремент
             # счётчика шагов на первом `user_ask`-цикле, если история непустая.
             state.skip_initial_user_ask_step_when_history = len(base_messages) > 0
-            messages = [*base_messages]
-            if technical_user_message is not None:
-                messages.append(technical_user_message)
-            messages.extend(new_user_messages)
+            messages = [*base_messages, *new_user_messages]
 
             def _persist_thread_batch(step_messages: list[dict]) -> None:
                 # Persist notes from in-memory state into thread meta.
@@ -318,6 +275,7 @@ class AgentExecutor:
                 thread_session.meta["current_user_intent"] = state.current_user_intent
                 thread_session.meta["backend_api_mode"] = state.backend_api_mode
                 thread_session.backend_api_mode = state.backend_api_mode
+                persist_memory_messages_state(state, thread_session.meta)
                 last_backend_response_id = getattr(
                     state, "last_backend_response_id", None
                 )
@@ -356,11 +314,17 @@ class AgentExecutor:
                 pre_backend_compaction_hook=summary.pre_backend_compaction_hook,
                 get_pending_messages=get_pending_messages,
                 check_stop=check_stop,
+                session_meta=(
+                    thread_session.meta
+                    if thread_session is not None
+                    else None
+                ),
             )
             if thread_session is not None:
                 thread_session.meta["user_intent_log"] = state.user_intent_log
                 thread_session.meta["current_user_intent"] = state.current_user_intent
                 thread_session.meta["backend_api_mode"] = state.backend_api_mode
+                persist_memory_messages_state(state, thread_session.meta)
                 thread_session.persist_batch(
                     [], previous_response_id=state.previous_response_id
                 )

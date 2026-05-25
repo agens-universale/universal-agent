@@ -30,6 +30,7 @@ from message_policy.no_tool_call_bounce import (
     extract_last_assistant_text,
     format_no_tool_call_bounce,
 )
+from message_policy.memory_messages_notice.apply import apply_memory_messages_before_llm
 from message_policy.user_message_policy import (
     TECHNICAL_TYPE_TECHNICAL,
     TECHNICAL_TYPE_ERROR_MESSAGE,
@@ -335,6 +336,7 @@ def run_agent(
     pre_backend_compaction_hook: Optional[Callable[[List[Dict], str], None]] = None,
     get_pending_messages: Optional[Callable[[], List[Dict]]] = None,
     check_stop: Optional[Callable[[], bool]] = None,
+    session_meta: Optional[Dict[str, Any]] = None,
 ) -> Union[str, None]:
     tool_error_cnt = 0
     run_logger = getattr(ctx, "logger", None) or _fallback_logger
@@ -433,6 +435,25 @@ def run_agent(
                     run_logger.warning(
                         "Pre-backend compaction hook warning: %s",
                         pre_backend_exc,
+                        exc_info=True,
+                    )
+            if (
+                backend_mode == "chat_completions"
+                and _mode_requires_backend_call(mode)
+                and isinstance(session_meta, dict)
+            ):
+                try:
+                    messages = apply_memory_messages_before_llm(
+                        messages,
+                        state,
+                        ctx,
+                        session_meta,
+                        step_messages=messages,
+                    )
+                except Exception as mem_exc:
+                    run_logger.warning(
+                        "Memory messages hook warning: %s",
+                        mem_exc,
                         exc_info=True,
                     )
         except Exception as e:

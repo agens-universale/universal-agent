@@ -6,6 +6,7 @@ correctness is on the atomic os.replace.
 """
 from __future__ import annotations
 
+import hashlib
 import os
 import threading
 from dataclasses import dataclass
@@ -61,6 +62,14 @@ def stat(path: Path) -> LongMemoryStat:
             chars=len(text),
             lines=_count_lines(text),
         )
+
+
+def content_hash(path: Path) -> str | None:
+    """SHA-256 hex digest of file content, or ``None`` if missing/empty/whitespace-only."""
+    text = read(path)
+    if not text.strip():
+        return None
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 def read(path: Path) -> str:

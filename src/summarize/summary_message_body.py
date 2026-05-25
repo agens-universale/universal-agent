@@ -4,57 +4,26 @@ from typing import Dict, List
 
 from xml.sax.saxutils import quoteattr
 
-_JOURNAL_REGISTER = "journal"
-
-
-def _register_meta(raw: str) -> tuple[int, int]:
-    """Число символов и логических строк (как у splitlines) для метаданных."""
-    text = raw or ""
-    return len(text), len(text.splitlines())
-
-
 def _render_memory_files_section(memory_files: Dict[str, str]) -> str:
-    """Рендерит блок memory_files: journal целиком, остальные — индекс с метаданными.
-
-    Journal соответствует регистру ``journal`` (как у инструмента ``memory_files``).
-    Остальные ключи не встраиваются полностью — только имя, число символов и строк,
-    чтобы модель при необходимости вызвала ``memory_files`` / ``read``.
-    """
+    """Рендерит блок memory_files: все непустые регистры inline в ``<file>`` (D17)."""
     if not memory_files:
         return ""
     parts: List[str] = ["<memory_files>"]
-
-    if _JOURNAL_REGISTER in memory_files:
-        content = (memory_files[_JOURNAL_REGISTER] or "").strip()
-        parts.append(f'<file name="{_JOURNAL_REGISTER}">')
+    for name in sorted(memory_files):
+        content = (memory_files.get(name) or "").strip()
+        if not content:
+            continue
+        parts.append(f"<file name={quoteattr(name)}>")
         parts.append(content)
         parts.append("</file>")
-
-    others = sorted(name for name in memory_files if name != _JOURNAL_REGISTER)
-    if others:
-        parts.append("<other_registers>")
-        parts.append(
-            "These registers exist for this thread but are not inlined after summarization. "
-            "When you need their full text, call the memory_files tool with action \"read\" "
-            "and the corresponding file_name."
-        )
-        for name in others:
-            chars, lines = _register_meta(memory_files[name] or "")
-            parts.append(
-                "<register "
-                f"name={quoteattr(name)} chars={quoteattr(str(chars))} lines={quoteattr(str(lines))} "
-                "/>"
-            )
-        parts.append("</other_registers>")
-
     parts.append("</memory_files>")
     return "\n".join(parts)
 
 
 _MEMORY_FILES_HINT = (
-    "The block above inlines the updated journal only. Other registers (if listed) are "
-    "described by metadata; read them with memory_files when needed. "
-    "Continue to append or update registers as the thread progresses."
+    "The block above inlines all non-empty thread wiki registers from the latest snapshot. "
+    "Prefer this snapshot when present; use memory_files read only if you need content "
+    "updated after this summary. Continue to append or update registers as the thread progresses."
 )
 
 _USER_INTENT_LOG_HINT = (

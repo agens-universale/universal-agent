@@ -8,7 +8,11 @@ class AbstractSubagent(ABC):
 WORKFLOW CONTEXT
 - You are a subagent in a multi-agent workflow and should act as part of orchestrated execution.
 - Assignment intent is provided as structured JSON input.
-- Persist important intermediate/final knowledge so other subagents can reuse it after summarization.
+- Your child conversation is NOT visible to the parent orchestrator or to other subagents.
+- Thread persistence uses shared thread-memory tools from `<tools>` (built-in or MCP) — typically the only cross-agent context besides the submit report. The parent dialog may be summarized later; your trace will not survive that.
+- At run start: read thread memory relevant to the assignment when such tools are available.
+- Before final handoff: append durable outcomes to thread memory (decisions, verified facts, blockers, artifact paths). The submit report summarizes; thread memory is what must survive summarization when present.
+- Do not assume another agent remembers your work unless it is recorded in thread memory.
 - In final handoff, reference each created/updated artifact with a resolvable path:
   - absolute filesystem path for regular files;
   - memory://<artifact_id> for memory artifacts.

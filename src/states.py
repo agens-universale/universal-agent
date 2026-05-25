@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional, Union
 from long_memory import attach_status_to_prompt_vars
 from utils.project_data import get_project_data
 from tools.stored_outputs.tool_call_outputs_store import ToolCallOutputsStore
+from message_policy.memory_messages_notice.state import hydrate_memory_messages_state
 from message_policy.user_message_policy import (
     append_user_log_entries,
     normalize_user_log_entries,
@@ -87,13 +88,18 @@ class State:
         self.user_intent_log: List[str] = []
         self.current_user_intent: List[str] = []
         self.finish_gate_rejection_count: int = 0
+        self.long_memory_content_hash: Optional[str] = None
+        self.memory_notice_cnt: int = 0
         self.tool_call_outputs_store = ToolCallOutputsStore()
 
     def set_call_metadata(self):
         metadata: Dict[str, Any] = dict()
         metadata["systemPromptId"] = self.system_prompt_id
         metadata["promptVariables"] = self.initial_project_data
-        attach_status_to_prompt_vars(metadata["promptVariables"])
+        attach_status_to_prompt_vars(
+            metadata["promptVariables"],
+            config_dict=getattr(self, "workspace_config", None),
+        )
         if self.skills_list:
             metadata["promptVariables"]["available_skills"] = render_skills_catalog(
                 self.skills_list
@@ -218,6 +224,15 @@ class State:
         """Initialize `current_user_intent` from persisted meta (open user turn)."""
         self.current_user_intent = normalize_user_log_entries(entries)
 
+    def init_memory_messages_from_meta(self, meta: Optional[Dict[str, Any]]) -> None:
+        """Восстановить memory_messages поля из thread_session.meta или child_meta."""
+        hydrate_memory_messages_state(self, meta if isinstance(meta, dict) else None)
+
+    def init_subagent_memory_messages(self) -> None:
+        """Субагент: изолированный meta/state; wiki общая через shared (D34)."""
+        self.long_memory_content_hash = None
+        self.memory_notice_cnt = 0
+
     @staticmethod
     def append_intent_line(intent_list: List[str], text: str) -> List[str]:
         """
@@ -263,6 +278,7 @@ class State:
         """
         self.user_intent_log = []
         self.finish_gate_rejection_count = 0
+        self.init_subagent_memory_messages()
         self.current_user_intent = []
         line = str(assignment_text or "").strip()
         if line:

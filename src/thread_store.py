@@ -4,6 +4,7 @@ import re
 from datetime import datetime, timezone
 from typing import Dict, List, Tuple, Any, Set, Optional
 
+from message_policy.memory_messages_notice.state import merge_memory_messages_meta_to_base
 from message_policy.user_message_policy import (
     TECHNICAL_TYPE_DIALOG_SUMMARY,
     wrap_technical_user_content,
@@ -402,6 +403,7 @@ class ThreadSession:
                 base_meta["chat_completions_system_prompt_rendered"] = prompt
         else:
             base_meta.pop("chat_completions_system_prompt_rendered", None)
+        merge_memory_messages_meta_to_base(base_meta, self.meta)
         save_thread_meta(self.threads_dir, self.system_id, self.thread_id, base_meta)
 
     def archive_and_compact_summary_payload(

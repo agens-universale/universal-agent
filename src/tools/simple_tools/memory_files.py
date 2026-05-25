@@ -2,12 +2,12 @@ import json
 import re
 from typing import Any, Dict, List, Optional
 
+from config_modules.memory_files import (
+    DEFAULT_MAX_FILE_CHARS as _DEFAULT_MAX_FILE_CHARS,
+    DEFAULT_MAX_FILES as _DEFAULT_MAX_FILES,
+    DEFAULT_TOTAL_BUDGET_CHARS as _DEFAULT_TOTAL_BUDGET_CHARS,
+)
 from tools.simple_tools.abstract_simple_tool import AbstractSimpleTool
-
-
-_DEFAULT_MAX_FILE_CHARS = 50_000
-_DEFAULT_TOTAL_BUDGET_CHARS = 150_000
-_DEFAULT_MAX_FILES = 20
 _VALID_NAME_RE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 _PROTECTED_FILES = frozenset({"journal"})
 
@@ -166,8 +166,8 @@ Payload size:
 - For write (full rewrite): if the rewrite is large, use write with a compact opening, then append the rest in follow-up calls.
 
 Workflow:
-- At the start of a turn, call memory_files action="list" to see what files exist.
-- Read files relevant to the current task.
+- Prefer dialog_summary `<memory_files>` when present; use action="read" for registers you need in full.
+- Call action="list" only when register names are unknown.
 - When you fix a decision, fact, or structure — append or write to an appropriate file.
 - Keep files concise: facts, evidence, decisions. NOT long reasoning or chain-of-thought.
 - "journal" is the chronological log of important events and decisions.

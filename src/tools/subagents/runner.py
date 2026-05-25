@@ -8,6 +8,11 @@ from typing import Any, Callable, Dict, List, Optional
 from config_modules.stored_outputs import get_stored_tool_outputs_max_entries
 from run_summary_coordinator import RunSummaryCoordinator
 from summarize.config import parse_summary_trigger_chars
+from message_policy.memory_messages_notice.policy import (
+    maybe_emit_subagent_wiki_bootstrap,
+    wrap_thread_memory_technical_user_message,
+)
+from message_policy.memory_messages_notice.state import persist_memory_messages_state
 from states import State, save_state
 from tools import build_tools_data
 from tools.subagents.registry import get_subagent_class
@@ -91,8 +96,21 @@ class SubagentRunner:
             "content": initial_message,
             "id": generate_message_id_func("m_user_sub"),
         }
+        child_meta: Dict[str, Any] = {}
         messages = self._build_initial_messages(child_state, agent_role, user_message)
         child_state.init_subagent_current_user_intent(initial_message)
+        shared_mf = getattr(child_state.shared, "memory_files", None) or {}
+        bootstrap_text = maybe_emit_subagent_wiki_bootstrap(
+            child_meta, self._config, shared_mf
+        )
+        if bootstrap_text:
+            messages.append(
+                wrap_thread_memory_technical_user_message(
+                    bootstrap_text,
+                    message_id_suffix="mem_wiki_boot",
+                )
+            )
+            child_state.messages = messages.copy()
 
         try:
             child_ctx = self._build_child_ctx(tool_name=tool_name)
@@ -117,12 +135,11 @@ class SubagentRunner:
             and summary_trigger_chars > 0
         )
 
-        persist_messages_callback = None
+        persist_messages_callback = partial(
+            self._persist_runtime_step, child_state, child_meta
+        )
         pre_backend_compaction_hook = None
         if should_enable_summary:
-            persist_messages_callback = partial(
-                self._persist_runtime_step, child_state
-            )
             summary = RunSummaryCoordinator(
                 ctx=child_ctx,
                 state=child_state,
@@ -142,6 +159,7 @@ class SubagentRunner:
                 check_stop=self._check_stop_requested,
                 persist_messages_callback=persist_messages_callback,
                 pre_backend_compaction_hook=pre_backend_compaction_hook,
+                session_meta=child_meta,
             )
         except Exception as exc:
             self._log_lifecycle(
@@ -197,9 +215,13 @@ class SubagentRunner:
         return self._orchestrator_state.stop_requested
 
     def _persist_runtime_step(
-        self, child_state: State, step_messages: List[Dict[str, Any]]
+        self,
+        child_state: State,
+        child_meta: Dict[str, Any],
+        step_messages: List[Dict[str, Any]],
     ) -> None:
         child_state.append_current_user_intent_from_messages(step_messages)
+        persist_memory_messages_state(child_state, child_meta)
 
     def _build_child_state(self, agent_role: str) -> State:
         """Создать дочерний State, наследуя общие данные от оркестратора."""

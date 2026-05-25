@@ -27,8 +27,20 @@ def test_attach_status_with_populated_memory(tmp_path, monkeypatch):
     attach_status_to_prompt_vars(prompt_vars)
     assert "project has long memory" in prompt_vars["longMemoryStatus"]
     assert f"{len(body)} chars" in prompt_vars["longMemoryStatus"]
-    assert "MUST call the appropriate memory tool with action=read" in prompt_vars["longMemoryStatus"]
-    assert "AS YOUR FIRST STEP" in prompt_vars["longMemoryStatus"]
+    assert "appropriate memory tool" in prompt_vars["longMemoryStatus"]
+    assert "MUST" not in prompt_vars["longMemoryStatus"]
+    assert "FIRST STEP" not in prompt_vars["longMemoryStatus"]
+
+
+def test_attach_status_skipped_when_long_memory_in_stop_tools(tmp_path, monkeypatch):
+    (tmp_path / ".gc").mkdir()
+    (tmp_path / ".gc" / "long_memory.md").write_text("body", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    prompt_vars: dict = {}
+    attach_status_to_prompt_vars(
+        prompt_vars, config_dict={"stop_tools": ["long_memory"]}
+    )
+    assert "longMemoryStatus" not in prompt_vars
 
 
 def test_attach_status_with_explicit_cwd(tmp_path):
@@ -75,7 +87,9 @@ def test_main_prompt_template_renders_long_memory_status(tmp_path, monkeypatch):
     )
 
     assert "project has long memory" in rendered
-    assert "MUST call the appropriate memory tool with action=read" in rendered
+    assert "appropriate memory tool" in rendered
+    assert "MUST" not in rendered
+    assert "FIRST STEP" not in rendered
     assert "seeded body" not in rendered  # body content must NOT be inlined
 
 

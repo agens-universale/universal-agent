@@ -19,6 +19,13 @@ from config_modules.security import SecurityConfig
 from config_modules.stored_outputs import normalize_tool_output_limits
 from config_modules.intent_scope import IntentScopeConfig, normalize_intent_scope_config
 from config_modules.quality_gate import QualityGateConfig, normalize_quality_gate_config
+from config_modules.memory_files import MemoryFilesConfig, normalize_memory_files_config
+from config_modules.memory_messages import (
+    LongMemoryMessagesConfig,
+    MemoryGateConfig,
+    normalize_long_memory_messages_config,
+    normalize_memory_gate_config,
+)
 from config_modules.summary import (
     DEFAULT_INCREMENTAL_BATCH_MULTIPLIER,
     DEFAULT_LAST_DIALOG_STEP_MESSAGE_MAX_CHARS,
@@ -44,6 +51,9 @@ class AppConfig(BaseModel):
     summary: SummaryConfig = Field(default_factory=SummaryConfig)
     quality_gate: QualityGateConfig = Field(default_factory=QualityGateConfig)
     intent_scope: IntentScopeConfig = Field(default_factory=IntentScopeConfig)
+    memory_files: MemoryFilesConfig = Field(default_factory=MemoryFilesConfig)
+    memory_gate: MemoryGateConfig = Field(default_factory=MemoryGateConfig)
+    long_memory: LongMemoryMessagesConfig = Field(default_factory=LongMemoryMessagesConfig)
     paths: PathsConfig = Field(default_factory=PathsConfig)
     agent: AgentConfig = Field(default_factory=AgentConfig)
     mcp: McpConfig = Field(default_factory=McpConfig)
@@ -101,6 +111,9 @@ def resolve_paths(cfg: AppConfig, config_dir: str) -> None:
             int(trigger * DEFAULT_INCREMENTAL_BATCH_MULTIPLIER) if trigger > 0 else 0
         )
     normalize_quality_gate_config(cfg.quality_gate)
+    normalize_memory_files_config(cfg.memory_files)
+    normalize_memory_gate_config(cfg.memory_gate)
+    normalize_long_memory_messages_config(cfg.long_memory)
     normalize_intent_scope_config(cfg.intent_scope)
     cfg.intent_scope.intent_scope_tool_summary_prompt_path = to_abs(
         cfg.intent_scope.intent_scope_tool_summary_prompt_path

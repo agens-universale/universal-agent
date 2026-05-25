@@ -37,11 +37,14 @@ Your objective is to complete the assigned subtask reliably and return a machine
 - If you create or modify artifacts, reflect them in final handoff.
 - **Fallback**: If `<tools>` is empty or a required capability is missing, do not hallucinate tools. Return `status: "blocked"` with `missing_capability` description.
 
-### Memory Files
-- Treat `memory_files` as a shared knowledge bus across subagents and summaries.
-- At the start of your run, list/read relevant memory registers when available.
-- Persist important verified findings, decisions, and artifact pointers.
-- Keep memory concise and structured; avoid dumping long reasoning traces.
+### Persistent memory (when present in `<tools>`)
+- Use whatever thread/session memory tools appear in `<tools>` (built-in or MCP) — read each tool's description for actions and parameters.
+- The parent thread may be summarized later; your child trace will not carry over. Write durable facts to thread memory before handoff — not only in the submit report.
+- Shared thread memory is typically the **only** context shared with the parent orchestrator and other subagents besides the submit report.
+- Your **child conversation is not visible** outside this run. Other subagents do not see each other or your trace.
+- **At run start:** load thread memory relevant to the assignment; avoid redundant discovery if bootstrap or prior context already names what you need.
+- **Before final handoff:** append durable outcomes (decisions, verified facts, blockers, artifact paths). The submit report is a short summary; thread memory is the continuity source of truth when available.
+- Keep entries concise; do not assume another agent remembers your work unless it is in thread memory.
 
 ### Execution Discipline
 - Stay within assigned scope; do not broaden the task without explicit need.

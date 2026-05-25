@@ -16,8 +16,8 @@ _FILE_NAME = "long_memory.md"
 
 _EMPTY_STATUS = (
     "project doesn't have long memory yet. "
-    "When you discover or verify a durable fact (project convention, naming rule, "
-    "architectural decision, user preference), use the appropriate memory tool "
+    "When you discover or verify a durable fact (goal, requirement, convention, "
+    "stable decision, reference fact, user preference), use the appropriate memory tool "
     "with action=append/write to persist it for future sessions."
 )
 
@@ -34,18 +34,18 @@ def build_long_memory_status_for_cwd(cwd: Optional[str] = None) -> str:
 
 
 def attach_status_to_prompt_vars(
-    prompt_vars: dict, cwd: Optional[str] = None
+    prompt_vars: dict,
+    cwd: Optional[str] = None,
+    *,
+    config_dict: dict | None = None,
 ) -> None:
     """Add `longMemoryStatus` to the given prompt-variables dict.
 
-    Sole entry point for integrating long memory into the system prompt;
-    keeps the prompt-variable key name, the file name, the directory
-    layout and any rendering policy inside this module so that callers
-    (State / AgentExecutor / tests) stay decoupled from internals.
-
-    Safe by contract: any failure is swallowed so memory issues never
-    break system-prompt assembly.
+    Не добавляет статус, если ``long_memory`` в ``stop_tools`` (D36).
     """
+    stop = (config_dict or {}).get("stop_tools")
+    if isinstance(stop, list) and "long_memory" in stop:
+        return
     try:
         prompt_vars["longMemoryStatus"] = build_long_memory_status_for_cwd(cwd)
     except Exception:  # pragma: no cover — memory must never break metadata
@@ -58,9 +58,7 @@ def build_long_memory_status(path: Path) -> str:
     Two outputs by file state:
       - missing/empty/whitespace-only → empty-status nudging the model to persist
         durable facts when encountered.
-      - populated → imperative "MUST call read AS YOUR FIRST STEP" — model is not
-        expected to interpret it as optional; the imperative is reinforced by the
-        tool description and the system prompt rule (Long memory protocol).
+      - populated → size hint only; read when conventions/decisions may matter (D16).
     """
     info = storage.stat(path)
     if not info.exists or info.chars == 0:
@@ -70,9 +68,6 @@ def build_long_memory_status(path: Path) -> str:
         return _EMPTY_STATUS
     return (
         f"project has long memory — {info.chars} chars, {info.lines} lines.\n"
-        "You MUST call the appropriate memory tool with action=read AS YOUR FIRST "
-        "STEP of this session, before reading any project file or producing/"
-        "modifying code.\n"
-        "Skip ONLY if the task is unambiguously unrelated to code, conventions, "
-        "or project decisions (e.g. pure arithmetic, general questions)."
+        "Use the appropriate memory tool with action=read when standing goals, rules, "
+        "decisions, or durable facts may affect this task — not on every turn."
     )

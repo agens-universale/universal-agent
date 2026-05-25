@@ -3,7 +3,7 @@
 from summarize.summary_message_body import build_dialog_summary_content
 
 
-def test_journal_inlined_other_registers_index_only():
+def test_all_nonempty_registers_inlined():
     body = build_dialog_summary_content(
         summary_text="S",
         last_dialog_steps="",
@@ -15,35 +15,32 @@ def test_journal_inlined_other_registers_index_only():
     )
     assert '<file name="journal">' in body
     assert "full journal body" in body
-    assert "secret arch content" not in body
-    assert "<other_registers>" in body
-    assert 'name="arch"' in body
-    assert 'chars="25"' in body  # len("secret arch content\\nline2")
-    assert 'name="zeta"' in body
-    assert 'chars="1"' in body
-    assert 'action "read"' in body
+    assert '<file name="arch">' in body
+    assert "secret arch content" in body
+    assert '<file name="zeta">' in body
+    assert "z" in body
+    assert "<other_registers>" not in body
 
 
-def test_only_journal_no_other_registers_block():
+def test_empty_register_skipped():
     body = build_dialog_summary_content(
         summary_text="S",
         last_dialog_steps="",
-        memory_files={"journal": "only j"},
+        memory_files={"journal": "only j", "empty": "   "},
     )
-    assert "<other_registers>" not in body
     assert "only j" in body
+    assert '<file name="empty">' not in body
 
 
-def test_no_journal_only_named_registers():
+def test_no_journal_only_named_registers_inlined():
     body = build_dialog_summary_content(
         summary_text="S",
         last_dialog_steps="",
         memory_files={"notes": "n1\nn2"},
     )
-    assert "<file name=\"journal\">" not in body
-    assert "n1" not in body
-    assert "other_registers" in body
-    assert 'name="notes"' in body
+    assert '<file name="notes">' in body
+    assert "n1" in body
+    assert "n2" in body
 
 
 def test_empty_memory_files_skips_section_and_hint():
@@ -53,7 +50,7 @@ def test_empty_memory_files_skips_section_and_hint():
         memory_files={},
     )
     assert "<memory_files>" not in body
-    assert "The block above inlines" not in body
+    assert "all non-empty thread wiki" not in body
     assert "<last_dialog_steps>" in body
     assert "tail" in body
 

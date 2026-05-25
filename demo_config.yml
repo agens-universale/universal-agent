@@ -106,6 +106,20 @@ quality_gate:
   max_dialogue_chars: 200000
   max_message_chars: 5000
 
+# Лимиты thread wiki (memory_files); docs_md/memory_messages/SPEC.md
+memory_files:
+  max_file_chars: 20000
+  total_budget_chars: 50000
+  max_files: 5
+
+# Technical hints о памяти (wiki gate, long memory); docs_md/memory_messages/SPEC.md
+memory_gate:
+  enable_memory_file_notice: true
+  cooldown_messages: 30
+long_memory:
+  enable_long_memory_notice: true
+  check_interval_messages: 5
+
 # Intent scope: LLM post-hook после human-facing tools (только chat_completions).
 # tools: [] — выключить сбор интента; по умолчанию ask_human + submit_solution. LLM — summary.llm ниже.
 intent_scope:
