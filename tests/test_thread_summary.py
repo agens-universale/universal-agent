@@ -3,7 +3,7 @@ import os
 import tempfile
 import unittest
 
-from summarize.summary_serialization import (
+from message_format.serialization import (
     calc_history_chars_for_trigger,
     calc_messages_chars_total,
     message_text_for_summary,

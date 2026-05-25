@@ -3,6 +3,65 @@ from types import SimpleNamespace
 from utils import llm_chat_client
 
 
+def test_request_chat_completion_text_raw_logging_controlled_by_config(monkeypatch):
+    logs = []
+
+    class _Log:
+        def info(self, fmt, *args):
+            logs.append((fmt, args))
+
+    def _fake_headers(_state, _ctx):
+        return {}
+
+    def _fake_request(*_a, **_k):
+        return {"choices": [{"message": {"content": "ok"}}]}
+
+    monkeypatch.setattr(llm_chat_client, "create_call_headers", _fake_headers)
+    monkeypatch.setattr(
+        llm_chat_client,
+        "request_backend_chat_completions",
+        _fake_request,
+    )
+
+    state = SimpleNamespace(default_model="m")
+
+    ctx_no_raw = SimpleNamespace(
+        config_dict={"completions_url": "http://example.test/v1/chat/completions"},
+        logger=_Log(),
+    )
+    llm_chat_client.request_chat_completion_text(
+        ctx=ctx_no_raw,
+        state=state,
+        messages=[{"role": "user", "content": "hi"}],
+        max_tokens=10,
+        request_label="summary_batch_1",
+    )
+
+    raw_entries = [(f, a) for (f, a) in logs if "text-only raw response" in f]
+    assert len(raw_entries) == 0
+
+    ctx_raw = SimpleNamespace(
+        config_dict={
+            "completions_url": "http://example.test/v1/chat/completions",
+            "logging_params": {"full_log_backend": True},
+        },
+        logger=_Log(),
+    )
+    llm_chat_client.request_chat_completion_text(
+        ctx=ctx_raw,
+        state=state,
+        messages=[{"role": "user", "content": "hi"}],
+        max_tokens=10,
+        request_label="summary_batch_2",
+    )
+
+    raw_entries = [(f, a) for (f, a) in logs if "text-only raw response" in f]
+    assert len(raw_entries) == 1
+    _fmt, args = raw_entries[0]
+    assert args[0] == "summary_batch_2"
+    assert '"content": "ok"' in args[1]
+
+
 def test_request_chat_completion_text_uses_max_completion_tokens_and_safe_kwargs(monkeypatch):
     captured = {}
 

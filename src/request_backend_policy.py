@@ -8,7 +8,9 @@ from utils.connect_backend import request_backend_chat_completions
 
 _CHAT_COMPLETIONS_HTTP_RETRY_DELAY_SEC = 3.0
 _CHAT_COMPLETIONS_HTTP_RETRY_FACTOR = 0.5
-_CHAT_COMPLETIONS_ADAPTIVE_MAX_TOKEN_STEPS = 2
+# До 5 попыток с понижением max_tokens после HTTP-ошибки (один HTTP-запрос
+# на шаг, без transport-ретраев — сеть уже отработала на первой попытке).
+_CHAT_COMPLETIONS_ADAPTIVE_MAX_TOKEN_STEPS = 5
 _CHAT_COMPLETIONS_HTTP_RETRY_SKIP_STATUSES = {401, 403, 404}
 
 
@@ -46,8 +48,9 @@ def request_chat_completions_with_policy(
     Execute chat/completions request with the minimal adaptive max_tokens policy.
 
     Transport remains in `utils.connect_backend`; this module owns the request policy:
-    up to `_CHAT_COMPLETIONS_ADAPTIVE_MAX_TOKEN_STEPS` lower-max_tokens one-shot
-    retries for HTTP backend failures, no payload changes for connection errors/timeouts.
+    first call uses transport retries (network); on HTTP 4xx/5xx only, up to
+    `_CHAT_COMPLETIONS_ADAPTIVE_MAX_TOKEN_STEPS` lower-max_tokens retries without
+    transport retries. Connection errors/timeouts are not retried here.
     """
 
     def _send_once(

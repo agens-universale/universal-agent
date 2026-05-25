@@ -1,35 +1,7 @@
-import sys
-import types
 import json
 
-from pathlib import Path
-
-
-def _stub_tools_modules() -> None:
-    # Mirrors the stubbing pattern from test_processing_responses_feedback —
-    # `states` imports `tools` indirectly; we don't need the real tools here.
-    for name in list(sys.modules):
-        if name == "tools" or name.startswith("tools."):
-            sys.modules.pop(name, None)
-    tools_pkg = types.ModuleType("tools")
-
-    def _apply_tool(*_args, **_kwargs):
-        raise AssertionError("apply_tool should not be called in this test")
-
-    class _WrongFunctionArgumentsException(Exception):
-        pass
-
-    tools_pkg.apply_tool = _apply_tool
-    tools_pkg.WrongFunctionArgumentsException = _WrongFunctionArgumentsException
-    root = Path(__file__).resolve().parents[1]
-    tools_pkg.__path__ = [str(root / "src" / "tools")]
-    sys.modules["tools"] = tools_pkg
-
-
-_stub_tools_modules()
-
-from states import State  # noqa: E402
-from message_policy.user_message_policy import extract_real_user_message_text  # noqa: E402
+from message_policy.user_message_policy import extract_real_user_message_text
+from states import State
 
 
 

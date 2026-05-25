@@ -5,25 +5,77 @@ import urllib3
 import yaml
 
 from config_modules.auth import build_auth_connector
+from config_modules.env_vars import project_gc_dir
 from config_modules.backend import parse_chat_completions_max_tokens
 from config_modules.common import (
     apply_swarm_env_overrides,
 )
+from config_modules.merge import deep_merge
 from config_modules.root import AppConfig, resolve_paths
 from config_modules.security import (
     apply_cli_command_moderation_overrides,
 )
 from config_modules.summary import DEFAULT_LAST_DIALOG_STEP_MESSAGE_MAX_CHARS
+from config_modules import env_vars
 
 # Backward compatibility for existing imports.
 _DEFAULT_LAST_DIALOG_STEP_MESSAGE_MAX_CHARS = (
     DEFAULT_LAST_DIALOG_STEP_MESSAGE_MAX_CHARS
 )
 
+_LOGGING_SYNC_KEYS = (
+    "full_log_backend",
+    "console_trace",
+    "dump_storage",
+    "save_logs",
+)
+
+
+def sync_logging_flat_and_params(config_dict: Dict[str, Any]) -> None:
+    """Согласовать logging_params и плоские ключи (после merge overrides и т.п.)."""
+    lp = dict(config_dict.get("logging_params") or {})
+    for key in _LOGGING_SYNC_KEYS:
+        if key in config_dict:
+            lp[key] = config_dict[key]
+    config_dict["logging_params"] = lp
+    for key in _LOGGING_SYNC_KEYS:
+        if key in lp:
+            config_dict[key] = lp[key]
+
 
 def _default_config_path() -> str:
     base_dir = os.path.dirname(os.path.abspath(__file__))
     return os.path.join(base_dir, "..", "config.yml")
+
+
+def _project_local_config_path() -> Optional[str]:
+    """
+    Вернуть абсолютный путь к <cwd>/.gc/config.yml, если файл существует, иначе None.
+
+    Используется для layered loading: project local config мерджится поверх глобального.
+    """
+    candidate = str((project_gc_dir() / "config.yml").resolve())
+    if os.path.isfile(candidate):
+        return candidate
+    return None
+
+
+def _xdg_config_path() -> Optional[str]:
+    """
+    Вернуть абсолютный путь к <gc_paths()["config"]>/config.yml, если файл
+    существует, иначе None.
+
+    Базовый tier между --config и пакетным дефолтом. Каталог берётся из
+    gc_paths()["config"] (XDG-config: ~/.config/gc/ на Linux/macOS,
+    %USERPROFILE%\\.gc\\ на Windows; учитывает GC_CONFIG_DIR / XDG_CONFIG_HOME
+    / GC_HOME). Полная база-замена, НЕ слой: частичный файл здесь теряет
+    пакетные дефолты (project-local <cwd>/.gc/config.yml по-прежнему
+    мерджится поверх выбранной базы).
+    """
+    candidate = os.path.abspath(str(env_vars.gc_paths()["config"] / "config.yml"))
+    if os.path.isfile(candidate):
+        return candidate
+    return None
 
 
 def apply_cli_overrides(
@@ -48,14 +100,22 @@ def apply_cli_overrides(
         read_guard_enabled=effective_read_guard_override,
         read_guard_mode=read_guard_mode,
     )
+    sync_logging_flat_and_params(config_dict)
 
 
 def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
-    path = config_path or _default_config_path()
+    path = config_path or _xdg_config_path() or _default_config_path()
     config_dir = os.path.dirname(os.path.abspath(path))
 
     with open(path, "r", encoding="utf-8") as file:
         raw_config = yaml.safe_load(file) or {}
+
+    # Layered loading: project <cwd>/.gc/config.yml поверх глобального.
+    project_path = _project_local_config_path()
+    if project_path is not None and os.path.abspath(project_path) != os.path.abspath(path):
+        with open(project_path, "r", encoding="utf-8") as file:
+            project_raw = yaml.safe_load(file) or {}
+        raw_config = deep_merge(raw_config, project_raw)
 
     app_cfg = AppConfig.model_validate(raw_config)
     resolve_paths(app_cfg, config_dir)
@@ -85,6 +145,8 @@ def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
             "read_guard": app_cfg.security.command_moderation.read_guard.model_dump(),
         },
         "summary_params": app_cfg.summary.model_dump(),
+        "quality_gate_params": app_cfg.quality_gate.model_dump(),
+        "logging_params": app_cfg.logging.model_dump(),
         "agent_md_path": app_cfg.paths.agent_md_path,
         "chat_completions_system_prompt_path": app_cfg.paths.chat_completions_system_prompt_path,
         "threads_data_path": app_cfg.paths.threads_data_path,
@@ -98,18 +160,21 @@ def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
         "client_name": app_cfg.agent.client_name,
         "x_cl_id": app_cfg.agent.x_cl_id,
         "verbose": app_cfg.agent.verbose,
-        "use_ask_human_tool": app_cfg.agent.use_ask_human_tool,
         "stop_tools": app_cfg.agent.stop_tools,
         "server_tool_prefix": app_cfg.agent.server_tool_prefix,
         "max_steps": app_cfg.agent.max_steps,
         "no_tool_call_max_count": app_cfg.agent.no_tool_call_max_count,
         "strict_submit_solution_validation": app_cfg.agent.strict_submit_solution_validation,
-        "console_trace": app_cfg.agent.console_trace,
-        "dump_storage": app_cfg.agent.dump_storage,
-        "save_logs": app_cfg.agent.save_logs,
+        "finish_gate_max_iterations": app_cfg.agent.finish_gate_max_iterations,
+        "subagent_finish_gate_max_iterations": app_cfg.agent.subagent_finish_gate_max_iterations,
+        "finish_gate_use_rule_hints": app_cfg.agent.finish_gate_use_rule_hints,
+        "console_trace": app_cfg.logging.console_trace,
+        "dump_storage": app_cfg.logging.dump_storage,
+        "save_logs": app_cfg.logging.save_logs,
         "limit_project_metadata": app_cfg.agent.limit_project_metadata,
         "tool_output_inline_max_chars": app_cfg.agent.tool_output_inline_max_chars,
         "stored_tool_outputs_max_entries": app_cfg.agent.stored_tool_outputs_max_entries,
+        "inject_tool_fields": dict(app_cfg.agent.inject_tool_fields),
         "mcp-servers": {
             name: server.model_dump(by_alias=True) for name, server in app_cfg.mcp.servers.items()
         },
@@ -118,6 +183,8 @@ def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
     }
 
     apply_swarm_env_overrides(config_dict, config_dir)
+
+    sync_logging_flat_and_params(config_dict)
 
     verify = config_dict["use_ssl"]
     if verify is False:

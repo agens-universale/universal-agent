@@ -74,50 +74,27 @@ MCP без блока `run:` пропускаются — агент спавн�
 
 ## Как добавить новый MCP
 
-### Свой собственный (исходники в `external/`)
+1. Создай подпапку `recommended_mcp/<name>/`.
+2. Положи туда установочные артефакты:
+   - для wheel-пакета: `dist/<package>-<version>-py3-none-any.whl`
+   - для docker-сервера: `Dockerfile` + `docker-compose.yml`
+3. Добавь `agent_config.snippet.yml` — блок для `mcp-servers:` в config.yml агента.
+4. Добавь `README.md` — требования, ограничения, альтернативы.
+5. Допиши блок в `recommended_mcp/config.yml`:
 
-1. Положи исходники пакета в `external/<package-name>/`
-   (с `pyproject.toml`, тестами, README).
-2. Создай подпапку `recommended_mcp/<name>/`:
-   - `agent_config.snippet.yml` — блок для `mcp-servers:` в config.yml агента;
-   - `README.md` — описание тулов, env-переменных, ограничений.
-3. Допиши блок в `recommended_mcp/config.yml`:
+```yaml
+mcps:
+  - name: <name>
+    path: ./<name>
+    install:
+      type: wheel | docker
+      platforms: [win32, linux, darwin]   # опционально, whitelist
+    run:                                  # опционально, только для долгоживущих
+      type: docker-compose
+      detach: true
+```
 
-   ```yaml
-   - name: <name>
-     path: ./<name>
-     install:
-       type: source
-       source: ../external/<package-name>
-       platforms: [win32, linux, darwin]   # опционально
-   ```
-
-### Публичный (npx, PyPI, docker)
-
-1. Создай подпапку `recommended_mcp/<name>/` с `agent_config.snippet.yml`
-   и `README.md` (по образцу `computer/` или `office/`).
-2. Допиши блок в `recommended_mcp/config.yml` с подходящим `install.type`:
-
-   ```yaml
-   # npx-based:
-   - name: <name>
-     path: ./<name>
-     install:
-       type: npx
-       commands:
-         - [npm, install, -g, "<package>@<version>"]
-
-   # docker-based:
-   - name: <name>
-     path: ./<name>
-     install:
-       type: docker
-     run:
-       type: docker-compose
-       detach: true
-   ```
-
-3. Если `install.type` / `run.type` — новый, расширь switch в `install.py` /
+6. Если `install.type` / `run.type` — новый, расширь switch в `install.py` /
    `run.py` под свой тип.
 
 ## Ограничения

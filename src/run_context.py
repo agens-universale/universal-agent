@@ -1,12 +1,14 @@
 import json
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from utils.prod_auth import AuthConnector
 from utils.logging_module import create_run_logger
 from utils.logging_module import generate_run_id
 from tools import build_tools_data
+from config_modules.env_vars import project_gc_dir as _resolve_project_gc_dir
 
 
 @dataclass
@@ -19,7 +21,8 @@ class RunContext:
     - auth_connector — коннектор авторизации для бэкенда;
     - logger / logging_path — логгер и путь к файлу логов для этого запуска;
     - summary_trace_path — отдельный файл trace для суммаризации;
-    - tools_data / tools_spec / tools_description — подготовленные данные о тулах.
+    - tools_data / tools_spec / tools_description — подготовленные данные о тулах;
+    - project_gc_dir — папка project-local артефактов (<cwd>/.gc/).
     """
 
     config_dict: Dict[str, Any]
@@ -31,6 +34,7 @@ class RunContext:
     tools_data: Dict[str, Dict[str, Any]]
     tools_spec: List[Dict[str, Any]]
     tools_description: List[str]
+    project_gc_dir: Path = field(default_factory=lambda: Path("."))
 
 
 def create_run_context(
@@ -69,6 +73,7 @@ def create_run_context(
         tools_data=tools_data,
         tools_spec=tools_spec,
         tools_description=tools_description,
+        project_gc_dir=_resolve_project_gc_dir(),
     )
 
     run_logger.debug(

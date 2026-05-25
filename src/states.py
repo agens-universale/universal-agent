@@ -4,12 +4,14 @@ from dataclasses import dataclass, field
 from uuid import uuid4
 import json
 from typing import Any, Dict, List, Optional, Union
+from long_memory import attach_status_to_prompt_vars
 from utils.project_data import get_project_data
 from tools.stored_outputs.tool_call_outputs_store import ToolCallOutputsStore
 from message_policy.user_message_policy import (
     append_user_log_entries,
     normalize_user_log_entries,
 )
+from tools.skills.skills_policy import render_skills_catalog
 
 
 @dataclass
@@ -18,6 +20,10 @@ class SharedStateData:
     memory_files: Dict[str, str] = field(default_factory=dict)
     notes_md: str = ""
     fetch_url_cache: Dict[str, str] = field(default_factory=dict)
+
+    def to_dict(self):
+        import dataclasses
+        return dataclasses.asdict(self)
 
 
 class State:
@@ -80,20 +86,18 @@ class State:
         self.stop_requested = False
         self.user_messages_log: List[str] = []
         self.current_user_messages: List[str] = []
+        self.finish_gate_rejection_count: int = 0
         self.tool_call_outputs_store = ToolCallOutputsStore()
 
     def set_call_metadata(self):
         metadata: Dict[str, Any] = dict()
         metadata["systemPromptId"] = self.system_prompt_id
         metadata["promptVariables"] = self.initial_project_data
+        attach_status_to_prompt_vars(metadata["promptVariables"])
         if self.skills_list:
-            skills_template = (
-                "For solving task you can use skills.\n"
-                "Use skills tools for loading skills data and skills resources.\n"
-                "Available skills list:\n"
+            metadata["promptVariables"]["available_skills"] = render_skills_catalog(
+                self.skills_list
             )
-            skills_template += json.dumps(self.skills_list, ensure_ascii=False)
-            metadata["promptVariables"]["available_skills"] = skills_template
         agent_md_path = getattr(self, "agent_md_path", None)
         if agent_md_path:
             try:
@@ -250,6 +254,7 @@ class State:
         - new request should be appended only when it is a real user message
           (non-technical), preserving existing active scope from state.
         """
+        self.finish_gate_rejection_count = 0
         self.current_user_messages = append_user_log_entries(
             self.current_user_messages, [new_user_message]
         )

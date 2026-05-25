@@ -1,6 +1,7 @@
 """Tests for SpecialAgent create_instance and integration with SubagentRunner."""
 
 import asyncio
+import json
 from types import SimpleNamespace
 from unittest.mock import patch, MagicMock
 
@@ -101,8 +102,8 @@ class TestSpecialAgentCreateInstance:
             )
 
         agent_role, task = instance.get_initial_data()
-        assert agent_role == "Custom role"
-        assert task == "Analyze data"
+        assert agent_role.startswith("Custom role")
+        assert "Analyze data" in task
 
     def test_llm_receives_role_in_prompt(self):
         """The LLM prompt should contain role name and description."""
@@ -216,7 +217,9 @@ class TestSpecialAgentWithRunner:
                 run_agent_func,
             )
 
-        assert result == "Special agent done"
+        parsed = json.loads(result)
+        assert parsed["ok"] is True
+        assert parsed["result"] == "Special agent done"
         run_agent_func.assert_called_once()
 
         call_args = run_agent_func.call_args

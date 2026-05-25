@@ -95,6 +95,27 @@ parser.add_argument(
 )
 
 parser.add_argument(
+    "-T",
+    "--technical",
+    action="store_true",
+    dest="wrap_technical",
+    help='Обернуть запрос в теги <technical type="technical">…</technical>',
+)
+
+parser.add_argument(
+    "-s",
+    "--skill",
+    metavar="SKILL_NAME",
+    type=str,
+    default=None,
+    help=(
+        "Добавить техническое указание: решать запрос через skill с данным "
+        "именем; при отсутствии — похожее имя (опечатка), если описание "
+        "подходит к задаче; иначе сообщить об ошибке и остановиться"
+    ),
+)
+
+parser.add_argument(
     "--config",
     type=str,
     help="Путь к кастомному конфигурационному файлу",

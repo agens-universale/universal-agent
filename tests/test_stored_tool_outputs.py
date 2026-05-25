@@ -1,33 +1,7 @@
 import json
 import sys
 import types
-from pathlib import Path
 from types import SimpleNamespace
-
-
-def _stub_tools_modules() -> None:
-    for name in list(sys.modules):
-        if name == "tools" or name.startswith("tools."):
-            sys.modules.pop(name, None)
-
-    tools_pkg = types.ModuleType("tools")
-
-    class _WrongFunctionArgumentsException(Exception):
-        def to_llm_feedback(self):
-            return str(self)
-
-    def _apply_tool(*_args, **_kwargs):
-        raise AssertionError("apply_tool should be monkeypatched in this test")
-
-    tools_pkg.apply_tool = _apply_tool
-    tools_pkg.WrongFunctionArgumentsException = _WrongFunctionArgumentsException
-    root = Path(__file__).resolve().parents[1]
-    tools_dir = root / "src" / "tools"
-    tools_pkg.__path__ = [str(tools_dir)]
-    sys.modules["tools"] = tools_pkg
-
-
-_stub_tools_modules()
 
 
 def _stub_optional_web_parsers() -> None:

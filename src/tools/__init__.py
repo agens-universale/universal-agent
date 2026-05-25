@@ -13,6 +13,11 @@ from tools.skills.registry import get_skills_registry
 from tools.skills.skills_tools import get_skills_tools_data
 from tools.simple_tools import get_simple_tools_data
 from tools.subagents.registry import is_subagent_tool
+from tools.inject_tool_fields import (
+    apply_injected_fields_to_spec,
+    resolve_inject_tool_fields,
+    strip_injected_tool_args,
+)
 
 _fallback_logger = logging.getLogger(__name__)
 
@@ -87,12 +92,17 @@ def build_tools_data(
     _fallback_logger.debug("Collected tools_data: %s", tools_data)
 
     openai_strict = bool(config_dict.get("openai_strict_tools_schema", False))
+    inject_tool_fields = resolve_inject_tool_fields(config_dict)
 
     # Бэкенд требует parameters.required — нормализуем все spec'и
     for v in tools_data.values():
+        v.setdefault("injected_fields", [])
         spec = v.get("spec")
         if isinstance(spec, dict):
             _ensure_spec_has_required(spec)
+            if inject_tool_fields:
+                injected = apply_injected_fields_to_spec(spec, inject_tool_fields)
+                v["injected_fields"].extend(injected)
             if openai_strict:
                 _apply_openai_strict_tools_schema(spec)
 
@@ -157,6 +167,11 @@ def apply_tool(
             tool_spec=tool_spec,
             allow_empty_for_empty_schema=False,
         )
+        entry = tools_data_.get(tool_name) or {}
+        parsed_args = strip_injected_tool_args(
+            parsed_args,
+            injected_fields=entry.get("injected_fields") or [],
+        )
         runner = SubagentRunner(ctx, orchestrator_state, config_dict)
         return runner.run(tool_name, parsed_args, run_agent_func)
 
@@ -185,6 +200,11 @@ def apply_tool(
         arguments=arguments,
         tool_spec=spec,
         allow_empty_for_empty_schema=True,
+    )
+    entry = tools_data_[tool_name]
+    arguments = strip_injected_tool_args(
+        arguments,
+        injected_fields=entry.get("injected_fields") or [],
     )
 
     # Пробрасываем ctx/config_dict в kwargs тула: AbstractSimpleTool.__init__

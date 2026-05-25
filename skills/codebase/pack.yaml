@@ -1,0 +1,8 @@
+id: codebase
+name: Codebase Understanding
+description: |
+  Read-only understanding of an existing codebase: a broad evidence-backed
+  map, or a trace of one specific behavior or flow. Use when the deliverable
+  is the understanding itself, not a code change.
+version: 1.0.0
+bootstrap_skill: using-codebase

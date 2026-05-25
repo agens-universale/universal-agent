@@ -1,3 +1,4 @@
+import importlib
 import logging
 import json
 import sys
@@ -5,8 +6,51 @@ import types
 from pathlib import Path
 from types import SimpleNamespace
 
+import intent_guard.guard as intent_guard_guard
 import pytest
 import requests
+
+from intent_guard.validation_result import ValidationResult
+
+
+def teardown_module(_module) -> None:
+    # Нельзя выкидывать processing_responses: тесты вида
+    # `from processing_responses import f` держат f с устаревшим __globals__;
+    # monkeypatch затем меняет другой экземпляр модуля.
+    for name in list(sys.modules):
+        if name == "tools" or name.startswith("tools."):
+            sys.modules.pop(name, None)
+    real_tools = importlib.import_module("tools")
+    proc = sys.modules.get("processing_responses")
+    if proc is not None:
+        proc.apply_tool = real_tools.apply_tool
+        proc.WrongFunctionArgumentsException = (
+            real_tools.WrongFunctionArgumentsException
+        )
+    cycle_stop_mod = sys.modules.get("message_policy.cycle_stop")
+    if cycle_stop_mod is not None:
+        cycle_stop_mod.apply_tool = real_tools.apply_tool
+
+
+processing_module = None
+request_policy = None
+run_agent = None
+State = None
+
+
+def setup_module(module) -> None:
+    global processing_module, request_policy, run_agent, State
+    _stub_tools_modules()
+    import processing_responses as pm
+    import request_backend_policy as rq
+    from processing_responses import run_agent as ra
+    from states import State as St
+
+    processing_module = pm
+    request_policy = rq
+    run_agent = ra
+    State = St
+    pm.apply_tool = sys.modules["tools"].apply_tool
 
 
 def _stub_tools_modules() -> None:
@@ -42,23 +86,23 @@ def _stub_tools_modules() -> None:
             return json.dumps(result, ensure_ascii=False)
         raise AssertionError("apply_tool should not be called in this test")
 
+    def _build_tools_data(_config_dict):
+        return {}, [], []
+
     tools_pkg.apply_tool = _apply_tool
+    tools_pkg.build_tools_data = _build_tools_data
     tools_pkg.WrongFunctionArgumentsException = _WrongFunctionArgumentsException
     root = Path(__file__).resolve().parents[1]
     tools_dir = root / "src" / "tools"
     tools_pkg.__path__ = [str(tools_dir)]
     sys.modules["tools"] = tools_pkg
 
+    import message_policy.cycle_stop as _cycle_stop_mod
 
-_stub_tools_modules()
-
-import processing_responses as processing_module  # noqa: E402
-import request_backend_policy as request_policy  # noqa: E402
-from processing_responses import run_agent  # noqa: E402
-from states import State  # noqa: E402
+    _cycle_stop_mod.apply_tool = tools_pkg.apply_tool
 
 
-def _make_state(*, max_steps: int = 5) -> State:
+def _make_state(*, max_steps: int = 5):
     return State(
         verbose=False,
         model="CodeChat",
@@ -186,6 +230,29 @@ def test_run_agent_calls_pre_backend_hook_before_tool_output_backend(monkeypatch
     assert order == ["pre:function_call_output", "backend"]
 
 
+def test_run_agent_responses_mode_does_not_call_pre_backend_hook(monkeypatch):
+    """Режим responses не должен вызывать pre-backend compaction (см. spec Step 0)."""
+    hook_calls: list[str] = []
+
+    def _pre_backend_hook(_messages, mode):
+        hook_calls.append(str(mode))
+
+    def _fake_process_user_ask(_messages, _state, _ctx):
+        return [_submit_solution_call()], "resp_1"
+
+    monkeypatch.setattr(processing_module, "process_user_ask", _fake_process_user_ask)
+
+    result = run_agent(
+        [{"role": "user", "content": "hello", "id": "m1"}],
+        _make_state(),
+        _make_ctx(backend_api_mode="responses"),
+        pre_backend_compaction_hook=_pre_backend_hook,
+    )
+
+    assert result == '{"ok": true}'
+    assert hook_calls == []
+
+
 def test_chat_completions_http_error_retries_with_reduced_max_tokens(monkeypatch):
     max_tokens_seen: list[int] = []
     use_retry_seen: list[bool] = []
@@ -219,6 +286,40 @@ def test_chat_completions_http_error_retries_with_reduced_max_tokens(monkeypatch
     assert payload["max_tokens"] == 30
     assert max_tokens_seen == [100, 50, 30]
     assert use_retry_seen == [True, False, False]
+
+
+def test_run_agent_propagates_backend_connection_error(monkeypatch):
+    """После исчерпания transport-ретраев не подменяем ошибку no-tool-call bounce."""
+
+    def _failing_process_user_ask(_messages, _state, _ctx):
+        raise requests.exceptions.ConnectionError("network is down")
+
+    monkeypatch.setattr(
+        processing_module, "process_user_ask", _failing_process_user_ask
+    )
+
+    with pytest.raises(requests.exceptions.ConnectionError, match="network is down"):
+        run_agent(
+            [{"role": "user", "content": "hello", "id": "m1"}],
+            _make_state(),
+            _make_ctx(),
+        )
+
+
+def test_run_agent_propagates_backend_http_error(monkeypatch):
+    def _failing_process_user_ask(_messages, _state, _ctx):
+        raise _http_error(503)
+
+    monkeypatch.setattr(
+        processing_module, "process_user_ask", _failing_process_user_ask
+    )
+
+    with pytest.raises(requests.exceptions.HTTPError):
+        run_agent(
+            [{"role": "user", "content": "hello", "id": "m1"}],
+            _make_state(),
+            _make_ctx(),
+        )
 
 
 def test_chat_completions_connection_error_does_not_lower_max_tokens(monkeypatch):
@@ -279,7 +380,7 @@ def test_submit_solution_validation_failure_fails_open(monkeypatch):
         raise RuntimeError("validation backend failure")
 
     monkeypatch.setattr(
-        processing_module,
+        intent_guard_guard,
         "validate_final_report_vs_user_intent",
         _raise_validation,
     )
@@ -325,8 +426,13 @@ def test_submit_solution_validation_receives_context_and_current_scope(monkeypat
 
     def _fake_validation(**kwargs):
         captured.update(kwargs)
-        return SimpleNamespace(
+        return ValidationResult(
             ok=True,
+            action="accept",
+            trace_ok=True,
+            report_ok=True,
+            trace_gaps=[],
+            report_mismatches=[],
             missing_requirements=[],
             conflicts=[],
             coverage_score=1.0,
@@ -334,7 +440,7 @@ def test_submit_solution_validation_receives_context_and_current_scope(monkeypat
         )
 
     monkeypatch.setattr(
-        processing_module,
+        intent_guard_guard,
         "validate_final_report_vs_user_intent",
         _fake_validation,
     )
@@ -348,3 +454,118 @@ def test_submit_solution_validation_receives_context_and_current_scope(monkeypat
     assert result == '{"ok": true}'
     assert captured["current_user_requests"] == ["актуальный вопрос", "уточнение"]
     assert captured["context_user_messages"] == ["старый вопрос"]
+
+
+def test_finish_gate_builds_trace_digest_from_state_messages(monkeypatch):
+    from unittest.mock import patch
+
+    from intent_guard.trace_digest import FinishGateTraceDigest
+
+    state = _make_state()
+    state.messages = [
+        {"role": "user", "content": "сделай X"},
+        {
+            "type": "function_call",
+            "call_id": "t1",
+            "name": "read_file",
+            "arguments": {"path": "x.py"},
+        },
+    ]
+    state.current_user_messages = ["сделай X"]
+    state.user_messages_log = ["сделай X"]
+    digest = FinishGateTraceDigest(
+        trace_digest_text='<message n="1">\n[user] сделай X\n</message>',
+        digest_chars=30,
+    )
+    validator_json = (
+        '{"action":"accept","trace_ok":true,"report_ok":true,'
+        '"trace_gaps":[],"report_mismatches":[]}'
+    )
+
+    with patch(
+        "intent_guard.final_report_consistency.build_finish_gate_trace_digest",
+        return_value=digest,
+    ) as mock_build:
+        with patch(
+            "intent_guard.final_report_consistency.request_chat_completion_text",
+            return_value=validator_json,
+        ):
+            run_agent(
+                [_submit_solution_call()],
+                state,
+                _make_ctx(strict_submit_solution_validation=True),
+            )
+
+    mock_build.assert_called_once()
+    call_state = mock_build.call_args.kwargs.get("state") or mock_build.call_args[0][0]
+    assert call_state is state
+
+
+def test_finish_gate_rejection_still_appends_cycle_stop_tool_outputs(monkeypatch):
+    """При отклонении quality/finish gate pending tool_calls должны закрываться
+    синтетическими function_call_output (как при успехе), иначе chat/completions
+    получает невалидную цепочку assistant.tool_calls → user."""
+    recorded: list[list[str | None]] = []
+
+    def _reject_validation(**_kwargs):
+        return ValidationResult(
+            ok=False,
+            action="fix_report_and_continue",
+            trace_ok=False,
+            report_ok=False,
+            trace_gaps=["m"],
+            report_mismatches=["c"],
+            missing_requirements=["m"],
+            conflicts=["c"],
+            coverage_score=0.0,
+            feedback_for_agent="improve the answer",
+        )
+
+    real_append = processing_module.append_cycle_stop_tool_outputs_for_batch
+
+    def _spy_append_cycle_stop(**kwargs):
+        tool_calls = kwargs.get("tool_calls") or []
+        recorded.append([t.get("call_id") for t in tool_calls])
+        return real_append(**kwargs)
+
+    monkeypatch.setattr(
+        intent_guard_guard,
+        "validate_final_report_vs_user_intent",
+        _reject_validation,
+    )
+    monkeypatch.setattr(
+        processing_module,
+        "append_cycle_stop_tool_outputs_for_batch",
+        _spy_append_cycle_stop,
+    )
+
+    def _stub_user_ask(_messages, _state, _ctx):
+        return (
+            [
+                {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{"type": "text", "text": "done"}],
+                    "id": "m_after_gate",
+                }
+            ],
+            "rid_stub",
+        )
+
+    monkeypatch.setattr(processing_module, "process_user_ask", _stub_user_ask)
+
+    state = _make_state(max_steps=0)
+    state.user_messages_log = ["user question"]
+    state.current_user_messages = ["user question"]
+
+    run_agent(
+        [_submit_solution_call()],
+        state,
+        _make_ctx(strict_submit_solution_validation=True),
+    )
+
+    assert recorded == [["call_finish"]]
+    assert any(
+        m.get("type") == "function_call_output" and m.get("call_id") == "call_finish"
+        for m in state.messages
+    )

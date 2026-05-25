@@ -1,15 +1,23 @@
 from __future__ import annotations
 
+import logging
 import os
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from config_modules.agent import AgentConfig
+from config_modules import env_vars
+from config_modules.agent import (
+    AgentConfig,
+    DEFAULT_FINISH_GATE_MAX_ITERATIONS,
+    DEFAULT_SUBAGENT_FINISH_GATE_MAX_ITERATIONS,
+)
 from config_modules.backend import BackendConfig
+from config_modules.logging_config import LoggingConfig
 from config_modules.mcp import McpConfig
 from config_modules.paths import PathsConfig
 from config_modules.security import SecurityConfig
 from config_modules.stored_outputs import normalize_tool_output_limits
+from config_modules.quality_gate import QualityGateConfig, normalize_quality_gate_config
 from config_modules.summary import (
     DEFAULT_INCREMENTAL_BATCH_MULTIPLIER,
     DEFAULT_LAST_DIALOG_STEP_MESSAGE_MAX_CHARS,
@@ -30,8 +38,10 @@ class AppConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     backend: BackendConfig = Field(default_factory=BackendConfig)
+    logging: LoggingConfig = Field(default_factory=LoggingConfig)
     security: SecurityConfig = Field(default_factory=SecurityConfig)
     summary: SummaryConfig = Field(default_factory=SummaryConfig)
+    quality_gate: QualityGateConfig = Field(default_factory=QualityGateConfig)
     paths: PathsConfig = Field(default_factory=PathsConfig)
     agent: AgentConfig = Field(default_factory=AgentConfig)
     mcp: McpConfig = Field(default_factory=McpConfig)
@@ -40,19 +50,28 @@ class AppConfig(BaseModel):
 
 def resolve_paths(cfg: AppConfig, config_dir: str) -> None:
     def to_abs(path_value: str | None) -> str | None:
-        if path_value is None:
+        if path_value is None or not str(path_value).strip():
             return None
+        path_value = str(path_value).strip()
         if os.path.isabs(path_value):
             return path_value
         return os.path.abspath(os.path.join(config_dir, path_value))
+
+    paths = env_vars.gc_paths()
+    slug = env_vars.project_slug()
+    project_state = paths["state"] / "projects" / slug
 
     cfg.paths.agent_md_path = to_abs(cfg.paths.agent_md_path) or cfg.paths.agent_md_path
     cfg.paths.chat_completions_system_prompt_path = to_abs(
         cfg.paths.chat_completions_system_prompt_path
     ) or os.path.join(config_dir, "prompts", "chat_completions_system_prompt.md")
-    cfg.paths.threads_data_path = to_abs(cfg.paths.threads_data_path)
+    cfg.paths.threads_data_path = (
+        to_abs(cfg.paths.threads_data_path) or str(project_state / "threads")
+    )
     cfg.paths.skills_data_path = to_abs(cfg.paths.skills_data_path)
-    cfg.paths.logs_dump_dir = to_abs(cfg.paths.logs_dump_dir)
+    cfg.paths.logs_dump_dir = (
+        to_abs(cfg.paths.logs_dump_dir) or str(project_state / "logs")
+    )
     cfg.summary.chat_completions_summary_prompt_path = to_abs(
         cfg.summary.chat_completions_summary_prompt_path
     ) or os.path.join(config_dir, "prompts", "chat_completions_summary_prompt.md")
@@ -78,6 +97,23 @@ def resolve_paths(cfg: AppConfig, config_dir: str) -> None:
         trigger = cfg.summary.chat_completions_summary_trigger_chars
         cfg.summary.incremental_batch_chars = (
             int(trigger * DEFAULT_INCREMENTAL_BATCH_MULTIPLIER) if trigger > 0 else 0
+        )
+    normalize_quality_gate_config(cfg.quality_gate)
+    if cfg.agent.finish_gate_max_iterations < 1:
+        logging.getLogger(__name__).warning(
+            "finish_gate_reject_limit_invalid finish_gate_max_iterations=%s; using %s",
+            cfg.agent.finish_gate_max_iterations,
+            DEFAULT_FINISH_GATE_MAX_ITERATIONS,
+        )
+        cfg.agent.finish_gate_max_iterations = DEFAULT_FINISH_GATE_MAX_ITERATIONS
+    if cfg.agent.subagent_finish_gate_max_iterations < 1:
+        logging.getLogger(__name__).warning(
+            "finish_gate_reject_limit_invalid subagent_finish_gate_max_iterations=%s; using %s",
+            cfg.agent.subagent_finish_gate_max_iterations,
+            DEFAULT_SUBAGENT_FINISH_GATE_MAX_ITERATIONS,
+        )
+        cfg.agent.subagent_finish_gate_max_iterations = (
+            DEFAULT_SUBAGENT_FINISH_GATE_MAX_ITERATIONS
         )
     (
         cfg.agent.tool_output_inline_max_chars,

@@ -1,6 +1,8 @@
 import os
 from typing import Any, Dict, Optional
 
+from config_modules import env_vars
+
 
 def resolve_path_from_config_dir(path_value: str, config_dir: str) -> str:
     if os.path.isabs(path_value):
@@ -20,12 +22,18 @@ def maybe_override_and_resolve(
 
 
 def apply_swarm_env_overrides(config_dict: Dict[str, Any], config_dir: str) -> None:
-    maybe_override_and_resolve(
-        os.environ.get("SWARM_AGENTMD_PATH"), "agent_md_path", config_dict, config_dir
-    )
-    maybe_override_and_resolve(
-        os.environ.get("SWARM_THREADS_DIR"), "threads_data_path", config_dict, config_dir
-    )
-    maybe_override_and_resolve(
-        os.environ.get("SWARM_SKILLS_DIR"), "skills_data_path", config_dict, config_dir
-    )
+    if env_vars.env.swarm_agentmd_path is not None:
+        maybe_override_and_resolve(
+            str(env_vars.env.swarm_agentmd_path),
+            "agent_md_path", config_dict, config_dir,
+        )
+    if env_vars.env.swarm_threads_dir is not None:
+        maybe_override_and_resolve(
+            str(env_vars.env.swarm_threads_dir),
+            "threads_data_path", config_dict, config_dir,
+        )
+    if env_vars.env.swarm_skills_dir is not None:
+        maybe_override_and_resolve(
+            str(env_vars.env.swarm_skills_dir),
+            "skills_data_path", config_dict, config_dir,
+        )

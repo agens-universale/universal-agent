@@ -1,10 +1,14 @@
 import json
 import os
-from dataclasses import dataclass
 from typing import Any, Dict, List
 
+from intent_guard.trace_digest import FinishGateTraceDigest, build_finish_gate_trace_digest
+from intent_guard.validation_result import (
+    ValidationResult,
+    fail_open_validation_result,
+    parse_validator_response,
+)
 from utils.llm_chat_client import log_llm_prompt_and_result, request_chat_completion_text
-from utils.json_text import parse_json_from_text
 
 _BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 _PROJECT_ROOT = os.path.abspath(os.path.join(_BASE_DIR, "..", ".."))
@@ -12,14 +16,7 @@ DEFAULT_INTENT_GUARD_PROMPT_PATH = os.path.abspath(
     os.path.join(_PROJECT_ROOT, "prompts", "chat_completions_intent_guard_prompt.md")
 )
 
-
-@dataclass
-class ValidationResult:
-    ok: bool
-    missing_requirements: List[str]
-    conflicts: List[str]
-    coverage_score: float
-    feedback_for_agent: str
+_FINISH_GATE_MAX_TOKENS = 1400
 
 
 def _to_text(value: Any) -> str:
@@ -48,31 +45,25 @@ def _parse_submit_solution_args(arguments: Any) -> Dict[str, Any]:
     return obj if isinstance(obj, dict) else {}
 
 
-def _load_guard_prompt(ctx: Any) -> str:
-    cfg = getattr(ctx, "config_dict", {}) or {}
-    summary_params = (
-        cfg.get("summary_params") if isinstance(cfg.get("summary_params"), dict) else {}
-    )
-    prompt_path_raw = str(
-        summary_params.get("chat_completions_intent_guard_prompt_path")
-        or DEFAULT_INTENT_GUARD_PROMPT_PATH
-    ).strip()
-    if not prompt_path_raw:
-        raise ValueError(
-            "summary_params.chat_completions_intent_guard_prompt_path is empty"
+def _load_guard_prompt() -> str:
+    if not os.path.exists(DEFAULT_INTENT_GUARD_PROMPT_PATH):
+        raise FileNotFoundError(
+            f"Intent guard prompt file not found: {DEFAULT_INTENT_GUARD_PROMPT_PATH}"
         )
-    prompt_path = (
-        prompt_path_raw
-        if os.path.isabs(prompt_path_raw)
-        else os.path.abspath(os.path.join(_PROJECT_ROOT, prompt_path_raw))
-    )
-    if not os.path.exists(prompt_path):
-        raise FileNotFoundError(f"Intent guard prompt file not found: {prompt_path}")
-    with open(prompt_path, "r", encoding="utf-8") as fd:
+    with open(DEFAULT_INTENT_GUARD_PROMPT_PATH, "r", encoding="utf-8") as fd:
         prompt = fd.read().strip()
     if not prompt:
-        raise ValueError(f"Intent guard prompt file is empty: {prompt_path}")
+        raise ValueError(
+            f"Intent guard prompt file is empty: {DEFAULT_INTENT_GUARD_PROMPT_PATH}"
+        )
     return prompt
+
+
+def _wrap_trace_digest_text(trace_digest_text: str) -> str:
+    body = (trace_digest_text or "").strip()
+    if body.startswith("<dialog_history>"):
+        return body
+    return f"<dialog_history>\n{body}\n</dialog_history>"
 
 
 def validate_final_report_vs_user_intent(
@@ -82,31 +73,32 @@ def validate_final_report_vs_user_intent(
     current_user_requests: List[str],
     context_user_messages: List[str] | None = None,
     submit_solution_arguments: Any,
+    trace_digest: FinishGateTraceDigest | None = None,
 ) -> ValidationResult:
     args = _parse_submit_solution_args(submit_solution_arguments)
-    active_user_requests = [
-        str(x) for x in current_user_requests if isinstance(x, str)
-    ]
+    active_user_requests = [str(x) for x in current_user_requests if isinstance(x, str)]
     user_context = [str(x) for x in (context_user_messages or []) if isinstance(x, str)]
 
-    system_prompt = _load_guard_prompt(ctx)
+    if trace_digest is None:
+        cfg = getattr(ctx, "config_dict", {}) or {}
+        trace_digest = build_finish_gate_trace_digest(
+            state=state,
+            cfg=cfg if isinstance(cfg, dict) else None,
+        )
+
+    system_prompt = _load_guard_prompt()
+    is_subagent = getattr(state, "parent_state_id", None) is not None
     payload = {
         "user_context": user_context,
         "current_user_requests": active_user_requests,
-        "user_messages_log": active_user_requests,
+        "trace_digest_text": _wrap_trace_digest_text(trace_digest.trace_digest_text),
         "submit_solution_arguments": args if args else _to_text(submit_solution_arguments),
+        "agent_kind": "subagent" if is_subagent else "main",
     }
     user_prompt = (
-        "Check final-report consistency against current user requests.\n\n"
-        "Input format:\n"
-        "- `user_context`: previous user messages that were already answered earlier in the dialogue; use for context only.\n"
-        "- `current_user_requests`: actual requests that must be covered now.\n\n"
-        "IMPORTANT: Validate required coverage ONLY against `current_user_requests`.\n"
-        "Use `user_context` to disambiguate intent and references.\n"
-        "Do not require fulfilling requests that were already completed in previous turns.\n\n"
-        "Return ONLY JSON object with keys:\n"
-        "{\"ok\": bool, \"coverage_score\": number, \"conflicts\": [str], "
-        "\"missing_requirements\": [str], \"feedback_for_agent\": str}\n\n"
+        "Run the two-axis finish gate on the input below.\n"
+        "Return ONLY JSON with required keys from the system prompt "
+        "(action, trace_ok, report_ok; lists on reject).\n\n"
         f"Input:\n{json.dumps(payload, ensure_ascii=False, indent=2)}"
     )
     request_messages = [
@@ -117,55 +109,16 @@ def validate_final_report_vs_user_intent(
         ctx=ctx,
         state=state,
         messages=request_messages,
-        max_tokens=1200,
-        request_label="intent_guard_consistency",
+        max_tokens=_FINISH_GATE_MAX_TOKENS,
+        request_label="intent_guard_finish_gate",
     )
     log_llm_prompt_and_result(
         logger=getattr(ctx, "logger", None),
-        label="intent_guard_consistency",
+        label="intent_guard_finish_gate",
         messages=request_messages,
         output_text=raw,
     )
-    parsed = parse_json_from_text(raw, default=None)
+    parsed = parse_validator_response(raw)
     if parsed is None:
-        return ValidationResult(
-            ok=True,
-            missing_requirements=[],
-            conflicts=[],
-            coverage_score=1.0,
-            feedback_for_agent="",
-        )
-    if not isinstance(parsed, dict):
-        return ValidationResult(
-            ok=True,
-            missing_requirements=[],
-            conflicts=[],
-            coverage_score=1.0,
-            feedback_for_agent="",
-        )
-    ok = bool(parsed.get("ok", False))
-    missing = parsed.get("missing_requirements")
-    conflicts = parsed.get("conflicts")
-    coverage_raw = parsed.get("coverage_score", 0.0)
-    feedback = str(parsed.get("feedback_for_agent") or "").strip()
-    try:
-        coverage = float(coverage_raw)
-    except (TypeError, ValueError):
-        coverage = 0.0
-    if not isinstance(missing, list):
-        missing = []
-    if not isinstance(conflicts, list):
-        conflicts = []
-    if not feedback and not ok:
-        feedback = (
-            "submit_solution rejected by finish gate.\n"
-            "Final report is not consistent with initial user intent. Continue execution unless"
-            " it is explicitly impossible to make further progress."
-        )
-    return ValidationResult(
-        ok=ok,
-        missing_requirements=[str(x) for x in missing if x is not None],
-        conflicts=[str(x) for x in conflicts if x is not None],
-        coverage_score=coverage,
-        feedback_for_agent=feedback,
-    )
+        return fail_open_validation_result()
+    return parsed

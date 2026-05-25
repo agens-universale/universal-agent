@@ -1,3 +1,5 @@
+import json
+import logging
 from types import SimpleNamespace
 
 from states import SharedStateData
@@ -64,17 +66,22 @@ def test_build_child_ctx_creates_dedicated_subagent_run_log(tmp_path):
 def test_lifecycle_payload_contains_parent_and_child_run_ids(tmp_path):
     orch = _make_orchestrator_state()
     cfg = _make_config(tmp_path)
-    recorded = []
+    recorded: list[str] = []
 
-    class DummyLogger:
-        def info(self, msg, payload):
-            recorded.append((msg, payload))
+    class _CaptureHandler(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            recorded.append(record.getMessage())
+
+    parent_log = logging.getLogger("subagent_lifecycle_test_parent")
+    parent_log.handlers.clear()
+    parent_log.addHandler(_CaptureHandler())
+    parent_log.setLevel(logging.INFO)
 
     parent_ctx = SimpleNamespace(
         config_dict=cfg,
         run_id="parent_run_1",
         auth_connector=None,
-        logger=DummyLogger(),
+        logger=parent_log,
         logging_path="",
         summary_trace_path="",
         tools_data={},
@@ -93,7 +100,9 @@ def test_lifecycle_payload_contains_parent_and_child_run_ids(tmp_path):
     )
 
     assert recorded
-    payload = recorded[0][1]
+    prefix, sep, json_blob = recorded[0].partition(" ")
+    assert prefix == "subagent_lifecycle"
+    payload = json.loads(json_blob)
     assert payload["parent_run_id"] == "parent_run_1"
     assert payload["child_run_id"] == "child_run_2"
     assert payload["subagent_tool_name"] == "subagent_worker"

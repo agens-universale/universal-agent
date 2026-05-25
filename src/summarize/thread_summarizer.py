@@ -1,8 +1,8 @@
 from typing import Any, Dict, List
 
 from config import _DEFAULT_LAST_DIALOG_STEP_MESSAGE_MAX_CHARS
+import message_format.dialog_history as dialog_history
 from summarize import (
-    dialog_history,
     memory_suggestions,
     prompt_loading,
     summary_llm_steps,
@@ -172,6 +172,12 @@ def summarize_dialog_via_chat_completions(
         max_dialogue_chars=max_dialogue_chars,
         max_message_chars=max_message_chars,
     )
+    # Полный текст усечённой истории (для шага journal и, при одном батче, совпадает с первым тактом).
+    full_history_text = dialog_history.build_history_text(
+        history_for_summary,
+        max_chars=0,
+        max_message_chars=max_message_chars,
+    )
     # `state.user_messages_log` is expected to be already filtered and deduplicated by State
     # via user_message_policy. We still normalize defensively here because this function can be
     # called with persisted/raw data in tests and integrations.
@@ -213,7 +219,7 @@ def summarize_dialog_via_chat_completions(
     accumulated_summary = ""
     for batch_index, batch_turns in enumerate(batches, start=1):
         batch: List[Dict[str, Any]] = [m for turn in batch_turns for m in turn]
-        history_text = dialog_history.build_history_text(
+        batch_history_text = dialog_history.build_history_text(
             batch,
             max_chars=0,
             max_message_chars=max_message_chars,
@@ -224,7 +230,7 @@ def summarize_dialog_via_chat_completions(
                 batch_index,
                 len(batches),
                 len(batch),
-                len(history_text),
+                len(batch_history_text),
             )
         if batch_index == 1:
             user_prompt = (
@@ -232,7 +238,7 @@ def summarize_dialog_via_chat_completions(
                 f"{user_requests_text}\n"
                 "</user_requests_log>\n\n"
                 "<dialog_history>\n"
-                f"{history_text}\n"
+                f"{batch_history_text}\n"
                 "</dialog_history>\n\n"
                 f"{project_block}"
                 "Produce the structured summary now."
@@ -246,7 +252,7 @@ def summarize_dialog_via_chat_completions(
                 f"{accumulated_summary}\n"
                 "</previous_summary>\n\n"
                 "<dialog_history_batch>\n"
-                f"{history_text}\n"
+                f"{batch_history_text}\n"
                 "</dialog_history_batch>\n\n"
                 f"{project_block}"
                 "Update previous_summary using this batch. "
@@ -308,14 +314,14 @@ def summarize_dialog_via_chat_completions(
                     batch_index,
                     len(batches),
                     reason,
-                    len(history_text),
+                    len(batch_history_text),
                     len(user_requests_text),
                     len(text or ""),
                 )
             repaired = summary_llm_steps.repair_summary_text(
                 ctx=ctx,
                 state=state,
-                history_text=history_text,
+                history_text=batch_history_text,
                 user_requests_text=user_requests_text,
                 invalid_summary=text,
                 reason=reason,
@@ -360,18 +366,13 @@ def summarize_dialog_via_chat_completions(
             )
     text = accumulated_summary or FALLBACK_SUMMARY
 
-    history_text = dialog_history.build_history_text(
-        history_for_summary,
-        max_chars=0,
-        max_message_chars=max_message_chars,
-    )
     # Второй такт: LLM полностью переписывает journal (не дельта). Для multi-batch пока пропускаем.
     updated_journal = ""
     if len(batches) <= 1:
         trace["step2_memory_update"] = {
             "executed": True,
             "input": {
-                "history_text": history_text,
+                "history_text": full_history_text,
                 "summary_text": text,
                 "current_journal": current_memory,
             },
@@ -381,7 +382,7 @@ def summarize_dialog_via_chat_completions(
         memory_result = memory_suggestions.suggest_updated_journal(
             ctx=ctx,
             state=state,
-            history_text=history_text,
+            history_text=full_history_text,
             summary_text=text,
             current_memory=current_memory,
         )
@@ -402,7 +403,7 @@ def summarize_dialog_via_chat_completions(
         trace["step2_memory_update"] = {
             "executed": False,
             "input": {
-                "history_text": history_text,
+                "history_text": full_history_text,
                 "summary_text": text,
                 "current_memory": current_memory,
                 "reason": "skipped_for_multi_batch",

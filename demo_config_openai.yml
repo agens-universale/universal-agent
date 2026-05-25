@@ -31,17 +31,19 @@ agent:
   client_name: mini_cli_pub_agent_1
   x_cl_id: "12345"
   verbose: true
-  use_ask_human_tool: true
   stop_tools: []
   server_tool_prefix: system
   max_steps: 1000
   no_tool_call_max_count: 5
   strict_submit_solution_validation: true
+  tool_output_inline_max_chars: 20000
+  stored_tool_outputs_max_entries: 10
+
+logging:
+  full_log_backend: false
   console_trace: true
   dump_storage: false
   save_logs: true
-  tool_output_inline_max_chars: 20000
-  stored_tool_outputs_max_entries: 10
 
 paths:
   # Relative paths are resolved from config.yml directory.

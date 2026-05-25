@@ -10,7 +10,7 @@ import json
 import logging
 from typing import Any, Dict, Optional
 
-from tools.skills.registry import SkillsRegistry
+from tools.skills.registry import AmbiguousSkillId, SkillsRegistry
 from utils.arg_decorators import parse_json_object_argument
 from utils.json_arg_parser import JsonArgParseError
 
@@ -59,9 +59,9 @@ class SkillsListTool:
     def __init__(self, registry: SkillsRegistry, *args: Any, **kwargs: Any) -> None:
         self._registry = registry
 
-    def __call__(self, **kwargs: Any) -> Dict[str, Any]:
+    def __call__(self, pack: Optional[str] = None, **kwargs: Any) -> Dict[str, Any]:
         try:
-            skills = self._registry.list_skills()
+            skills = self._registry.list_skills(pack=pack)
             return _wrap(tool="skills_list", ok=True, result={"skills": skills})
         except Exception as exc:  # noqa: BLE001
             logger.error("skills_list failed: %s", exc, exc_info=True)
@@ -85,6 +85,18 @@ class LoadSkillTool:
                 ok=True,
                 skill_id=skill_id,
                 result={"skill": detail},
+            )
+        except AmbiguousSkillId as exc:
+            return _wrap(
+                tool="skills_load",
+                ok=False,
+                skill_id=skill_id,
+                result=None,
+                error={
+                    "code": "AMBIGUOUS_SKILL_ID",
+                    "message": str(exc),
+                    "candidates": exc.candidates,
+                },
             )
         except KeyError as exc:
             return _wrap(
@@ -135,6 +147,20 @@ class RunSkillScriptTool:
                 script_name=script_name,
                 args=args_data,
                 result=result,
+            )
+        except AmbiguousSkillId as exc:
+            return _wrap(
+                tool="skills_run_script",
+                ok=False,
+                skill_id=skill_id,
+                script_name=script_name,
+                args=args_data,
+                result=None,
+                error={
+                    "code": "AMBIGUOUS_SKILL_ID",
+                    "message": str(exc),
+                    "candidates": exc.candidates,
+                },
             )
         except FileNotFoundError as exc:
             return _wrap(
@@ -187,6 +213,19 @@ class LoadReferenceTool:
                 slug=slug,
                 result=res,
             )
+        except AmbiguousSkillId as exc:
+            return _wrap(
+                tool="skills_load_reference",
+                ok=False,
+                skill_id=skill_id,
+                slug=slug,
+                result=None,
+                error={
+                    "code": "AMBIGUOUS_SKILL_ID",
+                    "message": str(exc),
+                    "candidates": exc.candidates,
+                },
+            )
         except KeyError as exc:
             return _wrap(
                 tool="skills_load_reference",
@@ -221,6 +260,19 @@ class LoadAssetTool:
                 skill_id=skill_id,
                 slug=slug,
                 result=res,
+            )
+        except AmbiguousSkillId as exc:
+            return _wrap(
+                tool="skills_load_asset",
+                ok=False,
+                skill_id=skill_id,
+                slug=slug,
+                result=None,
+                error={
+                    "code": "AMBIGUOUS_SKILL_ID",
+                    "message": str(exc),
+                    "candidates": exc.candidates,
+                },
             )
         except KeyError as exc:
             return _wrap(
@@ -260,13 +312,27 @@ def get_skills_tools_data(skills_registry: SkillsRegistry) -> Dict[str, Dict[str
                 "type": "function",
                 "name": "skills_list",
                 "description": (
-                    "List all available local skills discovered in the skills_data directory. "
-                    "Use this tool to see which skills (id, name, description) you can work with. "
-                    "Returns a JSON string envelope: {tool, ok, error, result}. On success, result.skills is a list."
+                    "List available local skills. By default returns flat skills plus one entry "
+                    "per pack (the pack's bootstrap skill, marked with 'is_pack_bootstrap': true and 'pack_size': N). "
+                    "Internal pack skills are hidden by default. "
+                    "Use the 'pack' parameter to drill into a specific pack's internal skills. "
+                    "Each list entry has fields: id (canonical, '<pack-id>:<skill-id>' for pack skills), name, description, "
+                    "source (system/user/project), pack_id (string for pack skills, null for flat), "
+                    "is_pack_bootstrap (bool). Bootstrap entries also have 'pack_size' (total internal skills count). "
+                    "Returns a JSON string envelope: {tool, ok, error, result}."
                 ),
                 "parameters": {
                     "type": "object",
-                    "properties": {},
+                    "properties": {
+                        "pack": {
+                            "type": "string",
+                            "description": (
+                                "Optional pack ID to drill into. When set, returns ONLY internal "
+                                "skills of that pack (including bootstrap). Default: omit to get "
+                                "flat skills + pack bootstrap entries."
+                            ),
+                        },
+                    },
                     "required": [],
                     "additionalProperties": False,
                 },
@@ -274,12 +340,12 @@ def get_skills_tools_data(skills_registry: SkillsRegistry) -> Dict[str, Dict[str
             },
             "description": (
                 "Tool name: skills_list\n"
-                "Tool description: Lists all available local skills from skills_data/*.\n"
-                "Input schema: {}\n"
-                "\n"
-                "Usage:\n"
-                "- Call this tool when you want to know which skills are available.\n"
-                "- Each skill has an id, name and description that you can use to select it."
+                "Tool description: Lists available local skills with smart pack filtering.\n"
+                "Default returns flat skills + pack bootstrap entries (one per pack).\n"
+                "Use pack='<pack-id>' to drill into a specific pack.\n"
+                "Each entry: id, name, description, source, pack_id, is_pack_bootstrap.\n"
+                "Bootstrap entries also have pack_size.\n"
+                "Pack skills have canonical id '<pack-id>:<skill-id>'.\n"
             ),
         },
         "skills_load": {

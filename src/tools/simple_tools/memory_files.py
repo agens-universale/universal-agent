@@ -78,6 +78,8 @@ class MemoryFiles(AbstractSimpleTool):
             "description": (
                 "Persistent named memory files for the current thread. "
                 "Each file is a markdown register that survives summarization. "
+                "IMPORTANT: This tool is for INTERNAL AGENT MEMORY ONLY — it does NOT write files to the filesystem. "
+                "To create or write files on disk (e.g. .py, .json, .txt files), use the write_to_file tool instead. "
                 "Default file is 'journal'. "
                 "Use action='list' to see all file names and sizes. "
                 "Use action='read' to load a file (default: journal). "
@@ -138,7 +140,8 @@ class MemoryFiles(AbstractSimpleTool):
         )
         max_files = cls._cfg_int(cfg, "memory_files_max_files", _DEFAULT_MAX_FILES)
         return f'''Tool name: memory_files
-Tool description: Persistent named memory files for the current thread.
+Tool description: Persistent named memory files for the current thread (INTERNAL AGENT MEMORY ONLY).
+WARNING: This tool does NOT write files to the disk/filesystem. To write .py, .json, .txt or any other files on disk, use write_to_file tool.
 Each file is a separate markdown register that survives summarization.
 Default file: "journal".
 

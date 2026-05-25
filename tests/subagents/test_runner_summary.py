@@ -7,6 +7,8 @@ from states import State, SharedStateData, save_state
 from tools.subagents import runner as runner_module
 from tools.subagents.runner import SubagentRunner
 
+import run_summary_coordinator as run_summary_coordinator_module
+
 
 def _make_orchestrator_state():
     state = State(
@@ -96,9 +98,13 @@ class TestRunnerSummary:
 
         with (
             patch.object(runner, "_build_child_ctx", return_value=SimpleNamespace()),
-            patch.object(runner_module, "history_exceeds_summary_trigger", return_value=True),
             patch.object(
-                runner_module,
+                run_summary_coordinator_module,
+                "history_exceeds_summary_trigger",
+                return_value=True,
+            ),
+            patch.object(
+                run_summary_coordinator_module,
                 "run_summary_compaction",
                 side_effect=fake_run_summary_compaction,
             ),

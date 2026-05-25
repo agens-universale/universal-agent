@@ -54,6 +54,10 @@ class ChatCompletionsPromptConfigTest(unittest.TestCase):
                 cfg["summary_params"]["chat_completions_summary_trigger_chars"], 0
             )
             self.assertEqual(cfg["summary_params"]["incremental_batch_chars"], 0)
+            self.assertFalse(cfg["logging_params"]["full_log_backend"])
+            self.assertTrue(cfg["logging_params"]["console_trace"])
+            self.assertFalse(cfg["logging_params"]["dump_storage"])
+            self.assertTrue(cfg["logging_params"]["save_logs"])
 
     def test_summary_trigger_chars_is_normalized_to_int(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -173,11 +177,14 @@ class ChatCompletionsPromptConfigTest(unittest.TestCase):
                     "    temperature: 0.2\n"
                     "    top_p: 0.9\n"
                     "    vendor_flag: true\n"
+                    "logging:\n"
+                    "  full_log_backend: true\n"
                 )
             cfg = load_config(cfg_path)
             self.assertEqual(cfg["chat_completion_kwargs"]["temperature"], 0.2)
             self.assertEqual(cfg["chat_completion_kwargs"]["top_p"], 0.9)
             self.assertTrue(cfg["chat_completion_kwargs"]["vendor_flag"])
+            self.assertTrue(cfg["logging_params"]["full_log_backend"])
             self.assertTrue(cfg["use_max_tokens_param"])
             self.assertTrue(cfg["openai_strict_tools_schema"])
 

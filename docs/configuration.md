@@ -1,0 +1,251 @@
+[Назад к README](../readme.md)
+
+# Конфигурация
+
+## Конфиг клиента
+
+- Требуется запущенный GigaCode Agent с API `v1/responses` или с режимом `backend_api_mode: chat_completions`. Адрес сервиса задаётся в `config.yml`.
+- **Где ищется базовый `config.yml`** (первый найденный источник побеждает):
+  1. путь из `--config` (если задан);
+  2. иначе `config.yml` в каталоге «Config» из таблицы [«Где gc-cli хранит runtime-данные»](#где-gc-cli-хранит-runtime-данные) — `~/.config/gc/config.yml` на Linux/macOS, `%USERPROFILE%\.gc\config.yml` на Windows (учитывает `GC_CONFIG_DIR` / `XDG_CONFIG_HOME` / `GC_HOME`). Это **полная база** (кладите полный конфиг — частичный файл здесь потеряет пакетные дефолты);
+  3. иначе `config.yml` рядом с установленным пакетом (каталог, откуда был выполнен `pip install -e .`, подкаталог `src`).
+
+  Поверх выбранной базы дополнительно deep-merge'ится project-local `<cwd>/.gc/config.yml` (см. [«Project local config (опционально)»](#project-local-config-опционально)). Чтобы указать свой путь явно:
+  ```commandline
+  gc-cli -q "ваш вопрос" --config ./config.yml
+  ```
+- Пример конфигурации: `demo_config.yml`. Скопируйте в `config.yml` и отредактируйте под свой бэкенд и MCP-серверы.
+- В конфиге можно задать количество шагов агента (`max_steps`), логирование и другие параметры.
+- Для режима `backend_api_mode: chat_completions` можно передавать токен провайдера
+  (например OpenRouter) через `chat_completions_auth_token` (или алиас `openrouter_api_key`);
+  тогда клиент отправит `Authorization: Bearer <token>` в запрос к `completions_url`.
+  Опционально для OpenRouter поддерживаются заголовки `openrouter_http_referer`
+  и `openrouter_x_title` (в запросе это `HTTP-Referer` и `X-OpenRouter-Title`).
+- Для хранения истории тредов:
+  - по умолчанию используется папка `threads` в корне проекта (`mini-cli-pub/threads`);
+  - опциональный параметр `threads_data_path` в `config.yml` должен быть **абсолютным путём** к директории хранения; если не задан — используется кросс-платформенный дефолт `<state>/projects/<project-slug>/threads/` (на Linux/macOS — `~/.local/state/gc/...`, на Windows — `~/.gc/...`);
+  - параметры суммаризации в `chat_completions` задаются в секции `summary_params`:
+    - `summary_params.chat_completions_summary_trigger_chars`:
+      - `<= 0` (или отсутствует) — суммаризация выключена;
+      - `> 0` — при достижении/превышении порога тред архивируется (`data_*`/`meta_*` с суффиксом `__summarized_<YYYYMMDD_HHMMSS>`) и продолжается от compact summary;
+    - `summary_params.incremental_batch_chars` — размер батча для кумулятивной суммаризации; если не задан, используется `int(summary_params.chat_completions_summary_trigger_chars * 1.4)`;
+    - `summary_params.chat_completions_summary_prompt_path` (опционально), по умолчанию `prompts/chat_completions_summary_prompt.md`;
+    - `summary_params.max_message_chars` — максимум символов на одно сообщение при подготовке истории к суммаризации (по умолчанию `50000`);
+    - `summary_params.max_dialogue_chars` — максимум символов на весь диалог для суммаризации (по умолчанию `1000000`, берется хвост целыми сообщениями);
+    - `summary_params.max_accumulated_summary_chars` — лимит длины накопленного summary; при превышении запускается дополнительное сжатие summary-of-summary (по умолчанию `20000`);
+    - `summary_params.original_user_messages_max_chars` — лимит символов для `meta.user_messages_log` (единственный источник user-запросов для суммаризации); сохраняются последние сообщения целиком (по умолчанию `20000`);
+    - `summary_params.last_dialog_steps_count` — сколько последних сообщений включать;
+    - `summary_params.last_dialog_step_message_max_chars` — максимум символов на одно сообщение (лишнее обрезается).
+  - **Поток суммаризации** (только при `backend_api_mode: chat_completions` и положительном `summary_params.chat_completions_summary_trigger_chars`):
+    - перед стартом цикла агента выполняется **pre-run** compaction (если объём диалога в `state.messages` уже достиг порога);
+    - после шага с исходящим результатом инструмента (**post-step**, сразу после обработки `function_call_output`) снова проверяется порог и при необходимости запускается compaction;
+    - источник данных для решения «суммаризировать или нет» — только текущие сообщения сессии (`state.messages`); при запуске с `-t` после успешного compaction дополнительно обновляются файлы треда через `thread_store` (архив старых `data_*/meta_*` и запись compact-истории).
+  - `gc-cli -q "..." -t my-thread` — продолжить диалог по треду;
+  - `gc-cli -q "..." -t my-thread -n` (или `--new`) — начать тред заново с тем же id и удалить старые файлы этого треда (`data_*`/`meta_*`);
+  - `-n/--new` можно использовать только вместе с `-t/--thread-id`.
+  - в директории для тредов создаются файлы `data_<thread_id>.jsonl` (сообщения) и `meta_<thread_id>.json` (метаданные, включая `previous_response_id`).
+- По умолчанию логи будут сохраняться в той папке, из которой запущена команда.
+
+## Security policy (`security.command_moderation`)
+
+Клиент поддерживает единый контур безопасности для файловых изменений,
+запуска команд/кода и сетевых запросов:
+
+```yaml
+security:
+  command_moderation:
+    mode: deny # allow | ask | deny
+    root_box:
+      enabled: true
+      extra_write_paths: []
+    allowed_command_examples: []
+    url_policy:
+      allowed_schemes: ["http", "https"]
+      url_blacklist: []
+```
+
+- `root_box.enabled` по умолчанию включён и ограничивает файловые изменения директорией запуска `gc-cli` (`launch_root`).
+  Чтение файлов не ограничивается этим периметром, но запись/создание/редактирование вне него блокируются.
+- `root_box.extra_write_paths` — дополнительные директории, куда разрешена запись помимо `launch_root`.
+  Относительные пути разрешаются от директории `config.yml`.
+- `mode` управляет только `execute_command` и `run_python_code`:
+  - `allow` — выполнять без judge;
+  - `ask` — безопасное выполнять, опасное выполнять только после подтверждения пользователя;
+  - `deny` — безопасное выполнять, опасное блокировать.
+- `allowed_command_examples` — positive examples для LLM judge. Это не строгий allowlist,
+  а ориентир безопасного профиля команд проекта.
+- `url_policy.allowed_schemes` и `url_policy.url_blacklist` проверяются для исходного URL
+  в `fetch_url`/`simple_fetch_url` до сетевого запроса. Redirect targets повторно не проверяются.
+- Основные policy-ошибки в JSON-envelope инструментов:
+  - `root_box_violation` — файловое изменение вне разрешённых roots;
+  - `unsafe_command_blocked` — опасная команда/код заблокированы в `deny`;
+  - `unsafe_command_cancelled_by_user` — пользователь не подтвердил опасное действие в `ask`;
+  - `url_validation_failed` — URL не прошёл схему/формат;
+  - `url_blocked_by_policy` — URL совпал с blacklist.
+- Все policy-решения пишутся в run logger как `security_policy_decision` без полного payload команды/кода.
+
+## Переопределение настроек из CLI
+
+Любой параметр из `config.yml` (или новый, которого там нет) можно переопределить при запуске через дополнительные аргументы командной строки.
+
+- Значения из CLI **всегда имеют приоритет** над значениями из `config.yml`.
+- Поддерживаются следующие формы:
+  - `--param value`
+  - `--param=value`
+  - `--flag` (без значения, в конфиг уйдёт `true`)
+- Значения автоматически приводятся к типам с помощью `yaml.safe_load`, поэтому:
+  - `--max_steps 50` → `config_dict["max_steps"] == 50` (число),
+  - `--verbose true` → `config_dict["verbose"] == True` (булево),
+  - `--client_name "my_client"` → `config_dict["client_name"] == "my_client"` (строка).
+
+**Примеры:**
+
+- Отключить файловый периметр для разового запуска:
+  ```bash
+  gc-cli -q "..." --no-root-box
+  ```
+
+- Переключить режим command moderation:
+  ```bash
+  gc-cli -q "..." --command-moderation ask
+  ```
+
+- Переопределить существующие ключи:
+  ```bash
+  gc-cli -q "..." --agent_md_path "my path" --max_steps 50
+  ```
+  В рантайме будет использовано:
+  - `config_dict["agent_md_path"] == "my path"`,
+  - `config_dict["max_steps"] == 50`,
+  даже если в `config.yml` заданы другие значения.
+
+- Добавить новый параметр, которого нет в `config.yml`:
+  ```bash
+  gc-cli -q "..." --my_custom_flag true --extra_param "some value"
+  ```
+  В `config_dict` появятся:
+  - `config_dict["my_custom_flag"] == True`,
+  - `config_dict["extra_param"] == "some value"`.
+
+## MCP-серверы
+
+Клиент поддерживает MCP (Model Context Protocol): агент может вызывать инструменты
+внешних MCP-серверов (поиск, RAG, файловая система, выполнение кода и т.д.).
+
+Настройка — в `config.yml`, секция `mcp-servers`. Каждый сервер задаётся ключом-именем
+(например `rag`, `search`, `python`); этот ключ служит префиксом имён инструментов
+(например `search_web_search`). Используйте короткие имена из латинских букв, цифр и символов `-_`, без пробелов.
+
+Поддерживаются шесть типов транспорта MCP:
+
+**Сессионные транспорты** (один запрос — один ответ, при необходимости используется `mcp-session-id`):
+
+- **http** — запросы по HTTP. Обязательно: `transport: http`, `url`, `description`, `server-name`. Опционально: `token`, `verify-ssl`.
+- **sse** — обмен через Server-Sent Events. Обязательно: `transport: sse`, `url`, `description`, `server-name`. Опционально: `token`, `verify-ssl`.
+- **stdio** — MCP-сервер как локальный процесс (stdin/stdout); процесс запускается на каждый запрос. Обязательно: `transport: stdio`, `command`, `description`, `server-name`. Опционально: `args`, `cwd`, `env`.
+
+**Стриминговые транспорты** (через MCP SDK, без сессий; подходят для серверов, поддерживающих streamable-протокол):
+
+- **stream_http** — Streamable HTTP (MCP 1.26+). Обязательно: `transport: stream_http`, `url`, `description`, `server-name`. Опционально: `token`, `verify-ssl`. Endpoint обычно `.../mcp`; при 404 пробуется базовый URL.
+- **stream_sse** — SSE в формате MCP SDK. Обязательно: `transport: stream_sse`, `url`, `description`, `server-name`. Опционально: `token`, `verify-ssl`.
+- **stream_stdio** — stdio через MCP SDK (процесс на каждый запрос). Обязательно: `transport: stream_stdio`, `command`, `description`, `server-name`. Опционально: `args`, `cwd`, `env`.
+
+**Общие параметры:** для любого транспорта можно задать `verify-ssl: true` (по умолчанию) или `verify-ssl: false` (отключить проверку SSL, например для self-signed сертификатов).
+
+**Кроссплатформенность (stdio / stream_stdio):** в `command` и `args` указывайте команду, доступную в PATH на вашей ОС (например, на Windows — `python` или `py`, а не только `python3`). Пути к скриптам в `args` лучше задавать в формате, принятом на целевой ОС, или использовать переменные окружения в `env`.
+
+В секции `mcp-meta` можно задать:
+- `tools-cache-ttl` — время жизни кэша списка инструментов (секунды);
+- `request_timeout_sec` — таймаут запроса к MCP (секунды).
+
+Полные примеры для http, sse, stdio и комментарии по stream_http/stream_sse/stream_stdio — в `demo_config.yml`. Скопируйте нужный блок, подставьте свои `url` или `command`/`args`.
+
+### Встроенные интеграции — `recommended_mcp/`
+
+В корне репозитория есть каталог `recommended_mcp/` с готовыми рецептами
+подключения нескольких MCP. Установка одной командой:
+
+```bash
+python recommended_mcp/install.py
+```
+
+После установки нужно скопировать сниппеты из
+`recommended_mcp/<name>/agent_config.snippet.yml` в секцию `mcp-servers:`
+своего `config.yml`. На момент написания доступны:
+
+- **`computer`** — управление Windows GUI через UI Automation (запуск
+  приложений, клики, ввод, чтение состояния окон). Только Windows.
+  Исходники: `external/computer-mcp/`.
+- **`office`** — чтение офисных документов (pdf, docx, xls, xlsx, pptx,
+  csv, html, msg) → markdown. Кросс-платформенно. Исходники:
+  `external/office-mcp/`.
+
+Подробности про каждую интеграцию — в её `recommended_mcp/<name>/README.md`.
+Общая документация по `install.py` / `run.py` / структуре каталога —
+в `recommended_mcp/README.md`.
+
+Для итеративной разработки наших MCP в `external/`:
+
+```bash
+python recommended_mcp/install.py --editable
+```
+
+### Ручная установка (для MCP не из `recommended_mcp/`)
+
+Если нужный MCP не входит в `recommended_mcp/` — ставь как обычный пакет
+и подключай через `mcp-servers:`. Пример с DDGS-поиском:
+
+```bash
+python3 -m pip install ddgs-mcp
+ddgs-mcp --http
+```
+
+В `config.yml` агента укажи нужный транспорт (`http`, `stream_http` и т.д.)
+и endpoint подключения (см. раздел [MCP-серверы](#mcp-серверы) выше).
+
+## Где gc-cli хранит runtime-данные
+
+Кросс-платформенная раскладка. По умолчанию:
+
+| ОС | Логи / треды / swarm | Cache (пока не используется)          | Config |
+|---|---|---------------------------------------|---|
+| Linux | `~/.local/state/gc/projects/<slug>/` | `~/.cache/gc/` *(резерв)*             | `~/.config/gc/` |
+| macOS | `~/.local/state/gc/projects/<slug>/` *(как Linux)* | `~/.cache/gc/` *(резерв)*             | `~/.config/gc/` |
+| Windows | `%USERPROFILE%\.gc\projects\<slug>\` | `%USERPROFILE%\.gc\cache\` *(резерв)* | `%USERPROFILE%\.gc\` |
+
+`<slug>` — путь к проекту с заменой `/`, `\`, `:` на `-`, в стиле `~/.claude/projects/`.
+
+Override через переменные окружения: `GC_HOME` (корневой), `GC_STATE_DIR` / `GC_CONFIG_DIR` / `GC_CACHE_DIR` / `GC_DATA_DIR` (точечные). На Linux/macOS дополнительно работают `XDG_STATE_HOME` / `XDG_CONFIG_HOME` / `XDG_CACHE_HOME` / `XDG_DATA_HOME`.
+
+Каталог «Config» — это где `gc-cli` ищет базовый `config.yml` (tier между `--config` и пакетным дефолтом; подробнее — [«Где ищется базовый config.yml»](#конфиг-клиента) в начале страницы).
+
+Каталог «Cache» — зарезервирован в кросс-платформенной XDG-раскладке, но `gc-cli` **пока не использует файловый кэш**: путь вычисляется (и переопределяется `GC_CACHE_DIR` / `XDG_CACHE_HOME`), но каталог не создаётся и в него ничего не пишется.
+
+См. также пояснения в `demo_config.yml` (секция `paths`).
+
+## Project local config (опционально)
+
+Если в корне проекта есть файл `<your-repo>/.gc/config.yml`, gc-cli мерджит его поверх глобального `config.yml` через layered loading:
+
+- **scalar** (число, строка, bool) — project переопределяет global.
+- **dict** — рекурсивный deep merge: project расширяет/переопределяет ключи внутри.
+- **list / array** — конкатенация + dedup: project только **расширяет** список, не сбрасывает (важно для security-полей вроде `agent.stop_tools` или `command_moderation.url_policy.url_blacklist`).
+
+Пример проектного `<your-repo>/.gc/config.yml`:
+
+```yaml
+agent:
+  max_steps: 200             # этот проект — длиннее цепочки рассуждений
+  stop_tools: [browse_url]    # добавить локальный запрет (к глобальному списку)
+mcp:
+  servers:
+    my_local_db:               # MCP только для этого проекта
+      transport: stdio
+      command: psql
+```
+
+Файл `.gc/config.yml` следует той же схеме, что и глобальный `config.yml` — указывайте только те поля, которые хотите переопределить или дополнить. Папка `.gc/` создаётся автоматически при первом запуске `gc-cli` (та же папка, что и для project-скиллов).
+
+CLI-флаги (`--max_steps 999` и т.п.) перебивают и global, и project. Файл опционален; если его нет — используется только global.
+
+Если через `--config` явно передан тот же файл, что и `<repo>/.gc/config.yml` — gc-cli применяет его как обычный config без второго слоя (особый случай для запусков с явным путём).
