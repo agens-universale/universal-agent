@@ -35,24 +35,25 @@ def _resolve_skills_root(config_dict: dict[str, Any]) -> str | None:
     чтобы read_guard мог автоматически разрешать их чтение без явной записи
     в `allowed_read_paths`.
 
-    Логика делегирована `tools.skills.registry.get_skills_registry`:
-      - если в config.yml задан `skills_data_path` — используется он;
-      - иначе — `<project_root>/skills` (где project_root — корень установки агента).
+    Логика:
+      - если в config.yml задан `skills_data_path` — используется он
+        (single-source mode);
+      - иначе — system root из `tools.skills.registry._system_skills_root`
+        (`<project_root>/skills`).
 
     Импорт ленивый, чтобы избежать циклической зависимости security ↔ tools.
     """
+    # 1. Явный single-source mode.
+    if isinstance(config_dict, dict):
+        raw = config_dict.get("skills_data_path")
+        if isinstance(raw, str) and raw.strip():
+            return os.path.abspath(raw.strip())
+    # 2. Three-layer mode → system root (<project_root>/skills).
     try:
-        from tools.skills.registry import get_skills_registry  # type: ignore
+        from tools.skills.registry import _system_skills_root  # type: ignore
+        return os.path.abspath(_system_skills_root())
     except Exception:
         return None
-    try:
-        registry = get_skills_registry(config_dict)
-        root = getattr(registry, "_skills_root", None)
-        if isinstance(root, str) and root.strip():
-            return os.path.abspath(root)
-    except Exception:
-        return None
-    return None
 
 
 @dataclass(frozen=True)
