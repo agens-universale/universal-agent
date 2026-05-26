@@ -51,11 +51,10 @@ def test_match_url_blacklist_supports_exact_and_glob_rules():
 
 def test_enforce_url_policy_returns_structured_error(tmp_path):
     config_dict = {
-        "command_moderation": {
-            "url_policy": {
-                "allowed_schemes": ["https"],
-                "url_blacklist": ["blocked.example"],
-            }
+        "url_policy": {
+            "enabled": True,
+            "allowed_schemes": ["https"],
+            "url_blacklist": ["blocked.example"],
         }
     }
 
@@ -74,11 +73,10 @@ def test_enforce_url_policy_audits_blocked_decision():
     logger = _Logger()
     ctx = SimpleNamespace(
         config_dict={
-            "command_moderation": {
-                "url_policy": {
-                    "allowed_schemes": ["https"],
-                    "url_blacklist": ["blocked.example"],
-                }
+            "url_policy": {
+                "enabled": True,
+                "allowed_schemes": ["https"],
+                "url_blacklist": ["blocked.example"],
             }
         },
         logger=logger,

@@ -135,21 +135,21 @@ parser.add_argument(
     help="Начать тред заново: удалить существующие данные треда (только с -t/--thread-id)",
 )
 
-root_box_group = parser.add_mutually_exclusive_group()
-root_box_group.add_argument(
-    "--root-box",
+write_guard_group = parser.add_mutually_exclusive_group()
+write_guard_group.add_argument(
+    "--write-guard",
     type=_parse_bool_cli,
     choices=[True, False],
     help=(
-        "Включить/выключить root_box (true|false): ограничение файловых "
-        "изменений launch_root и command_moderation.root_box.extra_write_paths"
+        "Включить/выключить write_guard (true|false): ограничение файловых "
+        "изменений launch_root и write_guard.extra_paths"
     ),
 )
-root_box_group.add_argument(
-    "--no-root-box",
+write_guard_group.add_argument(
+    "--no-write-guard",
     action="store_true",
     help=(
-        "Явно отключить root_box (эквивалент --root-box false); "
+        "Явно отключить write_guard (эквивалент --write-guard false); "
         "имеет приоритет над config.yml"
     ),
 )

@@ -10,10 +10,11 @@ def _config(tmp_path, mode):
     return {
         "launch_root": str(tmp_path),
         "command_moderation": {
+            "enabled": True,
             "mode": mode,
-            "root_box": {"enabled": True, "extra_write_paths": []},
             "allowed_command_examples": [],
         },
+        "write_guard": {"enabled": True, "extra_paths": []},
     }
 
 

@@ -6,20 +6,22 @@ import json
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
+import sys
 from typing import Any, Callable, Iterable
 
 
 @dataclass(frozen=True)
-class RootBoxConfig:
-    enabled: bool = True
-    extra_write_paths: list[str] = field(default_factory=list)
+class WriteGuardConfig:
+    enabled: bool = False
+    mode: str = "deny"  # allow | ask | deny
+    extra_paths: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
 class ToolSecurityContext:
     launch_root: str
-    root_box: RootBoxConfig = field(default_factory=RootBoxConfig)
-    command_moderation_mode: str = "deny"
+    write_guard: WriteGuardConfig = field(default_factory=WriteGuardConfig)
+    command_moderation_mode: str = "allow"
     allowed_command_examples: list[str] = field(default_factory=list)
     url_allowed_schemes: list[str] = field(default_factory=lambda: ["http", "https"])
     url_blacklist: list[str] = field(default_factory=list)
@@ -29,7 +31,7 @@ class ToolSecurityContext:
     logger: Any = None
 
 
-class RootBoxViolation(ValueError):
+class WriteGuardViolation(ValueError):
     def __init__(
         self,
         *,
@@ -39,12 +41,12 @@ class RootBoxViolation(ValueError):
         operation: str,
     ) -> None:
         self.error = {
-            "type": "root_box_violation",
+            "type": "write_guard_violation",
             "launch_root": launch_root,
             "allowed_write_roots": allowed_write_roots,
             "path": path,
             "operation": operation,
-            "message": "Write operation is outside allowed root_box perimeter.",
+            "message": "Write operation is outside allowed write_guard perimeter.",
         }
         super().__init__(self.error["message"])
 
@@ -126,7 +128,7 @@ def check_write_path_allowed(
         case_insensitive = os.name == "nt"
     if is_within_any_root(target, allowed_roots, case_insensitive=case_insensitive):
         return target
-    raise RootBoxViolation(
+    raise WriteGuardViolation(
         launch_root=str(root),
         allowed_write_roots=[str(path) for path in allowed_roots],
         path=str(target),
@@ -148,30 +150,30 @@ def resolve_tool_context(*args: Any, **kwargs: Any) -> ToolSecurityContext:
         or os.getcwd()
     )
     # Safe-by-default-OFF: каждый security-слой включается ТОЛЬКО явным
-    # `enabled: true` (или для url_policy — непустым `url_blacklist`/нестандартными
-    # `allowed_schemes`). Если ключа нет в конфиге — слой выключен. Так пользователь
-    # не получает "тихо включённую" защиту от наличия родительского блока.
+    # `enabled: true`. Если ключа верхнего уровня (write_guard / url_policy)
+    # нет в конфиге — слой выключен.
     moderation = config_dict.get("command_moderation") or {}
-    root_box_cfg = moderation.get("root_box") or {}
-    url_policy_cfg = moderation.get("url_policy") or {}
+    write_guard_cfg = config_dict.get("write_guard") or {}
+    url_policy_cfg = config_dict.get("url_policy") or {}
     return ToolSecurityContext(
         launch_root=str(launch_root),
-        root_box=RootBoxConfig(
-            enabled=bool(root_box_cfg.get("enabled", False)),
-            extra_write_paths=list(root_box_cfg.get("extra_write_paths") or []),
+        write_guard=WriteGuardConfig(
+            enabled=bool(write_guard_cfg.get("enabled", False)),
+            mode=str(write_guard_cfg.get("mode", "deny")).strip().lower(),
+            extra_paths=list(write_guard_cfg.get("extra_paths") or []),
         ),
         command_moderation_mode=str(moderation.get("mode", "allow")).strip().lower(),
         allowed_command_examples=list(moderation.get("allowed_command_examples") or []),
         url_allowed_schemes=list(url_policy_cfg.get("allowed_schemes") or ["http", "https"]),
         url_blacklist=list(url_policy_cfg.get("url_blacklist") or []),
-        url_policy_enabled=bool(moderation.get("url_policy")),
+        url_policy_enabled=bool(url_policy_cfg.get("enabled", False)),
         ctx=ctx,
         state=state,
         logger=logger,
     )
 
 
-def enforce_root_box(
+def enforce_write_guard(
     path_arg: str | None = None,
     path_extractor: Callable[..., str] | None = None,
     operation: str = "write",
@@ -181,7 +183,7 @@ def enforce_root_box(
         @functools.wraps(func)
         def wrapper(*args: Any, **kwargs: Any) -> str:
             context = resolve_tool_context(*args, **kwargs)
-            if not context.root_box.enabled:
+            if not context.write_guard.enabled:
                 audit_policy_decision(
                     context,
                     tool_name=_tool_name(func, args),
@@ -204,16 +206,48 @@ def enforce_root_box(
                 check_write_path_allowed(
                     candidate_path,
                     context.launch_root,
-                    context.root_box.extra_write_paths,
+                    context.write_guard.extra_paths,
                     base_dir=context.launch_root,
                     operation=operation,
                 )
-            except RootBoxViolation as exc:
+            except WriteGuardViolation as exc:
+                wg_mode = (context.write_guard.mode or "deny").strip().lower()
+                if wg_mode == "allow":
+                    # Документированный пропуск: помечаем в audit, но даём
+                    # write пройти. Используется для baseline-тестов.
+                    audit_policy_decision(
+                        context,
+                        tool_name=_tool_name(func, args),
+                        decision="executed",
+                        reason_code="policy_allow_out_of_perimeter",
+                        risk_flags=["out_of_perimeter"],
+                    )
+                    return func(*args, **kwargs)
+                if wg_mode == "ask":
+                    confirmed = _ask_user_confirmation_for_write(
+                        tool_name=_tool_name(func, args),
+                        path=candidate_path,
+                        operation=operation,
+                        error=exc.error,
+                    )
+                    if confirmed:
+                        audit_policy_decision(
+                            context,
+                            tool_name=_tool_name(func, args),
+                            decision="executed",
+                            reason_code="policy_ask_confirmed",
+                            risk_flags=["out_of_perimeter"],
+                        )
+                        return func(*args, **kwargs)
+                    # cancelled — продолжаем в стандартный blocked-flow ниже,
+                    # но помечаем error.type для отличимости в логах.
+                    exc.error["type"] = "write_guard_cancelled_by_user"
+                    exc.error["message"] = "User declined out-of-perimeter write."
                 audit_policy_decision(
                     context,
                     tool_name=_tool_name(func, args),
                     decision="blocked",
-                    reason_code="policy_deny",
+                    reason_code="policy_deny" if wg_mode == "deny" else "policy_ask_cancelled",
                     error_type=exc.error.get("type"),
                 )
                 return _blocked_result(
@@ -310,6 +344,60 @@ def _tool_name(func: Callable[..., Any], args: tuple[Any, ...]) -> str:
     return getattr(func, "__name__", "unknown")
 
 
+def prompt_user_confirmation(
+    *,
+    title: str,
+    fields: list[tuple[str, Any]],
+    question: str,
+) -> bool:
+    """
+    Унифицированный prompt подтверждения для security-слоёв.
+
+    Формат:
+        {title}: требуется подтверждение.
+        {field_1}: {value_1}
+        {field_2}: {value_2}
+        ...
+        {question} [y/N]:
+
+    Возвращает True при ответе yes/y/да/д, иначе False.
+    Auto-decline если stdin не tty (фоновый/CI запуск).
+    """
+    if not sys.stdin or not sys.stdin.isatty():
+        return False
+    lines = [f"\n{title}: требуется подтверждение."]
+    for label, value in fields:
+        lines.append(f"{label}: {value}")
+    lines.append(f"{question} [y/N]: ")
+    prompt = "\n".join(lines)
+    try:
+        print(prompt, file=sys.stderr, end="")
+        sys.stderr.flush()
+        answer = input().strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        return False
+    return answer in {"y", "yes", "д", "да"}
+
+
+def _ask_user_confirmation_for_write(
+    *,
+    tool_name: str,
+    path: str,
+    operation: str,
+    error: dict[str, Any],
+) -> bool:
+    return prompt_user_confirmation(
+        title="Write guard",
+        fields=[
+            ("Тул", tool_name),
+            ("Операция", operation),
+            ("Путь", path),
+            ("Разрешённые корни", error.get("allowed_write_roots") or []),
+        ],
+        question="Разрешить запись вне периметра?",
+    )
+
+
 def _blocked_result(
     func: Callable[..., Any],
     error: dict[str, Any],
@@ -321,7 +409,7 @@ def _blocked_result(
     if blocked_result_factory is not None:
         return blocked_result_factory(error)
     self_obj = args[0] if args else None
-    tool_blocked_result = getattr(self_obj, "_root_box_blocked_result", None)
+    tool_blocked_result = getattr(self_obj, "_write_guard_blocked_result", None)
     if callable(tool_blocked_result):
         return tool_blocked_result(error, *args[1:], **kwargs)
     return json.dumps(

@@ -66,13 +66,14 @@ summary:
 security:
   command_moderation:
     mode: deny
-    root_box:
-      enabled: true
-      extra_write_paths: []
     allowed_command_examples: []
-    url_policy:
-      allowed_schemes: ["http", "https"]
-      url_blacklist: []
+  write_guard:
+    enabled: true
+    extra_paths: []
+  url_policy:
+    enabled: false
+    allowed_schemes: ["http", "https"]
+    url_blacklist: []
 
 mcp:
   servers:

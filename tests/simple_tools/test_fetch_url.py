@@ -38,11 +38,10 @@ class _SessionStub:
 
 def _url_policy_config(allowed_schemes=None, url_blacklist=None):
     return {
-        "command_moderation": {
-            "url_policy": {
-                "allowed_schemes": allowed_schemes or ["http", "https"],
-                "url_blacklist": url_blacklist or [],
-            }
+        "url_policy": {
+            "enabled": True,
+            "allowed_schemes": allowed_schemes or ["http", "https"],
+            "url_blacklist": url_blacklist or [],
         }
     }
 

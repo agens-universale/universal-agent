@@ -7,35 +7,35 @@ from config import apply_cli_command_moderation_overrides, apply_cli_overrides, 
 
 class CommandModerationConfigTest(unittest.TestCase):
     def test_defaults_are_applied(self):
+        """Safe-by-default-OFF: при отсутствии security блока — все слои выключены."""
         with tempfile.TemporaryDirectory() as tmp_dir:
             cfg_path = os.path.join(tmp_dir, "config.yml")
             with open(cfg_path, "w", encoding="utf-8") as fd:
                 fd.write("backend:\n  api_mode: chat_completions\n")
 
             cfg = load_config(cfg_path)
-            moderation = cfg["command_moderation"]
-            self.assertEqual(moderation["mode"], "deny")
-            self.assertTrue(moderation["root_box"]["enabled"])
-            self.assertEqual(moderation["root_box"]["extra_write_paths"], [])
-            self.assertEqual(moderation["allowed_command_examples"], [])
-            self.assertEqual(moderation["url_policy"]["allowed_schemes"], ["http", "https"])
-            self.assertEqual(moderation["url_policy"]["url_blacklist"], [])
+            self.assertEqual(cfg["command_moderation"]["mode"], "allow")
+            self.assertFalse(cfg["write_guard"]["enabled"])
+            self.assertEqual(cfg["write_guard"]["extra_paths"], [])
+            self.assertEqual(cfg["command_moderation"]["allowed_command_examples"], [])
+            self.assertFalse(cfg["url_policy"]["enabled"])
+            self.assertEqual(cfg["url_policy"]["allowed_schemes"], ["http", "https"])
+            self.assertEqual(cfg["url_policy"]["url_blacklist"], [])
 
-    def test_extra_write_paths_resolve_relative_to_config_dir(self):
+    def test_extra_paths_resolve_relative_to_config_dir(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             cfg_path = os.path.join(tmp_dir, "config.yml")
             with open(cfg_path, "w", encoding="utf-8") as fd:
                 fd.write(
                     "backend:\n  api_mode: chat_completions\n"
                     "security:\n"
-                    "  command_moderation:\n"
-                    "    root_box:\n"
-                    "      extra_write_paths: ['tmp/cache']\n"
+                    "  write_guard:\n"
+                    "    extra_paths: ['tmp/cache']\n"
                 )
 
             cfg = load_config(cfg_path)
             self.assertEqual(
-                cfg["command_moderation"]["root_box"]["extra_write_paths"],
+                cfg["write_guard"]["extra_paths"],
                 [os.path.join(tmp_dir, "tmp", "cache")],
             )
 
@@ -62,17 +62,17 @@ class CommandModerationConfigTest(unittest.TestCase):
                     "security:\n"
                     "  command_moderation:\n"
                     "    mode: ask\n"
-                    "    root_box:\n"
-                    "      enabled: true\n"
+                    "  write_guard:\n"
+                    "    enabled: true\n"
                 )
 
             cfg = load_config(cfg_path)
             apply_cli_command_moderation_overrides(
                 cfg,
-                root_box_enabled=False,
+                write_guard_enabled=False,
                 command_moderation_mode="allow",
             )
-            self.assertFalse(cfg["command_moderation"]["root_box"]["enabled"])
+            self.assertFalse(cfg["write_guard"]["enabled"])
             self.assertEqual(cfg["command_moderation"]["mode"], "allow")
 
     def test_apply_cli_overrides_is_single_entry_point(self):
@@ -85,21 +85,21 @@ class CommandModerationConfigTest(unittest.TestCase):
                     "security:\n"
                     "  command_moderation:\n"
                     "    mode: ask\n"
-                    "    root_box:\n"
-                    "      enabled: true\n"
+                    "  write_guard:\n"
+                    "    enabled: true\n"
                 )
 
             cfg = load_config(cfg_path)
             apply_cli_overrides(
                 cfg,
                 extra_overrides={"model": "cli-model", "max_steps": 77},
-                root_box_enabled=True,
-                no_root_box=True,
+                write_guard_enabled=True,
+                no_write_guard=True,
                 command_moderation_mode="deny",
             )
             self.assertEqual(cfg["model"], "cli-model")
             self.assertEqual(cfg["max_steps"], 77)
-            self.assertFalse(cfg["command_moderation"]["root_box"]["enabled"])
+            self.assertFalse(cfg["write_guard"]["enabled"])
             self.assertEqual(cfg["command_moderation"]["mode"], "deny")
 
     def test_apply_cli_overrides_syncs_logging_params(self):

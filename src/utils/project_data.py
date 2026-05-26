@@ -96,13 +96,10 @@ def _resolve_workspace_dir(config_dict: Optional[Dict[str, Any]]) -> str:
 def _extra_write_roots(config_dict: Optional[Dict[str, Any]]) -> List[str]:
     if not isinstance(config_dict, dict):
         return []
-    moderation = config_dict.get("command_moderation")
-    if not isinstance(moderation, dict):
+    write_guard = config_dict.get("write_guard")
+    if not isinstance(write_guard, dict):
         return []
-    root_box = moderation.get("root_box")
-    if not isinstance(root_box, dict):
-        return []
-    extra = root_box.get("extra_write_paths")
+    extra = write_guard.get("extra_paths")
     return [str(x) for x in (extra or []) if x is not None and str(x).strip()]
 
 
@@ -121,7 +118,7 @@ def get_project_data(workspace_config: Optional[Dict[str, Any]] = None) -> Dict[
     }
 
     workspace_config: optional CLI/server config snapshot (launch_root, project_root,
-    command_moderation.root_box.extra_write_paths) used for projectDir / allowed writes.
+    write_guard.extra_paths) used for projectDir / allowed writes.
 
     ``allowed_write_paths`` lists only directories where a probe file can be created and removed
     (same meaning on Linux, macOS, and Windows); non-writable roots are omitted.

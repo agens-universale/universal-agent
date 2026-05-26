@@ -6,7 +6,7 @@ path-policy). Контур 2 (sensitivity scan) и Контур 3 (anti-exfiltra
 оставлены на следующие итерации.
 
 Декоратор `enforce_read_guard` применяется к read-тулам аналогично тому,
-как `enforce_root_box` применяется к write-тулам.
+как `enforce_write_guard` применяется к write-тулам.
 """
 from __future__ import annotations
 
@@ -92,16 +92,13 @@ class ReadGuardViolation(ValueError):
 
 def parse_read_guard_config(config_dict: dict[str, Any]) -> ReadGuardConfig:
     """
-    Достаёт read_guard блок из config_dict["command_moderation"]["read_guard"].
+    Достаёт read_guard блок из top-level `config_dict["read_guard"]`.
 
     Safe-by-default-OFF: read_guard включается ТОЛЬКО явным `enabled: true`.
     Если ключа `read_guard` нет вообще — слой выключен. Это симметрично с
-    `root_box` (см. resolve_tool_context в path_policy.py).
+    `write_guard` и `url_policy` (см. resolve_tool_context в path_policy.py).
     """
-    cm = config_dict.get("command_moderation")
-    if not isinstance(cm, dict):
-        cm = {}
-    raw = cm.get("read_guard") or {}
+    raw = config_dict.get("read_guard") or {}
     if not isinstance(raw, dict):
         raw = {}
     return ReadGuardConfig(
@@ -328,10 +325,10 @@ def enforce_read_guard(
     blocked_result_factory: Callable[[dict[str, Any]], str] | None = None,
 ) -> Callable[[Callable[..., str]], Callable[..., str]]:
     """
-    Декоратор для read-тулов. По смыслу и интерфейсу зеркалит `enforce_root_box`.
+    Декоратор для read-тулов. По смыслу и интерфейсу зеркалит `enforce_write_guard`.
 
     Применяется к `read_file`, `list_files`, `search_files` (см. spec).
-    Не применяется к write-тулам (root_box), execute-тулам (command_moderation)
+    Не применяется к write-тулам (write_guard), execute-тулам (command_moderation)
     и url-тулам (url_policy).
     """
     def decorator(func: Callable[..., str]) -> Callable[..., str]:
@@ -369,11 +366,45 @@ def enforce_read_guard(
                     extra_allowed_paths=extra_allowed,
                 )
             except ReadGuardViolation as exc:
+                mode = (cfg.mode or "deny").strip().lower()
+                if mode == "allow":
+                    # Документированный пропуск: контент возвращается, но в audit
+                    # помечаем что путь был вне allowed_read_*.
+                    audit_policy_decision(
+                        context,
+                        tool_name=_tool_name(func, args),
+                        decision="executed",
+                        reason_code="policy_allow_out_of_perimeter",
+                        risk_flags=["out_of_perimeter"],
+                    )
+                    return func(*args, **kwargs)
+                if mode == "ask":
+                    from security.path_policy import prompt_user_confirmation
+                    confirmed = prompt_user_confirmation(
+                        title="Read guard",
+                        fields=[
+                            ("Тул", _tool_name(func, args)),
+                            ("Операция", "read"),
+                            ("Путь", exc.error.get("path", candidate_path)),
+                            ("Причина", exc.error.get("reason", "")),
+                        ],
+                        question="Разрешить чтение вне периметра?",
+                    )
+                    if confirmed:
+                        audit_policy_decision(
+                            context,
+                            tool_name=_tool_name(func, args),
+                            decision="executed",
+                            reason_code="policy_ask_confirmed",
+                            risk_flags=["out_of_perimeter"],
+                        )
+                        return func(*args, **kwargs)
+                    exc.error["type"] = "read_guard_cancelled_by_user"
                 audit_policy_decision(
                     context,
                     tool_name=_tool_name(func, args),
                     decision="blocked",
-                    reason_code="path_policy",
+                    reason_code="policy_deny" if mode == "deny" else "policy_ask_cancelled",
                     error_type=exc.error.get("type"),
                 )
                 return _read_guard_blocked_result(
