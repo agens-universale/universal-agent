@@ -144,6 +144,7 @@ def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
         "read_guard": app_cfg.security.read_guard.model_dump(),
         "url_policy": {
             "enabled": app_cfg.security.url_policy.enabled,
+            "mode": app_cfg.security.url_policy.mode,
             "allowed_schemes": app_cfg.security.url_policy.allowed_schemes,
             "url_blacklist": app_cfg.security.url_policy.url_blacklist,
         },

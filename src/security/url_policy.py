@@ -142,12 +142,46 @@ def enforce_url_policy(
             }
             if decision.matched_rule is not None:
                 error["matched_rule"] = decision.matched_rule
+            mode = (context.url_policy_mode or "deny").strip().lower()
+            if mode == "allow":
+                audit_policy_decision(
+                    context,
+                    tool_name=_tool_name(func, args),
+                    decision="executed",
+                    reason_code="policy_allow_out_of_perimeter",
+                    risk_flags=["out_of_perimeter"],
+                    error_type=decision.error_type,
+                )
+                return func(*args, **kwargs)
+            if mode == "ask":
+                from security.path_policy import prompt_user_confirmation
+                confirmed = prompt_user_confirmation(
+                    title="URL policy",
+                    fields=[
+                        ("Тул", _tool_name(func, args)),
+                        ("URL", decision.url),
+                        ("Причина", decision.reason or ""),
+                        ("Matched rule", decision.matched_rule or "-"),
+                    ],
+                    question="Разрешить запрос к URL вне policy?",
+                )
+                if confirmed:
+                    audit_policy_decision(
+                        context,
+                        tool_name=_tool_name(func, args),
+                        decision="executed",
+                        reason_code="policy_ask_confirmed",
+                        risk_flags=["out_of_perimeter"],
+                        error_type=decision.error_type,
+                    )
+                    return func(*args, **kwargs)
+                error["type"] = "url_blocked_by_policy_cancelled_by_user"
             audit_policy_decision(
                 context,
                 tool_name=_tool_name(func, args),
                 decision="blocked",
-                reason_code="policy_deny",
-                error_type=decision.error_type,
+                reason_code="policy_deny" if mode == "deny" else "policy_ask_cancelled",
+                error_type=error.get("type"),
             )
             if blocked_result_factory is not None:
                 return blocked_result_factory(error)

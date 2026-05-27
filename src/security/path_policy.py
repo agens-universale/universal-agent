@@ -26,6 +26,7 @@ class ToolSecurityContext:
     url_allowed_schemes: list[str] = field(default_factory=lambda: ["http", "https"])
     url_blacklist: list[str] = field(default_factory=list)
     url_policy_enabled: bool = False
+    url_policy_mode: str = "deny"
     ctx: Any = None
     state: Any = None
     logger: Any = None
@@ -167,6 +168,7 @@ def resolve_tool_context(*args: Any, **kwargs: Any) -> ToolSecurityContext:
         url_allowed_schemes=list(url_policy_cfg.get("allowed_schemes") or ["http", "https"]),
         url_blacklist=list(url_policy_cfg.get("url_blacklist") or []),
         url_policy_enabled=bool(url_policy_cfg.get("enabled", False)),
+        url_policy_mode=str(url_policy_cfg.get("mode", "deny")).strip().lower(),
         ctx=ctx,
         state=state,
         logger=logger,

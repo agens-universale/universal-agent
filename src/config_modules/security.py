@@ -143,11 +143,27 @@ class WriteGuardConfig(BaseModel):
 
 
 class UrlPolicyConfig(BaseModel):
-    """URL-policy для fetch_url/simple_fetch_url. Safe-by-default-OFF: enabled=False."""
+    """
+    URL-policy для fetch_url/simple_fetch_url. Safe-by-default-OFF: enabled=False.
+
+    mode:
+      deny  — нарушение → блок с `url_blocked_by_policy` (по умолчанию);
+      ask   — нарушение → запрос подтверждения у пользователя (interactive);
+      allow — нарушение → пропустить, audit log пометит `out_of_perimeter`.
+    """
     model_config = ConfigDict(extra="forbid")
     enabled: bool = False
+    mode: str = "deny"
     allowed_schemes: list[str] = Field(default_factory=lambda: ["http", "https"])
     url_blacklist: list[str] = Field(default_factory=list)
+
+    @field_validator("mode")
+    @classmethod
+    def validate_mode(cls, value: str) -> str:
+        mode = str(value or "deny").strip().lower()
+        if mode not in {"allow", "ask", "deny"}:
+            raise ValueError("security.url_policy.mode должен быть 'allow', 'ask' или 'deny'")
+        return mode
 
 
 class ReadGuardConfig(BaseModel):

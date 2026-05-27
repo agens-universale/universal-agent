@@ -120,10 +120,19 @@ security:
 
 Проверяется для **исходного** URL в `fetch_url`/`simple_fetch_url` до сетевого запроса. Redirect targets валидируются per-hop **только в `simple_fetch_url`**.
 
+`mode` (как у write/read_guard):
+
+| mode | Поведение при матче blacklist / disallowed scheme |
+|---|---|
+| `deny` (default) | блок c `url_blocked_by_policy` / `url_validation_failed` |
+| `ask` | Prompt: «Разрешить запрос к URL вне policy? [y/N]:». Confirm → пропустить + audit `out_of_perimeter`; decline → `url_blocked_by_policy_cancelled_by_user`. Auto-decline если stdin не tty. |
+| `allow` | Пропустить + audit `risk_flags: ["out_of_perimeter"]` |
+
 ```yaml
 security:
   url_policy:
     enabled: true
+    mode: deny                        # allow | ask | deny
     allowed_schemes: ["http", "https"]
     url_blacklist:
       - "169.254.*"                    # link-local + AWS/GCP IMDS 169.254.169.254
