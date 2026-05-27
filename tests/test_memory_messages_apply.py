@@ -14,7 +14,7 @@ def _state() -> State:
         max_steps=100,
         system_prompt_id="v1",
         use_server_subagents=False,
-        shared=SharedStateData(memory_files={"journal": "note"}),
+        shared=SharedStateData(working_memory={"state": "note"}),
     )
 
 
@@ -37,7 +37,7 @@ def test_apply_appends_gate_when_notice_threshold_reached():
         step_messages=[{"role": "assistant", "content": "ok", "id": "a1"}],
     )
     assert len(out) == 2
-    assert "not used memory_files" in out[1]["content"]
+    assert "not used working_memory" in out[1]["content"]
     assert state.memory_notice_cnt == 0
 
 

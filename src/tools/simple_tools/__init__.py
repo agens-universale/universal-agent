@@ -8,14 +8,13 @@ from tools.simple_tools.answer_question import AnswerQuestion
 from tools.simple_tools.execute_command import ExecuteCommand
 from tools.simple_tools.search_and_replace import SearchAndReplace
 from tools.simple_tools.think import Think
-from tools.simple_tools.thread_notes import ThreadNotes
-from tools.simple_tools.memory_files import MemoryFiles
 from tools.simple_tools.long_memory import LongMemory
 from tools.simple_tools.submit_solution import SubmitSolution
 from tools.simple_tools.calculator import Calculator
 from tools.simple_tools.sleep_tool import Sleep
 from tools.simple_tools.run_python_code import RunPythonCode
 from tools.simple_tools.save_base64_file import SaveBase64File
+from tools.simple_tools.working_memory import WorkingMemory
 from tools.stored_outputs.read_stored_tool_output import ReadStoredToolOutput
 try:
     from tools.simple_tools.fetch_url import FetchUrl
@@ -71,11 +70,6 @@ def get_simple_tools_data(config_dict: Dict[str, Any]) -> Dict[str, Dict[str, An
         #     'spec': ThreadNotes.tool_description(),
         #     'description': ThreadNotes.prompt_description(),
         # },
-        'memory_files': {
-            'tool_fabric': MemoryFiles,
-            'spec': MemoryFiles.tool_description(),
-            'description': MemoryFiles.prompt_description(config_dict),
-        },
         'long_memory': {
             'tool_fabric': LongMemory,
             'spec': LongMemory.tool_description(),
@@ -130,6 +124,11 @@ def get_simple_tools_data(config_dict: Dict[str, Any]) -> Dict[str, Dict[str, An
             'tool_fabric': AnswerQuestion,
             'spec': AnswerQuestion.tool_description(),
             'description': AnswerQuestion.prompt_description(),
+        },
+        'working_memory': {
+            'tool_fabric': WorkingMemory,
+            'spec': WorkingMemory.tool_description(),
+            'description': WorkingMemory.prompt_description(),
         },
     }
 

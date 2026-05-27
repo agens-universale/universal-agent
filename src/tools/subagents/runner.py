@@ -9,6 +9,7 @@ from config_modules.stored_outputs import get_stored_tool_outputs_max_entries
 from run_summary_coordinator import RunSummaryCoordinator
 from summarize.config import parse_summary_trigger_chars
 from message_policy.memory_messages_notice.policy import (
+    get_thread_memory_registers_from_shared,
     maybe_emit_subagent_wiki_bootstrap,
     wrap_thread_memory_technical_user_message,
 )
@@ -99,7 +100,7 @@ class SubagentRunner:
         child_meta: Dict[str, Any] = {}
         messages = self._build_initial_messages(child_state, agent_role, user_message)
         child_state.init_subagent_current_user_intent(initial_message)
-        shared_mf = getattr(child_state.shared, "memory_files", None) or {}
+        shared_mf = get_thread_memory_registers_from_shared(child_state.shared)
         bootstrap_text = maybe_emit_subagent_wiki_bootstrap(
             child_meta, self._config, shared_mf
         )

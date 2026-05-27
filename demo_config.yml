@@ -115,11 +115,12 @@ quality_gate:
   max_dialogue_chars: 200000
   max_message_chars: 5000
 
-# Лимиты thread wiki (memory_files); docs_md/memory_messages/SPEC.md
-memory_files:
-  max_file_chars: 20000
-  total_budget_chars: 50000
-  max_files: 5
+working_memory:
+  max_chars_goal: 2000
+  max_chars_constraints: 4000
+  max_chars_state: 6000
+  max_chars_knowledge: 8000
+  total_budget_chars: 20000
 
 # Technical hints о памяти (wiki gate, long memory); docs_md/memory_messages/SPEC.md
 memory_gate:

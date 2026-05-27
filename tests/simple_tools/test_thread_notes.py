@@ -2,7 +2,7 @@ import json
 from types import SimpleNamespace
 
 from states import SharedStateData
-from tools.simple_tools.thread_notes import ThreadNotes
+from tools.simple_tools.deprecated_tools.thread_notes import ThreadNotes
 
 
 def test_thread_notes_no_state():

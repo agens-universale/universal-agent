@@ -20,6 +20,10 @@ from config_modules.stored_outputs import normalize_tool_output_limits
 from config_modules.intent_scope import IntentScopeConfig, normalize_intent_scope_config
 from config_modules.quality_gate import QualityGateConfig, normalize_quality_gate_config
 from config_modules.memory_files import MemoryFilesConfig, normalize_memory_files_config
+from config_modules.working_memory import (
+    WorkingMemoryConfig,
+    normalize_working_memory_config,
+)
 from config_modules.memory_messages import (
     LongMemoryMessagesConfig,
     MemoryGateConfig,
@@ -54,6 +58,7 @@ class AppConfig(BaseModel):
     quality_gate: QualityGateConfig = Field(default_factory=QualityGateConfig)
     intent_scope: IntentScopeConfig = Field(default_factory=IntentScopeConfig)
     memory_files: MemoryFilesConfig = Field(default_factory=MemoryFilesConfig)
+    working_memory: WorkingMemoryConfig = Field(default_factory=WorkingMemoryConfig)
     memory_gate: MemoryGateConfig = Field(default_factory=MemoryGateConfig)
     long_memory: LongMemoryMessagesConfig = Field(default_factory=LongMemoryMessagesConfig)
     paths: PathsConfig = Field(default_factory=PathsConfig)
@@ -114,6 +119,7 @@ def resolve_paths(cfg: AppConfig, config_dir: str) -> None:
         )
     normalize_quality_gate_config(cfg.quality_gate)
     normalize_memory_files_config(cfg.memory_files)
+    normalize_working_memory_config(cfg.working_memory)
     normalize_memory_gate_config(cfg.memory_gate)
     normalize_long_memory_messages_config(cfg.long_memory)
     normalize_intent_scope_config(cfg.intent_scope)

@@ -1,6 +1,6 @@
 import json
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 from config_modules.memory_files import (
     DEFAULT_MAX_FILE_CHARS as _DEFAULT_MAX_FILE_CHARS,
@@ -8,6 +8,7 @@ from config_modules.memory_files import (
     DEFAULT_TOTAL_BUDGET_CHARS as _DEFAULT_TOTAL_BUDGET_CHARS,
 )
 from tools.simple_tools.abstract_simple_tool import AbstractSimpleTool
+
 _VALID_NAME_RE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 _PROTECTED_FILES = frozenset({"journal"})
 
@@ -66,10 +67,6 @@ class MemoryFiles(AbstractSimpleTool):
             return val
         return default
 
-    # ------------------------------------------------------------------
-    # Tool descriptor (sent to the model as function spec)
-    # ------------------------------------------------------------------
-
     @classmethod
     def tool_description(cls) -> Dict[str, Any]:
         return {
@@ -78,7 +75,7 @@ class MemoryFiles(AbstractSimpleTool):
             "description": (
                 "Persistent named memory files for the current thread. "
                 "Each file is a markdown register that survives summarization. "
-                "IMPORTANT: This tool is for INTERNAL AGENT MEMORY ONLY — it does NOT write files to the filesystem. "
+                "IMPORTANT: This tool is for INTERNAL AGENT MEMORY ONLY - it does NOT write files to the filesystem. "
                 "To create or write files on disk (e.g. .py, .json, .txt files), use the write_to_file tool instead. "
                 "Default file is 'journal'. "
                 "Use action='list' to see all file names and sizes. "
@@ -87,7 +84,7 @@ class MemoryFiles(AbstractSimpleTool):
                 "Use action='write' to fully rewrite a file. "
                 "Use action='delete' to remove a file (journal cannot be deleted). "
                 "Keep `content` concise: store facts, decisions, and evidence only. "
-                "Do NOT put large text blobs in a single call—one huge `content` often breaks "
+                "Do NOT put large text blobs in a single call-one huge `content` often breaks "
                 "tool-call JSON due to max_tokens limits. Split across several append calls if needed."
             ),
             "parameters": {
@@ -116,7 +113,7 @@ class MemoryFiles(AbstractSimpleTool):
                         "description": (
                             "Markdown text for append/write; keep each call moderate-sized. "
                             "For append: ONLY the new delta (do not resend existing content). "
-                            "For write: the FULL updated content, but keep it concise—if the "
+                            "For write: the FULL updated content, but keep it concise-if the "
                             "rewrite is large, split into write + subsequent appends."
                         ),
                     },
@@ -126,10 +123,6 @@ class MemoryFiles(AbstractSimpleTool):
             },
             "strict": True,
         }
-
-    # ------------------------------------------------------------------
-    # Prompt description (injected into system prompt for the model)
-    # ------------------------------------------------------------------
 
     @classmethod
     def prompt_description(cls, config_dict: Optional[Dict[str, Any]] = None) -> str:
@@ -168,7 +161,7 @@ Payload size:
 Workflow:
 - Prefer dialog_summary `<memory_files>` when present; use action="read" for registers you need in full.
 - Call action="list" only when register names are unknown.
-- When you fix a decision, fact, or structure — append or write to an appropriate file.
+- When you fix a decision, fact, or structure - append or write to an appropriate file.
 - Keep files concise: facts, evidence, decisions. NOT long reasoning or chain-of-thought.
 - "journal" is the chronological log of important events and decisions.
 
@@ -182,14 +175,10 @@ Return format (JSON string):
   "error": null|{{"type":"...","message":"...","files":{{...}}}},
   "files": {{"file_name": "Length - <N> chars", ...}},
   "total_chars": number,
-  "hint": "..." (only for list when files is empty — nudge to start using memory),
+  "hint": "..." (only for list when files is empty - nudge to start using memory),
   "content": "..." (only for read)
 }}
 '''
-
-    # ------------------------------------------------------------------
-    # Internal helpers
-    # ------------------------------------------------------------------
 
     def _get_files(self) -> Dict[str, str]:
         shared = getattr(self._state, "shared", None)
@@ -247,10 +236,6 @@ Return format (JSON string):
             error=err,
         )
 
-    # ------------------------------------------------------------------
-    # __call__  — entry point
-    # ------------------------------------------------------------------
-
     def __call__(
         self,
         action: str,
@@ -284,10 +269,6 @@ Return format (JSON string):
 
         return handler(file_name=file_name, content=content)
 
-    # ------------------------------------------------------------------
-    # Actions
-    # ------------------------------------------------------------------
-
     def _action_list(self, **_: Any) -> str:
         files = self._get_files()
         summary = _files_summary(files)
@@ -314,7 +295,7 @@ Return format (JSON string):
                     action="read",
                     files=_files_summary(files),
                     total_chars=_total_chars(files),
-                    content="(empty — use append to start logging decisions and facts)",
+                    content="(empty - use append to start logging decisions and facts)",
                 )
             return self._error("read", "not_found", f"File '{file_name}' does not exist.")
         return self._result(
@@ -399,10 +380,6 @@ Return format (JSON string):
             files=_files_summary(files),
             total_chars=_total_chars(files),
         )
-
-    # ------------------------------------------------------------------
-    # Limit checks
-    # ------------------------------------------------------------------
 
     def _check_limits(
         self,

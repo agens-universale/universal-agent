@@ -9,6 +9,7 @@ from message_policy.long_memory_notice.policy import (
     wrap_long_memory_hint_user_message,
 )
 from message_policy.memory_messages_notice.policy import (
+    get_thread_memory_registers_from_shared,
     memory_gate_enabled,
     maybe_emit_memory_gate,
     update_memory_notice_after_persist,
@@ -45,12 +46,8 @@ def apply_memory_messages_before_llm(
         out.append(wrap_long_memory_hint_user_message(hint_text, suffix="mem_long"))
         emitted_notice = True
 
-    memory_files = {}
     shared = getattr(state, "shared", None)
-    if shared is not None:
-        raw_mf = getattr(shared, "memory_files", None)
-        if isinstance(raw_mf, dict):
-            memory_files = raw_mf
+    memory_files = get_thread_memory_registers_from_shared(shared)
 
     gate_text = maybe_emit_memory_gate(state, cfg, memory_files)
     if gate_text:

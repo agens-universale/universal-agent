@@ -19,6 +19,7 @@ from tools.skills.skills_policy import render_skills_catalog
 class SharedStateData:
     """Данные, разделяемые между оркестратором и его субагентами."""
     memory_files: Dict[str, str] = field(default_factory=dict)
+    working_memory: Dict[str, str] = field(default_factory=dict)
     notes_md: str = ""
     fetch_url_cache: Dict[str, str] = field(default_factory=dict)
 
@@ -144,6 +145,7 @@ class State:
         if isinstance(shared, SharedStateData):
             raw["shared"] = {
                 "memory_files": dict(shared.memory_files),
+                "working_memory": dict(shared.working_memory),
                 "notes_md": shared.notes_md,
                 "fetch_url_cache": dict(shared.fetch_url_cache),
             }
@@ -174,6 +176,7 @@ class State:
             try:
                 state.shared = SharedStateData(
                     memory_files=shared_raw.get("memory_files") or {},
+                    working_memory=shared_raw.get("working_memory") or {},
                     notes_md=str(shared_raw.get("notes_md") or ""),
                     fetch_url_cache=shared_raw.get("fetch_url_cache") or {},
                 )

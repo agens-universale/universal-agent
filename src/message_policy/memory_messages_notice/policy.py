@@ -12,12 +12,30 @@ from message_policy.memory_messages_notice.state import (
 )
 from message_policy.user_message_policy import wrap_technical_user_content, TECHNICAL_TYPE_CURRENT_CONTEXT
 
+THREAD_MEMORY_TOOL_NAMES = (
+    "working_memory",
+    "memory_files",
+)
+
+
+def _stopped_tools(config_dict: dict[str, Any] | None) -> set[str]:
+    stop = config_dict.get("stop_tools") if isinstance(config_dict, dict) else None
+    if not isinstance(stop, list):
+        return set()
+    return {str(item).strip() for item in stop if isinstance(item, str) and item.strip()}
+
+
+def preferred_thread_memory_tool_name(config_dict: dict[str, Any] | None) -> str:
+    stopped = _stopped_tools(config_dict)
+    for tool_name in THREAD_MEMORY_TOOL_NAMES:
+        if tool_name not in stopped:
+            return tool_name
+    return THREAD_MEMORY_TOOL_NAMES[0]
+
 
 def tool_memory_files_enabled(config_dict: dict[str, Any] | None) -> bool:
-    stop = config_dict.get("stop_tools") if isinstance(config_dict, dict) else None
-    if isinstance(stop, list) and "memory_files" in stop:
-        return False
-    return True
+    stopped = _stopped_tools(config_dict)
+    return any(tool_name not in stopped for tool_name in THREAD_MEMORY_TOOL_NAMES)
 
 
 def memory_gate_enabled(config_dict: dict[str, Any] | None) -> bool:
@@ -32,9 +50,9 @@ def batch_used_memory_files(step_messages: list[dict[str, Any]]) -> bool:
         if not isinstance(message, dict):
             continue
         name = message.get("name")
-        if name == "memory_files":
+        if name in THREAD_MEMORY_TOOL_NAMES:
             return True
-        if message.get("type") == "function_call" and name == "memory_files":
+        if message.get("type") == "function_call" and name in THREAD_MEMORY_TOOL_NAMES:
             return True
     return False
 
@@ -70,12 +88,13 @@ def build_memory_gate_message(
     *,
     cooldown_messages: int,
     memory_files: dict[str, str],
+    tool_name: str,
 ) -> str:
     index = _format_register_index(memory_files if isinstance(memory_files, dict) else {})
     return (
-        f"You have not used memory_files for at least {cooldown_messages} steps. "
+        f"You have not used {tool_name} for at least {cooldown_messages} steps. "
         "Review the thread wiki if you need persistent context. "
-        "Prefer dialog_summary when present; use memory_files read when needed.\n"
+        f"Prefer dialog_summary when present; use {tool_name} read when needed.\n"
         f"{index}"
     )
 
@@ -94,6 +113,7 @@ def maybe_emit_memory_gate(
     return build_memory_gate_message(
         cooldown_messages=threshold,
         memory_files=memory_files or {},
+        tool_name=preferred_thread_memory_tool_name(config_dict),
     )
 
 
@@ -107,14 +127,32 @@ def build_subagent_wiki_bootstrap_message(memory_files: dict[str, str] | None) -
     if not non_empty:
         return (
             "Thread memory (shared wiki): no registers yet. "
-            "Append durable facts with memory_files before submit when you learn something worth keeping."
+            "Append durable facts with the thread memory tool before submit when you learn something worth keeping."
         )
     index = _format_register_index(non_empty)
     return (
         "Thread memory (shared wiki): shared with the orchestrator for this thread. "
-        "Read registers you need; append durable outcomes before submit.\n"
+        "Read registers you need; append durable outcomes with the thread memory tool before submit.\n"
         f"{index}"
     )
+
+
+def get_thread_memory_registers_from_shared(shared: Any) -> dict[str, str]:
+    if shared is None:
+        return {}
+
+    for attr_name in ("working_memory", "memory_files"):
+        raw = getattr(shared, attr_name, None)
+        if not isinstance(raw, dict):
+            continue
+        out = {
+            str(name): content
+            for name, content in raw.items()
+            if isinstance(name, str) and isinstance(content, str)
+        }
+        if out:
+            return out
+    return {}
 
 
 def maybe_emit_subagent_wiki_bootstrap(

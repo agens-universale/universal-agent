@@ -3,8 +3,10 @@ from types import SimpleNamespace
 from message_policy.memory_messages_notice.policy import (
     batch_used_memory_files,
     build_memory_gate_message,
+    get_thread_memory_registers_from_shared,
     maybe_emit_memory_gate,
     maybe_emit_subagent_wiki_bootstrap,
+    preferred_thread_memory_tool_name,
     update_memory_notice_after_persist,
 )
 from states import State
@@ -36,7 +38,7 @@ def test_memory_notice_resets_on_memory_files_batch():
     state.memory_notice_cnt = 5
     update_memory_notice_after_persist(
         state,
-        [{"type": "function_call", "name": "memory_files", "arguments": "{}"}],
+        [{"type": "function_call", "name": "working_memory", "arguments": "{}"}],
     )
     assert state.memory_notice_cnt == 0
 
@@ -50,9 +52,18 @@ def test_memory_notice_resets_after_emitted_notice():
 
 def test_batch_used_memory_files_detects_function_call():
     assert batch_used_memory_files(
+        [{"type": "function_call", "name": "working_memory"}]
+    )
+    assert batch_used_memory_files(
         [{"type": "function_call", "name": "memory_files"}]
     )
     assert not batch_used_memory_files([{"type": "function_call", "name": "read_file"}])
+
+
+def test_preferred_thread_memory_tool_name_with_stop_tools():
+    assert preferred_thread_memory_tool_name({"stop_tools": []}) == "working_memory"
+    assert preferred_thread_memory_tool_name({"stop_tools": ["working_memory"]}) == "memory_files"
+    assert preferred_thread_memory_tool_name({"stop_tools": ["working_memory", "memory_files"]}) == "working_memory"
 
 
 def test_maybe_emit_memory_gate_respects_threshold_and_stop_tools():
@@ -65,10 +76,10 @@ def test_maybe_emit_memory_gate_respects_threshold_and_stop_tools():
     }
     text = maybe_emit_memory_gate(state, cfg, {"journal": "note"})
     assert text is not None
-    assert "not used memory_files" in text
+    assert "not used working_memory" in text
     assert "journal" in text
 
-    cfg_blocked = {**cfg, "stop_tools": ["memory_files"]}
+    cfg_blocked = {**cfg, "stop_tools": ["working_memory", "memory_files"]}
     assert maybe_emit_memory_gate(state, cfg_blocked, {"journal": "x"}) is None
 
 
@@ -96,6 +107,15 @@ def test_build_memory_gate_message_includes_register_index():
     msg = build_memory_gate_message(
         cooldown_messages=30,
         memory_files={"arch": "line1\nline2"},
+        tool_name="working_memory",
     )
     assert "30" in msg
     assert "arch" in msg
+
+
+def test_get_thread_memory_registers_prefers_working_memory():
+    shared = SimpleNamespace(
+        working_memory={"state": "progress"},
+        memory_files={"journal": "legacy"},
+    )
+    assert get_thread_memory_registers_from_shared(shared) == {"state": "progress"}
