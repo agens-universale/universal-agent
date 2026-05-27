@@ -1,0 +1,60 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<feed xmlns:opensearch="http://a9.com/-/spec/opensearch/1.1/" xmlns:arxiv="http://arxiv.org/schemas/atom" xmlns="http://www.w3.org/2005/Atom">
+  <id>https://arxiv.org/api/SIkcCYXJY/oR12GaVh6+MSe56ko</id>
+  <title>arXiv Query: search_query=all:transformer OR all:protein OR all:design&amp;id_list=&amp;start=0&amp;max_results=2</title>
+  <updated>2026-05-18T18:34:13Z</updated>
+  <link href="https://arxiv.org/api/query?search_query=all:transformer+OR+(all:protein+OR+all:design)&amp;start=0&amp;max_results=2&amp;id_list=" type="application/atom+xml"/>
+  <opensearch:itemsPerPage>2</opensearch:itemsPerPage>
+  <opensearch:totalResults>438934</opensearch:totalResults>
+  <opensearch:startIndex>0</opensearch:startIndex>
+  <entry>
+    <id>http://arxiv.org/abs/2207.07410v1</id>
+    <title>AlphaFold predicts the most complex protein knot and composite protein knots</title>
+    <updated>2022-07-15T11:38:45Z</updated>
+    <link href="https://arxiv.org/abs/2207.07410v1" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2207.07410v1" rel="related" type="application/pdf" title="pdf"/>
+    <summary>The computer artificial intelligence system AlphaFold has recently predicted previously unknown three-dimensional structures of thousands of proteins. Focusing on the subset with high-confidence scores, we algorithmically analyze these predictions for cases where the protein backbone exhibits rare topological complexity, i.e. knotting. Amongst others, we discovered a $7_1$-knot, the most topologically complex knot ever found in a protein, as well several 6-crossing composite knots comprised of two methyltransferase or carbonic anhydrase domains, each containing a simple trefoil knot. These deeply embedded composite knots occur evidently by gene duplication and interconnection of knotted dimers. Finally, we report two new five-crossing knots including the first $5_1$-knot. Our list of analyzed structures forms the basis for future experimental studies to confirm these novel knotted topologies and to explore their complex folding mechanisms.</summary>
+    <category term="q-bio.BM" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="cond-mat.soft" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="physics.bio-ph" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2022-07-15T11:38:45Z</published>
+    <arxiv:comment>This article appeared openly accessible in M. A. Brems et al., Protein Science. 2022; 31( 8):e4380 and may be found at https://doi.org/10.1002/pro.4380</arxiv:comment>
+    <arxiv:primary_category term="q-bio.BM"/>
+    <arxiv:journal_ref>Protein Science. 2022; 31( 8):e4380</arxiv:journal_ref>
+    <author>
+      <name>Maarten A. Brems</name>
+    </author>
+    <author>
+      <name>Robert Runkel</name>
+    </author>
+    <author>
+      <name>Todd O. Yeates</name>
+    </author>
+    <author>
+      <name>Peter Virnau</name>
+    </author>
+    <arxiv:doi>10.1002/pro.4380</arxiv:doi>
+    <link rel="related" href="https://doi.org/10.1002/pro.4380" title="doi"/>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2201.07338v2</id>
+    <title>Controllable Protein Design with Language Models</title>
+    <updated>2022-08-22T18:44:27Z</updated>
+    <link href="https://arxiv.org/abs/2201.07338v2" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2201.07338v2" rel="related" type="application/pdf" title="pdf"/>
+    <summary>The 21st century is presenting humankind with unprecedented environmental and medical challenges. The ability to design novel proteins tailored for specific purposes could transform our ability to respond timely to these issues. Recent advances in the field of artificial intelligence are now setting the stage to make this goal achievable. Protein sequences are inherently similar to natural languages: Amino acids arrange in a multitude of combinations to form structures that carry function, the same way as letters form words and sentences that carry meaning. Therefore, it is not surprising that throughout the history of Natural Language Processing (NLP), many of its techniques have been applied to protein research problems. In the last few years, we have witnessed revolutionary breakthroughs in the field of NLP. The implementation of Transformer pre-trained models has enabled text generation with human-like capabilities, including texts with specific properties such as style or subject. Motivated by its considerable success in NLP tasks, we expect dedicated Transformers to dominate custom protein sequence generation in the near future. Finetuning pre-trained models on protein families will enable the extension of their repertoires with novel sequences that could be highly divergent but still potentially functional. The combination of control tags such as cellular compartment or function will further enable the controllable design of novel protein functions. Moreover, recent model interpretability methods will allow us to open the 'black box' and thus enhance our understanding of folding principles. While early initiatives show the enormous potential of generative language models to design functional sequences, the field is still in its infancy. We believe that protein language models are a promising and largely unexplored field and discuss their foreseeable impact on protein design.</summary>
+    <category term="q-bio.BM" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2022-01-18T22:23:03Z</published>
+    <arxiv:comment>This is a version before peer-review. A view-only, peer-reviewed, published version can be found here: https://rdcu.be/cQbmH. The peer-reviewed version is under embargo at Nat Mach Intell until 12/2022</arxiv:comment>
+    <arxiv:primary_category term="q-bio.BM"/>
+    <arxiv:journal_ref>Controllable protein design with language models. Nat Mach Intell 4, 521-532, 2022</arxiv:journal_ref>
+    <author>
+      <name>Noelia Ferruz</name>
+    </author>
+    <author>
+      <name>Birte Höcker</name>
+    </author>
+    <arxiv:doi>10.1038/s42256-022-00499-z</arxiv:doi>
+    <link rel="related" href="https://doi.org/10.1038/s42256-022-00499-z" title="doi"/>
+  </entry>
+</feed>

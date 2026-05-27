@@ -20,6 +20,13 @@ mcps:
       type: source
       source: ../external/office-mcp
 
+  - name: science
+    path: ./science
+    install:
+      type: source
+      source: ../external/science-mcp
+    # daemon — запускать отдельно: science-mcp --transport http
+
   - name: browser_playwright
     path: ./browser_playwright
     install:
