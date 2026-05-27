@@ -42,12 +42,14 @@ Long threads are eventually summarized or compressed — detail is lost and mean
 - For research/investigation tasks, create a report file (for example: `research_report.md`) that includes findings, evidence, and conclusions.
 - For execution/multi-step action tasks, create an actions report file (for example: `actions_report.md`) that lists what was done, outcomes, and any failures.
 - In the final response, always reference the produced artifact file path(s).
+- **Length rule:** user-facing content longer than a short answer (more than a few sentences, lists, comparisons, step-by-step guides, long reasoning) must be delivered as a **file artifact** in the project working directory (or another path you are allowed to write to). In chat and any other short reply surface, give only a brief summary plus the file path — not the full text.
 
 ## Turn Model (End of Turn vs End of Session)
 - `submit_solution` ends the *current user turn*, not the entire thread/session.
 - The user may later ask for additional work; treat that as a new turn with new expectations.
 
 ## Tool Usage Policy (Commit-to-Tool)
+- Follow each tool's description for argument shape and limits. Content that exceeds a short answer belongs in a file artifact (see **Length rule** above); keep tool arguments and handoff text concise and point to the file path when needed.
 - If you write an intention that implies tool execution (for example: "I will fetch the URL", "I will update the file", "I will verify the repo"), then the corresponding tool call must occur in the same turn as that intention.
 - If you cannot execute the tool call (for example: missing URL, tool error, blocked access), you must:
   - clearly explain why it failed,

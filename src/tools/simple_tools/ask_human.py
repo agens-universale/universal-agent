@@ -23,7 +23,9 @@ _TOOL_DESCRIPTION = (
     "Ask the human user and wait for their free-form reply. "
     "Use for clarification, confirmation, subjective judgment, or continuing a dialogue. "
     "Be clear and include necessary context; avoid vague questions. "
-    "The question may be a short prompt or a longer turn (background, reasoning, what you need). "
+    "The `question` must be concise and should contain only the actual question (plus minimal context). "
+    "Do not put long explanations, full comparisons, or large background dumps into `question`; "
+    "deliver detailed material as a separate user-facing artifact when you can, and keep `question` to a short prompt that points to that artifact and states what you need. "
     "When a finite choice set fits, prefer explicit options (A/B/C, numbered list, yes/no) "
     "to minimize follow-up; otherwise ask openly. "
     "After each call, follow the hint field in the tool result to handle the user's reply."
@@ -68,8 +70,9 @@ class AskHuman(AbstractSimpleTool):
                     "question": {
                         "type": "string",
                         "description": (
-                            "Clear message to the human (markdown ok): question, context, and "
-                            "preferably explicit answer options when choices are known."
+                            "Concise message to the human (markdown ok): the question, minimal context, "
+                            "and explicit answer options when choices are known. Not for long content—"
+                            "provide that as a separate artifact and reference it here."
                         ),
                     }
                 },
@@ -108,10 +111,11 @@ When NOT to use:
 
 How to formulate `question`:
 - Be clear; include necessary context; avoid vague prompts like "What should I do?".
-- May be **short** or a **longer conversational turn**: background, your reasoning so far, partial findings, then what you need.
+- Keep it **short**: only the question and minimal context needed to answer.
+- Long material belongs in a **user-facing artifact** (when your environment allows); in `question`, point to it and ask what you need—do not paste the full text here.
 - When a finite choice set fits, prefer **closed-form** with explicit options (A/B/C, numbered list, yes/no) to minimize follow-up.
 - Use an **open** question when options would be incomplete, misleading, or worse than free-form.
-- Markdown is fine (code snippets, lists). Hard limit: 4096 characters per question.
+- Markdown is fine (code snippets, lists), but avoid long narratives. Hard limit: 4096 characters per question.
 
 After each call — read `response` and the result **`hint`**:
 Classify the reply before advancing. Same rules as the live hint; four categories:

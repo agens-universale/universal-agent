@@ -4,6 +4,7 @@ from tools.simple_tools.read_file import ReadFile
 from tools.simple_tools.list_files import ListFiles
 from tools.simple_tools.search_files import SearchFiles
 from tools.simple_tools.ask_human import AskHuman
+from tools.simple_tools.answer_question import AnswerQuestion
 from tools.simple_tools.execute_command import ExecuteCommand
 from tools.simple_tools.search_and_replace import SearchAndReplace
 from tools.simple_tools.think import Think
@@ -124,6 +125,11 @@ def get_simple_tools_data(config_dict: Dict[str, Any]) -> Dict[str, Dict[str, An
             'tool_fabric': AskHuman,
             'spec': AskHuman.tool_description(),
             'description': AskHuman.prompt_description(),
+        },
+        'answer_question': {
+            'tool_fabric': AnswerQuestion,
+            'spec': AnswerQuestion.tool_description(),
+            'description': AnswerQuestion.prompt_description(),
         },
     }
 
