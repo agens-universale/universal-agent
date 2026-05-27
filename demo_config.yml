@@ -173,14 +173,37 @@ security:
     #   ask   — то же → запрос подтверждения у пользователя;
     #   allow — то же → пропустить + audit `out_of_perimeter`.
     mode: deny
+    # -----------------------------------------------------------------
+    # Разница между allowed_read_roots и allowed_read_paths (важно!):
+    #
+    #   allowed_read_roots = "КАРТА разрешённой территории" — большие
+    #     корневые директории, где вообще разрешено читать. Это глобальный
+    #     периметр. Файл вне этих корней → блок.
+    #
+    #   allowed_read_paths = "VIP-пропуск для исключений" — точечные дырки
+    #     в denied_*. Если путь матчит — разрешено, даже если он попадает
+    #     под denied_read_paths / denied_file_patterns / denied_extensions.
+    #
+    # Канонический пример (.gc запрещён, но .gc/skills — exception):
+    #   allowed_read_roots: []                       # = [launch_root]
+    #   denied_read_paths:    [<launch_root>/.gc]    # вся .gc закрыта
+    #   allowed_read_paths:   [<launch_root>/.gc/skills]  # кроме skills/
+    #
+    # Что получится:
+    #   <launch_root>/main.py             → ✅ allow (внутри проекта)
+    #   /etc/passwd                       → ❌ block (вне периметра)
+    #   <launch_root>/.gc/threads.json    → ❌ block (denied .gc)
+    #   <launch_root>/.gc/skills/foo.md   → ✅ allow (exception override)
+    # -----------------------------------------------------------------
+
     # Где разрешено читать (периметр):
     #   []        → трактуется как [launch_root] (только проект);
-    #   ["*"]     → allow-by-default по ФС, режут только denied_*;
+    #   ["*"]     → allow-by-default по ФС (файловая система), режут только denied_*;
     #   ["/abs"]  → объединение указанных корней.
     allowed_read_roots: []
-    # Точечные exception-override НАД denied_*: если путь матчит — разрешено,
-    # даже если он в denied_read_paths / denied_file_patterns / denied_extensions.
-    # Используется для подкаталогов внутри denied (например skills/ внутри .gc/).
+
+    # Точечные exception-override НАД denied_*. Используется для подкаталогов
+    # внутри denied (например skills/ внутри .gc/ — см. пример выше).
     allowed_read_paths: []
     # allowed_read_paths:
     #   - "~/.local/state/gc/skills"
