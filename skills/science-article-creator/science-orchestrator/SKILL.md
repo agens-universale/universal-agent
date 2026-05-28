@@ -16,6 +16,21 @@ version: 0.1.0
 
 Управляет длинной исследовательской сессией с двумя контурами: быстрая итерация (inner) и периодический синтез (outer). На выходе — артефакт + финальный отчёт со ссылками.
 
+## Граница ответственности (MANDATORY)
+
+Orchestrator **координирует**, а не исполняет. Запрещено делать своими руками то, что закрыто inner-скиллами:
+
+- Поиск литературы → **только** через `skills_load("science-article-creator:scientific-research")`, не напрямую через `science-literature_search` / `science-preprint_search`.
+- Структурирование результатов → **только** через `skills_load("science-article-creator:research-artifact-compiler")`.
+- Написание отчёта → **только** через `skills_load("science-article-creator:scientific-article-creator")`.
+- Self-review итогового документа → **только** через `skills_load("science-article-creator:scientific-article-checker")`.
+
+Прямые вызовы `science-*` MCP-тулов orchestrator'ом допустимы **только** в двух случаях:
+1. Pre-flight `science-explain_sources` один раз в начале сессии.
+2. Точечный `science-work_lookup`, когда нужно резолвить один identifier, упомянутый пользователем в постановке (не результат поиска — это работа inner-скиллов).
+
+Если по логу видно, что orchestrator делает много прямых поисков и резолвов — он не делегирует. Это failure исполнения, а не «эффективность». Перезапустить с явным напоминанием о делегировании.
+
 ## Входные данные
 
 - Тема / research question.
@@ -35,10 +50,10 @@ version: 0.1.0
 
 1. **Pick** — выбрать гипотезу или подвопрос для итерации.
 2. **Lock protocol** — записать в `iterations/<NN>/plan.md` что именно делаем и какой результат ожидаем ДО действия. Это git-style proof против rationalization задним числом.
-3. **Execute** — действия:
-   - Поиск: вызывать `science-literature_search` / `preprint_search` / `open_access_search` (или делегировать в `scientific-research`).
-   - Чтение: `science-ncbi_fetch` / `open_access_search` для нужных полных текстов.
-   - Резолв: `science-work_lookup` для каждого найденного DOI/PMID/arXiv.
+3. **Execute** — действия только через делегирование (см. «Граница ответственности» выше):
+   - Поиск → `skills_load("science-article-creator:scientific-research")` с подзадачей итерации.
+   - Полнотекстовый разбор найденных работ → внутри `scientific-research` или `scientific-article-checker`, не из orchestrator'а.
+   - Резолв identifier'ов из результатов поиска — работа `scientific-research` (он уже делает `work_lookup` для нормализации в `WorkRecord`).
 4. **Measure** — записать в `iterations/<NN>/observations.md`: что нашли, что подтверждает / опровергает гипотезы, какие пробелы.
 5. **Record** — добавить relevant claims/evidence в общий накапливаемый артефакт через `research-artifact-compiler` (incremental режим).
 
@@ -66,12 +81,11 @@ version: 0.1.0
 
 ## MCP-тулы
 
-Все 7 science-mcp + делегирование в inner skills через `skills_load`:
-- `science-explain_sources` — pre-flight.
-- `science-literature_search`, `science-preprint_search`, `science-open_access_search` — поиск.
-- `science-work_lookup` — нормализация идентификаторов.
-- `science-citations_by_doi` — вес источников.
-- `science-ncbi_fetch` — полнотекст PubMed.
+Orchestrator сам вызывает только:
+- `science-explain_sources` — pre-flight один раз в начале сессии.
+- `science-work_lookup` — точечно, если пользователь упомянул identifier в постановке (не из результатов поиска).
+
+Всё остальное (`literature_search`, `preprint_search`, `open_access_search`, `citations_by_doi`, `ncbi_fetch`) — **через делегирование** в inner-скиллы, которые уже знают, как и когда их вызывать.
 
 ## Формат вывода
 
@@ -93,7 +107,8 @@ review.md               # опционально, от scientific-article-checke
 - НЕ совмещать inner и outer loop в одну фазу — outer loop работает только после ≥2 inner итераций.
 - НЕ переписывать prior observations.md ретроактивно. Если ошиблись — новая запись с пометкой.
 - НЕ выдумывать gates («достаточно данных») без явного критерия в master_plan.
-- НЕ повторять функционал inner skills — делегировать через skills_load.
+- НЕ повторять функционал inner skills — делегировать через `skills_load`. Прямой вызов `science-literature_search`, `science-preprint_search`, `science-citations_by_doi` из orchestrator'а — bug, не feature.
+- НЕ писать финальный отчёт самостоятельно. Финал — это `scientific-article-creator` на основе собранного артефакта.
 
 ## Примеры
 
