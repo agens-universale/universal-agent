@@ -7,69 +7,82 @@ version: 0.1.0
 
 # Skill: Research Artifact Compiler
 
-## Когда использовать
+## Language Strategy
 
-- Триггеры: «собери из этих заметок research artifact», «структурируй мои результаты», «преобразуй PDF в claims+evidence», «подготовь материал для статьи».
-- НЕ использовать: казуальные заметки без научного содержания; уже структурированный артефакт (просто использовать как вход).
+- This SKILL.md is in English (project convention).
+- The deliverable — the artifact directory and the chat summary — is produced in **Russian Markdown** unless the user explicitly asks for another language.
+- Quoted source titles, DOIs, and verbatim numerical results stay in their original form.
 
-## Что делает
+## Role boundary
 
-Преобразует разрозненный материал в каноничную директорию с 4 слоями, где каждое утверждение явно привязано к эксперименту или источнику.
+Compiler **structures**, it does not verify. Verifying that citations exist and that claims match cited sources is the job of `scientific-article-checker`. If the user wants verification of the compiled artifact, run the checker as a follow-up step.
 
-## Входные данные
+## When to use
 
-- Сырой текст / путь к файлу / набор файлов (заметки, логи, выдержки из статей).
-- Опционально — топик / гипотеза, к которой материал относится.
+- Triggers: "compile a research artifact from these notes", "structure my results", "turn this PDF into claims+evidence", "prepare material for an article".
+- Do NOT use for casual notes without scientific content. Do NOT use on already-structured artifacts (just consume them).
 
-## Алгоритм
+## What it does
 
-### Шаг 1 — извлечение
+Converts scattered material into a canonical 4-layer directory where every claim is explicitly bound to an experiment or external source.
 
-Сканировать вход, отметить:
-- Утверждения (claims) — предложения с фактическим содержанием.
-- Эксперименты / наблюдения / измерения — описания методики и того, что измеряли.
-- Численные результаты с указанием источника.
-- Внешние ссылки (DOI/PMID/arXiv) — собирать отдельно.
+## Inputs
 
-### Шаг 2 — нормализация цитат
+- Raw text / file path / set of files (notes, logs, paper excerpts).
+- Optional — the topic or hypothesis the material relates to.
 
-Каждый встретившийся идентификатор пропустить через `science-work_lookup`. Сохранить `WorkRecord`. Не-резолвящиеся пометить и сообщить пользователю.
+## Algorithm
 
-### Шаг 3 — формирование 4 слоёв
+### Step 1 — extraction
 
-Создать директорию `<output_dir>/artifact/`:
+Scan the input and tag:
+- Claims — sentences with factual content.
+- Experiments / observations / measurements — descriptions of methodology and what was measured.
+- Numerical results with source attribution.
+- External references (DOI / PMID / arXiv) — collect separately.
+
+### Step 2 — citation normalization (optional)
+
+For each external reference, decide whether normalization is needed:
+- If the input already provides authors / title / year / journal — copy the entry as-is. Do not call `science-work_lookup`.
+- If the input has only a bare identifier (just a DOI or PMID, no other metadata), call `science-work_lookup(identifier)` once to enrich the record.
+- An identifier that fails to resolve is tagged `unresolved` in `sources.json` and surfaced in the chat summary. Verification beyond that is the checker's job, not the compiler's.
+
+### Step 3 — build the 4 layers
+
+Create `<output_dir>/artifact/`:
 
 ```
 artifact/
-├── PAPER.md              # одно-страничный конспект: что исследуем и почему
+├── PAPER.md              # one-page summary: what is being studied and why
 ├── logic/
-│   ├── claims.md         # список утверждений, каждый с criteria и evidence-refs
-│   ├── concepts.md       # формальные определения / переменные
-│   └── related_work.md   # из нормализованных WorkRecord
+│   ├── claims.md         # claims, each with criteria and evidence-refs
+│   ├── concepts.md       # formal definitions / variables
+│   └── related_work.md   # from normalized WorkRecord entries
 ├── physical/
-│   ├── hyperparams.yaml  # если применимо
-│   └── environment.md    # окружение / setup
-├── exploration_tree.yaml # research DAG (≥8 узлов)
+│   ├── hyperparams.yaml  # if applicable
+│   └── environment.md    # environment / setup
+├── exploration_tree.yaml # research DAG (≥8 nodes)
 └── evidence/
-    ├── experiments.md    # списки экспериментов E01, E02, ... — план + методика, БЕЗ точных чисел
-    ├── results.md        # точные численные результаты с привязкой к E01, E02, ...
-    └── sources.json      # массив WorkRecord'ов (с DOI/PMID/arXiv)
+    ├── experiments.md    # E01, E02, ... — design + methodology, NO exact numbers
+    ├── results.md        # exact numerical results bound to E01, E02, ...
+    └── sources.json      # array of WorkRecords (with DOI / PMID / arXiv)
 ```
 
-### Шаг 4 — claims-evidence binding
+### Step 4 — claims-evidence binding
 
-Каждый claim в `logic/claims.md` имеет:
+Every claim in `logic/claims.md` has:
 - ID (C01, C02, …).
-- Текст утверждения.
-- `evidence_refs: [E01, E03]` — на какие эксперименты опирается.
-- `criteria` — при каком наблюдении claim считается опровергнутым.
-- Если evidence-ref'ов нет — статус `unsupported` (заметно красным/тегом).
+- Claim text.
+- `evidence_refs: [E01, E03]` — experiments it relies on.
+- `criteria` — the observation that would refute the claim.
+- If there are no evidence-refs — status `unsupported` (highlighted, red tag).
 
-Правило: формулировка claim'а ограничена тем, что доказывает evidence. Валидационная метрика → claim про валидационную метрику. Не «метод улучшает X в проде», если в evidence только тестовый набор.
+Rule: claim wording is bounded by what the evidence shows. A validation metric supports a claim about a validation metric. Do not write "method improves X in production" when the evidence is a test set only.
 
-### Шаг 5 — exploration_tree.yaml
+### Step 5 — exploration_tree.yaml
 
-Минимум 8 узлов вида:
+At least 8 nodes of the form:
 
 ```yaml
 nodes:
@@ -84,50 +97,54 @@ edges:
     relation: "leads_to | rejects | refines | branches"
 ```
 
-Включать тупики и пивоты честно, не только успешный путь.
+Record dead-ends and pivots honestly — not only the successful path.
 
-### Шаг 6 — валидация
+### Step 6 — self-validation
 
-Прогнать самопроверку:
-- Каждый claim либо имеет ≥1 `evidence_refs`, либо помечен `unsupported`.
-- Каждый experiment ID в claim существует в `experiments.md`.
-- В `experiments.md` нет точных чисел (только дизайн); точные числа в `results.md`.
-- exploration_tree ≥8 узлов.
-- Все `sources.json` записи имеют canonical id.
+Run the following self-check:
+- Every claim either has ≥1 `evidence_refs` or is marked `unsupported`.
+- Every experiment ID referenced from a claim exists in `experiments.md`.
+- `experiments.md` contains no exact numbers (design only); exact numbers live in `results.md`.
+- exploration_tree has ≥8 nodes.
+- Every `sources.json` entry has a canonical identifier.
 
-Отчёт о проверке вывести пользователю.
+Surface the validation report to the user.
 
-## MCP-тулы
+## MCP tools
 
-- `science-work_lookup(identifier)` — нормализация цитат.
-- `science-citations_by_doi(doi, count_only=true)` — опционально, для оценки веса источника в `related_work.md`.
+- `science-work_lookup(identifier)` — **only** when a reference is missing metadata. Not called for already-complete entries.
+- `science-citations_by_doi(doi, count_only=true)` — optional, for citation-weight notes in `related_work.md`.
 
-## Формат вывода
+This skill does not run full verification. If the user asks "are these citations valid?" — hand off to `scientific-article-checker` after compilation.
 
-Структура директории выше + краткое summary в чат:
+## Output format
+
+The directory structure above plus a short chat summary:
+
 ```
 artifact compiled at <path>
 - claims: <N> (supported: <M>, unsupported: <K>)
 - experiments: <N>
 - exploration_tree nodes: <N>
-- sources resolved: <N> / <total>
+- sources: <N> total, <K> normalized via work_lookup, <U> unresolved
 ```
 
-## Что НЕ делать
+## What NOT to do
 
-- НЕ выдумывать experiment'ы / результаты, которых нет во входе. Если данных нет — отметить gap и попросить пользователя дополнить.
-- НЕ копировать точные числа в experiment plans — только в evidence/results.md.
-- НЕ писать готовую статью — артефакт это вход для `scientific-article-creator`.
+- Do not invent experiments / results that are not in the input. If data is missing — flag a gap and ask the user to fill it in.
+- Do not copy exact numbers into experiment plans — they belong only in `evidence/results.md`.
+- Do not write a finished article — the artifact is an input for `scientific-article-creator`.
+- Do not duplicate `scientific-article-checker`: forcing `work_lookup` on every already-complete reference is verification, not structuring.
 
-## Примеры
+## Examples
 
-**Запрос:** «Из этих заметок (3 КБ) собери artifact».
-→ Шаги 1–6. Если из текста извлечено 5 claims и только 2 experiment'а — exploration_tree всё равно ≥8 узлов (включая вопросы и пивоты, не только эксперименты).
+**Request:** "Compile these notes (3 KB) into an artifact."
+→ Steps 1–6. If the text yields 5 claims and only 2 experiments, the exploration_tree still has ≥8 nodes (questions and pivots count, not only experiments).
 
-**Запрос:** «У меня есть только список 10 статей, никаких своих экспериментов».
-→ Артефакт в режиме «обзор»: `claims.md` отражает claim'ы из чужих статей, `evidence_refs` указывают на номера в `sources.json` через E01, E02 как «external evidence», exploration_tree описывает структуру области.
+**Request:** "I only have a list of 10 papers, no experiments of my own."
+→ Review-mode artifact: `claims.md` reflects claims from external papers, `evidence_refs` point to entries in `sources.json` as `E01, E02 ...` external evidence; the exploration_tree describes the structure of the field.
 
-## Ограничения
+## Limits
 
-- Если вход требует full-text работ, а они доступны только в PubMed — `ncbi_fetch` режет на 50 КБ. Использовать суммаризацию или `open_access_search`.
-- Для очень больших входов (>50 КБ) лучше делать в несколько проходов и склеивать.
+- If the input requires full text of papers that exists only in PubMed, `ncbi_fetch` truncates at 50 KB. Use summarization or `open_access_search` instead.
+- For very large inputs (>50 KB), compile in multiple passes and merge.

@@ -7,65 +7,72 @@ version: 0.1.0
 
 # Skill: Scientific Article Checker
 
-## Когда использовать
+## Language Strategy (MANDATORY)
 
-- Триггеры: «проверь эту научную статью», «отрецензируй обзор», «fact-check с проверкой DOI», «оцени методологию статьи», файл со ссылками DOI/PMID/arXiv в нём.
-- НЕ использовать: бытовая проверка статьи без научных ссылок → `articles:check-article`; создание статьи с нуля → `scientific-article-creator`.
+- This SKILL.md is in English (project convention).
+- **The review report MUST be written in Russian.** Title, summary, findings text, dimension comments, recommendations — all Russian. Even when the article being reviewed is in English or contains English technical terms, the review report itself is Russian Markdown.
+- Quoted titles, journals, DOI / PMID / arXiv identifiers and direct quotes from the article stay verbatim in their original language.
+- If the user explicitly asks for English output, switch — otherwise default to Russian regardless of the input language.
 
-## Что делает
+## When to use
 
-Проводит двойную проверку: (1) каждая цитата существует и действительно говорит то, что заявлено в статье; (2) методология статьи выдерживает 6 эпистемических измерений.
+- Triggers: "check this scientific article", "review this paper", "fact-check with DOI verification", "assess the methodology of this article", a file with DOI / PMID / arXiv identifiers in its citations.
+- Do NOT use for casual article fact-checking without scientific references → `articles:check-article`. Do NOT use to write an article from scratch → `scientific-article-creator`.
 
-## Входные данные
+## What it does
 
-- Markdown / текст научной статьи (путь к файлу или содержимое).
-- Опционально: фокус (только методология / только цитаты / всё).
+Runs a two-track check: (1) every citation actually exists and matches what the article claims about it; (2) the article's methodology holds up across six epistemic dimensions.
 
-## Алгоритм
+## Inputs
 
-### Шаг 1 — извлечение цитат
+- Markdown / plain text of the scientific article (file path or content).
+- Optional: focus (citations only / methodology only / both).
 
-- Найти в тексте все идентификаторы: DOI (`10.\d+/...`), PMID (`PMID:\s*\d+`), arXiv ID (`arXiv:\s*\d+\.\d+`), плюс инлайн-формы `[N]` с расшифровкой в bibliography.
-- Сохранить карту: claim_in_text → identifier.
+## Algorithm
 
-### Шаг 2 — резолв через MCP
+### Step 1 — citation extraction
 
-Для каждой ссылки:
-1. `science-work_lookup(identifier)` — пытается резолвить через 6 источников.
-2. Если не резолвится — finding **«Unresolved Citation»** (severity: high).
-3. Если резолвится, но заголовок / авторы заметно расходятся с тем, как процитировано в тексте — finding **«Citation Mismatch»** (severity: medium).
-4. `science-citations_by_doi(doi, count_only=true)` — если ключевое утверждение опирается на работу с 0–2 цитатами при возрасте >2 лет → **«Weak Evidence»** (severity: low–medium).
-5. Для критических утверждений — `science-ncbi_fetch(pmid, mode="fetch")` или `science-open_access_search` для подтверждения, что цитируемая работа действительно содержит заявленный результат.
+- Find every identifier in the text: DOI (`10.\d+/...`), PMID (`PMID:\s*\d+`), arXiv ID (`arXiv:\s*\d+\.\d+`), plus inline `[N]` references resolved through the bibliography.
+- Build a map: `claim_in_text → identifier`.
 
-### Шаг 3 — 6 эпистемических измерений
+### Step 2 — MCP resolution
 
-Каждое измерение оценить от 1 (плохо) до 5 (отлично), привести конкретные находки.
+For each citation:
+1. `science-work_lookup(identifier)` — try to resolve via 6 sources.
+2. If it does not resolve → finding **"Unresolved Citation"** (severity: high).
+3. If it resolves but the title / authors materially disagree with how the article cites it → finding **"Citation Mismatch"** (severity: medium).
+4. `science-citations_by_doi(doi, count_only=true)` — if a key claim relies on a work with 0–2 citations and age >2 years → **"Weak Evidence"** (severity: low–medium).
+5. For critical claims: `science-ncbi_fetch(pmid, mode="fetch")` or `science-open_access_search` to confirm the cited work actually contains the asserted result.
 
-1. **Evidence Relevance** — действительно ли цитируемый эксперимент подтверждает claim, или это «тематически близкая» работа.
-2. **Falsifiability** — сформулирован ли claim так, что его можно было бы опровергнуть; есть ли заявленные критерии.
-3. **Scope Calibration** — соответствует ли сила утверждения силе доказательств (нет ли «улучшает на 30%» при p=0.05 в одной малой когорте).
-4. **Argument Coherence** — есть ли логическая цепь наблюдение → пробел → инсайт → решение → доказательство, или текст разваливается.
-5. **Exploration Integrity** — упомянуты ли альтернативы и тупики, или статья выглядит так, будто авторы шли по прямой.
-6. **Methodological Rigor** — есть ли baseline, ablation/control, статистическая проверка, обсуждение воспроизводимости.
+### Step 3 — 6 epistemic dimensions
 
-### Шаг 4 — severity ranking
+Score each dimension 1 (poor) to 5 (excellent) with concrete findings.
 
-Все finding'и собрать в общий список с severity (high / medium / low). High = блокер публикации; medium = требует ревизии; low = пожелание.
+1. **Evidence Relevance** — does the cited experiment actually support the claim, or is it merely "thematically close"?
+2. **Falsifiability** — is the claim phrased so it could be refuted; are explicit criteria stated?
+3. **Scope Calibration** — does the strength of the claim match the strength of the evidence (no "improves by 30%" when p=0.05 in a single small cohort)?
+4. **Argument Coherence** — is there a logical arc observation → gap → insight → solution → evidence, or does the text fall apart?
+5. **Exploration Integrity** — are alternatives and dead-ends acknowledged, or does the paper read as if the authors marched in a straight line?
+6. **Methodological Rigor** — baselines, ablation / controls, statistical testing, reproducibility discussion?
 
-### Шаг 5 — рекомендации
+### Step 4 — severity ranking
 
-Для каждой high/medium находки — конкретная рекомендация: «удалить утверждение», «заменить источник на …», «переформулировать как…», «добавить статистический тест».
+Consolidate every finding into one list ranked by severity (high / medium / low). High = blocks publication; medium = requires revision; low = nice-to-have.
 
-## MCP-тулы
+### Step 5 — recommendations
 
-- `science-work_lookup(identifier)` — основной, для каждой цитаты.
-- `science-citations_by_doi(doi, count_only=true)` — оценка веса.
-- `science-ncbi_fetch(pmid, mode="fetch")` — full-text PubMed (≤50 КБ).
-- `science-open_access_search(query)` — fallback для full-text вне PubMed.
+For each high / medium finding, give a concrete action: "drop the claim", "replace source with …", "rephrase as…", "add a statistical test".
 
-## Формат вывода
+## MCP tools
 
-Файл `<input>.review.md` (или `level2_report.md`):
+- `science-work_lookup(identifier)` — main tool, called for every citation.
+- `science-citations_by_doi(doi, count_only=true)` — citation-weight check.
+- `science-ncbi_fetch(pmid, mode="fetch")` — PubMed full text (≤50 KB).
+- `science-open_access_search(query)` — fallback for full text outside PubMed.
+
+## Output format
+
+A file `<input>.review.md` (or `level2_report.md`):
 
 ```markdown
 # Эпистемическая проверка: <название статьи>
@@ -105,21 +112,21 @@ version: 0.1.0
 - ...
 ```
 
-## Что НЕ делать
+## What NOT to do
 
-- НЕ переписывать статью — это задача `scientific-article-creator`.
-- НЕ выдумывать заменяющие источники — только показывать, что текущий источник не подходит.
-- НЕ резолвить «человекочитаемые» ссылки без identifier'а как успех — если в статье ссылка только URL'ом, отметить как «no canonical ID, manual review needed».
+- Do not rewrite the article — that is the job of `scientific-article-creator`.
+- Do not invent replacement sources — only flag that the current source does not support the claim.
+- Do not treat human-readable URLs without a canonical identifier as a successful resolve — flag them as "no canonical ID, manual review needed".
 
-## Примеры
+## Examples
 
-**Запрос:** «Проверь mRNA_cancer_vaccines_review.md».
-→ Шаг 1: извлечь DOI/PMID. Шаг 2: каждый прогнать через `work_lookup`. Шаг 3: 6 измерений. Шаг 4: ранжировать. Шаг 5: рекомендации. Вывод: `mRNA_cancer_vaccines_review.review.md`.
+**Request:** "Check mRNA_cancer_vaccines_review.md."
+→ Step 1: extract DOI / PMID. Step 2: each through `work_lookup`. Step 3: 6 dimensions. Step 4: rank. Step 5: recommendations. Output: `mRNA_cancer_vaccines_review.review.md`.
 
-**Запрос:** «Проверь только цитаты, методологию не трогай».
-→ Шаги 1–2 + Шаг 4 (только Unresolved/Mismatch findings), без 6 измерений.
+**Request:** "Only check the citations; do not touch the methodology."
+→ Steps 1–2 + Step 4 (Unresolved / Mismatch findings only), no 6 dimensions.
 
-## Ограничения
+## Limits
 
-- `ncbi_fetch` обрезает full-text до 50 КБ — для подробной сверки claim'а с источником может потребоваться несколько вызовов или fallback в CORE.
-- Если статья сильно превышает контекст — обрабатывать секциями.
+- `ncbi_fetch` truncates full text at 50 KB — detailed claim-to-source comparison may need several calls or a CORE fallback.
+- If the article exceeds the context window, process it section by section.

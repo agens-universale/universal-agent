@@ -7,123 +7,130 @@ version: 0.1.0
 
 # Skill: Science Orchestrator
 
-## Когда использовать
+## Language Strategy
 
-- Триггеры: «проведи полное мини-исследование», «от гипотезы до отчёта», «разберись с темой X и сделай вывод», «исследуй и напиши отчёт», «спланируй и проведи научное расследование».
-- НЕ использовать: разовый поиск статей → `scientific-research`; готовый запрос на статью → `scientific-article-creator`; общая многошаговая задача без научного контекста → `complex-task-solver`.
+- This SKILL.md is in English (project convention).
+- Working files (`master_plan.md`, `iterations/*/plan.md`, `iterations/*/observations.md`) are written in **Russian** so the user can review them in their preferred language. Tool names and identifiers stay in English.
+- The final deliverable (`final_report.md` produced via `scientific-article-creator`) is in **Russian Markdown** unless the user asks otherwise.
 
-## Что делает
+## When to use
 
-Управляет длинной исследовательской сессией с двумя контурами: быстрая итерация (inner) и периодический синтез (outer). На выходе — артефакт + финальный отчёт со ссылками.
+- Triggers: "run a full mini-investigation", "from a hypothesis to a final report", "figure out topic X and produce a conclusion", "investigate and write a report", "plan and run a scientific inquiry".
+- Do NOT use for one-off paper search → `scientific-research`. Do NOT use for an upfront article request → `scientific-article-creator`. Do NOT use for a generic multi-step task without scientific context → `complex-task-solver`.
 
-## Граница ответственности (MANDATORY)
+## What it does
 
-Orchestrator **координирует**, а не исполняет. Запрещено делать своими руками то, что закрыто inner-скиллами:
+Manages a long-running research session with two control loops: a fast inner loop for iteration and a periodic outer loop for synthesis. The output is an artifact plus a final report with verified references.
 
-- Поиск литературы → **только** через `skills_load("science-article-creator:scientific-research")`, не напрямую через `science-literature_search` / `science-preprint_search`.
-- Структурирование результатов → **только** через `skills_load("science-article-creator:research-artifact-compiler")`.
-- Написание отчёта → **только** через `skills_load("science-article-creator:scientific-article-creator")`.
-- Self-review итогового документа → **только** через `skills_load("science-article-creator:scientific-article-checker")`.
+## Role boundary (MANDATORY)
 
-Прямые вызовы `science-*` MCP-тулов orchestrator'ом допустимы **только** в двух случаях:
-1. Pre-flight `science-explain_sources` один раз в начале сессии.
-2. Точечный `science-work_lookup`, когда нужно резолвить один identifier, упомянутый пользователем в постановке (не результат поиска — это работа inner-скиллов).
+The orchestrator **coordinates**, it does not execute. It is forbidden from doing by hand what inner skills cover:
 
-Если по логу видно, что orchestrator делает много прямых поисков и резолвов — он не делегирует. Это failure исполнения, а не «эффективность». Перезапустить с явным напоминанием о делегировании.
+- Literature search → **only** via `skills_load("science-article-creator:scientific-research")`, not directly through `science-literature_search` / `science-preprint_search`.
+- Structuring results → **only** via `skills_load("science-article-creator:research-artifact-compiler")`.
+- Writing the report → **only** via `skills_load("science-article-creator:scientific-article-creator")`.
+- Self-review of the final document → **only** via `skills_load("science-article-creator:scientific-article-checker")`.
 
-## Входные данные
+The orchestrator may call `science-*` MCP tools directly **only** in two cases:
+1. Pre-flight `science-explain_sources` once at the start of the session.
+2. A single `science-work_lookup` to resolve one identifier the user named in the prompt (not an identifier from search results — that belongs to inner skills).
 
-- Тема / research question.
-- Опционально: целевой формат отчёта (обзор / краткое заключение / решение), временной горизонт (1–3 итерации / больше).
+If the log shows the orchestrator running many direct searches or lookups, it is not delegating. That is an execution failure, not "efficiency". Restart with an explicit reminder about delegation.
 
-## Алгоритм
+## Inputs
+
+- Topic / research question.
+- Optional: target format of the report (review / short conclusion / decision), time horizon (1–3 iterations / more).
+
+## Algorithm
 
 ### Bootstrap
 
-1. Сформулировать центральный research question (если расплывчат — делегировать в `scientific-research` для применения линз).
-2. Сформулировать 2–4 фальсифицируемые гипотезы.
-3. Создать рабочую папку `tmp/science-smoke/<session-id>/` с подкаталогом `iterations/`.
+1. State the central research question (if vague — delegate to `scientific-research` to apply the lenses).
+2. Formulate 2–4 falsifiable hypotheses.
+3. Create the working directory `tmp/science-smoke-en/<session-id>/` with an `iterations/` subdirectory.
 
-### Inner loop (повторять)
+### Inner loop (repeat)
 
-Один проход = одна итерация в `iterations/<NN>/`:
+One pass = one iteration in `iterations/<NN>/`:
 
-1. **Pick** — выбрать гипотезу или подвопрос для итерации.
-2. **Lock protocol** — записать в `iterations/<NN>/plan.md` что именно делаем и какой результат ожидаем ДО действия. Это git-style proof против rationalization задним числом.
-3. **Execute** — действия только через делегирование (см. «Граница ответственности» выше):
-   - Поиск → `skills_load("science-article-creator:scientific-research")` с подзадачей итерации.
-   - Полнотекстовый разбор найденных работ → внутри `scientific-research` или `scientific-article-checker`, не из orchestrator'а.
-   - Резолв identifier'ов из результатов поиска — работа `scientific-research` (он уже делает `work_lookup` для нормализации в `WorkRecord`).
-4. **Measure** — записать в `iterations/<NN>/observations.md`: что нашли, что подтверждает / опровергает гипотезы, какие пробелы.
-5. **Record** — добавить relevant claims/evidence в общий накапливаемый артефакт через `research-artifact-compiler` (incremental режим).
+1. **Pick** — pick the hypothesis or sub-question for this iteration.
+2. **Lock protocol** — write `iterations/<NN>/plan.md` describing exactly what we are doing and what we expect BEFORE acting. This is the git-style proof against post-hoc rationalization.
+3. **Execute** — only via delegation (see "Role boundary"):
+   - Search → `skills_load("science-article-creator:scientific-research")` with the iteration's sub-task.
+   - Full-text reading of found works → inside `scientific-research` or `scientific-article-checker`, not the orchestrator.
+   - Identifier resolution from search results — handled by `scientific-research` (it already calls `work_lookup` for `WorkRecord` normalization).
+4. **Measure** — write `iterations/<NN>/observations.md`: what was found, what confirms / refutes hypotheses, what gaps remain.
+5. **Record** — add the relevant claims / evidence to the rolling artifact via `research-artifact-compiler` in incremental mode.
 
-После каждой 2–3 итераций — выходить в outer loop.
+After every 2–3 iterations, switch to the outer loop.
 
-### Outer loop (синтез)
+### Outer loop (synthesis)
 
-1. **Step back** — прочитать `iterations/*/observations.md` целиком.
-2. **Pattern recognition** — какие закономерности видны, какие гипотезы укрепились, какие отброшены, что неожиданно.
-3. **Decision** — выбрать одно:
-   - **Deepen** — углубиться в одну подобласть, новая итерация по ней.
-   - **Broaden** — расширить запрос на смежные области.
-   - **Pivot** — текущая ветка не даёт ответа, переформулировать гипотезы.
-   - **Conclude** — данных достаточно, переходим к финальному отчёту.
-4. **Update plan** — записать решение в `master_plan.md` с обоснованием.
+1. **Step back** — read all `iterations/*/observations.md`.
+2. **Pattern recognition** — what patterns are visible, which hypotheses got stronger, which were rejected, what was surprising.
+3. **Decision** — pick one:
+   - **Deepen** — dive into one sub-area, schedule a new iteration on it.
+   - **Broaden** — extend the inquiry into adjacent fields.
+   - **Pivot** — the current branch yields no answer; reformulate the hypotheses.
+   - **Conclude** — enough data; move to the final report.
+4. **Update plan** — write the decision into `master_plan.md` with a rationale.
 
-### Финал
+### Final stage
 
-Когда outer loop сказал `Conclude`:
+When the outer loop returns `Conclude`:
 
-1. Зафиксировать артефакт через `research-artifact-compiler` (финальная сборка из всех iterations).
-2. Делегировать в `scientific-article-creator` — финальный текст на основе артефакта.
-3. Опционально — `scientific-article-checker` для самопроверки сгенерированного отчёта.
-4. Положить готовый MD в `<session-dir>/final_report.md`.
+1. Lock the artifact via `research-artifact-compiler` (final assembly across all iterations).
+2. Delegate to `scientific-article-creator` for the final text built on top of the artifact.
+3. Optional — `scientific-article-checker` for a self-review of the generated report.
+4. Place the finished file at `<session-dir>/final_report.md`.
 
-## MCP-тулы
+## MCP tools
 
-Orchestrator сам вызывает только:
-- `science-explain_sources` — pre-flight один раз в начале сессии.
-- `science-work_lookup` — точечно, если пользователь упомянул identifier в постановке (не из результатов поиска).
+The orchestrator itself calls only:
+- `science-explain_sources` — pre-flight, once per session.
+- `science-work_lookup` — point-resolve when the user named an identifier in the prompt (not from search results).
 
-Всё остальное (`literature_search`, `preprint_search`, `open_access_search`, `citations_by_doi`, `ncbi_fetch`) — **через делегирование** в inner-скиллы, которые уже знают, как и когда их вызывать.
+Everything else (`literature_search`, `preprint_search`, `open_access_search`, `citations_by_doi`, `ncbi_fetch`) is **delegated** to inner skills that already know how and when to invoke them.
 
-## Формат вывода
+## Output format
 
-Файлы в `<session-dir>/`:
+Files inside `<session-dir>/`:
+
 ```
-master_plan.md          # план + outer-loop решения с обоснованием
+master_plan.md          # план + outer-loop decisions with rationale
 iterations/
   01/plan.md
   01/observations.md
   02/plan.md
   ...
-artifact/               # финальный research artifact
-final_report.md         # итоговая статья / отчёт
-review.md               # опционально, от scientific-article-checker
+artifact/               # final research artifact
+final_report.md         # final article / report (Russian)
+review.md               # optional, from scientific-article-checker
 ```
 
-## Что НЕ делать
+## What NOT to do
 
-- НЕ совмещать inner и outer loop в одну фазу — outer loop работает только после ≥2 inner итераций.
-- НЕ переписывать prior observations.md ретроактивно. Если ошиблись — новая запись с пометкой.
-- НЕ выдумывать gates («достаточно данных») без явного критерия в master_plan.
-- НЕ повторять функционал inner skills — делегировать через `skills_load`. Прямой вызов `science-literature_search`, `science-preprint_search`, `science-citations_by_doi` из orchestrator'а — bug, не feature.
-- НЕ писать финальный отчёт самостоятельно. Финал — это `scientific-article-creator` на основе собранного артефакта.
+- Do not collapse inner and outer loop into one phase — the outer loop runs only after ≥2 inner iterations.
+- Do not rewrite prior `observations.md` retroactively. If a mistake was made, add a new entry marking the correction.
+- Do not invent gates ("data is sufficient") without an explicit criterion in `master_plan.md`.
+- Do not duplicate inner-skill function — delegate via `skills_load`. A direct call to `science-literature_search`, `science-preprint_search`, or `science-citations_by_doi` from the orchestrator is a bug, not a feature.
+- Do not write the final report yourself. The final text is produced by `scientific-article-creator` from the assembled artifact.
 
-## Примеры
+## Examples
 
-**Запрос:** «Проведи мини-исследование: эффективность тирзепатида в снижении сердечно-сосудистых рисков. 2 итерации, финальный отчёт».
-→ Bootstrap: research_question + 3 гипотезы (снижение MACE / снижение HF hospitalizations / снижение mortality).
-→ Inner #1: гипотеза HF — `literature_search "tirzepatide heart failure"` + `work_lookup` ключевых RCT.
-→ Inner #2: гипотеза MACE — `literature_search "tirzepatide cardiovascular outcomes"` + `citations_by_doi` главного RCT.
-→ Outer: данных по MACE мало (1 ongoing trial), по HF — есть положительные. Decision: `Conclude`, отметить что MACE-данных недостаточно.
-→ Финал: artifact + `final_report.md` через `scientific-article-creator`.
+**Request:** "Run a mini-investigation: effect of tirzepatide on cardiovascular risk. 2 iterations, final report."
+→ Bootstrap: research_question + 3 hypotheses (MACE reduction / HF hospitalization reduction / mortality reduction).
+→ Inner #1: HF hypothesis — delegate to `scientific-research` for `literature_search "tirzepatide heart failure"`; the inner skill handles `work_lookup` of the key RCTs.
+→ Inner #2: MACE hypothesis — delegate again for `literature_search "tirzepatide cardiovascular outcomes"` plus `citations_by_doi` on the main RCT.
+→ Outer: MACE evidence is thin (1 ongoing trial), HF evidence is positive. Decision: `Conclude`, note insufficient MACE data.
+→ Final stage: artifact + `final_report.md` via `scientific-article-creator`.
 
-**Запрос:** «Разберись с микробиомом и метаболическим синдромом, итерируй пока не получишь чёткий ответ».
-→ Inner loop циклится до выхода outer-loop `Conclude`, обычно 3–5 итераций.
+**Request:** "Sort out microbiome and metabolic syndrome; iterate until you have a clear answer."
+→ The inner loop cycles until the outer loop returns `Conclude`, typically 3–5 iterations.
 
-## Ограничения
+## Limits
 
-- arXiv rate limit (1 req/3s) + Semantic Scholar без API-key могут удлинить итерации.
-- Для длинных сессий запускать science-mcp как HTTP daemon (`127.0.0.1:8765/mcp`) — stdio теряет throttler-state между вызовами.
-- Если outer loop не может выйти на `Conclude` за >5 итераций — остановиться, явно сообщить пользователю и попросить переформулировать вопрос.
+- arXiv rate limit (1 req / 3 s) plus a missing Semantic Scholar API key can stretch iterations.
+- For long sessions, run science-mcp as an HTTP daemon (`127.0.0.1:8766/mcp` in this project) — stdio loses throttler state between calls.
+- If the outer loop cannot reach `Conclude` in more than 5 iterations, stop, surface this to the user explicitly, and ask them to refine the question.

@@ -9,6 +9,12 @@ version: 0.1.0
 
 This pack handles scientific literature work on top of the `science-mcp` server (tools: `literature_search`, `work_lookup`, `preprint_search`, `ncbi_fetch`, `citations_by_doi`, `open_access_search`, `explain_sources`).
 
+## Language Strategy
+
+- This SKILL.md and the bodies of all inner skills are in English (project convention).
+- User-facing deliverables this pack produces — articles, reviews, fact-check reports, research artifacts, final orchestrator reports — are in **Russian Markdown** unless the user explicitly asks for another language.
+- Source papers can be in any language; quotes and titles remain verbatim.
+
 ## Pre-flight check
 
 Before the first MCP call in a session, invoke `explain_sources` once. Surface to the user any missing API keys (Semantic Scholar, CORE) and the resulting degradation — those sources will be skipped or rate-limited.

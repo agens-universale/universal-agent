@@ -7,72 +7,79 @@ version: 0.1.0
 
 # Skill: Scientific Article Creator
 
-## Когда использовать
+## Language Strategy (MANDATORY)
 
-- Триггеры: «напиши научный обзор / статью по теме X», «литературный обзор для публикации», «paper-style review», «оформи это в научную статью».
-- НЕ использовать: казуальная статья без проверки источников → `articles:article-creator`; проверка готовой статьи → `scientific-article-checker`; черновик идеи без цитат → `scientific-research`.
+- This SKILL.md is in English (project convention).
+- **The article MUST be written in Russian.** Title, abstract, every section heading, every sentence of the narrative — all Russian. Even when the topic is named with English technical terms (CRISPR, mRNA, GLP-1, Alzheimer), the article itself is Russian Markdown.
+- Source paper titles, journal names, author lists, and DOI / PMID / arXiv identifiers stay verbatim in their original language inside the bibliography block.
+- If the user explicitly asks for English output, switch — otherwise default to Russian regardless of the input language.
 
-## Что делает
+## When to use
 
-Создаёт научный текст 1500–5000 слов на русском, в котором каждое нетривиальное утверждение подкреплено реальной статьёй с проверенным идентификатором.
+- Triggers: "write a scientific review / article on topic X", "literature review for publication", "paper-style review", "turn this into a scientific article".
+- Do NOT use for casual articles without source verification → `articles:article-creator`. Do NOT use to verify an existing article → `scientific-article-checker`. Do NOT use for an unstructured idea sketch without citations → `scientific-research`.
 
-## Входные данные
+## What it does
 
-- Тема, объём, опционально аудитория (специалисты / широкая).
-- Опционально: research artifact от `research-artifact-compiler` или список источников от `scientific-research`.
+Produces a 1500–5000-word scientific text in Russian where every non-trivial claim is backed by a real paper with a verified identifier (DOI / PMID / arXiv).
 
-## Алгоритм
+## Inputs
 
-### Шаг 1 — план статьи (skeleton)
+- Topic, target word count, optional audience (specialists / general).
+- Optional: a research artifact from `research-artifact-compiler` or a sources list from `scientific-research`.
 
-1. Сформулировать одну центральную contribution / тезис в одну фразу.
-2. Описать «Figure 1» одним абзацем — какая ключевая иллюстрация была бы (даже если не рисуем).
-3. Набросать заголовки секций: abstract, introduction, methods/approach, results/synthesis, related work, limitations, conclusion.
+## Algorithm
 
-### Шаг 2 — сбор литературы
+### Step 1 — article skeleton
 
-Если на входе нет готового списка:
-- Вызвать (или делегировать в `scientific-research`) — `science-literature_search` по 2–4 запросам по теме, собрать 15–30 кандидатов.
-- Дополнить `science-preprint_search` для горячих направлений.
-- Каждую отобранную работу пропустить через `science-work_lookup` — гарантировать нормализованный `WorkRecord`.
-- Отобрать 8–15 ключевых работ для использования в тексте.
+1. State one central contribution / thesis in one sentence.
+2. Describe "Figure 1" in one paragraph — what the headline illustration would be (even if not drawn).
+3. Sketch section headings: abstract, introduction, methods / approach, results / synthesis, related work, limitations, conclusion.
 
-### Шаг 3 — draft с инлайн-цитатами
+### Step 2 — literature collection
 
-- Писать секции по плану. Каждое утверждение, содержащее цифры, имена, годы, конкретный механизм, метод или вывод — обязано иметь цитату вида `[N]`, где N — индекс в bibliography-блоке.
-- Утверждения «общего знания» (например, «ДНК состоит из четырёх нуклеотидов») допустимы без цитаты.
-- Если по теме найти подтверждение не удалось — `[CITATION NEEDED]` с короткой пометкой «искал X, Y — не нашёл».
+If no sources list is provided on input:
+- Call (or delegate to `scientific-research`) — `science-literature_search` with 2–4 topical queries, collect 15–30 candidates.
+- Add `science-preprint_search` for hot subareas.
+- Run every selected work through `science-work_lookup` to ensure a normalized `WorkRecord`.
+- Pick 8–15 key works for inclusion in the text.
 
-### Шаг 4 — bibliography-блок
+### Step 3 — draft with inline citations
 
-В конце статьи — секция `## Литература` с пронумерованным списком. Формат записи:
+- Write sections per the plan. Every claim that contains a number, name, year, specific mechanism, method, or conclusion MUST carry an inline citation `[N]` referencing an entry in the bibliography block.
+- "Common knowledge" claims (e.g. "DNA is made of four nucleotides") may stand without a citation.
+- If no supporting paper can be found, write `[CITATION NEEDED]` with a short note "searched X, Y — not found".
+
+### Step 4 — bibliography block
+
+End the article with a `## Литература` section, numbered. Entry format:
 
 ```
 [N] Authors. Title. Journal/Venue, Year. DOI:<…> | PMID:<…> | arXiv:<…>. URL: <…>
 ```
 
-Все идентификаторы — из ответов MCP, никогда не из памяти модели.
+Every identifier comes from an MCP response — never from model memory.
 
-### Шаг 5 — citation strength check
+### Step 5 — citation strength check
 
-Для критичных утверждений (центральная гипотеза, ключевые цифры) — вызвать `science-citations_by_doi(doi=…, count_only=True)`. Если работа имеет 0 цитат при возрасте >2 лет — пометить как «weak evidence» в тексте или искать дополнительное подтверждение.
+For critical claims (central hypothesis, headline numbers) call `science-citations_by_doi(doi=…, count_only=true)`. If a work older than 2 years has 0 citations, mark it as "weak evidence" inline or seek additional support.
 
-### Шаг 6 — финальный проход
+### Step 6 — final pass
 
-- Прочитать draft, убрать дубли, гладкая русская проза.
-- Проверить, что нет `[CITATION NEEDED]` без явного комментария.
-- Сохранить в `tmp/science-smoke/<task>/article.md` или в указанную пользователем директорию.
+- Read the draft, remove duplicates, polish Russian prose.
+- Verify no `[CITATION NEEDED]` remains without an explicit note.
+- Save to `tmp/science-smoke-en/<task>/article.md` or to the directory specified by the user.
 
-## MCP-тулы
+## MCP tools
 
-- `science-literature_search`, `science-preprint_search` — поиск.
-- `science-work_lookup(identifier)` — нормализация перед добавлением в bib.
-- `science-citations_by_doi(doi, count_only=true)` — оценка веса.
-- `science-open_access_search` — если нужен full-text для глубокого вытаскивания.
+- `science-literature_search`, `science-preprint_search` — search.
+- `science-work_lookup(identifier)` — normalization before adding to the bibliography.
+- `science-citations_by_doi(doi, count_only=true)` — citation-weight check.
+- `science-open_access_search` — when full text is needed for deeper extraction.
 
-## Формат вывода
+## Output format
 
-Готовый Markdown-файл:
+A finished Markdown file:
 
 ```markdown
 # <Заголовок статьи>
@@ -83,7 +90,7 @@ version: 0.1.0
 <150–250 слов>
 
 ## Введение
-<2–4 абзаца, заканчивая четкой постановкой>
+<2–4 абзаца, заканчивающихся чёткой постановкой>
 
 ## Методы / подход
 ...
@@ -106,22 +113,22 @@ version: 0.1.0
 [2] ...
 ```
 
-## Что НЕ делать
+## What NOT to do
 
-- НЕ генерировать BibTeX / ссылки из памяти модели.
-- НЕ оставлять `[CITATION NEEDED]` без пояснения.
-- НЕ использовать веб-поиск как источник цитат — только science-mcp.
-- НЕ дублировать функционал `scientific-article-checker` — проверка делается отдельным шагом по запросу.
+- Do not generate BibTeX or citations from model memory.
+- Do not leave `[CITATION NEEDED]` without an explanatory note.
+- Do not use web search as a citation source — only science-mcp.
+- Do not duplicate the function of `scientific-article-checker` — verification runs as a separate step on request.
 
-## Примеры
+## Examples
 
-**Запрос:** «Напиши обзор на 3000 слов про связь микробиома кишечника и метаболического синдрома».
-→ Шаг 1: contribution = «синтез доказательств причинной связи микробиом → MetS через SCFA и эндотоксемию». Figure 1 = диаграмма путей. Шаги 2–6 по плану. Bibliography ≈ 12–15 работ, все с DOI/PMID.
+**Request:** "Write a 3000-word review on the link between gut microbiome and metabolic syndrome."
+→ Step 1: contribution = "synthesis of evidence for the causal microbiome → MetS link via SCFA and endotoxemia". Figure 1 = pathway diagram. Steps 2–6 as planned. Bibliography ≈ 12–15 works, every entry carrying DOI / PMID.
 
-**Запрос:** «Из этого артефакта сделай статью».
-→ Источники уже нормализованы compiler'ом. Пропустить шаг 2, идти сразу к 3.
+**Request:** "Turn this artifact into an article."
+→ Sources are already normalized by the compiler. Skip Step 2, jump to Step 3.
 
-## Ограничения
+## Limits
 
-- Запросы на полный full-text часто требуют `open_access_search` (CORE) или PMC; PubMed XML режется на 50 КБ.
-- Длинный обзор (>4000 слов) с >20 источниками может потребовать пары прогонов поиска — это нормально.
+- Full-text deep dives often require `open_access_search` (CORE) or PMC; PubMed XML is capped at 50 KB.
+- A long review (>4000 words) with >20 sources may need a second search pass — that is expected.
