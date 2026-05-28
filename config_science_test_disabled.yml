@@ -1,0 +1,45 @@
+# A/B comparison config: same as config_science_test.yml but with the
+# science-article-creator pack disabled. Used to measure how much value the
+# new science skills add on top of plain agent + science-mcp tools.
+
+backend:
+  api_mode: chat_completions
+  completions_url: "http://127.0.0.1:8014/v1/chat/completions"
+  chat_completions_max_tokens: 32768
+  use_ssl: false
+  use_retry: true
+  openai_strict_tools_schema: false
+
+agent:
+  model: MiniMaxAI/MiniMax-M2.7
+  system_prompt_id: v1
+  max_steps: 60
+  no_tool_call_max_count: 3
+  verbose: true
+  stop_tools: []
+  use_server_subagents: false
+  use_local_subagents: false
+  disable_skills:
+    - science-article-creator
+
+paths:
+  agent_md_path: "./prompts/demo_cli_agent.md"
+
+logging:
+  console_trace: true
+  save_logs: true
+  dump_storage: false
+
+mcp:
+  servers:
+    science:
+      transport: stream_http
+      url: http://127.0.0.1:8766/mcp
+      description: "Unified scientific literature search across 10 public APIs (daemon per spec §3.1)"
+      server-name: science
+  meta:
+    tools-cache-ttl: 3600
+    request_timeout_sec: 600
+
+summary:
+  chat_completions_summary_trigger_chars: 0

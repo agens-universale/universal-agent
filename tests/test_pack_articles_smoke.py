@@ -30,9 +30,11 @@ def test_articles_pack_default_list_hides_inner_shows_bootstrap():
 def test_articles_pack_collapses_in_rendered_catalog():
     out = render_skills_catalog(SkillsRegistry().list_skills())
     assert "articles:using-articles" in out
-    # the two inner skills are fully hidden — their ids appear nowhere in the catalog
-    assert "article-creator" not in out
-    assert "check-article" not in out
+    # the two inner skills are fully hidden — their canonical ids appear nowhere
+    # (use exact canonical-id substrings, not bare names, because other packs may
+    # legitimately have similar-looking names, e.g. `science-article-creator`).
+    assert "articles:article-creator" not in out
+    assert "articles:check-article" not in out
 
 
 def test_articles_inner_skills_still_loadable():

@@ -154,6 +154,7 @@ def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
         "x_cl_id": app_cfg.agent.x_cl_id,
         "verbose": app_cfg.agent.verbose,
         "stop_tools": app_cfg.agent.stop_tools,
+        "disable_skills": app_cfg.agent.disable_skills,
         "server_tool_prefix": app_cfg.agent.server_tool_prefix,
         "max_steps": app_cfg.agent.max_steps,
         "no_tool_call_max_count": app_cfg.agent.no_tool_call_max_count,

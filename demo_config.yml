@@ -60,6 +60,13 @@ agent:
   x_cl_id: "12345"
   verbose: true
   stop_tools: [ask_human]
+  # Отключить целые паки или отдельные flat-скиллы из реестра (по canonical id).
+  # Пакет (`pack-id`) убирает и bootstrap, и все inner. Flat-скилл (`skill-id`) — один.
+  # По умолчанию пусто — все скиллы видны агенту.
+  # Пример: убрать научные скиллы из роутинга:
+  #   disable_skills:
+  #     - science-article-creator
+  disable_skills: []
   server_tool_prefix: system
   max_steps: 200
   no_tool_call_max_count: 3
