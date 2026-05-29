@@ -156,6 +156,10 @@ def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
         "memory_gate_params": app_cfg.memory_gate.model_dump(),
         "memory_gate_cooldown_messages": app_cfg.memory_gate.cooldown_messages,
         "enable_memory_file_notice": app_cfg.memory_gate.enable_memory_file_notice,
+        "tool_usage_notice": app_cfg.tool_usage_notice,
+        "tool_usage_notice_params": [
+            rule.model_dump() for rule in app_cfg.tool_usage_notice
+        ],
         "long_memory": app_cfg.long_memory,
         "long_memory_params": app_cfg.long_memory.model_dump(),
         "long_memory_check_interval_messages": app_cfg.long_memory.check_interval_messages,

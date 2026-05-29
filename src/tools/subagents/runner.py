@@ -8,12 +8,12 @@ from typing import Any, Callable, Dict, List, Optional
 from config_modules.stored_outputs import get_stored_tool_outputs_max_entries
 from run_summary_coordinator import RunSummaryCoordinator
 from summarize.config import parse_summary_trigger_chars
-from message_policy.memory_messages_notice.policy import (
+from message_policy.tool_usage_notice.policy import (
     get_thread_memory_registers_from_shared,
-    maybe_emit_subagent_wiki_bootstrap,
+    maybe_emit_subagent_thread_memory_bootstrap,
     wrap_thread_memory_technical_user_message,
 )
-from message_policy.memory_messages_notice.state import persist_memory_messages_state
+from message_policy.tool_usage_notice.state import persist_memory_messages_state
 from persistence.state_storage import save_state
 from states import State
 from tools import build_tools_data
@@ -102,7 +102,7 @@ class SubagentRunner:
         messages = self._build_initial_messages(child_state, agent_role, user_message)
         child_state.init_subagent_current_user_intent(initial_message)
         shared_mf = get_thread_memory_registers_from_shared(child_state.shared)
-        bootstrap_text = maybe_emit_subagent_wiki_bootstrap(
+        bootstrap_text = maybe_emit_subagent_thread_memory_bootstrap(
             child_meta, self._config, shared_mf
         )
         if bootstrap_text:

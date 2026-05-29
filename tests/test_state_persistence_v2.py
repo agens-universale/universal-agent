@@ -137,7 +137,7 @@ def test_state_serializer_roundtrip_from_state_factory():
 
 
 def test_get_thread_memory_registers_only_working_memory():
-    from message_policy.memory_messages_notice.policy import (
+    from message_policy.tool_usage_notice.policy import (
         get_thread_memory_registers_from_shared,
     )
 

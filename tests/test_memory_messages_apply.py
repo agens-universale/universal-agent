@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 
-from message_policy.memory_messages_notice.apply import apply_memory_messages_before_llm
+from message_policy.tool_usage_notice.apply import apply_memory_messages_before_llm
 from states import State, SharedStateData
 
 
@@ -18,14 +18,19 @@ def _state() -> State:
     )
 
 
-def test_apply_appends_gate_when_notice_threshold_reached():
+def test_apply_appends_notice_when_threshold_reached():
     state = _state()
-    state.memory_notice_cnt = 30
+    state.tool_usage_notice_cnt = {"working_memory": 30}
     meta: dict = {}
     ctx = SimpleNamespace(
         config_dict={
-            "enable_memory_file_notice": True,
-            "memory_gate_params": {"cooldown_messages": 30},
+            "tool_usage_notice": [
+                {
+                    "tool_name": "working_memory",
+                    "step_messages_count": 30,
+                    "notice_message": "You have not used working_memory for 30 steps.",
+                }
+            ],
             "stop_tools": [],
         }
     )
@@ -38,12 +43,12 @@ def test_apply_appends_gate_when_notice_threshold_reached():
     )
     assert len(out) == 2
     assert "not used working_memory" in out[1]["content"]
-    assert state.memory_notice_cnt == 0
+    assert state.tool_usage_notice_cnt.get("working_memory", 0) == 0
 
 
-def test_apply_no_gate_when_memory_files_disabled_in_config():
+def test_apply_no_notice_when_rules_empty():
     state = _state()
-    state.memory_notice_cnt = 100
+    state.tool_usage_notice_cnt = {"working_memory": 100}
     meta: dict = {}
     ctx = SimpleNamespace(
         config_dict={
@@ -59,7 +64,7 @@ def test_apply_no_gate_when_memory_files_disabled_in_config():
         step_messages=[],
     )
     assert len(out) == 1
-    assert state.memory_notice_cnt == 100
+    assert state.tool_usage_notice_cnt.get("working_memory", 0) == 100
 
 
 def test_apply_long_changed_hint_on_k_tick(monkeypatch):
@@ -73,7 +78,7 @@ def test_apply_long_changed_hint_on_k_tick(monkeypatch):
             "stop_tools": [],
         }
     )
-    from message_policy.memory_messages_notice.state import set_long_memory_check_cnt
+    from message_policy.tool_usage_notice.state import set_long_memory_check_cnt
 
     set_long_memory_check_cnt(meta, 2)
     monkeypatch.setattr("long_memory.get_hash", lambda _ctx: "new_hash")

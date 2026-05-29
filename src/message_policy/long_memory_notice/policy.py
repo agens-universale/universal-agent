@@ -6,7 +6,7 @@ from config_modules.memory_messages import (
     long_memory_messages_from_config_dict,
     long_memory_notice_enabled,
 )
-from message_policy.memory_messages_notice.state import (
+from message_policy.tool_usage_notice.state import (
     get_long_memory_check_cnt,
     set_long_memory_check_cnt,
 )

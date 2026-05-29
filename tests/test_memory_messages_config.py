@@ -6,12 +6,15 @@ from config import load_config
 from config_modules.memory_messages import (
     LongMemoryMessagesConfig,
     MemoryGateConfig,
+    ToolUsageNoticeRule,
+    active_tool_usage_notice_rules,
     long_memory_notice_enabled,
     memory_file_notice_enabled,
     long_memory_messages_from_config_dict,
     memory_gate_from_config_dict,
     normalize_long_memory_messages_config,
     normalize_memory_gate_config,
+    tool_usage_notice_rules_from_config_dict,
 )
 from config_modules.root import AppConfig
 
@@ -85,6 +88,65 @@ def test_memory_file_notice_enabled_from_nested_and_flat_config():
     assert memory_file_notice_enabled({"enable_memory_file_notice": True})
 
 
+def test_tool_usage_notice_rules_from_yaml_list():
+    rules = tool_usage_notice_rules_from_config_dict(
+        {
+            "tool_usage_notice": [
+                {
+                    "tool_name": "working_memory",
+                    "step_messages_count": 3,
+                    "notice_message": "nudge",
+                }
+            ]
+        }
+    )
+    assert len(rules) == 1
+    assert rules[0].tool_name == "working_memory"
+    assert rules[0].step_messages_count == 3
+
+
+def test_tool_usage_notice_legacy_memory_gate_bridge():
+    rules = tool_usage_notice_rules_from_config_dict(
+        {
+            "memory_gate_params": {
+                "enable_memory_file_notice": True,
+                "cooldown_messages": 12,
+            }
+        }
+    )
+    assert len(rules) == 1
+    assert rules[0].tool_name == "working_memory"
+    assert rules[0].step_messages_count == 12
+
+
+def test_active_tool_usage_notice_rules_respects_stop_tools():
+    cfg = {
+        "tool_usage_notice": [
+            ToolUsageNoticeRule(
+                tool_name="working_memory",
+                step_messages_count=3,
+                notice_message="nudge",
+            )
+        ],
+        "stop_tools": ["working_memory"],
+    }
+    assert active_tool_usage_notice_rules(cfg) == []
+
+
+def test_app_config_parses_tool_usage_notice_section():
+    raw = yaml.safe_load(
+        """
+tool_usage_notice:
+  - tool_name: working_memory
+    step_messages_count: 5
+    notice_message: "Review thread memory."
+"""
+    )
+    app = AppConfig.model_validate(raw)
+    assert len(app.tool_usage_notice) == 1
+    assert app.tool_usage_notice[0].notice_message == "Review thread memory."
+
+
 def test_long_memory_notice_enabled_from_nested_and_flat_config():
     assert not long_memory_notice_enabled({})
     assert long_memory_notice_enabled(
@@ -118,3 +180,4 @@ long_memory:
     assert cfg["enable_long_memory_notice"] is True
     assert cfg["memory_gate_params"]["cooldown_messages"] == 25
     assert cfg["long_memory_params"]["check_interval_messages"] == 4
+    assert "tool_usage_notice_params" in cfg

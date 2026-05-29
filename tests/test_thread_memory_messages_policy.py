@@ -1,13 +1,12 @@
 from types import SimpleNamespace
 
-from message_policy.memory_messages_notice.policy import (
-    batch_used_memory_files,
-    build_memory_gate_message,
+from config_modules.memory_messages import ToolUsageNoticeRule
+from message_policy.tool_usage_notice.policy import (
+    batch_used_tool,
+    collect_tool_usage_notices,
     get_thread_memory_registers_from_shared,
-    maybe_emit_memory_gate,
-    maybe_emit_subagent_wiki_bootstrap,
-    preferred_thread_memory_tool_name,
-    update_memory_notice_after_persist,
+    maybe_emit_subagent_thread_memory_bootstrap,
+    update_tool_usage_notice_after_persist,
 )
 from states import State
 
@@ -25,92 +24,90 @@ def _state() -> State:
     )
 
 
-def test_memory_notice_increments_without_memory_files():
-    state = _state()
-    update_memory_notice_after_persist(state, [{"role": "assistant", "content": "ok"}])
-    assert state.memory_notice_cnt == 1
-    update_memory_notice_after_persist(state, [])
-    assert state.memory_notice_cnt == 2
+def _rule(step_count: int = 3, message: str = "unused tool notice") -> ToolUsageNoticeRule:
+    return ToolUsageNoticeRule(
+        tool_name="working_memory",
+        step_messages_count=step_count,
+        notice_message=message,
+    )
 
 
-def test_memory_notice_resets_on_memory_files_batch():
+def test_tool_usage_notice_increments_without_tool_call():
     state = _state()
-    state.memory_notice_cnt = 5
-    update_memory_notice_after_persist(
+    rules = [_rule(30)]
+    update_tool_usage_notice_after_persist(
+        state, [{"role": "assistant", "content": "ok"}], rules
+    )
+    assert state.tool_usage_notice_cnt["working_memory"] == 1
+    update_tool_usage_notice_after_persist(state, [], rules)
+    assert state.tool_usage_notice_cnt["working_memory"] == 2
+
+
+def test_tool_usage_notice_resets_on_tool_batch():
+    state = _state()
+    state.tool_usage_notice_cnt = {"working_memory": 5}
+    rules = [_rule(30)]
+    update_tool_usage_notice_after_persist(
         state,
         [{"type": "function_call", "name": "working_memory", "arguments": "{}"}],
+        rules,
     )
-    assert state.memory_notice_cnt == 0
+    assert state.tool_usage_notice_cnt.get("working_memory", 0) == 0
 
 
-def test_memory_notice_resets_after_emitted_notice():
+def test_tool_usage_notice_resets_after_explicit_reset():
     state = _state()
-    state.memory_notice_cnt = 10
-    update_memory_notice_after_persist(state, [], emitted_memory_notice=True)
-    assert state.memory_notice_cnt == 0
-
-
-def test_batch_used_memory_files_detects_function_call():
-    assert batch_used_memory_files(
-        [{"type": "function_call", "name": "working_memory"}]
+    state.tool_usage_notice_cnt = {"working_memory": 10}
+    rules = [_rule(30)]
+    update_tool_usage_notice_after_persist(
+        state, [], rules, reset_tool_names={"working_memory"}
     )
-    assert batch_used_memory_files(
-        [{"type": "function_call", "name": "memory_files"}]
-    )
-    assert not batch_used_memory_files([{"type": "function_call", "name": "read_file"}])
+    assert state.tool_usage_notice_cnt.get("working_memory", 0) == 0
 
 
-def test_preferred_thread_memory_tool_name_with_stop_tools():
-    assert preferred_thread_memory_tool_name({"stop_tools": []}) == "working_memory"
-    assert preferred_thread_memory_tool_name({"stop_tools": ["working_memory"]}) == "memory_files"
-    assert preferred_thread_memory_tool_name({"stop_tools": ["working_memory", "memory_files"]}) == "working_memory"
+def test_batch_used_tool_detects_function_call():
+    assert batch_used_tool([{"type": "function_call", "name": "working_memory"}], "working_memory")
+    assert not batch_used_tool([{"type": "function_call", "name": "read_file"}], "working_memory")
 
 
-def test_maybe_emit_memory_gate_respects_threshold_and_stop_tools():
+def test_collect_tool_usage_notices_respects_threshold_and_stop_tools():
     state = _state()
-    state.memory_notice_cnt = 30
-    cfg = {
-        "enable_memory_file_notice": True,
-        "memory_gate_params": {"cooldown_messages": 30},
-        "stop_tools": [],
-    }
-    text = maybe_emit_memory_gate(state, cfg, {"journal": "note"})
-    assert text is not None
-    assert "not used working_memory" in text
-    assert "journal" in text
-
-    cfg_blocked = {**cfg, "stop_tools": ["working_memory", "memory_files"]}
-    assert maybe_emit_memory_gate(state, cfg_blocked, {"journal": "x"}) is None
+    state.tool_usage_notice_cnt = {"working_memory": 30}
+    rules = [_rule(30, "You have not used working_memory for 30 steps.")]
+    texts = collect_tool_usage_notices(state, rules, registers={"state": "note"})
+    assert texts == ["You have not used working_memory for 30 steps."]
+    assert state.tool_usage_notice_cnt.get("working_memory", 0) == 0
 
 
-def test_memory_gate_disabled_when_notice_flag_off():
+def test_collect_tool_usage_notices_skips_below_threshold():
     state = _state()
-    state.memory_notice_cnt = 100
-    cfg = {
-        "memory_gate_params": {"enable_memory_file_notice": False},
-        "stop_tools": [],
-    }
-    assert maybe_emit_memory_gate(state, cfg, {}) is None
+    state.tool_usage_notice_cnt = {"working_memory": 2}
+    rules = [_rule(30)]
+    assert collect_tool_usage_notices(state, rules) == []
 
 
 def test_subagent_bootstrap_once():
     meta: dict = {}
-    cfg = {"enable_memory_file_notice": True, "stop_tools": []}
-    first = maybe_emit_subagent_wiki_bootstrap(meta, cfg, {"journal": "j"})
-    second = maybe_emit_subagent_wiki_bootstrap(meta, cfg, {"journal": "j"})
+    cfg = {
+        "tool_usage_notice": [
+            {
+                "tool_name": "working_memory",
+                "step_messages_count": 3,
+                "notice_message": "nudge",
+            }
+        ]
+    }
+    first = maybe_emit_subagent_thread_memory_bootstrap(meta, cfg, {"state": "progress"})
+    second = maybe_emit_subagent_thread_memory_bootstrap(meta, cfg, {"state": "progress"})
     assert first is not None
-    assert "Thread memory (shared wiki)" in first
+    assert "Thread memory" in first
+    assert "state" in first
     assert second is None
 
 
-def test_build_memory_gate_message_includes_register_index():
-    msg = build_memory_gate_message(
-        cooldown_messages=30,
-        memory_files={"arch": "line1\nline2"},
-        tool_name="working_memory",
-    )
-    assert "30" in msg
-    assert "arch" in msg
+def test_subagent_bootstrap_disabled_without_rules():
+    meta: dict = {}
+    assert maybe_emit_subagent_thread_memory_bootstrap(meta, {}, {"state": "x"}) is None
 
 
 def test_get_thread_memory_registers_reads_working_memory():

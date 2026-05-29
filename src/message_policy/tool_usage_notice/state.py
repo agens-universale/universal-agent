@@ -3,13 +3,14 @@ from __future__ import annotations
 from typing import Any
 
 META_LONG_MEMORY_CONTENT_HASH = "long_memory_content_hash"
+META_TOOL_USAGE_NOTICE_CNT = "tool_usage_notice_cnt"
 META_MEMORY_NOTICE_CNT = "memory_notice_cnt"
 META_LONG_MEMORY_CHECK_CNT = "long_memory_check_cnt"
 META_SUBAGENT_THREAD_MEMORY_ANNOUNCED = "subagent_thread_memory_announced"
 
 STATE_META_KEYS = (
     META_LONG_MEMORY_CONTENT_HASH,
-    META_MEMORY_NOTICE_CNT,
+    META_TOOL_USAGE_NOTICE_CNT,
 )
 EPHEMERAL_META_KEYS = (
     META_LONG_MEMORY_CHECK_CNT,
@@ -26,6 +27,19 @@ def _coerce_non_negative_int(value: Any, *, default: int = 0) -> int:
     return parsed if parsed >= 0 else default
 
 
+def _coerce_tool_usage_notice_counters(value: Any) -> dict[str, int]:
+    if isinstance(value, dict):
+        raw = value
+    else:
+        return {}
+    out: dict[str, int] = {}
+    for key, item in raw.items():
+        if not isinstance(key, str) or not key.strip():
+            continue
+        out[key.strip()] = _coerce_non_negative_int(item)
+    return out
+
+
 def hydrate_memory_messages_state(state: Any, meta: dict[str, Any] | None) -> None:
     """Восстановить поля State и meta-only ключи из thread/child meta."""
     session = meta if isinstance(meta, dict) else {}
@@ -34,9 +48,13 @@ def hydrate_memory_messages_state(state: Any, meta: dict[str, Any] | None) -> No
         state.long_memory_content_hash = raw_hash
     else:
         state.long_memory_content_hash = None
-    state.memory_notice_cnt = _coerce_non_negative_int(
-        session.get(META_MEMORY_NOTICE_CNT, 0)
-    )
+
+    counters = _coerce_tool_usage_notice_counters(session.get(META_TOOL_USAGE_NOTICE_CNT))
+    if not counters and META_MEMORY_NOTICE_CNT in session:
+        legacy = _coerce_non_negative_int(session.get(META_MEMORY_NOTICE_CNT, 0))
+        if legacy > 0:
+            counters = {"working_memory": legacy}
+    state.tool_usage_notice_cnt = counters
 
 
 def persist_memory_messages_state(state: Any, meta: dict[str, Any]) -> None:
@@ -44,8 +62,11 @@ def persist_memory_messages_state(state: Any, meta: dict[str, Any]) -> None:
     meta[META_LONG_MEMORY_CONTENT_HASH] = getattr(
         state, "long_memory_content_hash", None
     )
-    meta[META_MEMORY_NOTICE_CNT] = _coerce_non_negative_int(
-        getattr(state, "memory_notice_cnt", 0)
+    raw_counters = getattr(state, "tool_usage_notice_cnt", None)
+    meta[META_TOOL_USAGE_NOTICE_CNT] = (
+        _coerce_tool_usage_notice_counters(raw_counters)
+        if isinstance(raw_counters, dict)
+        else {}
     )
 
 

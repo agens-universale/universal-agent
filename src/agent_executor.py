@@ -29,7 +29,7 @@ from thread_store import (
 from tools.connect_mcp.persistent_stdio import PersistentStdioRegistry
 from tools.connect_mcp.stream_client import _SESSION_MANAGER as _STREAM_SESSION_MANAGER
 from tools.skills.registry import get_skills_registry
-from message_policy.memory_messages_notice.state import persist_memory_messages_state
+from message_policy.tool_usage_notice.state import persist_memory_messages_state
 from utils.generate_message_id import generate_msg_id_sha256 as generate_message_id_func
 from utils.local_render_system_prompt import render_system_prompt
 

@@ -6,7 +6,7 @@ from message_policy.long_memory_notice.policy import (
     on_persist_steps,
     touch_long_memory_baseline,
 )
-from message_policy.memory_messages_notice.state import get_long_memory_check_cnt
+from message_policy.tool_usage_notice.state import get_long_memory_check_cnt
 from states import State
 
 

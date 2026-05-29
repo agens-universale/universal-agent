@@ -1,10 +1,11 @@
 import json
 
-from message_policy.memory_messages_notice.state import (
+from message_policy.tool_usage_notice.state import (
     META_LONG_MEMORY_CHECK_CNT,
     META_LONG_MEMORY_CONTENT_HASH,
     META_MEMORY_NOTICE_CNT,
     META_SUBAGENT_THREAD_MEMORY_ANNOUNCED,
+    META_TOOL_USAGE_NOTICE_CNT,
     get_long_memory_check_cnt,
     hydrate_memory_messages_state,
     merge_memory_messages_meta_to_base,
@@ -32,7 +33,7 @@ def _make_state() -> State:
 def test_new_state_memory_messages_defaults():
     state = _make_state()
     assert state.long_memory_content_hash is None
-    assert state.memory_notice_cnt == 0
+    assert state.tool_usage_notice_cnt == {}
 
 
 def test_hydrate_from_meta_restores_state_fields():
@@ -41,32 +42,44 @@ def test_hydrate_from_meta_restores_state_fields():
         state,
         {
             META_LONG_MEMORY_CONTENT_HASH: "abc123",
-            META_MEMORY_NOTICE_CNT: 7,
+            META_TOOL_USAGE_NOTICE_CNT: {"working_memory": 7},
             META_LONG_MEMORY_CHECK_CNT: 2,
         },
     )
     assert state.long_memory_content_hash == "abc123"
-    assert state.memory_notice_cnt == 7
+    assert state.tool_usage_notice_cnt == {"working_memory": 7}
+
+
+def test_hydrate_maps_legacy_memory_notice_cnt_to_working_memory():
+    state = _make_state()
+    hydrate_memory_messages_state(
+        state,
+        {META_MEMORY_NOTICE_CNT: 4},
+    )
+    assert state.tool_usage_notice_cnt == {"working_memory": 4}
 
 
 def test_hydrate_rejects_invalid_hash_and_negative_counter():
     state = _make_state()
     hydrate_memory_messages_state(
         state,
-        {META_LONG_MEMORY_CONTENT_HASH: 42, META_MEMORY_NOTICE_CNT: -3},
+        {
+            META_LONG_MEMORY_CONTENT_HASH: 42,
+            META_TOOL_USAGE_NOTICE_CNT: {"working_memory": -3},
+        },
     )
     assert state.long_memory_content_hash is None
-    assert state.memory_notice_cnt == 0
+    assert state.tool_usage_notice_cnt == {"working_memory": 0}
 
 
 def test_persist_writes_state_fields_to_meta():
     state = _make_state()
     state.long_memory_content_hash = "deadbeef"
-    state.memory_notice_cnt = 11
+    state.tool_usage_notice_cnt = {"working_memory": 11}
     meta: dict = {META_LONG_MEMORY_CHECK_CNT: 4}
     persist_memory_messages_state(state, meta)
     assert meta[META_LONG_MEMORY_CONTENT_HASH] == "deadbeef"
-    assert meta[META_MEMORY_NOTICE_CNT] == 11
+    assert meta[META_TOOL_USAGE_NOTICE_CNT] == {"working_memory": 11}
     assert meta[META_LONG_MEMORY_CHECK_CNT] == 4
 
 
@@ -74,13 +87,13 @@ def test_merge_memory_messages_meta_to_base_preserves_ephemeral_keys():
     base: dict = {"created_at": "t0"}
     session = {
         META_LONG_MEMORY_CONTENT_HASH: None,
-        META_MEMORY_NOTICE_CNT: 3,
+        META_TOOL_USAGE_NOTICE_CNT: {"working_memory": 3},
         META_LONG_MEMORY_CHECK_CNT: 2,
         META_SUBAGENT_THREAD_MEMORY_ANNOUNCED: True,
     }
     merge_memory_messages_meta_to_base(base, session)
     assert base[META_LONG_MEMORY_CONTENT_HASH] is None
-    assert base[META_MEMORY_NOTICE_CNT] == 3
+    assert base[META_TOOL_USAGE_NOTICE_CNT] == {"working_memory": 3}
     assert base[META_LONG_MEMORY_CHECK_CNT] == 2
     assert base[META_SUBAGENT_THREAD_MEMORY_ANNOUNCED] is True
 
@@ -88,40 +101,40 @@ def test_merge_memory_messages_meta_to_base_preserves_ephemeral_keys():
 def test_init_memory_messages_from_meta_on_state():
     state = _make_state()
     state.init_memory_messages_from_meta(
-        {META_LONG_MEMORY_CONTENT_HASH: "h1", META_MEMORY_NOTICE_CNT: 5}
+        {META_LONG_MEMORY_CONTENT_HASH: "h1", META_TOOL_USAGE_NOTICE_CNT: {"wm": 5}}
     )
     assert state.long_memory_content_hash == "h1"
-    assert state.memory_notice_cnt == 5
+    assert state.tool_usage_notice_cnt == {"wm": 5}
 
 
 def test_init_subagent_memory_messages_resets_isolated_counters():
     state = _make_state()
     state.long_memory_content_hash = "parent"
-    state.memory_notice_cnt = 99
+    state.tool_usage_notice_cnt = {"working_memory": 99}
     state.init_subagent_memory_messages()
     assert state.long_memory_content_hash is None
-    assert state.memory_notice_cnt == 0
+    assert state.tool_usage_notice_cnt == {}
 
 
 def test_init_subagent_current_user_intent_resets_memory_messages():
     state = _make_state()
     state.long_memory_content_hash = "parent"
-    state.memory_notice_cnt = 12
+    state.tool_usage_notice_cnt = {"working_memory": 12}
     state.init_subagent_current_user_intent("do task")
     assert state.long_memory_content_hash is None
-    assert state.memory_notice_cnt == 0
+    assert state.tool_usage_notice_cnt == {}
 
 
 def test_state_to_dict_roundtrip_restores_memory_fields():
     state = _make_state()
     state.long_memory_content_hash = "hash_x"
-    state.memory_notice_cnt = 8
+    state.tool_usage_notice_cnt = {"working_memory": 8}
     from persistence.state_serializer import StateSerializer
 
     payload = StateSerializer.serialize(state)
     restored = StateSerializer.deserialize(json.loads(json.dumps(payload)))
     assert restored.long_memory_content_hash == "hash_x"
-    assert restored.memory_notice_cnt == 8
+    assert restored.tool_usage_notice_cnt == {"working_memory": 8}
 
 
 def test_meta_only_helpers():
@@ -153,7 +166,7 @@ def test_thread_session_persist_batch_writes_memory_meta(tmp_path, monkeypatch):
     )
     state = _make_state()
     state.long_memory_content_hash = "disk_hash"
-    state.memory_notice_cnt = 6
+    state.tool_usage_notice_cnt = {"working_memory": 6}
     set_long_memory_check_cnt(session.meta, 1)
 
     persist_memory_messages_state(state, session.meta)
@@ -163,5 +176,5 @@ def test_thread_session_persist_batch_writes_memory_meta(tmp_path, monkeypatch):
 
     saved = load_thread_meta(str(threads_dir), "cli", "t_mem")
     assert saved[META_LONG_MEMORY_CONTENT_HASH] == "disk_hash"
-    assert saved[META_MEMORY_NOTICE_CNT] == 6
+    assert saved[META_TOOL_USAGE_NOTICE_CNT] == {"working_memory": 6}
     assert saved[META_LONG_MEMORY_CHECK_CNT] == 1

@@ -4,7 +4,7 @@ import re
 from datetime import datetime, timezone
 from typing import Dict, List, Tuple, Any, Set, Optional
 
-from message_policy.memory_messages_notice.state import merge_memory_messages_meta_to_base
+from message_policy.tool_usage_notice.state import merge_memory_messages_meta_to_base
 from persistence.thread_meta_mapper import ThreadMetaMapper
 from message_policy.user_message_policy import (
     TECHNICAL_TYPE_DIALOG_SUMMARY,

@@ -27,8 +27,10 @@ from config_modules.working_memory import (
 from config_modules.memory_messages import (
     LongMemoryMessagesConfig,
     MemoryGateConfig,
+    ToolUsageNoticeRule,
     normalize_long_memory_messages_config,
     normalize_memory_gate_config,
+    normalize_tool_usage_notice_rules,
 )
 from config_modules.chat_completions import ChatCompletionsConfig
 from config_modules.summary import (
@@ -60,6 +62,7 @@ class AppConfig(BaseModel):
     memory_files: MemoryFilesConfig = Field(default_factory=MemoryFilesConfig)
     working_memory: WorkingMemoryConfig = Field(default_factory=WorkingMemoryConfig)
     memory_gate: MemoryGateConfig = Field(default_factory=MemoryGateConfig)
+    tool_usage_notice: list[ToolUsageNoticeRule] = Field(default_factory=list)
     long_memory: LongMemoryMessagesConfig = Field(default_factory=LongMemoryMessagesConfig)
     paths: PathsConfig = Field(default_factory=PathsConfig)
     agent: AgentConfig = Field(default_factory=AgentConfig)
@@ -121,6 +124,7 @@ def resolve_paths(cfg: AppConfig, config_dir: str) -> None:
     normalize_memory_files_config(cfg.memory_files)
     normalize_working_memory_config(cfg.working_memory)
     normalize_memory_gate_config(cfg.memory_gate)
+    cfg.tool_usage_notice = normalize_tool_usage_notice_rules(cfg.tool_usage_notice)
     normalize_long_memory_messages_config(cfg.long_memory)
     normalize_intent_scope_config(cfg.intent_scope)
     cfg.intent_scope.intent_scope_tool_summary_prompt_path = to_abs(

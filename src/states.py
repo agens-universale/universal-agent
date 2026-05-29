@@ -4,7 +4,7 @@ from typing import Any, Dict, List, Optional, Union
 from long_memory import attach_status_to_prompt_vars
 from utils.project_data import get_project_data
 from tools.stored_outputs.tool_call_outputs_store import ToolCallOutputsStore
-from message_policy.memory_messages_notice.state import hydrate_memory_messages_state
+from message_policy.tool_usage_notice.state import hydrate_memory_messages_state
 from message_policy.user_message_policy import (
     append_user_log_entries,
     normalize_user_log_entries,
@@ -86,7 +86,7 @@ class State:
         self.current_user_intent: List[str] = []
         self.finish_gate_rejection_count: int = 0
         self.long_memory_content_hash: Optional[str] = None
-        self.memory_notice_cnt: int = 0
+        self.tool_usage_notice_cnt: dict[str, int] = {}
         self.tool_call_outputs_store = ToolCallOutputsStore()
 
     def set_call_metadata(self):
@@ -168,7 +168,7 @@ class State:
     def init_subagent_memory_messages(self) -> None:
         """Субагент: изолированный meta/state; wiki общая через shared (D34)."""
         self.long_memory_content_hash = None
-        self.memory_notice_cnt = 0
+        self.tool_usage_notice_cnt = {}
 
     @staticmethod
     def append_intent_line(intent_list: List[str], text: str) -> List[str]:
