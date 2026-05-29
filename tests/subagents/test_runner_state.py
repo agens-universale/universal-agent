@@ -2,13 +2,14 @@
 
 from types import SimpleNamespace
 
-from states import State, SharedStateData, save_state
+from persistence.state_storage import save_state
+from states import State, SharedStateData
 from tools.subagents.registry import SUBAGENT_CLASSES, is_subagent_tool
 from tools.subagents.runner import SubagentRunner
 
 
 def _make_orchestrator_state(**overrides):
-    shared = overrides.pop("shared", SharedStateData(memory_files={"journal": "test"}))
+    shared = overrides.pop("shared", SharedStateData(working_memory={"state": "test"}))
     state = State(
         verbose=False,
         model="test-model",
@@ -66,7 +67,7 @@ class TestBuildChildState:
         assert child.parent_state_id == orch.state_id
 
     def test_shared_is_same_reference(self):
-        shared = SharedStateData(memory_files={"journal": "shared data"})
+        shared = SharedStateData(working_memory={"state": "shared data"})
         orch = _make_orchestrator_state(shared=shared)
         cfg = _make_config()
         runner = SubagentRunner(_make_ctx(cfg), orch, cfg)

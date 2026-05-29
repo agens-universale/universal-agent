@@ -4,7 +4,8 @@ import json
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-from states import State, SharedStateData, save_state
+from persistence.state_storage import save_state
+from states import State, SharedStateData
 from tools.subagents import runner as runner_module
 from tools.subagents.runner import SubagentRunner
 

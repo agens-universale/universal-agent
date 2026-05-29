@@ -17,7 +17,9 @@ from config_modules.stored_outputs import get_stored_tool_outputs_max_entries
 from message_policy.chat_completions import repair_tool_call_pairing
 from run_summary_coordinator import RunSummaryCoordinator
 from summarize.config import parse_summary_trigger_chars
-from states import State, SharedStateData, save_state, dump_storage
+from persistence.state_storage import dump_storage, save_state
+from persistence.thread_meta_mapper import ThreadMetaMapper
+from states import State, SharedStateData
 from thread_store import (
     ThreadSession,
     make_message_key,
@@ -94,16 +96,7 @@ class AgentExecutor:
             if backend_api_mode == "responses":
                 previous_response_id = thread_session.previous_response_id
             meta = getattr(thread_session, "meta", None) or {}
-            shared_raw = meta.get("shared") or {}
-            if isinstance(shared_raw, dict) and shared_raw:
-                thread_shared = SharedStateData(
-                    memory_files=dict(shared_raw.get("memory_files", {})),
-                    notes_md=str(shared_raw.get("notes_md", "")),
-                )
-            else:
-                maybe_memory_files = meta.get("memory_files")
-                if isinstance(maybe_memory_files, dict):
-                    thread_shared = SharedStateData(memory_files=dict(maybe_memory_files))
+            thread_shared = ThreadMetaMapper.shared_from_meta(meta)
         else:
             system_id = system or "cli"
         is_cli_mode = system_id == "cli"
@@ -259,10 +252,9 @@ class AgentExecutor:
                     ] = rendered_system_prompt
                 _shared = getattr(state, "shared", None)
                 if isinstance(_shared, SharedStateData):
-                    thread_session.meta["shared"] = {
-                        "memory_files": _shared.memory_files,
-                        "notes_md": _shared.notes_md,
-                    }
+                    thread_session.meta = ThreadMetaMapper.merge_shared_into_meta(
+                        thread_session.meta, _shared
+                    )
                 known_before = set(thread_session.known_message_keys)
                 step_messages_for_user_scope = [
                     m for m in step_messages

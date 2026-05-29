@@ -8,7 +8,8 @@ import intent_guard.guard as intent_guard_guard
 
 from intent_guard.guard import FinishGateGuard
 from intent_guard.validation_result import ValidationResult
-from states import SharedStateData, State, save_state
+from persistence.state_storage import save_state
+from states import SharedStateData, State
 from tools.subagents.runner import SubagentRunner
 
 

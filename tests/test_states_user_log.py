@@ -1,6 +1,7 @@
 import json
 
 from message_policy.user_message_policy import extract_real_user_message_text
+from persistence.state_serializer import StateSerializer
 from states import State
 
 
@@ -161,7 +162,7 @@ def test_extract_real_user_message_text_keeps_regular_user_message():
 
 def test_state_to_dict_roundtrip_is_json_serializable_and_restores_shared_and_store():
     state = _make_state()
-    state.shared.memory_files["journal"] = "entry"
+    state.shared.working_memory["state"] = "entry"
     state.shared.notes_md = "notes"
     state.shared.fetch_url_cache["https://example.com"] = {"content": "ok"}
 
@@ -180,11 +181,12 @@ def test_state_to_dict_roundtrip_is_json_serializable_and_restores_shared_and_st
         )
     )
 
-    payload = state.to_dict()
+    payload = StateSerializer.serialize(state)
     raw_json = json.dumps(payload, ensure_ascii=False)
-    restored = State.from_dict(json.loads(raw_json))
+    restored = StateSerializer.deserialize(json.loads(raw_json))
 
-    assert restored.shared.memory_files["journal"] == "entry"
+    assert restored.shared.working_memory["state"] == "entry"
+    assert StateSerializer.serialize(restored)["state_schema_version"] == "v2"
     assert restored.shared.notes_md == "notes"
     assert restored.shared.fetch_url_cache["https://example.com"] == {"content": "ok"}
     rec = restored.tool_call_outputs_store.peek("out_1")
@@ -237,11 +239,11 @@ def test_state_roundtrip_with_monster_payload_preserves_core_runtime_fields():
         {"id": "t1", "type": "function_call", "name": "memory_files", "arguments": "{\"action\":\"list\"}"},
     ]
 
-    state.shared.memory_files.update(
+    state.shared.working_memory.update(
         {
-            "journal": "line1\nline2",
-            "arch": "decision: keep explicit serializers",
-            "notes": "long text " * 5,
+            "state": "line1\nline2",
+            "knowledge": "decision: keep explicit serializers",
+            "goal": "long text " * 5,
         }
     )
     state.shared.notes_md = "# Notes\n- item1\n- item2"
@@ -274,9 +276,9 @@ def test_state_roundtrip_with_monster_payload_preserves_core_runtime_fields():
         )
     )
 
-    raw = state.to_dict()
+    raw = StateSerializer.serialize(state)
     blob = json.dumps(raw, ensure_ascii=False)
-    restored = State.from_dict(json.loads(blob))
+    restored = StateSerializer.deserialize(json.loads(blob))
 
     assert restored.verbose is True
     assert restored.default_model == "CodeChat-Pro"
@@ -300,8 +302,8 @@ def test_state_roundtrip_with_monster_payload_preserves_core_runtime_fields():
     assert restored.current_user_intent == ["active one", "active two"]
     assert restored.call_metadata["extra"]["nested"][2]["flags"] == [True, False, None]
 
-    assert restored.shared.memory_files["journal"] == "line1\nline2"
-    assert restored.shared.memory_files["arch"] == "decision: keep explicit serializers"
+    assert restored.shared.working_memory["state"] == "line1\nline2"
+    assert restored.shared.working_memory["knowledge"] == "decision: keep explicit serializers"
     assert restored.shared.notes_md == "# Notes\n- item1\n- item2"
     assert restored.shared.fetch_url_cache["https://example.com/b"]["content"] == "BBB"
 

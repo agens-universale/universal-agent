@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from typing import Dict, List, Tuple, Any, Set, Optional
 
 from message_policy.memory_messages_notice.state import merge_memory_messages_meta_to_base
+from persistence.thread_meta_mapper import ThreadMetaMapper
 from message_policy.user_message_policy import (
     TECHNICAL_TYPE_DIALOG_SUMMARY,
     wrap_technical_user_content,
@@ -214,7 +215,7 @@ def save_thread_meta(
     _, meta_path = _thread_paths(threads_dir, sys_norm, thread_id)
     ensure_threads_dir(threads_dir)
 
-    to_save = dict(meta)
+    to_save = ThreadMetaMapper.ensure_v2_meta(dict(meta))
     to_save["thread_id"] = validate_thread_id(thread_id)
     to_save["system"] = sys_norm
     to_save["schema_version"] = _META_SCHEMA_VERSION
@@ -369,7 +370,7 @@ class ThreadSession:
             self.history_messages.append(message)
             known_seen.add(key)
         self.previous_response_id = previous_response_id
-        # Preserve arbitrary meta fields (e.g. memory_files), otherwise tools that
+        # Preserve arbitrary meta fields (e.g. shared.working_memory), otherwise tools that
         # update meta would get their data wiped on the next persist_batch().
         base_meta = (
             load_thread_meta(self.threads_dir, self.system_id, self.thread_id) or {}

@@ -113,9 +113,8 @@ def test_build_memory_gate_message_includes_register_index():
     assert "arch" in msg
 
 
-def test_get_thread_memory_registers_prefers_working_memory():
+def test_get_thread_memory_registers_reads_working_memory():
     shared = SimpleNamespace(
         working_memory={"state": "progress"},
-        memory_files={"journal": "legacy"},
     )
     assert get_thread_memory_registers_from_shared(shared) == {"state": "progress"}

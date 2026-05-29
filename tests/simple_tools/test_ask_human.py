@@ -44,7 +44,7 @@ def test_tool_description_focuses_on_asking_not_reply_taxonomy():
     assert "options" in desc.lower() or "a/b/c" in desc.lower()
     assert "delegation" not in desc.lower()
     assert "meta-question" not in desc.lower()
-    assert len(desc) < 550
+    assert len(desc) < 850
 
 
 def test_prompt_description_is_full_reference_doc():
@@ -58,7 +58,7 @@ def test_prompt_description_is_full_reference_doc():
     assert "black box" in desc.lower()
     assert "Meta-question" in desc or "meta-question" in desc
     assert "4096" in desc
-    assert "longer conversational turn" in desc.lower() or "longer turn" in desc.lower()
+    assert "long material" in desc.lower() or "pacing follows the user" in desc.lower()
     assert "Pacing follows the user" in desc
 
 

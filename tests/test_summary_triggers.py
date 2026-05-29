@@ -322,6 +322,7 @@ class SummaryTriggersTest(unittest.TestCase):
                         "messages_count": 2,
                         "backend_api_mode": "chat_completions",
                         "previous_response_id": None,
+                        "state_schema_version": "v2",
                         "user_intent_log": ["старый вопрос 1", "старый вопрос 2"],
                         "current_user_intent": [],
                     },

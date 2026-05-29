@@ -5,7 +5,6 @@ from types import SimpleNamespace
 
 import pytest
 
-from states import SharedStateData
 from tools.simple_tools.deprecated_tools.memory_files import (
     MemoryFiles,
     _DEFAULT_MAX_FILE_CHARS,
@@ -19,9 +18,9 @@ from tools.simple_tools.deprecated_tools.memory_files import (
 
 
 def _make_state(memory_files=None):
-    """Minimal state stub with shared.memory_files dict."""
+    """Minimal state stub for deprecated tool (isolated from SharedStateData v2)."""
     state = SimpleNamespace()
-    state.shared = SharedStateData(
+    state.shared = SimpleNamespace(
         memory_files=memory_files if memory_files is not None else {}
     )
     return state

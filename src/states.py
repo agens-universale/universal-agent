@@ -1,8 +1,5 @@
-import os
-import time
 from dataclasses import dataclass, field
 from uuid import uuid4
-import json
 from typing import Any, Dict, List, Optional, Union
 from long_memory import attach_status_to_prompt_vars
 from utils.project_data import get_project_data
@@ -18,7 +15,6 @@ from tools.skills.skills_policy import render_skills_catalog
 @dataclass
 class SharedStateData:
     """Данные, разделяемые между оркестратором и его субагентами."""
-    memory_files: Dict[str, str] = field(default_factory=dict)
     working_memory: Dict[str, str] = field(default_factory=dict)
     notes_md: str = ""
     fetch_url_cache: Dict[str, str] = field(default_factory=dict)
@@ -132,68 +128,6 @@ class State:
         if x_target and self.x_target is None:
             self.x_target = x_target
 
-    def to_dict(self) -> Dict[str, Any]:
-        """
-        Сериализация State для json-dump (debug/продолжение сессии).
-
-        Важно: `tool_call_outputs_store` и `shared` не являются нативно JSON-сериализуемыми,
-        поэтому их нужно представлять в виде простых dict/list.
-        """
-        raw = vars(self).copy()
-
-        shared = raw.get("shared")
-        if isinstance(shared, SharedStateData):
-            raw["shared"] = {
-                "memory_files": dict(shared.memory_files),
-                "working_memory": dict(shared.working_memory),
-                "notes_md": shared.notes_md,
-                "fetch_url_cache": dict(shared.fetch_url_cache),
-            }
-
-        store = raw.get("tool_call_outputs_store")
-        if isinstance(store, ToolCallOutputsStore):
-            raw["tool_call_outputs_store"] = store.to_dict()
-
-        return raw
-
-    @classmethod
-    def from_dict(cls, raw: Dict[str, Any]) -> "State":
-        """
-        Восстановление State из json-совместимого dict (как результат `to_dict()`).
-
-        Используем `__new__`, чтобы не зависеть от сигнатуры __init__ и не
-        исполнять сайд-эффекты (например чтение файлов для system prompt).
-        """
-        if not isinstance(raw, dict):
-            raise TypeError("State.from_dict expects dict")
-
-        # Создаём объект без вызова __init__.
-        state = cls.__new__(cls)
-        state.__dict__ = dict(raw)
-
-        shared_raw = state.__dict__.get("shared")
-        if isinstance(shared_raw, dict):
-            try:
-                state.shared = SharedStateData(
-                    memory_files=shared_raw.get("memory_files") or {},
-                    working_memory=shared_raw.get("working_memory") or {},
-                    notes_md=str(shared_raw.get("notes_md") or ""),
-                    fetch_url_cache=shared_raw.get("fetch_url_cache") or {},
-                )
-            except Exception:
-                # Fallback: оставляем как есть (хуже, но не валим загрузку целиком).
-                pass
-
-        store_raw = state.__dict__.get("tool_call_outputs_store")
-        if isinstance(store_raw, dict):
-            try:
-                state.tool_call_outputs_store = ToolCallOutputsStore.from_dict(store_raw)
-            except Exception:
-                # Fallback: оставляем как есть.
-                pass
-
-        return state
-
     def add_message(self, message):
         self.messages.append(message)
 
@@ -297,68 +231,5 @@ class State:
         self.current_user_intent = append_user_log_entries(
             self.current_user_intent, [new_user_message]
         )
-
-
-class SatesStorage:
-
-    def __init__(self):
-        self.states = dict()
-
-    def add_state(self, state: State):
-        state_id = state.state_id
-        self.states[state_id] = state
-
-    def remove_state(self, state: State):
-        state_id = state.state_id
-        del self.states[state_id]
-
-    def get_state_by_id(self, state_id):
-        return self.states.get(state_id, None)
-
-    def to_dict(self):
-        return {
-            state_id: state.to_dict() if hasattr(state, 'to_dict') else state.__dict__
-            for state_id, state in self.states.items()
-        }
-
-    def save_to_file(self, filepath, **kwargs):
-        with open(filepath, 'w', encoding='utf-8') as fd:
-            json.dump(self.to_dict(), fd, ensure_ascii=False, **kwargs)
-
-    def load_from_file(self, filepath: str) -> None:
-        """
-        Загрузить сохранённый дамп state (как результат dump_storage()).
-        """
-        with open(filepath, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        if not isinstance(data, dict):
-            return
-
-        # Восстанавливаем state по ключу state_id и значению payload.
-        for state_id, payload in data.items():
-            if not isinstance(payload, dict):
-                continue
-            state = State.from_dict(payload)
-            if isinstance(state_id, str) and state_id.strip():
-                state.state_id = state_id
-            self.states[state.state_id] = state
-
-
-# Global object
-
-state_storage = SatesStorage()
-
-#####################
-
-
-def save_state(state: State):
-    global state_storage
-    state_storage.add_state(state)
-
-def dump_storage(cur_dir, **kwargs):
-    global state_storage
-    fp = os.path.join(cur_dir, f'session_storage_{int(time.time())}.json')
-    state_storage.save_to_file(fp, **kwargs)
-    print(f'\n\nStorage dumped in file {fp}\n\n')
 
 

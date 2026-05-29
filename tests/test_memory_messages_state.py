@@ -116,7 +116,10 @@ def test_state_to_dict_roundtrip_restores_memory_fields():
     state = _make_state()
     state.long_memory_content_hash = "hash_x"
     state.memory_notice_cnt = 8
-    restored = State.from_dict(json.loads(json.dumps(state.to_dict())))
+    from persistence.state_serializer import StateSerializer
+
+    payload = StateSerializer.serialize(state)
+    restored = StateSerializer.deserialize(json.loads(json.dumps(payload)))
     assert restored.long_memory_content_hash == "hash_x"
     assert restored.memory_notice_cnt == 8
 

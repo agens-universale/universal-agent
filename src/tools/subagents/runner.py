@@ -14,7 +14,8 @@ from message_policy.memory_messages_notice.policy import (
     wrap_thread_memory_technical_user_message,
 )
 from message_policy.memory_messages_notice.state import persist_memory_messages_state
-from states import State, save_state
+from persistence.state_storage import save_state
+from states import State
 from tools import build_tools_data
 from tools.subagents.registry import get_subagent_class
 from utils.generate_message_id import generate_msg_id_sha256 as generate_message_id_func

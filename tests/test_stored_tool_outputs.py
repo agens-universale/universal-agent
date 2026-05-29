@@ -27,7 +27,8 @@ def _stub_optional_web_parsers() -> None:
 _stub_optional_web_parsers()
 
 from processing_responses import process_tool_calls
-from states import State, SatesStorage
+from persistence.state_storage import SatesStorage
+from states import State
 from tools.stored_outputs.read_stored_tool_output import ReadStoredToolOutput
 from tools.stored_outputs.tool_call_outputs_store import (
     ToolCallOutputRecord,

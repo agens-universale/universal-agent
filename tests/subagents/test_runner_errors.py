@@ -4,7 +4,8 @@ import json
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch, AsyncMock
 
-from states import State, SharedStateData, save_state
+from persistence.state_storage import save_state
+from states import State, SharedStateData
 from tools.subagents import runner as runner_module
 from tools.subagents.runner import SubagentRunner
 
@@ -20,7 +21,7 @@ def _make_orchestrator_state():
         system_prompt_id="test-prompt",
         use_server_subagents=False,
         chat_completions_system_prompt="System\n<specific_role>x</specific_role>",
-        shared=SharedStateData(memory_files={"journal": "before"}),
+        shared=SharedStateData(working_memory={"state": "before"}),
     )
     state.backend_api_mode = "chat_completions"
     save_state(state)
@@ -102,7 +103,7 @@ class TestCreateInstanceError:
 
             runner.run("subagent_worker", {"task": "test"}, MagicMock())
 
-        assert orch.shared.memory_files["journal"] == "before"
+        assert orch.shared.working_memory["state"] == "before"
         assert orch.stop_requested is False
 
 

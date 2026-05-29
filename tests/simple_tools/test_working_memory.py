@@ -120,7 +120,7 @@ def test_register_limit_exceeded():
         )
     )
     assert res["ok"] is False
-    assert res["error"]["type"] == "limit_exceeded"
+    assert res["error"]["type"] == "register_limit_exceeded"
 
 
 def test_total_budget_limit_exceeded():

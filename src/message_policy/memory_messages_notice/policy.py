@@ -141,7 +141,7 @@ def get_thread_memory_registers_from_shared(shared: Any) -> dict[str, str]:
     if shared is None:
         return {}
 
-    for attr_name in ("working_memory", "memory_files"):
+    for attr_name in ("working_memory",):
         raw = getattr(shared, attr_name, None)
         if not isinstance(raw, dict):
             continue
