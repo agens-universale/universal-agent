@@ -89,7 +89,7 @@ class ThreadSummaryTest(unittest.TestCase):
                 {
                     "summary_message_content": "compressed summary",
                     "shared": {
-                        "memory_files": {"journal": "## Thread summary\n\ncompressed summary"},
+                        "working_memory": {"state": "## Thread summary\n\ncompressed summary"},
                         "notes_md": "",
                     },
                     "user_intent_log": ["req1", "req2"],
@@ -116,7 +116,7 @@ class ThreadSummaryTest(unittest.TestCase):
 
             meta = load_thread_meta(tmp_dir, system_id, thread_id)
             self.assertEqual(
-                meta.get("shared", {}).get("memory_files", {}).get("journal"),
+                meta.get("shared", {}).get("working_memory", {}).get("state"),
                 "## Thread summary\n\ncompressed summary",
             )
             self.assertEqual(meta.get("backend_api_mode"), "chat_completions")
@@ -161,7 +161,7 @@ class ThreadSummaryTest(unittest.TestCase):
                 {
                     "summary_message_content": summary_text,
                     "shared": {
-                        "memory_files": {"journal": "notes"},
+                        "working_memory": {"state": "notes"},
                         "notes_md": "",
                     },
                 }

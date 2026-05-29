@@ -41,10 +41,11 @@ def _ctx():
 def _state():
     return types.SimpleNamespace(
         default_model="test-model",
-        memory_files={},
+        shared=types.SimpleNamespace(working_memory={}),
         dialog_steps_offset=0,
         previous_response_id=None,
         user_intent_log=[],
+        messages=[],
     )
 
 
@@ -101,7 +102,7 @@ def test_e2e_two_sequential_summaries_keep_user_log_order_and_no_original_block(
             monkeypatch,
             lambda **_kwargs: _valid_summary("s"),
         )
-        monkeypatch.setattr("summarize.memory_suggestions.suggest_updated_journal", lambda **_k: "")
+        monkeypatch.setattr("summarize.memory_suggestions.request_memory_update", lambda **_k: types.SimpleNamespace(request_messages=[], raw_response=""))
 
         assert maybe_run_summary_compaction(
             ctx=_ctx(),
@@ -153,9 +154,8 @@ def test_e2e_two_sequential_summaries_keep_user_log_order_and_no_original_block(
         assert state.previous_response_id is None
         meta_after_second = load_thread_meta(tmp_dir, system_id, thread_id)
         assert meta_after_second.get("backend_api_mode") == "chat_completions"
-        # При пустом updated_journal (нет LLM-переписи) journal в state не меняется.
-        mf = meta_after_second.get("memory_files", {})
-        assert mf.get("journal", "") == ""
+        wm = meta_after_second.get("shared", {}).get("working_memory", {})
+        assert wm == {} or all(not str(v).strip() for v in wm.values())
         assert isinstance(meta_after_second.get("dialog_steps_offset"), int)
         assert meta_after_second.get("messages_count") == 1
         assert meta_after_second.get("previous_response_id") is None
@@ -215,7 +215,7 @@ def test_e2e_user_log_skips_technical_and_tool_messages(monkeypatch):
             monkeypatch,
             lambda **_kwargs: _valid_summary("s-tech"),
         )
-        monkeypatch.setattr("summarize.memory_suggestions.suggest_updated_journal", lambda **_k: "")
+        monkeypatch.setattr("summarize.memory_suggestions.request_memory_update", lambda **_k: types.SimpleNamespace(request_messages=[], raw_response=""))
 
         assert maybe_run_summary_compaction(
             ctx=_ctx(),

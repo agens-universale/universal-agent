@@ -83,13 +83,12 @@ def test_summarize_incremental_empty_history_no_model_call(monkeypatch):
 
     monkeypatch.setattr("summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
     _patch_chat_completion(monkeypatch, _never_call)
-    monkeypatch.setattr("summarize.memory_suggestions.suggest_updated_journal", lambda **_k: "")
+    monkeypatch.setattr("summarize.memory_suggestions.request_memory_update", lambda **_k: types.SimpleNamespace(request_messages=[], raw_response=""))
 
     result = summarize_dialog_via_chat_completions(
         ctx=_ctx(),
         state=_state(),
         full_history_messages=[],
-        current_memory="",
     )
     assert result["raw_summary"] == ""
     assert result["last_dialog_steps"] == ""
@@ -107,63 +106,61 @@ def test_summarize_incremental_single_batch_one_summary_call(monkeypatch):
 
     monkeypatch.setattr("summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
     _patch_chat_completion(monkeypatch, _fake_request)
-    monkeypatch.setattr("summarize.memory_suggestions.suggest_updated_journal", lambda **_k: "")
+    monkeypatch.setattr("summarize.memory_suggestions.request_memory_update", lambda **_k: types.SimpleNamespace(request_messages=[], raw_response=""))
 
     result = summarize_dialog_via_chat_completions(
         ctx=_ctx(trigger_chars=999999),
         state=_state(),
         full_history_messages=history,
-        current_memory="",
     )
     assert "single-batch" in result["raw_summary"]
     assert result["num_batches"] == 1
     assert len(calls) == 1
 
 
-def test_memory_additions_go_to_memory_files_journal_not_inside_summary(monkeypatch):
+def test_memory_deltas_applied_to_working_memory_not_inside_summary(monkeypatch):
     history = _flatten_turns([_make_turn("hi", "hello")])
 
     def _fake_request(**kwargs):
         return _valid_summary("with-memory")
 
-    def _fake_memory(**kwargs):
-        # Имитация LLM: переписывает journal целиком, но сохраняет прежнее содержимое.
-        return (
-            f"{kwargs.get('current_memory', '').strip()}\n\n"
-            "- bullet one\n- bullet two"
+    def _fake_memory(**_kwargs):
+        return types.SimpleNamespace(
+            request_messages=[],
+            raw_response="<knowledge>- bullet one\n- bullet two</knowledge>",
         )
 
     monkeypatch.setattr("summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
     _patch_chat_completion(monkeypatch, _fake_request)
-    monkeypatch.setattr("summarize.memory_suggestions.suggest_updated_journal", _fake_memory)
+    monkeypatch.setattr("summarize.memory_suggestions.request_memory_update", _fake_memory)
 
-    result = summarize_dialog_via_chat_completions(
-        ctx=_ctx(trigger_chars=999999),
-        state=_state(),
-        full_history_messages=history,
-        current_memory="existing note",
-    )
-    from states import SharedStateData
     state = types.SimpleNamespace(
-        shared=SharedStateData(memory_files={"journal": "existing note"}),
+        default_model="test-model",
+        shared=types.SimpleNamespace(working_memory={"goal": "existing note"}),
         messages=[],
         dialog_steps_offset=0,
         previous_response_id=None,
+    )
+    result = summarize_dialog_via_chat_completions(
+        ctx=_ctx(trigger_chars=999999),
+        state=state,
+        full_history_messages=history,
     )
     content = apply_summary_state_patch(
         state=state,
         raw_summary=result["raw_summary"],
         last_dialog_steps=result["last_dialog_steps"],
-        updated_journal=result["updated_journal"],
+        memory_deltas=result["memory_deltas"],
         summarized_messages_count=len(history),
     )
     assert "<add_to_memory>" not in content
-    assert "Suggested memory" not in content
     inner = content.split("<summary>")[1].split("</summary>")[0]
     assert "bullet one" not in inner
-    journal_block = content.split('<file name="journal">')[1].split("</file>")[0]
-    assert "existing note" in journal_block
-    assert "bullet one" in journal_block
+    assert "<working_memory>" in content
+    assert "existing note" in content
+    assert "bullet one" in content
+    assert state.shared.working_memory["knowledge"].startswith("existing note") is False
+    assert "bullet one" in state.shared.working_memory["knowledge"]
 
 
 def test_summarize_incremental_two_batches_previous_summary_passed(monkeypatch):
@@ -190,20 +187,22 @@ def test_summarize_incremental_two_batches_previous_summary_passed(monkeypatch):
 
     monkeypatch.setattr("summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
     _patch_chat_completion(monkeypatch, _fake_request)
-    monkeypatch.setattr("summarize.memory_suggestions.suggest_updated_journal", _fake_memory)
+    monkeypatch.setattr("summarize.memory_suggestions.request_memory_update", _fake_memory)
 
     result = summarize_dialog_via_chat_completions(
         ctx=_ctx(trigger_chars=4500),
         state=_state(),
         full_history_messages=history,
-        current_memory="notes",
     )
     assert result["num_batches"] == 2
     assert "batch-2" in result["raw_summary"]
     assert len(seen_user_prompts) == 2
     assert "batch-1" in seen_user_prompts[1]
-    # Для multi-batch второй такт memory updates не вызываем.
+    # Для multi-batch memory patch не выполняется.
     assert memory_calls == []
+    assert result["memory_deltas"] == {}
+    assert result["trace"]["memory_patch"]["executed"] is False
+    assert result["trace"]["memory_patch"]["reason"] == "skipped_multi_batch"
 
 
 def test_batches_respect_turn_boundaries():
@@ -374,7 +373,7 @@ def test_accumulated_summary_is_compressed_when_limit_exceeded(monkeypatch):
 
     monkeypatch.setattr("summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
     _patch_chat_completion(monkeypatch, _fake_request)
-    monkeypatch.setattr("summarize.memory_suggestions.suggest_updated_journal", lambda **_k: "")
+    monkeypatch.setattr("summarize.memory_suggestions.request_memory_update", lambda **_k: types.SimpleNamespace(request_messages=[], raw_response=""))
 
     ctx = _ctx(trigger_chars=4500)
     ctx.config_dict["summary_params"]["max_accumulated_summary_chars"] = 50
@@ -382,7 +381,6 @@ def test_accumulated_summary_is_compressed_when_limit_exceeded(monkeypatch):
         ctx=ctx,
         state=_state(),
         full_history_messages=history,
-        current_memory="",
     )
     assert "final-summary" in result["raw_summary"]
     assert calls["n"] >= 3
@@ -458,7 +456,7 @@ def test_summarize_pipeline_calls_build_history_text_with_max_chars_disabled(mon
 
     monkeypatch.setattr("summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
     _patch_chat_completion(monkeypatch, _fake_request)
-    monkeypatch.setattr("summarize.memory_suggestions.suggest_updated_journal", lambda **_k: "")
+    monkeypatch.setattr("summarize.memory_suggestions.request_memory_update", lambda **_k: types.SimpleNamespace(request_messages=[], raw_response=""))
 
     history = [
         {"role": "user", "content": "u1"},
@@ -468,7 +466,6 @@ def test_summarize_pipeline_calls_build_history_text_with_max_chars_disabled(mon
         ctx=_ctx(trigger_chars=999999),
         state=types.SimpleNamespace(default_model="m"),
         full_history_messages=history,
-        current_memory="",
     )
     assert captured
     assert all(k.get("max_chars") == 0 for k in captured)
@@ -482,13 +479,12 @@ def test_summarize_merges_existing_user_intent_log(monkeypatch):
 
     monkeypatch.setattr("summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
     _patch_chat_completion(monkeypatch, _fake_request)
-    monkeypatch.setattr("summarize.memory_suggestions.suggest_updated_journal", lambda **_k: "")
+    monkeypatch.setattr("summarize.memory_suggestions.request_memory_update", lambda **_k: types.SimpleNamespace(request_messages=[], raw_response=""))
 
     result = summarize_dialog_via_chat_completions(
         ctx=_ctx(trigger_chars=999999),
         state=_state(),
         full_history_messages=history,
-        current_memory="",
         user_intent_log=["older user request", "new user request"],
     )
     assert result["user_intent_log"] == [
@@ -496,7 +492,7 @@ def test_summarize_merges_existing_user_intent_log(monkeypatch):
         "new user request",
     ]
     state = types.SimpleNamespace(
-        memory_files={},
+        shared=types.SimpleNamespace(working_memory={}),
         messages=[],
         dialog_steps_offset=0,
         previous_response_id=None,
@@ -505,7 +501,7 @@ def test_summarize_merges_existing_user_intent_log(monkeypatch):
         state=state,
         raw_summary=result["raw_summary"],
         last_dialog_steps=result["last_dialog_steps"],
-        updated_journal=result["updated_journal"],
+        memory_deltas=result.get("memory_deltas", {}),
         summarized_messages_count=len(history),
     )
     assert "<original_user_messages>" not in built
@@ -524,13 +520,12 @@ def test_summarize_preserves_user_intent_log_chronological_order(monkeypatch):
 
     monkeypatch.setattr("summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
     _patch_chat_completion(monkeypatch, _fake_request)
-    monkeypatch.setattr("summarize.memory_suggestions.suggest_updated_journal", lambda **_k: "")
+    monkeypatch.setattr("summarize.memory_suggestions.request_memory_update", lambda **_k: types.SimpleNamespace(request_messages=[], raw_response=""))
 
     result = summarize_dialog_via_chat_completions(
         ctx=_ctx(trigger_chars=999999),
         state=_state(),
         full_history_messages=history,
-        current_memory="",
         user_intent_log=[
             "first user request",
             "second user request",
@@ -555,13 +550,12 @@ def test_summarize_filters_technical_messages_from_user_intent_log(monkeypatch):
 
     monkeypatch.setattr("summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
     _patch_chat_completion(monkeypatch, _fake_request)
-    monkeypatch.setattr("summarize.memory_suggestions.suggest_updated_journal", lambda **_k: "")
+    monkeypatch.setattr("summarize.memory_suggestions.request_memory_update", lambda **_k: types.SimpleNamespace(request_messages=[], raw_response=""))
 
     result = summarize_dialog_via_chat_completions(
         ctx=_ctx(trigger_chars=999999),
         state=_state(),
         full_history_messages=history,
-        current_memory="",
         user_intent_log=[
             '<current_context>client has non-empty memory files; call `memory_files` with action="list" to see available files, then read what you need.</current_context>',
             "real request",
@@ -582,14 +576,49 @@ def test_invalid_summary_triggers_one_repair_retry(monkeypatch):
 
     monkeypatch.setattr("summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
     _patch_chat_completion(monkeypatch, _fake_request)
-    monkeypatch.setattr("summarize.memory_suggestions.suggest_updated_journal", lambda **_k: "")
+    monkeypatch.setattr("summarize.memory_suggestions.request_memory_update", lambda **_k: types.SimpleNamespace(request_messages=[], raw_response=""))
 
     result = summarize_dialog_via_chat_completions(
         ctx=_ctx(trigger_chars=999999),
         state=_state(),
         full_history_messages=history,
-        current_memory="",
     )
     assert "repaired" in result["raw_summary"]
     assert calls["n"] == 2
+
+
+def test_memory_update_format_repair_runs_once_for_long_unparsed_output(monkeypatch):
+    history = _flatten_turns([_make_turn("u1", "a1")])
+    llm_calls = {"repair": 0}
+
+    def _fake_summary(**_kwargs):
+        return _valid_summary("single-batch")
+
+    def _fake_memory(**_kwargs):
+        return types.SimpleNamespace(
+            request_messages=[{"role": "user", "content": "memory-step"}],
+            raw_response=("narrative output without xml tags " + ("x" * 150)),
+        )
+
+    def _fake_repair(**_kwargs):
+        llm_calls["repair"] += 1
+        return "<goal>repaired memory body</goal>"
+
+    monkeypatch.setattr("summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
+    _patch_chat_completion(monkeypatch, _fake_summary)
+    monkeypatch.setattr("summarize.memory_suggestions.request_memory_update", _fake_memory)
+    monkeypatch.setattr(
+        "summarize.memory_suggestions.request_memory_deltas_format_repair",
+        _fake_repair,
+    )
+
+    result = summarize_dialog_via_chat_completions(
+        ctx=_ctx(trigger_chars=999999),
+        state=_state(),
+        full_history_messages=history,
+    )
+    assert result["memory_deltas"]["goal"] == "repaired memory body"
+    assert result["trace"]["memory_patch"]["format_repair_attempted"] is True
+    assert result["trace"]["memory_patch"]["format_repair_success"] is True
+    assert llm_calls["repair"] == 1
 

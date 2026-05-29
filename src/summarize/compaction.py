@@ -12,16 +12,14 @@ from message_format.serialization import (
 )
 from summarize.summary_message_body import build_dialog_summary_content
 from summarize.thread_summarizer import summarize_dialog_via_chat_completions
-
-
-def _journal_text(state: Any) -> str:
-    """Extract journal text from state.shared.memory_files for backward-compat with summarizer."""
-    shared = getattr(state, "shared", None)
-    if shared is not None:
-        mf = getattr(shared, "memory_files", None)
-        if isinstance(mf, dict):
-            return (mf.get("journal") or "").strip()
-    return ""
+from summarize.working_memory_gateway import (
+    REGISTER_ORDER,
+    WorkingMemoryDeltas,
+    apply_append_deltas,
+    read_snapshot_from_state,
+    render_persistent_state_for_prompt,
+    render_working_memory_for_summary_message,
+)
 
 
 def without_system_messages(messages_list: List[dict]) -> List[dict]:
@@ -35,69 +33,44 @@ def without_system_messages(messages_list: List[dict]) -> List[dict]:
     return out
 
 
+def _deltas_from_mapping(raw: Dict[str, str] | None) -> WorkingMemoryDeltas:
+    data = raw if isinstance(raw, dict) else {}
+    return WorkingMemoryDeltas(
+        goal=str(data.get("goal") or "").strip(),
+        constraints=str(data.get("constraints") or "").strip(),
+        state=str(data.get("state") or "").strip(),
+        knowledge=str(data.get("knowledge") or "").strip(),
+    )
+
+
 def apply_summary_state_patch(
     *,
     state: Any,
     raw_summary: str,
     last_dialog_steps: str,
-    updated_journal: str,
+    memory_deltas: Dict[str, str] | None = None,
     summarized_messages_count: int,
 ) -> str:
-    """
-    Атомарно вносит в объект ``state`` результат compaction-суммаризации (без I/O и без решения «когда»).
-
-    Зачем: каноничное состояние исполнения живёт в ``state`` (см. принципы слоёв); эта функция — точка,
-    где согласованно обновляются заметки, оффсет шагов, привязка к предыдущему ответу API и список
-    сообщений. Вызывается из ``run_summary_compaction`` после успешной суммаризации.
-
-    Что делает:
-        1. ``state.shared.memory_files["journal"]`` — полностью обновляет journal значением
-           ``updated_journal``, если оно непустое (это уже актуализированная версия, не дельта);
-           иначе не меняет.
-        2. Собирает тело сообщения-резюме через ``build_dialog_summary_content`` уже **после** шага (1):
-           в ``<memory_files>`` попадает актуальный ``journal`` целиком и индекс прочих регистров
-           (имя, размер), без полного текста остальных файлов.
-        3. ``state.dialog_steps_offset`` — увеличивает на ``summarized_messages_count`` (служебно через
-           ``max(0, int(...))``).
-        4. ``state.previous_response_id`` — сбрасывает в ``None`` (контракт после compaction).
-        5. ``state.messages`` — заменяет на компактный трейс: если в прежней истории есть ``system``,
-           оставляет первое такое сообщение первым, затем одно техническое user-сообщение dialog summary
-           (``wrap_technical_user_content`` + ``TECHNICAL_TYPE_DIALOG_SUMMARY``).
-
-    Аргументы:
-        state:
-            Изменяемый in-place объект исполнения; ожидаются атрибуты ``memory_files``, ``dialog_steps_offset``,
-            ``previous_response_id``, ``messages``.
-        raw_summary:
-            Текст сводки LLM для секции ``<summary>``.
-        last_dialog_steps:
-            Отформатированный хвост диалога для ``<last_dialog_steps>``.
-        updated_journal:
-            Актуализированная полная версия journal; при непустом значении заменяет
-            ``memory_files["journal"]``.
-        summarized_messages_count:
-            Число сообщений, схлопнутых в этом проходе; участвует в ``dialog_steps_offset``.
-
-    Возвращает:
-        Итоговое тело резюме (то же, что вложено в служебное сообщение).
-    """
-    updated_journal_text = str(updated_journal or "").strip()
     shared = getattr(state, "shared", None)
     if shared is None:
         from states import SharedStateData
+
         shared = SharedStateData()
         state.shared = shared
-    mf = shared.memory_files
-    if not isinstance(mf, dict):
-        mf = {}
-        shared.memory_files = mf
-    if updated_journal_text:
-        mf["journal"] = updated_journal_text
 
+    snapshot = read_snapshot_from_state(state)
+    deltas = _deltas_from_mapping(memory_deltas)
+    if not deltas.is_empty():
+        snapshot = apply_append_deltas(snapshot, deltas)
+
+    wm_dict = {name: snapshot.to_dict().get(name, "") for name in REGISTER_ORDER}
+    shared.working_memory = wm_dict
+
+    working_memory_block = render_working_memory_for_summary_message(snapshot)
     summary_message_content = build_dialog_summary_content(
         summary_text=str(raw_summary or ""),
         last_dialog_steps=str(last_dialog_steps or ""),
-        memory_files=mf,
+        working_memory_block=working_memory_block,
         user_intent_log=list(getattr(state, "user_intent_log", []) or []),
         current_user_intent=list(getattr(state, "current_user_intent", []) or []),
     )
@@ -140,11 +113,6 @@ def history_exceeds_summary_trigger(
     state: Any,
     summary_trigger_chars: int,
 ) -> bool:
-    """
-    Дешёвая проверка: объём истории (`calc_history_chars_for_trigger`) строго больше порога.
-
-    При ``summary_trigger_chars <= 0`` всегда ``False`` (суммаризация отключена конфигом).
-    """
     if summary_trigger_chars <= 0:
         return False
     full_messages = without_system_messages(getattr(state, "messages", []))
@@ -159,12 +127,6 @@ def run_summary_compaction(
     is_cli_mode: bool,
     on_summary_applied: Optional[Callable[[Dict[str, Any]], None]] = None,
 ) -> None:
-    """
-    Выполняет compaction: LLM-сводка и ``apply_summary_state_patch``. Порог «когда» не проверяет —
-    вызывающий обязан вызвать после `history_exceeds_summary_trigger` (или в тестах принудительно).
-
-    История для суммаризации всегда берётся из ``state.messages`` (без system-сообщений).
-    """
     logger = getattr(ctx, "logger", None)
     thread_id = getattr(state, "thread_id", None)
     full_messages = without_system_messages(getattr(state, "messages", []))
@@ -198,19 +160,20 @@ def run_summary_compaction(
         if isinstance(source_current_intent, list)
         else []
     )
+    memory_snapshot = read_snapshot_from_state(state)
     summary_result = summarize_dialog_via_chat_completions(
         ctx=ctx,
         state=state,
         full_history_messages=full_messages,
-        current_memory=_journal_text(state),
+        persistent_state_block=render_persistent_state_for_prompt(memory_snapshot),
         user_intent_log=source_user_log,
         current_user_intent=source_current_intent,
         steps_offset=int(getattr(state, "dialog_steps_offset", 0) or 0),
     )
     raw_summary = str(summary_result.get("raw_summary") or "")
-    updated_journal = summary_result.get("updated_journal", "")
-    if not updated_journal:
-        updated_journal = summary_result.get("memory_additions", "")
+    memory_deltas = summary_result.get("memory_deltas", {})
+    if not isinstance(memory_deltas, dict):
+        memory_deltas = {}
     if logger is not None:
         logger.info("summary_received_raw_text=\n%s", raw_summary)
     if is_cli_mode:
@@ -221,7 +184,7 @@ def run_summary_compaction(
         state=state,
         raw_summary=raw_summary,
         last_dialog_steps=str(summary_result.get("last_dialog_steps") or ""),
-        updated_journal=updated_journal,
+        memory_deltas=memory_deltas,
         summarized_messages_count=len(full_messages),
     )
     trace = summary_result.get("trace")
@@ -236,7 +199,9 @@ def run_summary_compaction(
     summary_payload = {
         "summary_message_content": summary_message_content,
         "shared": {
-            "memory_files": dict(getattr(_shared, "memory_files", None) or {}) if _shared else {},
+            "working_memory": dict(getattr(_shared, "working_memory", None) or {})
+            if _shared
+            else {},
             "notes_md": str(getattr(_shared, "notes_md", "") or "") if _shared else "",
         },
         "user_intent_log": list(getattr(state, "user_intent_log", []) or []),
@@ -263,9 +228,10 @@ def run_summary_compaction(
     ratio = (
         round((new_serialized / serialized_chars), 4) if serialized_chars > 0 else 0.0
     )
+    delta_chars = sum(len(str(v or "")) for v in memory_deltas.values())
     if logger is not None:
         logger.info(
-            "summary_completed reason=%s thread_id=%s trigger_volume=%s serialized_before=%s serialized_after=%s compression_ratio=%s num_batches=%s updated_journal_chars=%s",
+            "summary_completed reason=%s thread_id=%s trigger_volume=%s serialized_before=%s serialized_after=%s compression_ratio=%s num_batches=%s memory_delta_chars=%s",
             trigger_reason,
             thread_id,
             trigger_volume,
@@ -273,14 +239,14 @@ def run_summary_compaction(
             new_serialized,
             ratio,
             summary_result.get("num_batches"),
-            len(updated_journal or ""),
+            delta_chars,
         )
     if is_cli_mode:
         print(
             "[summary] Завершена: "
             f"serialized_before={serialized_chars}, serialized_after={new_serialized}, ratio={ratio}, "
             f"batches={summary_result.get('num_batches')}, "
-            f"updated_journal_chars={len(updated_journal or '')}"
+            f"memory_delta_chars={delta_chars}"
         )
 
 
@@ -293,10 +259,6 @@ def maybe_run_summary_compaction(
     is_cli_mode: bool,
     on_summary_applied: Optional[Callable[[Dict[str, Any]], None]] = None,
 ) -> bool:
-    """
-    Условно выполняет compaction: проверка `history_exceeds_summary_trigger`, затем при необходимости
-    `run_summary_compaction`.
-    """
     logger = getattr(ctx, "logger", None)
     thread_id = getattr(state, "thread_id", None)
     if summary_trigger_chars <= 0:

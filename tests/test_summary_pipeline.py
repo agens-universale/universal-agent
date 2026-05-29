@@ -1,7 +1,6 @@
 import tempfile
 import types
 
-from states import SharedStateData
 from summarize.compaction import (
     maybe_run_summary_compaction,
 )
@@ -40,7 +39,7 @@ def _ctx(trigger_chars: int = 1):
 def _state():
     return types.SimpleNamespace(
         default_model="test-model",
-        shared=SharedStateData(),
+        shared=types.SimpleNamespace(working_memory={}),
         dialog_steps_offset=0,
         previous_response_id=None,
         messages=[],
@@ -115,7 +114,7 @@ def test_maybe_run_summary_compaction_twice_uses_meta_user_log(monkeypatch):
                 "IMPORTANT_ARTIFACTS:\n- x\n"
             ),
         )
-        monkeypatch.setattr("summarize.memory_suggestions.suggest_updated_journal", lambda **_k: "")
+        monkeypatch.setattr("summarize.memory_suggestions.request_memory_update", lambda **_k: types.SimpleNamespace(request_messages=[], raw_response=""))
 
         state = _state()
         state.thread_id = thread_id
@@ -204,7 +203,7 @@ def test_maybe_run_summary_compaction_works_without_thread(monkeypatch):
             "IMPORTANT_ARTIFACTS:\n- x\n"
         ),
     )
-    monkeypatch.setattr("summarize.memory_suggestions.suggest_updated_journal", lambda **_k: "")
+    monkeypatch.setattr("summarize.memory_suggestions.request_memory_update", lambda **_k: types.SimpleNamespace(request_messages=[], raw_response=""))
 
     state = _state()
     state.messages = [
@@ -241,7 +240,7 @@ def test_maybe_run_summary_compaction_preserves_system_and_state_metadata(monkey
             "IMPORTANT_ARTIFACTS:\n- x\n"
         ),
     )
-    monkeypatch.setattr("summarize.memory_suggestions.suggest_updated_journal", lambda **_k: "")
+    monkeypatch.setattr("summarize.memory_suggestions.request_memory_update", lambda **_k: types.SimpleNamespace(request_messages=[], raw_response=""))
 
     state = _state()
     system_msg = {"role": "system", "content": "SYSTEM", "id": "sys_1"}
@@ -250,7 +249,7 @@ def test_maybe_run_summary_compaction_preserves_system_and_state_metadata(monkey
         {"role": "user", "content": "first request", "id": "m1"},
         {"role": "assistant", "content": "first reply", "id": "m2"},
     ]
-    state.shared = SharedStateData(memory_files={"journal": "keep me"})
+    state.shared = types.SimpleNamespace(working_memory={"goal": "keep me"})
     state.user_intent_log = ["first request"]
     state.dialog_steps_offset = 7
     initial_project_data_before = dict(state.initial_project_data)
@@ -270,7 +269,7 @@ def test_maybe_run_summary_compaction_preserves_system_and_state_metadata(monkey
     assert state.messages[0]["content"] == "SYSTEM"
     assert state.messages[1]["role"] == "user"
     assert "Summarized context from previous dialogue." in state.messages[1]["content"]
-    assert "keep me" in state.shared.memory_files.get("journal", "")
+    assert "keep me" in state.shared.working_memory.get("goal", "")
     assert state.user_intent_log == ["first request"]
     assert state.dialog_steps_offset > 7
     assert state.previous_response_id is None

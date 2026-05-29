@@ -1,25 +1,22 @@
-You are maintaining long-term session memory for a technical dialogue.
+You are maintaining per-thread working memory for a technical dialogue.
 
 You receive:
 1) full dialog history
-2) current summary
-3) current journal
+2) current summary (rolling continuation context)
+3) persistent_state (canonical working_memory snapshot)
 
-Return EXACTLY one XML tag and nothing else:
-<updated_journal>...</updated_journal>
+Return register deltas only. Use one or more of these tags (include only registers that need updates):
+<goal>...</goal>
+<constraints>...</constraints>
+<state>...</state>
+<knowledge>...</knowledge>
 
 Rules:
-- Inside the tag, produce the FULL rewritten journal (not a delta).
-- Preserve useful durable facts and decisions.
-- Remove duplicates and stale intermediate statuses.
+- Output deltas only (append semantics downstream). Do not rewrite full registers.
+- Preserve useful durable facts and decisions from dialog + summary.
+- Remove duplicates and stale intermediate statuses in your delta text.
 - Keep only information valuable for continuity across future turns.
 - Do NOT include verbose tool logs or repeated phrasing.
-- Use concise markdown with sections:
-  - Canonical target
-  - Evidence
-  - Decisions
-  - Open questions
-  - Progress
-
-If there is no meaningful information, return an empty tag:
-<updated_journal></updated_journal>
+- Do not add facts that are not supported by dialog/summary/persistent_state.
+- If there is no meaningful update for a register, omit that tag entirely.
+- If there is no meaningful update at all, return an empty response (no tags).
