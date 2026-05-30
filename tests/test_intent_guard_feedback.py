@@ -1,6 +1,9 @@
 import unittest
 
-from intent_guard.feedback import build_finish_gate_feedback
+from intent_guard.feedback import (
+    build_finish_gate_feedback,
+    build_finish_gate_reject_technical_user_content,
+)
 from intent_guard.validation_result import ValidationResult
 
 
@@ -68,6 +71,22 @@ class FinishGateFeedbackTest(unittest.TestCase):
         self.assertIn("gap", text)
         self.assertIn("mismatch", text)
         self.assertIn("Не повторяй", text)
+
+    def test_reject_technical_user_content_includes_continue_work(self) -> None:
+        feedback = build_finish_gate_feedback(
+            _v(
+                ok=False,
+                action="fix_report",
+                trace_ok=True,
+                report_ok=False,
+                report_mismatches=["solution_type должен быть answer_question"],
+            )
+        )
+        text = build_finish_gate_reject_technical_user_content(feedback)
+        self.assertIn("не соответствует интенту", text.lower())
+        self.assertIn("продолжай работу", text.lower())
+        self.assertIn("fix_report", text)
+        self.assertIn("answer_question", text)
 
 
 if __name__ == "__main__":

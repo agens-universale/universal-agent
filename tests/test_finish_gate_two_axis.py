@@ -441,3 +441,69 @@ def test_run_agent_handoff_phantom_artifact_fix_report(monkeypatch):
     assert payload["ok"] is False
     assert "fix_report" in payload["message"]
     assert "phantom_plan.md" in payload["message"]
+
+
+def test_run_agent_reject_continues_turn_with_technical_user_message(monkeypatch):
+    """Reject finish gate must not return finish_arguments; inject technical user feedback."""
+    validate_calls = {"n": 0}
+
+    def _validate(**_kwargs):
+        validate_calls["n"] += 1
+        if validate_calls["n"] == 1:
+            return _scenario_12_validation()
+        return ValidationResult(
+            ok=True,
+            action="accept",
+            trace_ok=True,
+            report_ok=True,
+            trace_gaps=[],
+            report_mismatches=[],
+            missing_requirements=[],
+            conflicts=[],
+            coverage_score=1.0,
+            feedback_for_agent="",
+        )
+
+    monkeypatch.setattr(
+        intent_guard_guard,
+        "validate_final_report_vs_user_intent",
+        _validate,
+    )
+    monkeypatch.setattr(
+        processing_module,
+        "maybe_update_intent_scope_from_tool",
+        lambda **_kwargs: None,
+    )
+
+    user_ask_batches: list[list] = []
+
+    def _stub_user_ask(in_messages, _state, _ctx):
+        user_ask_batches.append(list(in_messages))
+        return (
+            [_submit_solution_call(solution_type="answer_question")],
+            "rid_retry",
+        )
+
+    monkeypatch.setattr(processing_module, "process_user_ask", _stub_user_ask)
+
+    state = _make_state(max_steps=10)
+    state.current_user_intent = ["спроси меня что нибудь"]
+    state.user_intent_log = ["предыдущий ход"]
+
+    result = run_agent([_submit_solution_call()], state, _make_ctx())
+
+    assert validate_calls["n"] == 2
+    assert result is not None
+    assert state.user_intent_log == ["предыдущий ход", "спроси меня что нибудь"]
+    assert len(user_ask_batches) == 1
+    assert len(user_ask_batches[0]) == 1
+    tech_content = str(user_ask_batches[0][0].get("content") or "")
+    assert "интент" in tech_content.lower()
+    assert "продолжай работу" in tech_content.lower()
+    assert "<technical" in tech_content.lower()
+    assert any(
+        "quality gate" in str(m.get("content") or "").lower()
+        or "интент" in str(m.get("content") or "").lower()
+        for m in state.messages
+        if m.get("role") == "user"
+    )

@@ -61,3 +61,15 @@ def build_finish_gate_feedback(result: ValidationResult) -> str:
 
     lines.append(f"Неизвестный action={action!r}; исправь submit_solution или продолжи работу.")
     return "\n".join(lines)
+
+
+def build_finish_gate_reject_technical_user_content(feedback: str) -> str:
+    """Technical user message after finish gate reject — continue the open turn."""
+    body = str(feedback or "").strip()
+    lines = [
+        "submit_solution отклонён quality gate: ответ не соответствует интенту пользователя.",
+        "Продолжай работу над текущим ходом; не считай ход завершённым.",
+    ]
+    if body:
+        lines.extend(["", "Детали:", body])
+    return "\n".join(lines)

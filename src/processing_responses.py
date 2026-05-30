@@ -2,6 +2,10 @@ import json
 from types import SimpleNamespace
 
 from config import parse_chat_completions_max_tokens
+from intent_guard.feedback import (
+    build_finish_gate_feedback,
+    build_finish_gate_reject_technical_user_content,
+)
 from intent_guard.guard import FinishGateGuard
 from intent_guard.submit_solution_emit import (
     apply_finish_gate_to_submit_output_in_state,
@@ -558,10 +562,20 @@ def run_agent(
                                 ctx=ctx,
                             )
                             if decision.outcome == "reject":
-                                messages, response_id = process_user_ask(
-                                    [], state, ctx
-                                )
-                                state.last_backend_response_id = response_id
+                                feedback = (decision.feedback_text or "").strip()
+                                if not feedback and decision.validation is not None:
+                                    feedback = build_finish_gate_feedback(
+                                        decision.validation
+                                    )
+                                messages = [
+                                    _make_technical_feedback_user_message(
+                                        build_finish_gate_reject_technical_user_content(
+                                            feedback
+                                        ),
+                                        technical_type=TECHNICAL_TYPE_TECHNICAL,
+                                    )
+                                ]
+                                continue
                             elif decision.outcome in (
                                 "fail_open_error",
                                 "fail_open_limit",
