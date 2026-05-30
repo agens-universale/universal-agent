@@ -10,10 +10,10 @@ from run_summary_coordinator import RunSummaryCoordinator
 from summarize.config import parse_summary_trigger_chars
 from message_policy.tool_usage_notice.policy import (
     get_thread_memory_registers_from_shared,
-    maybe_emit_subagent_thread_memory_bootstrap,
+    subagent_thread_memory_bootstrap_text,
     wrap_thread_memory_technical_user_message,
 )
-from message_policy.tool_usage_notice.state import persist_memory_messages_state
+from message_policy.tool_usage_notice.state import persist_tool_usage_notice_state
 from persistence.state_storage import save_state
 from states import State
 from tools import build_tools_data
@@ -102,9 +102,7 @@ class SubagentRunner:
         messages = self._build_initial_messages(child_state, agent_role, user_message)
         child_state.init_subagent_current_user_intent(initial_message)
         shared_mf = get_thread_memory_registers_from_shared(child_state.shared)
-        bootstrap_text = maybe_emit_subagent_thread_memory_bootstrap(
-            child_meta, self._config, shared_mf
-        )
+        bootstrap_text = subagent_thread_memory_bootstrap_text(self._config, shared_mf)
         if bootstrap_text:
             messages.append(
                 wrap_thread_memory_technical_user_message(
@@ -223,7 +221,7 @@ class SubagentRunner:
         step_messages: List[Dict[str, Any]],
     ) -> None:
         child_state.append_current_user_intent_from_messages(step_messages)
-        persist_memory_messages_state(child_state, child_meta)
+        persist_tool_usage_notice_state(child_state, child_meta)
 
     def _build_child_state(self, agent_role: str) -> State:
         """Создать дочерний State, наследуя общие данные от оркестратора."""

@@ -27,7 +27,7 @@ def _stub_optional_web_parsers() -> None:
 _stub_optional_web_parsers()
 
 from processing_responses import process_tool_calls
-from persistence.state_storage import SatesStorage
+from persistence.state_storage import StateStorage
 from states import State
 from tools.stored_outputs.read_stored_tool_output import ReadStoredToolOutput
 from tools.stored_outputs.tool_call_outputs_store import (
@@ -339,12 +339,12 @@ def test_state_serialization_roundtrip_restores_store_and_lru_order(tmp_path):
     # Now r2 should be LRU, r1 should be MRU.
     assert state.tool_call_outputs_store.get("r1") is not None
 
-    storage = SatesStorage()
+    storage = StateStorage()
     storage.add_state(state)
     dump_path = tmp_path / "state_dump.json"
     storage.save_to_file(str(dump_path), indent=2)
 
-    loaded = SatesStorage()
+    loaded = StateStorage()
     loaded.load_from_file(str(dump_path))
     restored_state = loaded.get_state_by_id(state.state_id)
     assert restored_state is not None

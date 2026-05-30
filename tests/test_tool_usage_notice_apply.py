@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 
-from message_policy.tool_usage_notice.apply import apply_memory_messages_before_llm
+from message_policy.tool_usage_notice.apply import apply_tool_usage_notice_before_llm
 from states import State, SharedStateData
 
 
@@ -20,21 +20,21 @@ def _state() -> State:
 
 def test_apply_appends_notice_when_threshold_reached():
     state = _state()
-    state.tool_usage_notice_cnt = {"working_memory": 30}
+    state.tool_usage_notice_cnt = {"working_memory": 10}
     meta: dict = {}
     ctx = SimpleNamespace(
         config_dict={
             "tool_usage_notice": [
                 {
                     "tool_name": "working_memory",
-                    "step_messages_count": 30,
-                    "notice_message": "You have not used working_memory for 30 steps.",
+                    "step_messages_count": 10,
+                    "notice_message": "You have not used working_memory for some steps.",
                 }
             ],
             "stop_tools": [],
         }
     )
-    out = apply_memory_messages_before_llm(
+    out = apply_tool_usage_notice_before_llm(
         [{"role": "user", "content": "hi", "id": "u1"}],
         state,
         ctx,
@@ -50,13 +50,8 @@ def test_apply_no_notice_when_rules_empty():
     state = _state()
     state.tool_usage_notice_cnt = {"working_memory": 100}
     meta: dict = {}
-    ctx = SimpleNamespace(
-        config_dict={
-            "memory_gate_params": {"enable_memory_file_notice": False},
-            "stop_tools": [],
-        }
-    )
-    out = apply_memory_messages_before_llm(
+    ctx = SimpleNamespace(config_dict={"stop_tools": []})
+    out = apply_tool_usage_notice_before_llm(
         [{"role": "user", "content": "hi", "id": "u1"}],
         state,
         ctx,
@@ -83,7 +78,7 @@ def test_apply_long_changed_hint_on_k_tick(monkeypatch):
     set_long_memory_check_cnt(meta, 2)
     monkeypatch.setattr("long_memory.get_hash", lambda _ctx: "new_hash")
 
-    out = apply_memory_messages_before_llm(
+    out = apply_tool_usage_notice_before_llm(
         [{"role": "user", "content": "x", "id": "u1"}],
         state,
         ctx,

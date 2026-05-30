@@ -69,8 +69,8 @@ working_memory:
 
 tool_usage_notice:
   - tool_name: working_memory
-    step_messages_count: 30
-    notice_message: "You have not used working_memory for 30 steps. Review/update thread memory if needed."
+    step_messages_count: 10
+    notice_message: "You have not used working_memory for some steps. Review/update thread memory if needed."
 long_memory:
   enable_long_memory_notice: true
   check_interval_messages: 5

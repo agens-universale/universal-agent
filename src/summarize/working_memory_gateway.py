@@ -71,6 +71,25 @@ def _snapshot_from_mapping(raw: Mapping[str, Any] | None) -> WorkingMemorySnapsh
     )
 
 
+def _deltas_from_mapping(raw: Mapping[str, Any] | None) -> WorkingMemoryDeltas:
+    data = raw if isinstance(raw, Mapping) else {}
+    return WorkingMemoryDeltas(
+        goal=_normalize_register_text(data.get(REGISTER_GOAL)),
+        constraints=_normalize_register_text(data.get(REGISTER_CONSTRAINTS)),
+        state=_normalize_register_text(data.get(REGISTER_STATE)),
+        knowledge=_normalize_register_text(data.get(REGISTER_KNOWLEDGE)),
+    )
+
+
+def coerce_working_memory_deltas(
+    raw: WorkingMemoryDeltas | Mapping[str, Any] | None,
+) -> WorkingMemoryDeltas:
+    """Normalize parsed or serialized deltas to a gateway DTO."""
+    if isinstance(raw, WorkingMemoryDeltas):
+        return raw
+    return _deltas_from_mapping(raw)
+
+
 def read_snapshot_from_state(state: Any) -> WorkingMemorySnapshot:
     shared = getattr(state, "shared", None)
     if shared is None:
@@ -146,12 +165,7 @@ def parse_memory_deltas(raw_output: str) -> WorkingMemoryDeltas:
         value = (match.group(1) or "").strip()
         if value:
             deltas[name] = value
-    return WorkingMemoryDeltas(
-        goal=deltas.get(REGISTER_GOAL, ""),
-        constraints=deltas.get(REGISTER_CONSTRAINTS, ""),
-        state=deltas.get(REGISTER_STATE, ""),
-        knowledge=deltas.get(REGISTER_KNOWLEDGE, ""),
-    )
+    return _deltas_from_mapping(deltas)
 
 
 def should_attempt_memory_deltas_repair(
@@ -190,12 +204,9 @@ def apply_append_deltas(
     snapshot: WorkingMemorySnapshot,
     deltas: WorkingMemoryDeltas | Mapping[str, str] | None,
 ) -> WorkingMemorySnapshot:
-    if isinstance(deltas, WorkingMemoryDeltas):
-        delta_map: Mapping[str, str] = deltas.to_dict(skip_empty=False)
-    elif isinstance(deltas, Mapping):
-        delta_map = deltas
-    else:
-        delta_map = {}
+    delta_map: Mapping[str, str] = coerce_working_memory_deltas(deltas).to_dict(
+        skip_empty=False
+    )
     merged: Dict[str, str] = snapshot.to_dict()
     for name in REGISTER_ORDER:
         delta_text = _normalize_register_text(delta_map.get(name))
@@ -231,6 +242,7 @@ __all__ = [
     "parse_memory_deltas",
     "should_attempt_memory_deltas_repair",
     "parse_memory_deltas_with_repair",
+    "coerce_working_memory_deltas",
     "apply_append_deltas",
     "render_working_memory_for_summary_message",
 ]

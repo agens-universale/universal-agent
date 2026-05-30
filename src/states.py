@@ -4,7 +4,7 @@ from typing import Any, Dict, List, Optional, Union
 from long_memory import attach_status_to_prompt_vars
 from utils.project_data import get_project_data
 from tools.stored_outputs.tool_call_outputs_store import ToolCallOutputsStore
-from message_policy.tool_usage_notice.state import hydrate_memory_messages_state
+from message_policy.tool_usage_notice.state import hydrate_tool_usage_notice_state
 from message_policy.user_message_policy import (
     append_user_log_entries,
     normalize_user_log_entries,
@@ -18,10 +18,6 @@ class SharedStateData:
     working_memory: Dict[str, str] = field(default_factory=dict)
     notes_md: str = ""
     fetch_url_cache: Dict[str, str] = field(default_factory=dict)
-
-    def to_dict(self):
-        import dataclasses
-        return dataclasses.asdict(self)
 
 
 class State:
@@ -161,11 +157,11 @@ class State:
         """Initialize `current_user_intent` from persisted meta (open user turn)."""
         self.current_user_intent = normalize_user_log_entries(entries)
 
-    def init_memory_messages_from_meta(self, meta: Optional[Dict[str, Any]]) -> None:
-        """Восстановить memory_messages поля из thread_session.meta или child_meta."""
-        hydrate_memory_messages_state(self, meta if isinstance(meta, dict) else None)
+    def init_tool_usage_notice_from_meta(self, meta: Optional[Dict[str, Any]]) -> None:
+        """Восстановить tool_usage_notice / long_memory поля из thread_session.meta или child_meta."""
+        hydrate_tool_usage_notice_state(self, meta if isinstance(meta, dict) else None)
 
-    def init_subagent_memory_messages(self) -> None:
+    def init_subagent_tool_usage_notice(self) -> None:
         """Субагент: изолированный meta/state; wiki общая через shared (D34)."""
         self.long_memory_content_hash = None
         self.tool_usage_notice_cnt = {}
@@ -215,7 +211,7 @@ class State:
         """
         self.user_intent_log = []
         self.finish_gate_rejection_count = 0
-        self.init_subagent_memory_messages()
+        self.init_subagent_tool_usage_notice()
         self.current_user_intent = []
         line = str(assignment_text or "").strip()
         if line:

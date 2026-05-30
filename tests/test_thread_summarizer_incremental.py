@@ -9,6 +9,7 @@ from message_format.dialog_history import (
     trim_original_user_messages_to_max_chars,
 )
 from summarize.compaction import apply_summary_state_patch
+from summarize.working_memory_gateway import WorkingMemoryDeltas
 from summarize.thread_summarizer import summarize_dialog_via_chat_completions
 from message_policy.user_message_policy import (
     TECHNICAL_TYPE_DIALOG_SUMMARY,
@@ -200,7 +201,7 @@ def test_summarize_incremental_two_batches_previous_summary_passed(monkeypatch):
     assert "batch-1" in seen_user_prompts[1]
     # Для multi-batch memory patch не выполняется.
     assert memory_calls == []
-    assert result["memory_deltas"] == {}
+    assert result["memory_deltas"] == WorkingMemoryDeltas()
     assert result["trace"]["memory_patch"]["executed"] is False
     assert result["trace"]["memory_patch"]["reason"] == "skipped_multi_batch"
 
@@ -501,7 +502,7 @@ def test_summarize_merges_existing_user_intent_log(monkeypatch):
         state=state,
         raw_summary=result["raw_summary"],
         last_dialog_steps=result["last_dialog_steps"],
-        memory_deltas=result.get("memory_deltas", {}),
+        memory_deltas=result.get("memory_deltas", WorkingMemoryDeltas()),
         summarized_messages_count=len(history),
     )
     assert "<original_user_messages>" not in built
@@ -617,7 +618,7 @@ def test_memory_update_format_repair_runs_once_for_long_unparsed_output(monkeypa
         state=_state(),
         full_history_messages=history,
     )
-    assert result["memory_deltas"]["goal"] == "repaired memory body"
+    assert result["memory_deltas"].goal == "repaired memory body"
     assert result["trace"]["memory_patch"]["format_repair_attempted"] is True
     assert result["trace"]["memory_patch"]["format_repair_success"] is True
     assert llm_calls["repair"] == 1

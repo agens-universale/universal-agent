@@ -18,10 +18,12 @@ def _is_non_empty_mapping(value: Any) -> bool:
 
 
 def meta_has_persisted_agent_state(meta: Mapping[str, Any]) -> bool:
-    """True when meta carries restorable agent fields (not just thread bookkeeping)."""
+    """True when meta carries restorable v2 agent fields (not just thread bookkeeping).
+
+    Call after ``reject_legacy_memory_keys`` on load paths; legacy ``memory_files``
+    is never a valid persisted-state signal in v2.
+    """
     if _is_non_empty_mapping(meta.get("shared")):
-        return True
-    if _is_non_empty_mapping(meta.get("memory_files")):
         return True
     intent_log = meta.get("user_intent_log")
     if isinstance(intent_log, list) and any(str(x).strip() for x in intent_log):

@@ -12,6 +12,7 @@ from summarize.summary_validation import FALLBACK_SUMMARY, validate_summary_text
 from message_policy.user_message_policy import normalize_user_log_entries
 from summarize.llm import request_summary_text
 from summarize.working_memory_gateway import (
+    WorkingMemoryDeltas,
     parse_memory_deltas_with_repair,
     resolve_persistent_state_block,
 )
@@ -71,7 +72,7 @@ def summarize_dialog_via_chat_completions(
             ``summary_message_content`` — для непустой истории пустая строка; итоговое тело строит
                 ``apply_summary_state_patch``. Для пустой истории — готовое тело без вызова compaction;
             ``user_intent_log`` / ``current_user_intent`` — нормализованные снимки для persisted summary;
-            ``memory_deltas`` — дельты по register'ам working_memory (пустой dict для multi-batch);
+            ``memory_deltas`` — ``WorkingMemoryDeltas`` (пустой DTO для multi-batch);
             ``last_dialog_steps`` — форматированный хвост диалога;
             ``num_batches`` — число батчей LLM;
             ``trace`` — структура с шагами, промптами и результатами для отладки.
@@ -99,12 +100,13 @@ def summarize_dialog_via_chat_completions(
             "memory_deltas": {},
             "summary_message_content": summary_content,
         }
+        empty_deltas = WorkingMemoryDeltas()
         return {
             "raw_summary": "",
             "summary_message_content": summary_content,
             "user_intent_log": [],
             "current_user_intent": [],
-            "memory_deltas": {},
+            "memory_deltas": empty_deltas,
             "last_dialog_steps": "",
             "num_batches": 0,
             "trace": trace,
@@ -379,7 +381,7 @@ def summarize_dialog_via_chat_completions(
             )
     text = accumulated_summary or FALLBACK_SUMMARY
 
-    memory_deltas: Dict[str, str] = {}
+    memory_deltas = WorkingMemoryDeltas()
     if len(batches) <= 1:
         memory_result = memory_suggestions.request_memory_update(
             ctx=ctx,
@@ -402,7 +404,7 @@ def summarize_dialog_via_chat_completions(
             repair_fn=_repair_fn,
             min_chars_for_repair=100,
         )
-        memory_deltas = deltas_dto.to_dict()
+        memory_deltas = deltas_dto
         trace["memory_patch"] = {
             "executed": True,
             "format_repair_attempted": repair_attempted,
@@ -412,7 +414,7 @@ def summarize_dialog_via_chat_completions(
                 "summary_text": text,
                 "persistent_state": persistent_state_block,
             },
-            "output": memory_deltas,
+            "output": memory_deltas.to_dict(),
             "llm": {
                 "request_messages": memory_result.request_messages,
                 "raw_response": memory_result.raw_response,
@@ -442,7 +444,7 @@ def summarize_dialog_via_chat_completions(
             len(batches),
             len(batches) <= 1,
             len(text),
-            len(memory_deltas),
+            len(memory_deltas.to_dict()),
         )
         logger.info("summary_final_raw_text=\n%s", text)
 
@@ -454,7 +456,7 @@ def summarize_dialog_via_chat_completions(
     )
     trace["final_output"] = {
         "raw_summary": text,
-        "memory_deltas": memory_deltas,
+        "memory_deltas": memory_deltas.to_dict(),
     }
     return {
         "raw_summary": text,

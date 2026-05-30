@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
-from config_modules.memory_messages import (
-    long_memory_messages_from_config_dict,
+from config_modules.message_notice import (
+    long_memory_notice_from_config_dict,
     long_memory_notice_enabled,
 )
 from message_policy.tool_usage_notice.state import (
@@ -82,7 +82,7 @@ def collect_long_memory_hints(
 
         get_hash_fn = get_hash
 
-    cfg = long_memory_messages_from_config_dict(config_dict)
+    cfg = long_memory_notice_from_config_dict(config_dict)
     interval = cfg.check_interval_messages
     if get_long_memory_check_cnt(meta) < interval:
         return []

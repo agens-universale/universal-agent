@@ -1,11 +1,12 @@
 from types import SimpleNamespace
 
-from config_modules.memory_messages import ToolUsageNoticeRule
+from config_modules.message_notice import ToolUsageNoticeRule
 from message_policy.tool_usage_notice.policy import (
     batch_used_tool,
+    build_subagent_thread_memory_bootstrap_message,
     collect_tool_usage_notices,
     get_thread_memory_registers_from_shared,
-    maybe_emit_subagent_thread_memory_bootstrap,
+    subagent_thread_memory_bootstrap_text,
     update_tool_usage_notice_after_persist,
 )
 from states import State
@@ -24,7 +25,7 @@ def _state() -> State:
     )
 
 
-def _rule(step_count: int = 3, message: str = "unused tool notice") -> ToolUsageNoticeRule:
+def _rule(step_count: int = 10, message: str = "unused tool notice") -> ToolUsageNoticeRule:
     return ToolUsageNoticeRule(
         tool_name="working_memory",
         step_messages_count=step_count,
@@ -34,7 +35,7 @@ def _rule(step_count: int = 3, message: str = "unused tool notice") -> ToolUsage
 
 def test_tool_usage_notice_increments_without_tool_call():
     state = _state()
-    rules = [_rule(30)]
+    rules = [_rule(10)]
     update_tool_usage_notice_after_persist(
         state, [{"role": "assistant", "content": "ok"}], rules
     )
@@ -46,7 +47,7 @@ def test_tool_usage_notice_increments_without_tool_call():
 def test_tool_usage_notice_resets_on_tool_batch():
     state = _state()
     state.tool_usage_notice_cnt = {"working_memory": 5}
-    rules = [_rule(30)]
+    rules = [_rule(10)]
     update_tool_usage_notice_after_persist(
         state,
         [{"type": "function_call", "name": "working_memory", "arguments": "{}"}],
@@ -58,7 +59,7 @@ def test_tool_usage_notice_resets_on_tool_batch():
 def test_tool_usage_notice_resets_after_explicit_reset():
     state = _state()
     state.tool_usage_notice_cnt = {"working_memory": 10}
-    rules = [_rule(30)]
+    rules = [_rule(10)]
     update_tool_usage_notice_after_persist(
         state, [], rules, reset_tool_names={"working_memory"}
     )
@@ -72,42 +73,43 @@ def test_batch_used_tool_detects_function_call():
 
 def test_collect_tool_usage_notices_respects_threshold_and_stop_tools():
     state = _state()
-    state.tool_usage_notice_cnt = {"working_memory": 30}
-    rules = [_rule(30, "You have not used working_memory for 30 steps.")]
+    state.tool_usage_notice_cnt = {"working_memory": 10}
+    rules = [_rule(10, "You have not used working_memory for some steps.")]
     texts = collect_tool_usage_notices(state, rules, registers={"state": "note"})
-    assert texts == ["You have not used working_memory for 30 steps."]
+    assert texts == ["You have not used working_memory for some steps."]
     assert state.tool_usage_notice_cnt.get("working_memory", 0) == 0
 
 
 def test_collect_tool_usage_notices_skips_below_threshold():
     state = _state()
     state.tool_usage_notice_cnt = {"working_memory": 2}
-    rules = [_rule(30)]
+    rules = [_rule(10)]
     assert collect_tool_usage_notices(state, rules) == []
 
 
-def test_subagent_bootstrap_once():
-    meta: dict = {}
+def test_subagent_bootstrap_text_when_policy_enabled():
     cfg = {
         "tool_usage_notice": [
             {
                 "tool_name": "working_memory",
-                "step_messages_count": 3,
+                "step_messages_count": 10,
                 "notice_message": "nudge",
             }
         ]
     }
-    first = maybe_emit_subagent_thread_memory_bootstrap(meta, cfg, {"state": "progress"})
-    second = maybe_emit_subagent_thread_memory_bootstrap(meta, cfg, {"state": "progress"})
-    assert first is not None
-    assert "Thread memory" in first
-    assert "state" in first
-    assert second is None
+    text = subagent_thread_memory_bootstrap_text(cfg, {"state": "progress"})
+    assert text is not None
+    assert "Thread memory" in text
+    assert "state" in text
 
 
-def test_subagent_bootstrap_disabled_without_rules():
-    meta: dict = {}
-    assert maybe_emit_subagent_thread_memory_bootstrap(meta, {}, {"state": "x"}) is None
+def test_subagent_bootstrap_text_disabled_without_rules():
+    assert subagent_thread_memory_bootstrap_text({}, {"state": "x"}) is None
+
+
+def test_build_subagent_bootstrap_empty_registers():
+    text = build_subagent_thread_memory_bootstrap_message({})
+    assert "no registers yet" in text.lower()
 
 
 def test_get_thread_memory_registers_reads_working_memory():

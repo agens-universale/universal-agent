@@ -4,6 +4,7 @@ from summarize.working_memory_gateway import (
     WorkingMemoryDeltas,
     WorkingMemorySnapshot,
     apply_append_deltas,
+    coerce_working_memory_deltas,
     build_memory_deltas_format_repair_messages,
     parse_memory_deltas,
     parse_memory_deltas_with_repair,
@@ -54,6 +55,16 @@ def test_render_persistent_state_for_prompt_contains_all_registers():
     assert "<state>" in rendered and "</state>" in rendered
     assert "<knowledge>" in rendered and "</knowledge>" in rendered
     assert "G" in rendered and "C" in rendered and "S" in rendered and "K" in rendered
+
+
+def test_coerce_working_memory_deltas_accepts_dto_and_mapping():
+    dto = WorkingMemoryDeltas(goal="g", state="s")
+    assert coerce_working_memory_deltas(dto) is dto
+    assert coerce_working_memory_deltas({"goal": " g ", "state": "s"}) == WorkingMemoryDeltas(
+        goal="g",
+        state="s",
+    )
+    assert coerce_working_memory_deltas(None) == WorkingMemoryDeltas()
 
 
 def test_parse_memory_deltas_parses_valid_and_partial_registers():

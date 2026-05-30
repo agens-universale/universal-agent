@@ -23,6 +23,21 @@ class AbstractSimpleTool(ABC):
         pass
 
     @classmethod
+    def wrong_arguments_feedback_hint(
+        cls,
+        *,
+        received_args: str,
+        parsed_args: dict[str, Any] | None,
+        _message: str,
+    ) -> str | None:
+        """
+        Optional extra LLM hint when argument validation fails for this tool.
+
+        Return None if there is nothing tool-specific to add.
+        """
+        return None
+
+    @classmethod
     def tool_output_on_cycle_stop(cls) -> Optional[str]:
         """
         Optional synthetic tool output for cycle-stop tools in chat/completions mode.

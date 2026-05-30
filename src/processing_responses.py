@@ -30,7 +30,7 @@ from message_policy.no_tool_call_bounce import (
     extract_last_assistant_text,
     format_no_tool_call_bounce,
 )
-from message_policy.tool_usage_notice.apply import apply_memory_messages_before_llm
+from message_policy.tool_usage_notice.apply import apply_tool_usage_notice_before_llm
 from message_policy.user_message_policy import (
     TECHNICAL_TYPE_TECHNICAL,
     TECHNICAL_TYPE_ERROR_MESSAGE,
@@ -443,7 +443,7 @@ def run_agent(
                 and isinstance(session_meta, dict)
             ):
                 try:
-                    messages = apply_memory_messages_before_llm(
+                    messages = apply_tool_usage_notice_before_llm(
                         messages,
                         state,
                         ctx,

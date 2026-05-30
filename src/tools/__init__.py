@@ -160,14 +160,15 @@ def apply_tool(
         run_agent_func = kwargs.get("run_agent_func")
         if orchestrator_state is None or run_agent_func is None:
             return f"Subagent {tool_name}: missing state or run_agent_func"
-        tool_spec = tools_data_.get(tool_name, {}).get("spec", {}) or {}
+        entry = tools_data_.get(tool_name) or {}
+        tool_spec = entry.get("spec", {}) or {}
         parsed_args = parse_and_validate_tool_arguments(
             tool_name=tool_name,
             arguments=arguments,
             tool_spec=tool_spec,
             allow_empty_for_empty_schema=False,
+            tool_fabric=entry.get("tool_fabric"),
         )
-        entry = tools_data_.get(tool_name) or {}
         parsed_args = strip_injected_tool_args(
             parsed_args,
             injected_fields=entry.get("injected_fields") or [],
@@ -200,6 +201,7 @@ def apply_tool(
         arguments=arguments,
         tool_spec=spec,
         allow_empty_for_empty_schema=True,
+        tool_fabric=tool_fabric,
     )
     entry = tools_data_[tool_name]
     arguments = strip_injected_tool_args(

@@ -2,12 +2,12 @@ import json
 import re
 from typing import Any, Dict, Optional
 
-from config_modules.memory_files import (
-    DEFAULT_MAX_FILE_CHARS as _DEFAULT_MAX_FILE_CHARS,
-    DEFAULT_MAX_FILES as _DEFAULT_MAX_FILES,
-    DEFAULT_TOTAL_BUDGET_CHARS as _DEFAULT_TOTAL_BUDGET_CHARS,
-)
 from tools.simple_tools.abstract_simple_tool import AbstractSimpleTool
+
+# Legacy limits for deprecated tool only (not part of runtime AppConfig).
+_DEFAULT_MAX_FILE_CHARS = 20_000
+_DEFAULT_TOTAL_BUDGET_CHARS = 50_000
+_DEFAULT_MAX_FILES = 5
 
 _VALID_NAME_RE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 _PROTECTED_FILES = frozenset({"journal"})

@@ -19,17 +19,14 @@ from config_modules.security import SecurityConfig
 from config_modules.stored_outputs import normalize_tool_output_limits
 from config_modules.intent_scope import IntentScopeConfig, normalize_intent_scope_config
 from config_modules.quality_gate import QualityGateConfig, normalize_quality_gate_config
-from config_modules.memory_files import MemoryFilesConfig, normalize_memory_files_config
 from config_modules.working_memory import (
     WorkingMemoryConfig,
     normalize_working_memory_config,
 )
-from config_modules.memory_messages import (
-    LongMemoryMessagesConfig,
-    MemoryGateConfig,
+from config_modules.message_notice import (
+    LongMemoryNoticeConfig,
     ToolUsageNoticeRule,
-    normalize_long_memory_messages_config,
-    normalize_memory_gate_config,
+    normalize_long_memory_notice_config,
     normalize_tool_usage_notice_rules,
 )
 from config_modules.chat_completions import ChatCompletionsConfig
@@ -59,11 +56,9 @@ class AppConfig(BaseModel):
     summary: SummaryConfig = Field(default_factory=SummaryConfig)
     quality_gate: QualityGateConfig = Field(default_factory=QualityGateConfig)
     intent_scope: IntentScopeConfig = Field(default_factory=IntentScopeConfig)
-    memory_files: MemoryFilesConfig = Field(default_factory=MemoryFilesConfig)
     working_memory: WorkingMemoryConfig = Field(default_factory=WorkingMemoryConfig)
-    memory_gate: MemoryGateConfig = Field(default_factory=MemoryGateConfig)
     tool_usage_notice: list[ToolUsageNoticeRule] = Field(default_factory=list)
-    long_memory: LongMemoryMessagesConfig = Field(default_factory=LongMemoryMessagesConfig)
+    long_memory: LongMemoryNoticeConfig = Field(default_factory=LongMemoryNoticeConfig)
     paths: PathsConfig = Field(default_factory=PathsConfig)
     agent: AgentConfig = Field(default_factory=AgentConfig)
     mcp: McpConfig = Field(default_factory=McpConfig)
@@ -121,11 +116,9 @@ def resolve_paths(cfg: AppConfig, config_dir: str) -> None:
             int(trigger * DEFAULT_INCREMENTAL_BATCH_MULTIPLIER) if trigger > 0 else 0
         )
     normalize_quality_gate_config(cfg.quality_gate)
-    normalize_memory_files_config(cfg.memory_files)
     normalize_working_memory_config(cfg.working_memory)
-    normalize_memory_gate_config(cfg.memory_gate)
     cfg.tool_usage_notice = normalize_tool_usage_notice_rules(cfg.tool_usage_notice)
-    normalize_long_memory_messages_config(cfg.long_memory)
+    normalize_long_memory_notice_config(cfg.long_memory)
     normalize_intent_scope_config(cfg.intent_scope)
     cfg.intent_scope.intent_scope_tool_summary_prompt_path = to_abs(
         cfg.intent_scope.intent_scope_tool_summary_prompt_path

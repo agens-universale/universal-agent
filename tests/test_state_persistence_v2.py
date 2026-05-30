@@ -4,11 +4,20 @@ from types import SimpleNamespace
 
 import pytest
 
-from persistence.schema import STATE_SCHEMA_VERSION, StateSchemaError
+from persistence.schema import (
+    STATE_SCHEMA_VERSION,
+    StateSchemaError,
+    meta_has_persisted_agent_state,
+    validate_thread_meta_for_load,
+)
 from persistence.state_repository import StateRepository
 from persistence.state_serializer import StateSerializer
 from persistence.thread_meta_mapper import ThreadMetaMapper
 from states import SharedStateData, State
+from tools.stored_outputs.tool_call_outputs_store import (
+    ToolCallOutputRecord,
+    ToolCallOutputsStore,
+)
 
 
 def _make_state() -> State:
@@ -22,6 +31,50 @@ def _make_state() -> State:
         system_prompt_id="v1",
         use_server_subagents=False,
     )
+
+
+def test_state_from_snapshot_roundtrip_preserves_runtime_fields():
+    state = _make_state()
+    state.shared.working_memory = {
+        "goal": "ship",
+        "constraints": "no legacy",
+        "state": "active",
+    }
+    state.shared.notes_md = "notes"
+    state.shared.fetch_url_cache = {"https://x": "body"}
+    state.user_intent_log = ["closed turn"]
+    state.current_user_intent = ["open turn"]
+    state.long_memory_content_hash = "lm_hash"
+    state.tool_usage_notice_cnt = {"working_memory": 3}
+    state.messages = [{"role": "user", "content": "hi", "id": "u1"}]
+    state.dialog_steps_offset = 7
+    state.tool_call_outputs_store = ToolCallOutputsStore(max_entries=5)
+    state.tool_call_outputs_store.put(
+        ToolCallOutputRecord(
+            output_ref="ref1",
+            source_tool="read_file",
+            call_id="c1",
+            total_chars=4,
+            text="data",
+        )
+    )
+    original_id = state.state_id
+
+    payload = StateSerializer.serialize(state)
+    restored = StateSerializer.deserialize(json.loads(json.dumps(payload)))
+
+    assert restored.state_id == original_id
+    assert restored.shared.working_memory["goal"] == "ship"
+    assert restored.shared.notes_md == "notes"
+    assert restored.shared.fetch_url_cache == {"https://x": "body"}
+    assert restored.user_intent_log == ["closed turn"]
+    assert restored.current_user_intent == ["open turn"]
+    assert restored.long_memory_content_hash == "lm_hash"
+    assert restored.tool_usage_notice_cnt == {"working_memory": 3}
+    assert restored.messages == [{"role": "user", "content": "hi", "id": "u1"}]
+    assert restored.dialog_steps_offset == 7
+    assert restored.tool_call_outputs_store.peek("ref1") is not None
+    assert restored.tool_call_outputs_store.peek("ref1").text == "data"
 
 
 def test_state_serializer_roundtrip_has_v2_schema_and_working_memory():
@@ -40,7 +93,7 @@ def test_state_serializer_roundtrip_has_v2_schema_and_working_memory():
     assert restored.shared.notes_md == "notes"
 
 
-def test_deserialize_rejects_legacy_memory_files_in_snapshot():
+def test_from_snapshot_rejects_legacy_memory_files_in_snapshot():
     state = _make_state()
     payload = StateSerializer.serialize(state)
     payload["shared"]["memory_files"] = {"journal": "legacy"}
@@ -49,7 +102,7 @@ def test_deserialize_rejects_legacy_memory_files_in_snapshot():
         StateSerializer.deserialize(payload)
 
 
-def test_deserialize_rejects_missing_state_schema_version():
+def test_from_snapshot_rejects_missing_state_schema_version():
     state = _make_state()
     payload = StateSerializer.serialize(state)
     del payload["state_schema_version"]
@@ -100,6 +153,18 @@ def test_thread_meta_mapper_rejects_meta_with_agent_state_but_no_schema_version(
 
 def test_thread_meta_mapper_allows_empty_meta():
     assert ThreadMetaMapper.shared_from_meta({}) is None
+
+
+def test_meta_has_persisted_agent_state_v2_signals_only():
+    assert meta_has_persisted_agent_state({"shared": {"working_memory": {"goal": "x"}}})
+    assert meta_has_persisted_agent_state({"user_intent_log": ["ship"]})
+    assert not meta_has_persisted_agent_state({"dialog_steps_offset": 3})
+    assert not meta_has_persisted_agent_state({"memory_files": {"journal": "legacy"}})
+
+
+def test_validate_thread_meta_rejects_legacy_before_agent_state_check():
+    with pytest.raises(StateSchemaError, match="memory_files"):
+        validate_thread_meta_for_load({"memory_files": {"journal": "x"}})
 
 
 def test_merge_state_into_meta_writes_v2_shared():

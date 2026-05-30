@@ -10,7 +10,7 @@ from persistence.state_repository import StateRepository
 from states import State
 
 
-class SatesStorage:
+class StateStorage:
     def __init__(self):
         self.states: Dict[str, State] = {}
 
@@ -30,7 +30,7 @@ class SatesStorage:
         self.states = StateRepository.load_snapshot(filepath)
 
 
-state_storage = SatesStorage()
+state_storage = StateStorage()
 
 
 def save_state(state: State) -> None:

@@ -29,7 +29,7 @@ from thread_store import (
 from tools.connect_mcp.persistent_stdio import PersistentStdioRegistry
 from tools.connect_mcp.stream_client import _SESSION_MANAGER as _STREAM_SESSION_MANAGER
 from tools.skills.registry import get_skills_registry
-from message_policy.tool_usage_notice.state import persist_memory_messages_state
+from message_policy.tool_usage_notice.state import persist_tool_usage_notice_state
 from utils.generate_message_id import generate_msg_id_sha256 as generate_message_id_func
 from utils.local_render_system_prompt import render_system_prompt
 
@@ -146,7 +146,7 @@ class AgentExecutor:
             meta = getattr(thread_session, "meta", None) or {}
             state.init_user_intent_log(meta.get("user_intent_log"))
             state.init_current_user_intent(meta.get("current_user_intent"))
-            state.init_memory_messages_from_meta(meta)
+            state.init_tool_usage_notice_from_meta(meta)
             state.dialog_steps_offset = int(meta.get("dialog_steps_offset", 0) or 0)
         if (
             backend_api_mode == "chat_completions"
@@ -267,7 +267,7 @@ class AgentExecutor:
                 thread_session.meta["current_user_intent"] = state.current_user_intent
                 thread_session.meta["backend_api_mode"] = state.backend_api_mode
                 thread_session.backend_api_mode = state.backend_api_mode
-                persist_memory_messages_state(state, thread_session.meta)
+                persist_tool_usage_notice_state(state, thread_session.meta)
                 last_backend_response_id = getattr(
                     state, "last_backend_response_id", None
                 )
@@ -316,7 +316,7 @@ class AgentExecutor:
                 thread_session.meta["user_intent_log"] = state.user_intent_log
                 thread_session.meta["current_user_intent"] = state.current_user_intent
                 thread_session.meta["backend_api_mode"] = state.backend_api_mode
-                persist_memory_messages_state(state, thread_session.meta)
+                persist_tool_usage_notice_state(state, thread_session.meta)
                 thread_session.persist_batch(
                     [], previous_response_id=state.previous_response_id
                 )

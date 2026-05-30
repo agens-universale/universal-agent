@@ -2,14 +2,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from config_modules.memory_messages import (
+from config_modules.message_notice import (
     ToolUsageNoticeRule,
     active_tool_usage_notice_rules,
     tool_usage_notice_policy_enabled,
-)
-from message_policy.tool_usage_notice.state import (
-    get_subagent_thread_memory_announced,
-    set_subagent_thread_memory_announced,
 )
 from message_policy.user_message_policy import wrap_technical_user_content, TECHNICAL_TYPE_CURRENT_CONTEXT
 
@@ -146,16 +142,13 @@ def get_thread_memory_registers_from_shared(shared: Any) -> dict[str, str]:
     }
 
 
-def maybe_emit_subagent_thread_memory_bootstrap(
-    meta: dict[str, Any],
+def subagent_thread_memory_bootstrap_text(
     config_dict: dict[str, Any] | None,
     registers: dict[str, str] | None,
 ) -> str | None:
+    """Текст one-shot bootstrap для subagent при старте; без meta/state side effects."""
     if not tool_usage_notice_policy_enabled(config_dict):
         return None
-    if get_subagent_thread_memory_announced(meta):
-        return None
-    set_subagent_thread_memory_announced(meta, True)
     return build_subagent_thread_memory_bootstrap_message(registers)
 
 

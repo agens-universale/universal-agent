@@ -141,10 +141,6 @@ def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
         "chat_completions_params": app_cfg.chat_completions.model_dump(),
         "chat_completions_llm": app_cfg.chat_completions.llm,
         "quality_gate_params": app_cfg.quality_gate.model_dump(),
-        "memory_files_params": app_cfg.memory_files.model_dump(),
-        "memory_files_max_file_chars": app_cfg.memory_files.max_file_chars,
-        "memory_files_total_budget_chars": app_cfg.memory_files.total_budget_chars,
-        "memory_files_max_files": app_cfg.memory_files.max_files,
         "working_memory": app_cfg.working_memory,
         "working_memory_params": app_cfg.working_memory.model_dump(),
         "working_memory_max_chars_goal": app_cfg.working_memory.max_chars_goal,
@@ -152,10 +148,6 @@ def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
         "working_memory_max_chars_state": app_cfg.working_memory.max_chars_state,
         "working_memory_max_chars_knowledge": app_cfg.working_memory.max_chars_knowledge,
         "working_memory_total_budget_chars": app_cfg.working_memory.total_budget_chars,
-        "memory_gate": app_cfg.memory_gate,
-        "memory_gate_params": app_cfg.memory_gate.model_dump(),
-        "memory_gate_cooldown_messages": app_cfg.memory_gate.cooldown_messages,
-        "enable_memory_file_notice": app_cfg.memory_gate.enable_memory_file_notice,
         "tool_usage_notice": app_cfg.tool_usage_notice,
         "tool_usage_notice_params": [
             rule.model_dump() for rule in app_cfg.tool_usage_notice

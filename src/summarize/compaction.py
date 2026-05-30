@@ -16,6 +16,7 @@ from summarize.working_memory_gateway import (
     REGISTER_ORDER,
     WorkingMemoryDeltas,
     apply_append_deltas,
+    coerce_working_memory_deltas,
     read_snapshot_from_state,
     render_persistent_state_for_prompt,
     render_working_memory_for_summary_message,
@@ -33,22 +34,12 @@ def without_system_messages(messages_list: List[dict]) -> List[dict]:
     return out
 
 
-def _deltas_from_mapping(raw: Dict[str, str] | None) -> WorkingMemoryDeltas:
-    data = raw if isinstance(raw, dict) else {}
-    return WorkingMemoryDeltas(
-        goal=str(data.get("goal") or "").strip(),
-        constraints=str(data.get("constraints") or "").strip(),
-        state=str(data.get("state") or "").strip(),
-        knowledge=str(data.get("knowledge") or "").strip(),
-    )
-
-
 def apply_summary_state_patch(
     *,
     state: Any,
     raw_summary: str,
     last_dialog_steps: str,
-    memory_deltas: Dict[str, str] | None = None,
+    memory_deltas: WorkingMemoryDeltas | Dict[str, str] | None = None,
     summarized_messages_count: int,
 ) -> str:
     shared = getattr(state, "shared", None)
@@ -59,7 +50,7 @@ def apply_summary_state_patch(
         state.shared = shared
 
     snapshot = read_snapshot_from_state(state)
-    deltas = _deltas_from_mapping(memory_deltas)
+    deltas = coerce_working_memory_deltas(memory_deltas)
     if not deltas.is_empty():
         snapshot = apply_append_deltas(snapshot, deltas)
 
@@ -171,9 +162,9 @@ def run_summary_compaction(
         steps_offset=int(getattr(state, "dialog_steps_offset", 0) or 0),
     )
     raw_summary = str(summary_result.get("raw_summary") or "")
-    memory_deltas = summary_result.get("memory_deltas", {})
-    if not isinstance(memory_deltas, dict):
-        memory_deltas = {}
+    memory_deltas = coerce_working_memory_deltas(
+        summary_result.get("memory_deltas")
+    )
     if logger is not None:
         logger.info("summary_received_raw_text=\n%s", raw_summary)
     if is_cli_mode:
@@ -228,7 +219,7 @@ def run_summary_compaction(
     ratio = (
         round((new_serialized / serialized_chars), 4) if serialized_chars > 0 else 0.0
     )
-    delta_chars = sum(len(str(v or "")) for v in memory_deltas.values())
+    delta_chars = sum(len(v) for v in memory_deltas.to_dict().values())
     if logger is not None:
         logger.info(
             "summary_completed reason=%s thread_id=%s trigger_volume=%s serialized_before=%s serialized_after=%s compression_ratio=%s num_batches=%s memory_delta_chars=%s",

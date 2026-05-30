@@ -7,6 +7,12 @@ def test_think_success_single_field():
     data = json.loads(Think()(thoughts="Analyzing the problem..."))
     assert data["ok"] is True
     assert "Thinking added" in (data.get("message") or "")
+    msg = (data.get("message") or "").lower()
+    assert "thread memory" in msg
+    assert "durable" in msg
+    assert "decision" in msg
+    assert "working_memory" not in msg
+    assert "memory_files" not in msg
     assert data.get("error") is None
 
 
@@ -21,6 +27,12 @@ def test_think_success_multiple_fields():
     )
     assert data["ok"] is True
     assert "Thinking added" in (data.get("message") or "")
+    msg = (data.get("message") or "").lower()
+    assert "thread memory" in msg
+    assert "durable" in msg
+    assert "decision" in msg
+    assert "working_memory" not in msg
+    assert "memory_files" not in msg
     assert data.get("error") is None
 
 
@@ -31,6 +43,15 @@ def test_think_invalid_all_empty():
     assert data.get("error") is not None
     assert data["error"]["type"] == "invalid_argument"
     assert "At least one" in data["error"]["message"]
+
+
+def test_think_descriptions_are_tool_agnostic():
+    desc = Think.tool_description()["description"]
+    prompt = Think.prompt_description()
+    combined = f"{desc}\n{prompt}".lower()
+    assert "thread memory" in combined
+    assert "working_memory" not in combined
+    assert "memory_files" not in combined
 
 
 def test_think_invalid_argument_type():

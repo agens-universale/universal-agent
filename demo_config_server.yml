@@ -33,7 +33,7 @@ agent_overrides:
     # - fetch_url
     - ask_human
     #- think
-    #- memory_files
+    #- working_memory
     # - calculator
     # Отключаем интерактив в консоли
   verbose: false

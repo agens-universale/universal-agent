@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from config_modules.memory_messages import active_tool_usage_notice_rules
+from config_modules.message_notice import active_tool_usage_notice_rules
 from message_policy.long_memory_notice.policy import (
     collect_long_memory_hints,
     long_memory_hints_enabled,
@@ -15,10 +15,10 @@ from message_policy.tool_usage_notice.policy import (
     update_tool_usage_notice_after_persist,
     wrap_tool_usage_notice_user_message,
 )
-from message_policy.tool_usage_notice.state import persist_memory_messages_state
+from message_policy.tool_usage_notice.state import persist_tool_usage_notice_state
 
 
-def apply_memory_messages_before_llm(
+def apply_tool_usage_notice_before_llm(
     messages: list[dict[str, Any]],
     state: Any,
     ctx: Any,
@@ -63,5 +63,5 @@ def apply_memory_messages_before_llm(
             reset_tool_names={rule.tool_name for rule in notice_rules},
         )
 
-    persist_memory_messages_state(state, meta)
+    persist_tool_usage_notice_state(state, meta)
     return out

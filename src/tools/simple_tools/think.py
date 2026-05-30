@@ -29,10 +29,11 @@ class Think(AbstractSimpleTool):
             "description": (
                 "Think out loud during the current turn. Use it when complex reasoning, "
                 "self-critique, or structured reflection is needed. "
-                "Content is NOT saved to memory_files or any storage—it only exists in the current dialogue context. "
-                "For persistent notes, use memory_files. "
-                "If your think output contains a specific Decision / Canonical target / Plan completed / Verified fact, "
-                "you MUST record it separately into memory_files (action=\"append\") so it can persist - if such tool or its analog is available."
+                "Content is NOT saved to thread memory or any other durable storage—it only "
+                "exists in the current dialogue context. "
+                "If your think output contains a specific Decision / Canonical target / "
+                "Plan completed / Verified fact, record it separately via the thread memory "
+                "tool (append) when one is available so it can persist across summarization."
             ),
             "parameters": {
                 "type": "object",
@@ -65,8 +66,8 @@ class Think(AbstractSimpleTool):
     def prompt_description(cls):
         description = '''Tool name: think
 Tool description: Think out loud for the current turn. Supports structured multi-layer thinking: thoughts, critics, doubts, reflection.
-IMPORTANT: think content is NOT saved to memory_files and NOT saved to any storage. It only exists in the current dialogue context.
-RULE: If your think output contains a specific Decision / Canonical target / Plan completed / Verified fact, you MUST record it separately into memory_files (action="append") so it can persist.
+IMPORTANT: think content is NOT saved to thread memory and NOT saved to any durable storage. It only exists in the current dialogue context.
+RULE: If your think output contains a specific Decision / Canonical target / Plan completed / Verified fact, record it separately via the thread memory tool (append) when one is available so it can persist.
 Input schema: {"type":"object","properties":{"thoughts":{"type":"string"},"critics":{"type":"string"},"doubts":{"type":"string"},"reflection":{"type":"string"}},"additionalProperties":false}
 At least one of thoughts, critics, doubts, reflection should be non-empty.
 
@@ -97,6 +98,12 @@ Return format (JSON string):
 
         return self._result(
             ok=True,
-            message="Thinking added to the dialogue context. For persistent notes, use memory_files.",
+            message=(
+                "Thinking added to the dialogue context only; it is not written to "
+                "durable storage. If this output includes a decision, verified fact, "
+                "plan milestone, or other takeaway worth keeping across turns and "
+                "summarization, append it to thread memory with the available "
+                "persistence tool before continuing."
+            ),
             error=None,
         )
