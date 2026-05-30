@@ -86,3 +86,38 @@ def test_apply_long_changed_hint_on_k_tick(monkeypatch):
         step_messages=[],
     )
     assert any("baseline" in m["content"].lower() for m in out if m.get("role") == "user")
+
+
+def test_apply_long_hint_does_not_reset_tool_usage_counter(monkeypatch):
+    state = _state()
+    state.tool_usage_notice_cnt = {"working_memory": 6}
+    state.long_memory_content_hash = "old"
+    meta: dict = {}
+    ctx = SimpleNamespace(
+        config_dict={
+            "enable_long_memory_notice": True,
+            "long_memory_params": {"check_interval_messages": 2},
+            "tool_usage_notice": [
+                {
+                    "tool_name": "working_memory",
+                    "step_messages_count": 8,
+                    "notice_message": "You have not used working_memory for some steps.",
+                }
+            ],
+            "stop_tools": [],
+        }
+    )
+    from message_policy.tool_usage_notice.state import set_long_memory_check_cnt
+
+    set_long_memory_check_cnt(meta, 2)
+    monkeypatch.setattr("long_memory.get_hash", lambda _ctx: "new_hash")
+
+    out = apply_tool_usage_notice_before_llm(
+        [{"role": "user", "content": "x", "id": "u1"}],
+        state,
+        ctx,
+        meta,
+        step_messages=[{"role": "assistant", "content": "ok", "id": "a1"}],
+    )
+    assert any("long memory" in m["content"].lower() for m in out if m.get("role") == "user")
+    assert state.tool_usage_notice_cnt.get("working_memory", 0) == 7

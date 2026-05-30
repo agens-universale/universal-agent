@@ -66,6 +66,51 @@ def test_tool_usage_notice_resets_after_explicit_reset():
     assert state.tool_usage_notice_cnt.get("working_memory", 0) == 0
 
 
+def test_tool_usage_notice_resets_only_matching_tool_in_batch():
+    state = _state()
+    state.tool_usage_notice_cnt = {"working_memory": 5, "fetch_url": 3}
+    rules = [
+        ToolUsageNoticeRule(
+            tool_name="working_memory",
+            step_messages_count=10,
+            notice_message="wm",
+        ),
+        ToolUsageNoticeRule(
+            tool_name="fetch_url",
+            step_messages_count=10,
+            notice_message="fetch",
+        ),
+    ]
+    update_tool_usage_notice_after_persist(
+        state,
+        [{"type": "function_call", "name": "working_memory", "arguments": "{}"}],
+        rules,
+    )
+    assert state.tool_usage_notice_cnt["working_memory"] == 0
+    assert state.tool_usage_notice_cnt["fetch_url"] == 4
+
+
+def test_collect_tool_usage_notice_resets_only_emitted_tool():
+    state = _state()
+    state.tool_usage_notice_cnt = {"working_memory": 10, "fetch_url": 3}
+    rules = [
+        ToolUsageNoticeRule(
+            tool_name="working_memory",
+            step_messages_count=10,
+            notice_message="wm notice",
+        ),
+        ToolUsageNoticeRule(
+            tool_name="fetch_url",
+            step_messages_count=10,
+            notice_message="fetch notice",
+        ),
+    ]
+    texts = collect_tool_usage_notices(state, rules)
+    assert texts == ["wm notice"]
+    assert state.tool_usage_notice_cnt["working_memory"] == 0
+    assert state.tool_usage_notice_cnt["fetch_url"] == 3
+
+
 def test_batch_used_tool_detects_function_call():
     assert batch_used_tool([{"type": "function_call", "name": "working_memory"}], "working_memory")
     assert not batch_used_tool([{"type": "function_call", "name": "read_file"}], "working_memory")

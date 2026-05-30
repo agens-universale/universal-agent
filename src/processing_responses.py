@@ -443,13 +443,27 @@ def run_agent(
                 and isinstance(session_meta, dict)
             ):
                 try:
+                    _messages_before_notice = len(messages)
                     messages = apply_tool_usage_notice_before_llm(
                         messages,
                         state,
                         ctx,
                         session_meta,
                         step_messages=messages,
+                        logger=run_logger,
                     )
+                    notice_messages = messages[_messages_before_notice:]
+                    if notice_messages:
+                        state.messages += notice_messages
+                        if persist_messages_callback is not None:
+                            try:
+                                persist_messages_callback(notice_messages)
+                            except Exception as persist_exc:
+                                run_logger.warning(
+                                    "Thread notice messages persist warning: %s",
+                                    persist_exc,
+                                    exc_info=True,
+                                )
                 except Exception as mem_exc:
                     run_logger.warning(
                         "Memory messages hook warning: %s",

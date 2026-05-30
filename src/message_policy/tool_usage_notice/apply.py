@@ -2,20 +2,58 @@ from __future__ import annotations
 
 from typing import Any
 
-from config_modules.message_notice import active_tool_usage_notice_rules
+from config_modules.message_notice import (
+    active_tool_usage_notice_rules,
+    long_memory_notice_from_config_dict,
+)
 from message_policy.long_memory_notice.policy import (
     collect_long_memory_hints,
     long_memory_hints_enabled,
     on_persist_steps,
     wrap_long_memory_hint_user_message,
 )
+from message_policy.notice_policy_log import log_notice_policy_step
 from message_policy.tool_usage_notice.policy import (
+    batch_used_tool,
     collect_tool_usage_notices,
     get_thread_memory_registers_from_shared,
     update_tool_usage_notice_after_persist,
     wrap_tool_usage_notice_user_message,
 )
-from message_policy.tool_usage_notice.state import persist_tool_usage_notice_state
+from message_policy.tool_usage_notice.state import (
+    get_long_memory_check_cnt,
+    persist_tool_usage_notice_state,
+)
+
+
+def _tool_thresholds(rules: list[Any]) -> dict[str, int]:
+    return {rule.tool_name: rule.step_messages_count for rule in rules}
+
+
+def _tool_reset_reasons(
+    step_messages: list[dict[str, Any]],
+    rules: list[Any],
+    *,
+    counters_before: dict[str, int],
+    counters_after: dict[str, int],
+    emitted_tools: set[str],
+) -> dict[str, str]:
+    reasons: dict[str, str] = {}
+    for rule in rules:
+        tool_name = rule.tool_name
+        before = counters_before.get(tool_name, 0)
+        after = counters_after.get(tool_name, 0)
+        if before == after:
+            continue
+        if tool_name in emitted_tools:
+            reasons[tool_name] = "notice emitted"
+        elif batch_used_tool(step_messages, tool_name):
+            reasons[tool_name] = "tool used in batch"
+        elif after == 0:
+            reasons[tool_name] = "counter cleared"
+        else:
+            reasons[tool_name] = "incremented"
+    return reasons
 
 
 def apply_tool_usage_notice_before_llm(
@@ -25,43 +63,81 @@ def apply_tool_usage_notice_before_llm(
     meta: dict[str, Any],
     *,
     step_messages: list[dict[str, Any]],
+    logger: Any | None = None,
 ) -> list[dict[str, Any]]:
     """
-    Цикл §4.4 после persist-batch, перед вызовом LLM: K-тик, tool usage notices, long hints.
+    После persist-batch, перед LLM: независимые контуры long_memory K-тик и tool_usage_notice.
+    Счётчики не сбрасывают друг друга; снимок — только в текстовый log.
     """
     cfg = getattr(ctx, "config_dict", None) or {}
     if not isinstance(meta, dict):
         meta = {}
 
     notice_rules = active_tool_usage_notice_rules(cfg)
+    tool_thresholds = _tool_thresholds(notice_rules)
+    counters_before = dict(getattr(state, "tool_usage_notice_cnt", None) or {})
 
-    if long_memory_hints_enabled(cfg):
-        on_persist_steps(meta, steps=1)
+    long_hints_enabled = long_memory_hints_enabled(cfg)
+    long_interval = (
+        long_memory_notice_from_config_dict(cfg).check_interval_messages
+        if long_hints_enabled
+        else None
+    )
+    long_check_after_tick: int | None = None
+
+    if long_hints_enabled:
+        long_check_after_tick = on_persist_steps(meta, steps=1)
 
     if notice_rules:
         update_tool_usage_notice_after_persist(state, step_messages, notice_rules)
 
+    counters_before_collect = dict(getattr(state, "tool_usage_notice_cnt", None) or {})
     out = list(messages)
-    emitted_any_technical_notice = False
 
+    emitted_long_hints: list[str] = []
     for hint_text in collect_long_memory_hints(state, meta, ctx, cfg):
         out.append(wrap_long_memory_hint_user_message(hint_text, suffix="mem_long"))
-        emitted_any_technical_notice = True
+        emitted_long_hints.append(hint_text)
+
+    long_check_final = get_long_memory_check_cnt(meta) if long_hints_enabled else None
+    long_reset = (
+        long_interval is not None
+        and long_check_after_tick is not None
+        and long_check_after_tick >= long_interval
+        and long_check_final == 0
+    )
 
     shared = getattr(state, "shared", None)
     registers = get_thread_memory_registers_from_shared(shared)
 
     for notice_text in collect_tool_usage_notices(state, notice_rules, registers=registers):
         out.append(wrap_tool_usage_notice_user_message(notice_text))
-        emitted_any_technical_notice = True
 
-    if notice_rules and emitted_any_technical_notice:
-        update_tool_usage_notice_after_persist(
-            state,
-            step_messages,
-            notice_rules,
-            reset_tool_names={rule.tool_name for rule in notice_rules},
-        )
+    counters_final = dict(getattr(state, "tool_usage_notice_cnt", None) or {})
+    emitted_tools = {
+        name
+        for name, threshold in tool_thresholds.items()
+        if counters_before_collect.get(name, 0) >= threshold
+    }
+    tool_resets = _tool_reset_reasons(
+        step_messages,
+        notice_rules,
+        counters_before=counters_before,
+        counters_after=counters_final,
+        emitted_tools=emitted_tools,
+    )
 
     persist_tool_usage_notice_state(state, meta)
+
+    log_notice_policy_step(
+        logger,
+        tool_counters=counters_final,
+        tool_thresholds=tool_thresholds,
+        tool_resets=tool_resets,
+        tool_emits=sorted(emitted_tools),
+        long_check_cnt=get_long_memory_check_cnt(meta) if long_hints_enabled else None,
+        long_interval=long_interval,
+        long_reset=long_reset,
+        long_emit=bool(emitted_long_hints),
+    )
     return out
