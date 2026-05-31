@@ -3,7 +3,10 @@ import types
 from summarize.working_memory_gateway import (
     WorkingMemoryDeltas,
     WorkingMemorySnapshot,
+    REGISTER_MERGE_MODES,
     apply_append_deltas,
+    apply_memory_patch,
+    apply_replace_deltas,
     coerce_working_memory_deltas,
     build_memory_deltas_format_repair_messages,
     parse_memory_deltas,
@@ -90,7 +93,16 @@ def test_parse_memory_deltas_returns_empty_on_broken_or_empty_payload():
     assert parse_memory_deltas("<goal></goal><state>   </state>") == WorkingMemoryDeltas()
 
 
-def test_apply_append_deltas_uses_append_semantics():
+def test_register_merge_modes_match_spec():
+    assert REGISTER_MERGE_MODES == {
+        "knowledge": "append",
+        "constraints": "append",
+        "goal": "replace",
+        "state": "replace",
+    }
+
+
+def test_apply_append_deltas_only_append_registers():
     snapshot = WorkingMemorySnapshot(
         goal="existing goal",
         constraints="",
@@ -100,16 +112,64 @@ def test_apply_append_deltas_uses_append_semantics():
     deltas = {
         "goal": "new goal delta",
         "constraints": "must keep tests green",
-        "state": "",
+        "state": "new state delta",
         "knowledge": "verified fact",
     }
 
     updated = apply_append_deltas(snapshot, deltas)
 
-    assert updated.goal == "existing goal\n\nnew goal delta"
-    assert updated.constraints == "must keep tests green"
+    assert updated.goal == "existing goal"
     assert updated.state == "existing state"
+    assert updated.constraints == "must keep tests green"
     assert updated.knowledge == "verified fact"
+
+
+def test_apply_replace_deltas_only_replace_registers():
+    snapshot = WorkingMemorySnapshot(
+        goal="existing goal",
+        constraints="existing constraints",
+        state="existing state",
+        knowledge="existing knowledge",
+    )
+    deltas = {
+        "goal": "new goal snapshot",
+        "constraints": "ignored constraints delta",
+        "state": "new state snapshot",
+        "knowledge": "ignored knowledge delta",
+    }
+
+    updated = apply_replace_deltas(snapshot, deltas)
+
+    assert updated.goal == "new goal snapshot"
+    assert updated.state == "new state snapshot"
+    assert updated.constraints == "existing constraints"
+    assert updated.knowledge == "existing knowledge"
+
+
+def test_apply_memory_patch_combines_append_and_replace():
+    snapshot = WorkingMemorySnapshot(
+        goal="old goal",
+        constraints="old constraints",
+        state="stale TODO",
+        knowledge="old knowledge",
+    )
+    append_deltas = {
+        "constraints": "new rule",
+        "knowledge": "new fact",
+        "state": "must not append",
+    }
+    replace_deltas = {
+        "goal": "fresh goal",
+        "state": "fresh state",
+        "knowledge": "must not replace",
+    }
+
+    updated = apply_memory_patch(snapshot, append_deltas, replace_deltas)
+
+    assert updated.goal == "fresh goal"
+    assert updated.state == "fresh state"
+    assert updated.constraints == "old constraints\n\nnew rule"
+    assert updated.knowledge == "old knowledge\n\nnew fact"
 
 
 def test_render_working_memory_for_summary_message_skips_empty_registers():

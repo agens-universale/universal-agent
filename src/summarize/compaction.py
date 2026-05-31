@@ -1,5 +1,7 @@
 from typing import Any, Callable, Dict, List, Optional
 
+from config_modules.summary import DEFAULT_INTENT_LOG_PREVIEW_CHARS
+from intent_log import serialize, serialize_for_meta, tail_preview
 from message_policy.user_message_policy import (
     TECHNICAL_TYPE_DIALOG_SUMMARY,
     wrap_technical_user_content,
@@ -15,7 +17,7 @@ from summarize.thread_summarizer import summarize_dialog_via_chat_completions
 from summarize.working_memory_gateway import (
     REGISTER_ORDER,
     WorkingMemoryDeltas,
-    apply_append_deltas,
+    apply_memory_patch,
     coerce_working_memory_deltas,
     read_snapshot_from_state,
     render_persistent_state_for_prompt,
@@ -34,13 +36,27 @@ def without_system_messages(messages_list: List[dict]) -> List[dict]:
     return out
 
 
+def _intent_log_preview_chars_from_ctx(ctx: Any | None) -> int:
+    if ctx is None:
+        return DEFAULT_INTENT_LOG_PREVIEW_CHARS
+    cfg = getattr(ctx, "config_dict", {}) or {}
+    summary_params = cfg.get("summary_params") if isinstance(cfg.get("summary_params"), dict) else {}
+    try:
+        value = int(summary_params.get("intent_log_preview_chars", DEFAULT_INTENT_LOG_PREVIEW_CHARS))
+    except (TypeError, ValueError):
+        value = DEFAULT_INTENT_LOG_PREVIEW_CHARS
+    return value if value > 0 else DEFAULT_INTENT_LOG_PREVIEW_CHARS
+
+
 def apply_summary_state_patch(
     *,
     state: Any,
     raw_summary: str,
     last_dialog_steps: str,
-    memory_deltas: WorkingMemoryDeltas | Dict[str, str] | None = None,
+    memory_append_deltas: WorkingMemoryDeltas | Dict[str, str] | None = None,
+    memory_replace_deltas: WorkingMemoryDeltas | Dict[str, str] | None = None,
     summarized_messages_count: int,
+    intent_log_preview_chars: int = DEFAULT_INTENT_LOG_PREVIEW_CHARS,
 ) -> str:
     shared = getattr(state, "shared", None)
     if shared is None:
@@ -50,20 +66,24 @@ def apply_summary_state_patch(
         state.shared = shared
 
     snapshot = read_snapshot_from_state(state)
-    deltas = coerce_working_memory_deltas(memory_deltas)
-    if not deltas.is_empty():
-        snapshot = apply_append_deltas(snapshot, deltas)
+    append_deltas = coerce_working_memory_deltas(memory_append_deltas)
+    replace_deltas = coerce_working_memory_deltas(memory_replace_deltas)
+    if not append_deltas.is_empty() or not replace_deltas.is_empty():
+        snapshot = apply_memory_patch(snapshot, append_deltas, replace_deltas)
 
     wm_dict = {name: snapshot.to_dict().get(name, "") for name in REGISTER_ORDER}
     shared.working_memory = wm_dict
 
     working_memory_block = render_working_memory_for_summary_message(snapshot)
+    closed_records = list(getattr(state, "user_intent_log", []) or [])
+    open_records = list(getattr(state, "current_user_intent", []) or [])
+    preview_chars = intent_log_preview_chars if intent_log_preview_chars > 0 else DEFAULT_INTENT_LOG_PREVIEW_CHARS
     summary_message_content = build_dialog_summary_content(
         summary_text=str(raw_summary or ""),
         last_dialog_steps=str(last_dialog_steps or ""),
         working_memory_block=working_memory_block,
-        user_intent_log=list(getattr(state, "user_intent_log", []) or []),
-        current_user_intent=list(getattr(state, "current_user_intent", []) or []),
+        user_intent_log_preview=tail_preview(closed_records, preview_chars),
+        current_user_intent_jsonl=serialize(open_records),
     )
     prev_offset = int(getattr(state, "dialog_steps_offset", 0) or 0)
     state.dialog_steps_offset = prev_offset + max(0, int(summarized_messages_count or 0))
@@ -139,18 +159,8 @@ def run_summary_compaction(
             f"serialized_chars={serialized_chars}"
         )
 
-    source_user_log = getattr(state, "user_intent_log", None)
-    source_user_log = (
-        [str(x) for x in source_user_log if isinstance(x, str)]
-        if isinstance(source_user_log, list)
-        else []
-    )
-    source_current_intent = getattr(state, "current_user_intent", None)
-    source_current_intent = (
-        [str(x) for x in source_current_intent if isinstance(x, str)]
-        if isinstance(source_current_intent, list)
-        else []
-    )
+    source_user_log = list(getattr(state, "user_intent_log", []) or [])
+    source_current_intent = list(getattr(state, "current_user_intent", []) or [])
     memory_snapshot = read_snapshot_from_state(state)
     summary_result = summarize_dialog_via_chat_completions(
         ctx=ctx,
@@ -162,9 +172,13 @@ def run_summary_compaction(
         steps_offset=int(getattr(state, "dialog_steps_offset", 0) or 0),
     )
     raw_summary = str(summary_result.get("raw_summary") or "")
-    memory_deltas = coerce_working_memory_deltas(
-        summary_result.get("memory_deltas")
+    memory_append_deltas = coerce_working_memory_deltas(
+        summary_result.get("memory_append_deltas")
     )
+    memory_replace_deltas = coerce_working_memory_deltas(
+        summary_result.get("memory_replace_deltas")
+    )
+    preview_chars = _intent_log_preview_chars_from_ctx(ctx)
     if logger is not None:
         logger.info("summary_received_raw_text=\n%s", raw_summary)
     if is_cli_mode:
@@ -175,8 +189,10 @@ def run_summary_compaction(
         state=state,
         raw_summary=raw_summary,
         last_dialog_steps=str(summary_result.get("last_dialog_steps") or ""),
-        memory_deltas=memory_deltas,
+        memory_append_deltas=memory_append_deltas,
+        memory_replace_deltas=memory_replace_deltas,
         summarized_messages_count=len(full_messages),
+        intent_log_preview_chars=preview_chars,
     )
     trace = summary_result.get("trace")
     if isinstance(trace, dict):
@@ -195,8 +211,13 @@ def run_summary_compaction(
             else {},
             "notes_md": str(getattr(_shared, "notes_md", "") or "") if _shared else "",
         },
-        "user_intent_log": list(getattr(state, "user_intent_log", []) or []),
-        "current_user_intent": list(getattr(state, "current_user_intent", []) or []),
+        "user_intent_log": serialize_for_meta(
+            list(getattr(state, "user_intent_log", []) or [])
+        ),
+        "current_user_intent": serialize_for_meta(
+            list(getattr(state, "current_user_intent", []) or [])
+        ),
+        "user_turn_seq": int(getattr(state, "user_turn_seq", 0) or 0),
         "dialog_steps_offset": int(getattr(state, "dialog_steps_offset", 0) or 0),
     }
     if on_summary_applied is not None:
@@ -219,7 +240,9 @@ def run_summary_compaction(
     ratio = (
         round((new_serialized / serialized_chars), 4) if serialized_chars > 0 else 0.0
     )
-    delta_chars = sum(len(v) for v in memory_deltas.to_dict().values())
+    delta_chars = sum(len(v) for v in memory_append_deltas.to_dict().values()) + sum(
+        len(v) for v in memory_replace_deltas.to_dict().values()
+    )
     if logger is not None:
         logger.info(
             "summary_completed reason=%s thread_id=%s trigger_volume=%s serialized_before=%s serialized_after=%s compression_ratio=%s num_batches=%s memory_delta_chars=%s",

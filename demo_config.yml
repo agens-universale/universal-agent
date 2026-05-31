@@ -135,10 +135,13 @@ long_memory:
 # tools: [] — выключить. Параметры LLM — chat_completions.llm.
 intent_scope:
   tools:
-    - ask_human
-    - submit_solution
+    ask_human:
+      record: aggregated
+    submit_solution:
+      record: raw
   max_summary_chars: 500
   max_tool_output_chars: 8000
+  read_page_limit: 5000
   fallback_raw_on_llm_error: true
 
 summary:
@@ -150,6 +153,7 @@ summary:
   original_user_messages_max_chars: 20000
   last_dialog_steps_count: 4
   last_dialog_step_message_max_chars: 5000
+  intent_log_preview_chars: 10000
 
 security:
   command_moderation:

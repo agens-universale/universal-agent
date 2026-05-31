@@ -11,6 +11,7 @@ from message_policy.tool_usage_notice.state import (
     persist_tool_usage_notice_state,
     set_long_memory_check_cnt,
 )
+from intent_log.user_turn import init_subagent_open_turn
 from states import State
 from thread_store import ThreadSession
 
@@ -116,7 +117,7 @@ def test_init_subagent_current_user_intent_resets_tool_usage_notice():
     state = _make_state()
     state.long_memory_content_hash = "parent"
     state.tool_usage_notice_cnt = {"working_memory": 12}
-    state.init_subagent_current_user_intent("do task")
+    init_subagent_open_turn(state, "do task")
     assert state.long_memory_content_hash is None
     assert state.tool_usage_notice_cnt == {}
 

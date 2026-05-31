@@ -15,6 +15,7 @@ from message_policy.user_message_policy import (
     wrap_technical_user_content,
 )
 from run_context import RunContext, create_run_context
+from utils.json_text import format_json_for_display
 
 
 def _ensure_project_gc_dir() -> None:
@@ -110,10 +111,13 @@ def _resolve_forced_skill(skill_name: str, config_dict: dict) -> str | None:
     return res.canonical_id
 
 
-def main() -> Any:
+def main() -> int:
     """
     Входная точка CLI: парсинг аргументов, загрузка конфига,
     создание RunContext и запуск агента.
+
+    Возвращает код выхода (0). Финальный ответ агента печатается в stdout
+    при ``console_trace: true``; сырое значение доступно через ``cli.run()``.
     """
     _ensure_project_gc_dir()
     _ensure_user_skills_dir()
@@ -148,12 +152,17 @@ def main() -> Any:
     start_new_thread = arg_parser.run_args.new
 
     executor = AgentExecutor(ctx)
-    return executor.run(
+    response = executor.run(
         user_parts,
         thread_id=thread_id,
         start_new_thread=start_new_thread,
         verbose=verbose,
     )
+    if config_dict.get("console_trace", True):
+        formatted = format_json_for_display(response)
+        if formatted:
+            print(formatted)
+    return 0
 
 
 if __name__ == "__main__":

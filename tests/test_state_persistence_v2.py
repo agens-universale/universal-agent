@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from intent_log import ACTION_USER_ASK, deserialize_list, serialize_for_meta
 from persistence.schema import (
     STATE_SCHEMA_VERSION,
     StateSchemaError,
@@ -33,6 +34,19 @@ def _make_state() -> State:
     )
 
 
+FIXED_TS = "2026-05-30T11:35:08Z"
+
+
+def _user_ask_record(content: str, *, turn: int = 1) -> dict:
+    return {
+        "turn": turn,
+        "ts": FIXED_TS,
+        "action": ACTION_USER_ASK,
+        "tool_name": None,
+        "content": content,
+    }
+
+
 def test_state_from_snapshot_roundtrip_preserves_runtime_fields():
     state = _make_state()
     state.shared.working_memory = {
@@ -42,8 +56,9 @@ def test_state_from_snapshot_roundtrip_preserves_runtime_fields():
     }
     state.shared.notes_md = "notes"
     state.shared.fetch_url_cache = {"https://x": "body"}
-    state.user_intent_log = ["closed turn"]
-    state.current_user_intent = ["open turn"]
+    state.user_intent_log = deserialize_list([_user_ask_record("closed turn")])
+    state.current_user_intent = deserialize_list([_user_ask_record("open turn", turn=2)])
+    state.user_turn_seq = 2
     state.long_memory_content_hash = "lm_hash"
     state.tool_usage_notice_cnt = {"working_memory": 3}
     state.messages = [{"role": "user", "content": "hi", "id": "u1"}]
@@ -67,8 +82,9 @@ def test_state_from_snapshot_roundtrip_preserves_runtime_fields():
     assert restored.shared.working_memory["goal"] == "ship"
     assert restored.shared.notes_md == "notes"
     assert restored.shared.fetch_url_cache == {"https://x": "body"}
-    assert restored.user_intent_log == ["closed turn"]
-    assert restored.current_user_intent == ["open turn"]
+    assert restored.user_intent_log[0].content == "closed turn"
+    assert restored.current_user_intent[0].content == "open turn"
+    assert restored.user_turn_seq == 2
     assert restored.long_memory_content_hash == "lm_hash"
     assert restored.tool_usage_notice_cnt == {"working_memory": 3}
     assert restored.messages == [{"role": "user", "content": "hi", "id": "u1"}]
@@ -157,7 +173,9 @@ def test_thread_meta_mapper_allows_empty_meta():
 
 def test_meta_has_persisted_agent_state_v2_signals_only():
     assert meta_has_persisted_agent_state({"shared": {"working_memory": {"goal": "x"}}})
-    assert meta_has_persisted_agent_state({"user_intent_log": ["ship"]})
+    assert meta_has_persisted_agent_state(
+        {"user_intent_log": serialize_for_meta(deserialize_list([_user_ask_record("ship")]))}
+    )
     assert not meta_has_persisted_agent_state({"dialog_steps_offset": 3})
     assert not meta_has_persisted_agent_state({"memory_files": {"journal": "legacy"}})
 
@@ -170,7 +188,8 @@ def test_validate_thread_meta_rejects_legacy_before_agent_state_check():
 def test_merge_state_into_meta_writes_v2_shared():
     state = _make_state()
     state.shared.working_memory = {"constraints": "no legacy"}
-    state.user_intent_log = ["done"]
+    state.user_intent_log = deserialize_list([_user_ask_record("done")])
+    state.user_turn_seq = 1
     meta = ThreadMetaMapper.merge_state_into_meta({}, state)
     assert meta["state_schema_version"] == STATE_SCHEMA_VERSION
     assert meta["shared"]["working_memory"]["constraints"] == "no legacy"

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, Mapping
 
+from intent_log.serialize import deserialize_list, serialize_for_meta
 from persistence.schema import (
     STATE_SCHEMA_VERSION,
     normalize_working_memory,
@@ -50,6 +51,15 @@ def load_state_from_snapshot(payload: Mapping[str, Any]) -> State:
     elif not isinstance(store_raw, ToolCallOutputsStore):
         state.tool_call_outputs_store = ToolCallOutputsStore()
 
+    state.user_intent_log = deserialize_list(state.__dict__.get("user_intent_log"))
+    state.current_user_intent = deserialize_list(
+        state.__dict__.get("current_user_intent")
+    )
+    try:
+        state.user_turn_seq = max(0, int(state.__dict__.get("user_turn_seq", 0) or 0))
+    except (TypeError, ValueError):
+        state.user_turn_seq = 0
+
     return state
 
 
@@ -75,6 +85,12 @@ class StateSerializer:
 
         store = raw.get("tool_call_outputs_store")
         raw["tool_call_outputs_store"] = _serialize_tool_call_outputs_store(store)
+
+        raw["user_intent_log"] = serialize_for_meta(raw.get("user_intent_log") or [])
+        raw["current_user_intent"] = serialize_for_meta(
+            raw.get("current_user_intent") or []
+        )
+        raw["user_turn_seq"] = int(raw.get("user_turn_seq", 0) or 0)
 
         raw["state_schema_version"] = STATE_SCHEMA_VERSION
         return raw

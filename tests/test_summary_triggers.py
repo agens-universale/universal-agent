@@ -357,9 +357,17 @@ class SummaryTriggersTest(unittest.TestCase):
                 )
                 self.assertEqual(result, "ok")
 
+            from intent_fixtures import intent_user_ask_texts
+            from intent_log import deserialize_list
+
             with open(meta_path, "r", encoding="utf-8") as fd:
                 saved_meta = json.load(fd)
-            self.assertEqual(saved_meta.get("current_user_intent"), ["новый вопрос"])
+            self.assertEqual(
+                intent_user_ask_texts(
+                    deserialize_list(saved_meta.get("current_user_intent"))
+                ),
+                ["новый вопрос"],
+            )
 
 
 if __name__ == "__main__":

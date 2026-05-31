@@ -9,6 +9,7 @@ from intent_scope.agent_logging import (
     log_intent_scope_summary_start,
 )
 from config_modules.intent_scope import IntentScopeConfig
+from intent_log.serialize import records_to_summary_lines
 from message_format.dialog_history import truncate_text
 from summarize.llm import request_summary_text
 from utils.llm_chat_client import log_llm_prompt_and_result
@@ -51,9 +52,8 @@ def _load_system_prompt(ctx: Any) -> str:
     return system
 
 
-def _format_prior_intent(current_user_intent: List[str]) -> str:
-    lines = [str(line or "").strip() for line in current_user_intent]
-    lines = [line for line in lines if line]
+def _format_prior_intent(current_user_intent: List[Any]) -> str:
+    lines = records_to_summary_lines(list(current_user_intent or []))
     if not lines:
         return "(empty)"
     return "\n".join(f"- {line}" for line in lines)
@@ -64,7 +64,7 @@ def _build_user_prompt(
     tool_name: str,
     tool_arguments: str,
     tool_output: str,
-    prior_intent: List[str],
+    prior_intent: List[Any],
     max_tool_output_chars: int,
 ) -> str:
     args_text = truncate_text(str(tool_arguments or ""), max_tool_output_chars)
@@ -146,17 +146,17 @@ def summarize_tool_intent_line(
     return line
 
 
-def build_fallback_raw_line(
+def build_fallback_aggregated_content(
     *,
     ctx: Any,
     tool_output_raw: str,
 ) -> str:
+    """Truncated tool output for aggregated record when LLM summary fails."""
     scope_cfg = _scope_cfg(ctx)
     body = str(tool_output_raw or "").strip()
     if not body:
         return ""
-    prefix = "[intent_scope:raw] "
     max_chars = scope_cfg.max_summary_chars
     if max_chars > 0:
-        body = truncate_text(body, max(1, max_chars - len(prefix)))
-    return prefix + body
+        body = truncate_text(body, max_chars)
+    return body

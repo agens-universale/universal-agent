@@ -8,6 +8,7 @@ import intent_guard.guard as intent_guard_guard
 
 from intent_guard.guard import FinishGateGuard
 from intent_guard.validation_result import ValidationResult
+from intent_log.user_turn import init_subagent_open_turn
 from persistence.state_storage import save_state
 from states import SharedStateData, State
 from tools.subagents.runner import SubagentRunner
@@ -68,7 +69,7 @@ def test_subagent_gate_validates_assignment_not_orchestrator_cli_intent():
     assignment = "измени foo.py"
     user_message = _user_msg(assignment)
     runner._build_initial_messages(child, "worker", user_message)
-    child.init_subagent_current_user_intent(assignment)
+    init_subagent_open_turn(child, assignment)
 
     captured: dict[str, object] = {}
 
@@ -116,9 +117,13 @@ def test_subagent_seed_keeps_orchestrator_cli_scope_unchanged():
     task_text = "добавь тесты в foo.py"
     user_message = _user_msg(task_text)
     runner._build_initial_messages(child, "worker", user_message)
-    child.init_subagent_current_user_intent(task_text)
+    init_subagent_open_turn(child, task_text)
 
-    assert child.current_user_intent == [task_text]
+    from intent_log import ACTION_USER_ASK
+
+    assert len(child.current_user_intent) == 1
+    assert child.current_user_intent[0].action == ACTION_USER_ASK
+    assert child.current_user_intent[0].content == task_text
     assert child.parent_state_id == orch.state_id
     assert orch.current_user_intent == ["создай приложение для бухгалтерии"]
     assert orch.user_intent_log == []

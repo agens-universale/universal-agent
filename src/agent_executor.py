@@ -19,6 +19,8 @@ from run_summary_coordinator import RunSummaryCoordinator
 from summarize.config import parse_summary_trigger_chars
 from persistence.state_storage import dump_storage, save_state
 from persistence.thread_meta_mapper import ThreadMetaMapper
+from intent_log.user_turn import append_user_ask_deduped, append_user_asks_from_messages
+from message_policy.user_message_policy import extract_real_user_message_text
 from states import State, SharedStateData
 from thread_store import (
     ThreadSession,
@@ -146,6 +148,8 @@ class AgentExecutor:
             meta = getattr(thread_session, "meta", None) or {}
             state.init_user_intent_log(meta.get("user_intent_log"))
             state.init_current_user_intent(meta.get("current_user_intent"))
+            state.init_user_turn_seq(meta.get("user_turn_seq"))
+            state.infer_user_turn_seq_if_missing()
             state.init_tool_usage_notice_from_meta(meta)
             state.dialog_steps_offset = int(meta.get("dialog_steps_offset", 0) or 0)
         if (
@@ -215,9 +219,16 @@ class AgentExecutor:
         ]
         # На старте user turn дописываем текущий CLI-запрос в current_user_intent
         # (только реальные user-сообщения, не technical). user_intent_log — только
-        # после commit_closed_user_turn_to_intent_log при accept submit_solution.
+        # user_intent_log — только после flush при accept submit_solution.
         for new_user_message in new_user_messages:
-            state.seed_new_user_turn(new_user_message)
+            state.finish_gate_rejection_count = 0
+            text = extract_real_user_message_text(new_user_message)
+            if text:
+                state.current_user_intent = append_user_ask_deduped(
+                    state.current_user_intent,
+                    text,
+                    user_turn_seq=state.user_turn_seq,
+                )
 
         messages = list(new_user_messages)
 
@@ -260,11 +271,14 @@ class AgentExecutor:
                     m for m in step_messages
                     if make_message_key(m) not in known_before
                 ]
-                state.append_current_user_intent_from_messages(
-                    step_messages_for_user_scope
+                state.current_user_intent = append_user_asks_from_messages(
+                    state.current_user_intent,
+                    step_messages_for_user_scope,
+                    user_turn_seq=state.user_turn_seq,
                 )
-                thread_session.meta["user_intent_log"] = state.user_intent_log
-                thread_session.meta["current_user_intent"] = state.current_user_intent
+                thread_session.meta = ThreadMetaMapper.merge_state_into_meta(
+                    thread_session.meta, state
+                )
                 thread_session.meta["backend_api_mode"] = state.backend_api_mode
                 thread_session.backend_api_mode = state.backend_api_mode
                 persist_tool_usage_notice_state(state, thread_session.meta)
@@ -283,7 +297,11 @@ class AgentExecutor:
             get_full_history_messages = thread_session.get_full_history_messages
         elif backend_api_mode == "chat_completions" and summary_trigger_chars > 0:
             def _persist_runtime_batch(step_messages: list[dict]) -> None:
-                state.append_current_user_intent_from_messages(step_messages)
+                state.current_user_intent = append_user_asks_from_messages(
+                    state.current_user_intent,
+                    step_messages,
+                    user_turn_seq=state.user_turn_seq,
+                )
 
             persist_messages_callback = _persist_runtime_batch
 
@@ -313,8 +331,9 @@ class AgentExecutor:
                 ),
             )
             if thread_session is not None:
-                thread_session.meta["user_intent_log"] = state.user_intent_log
-                thread_session.meta["current_user_intent"] = state.current_user_intent
+                thread_session.meta = ThreadMetaMapper.merge_state_into_meta(
+                    thread_session.meta, state
+                )
                 thread_session.meta["backend_api_mode"] = state.backend_api_mode
                 persist_tool_usage_notice_state(state, thread_session.meta)
                 thread_session.persist_batch(

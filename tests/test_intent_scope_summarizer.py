@@ -36,11 +36,12 @@ def test_summarize_tool_intent_line_uses_chat_completions_llm_completion_kwargs(
     )
     monkeypatch.setattr(summarizer, "log_llm_prompt_and_result", lambda **kwargs: None)
 
-    from config_modules.intent_scope import IntentScopeConfig
+    from config_modules.intent_scope import IntentScopeConfig, IntentScopeToolConfig
+    from intent_log import append_user_ask
 
     ctx = SimpleNamespace(
         intent_scope=IntentScopeConfig(
-            tools=["ask_human"],
+            tools={"ask_human": IntentScopeToolConfig(record="aggregated")},
             max_summary_chars=500,
             max_tool_output_chars=1000,
         ),
@@ -50,7 +51,9 @@ def test_summarize_tool_intent_line_uses_chat_completions_llm_completion_kwargs(
         ),
         logger=None,
     )
-    state = SimpleNamespace(current_user_intent=["prior line"])
+    state = SimpleNamespace(
+        current_user_intent=append_user_ask([], "prior line", user_turn_seq=0)
+    )
 
     line = summarizer.summarize_tool_intent_line(
         ctx=ctx,
@@ -62,8 +65,15 @@ def test_summarize_tool_intent_line_uses_chat_completions_llm_completion_kwargs(
 
     assert line == "User wants a README section on install."
     assert captured["label"] == "intent_scope:ask_human"
-    # Intent scope не передаёт свои overrides — только chat_completions.llm в request_summary_text.
     assert captured.get("payload_overrides") is None
+    user_msg = summarizer._build_user_prompt(
+        tool_name="ask_human",
+        tool_arguments='{"question":"q"}',
+        tool_output='{"response":"yes"}',
+        prior_intent=state.current_user_intent,
+        max_tool_output_chars=1000,
+    )
+    assert "prior line" in user_msg
 
 
 def test_summarize_tool_intent_line_fail_open_on_llm_error(monkeypatch):
@@ -74,10 +84,12 @@ def test_summarize_tool_intent_line_fail_open_on_llm_error(monkeypatch):
     )
     monkeypatch.setattr(summarizer, "log_llm_prompt_and_result", lambda **kwargs: None)
 
-    from config_modules.intent_scope import IntentScopeConfig
+    from config_modules.intent_scope import IntentScopeConfig, IntentScopeToolConfig
 
     ctx = SimpleNamespace(
-        intent_scope=IntentScopeConfig(tools=["ask_human"]),
+        intent_scope=IntentScopeConfig(
+            tools={"ask_human": IntentScopeToolConfig(record="aggregated")}
+        ),
         chat_completions_llm=SimpleNamespace(
             max_tokens=100, completion_kwargs={}
         ),

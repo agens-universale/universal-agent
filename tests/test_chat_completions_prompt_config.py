@@ -95,6 +95,17 @@ class ChatCompletionsPromptConfigTest(unittest.TestCase):
             self.assertEqual(
                 cfg["summary_params"]["original_user_messages_max_chars"], 20000
             )
+            self.assertEqual(cfg["summary_params"]["intent_log_preview_chars"], 10000)
+            self.assertTrue(
+                cfg["summary_params"][
+                    "chat_completions_memory_patch_append_prompt_path"
+                ].endswith("prompts/chat_completions_memory_patch_append.md")
+            )
+            self.assertTrue(
+                cfg["summary_params"][
+                    "chat_completions_memory_patch_replace_prompt_path"
+                ].endswith("prompts/chat_completions_memory_patch_replace.md")
+            )
             self.assertNotIn("llm", cfg["summary_params"])
             from config_modules.chat_completions import ChatCompletionsLlmConfig
 
@@ -232,6 +243,45 @@ class ChatCompletionsPromptConfigTest(unittest.TestCase):
             )
             self.assertEqual(cfg["chat_completion_headers"]["X-Custom"], "123")
 
+    def test_memory_patch_prompt_paths_resolved_from_config_dir(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            cfg_path = os.path.join(tmp_dir, "config.yml")
+            with open(cfg_path, "w", encoding="utf-8") as fd:
+                fd.write(
+                    "backend:\n  api_mode: chat_completions\n"
+                    "summary:\n"
+                    "  chat_completions_memory_patch_append_prompt_path: prompts/patch_append.md\n"
+                    "  chat_completions_memory_patch_replace_prompt_path: prompts/patch_replace.md\n"
+                    "  intent_log_preview_chars: 8000\n"
+                )
+            cfg = load_config(cfg_path)
+            self.assertEqual(
+                cfg["summary_params"]["chat_completions_memory_patch_append_prompt_path"],
+                os.path.join(tmp_dir, "prompts", "patch_append.md"),
+            )
+            self.assertEqual(
+                cfg["summary_params"]["chat_completions_memory_patch_replace_prompt_path"],
+                os.path.join(tmp_dir, "prompts", "patch_replace.md"),
+            )
+            self.assertEqual(cfg["summary_params"]["intent_log_preview_chars"], 8000)
+
+    def test_intent_scope_tools_map_loaded_from_yaml(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            cfg_path = os.path.join(tmp_dir, "config.yml")
+            with open(cfg_path, "w", encoding="utf-8") as fd:
+                fd.write(
+                    "backend:\n  api_mode: chat_completions\n"
+                    "intent_scope:\n"
+                    "  tools:\n"
+                    "    ask_human:\n"
+                    "      record: aggregated\n"
+                    "    submit_solution:\n"
+                    "      record: raw\n"
+                )
+            cfg = load_config(cfg_path)
+            tools = cfg["intent_scope_params"]["tools"]
+            self.assertEqual(tools["ask_human"]["record"], "aggregated")
+            self.assertEqual(tools["submit_solution"]["record"], "raw")
 
 if __name__ == "__main__":
     unittest.main()

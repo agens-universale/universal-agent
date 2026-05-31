@@ -11,6 +11,7 @@ import pytest
 import requests
 
 from intent_guard.validation_result import ValidationResult
+from intent_fixtures import intent_user_ask_texts, seed_state_intent
 
 
 def teardown_module(_module) -> None:
@@ -365,7 +366,7 @@ def test_chat_completions_connection_error_does_not_lower_max_tokens(monkeypatch
 
 def test_submit_solution_commits_current_user_intent_on_success():
     state = _make_state()
-    state.current_user_intent = ["актуальный вопрос", "уточнение"]
+    seed_state_intent(state, current=["актуальный вопрос", "уточнение"])
 
     result = run_agent(
         [_submit_solution_call()],
@@ -375,7 +376,10 @@ def test_submit_solution_commits_current_user_intent_on_success():
 
     assert result == _expected_finish_return()
     assert state.current_user_intent == []
-    assert state.user_intent_log == ["актуальный вопрос", "уточнение"]
+    assert intent_user_ask_texts(state.user_intent_log) == [
+        "актуальный вопрос",
+        "уточнение",
+    ]
     synthetic_outputs = [
         m
         for m in state.messages
@@ -390,7 +394,7 @@ def test_submit_solution_commits_current_user_intent_on_success():
 
 def test_submit_solution_validation_failure_fails_open(monkeypatch):
     state = _make_state()
-    state.current_user_intent = ["актуальный вопрос"]
+    seed_state_intent(state, current=["актуальный вопрос"])
 
     def _raise_validation(*_args, **_kwargs):
         raise RuntimeError("validation backend failure")
@@ -438,8 +442,11 @@ def test_cycle_stop_generates_outputs_for_all_pending_tool_calls():
 
 def test_submit_solution_validation_receives_context_and_current_scope(monkeypatch):
     state = _make_state()
-    state.user_intent_log = ["старый вопрос"]
-    state.current_user_intent = ["актуальный вопрос", "уточнение"]
+    seed_state_intent(
+        state,
+        log=["старый вопрос"],
+        current=["актуальный вопрос", "уточнение"],
+    )
     captured: dict[str, object] = {}
 
     def _fake_validation(**kwargs):
@@ -489,8 +496,7 @@ def test_finish_gate_builds_trace_digest_from_state_messages(monkeypatch):
             "arguments": {"path": "x.py"},
         },
     ]
-    state.current_user_intent = ["сделай X"]
-    state.user_intent_log = ["сделай X"]
+    seed_state_intent(state, log=["сделай X"], current=["сделай X"])
     digest = FinishGateTraceDigest(
         trace_digest_text='<message n="1">\n[user] сделай X\n</message>',
         digest_chars=30,
@@ -573,8 +579,7 @@ def test_finish_gate_rejection_still_appends_cycle_stop_tool_outputs(monkeypatch
     monkeypatch.setattr(processing_module, "process_user_ask", _stub_user_ask)
 
     state = _make_state(max_steps=0)
-    state.user_intent_log = ["user question"]
-    state.current_user_intent = ["user question"]
+    seed_state_intent(state, log=["user question"], current=["user question"])
 
     run_agent(
         [_submit_solution_call()],

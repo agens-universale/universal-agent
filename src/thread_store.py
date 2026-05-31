@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from typing import Dict, List, Tuple, Any, Set, Optional
 
 from message_policy.tool_usage_notice.state import merge_tool_usage_notice_meta_to_base
+from intent_log.serialize import deserialize_list, serialize_for_meta
 from persistence.thread_meta_mapper import ThreadMetaMapper
 from message_policy.user_message_policy import (
     TECHNICAL_TYPE_DIALOG_SUMMARY,
@@ -384,17 +385,15 @@ class ThreadSession:
         if isinstance(self.meta.get("last_backend_response_id"), str):
             base_meta["last_backend_response_id"] = self.meta.get("last_backend_response_id")
         if isinstance(self.meta.get("user_intent_log"), list):
-            base_meta["user_intent_log"] = [
-                str(x).strip()
-                for x in self.meta.get("user_intent_log", [])
-                if str(x).strip()
-            ]
+            base_meta["user_intent_log"] = serialize_for_meta(
+                deserialize_list(self.meta.get("user_intent_log"))
+            )
         if isinstance(self.meta.get("current_user_intent"), list):
-            base_meta["current_user_intent"] = [
-                str(x).strip()
-                for x in self.meta.get("current_user_intent", [])
-                if str(x).strip()
-            ]
+            base_meta["current_user_intent"] = serialize_for_meta(
+                deserialize_list(self.meta.get("current_user_intent"))
+            )
+        if "user_turn_seq" in self.meta:
+            base_meta["user_turn_seq"] = int(self.meta.get("user_turn_seq") or 0)
         # Persist rendered chat/completions system prompt for transparency/debugging.
         # Must stay identical to актуальным данным: when we are in `responses`
         # mode, there is no system prompt in messages, so it must not be present in meta.
@@ -490,21 +489,22 @@ class ThreadSession:
             effective_steps_offset = 0
         new_meta["dialog_steps_offset"] = effective_steps_offset
         if isinstance(user_intent_log, list):
-            new_meta["user_intent_log"] = [
-                str(x).strip() for x in user_intent_log if str(x).strip()
-            ]
+            new_meta["user_intent_log"] = serialize_for_meta(
+                deserialize_list(user_intent_log)
+            )
         elif isinstance(existing_meta.get("user_intent_log"), list):
-            new_meta["user_intent_log"] = [
-                str(x).strip()
-                for x in existing_meta.get("user_intent_log", [])
-                if str(x).strip()
-            ]
+            new_meta["user_intent_log"] = serialize_for_meta(
+                deserialize_list(existing_meta.get("user_intent_log"))
+            )
         if isinstance(existing_meta.get("current_user_intent"), list):
-            new_meta["current_user_intent"] = [
-                str(x).strip()
-                for x in existing_meta.get("current_user_intent", [])
-                if str(x).strip()
-            ]
+            new_meta["current_user_intent"] = serialize_for_meta(
+                deserialize_list(existing_meta.get("current_user_intent"))
+            )
+        user_turn_seq = summary_payload.get("user_turn_seq")
+        if user_turn_seq is not None:
+            new_meta["user_turn_seq"] = int(user_turn_seq or 0)
+        elif "user_turn_seq" in existing_meta:
+            new_meta["user_turn_seq"] = int(existing_meta.get("user_turn_seq") or 0)
         prompt = existing_meta.get("chat_completions_system_prompt_rendered")
         if isinstance(prompt, str) and prompt.strip():
             new_meta["chat_completions_system_prompt_rendered"] = prompt

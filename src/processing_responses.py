@@ -583,10 +583,10 @@ def run_agent(
                                 state.current_user_intent = []
                                 return finish_arguments
                             elif decision.outcome == "accept":
-                                state.commit_closed_user_turn_to_intent_log()
+                                state.flush_current_user_intent()
                                 return finish_arguments
                             else:
-                                state.commit_closed_user_turn_to_intent_log()
+                                state.flush_current_user_intent()
                                 return finish_arguments
                         else:
                             state.current_user_intent = []

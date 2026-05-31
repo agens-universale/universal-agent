@@ -18,6 +18,13 @@ REGISTER_ORDER = (
     REGISTER_KNOWLEDGE,
 )
 
+REGISTER_MERGE_MODES = {
+    REGISTER_KNOWLEDGE: "append",
+    REGISTER_CONSTRAINTS: "append",
+    REGISTER_GOAL: "replace",
+    REGISTER_STATE: "replace",
+}
+
 @dataclass(frozen=True)
 class WorkingMemorySnapshot:
     goal: str = ""
@@ -209,12 +216,41 @@ def apply_append_deltas(
     )
     merged: Dict[str, str] = snapshot.to_dict()
     for name in REGISTER_ORDER:
+        if REGISTER_MERGE_MODES.get(name) != "append":
+            continue
         delta_text = _normalize_register_text(delta_map.get(name))
         if not delta_text:
             continue
         base_text = _normalize_register_text(merged.get(name))
         merged[name] = f"{base_text}\n\n{delta_text}" if base_text else delta_text
     return _snapshot_from_mapping(merged)
+
+
+def apply_replace_deltas(
+    snapshot: WorkingMemorySnapshot,
+    deltas: WorkingMemoryDeltas | Mapping[str, str] | None,
+) -> WorkingMemorySnapshot:
+    delta_map: Mapping[str, str] = coerce_working_memory_deltas(deltas).to_dict(
+        skip_empty=False
+    )
+    merged: Dict[str, str] = snapshot.to_dict()
+    for name in REGISTER_ORDER:
+        if REGISTER_MERGE_MODES.get(name) != "replace":
+            continue
+        delta_text = _normalize_register_text(delta_map.get(name))
+        if not delta_text:
+            continue
+        merged[name] = delta_text
+    return _snapshot_from_mapping(merged)
+
+
+def apply_memory_patch(
+    snapshot: WorkingMemorySnapshot,
+    append_deltas: WorkingMemoryDeltas | Mapping[str, str] | None,
+    replace_deltas: WorkingMemoryDeltas | Mapping[str, str] | None,
+) -> WorkingMemorySnapshot:
+    updated = apply_append_deltas(snapshot, append_deltas)
+    return apply_replace_deltas(updated, replace_deltas)
 
 
 def render_working_memory_for_summary_message(snapshot: WorkingMemorySnapshot) -> str:
@@ -234,6 +270,7 @@ __all__ = [
     "WorkingMemorySnapshot",
     "WorkingMemoryDeltas",
     "REGISTER_ORDER",
+    "REGISTER_MERGE_MODES",
     "MEMORY_DELTAS_FORMAT_REPAIR_REQUEST_LABEL",
     "read_snapshot_from_state",
     "render_persistent_state_for_prompt",
@@ -244,5 +281,7 @@ __all__ = [
     "parse_memory_deltas_with_repair",
     "coerce_working_memory_deltas",
     "apply_append_deltas",
+    "apply_replace_deltas",
+    "apply_memory_patch",
     "render_working_memory_for_summary_message",
 ]

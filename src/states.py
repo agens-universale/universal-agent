@@ -1,15 +1,12 @@
 from dataclasses import dataclass, field
 from uuid import uuid4
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional
 from long_memory import attach_status_to_prompt_vars
 from utils.project_data import get_project_data
 from tools.stored_outputs.tool_call_outputs_store import ToolCallOutputsStore
 from message_policy.tool_usage_notice.state import hydrate_tool_usage_notice_state
-from message_policy.user_message_policy import (
-    append_user_log_entries,
-    normalize_user_log_entries,
-)
 from tools.skills.skills_policy import render_skills_catalog
+from intent_log import IntentRecord, deserialize_list, flush
 
 
 @dataclass
@@ -78,8 +75,9 @@ class State:
         self.max_steps = max_steps
         self.steps = 0
         self.stop_requested = False
-        self.user_intent_log: List[str] = []
-        self.current_user_intent: List[str] = []
+        self.user_intent_log: list[IntentRecord] = []
+        self.current_user_intent: list[IntentRecord] = []
+        self.user_turn_seq: int = 0
         self.finish_gate_rejection_count: int = 0
         self.long_memory_content_hash: Optional[str] = None
         self.tool_usage_notice_cnt: dict[str, int] = {}
@@ -147,15 +145,29 @@ class State:
                 return True
         return False
 
-    def init_user_intent_log(self, entries: Optional[List[str]]) -> None:
-        """
-        Initialize `user_intent_log` from persisted meta (closed user turns).
-        """
-        self.user_intent_log = normalize_user_log_entries(entries)
+    def init_user_intent_log(self, entries: Any) -> None:
+        """Initialize closed user turns from persisted thread meta."""
+        self.user_intent_log = deserialize_list(entries)
 
-    def init_current_user_intent(self, entries: Optional[List[str]]) -> None:
-        """Initialize `current_user_intent` from persisted meta (open user turn)."""
-        self.current_user_intent = normalize_user_log_entries(entries)
+    def init_current_user_intent(self, entries: Any) -> None:
+        """Initialize open user turn from persisted thread meta."""
+        self.current_user_intent = deserialize_list(entries)
+
+    def init_user_turn_seq(self, seq: Any) -> None:
+        """Initialize closed turn counter from persisted thread meta."""
+        try:
+            self.user_turn_seq = max(0, int(seq or 0))
+        except (TypeError, ValueError):
+            self.user_turn_seq = 0
+
+    def infer_user_turn_seq_if_missing(self) -> None:
+        """Legacy meta had no ``user_turn_seq``; infer minimal value from closed log."""
+        if self.user_turn_seq > 0:
+            return
+        if not self.user_intent_log:
+            return
+        turns = [int(r.turn) for r in self.user_intent_log if isinstance(r.turn, int)]
+        self.user_turn_seq = max(turns) if turns else 1
 
     def init_tool_usage_notice_from_meta(self, meta: Optional[Dict[str, Any]]) -> None:
         """Восстановить tool_usage_notice / long_memory поля из thread_session.meta или child_meta."""
@@ -166,66 +178,11 @@ class State:
         self.long_memory_content_hash = None
         self.tool_usage_notice_cnt = {}
 
-    @staticmethod
-    def append_intent_line(intent_list: List[str], text: str) -> List[str]:
-        """
-        Append one intent line if non-empty and not already in the list (dedup in-scope).
-        """
-        line = str(text or "").strip()
-        if not line or line in intent_list:
-            return intent_list
-        return [*intent_list, line]
-
-    def append_intent_scope_delta(self, summary_line: str, *, source: str = "") -> None:
-        """Append tool-derived intent delta to the open turn (`current_user_intent` only)."""
-        _ = source
-        self.current_user_intent = self.append_intent_line(
-            self.current_user_intent, summary_line
+    def flush_current_user_intent(self) -> None:
+        """Flush open turn records into closed log and increment ``user_turn_seq``."""
+        self.current_user_intent, self.user_intent_log, self.user_turn_seq = flush(
+            self.current_user_intent,
+            self.user_intent_log,
+            self.user_turn_seq,
         )
-
-    def commit_closed_user_turn_to_intent_log(self) -> None:
-        """Flush `current_user_intent` → `user_intent_log` after accept submit_solution."""
-        for line in self.current_user_intent:
-            stripped = str(line or "").strip()
-            if stripped:
-                self.user_intent_log.append(stripped)
-        self.current_user_intent = []
-
-    def append_current_user_intent_from_messages(
-        self, step_messages: List[Dict[str, Any]]
-    ) -> None:
-        """
-        Extend active intent scope with real CLI user messages from a persist batch.
-        Does not touch `user_intent_log` (closed turns only via commit).
-        """
-        self.current_user_intent = append_user_log_entries(
-            self.current_user_intent, step_messages
-        )
-
-    def init_subagent_current_user_intent(self, assignment_text: str) -> None:
-        """
-        Initialize child subagent intent scope from assignment (§4.4).
-
-        Does not use ``append_user_log_entries`` / policy filter — assignment must
-        land in ``current_user_intent`` as-is. ``user_intent_log`` stays empty at start.
-        """
-        self.user_intent_log = []
-        self.finish_gate_rejection_count = 0
-        self.init_subagent_tool_usage_notice()
-        self.current_user_intent = []
-        line = str(assignment_text or "").strip()
-        if line:
-            self.current_user_intent = self.append_intent_line(
-                self.current_user_intent, line
-            )
-
-    def seed_new_user_turn(self, new_user_message: Dict[str, Any]) -> None:
-        """
-        Append current real user request to active intent scope (open turn only).
-        """
-        self.finish_gate_rejection_count = 0
-        self.current_user_intent = append_user_log_entries(
-            self.current_user_intent, [new_user_message]
-        )
-
 

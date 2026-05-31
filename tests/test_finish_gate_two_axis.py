@@ -13,6 +13,7 @@ import importlib
 import intent_guard.guard as intent_guard_guard
 import pytest
 
+from intent_fixtures import intent_user_ask_texts, seed_state_intent
 from intent_guard.feedback import build_finish_gate_feedback
 from intent_guard.guard import FinishGateGuard
 from intent_guard.validation_result import ValidationResult
@@ -175,8 +176,11 @@ def test_guard_reject_uses_structured_feedback_not_raw_llm(monkeypatch):
         _scenario_12_validation,
     )
     state = _make_state()
-    state.current_user_intent = ["спроси меня что нибудь"]
-    state.user_intent_log = ["спроси меня что нибудь"]
+    seed_state_intent(
+        state,
+        current="спроси меня что нибудь",
+        log="спроси меня что нибудь",
+    )
     guard = FinishGateGuard(ctx=_make_ctx(), state=state)
     decision = guard.evaluate_submit_solution(
         submit_solution_arguments={"solution_type": "full_solution"},
@@ -211,8 +215,11 @@ def test_run_agent_rejects_submit_with_fix_report_feedback(monkeypatch):
     monkeypatch.setattr(processing_module, "process_user_ask", _stub_user_ask)
 
     state = _make_state(max_steps=0)
-    state.current_user_intent = ["спроси меня что нибудь"]
-    state.user_intent_log = ["спроси меня что нибудь"]
+    seed_state_intent(
+        state,
+        current="спроси меня что нибудь",
+        log="спроси меня что нибудь",
+    )
 
     run_agent(
         [_submit_solution_call()],
@@ -256,8 +263,11 @@ def test_run_agent_accept_clears_current_user_intent_for_subagent(monkeypatch):
     )
 
     state = _make_state(parent_state_id="orch-parent")
-    state.current_user_intent = ["subagent task"]
-    state.user_intent_log = ["subagent task"]
+    seed_state_intent(
+        state,
+        current="subagent task",
+        log="subagent task",
+    )
 
     result = run_agent(
         [_submit_solution_call(solution_type="answer_question")],
@@ -328,8 +338,11 @@ def test_run_agent_continue_work_feedback_lists_trace_gaps(monkeypatch):
     monkeypatch.setattr(processing_module, "process_user_ask", _stub_user_ask)
 
     state = _make_state(max_steps=0)
-    state.current_user_intent = ["создай report.md"]
-    state.user_intent_log = ["создай report.md"]
+    seed_state_intent(
+        state,
+        current="создай report.md",
+        log="создай report.md",
+    )
 
     run_agent(
         [_submit_solution_call()],
@@ -379,8 +392,11 @@ def test_main_accept_after_ask_human_trace(monkeypatch):
 
     state = _make_state(max_steps=0)
     state.messages = _ask_human_scenario_messages(include_pending_submit=False)
-    state.current_user_intent = ["спроси меня что нибудь"]
-    state.user_intent_log = ["предыдущий запрос в треде"]
+    seed_state_intent(
+        state,
+        current="спроси меня что нибудь",
+        log="предыдущий запрос в треде",
+    )
 
     result = run_agent(
         [_submit_solution_call(solution_type="answer_question")],
@@ -390,7 +406,7 @@ def test_main_accept_after_ask_human_trace(monkeypatch):
 
     assert result is not None
     assert state.current_user_intent == []
-    assert state.user_intent_log == [
+    assert intent_user_ask_texts(state.user_intent_log) == [
         "предыдущий запрос в треде",
         "спроси меня что нибудь",
     ]
@@ -419,8 +435,11 @@ def test_run_agent_handoff_phantom_artifact_fix_report(monkeypatch):
     monkeypatch.setattr(processing_module, "process_user_ask", _stub_user_ask)
 
     state = _make_state(max_steps=0)
-    state.current_user_intent = ["спроси меня что нибудь"]
-    state.user_intent_log = ["спроси меня что нибудь"]
+    seed_state_intent(
+        state,
+        current="спроси меня что нибудь",
+        log="спроси меня что нибудь",
+    )
 
     run_agent(
         [
@@ -487,14 +506,20 @@ def test_run_agent_reject_continues_turn_with_technical_user_message(monkeypatch
     monkeypatch.setattr(processing_module, "process_user_ask", _stub_user_ask)
 
     state = _make_state(max_steps=10)
-    state.current_user_intent = ["спроси меня что нибудь"]
-    state.user_intent_log = ["предыдущий ход"]
+    seed_state_intent(
+        state,
+        current="спроси меня что нибудь",
+        log="предыдущий ход",
+    )
 
     result = run_agent([_submit_solution_call()], state, _make_ctx())
 
     assert validate_calls["n"] == 2
     assert result is not None
-    assert state.user_intent_log == ["предыдущий ход", "спроси меня что нибудь"]
+    assert intent_user_ask_texts(state.user_intent_log) == [
+        "предыдущий ход",
+        "спроси меня что нибудь",
+    ]
     assert len(user_ask_batches) == 1
     assert len(user_ask_batches[0]) == 1
     tech_content = str(user_ask_batches[0][0].get("content") or "")

@@ -8,6 +8,8 @@ from message_format.serialization import (
     calc_messages_chars_total,
     message_text_for_summary,
 )
+from intent_fixtures import intent_user_ask_texts
+from intent_log import deserialize_list
 from thread_store import (
     ThreadSession,
     append_new_thread_messages,
@@ -122,7 +124,10 @@ class ThreadSummaryTest(unittest.TestCase):
             self.assertEqual(meta.get("backend_api_mode"), "chat_completions")
             self.assertEqual(meta.get("messages_count"), 1)
             self.assertEqual(meta.get("dialog_steps_offset"), 12)
-            self.assertEqual(meta.get("user_intent_log"), ["req1", "req2"])
+            self.assertEqual(
+                intent_user_ask_texts(deserialize_list(meta.get("user_intent_log"))),
+                ["req1", "req2"],
+            )
             self.assertIsNone(meta.get("previous_response_id"))
             self.assertEqual(meta.get("chat_completions_system_prompt_rendered"), "SYSTEM")
             self.assertEqual(meta.get("created_at"), "2026-01-01T00:00:00+00:00")

@@ -15,6 +15,7 @@ from message_policy.tool_usage_notice.policy import (
 )
 from message_policy.tool_usage_notice.state import persist_tool_usage_notice_state
 from persistence.state_storage import save_state
+from intent_log.user_turn import append_user_asks_from_messages, init_subagent_open_turn
 from states import State
 from tools import build_tools_data
 from tools.subagents.registry import get_subagent_class
@@ -100,7 +101,7 @@ class SubagentRunner:
         }
         child_meta: Dict[str, Any] = {}
         messages = self._build_initial_messages(child_state, agent_role, user_message)
-        child_state.init_subagent_current_user_intent(initial_message)
+        init_subagent_open_turn(child_state, initial_message)
         shared_mf = get_thread_memory_registers_from_shared(child_state.shared)
         bootstrap_text = subagent_thread_memory_bootstrap_text(self._config, shared_mf)
         if bootstrap_text:
@@ -220,7 +221,11 @@ class SubagentRunner:
         child_meta: Dict[str, Any],
         step_messages: List[Dict[str, Any]],
     ) -> None:
-        child_state.append_current_user_intent_from_messages(step_messages)
+        child_state.current_user_intent = append_user_asks_from_messages(
+            child_state.current_user_intent,
+            step_messages,
+            user_turn_seq=child_state.user_turn_seq,
+        )
         persist_tool_usage_notice_state(child_state, child_meta)
 
     def _build_child_state(self, agent_role: str) -> State:

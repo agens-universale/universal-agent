@@ -1,47 +1,59 @@
+import json
 from types import SimpleNamespace
 
-from config_modules.intent_scope import IntentScopeConfig
+from config_modules.intent_scope import IntentScopeConfig, IntentScopeToolConfig
+from intent_log import ACTION_TOOL_AGGREGATED, ACTION_TOOL_RAW, append_user_ask
+from intent_scope.append import append_tool_aggregated_to_current, append_tool_raw_to_current
 from intent_scope.hook import maybe_update_intent_scope_from_tool
+from states import State
 
 
-class _RecordingState:
-    def __init__(self):
-        self.current_user_intent: list[str] = []
-        self.deltas: list[tuple[str, str]] = []
+def _make_state() -> State:
+    return State(
+        verbose=False,
+        model="CodeChat",
+        tools_spec=[],
+        tools_descr=[],
+        skills_list=[],
+        max_steps=2,
+        system_prompt_id="v1",
+        use_server_subagents=False,
+    )
 
-    def append_intent_scope_delta(self, summary_line: str, *, source: str = "") -> None:
-        line = str(summary_line or "").strip()
-        if not line or line in self.current_user_intent:
-            return
-        self.current_user_intent.append(line)
-        self.deltas.append((line, source))
 
-
-def _ctx(*, backend: str, tools: list[str], fallback: bool = False):
+def _ctx(
+    *,
+    backend: str,
+    tools: dict[str, IntentScopeToolConfig] | None = None,
+    fallback: bool = False,
+):
     return SimpleNamespace(
         config_dict={"backend_api_mode": backend},
         intent_scope=IntentScopeConfig(
-            tools=tools,
+            tools=tools or {},
             fallback_raw_on_llm_error=fallback,
         ),
         logger=None,
     )
 
 
+def _tool(name: str, *, record: str = "aggregated") -> dict[str, IntentScopeToolConfig]:
+    return {name: IntentScopeToolConfig(record=record)}
+
+
 def test_hook_skipped_on_responses_backend():
-    state = _RecordingState()
+    state = _make_state()
     maybe_update_intent_scope_from_tool(
         tool_name="ask_human",
         tool_output_raw='{"response":"hi"}',
         state=state,
-        ctx=_ctx(backend="responses", tools=["ask_human"]),
+        ctx=_ctx(backend="responses", tools=_tool("ask_human")),
     )
-    assert state.deltas == []
     assert state.current_user_intent == []
 
 
 def test_hook_skipped_without_intent_scope_on_ctx():
-    state = _RecordingState()
+    state = _make_state()
     maybe_update_intent_scope_from_tool(
         tool_name="ask_human",
         tool_output_raw='{"response":"hi"}',
@@ -51,82 +63,87 @@ def test_hook_skipped_without_intent_scope_on_ctx():
             logger=None,
         ),
     )
-    assert state.deltas == []
+    assert state.current_user_intent == []
 
 
 def test_hook_skipped_when_tools_empty():
-    state = _RecordingState()
+    state = _make_state()
     maybe_update_intent_scope_from_tool(
         tool_name="ask_human",
         tool_output_raw='{"response":"hi"}',
         state=state,
-        ctx=_ctx(backend="chat_completions", tools=[]),
+        ctx=_ctx(backend="chat_completions", tools={}),
     )
-    assert state.deltas == []
+    assert state.current_user_intent == []
 
 
-def test_hook_appends_delta_after_llm_summary(monkeypatch):
+def test_hook_appends_aggregated_record_after_llm_summary(monkeypatch):
     monkeypatch.setattr(
         "intent_scope.hook.summarize_tool_intent_line",
         lambda **kwargs: "User confirmed option B.",
     )
-    state = _RecordingState()
+    state = _make_state()
     maybe_update_intent_scope_from_tool(
         tool_name="ask_human",
         tool_output_raw='{"response":"B"}',
         state=state,
-        ctx=_ctx(backend="chat_completions", tools=["ask_human"]),
+        ctx=_ctx(backend="chat_completions", tools=_tool("ask_human")),
     )
-    assert state.current_user_intent == ["User confirmed option B."]
-    assert state.deltas == [("User confirmed option B.", "ask_human")]
+    assert len(state.current_user_intent) == 1
+    record = state.current_user_intent[0]
+    assert record.action == ACTION_TOOL_AGGREGATED
+    assert record.tool_name == "ask_human"
+    assert record.content == "User confirmed option B."
+    assert record.fallback is None
 
 
-def test_hook_submit_solution_uses_final_output(monkeypatch):
-    captured = {}
-
-    def _fake_summarize(**kwargs):
-        captured["tool_name"] = kwargs["tool_name"]
-        captured["output"] = kwargs["tool_output_raw"]
-        return "Attempted to close with report."
-
+def test_hook_submit_solution_raw_skips_llm_and_stores_object(monkeypatch):
     monkeypatch.setattr(
-        "intent_scope.hook.summarize_tool_intent_line", _fake_summarize
+        "intent_scope.hook.summarize_tool_intent_line",
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError("LLM must not run for raw")),
     )
-    state = _RecordingState()
+    state = _make_state()
     reject_output = (
-        '{"ok":false,"rejected_by_finish_gate":true,"finish_gate":{"feedback":"fix tests"}}'
+        '{"ok":false,"rejected_by_finish_gate":true,'
+        '"finish_gate":{"feedback":"fix tests"}}'
     )
     maybe_update_intent_scope_from_tool(
         tool_name="submit_solution",
         tool_output_raw=reject_output,
         tool_arguments='{"task_report":"done"}',
         state=state,
-        ctx=_ctx(backend="chat_completions", tools=["submit_solution"]),
+        ctx=_ctx(backend="chat_completions", tools=_tool("submit_solution", record="raw")),
     )
-    assert captured["tool_name"] == "submit_solution"
-    assert "rejected_by_finish_gate" in captured["output"]
-    assert state.current_user_intent == ["Attempted to close with report."]
+    assert len(state.current_user_intent) == 1
+    record = state.current_user_intent[0]
+    assert record.action == ACTION_TOOL_RAW
+    assert record.tool_name == "submit_solution"
+    assert record.content["arguments"] == {"task_report": "done"}
+    assert record.content["output"]["rejected_by_finish_gate"] is True
 
 
-def test_hook_fallback_raw_when_llm_empty(monkeypatch):
+def test_hook_aggregated_fallback_stores_truncated_content_with_flag(monkeypatch):
     monkeypatch.setattr(
         "intent_scope.hook.summarize_tool_intent_line",
         lambda **kwargs: "",
     )
-    state = _RecordingState()
+    state = _make_state()
     raw = '{"ok":false,"error":"validation"}'
     maybe_update_intent_scope_from_tool(
-        tool_name="submit_solution",
+        tool_name="ask_human",
         tool_output_raw=raw,
         state=state,
         ctx=_ctx(
             backend="chat_completions",
-            tools=["submit_solution"],
+            tools=_tool("ask_human", record="aggregated"),
             fallback=True,
         ),
     )
     assert len(state.current_user_intent) == 1
-    assert state.current_user_intent[0].startswith("[intent_scope:raw] ")
+    record = state.current_user_intent[0]
+    assert record.action == ACTION_TOOL_AGGREGATED
+    assert record.fallback is True
+    assert record.content == raw
 
 
 def test_hook_dedup_within_current(monkeypatch):
@@ -134,8 +151,8 @@ def test_hook_dedup_within_current(monkeypatch):
         "intent_scope.hook.summarize_tool_intent_line",
         lambda **kwargs: "same line",
     )
-    state = _RecordingState()
-    ctx = _ctx(backend="chat_completions", tools=["ask_human"])
+    state = _make_state()
+    ctx = _ctx(backend="chat_completions", tools=_tool("ask_human"))
     maybe_update_intent_scope_from_tool(
         tool_name="ask_human",
         tool_output_raw="a",
@@ -148,5 +165,27 @@ def test_hook_dedup_within_current(monkeypatch):
         state=state,
         ctx=ctx,
     )
-    assert state.current_user_intent == ["same line"]
-    assert len(state.deltas) == 1
+    assert len(state.current_user_intent) == 1
+    assert state.current_user_intent[0].content == "same line"
+
+
+def test_hook_turn_close_flush_increments_seq():
+    state = _make_state()
+    state.current_user_intent = append_user_ask([], "do task", user_turn_seq=0)
+    append_tool_aggregated_to_current(state, "ask_human", "picked A")
+    append_tool_raw_to_current(
+        state,
+        "submit_solution",
+        {"task_report": "done"},
+        output={"ok": True},
+    )
+
+    state.flush_current_user_intent()
+
+    assert state.current_user_intent == []
+    assert state.user_turn_seq == 1
+    assert len(state.user_intent_log) == 3
+    assert state.user_intent_log[0].action == "user_ask"
+    assert state.user_intent_log[1].action == ACTION_TOOL_AGGREGATED
+    assert state.user_intent_log[2].action == ACTION_TOOL_RAW
+    assert json.loads(json.dumps(state.user_intent_log[2].content))["output"] == {"ok": True}

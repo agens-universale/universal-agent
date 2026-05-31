@@ -1,6 +1,21 @@
 """Тесты разметки тела сообщения после суммаризации."""
 
+from intent_log import IntentRecord, read_page, serialize, tail_preview
+from intent_log.operations import utc_now_ts
+from intent_log.record import ACTION_USER_ASK
+from config_modules.intent_scope import DEFAULT_INTENT_LOG_READ_PAGE_LIMIT
+
 from summarize.summary_message_body import build_dialog_summary_content
+
+
+def _user_ask(content: str, *, turn: int = 1) -> IntentRecord:
+    return IntentRecord(
+        turn=turn,
+        ts=utc_now_ts(),
+        action=ACTION_USER_ASK,
+        tool_name=None,
+        content=content,
+    )
 
 
 def test_working_memory_block_inlined():
@@ -33,27 +48,66 @@ def test_empty_working_memory_block_skips_section_and_hint():
     assert "tail" in body
 
 
-def test_user_intent_log_and_current_sections_with_hints():
+def test_user_intent_log_tail_attrs_and_jsonl_current():
+    closed = [_user_ask("closed turn one"), _user_ask("closed turn two", turn=2)]
+    open_turn = [_user_ask("open turn detail")]
+    preview = tail_preview(closed, max_chars=10_000)
+    current_jsonl = serialize(open_turn)
+
     body = build_dialog_summary_content(
         summary_text="S",
         last_dialog_steps="tail",
-        user_intent_log=["закрытый ход: только план"],
-        current_user_intent=["открытый ход: уточнение"],
+        user_intent_log_preview=preview,
+        current_user_intent_jsonl=current_jsonl,
     )
-    assert "<user_intent_log>" in body
-    assert "- закрытый ход: только план" in body
-    assert "Prior completed user turns" in body
+
+    assert '<user_intent_log total_chars="' in body
+    assert 'total_records="2"' in body
+    assert 'truncated="false"' in body
+    assert preview["content"].strip() in body
     assert "<current_user_intent>" in body
-    assert "- открытый ход: уточнение" in body
-    assert "Open user turn" in body
+    assert '"action": "user_ask"' in body
+    assert "open turn detail" in body
+    assert "- closed turn" not in body
 
 
-def test_empty_current_skips_current_section():
+def test_empty_closed_log_omits_user_intent_log_block():
     body = build_dialog_summary_content(
         summary_text="S",
         last_dialog_steps="",
-        user_intent_log=["closed only"],
-        current_user_intent=[],
+        user_intent_log_preview=tail_preview([], max_chars=1000),
+        current_user_intent_jsonl=serialize([_user_ask("only open")]),
     )
-    assert "<user_intent_log>" in body
-    assert "\n<current_user_intent>\n" not in body
+    assert "<user_intent_log" not in body
+    assert "<current_user_intent>" in body
+
+
+def test_empty_current_skips_current_section():
+    closed = [_user_ask("closed only")]
+    body = build_dialog_summary_content(
+        summary_text="S",
+        last_dialog_steps="",
+        user_intent_log_preview=tail_preview(closed, max_chars=1000),
+        current_user_intent_jsonl=serialize([]),
+    )
+    assert "<user_intent_log" in body
+    assert "<current_user_intent>" not in body
+
+
+def test_summary_intent_tail_matches_read_page_slice():
+    closed = [_user_ask("x" * 20), _user_ask("y" * 20, turn=2)]
+    preview = tail_preview(closed, max_chars=25)
+    page = read_page(
+        closed,
+        preview["offset"],
+        preview["limit"],
+        default_limit=DEFAULT_INTENT_LOG_READ_PAGE_LIMIT,
+    )
+    assert page["content"] == preview["content"]
+    body = build_dialog_summary_content(
+        summary_text="S",
+        last_dialog_steps="",
+        user_intent_log_preview=preview,
+    )
+    assert preview["content"].strip() in body
+    assert 'truncated="true"' in body

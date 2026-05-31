@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -9,14 +9,24 @@ _logger = logging.getLogger(__name__)
 
 DEFAULT_INTENT_SCOPE_MAX_SUMMARY_CHARS = 500
 DEFAULT_INTENT_SCOPE_MAX_TOOL_OUTPUT_CHARS = 8000
+DEFAULT_INTENT_LOG_READ_PAGE_LIMIT = 5000
+
+IntentScopeRecordMode = Literal["aggregated", "raw"]
+
+
+class IntentScopeToolConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    record: IntentScopeRecordMode = "aggregated"
 
 
 class IntentScopeConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    tools: list[str] = Field(default_factory=list)
+    tools: dict[str, IntentScopeToolConfig] = Field(default_factory=dict)
     max_summary_chars: int = DEFAULT_INTENT_SCOPE_MAX_SUMMARY_CHARS
     max_tool_output_chars: int = DEFAULT_INTENT_SCOPE_MAX_TOOL_OUTPUT_CHARS
+    read_page_limit: int = DEFAULT_INTENT_LOG_READ_PAGE_LIMIT
     fallback_raw_on_llm_error: bool = False
     intent_scope_tool_summary_prompt_path: str | None = None
 
@@ -36,10 +46,26 @@ def normalize_intent_scope_config(cfg: IntentScopeConfig) -> None:
             DEFAULT_INTENT_SCOPE_MAX_TOOL_OUTPUT_CHARS,
         )
         cfg.max_tool_output_chars = DEFAULT_INTENT_SCOPE_MAX_TOOL_OUTPUT_CHARS
+    if cfg.read_page_limit <= 0:
+        _logger.warning(
+            "intent_scope.read_page_limit=%s must be > 0; using %s",
+            cfg.read_page_limit,
+            DEFAULT_INTENT_LOG_READ_PAGE_LIMIT,
+        )
+        cfg.read_page_limit = DEFAULT_INTENT_LOG_READ_PAGE_LIMIT
 
 
 def intent_scope_active(cfg: IntentScopeConfig) -> bool:
     return bool(cfg.tools)
+
+
+def intent_scope_tool_record(
+    cfg: IntentScopeConfig, tool_name: str
+) -> IntentScopeRecordMode | None:
+    tool_cfg = cfg.tools.get(tool_name)
+    if tool_cfg is None:
+        return None
+    return tool_cfg.record
 
 
 def intent_scope_from_config_dict(config_dict: dict[str, Any] | None) -> IntentScopeConfig:

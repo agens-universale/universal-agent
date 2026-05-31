@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, Mapping, Optional
 
+from intent_log.serialize import deserialize_list, serialize_for_meta
 from persistence.schema import (
     STATE_SCHEMA_VERSION,
     StateSchemaError,
@@ -38,8 +39,13 @@ class ThreadMetaMapper:
         shared = getattr(state, "shared", None)
         if isinstance(shared, SharedStateData):
             out["shared"] = serialize_shared_block(shared)
-        out["user_intent_log"] = list(getattr(state, "user_intent_log", []) or [])
-        out["current_user_intent"] = list(getattr(state, "current_user_intent", []) or [])
+        out["user_intent_log"] = serialize_for_meta(
+            getattr(state, "user_intent_log", []) or []
+        )
+        out["current_user_intent"] = serialize_for_meta(
+            getattr(state, "current_user_intent", []) or []
+        )
+        out["user_turn_seq"] = int(getattr(state, "user_turn_seq", 0) or 0)
         out["dialog_steps_offset"] = int(getattr(state, "dialog_steps_offset", 0) or 0)
         out["state_schema_version"] = STATE_SCHEMA_VERSION
         reject_legacy_memory_keys(out)

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any, Mapping
 
+from intent_log.serialize import deserialize_list
+
 STATE_SCHEMA_VERSION = "v2"
 
 WORKING_MEMORY_REGISTERS = ("goal", "constraints", "state", "knowledge")
@@ -17,6 +19,15 @@ def _is_non_empty_mapping(value: Any) -> bool:
     return isinstance(value, Mapping) and bool(value)
 
 
+def _intent_records_non_empty(items: Any) -> bool:
+    if not isinstance(items, list) or not items:
+        return False
+    try:
+        return bool(deserialize_list(items))
+    except (TypeError, ValueError):
+        return False
+
+
 def meta_has_persisted_agent_state(meta: Mapping[str, Any]) -> bool:
     """True when meta carries restorable v2 agent fields (not just thread bookkeeping).
 
@@ -25,11 +36,9 @@ def meta_has_persisted_agent_state(meta: Mapping[str, Any]) -> bool:
     """
     if _is_non_empty_mapping(meta.get("shared")):
         return True
-    intent_log = meta.get("user_intent_log")
-    if isinstance(intent_log, list) and any(str(x).strip() for x in intent_log):
+    if _intent_records_non_empty(meta.get("user_intent_log")):
         return True
-    current_intent = meta.get("current_user_intent")
-    if isinstance(current_intent, list) and any(str(x).strip() for x in current_intent):
+    if _intent_records_non_empty(meta.get("current_user_intent")):
         return True
     return False
 

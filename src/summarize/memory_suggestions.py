@@ -1,4 +1,4 @@
-"""Transport-only LLM call for working_memory update step after summary."""
+"""Transport-only LLM calls for working_memory patch steps after summary."""
 
 import os
 from dataclasses import dataclass
@@ -16,71 +16,59 @@ from utils.llm_chat_client import (
 
 _BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 _PROJECT_ROOT = os.path.abspath(os.path.join(_BASE_DIR, "..", ".."))
-DEFAULT_MEMORY_UPDATE_PROMPT_PATH = os.path.abspath(
-    os.path.join(_PROJECT_ROOT, "prompts", "chat_completions_memory_update_prompt.md")
+DEFAULT_MEMORY_PATCH_APPEND_PROMPT_PATH = os.path.abspath(
+    os.path.join(_PROJECT_ROOT, "prompts", "chat_completions_memory_patch_append.md")
+)
+DEFAULT_MEMORY_PATCH_REPLACE_PROMPT_PATH = os.path.abspath(
+    os.path.join(_PROJECT_ROOT, "prompts", "chat_completions_memory_patch_replace.md")
 )
 
 
 @dataclass
-class MemoryUpdateLlmResult:
-    """Raw LLM transport result for memory patch step (no parsing here)."""
+class MemoryPatchLlmResult:
+    """Raw LLM transport result for a memory patch step (no parsing here)."""
 
     request_messages: List[Dict[str, str]]
     raw_response: str
 
 
-def request_memory_update(
+def _resolve_prompt_path(ctx: Any, config_key: str, default_path: str) -> str:
+    cfg = getattr(ctx, "config_dict", {}) or {}
+    summary_params = cfg.get("summary_params") if isinstance(cfg.get("summary_params"), dict) else {}
+    prompt_path_raw = str(summary_params.get(config_key) or default_path).strip()
+    if not prompt_path_raw:
+        raise ValueError(f"summary_params.{config_key} is empty")
+    if os.path.isabs(prompt_path_raw):
+        return prompt_path_raw
+    return os.path.abspath(os.path.join(_PROJECT_ROOT, prompt_path_raw))
+
+
+def _load_system_prompt(path: str) -> str:
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"Memory patch prompt file not found: {path}")
+    try:
+        with open(path, "r", encoding="utf-8") as fd:
+            system = fd.read().strip()
+    except OSError as prompt_exc:
+        raise OSError(f"Failed to read memory patch prompt file: {path}") from prompt_exc
+    if not system:
+        raise ValueError(f"Memory patch prompt file is empty: {path}")
+    return system
+
+
+def _request_patch(
     *,
     ctx: Any,
     state: Any,
-    history_text: str,
-    summary_text: str,
-    persistent_state_block: str,
-) -> MemoryUpdateLlmResult:
-    cfg = getattr(ctx, "config_dict", {}) or {}
-    summary_params = cfg.get("summary_params") if isinstance(cfg.get("summary_params"), dict) else {}
-    prompt_path_raw = str(
-        summary_params.get("chat_completions_memory_update_prompt_path")
-        or DEFAULT_MEMORY_UPDATE_PROMPT_PATH
-    ).strip()
-    if not prompt_path_raw:
-        raise ValueError(
-            "summary_params.chat_completions_memory_update_prompt_path is empty"
-        )
-    prompt_path = (
-        prompt_path_raw
-        if os.path.isabs(prompt_path_raw)
-        else os.path.abspath(os.path.join(_PROJECT_ROOT, prompt_path_raw))
-    )
-    if not os.path.exists(prompt_path):
-        raise FileNotFoundError(
-            f"Memory update prompt file not found: {prompt_path}"
-        )
-    try:
-        with open(prompt_path, "r", encoding="utf-8") as fd:
-            system = fd.read().strip()
-    except OSError as prompt_exc:
-        raise OSError(
-            f"Failed to read memory update prompt file: {prompt_path}"
-        ) from prompt_exc
-    if not system:
-        raise ValueError(f"Memory update prompt file is empty: {prompt_path}")
-
+    system_prompt: str,
+    user_prompt: str,
+    request_label: str,
+) -> MemoryPatchLlmResult:
     logger = getattr(ctx, "logger", None)
-    user_prompt = (
-        "<dialog_history>\n"
-        f"{history_text}\n"
-        "</dialog_history>\n\n"
-        "<current_summary>\n"
-        f"{summary_text}\n"
-        "</current_summary>\n\n"
-        f"{persistent_state_block.strip()}\n"
-    )
     request_messages = [
-        {"role": "system", "content": system},
+        {"role": "system", "content": system_prompt},
         {"role": "user", "content": user_prompt},
     ]
-    request_label = "working_memory_update_after_summary"
     raw_llm_response = request_summary_text(
         ctx=ctx,
         state=state,
@@ -95,13 +83,78 @@ def request_memory_update(
     )
     if logger is not None:
         logger.info(
-            "working_memory_update_after_summary_raw chars=%s preview=%s",
+            "%s_raw chars=%s preview=%s",
+            request_label,
             len(raw_llm_response or ""),
             shorten_for_log(raw_llm_response or "", max_chars=500),
         )
-    return MemoryUpdateLlmResult(
+    return MemoryPatchLlmResult(
         request_messages=request_messages,
         raw_response=raw_llm_response,
+    )
+
+
+def request_patch_append(
+    *,
+    ctx: Any,
+    state: Any,
+    history_text: str,
+    summary_text: str,
+    persistent_state_block: str,
+) -> MemoryPatchLlmResult:
+    """LLM step 2a: append deltas for knowledge and constraints registers."""
+    prompt_path = _resolve_prompt_path(
+        ctx,
+        "chat_completions_memory_patch_append_prompt_path",
+        DEFAULT_MEMORY_PATCH_APPEND_PROMPT_PATH,
+    )
+    system = _load_system_prompt(prompt_path)
+    user_prompt = (
+        "<dialog_history>\n"
+        f"{history_text}\n"
+        "</dialog_history>\n\n"
+        "<current_summary>\n"
+        f"{summary_text}\n"
+        "</current_summary>\n\n"
+        f"{persistent_state_block.strip()}\n"
+    )
+    return _request_patch(
+        ctx=ctx,
+        state=state,
+        system_prompt=system,
+        user_prompt=user_prompt,
+        request_label="working_memory_patch_append_after_summary",
+    )
+
+
+def request_patch_replace(
+    *,
+    ctx: Any,
+    state: Any,
+    history_text: str,
+    summary_text: str,
+) -> MemoryPatchLlmResult:
+    """LLM step 2b: replace snapshots for goal and state registers."""
+    prompt_path = _resolve_prompt_path(
+        ctx,
+        "chat_completions_memory_patch_replace_prompt_path",
+        DEFAULT_MEMORY_PATCH_REPLACE_PROMPT_PATH,
+    )
+    system = _load_system_prompt(prompt_path)
+    user_prompt = (
+        "<dialog_history>\n"
+        f"{history_text}\n"
+        "</dialog_history>\n\n"
+        "<current_summary>\n"
+        f"{summary_text}\n"
+        "</current_summary>\n"
+    )
+    return _request_patch(
+        ctx=ctx,
+        state=state,
+        system_prompt=system,
+        user_prompt=user_prompt,
+        request_label="working_memory_patch_replace_after_summary",
     )
 
 

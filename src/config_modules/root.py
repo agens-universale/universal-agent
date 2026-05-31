@@ -32,6 +32,7 @@ from config_modules.message_notice import (
 from config_modules.chat_completions import ChatCompletionsConfig
 from config_modules.summary import (
     DEFAULT_INCREMENTAL_BATCH_MULTIPLIER,
+    DEFAULT_INTENT_LOG_PREVIEW_CHARS,
     DEFAULT_LAST_DIALOG_STEP_MESSAGE_MAX_CHARS,
     DEFAULT_LAST_DIALOG_STEPS_COUNT,
     DEFAULT_MAX_ACCUMULATED_SUMMARY_CHARS,
@@ -92,6 +93,18 @@ def resolve_paths(cfg: AppConfig, config_dir: str) -> None:
     cfg.summary.chat_completions_summary_prompt_path = to_abs(
         cfg.summary.chat_completions_summary_prompt_path
     ) or os.path.join(config_dir, "prompts", "chat_completions_summary_prompt.md")
+    cfg.summary.chat_completions_memory_patch_append_prompt_path = to_abs(
+        cfg.summary.chat_completions_memory_patch_append_prompt_path
+    ) or os.path.join(
+        config_dir, "prompts", "chat_completions_memory_patch_append.md"
+    )
+    cfg.summary.chat_completions_memory_patch_replace_prompt_path = to_abs(
+        cfg.summary.chat_completions_memory_patch_replace_prompt_path
+    ) or os.path.join(
+        config_dir, "prompts", "chat_completions_memory_patch_replace.md"
+    )
+    if cfg.summary.intent_log_preview_chars <= 0:
+        cfg.summary.intent_log_preview_chars = DEFAULT_INTENT_LOG_PREVIEW_CHARS
     if cfg.summary.chat_completions_summary_trigger_chars < 0:
         cfg.summary.chat_completions_summary_trigger_chars = 0
     if cfg.summary.last_dialog_steps_count <= 0:
