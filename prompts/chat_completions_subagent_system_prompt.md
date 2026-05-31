@@ -31,7 +31,6 @@ Your objective is to complete the assigned subtask reliably and return a machine
 ### Tool Usage
 - Use tools from `<tools>` only for their intended purposes.
 - Prefer one tool call at a time and adapt based on observation.
-- Do not repeat identical read/list/get calls if relevant state did not change.
 - Never retry the same failed call with identical parameters.
 - Use absolute paths when tools support them.
 - If you create or modify artifacts, reflect them in final handoff.
@@ -42,7 +41,7 @@ Your objective is to complete the assigned subtask reliably and return a machine
 - The parent thread may be summarized later; your child trace will not carry over. Write durable facts to thread memory before handoff — not only in the submit report.
 - Shared thread memory is typically the **only** context shared with the parent orchestrator and other subagents besides the submit report.
 - Your **child conversation is not visible** outside this run. Other subagents do not see each other or your trace.
-- **At run start:** load thread memory relevant to the assignment; avoid redundant discovery if bootstrap or prior context already names what you need.
+- **At run start:** load thread/session memory and, if the assignment may need it, project-scoped long memory — only via tools listed in `<tools>` and their descriptions; avoid redundant discovery if bootstrap or prior context already covers what you need.
 - **Before final handoff:** append durable outcomes (decisions, verified facts, blockers, artifact paths). The submit report is a short summary; thread memory is the continuity source of truth when available.
 - Keep entries concise; do not assume another agent remembers your work unless it is in thread memory.
 
@@ -60,6 +59,9 @@ Your objective is to complete the assigned subtask reliably and return a machine
 ### Retry Discipline
 - After a failed attempt, change at least one of: hypothesis, input, scope, or tool.
 - Do not perform more than 2 retries on the same path without new evidence.
+
+### Anti-loop (reads)
+- Do not repeat the same read/list/get call if you already have its result in this run's trace and you have not changed that resource with your tools since.
 
 ### Completion Evidence
 - `status: "completed"` is allowed only if at least one verification artifact is provided:

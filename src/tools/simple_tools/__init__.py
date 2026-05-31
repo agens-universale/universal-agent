@@ -15,6 +15,7 @@ from tools.simple_tools.sleep_tool import Sleep
 from tools.simple_tools.run_python_code import RunPythonCode
 from tools.simple_tools.save_base64_file import SaveBase64File
 from tools.simple_tools.working_memory import WorkingMemory
+from tools.read_user_intent_log import ReadUserIntentLog
 from tools.stored_outputs.read_stored_tool_output import ReadStoredToolOutput
 try:
     from tools.simple_tools.fetch_url import FetchUrl
@@ -131,6 +132,14 @@ def get_simple_tools_data(config_dict: Dict[str, Any]) -> Dict[str, Dict[str, An
             'description': WorkingMemory.prompt_description(),
         },
     }
+
+    backend_mode = str(config_dict.get("backend_api_mode", "responses")).strip().lower()
+    if backend_mode == "chat_completions":
+        simple_tools_data["read_user_intent_log"] = {
+            "tool_fabric": ReadUserIntentLog,
+            "spec": ReadUserIntentLog.tool_description(),
+            "description": ReadUserIntentLog.prompt_description(),
+        }
 
     stop_tools_cfg = config_dict.get('stop_tools', [])
     if isinstance(stop_tools_cfg, list):

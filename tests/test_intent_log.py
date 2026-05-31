@@ -200,3 +200,21 @@ def test_tail_preview_returns_full_text_when_short():
     assert preview["truncated"] is False
     assert preview["offset"] == 0
     assert preview["content"] == serialize(records)
+
+
+def test_render_for_finish_gate_structured_and_legacy_strings():
+    from intent_log import render_for_finish_gate
+
+    records = [
+        _user_ask("user line"),
+        IntentRecord(
+            turn=1,
+            ts=FIXED_TS,
+            action=ACTION_TOOL_AGGREGATED,
+            tool_name="ask_human",
+            content="summary",
+        ),
+    ]
+    assert render_for_finish_gate(records) == ["user line", "[ask_human] summary"]
+    assert render_for_finish_gate(["legacy plain ask"]) == ["legacy plain ask"]
+    assert render_for_finish_gate(["[tool] legacy aggregated"]) == ["[tool] legacy aggregated"]

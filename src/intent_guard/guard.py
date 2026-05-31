@@ -4,8 +4,7 @@ import logging
 from dataclasses import dataclass
 from typing import Any, Literal
 
-from intent_log import IntentRecord
-from intent_log.serialize import records_to_summary_lines
+from intent_log import render_for_finish_gate
 from intent_guard.agent_logging import (
     log_finish_gate_decision,
     log_finish_gate_skipped,
@@ -20,14 +19,6 @@ _logger = logging.getLogger(__name__)
 
 _DEFAULT_FINISH_GATE_MAIN = 10
 _DEFAULT_FINISH_GATE_SUB = 3
-
-
-def _intent_scope_text_lines(items: list) -> list[str]:
-    if not items:
-        return []
-    if isinstance(items[0], IntentRecord):
-        return records_to_summary_lines(items)
-    return [str(x).strip() for x in items if isinstance(x, str) and str(x).strip()]
 
 
 def resolve_finish_gate_max_rejections(cfg: dict | None, state: Any) -> int:
@@ -152,10 +143,10 @@ class FinishGateGuard:
             )
             return decision
 
-        current_user_intent = _intent_scope_text_lines(
+        current_user_intent = render_for_finish_gate(
             list(getattr(self._state, "current_user_intent", []) or [])
         )
-        user_intent_log = _intent_scope_text_lines(
+        user_intent_log = render_for_finish_gate(
             list(getattr(self._state, "user_intent_log", []) or [])
         )
 

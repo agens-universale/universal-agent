@@ -76,6 +76,11 @@ def validate_final_report_vs_user_intent(
     submit_solution_arguments: Any,
     trace_digest: FinishGateTraceDigest | None = None,
 ) -> ValidationResult:
+    """Run finish gate LLM validator.
+
+    ``current_user_requests`` and ``context_user_messages`` are flat lines from
+    ``intent_log.render_for_finish_gate`` (open turn and closed log).
+    """
     args = _parse_submit_solution_args(submit_solution_arguments)
     active_user_requests = [str(x) for x in current_user_requests if isinstance(x, str)]
     user_context = [str(x) for x in (context_user_messages or []) if isinstance(x, str)]

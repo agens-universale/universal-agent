@@ -17,7 +17,13 @@ from intent_log.record import (
     record_from_dict,
     validate_record,
 )
-from intent_log.serialize import deserialize_list, serialize, serialize_for_meta, records_to_summary_lines
+from intent_log.serialize import (
+    deserialize_list,
+    render_for_finish_gate,
+    records_to_summary_lines,
+    serialize,
+    serialize_for_meta,
+)
 
 __all__ = [
     "ACTION_TOOL_AGGREGATED",
@@ -35,6 +41,7 @@ __all__ = [
     "record_from_dict",
     "serialize",
     "serialize_for_meta",
+    "render_for_finish_gate",
     "records_to_summary_lines",
     "tail_preview",
     "utc_now_ts",

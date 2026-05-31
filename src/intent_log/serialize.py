@@ -113,8 +113,13 @@ def serialize_for_meta(records: Iterable[IntentRecord | Mapping[str, Any]]) -> l
     return [validate_record(item).to_dict() for item in records]
 
 
+def render_for_finish_gate(items: Iterable[Any] | None) -> list[str]:
+    """Flat text lines for finish gate validator (structured + legacy meta)."""
+    return records_to_summary_lines(deserialize_list(items))
+
+
 def records_to_summary_lines(records: Iterable[IntentRecord]) -> list[str]:
-    """Interim flat lines for summary prompts until step 5 JSONL intent blocks."""
+    """Flat lines for summary prompts and finish gate."""
     lines: list[str] = []
     for item in records:
         record = validate_record(item)

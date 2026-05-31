@@ -182,6 +182,66 @@ def test_memory_deltas_applied_to_working_memory_not_inside_summary(monkeypatch)
     assert "bullet one" in state.shared.working_memory["knowledge"]
 
 
+def test_memory_patch_replace_overwrites_stale_state_register(monkeypatch):
+    """Smoke §10: replace-patch must drop stale TODO from state register, not append."""
+    history = _flatten_turns([_make_turn("done with old task", "ack")])
+
+    def _fake_request(**kwargs):
+        return _valid_summary("replace-state")
+
+    def _fake_replace(**_kwargs):
+        return types.SimpleNamespace(
+            request_messages=[],
+            raw_response="<state>- [TODO] run tests\n- next: ship</state>",
+        )
+
+    monkeypatch.setattr("summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
+    _patch_chat_completion(monkeypatch, _fake_request)
+    monkeypatch.setattr(
+        "summarize.memory_suggestions.request_patch_append",
+        lambda **_k: types.SimpleNamespace(request_messages=[], raw_response=""),
+    )
+    monkeypatch.setattr("summarize.memory_suggestions.request_patch_replace", _fake_replace)
+
+    state = types.SimpleNamespace(
+        default_model="test-model",
+        shared=types.SimpleNamespace(
+            working_memory={
+                "goal": "finish feature",
+                "state": "- [TODO] old blocker\n- stale TODO item",
+            }
+        ),
+        messages=[],
+        dialog_steps_offset=0,
+        previous_response_id=None,
+        user_intent_log=[],
+        current_user_intent=[],
+    )
+    result = summarize_dialog_via_chat_completions(
+        ctx=_ctx(trigger_chars=999999),
+        state=state,
+        full_history_messages=history,
+    )
+    assert result["num_batches"] == 1
+    assert result["trace"]["memory_patch"]["executed"] is True
+
+    content = apply_summary_state_patch(
+        state=state,
+        raw_summary=result["raw_summary"],
+        last_dialog_steps=result["last_dialog_steps"],
+        memory_append_deltas=result["memory_append_deltas"],
+        memory_replace_deltas=result["memory_replace_deltas"],
+        summarized_messages_count=len(history),
+    )
+
+    wm_state = state.shared.working_memory["state"]
+    assert "stale TODO" not in wm_state
+    assert "old blocker" not in wm_state
+    assert "[TODO] run tests" in wm_state
+    assert "<state>" in content
+    assert "stale TODO" not in content.split("<working_memory>")[1]
+
+
 def test_summarize_incremental_two_batches_previous_summary_passed(monkeypatch):
     history = _flatten_turns(
         [
