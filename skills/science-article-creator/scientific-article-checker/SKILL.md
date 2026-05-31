@@ -1,7 +1,7 @@
 ---
 id: scientific-article-checker
 name: Scientific Article Checker
-description: "Verifies an existing SCIENTIFIC article along 6 epistemic dimensions (Evidence Relevance, Falsifiability, Scope Calibration, Argument Coherence, Exploration Integrity, Methodological Rigor) AND resolves every cited DOI/PMID/arXiv identifier through science-mcp (work_lookup) — unverifiable citations are flagged. Optionally weighs citations via citations_by_doi and fetches full-text via ncbi_fetch/open_access_search to confirm cited claims. Outputs a severity-ranked findings report with revision suggestions. Use when the user provides a scientific article / draft and asks to verify, fact-check, review, or audit it. Do NOT use for casual article fact-checking without DOI references — use `articles:check-article` instead."
+description: "Verifies an existing SCIENTIFIC article along 6 epistemic dimensions (Evidence Relevance, Falsifiability, Scope Calibration, Argument Coherence, Exploration Integrity, Methodological Rigor) AND resolves every cited DOI/PMID/arXiv identifier through science-mcp (work_lookup) — unverifiable citations are flagged. Weighs citations via citations_by_doi and runs claim-audit — fetching source text via ncbi_fetch/open_access_search and judging whether each cited source actually supports the claim. Outputs a severity-ranked findings report with revision suggestions. Use when the user provides a scientific article / draft and asks to verify, fact-check, review, or audit it. Do NOT use for casual article fact-checking without DOI references — use `articles:check-article` instead."
 version: 0.1.0
 ---
 
@@ -42,7 +42,35 @@ For each citation:
 2. If it does not resolve → finding **"Unresolved Citation"** (severity: high).
 3. If it resolves but the title / authors materially disagree with how the article cites it → finding **"Citation Mismatch"** (severity: medium).
 4. `science-citations_by_doi(doi, count_only=true)` — if a key claim relies on a work with 0–2 citations and age >2 years → **"Weak Evidence"** (severity: low–medium).
-5. For critical claims: `science-ncbi_fetch(pmid, mode="fetch")` or `science-open_access_search` to confirm the cited work actually contains the asserted result.
+
+### Step 2.5 — claim-audit (faithfulness of cited sources)
+
+For each citation that resolved in Step 2 AND backs a substantive claim
+(a number, an effect size, a mechanism, a clinical outcome):
+
+1. **Locate the claim** the citation is attached to in the article text.
+2. **Fetch source text**, in priority order:
+   - the abstract already returned by `science-work_lookup`;
+   - if a PMID/PMCID exists → `science-ncbi_fetch(pmid=..., mode="fetch")`
+     (full text, capped at 50 KB);
+   - else → `science-open_access_search(query="<title or DOI>")`.
+3. **Judge support** — compare the article's claim against the fetched text:
+   - **supported** — the source states the claim (or a stronger version).
+   - **partial** — the source is related but weaker / narrower / a different
+     population than the article asserts.
+   - **unsupported** — the source does not contain the claim, or contradicts it.
+   - **unverifiable-no-fulltext** — no text could be fetched (paywall, no PMID,
+     >50 KB). This is NOT the same as unsupported — say so explicitly.
+4. **Emit findings:**
+   - `unsupported` → severity **high** ("Claim Not Supported by Source").
+   - `partial` → severity **medium** ("Claim Overstates Source").
+   - `unverifiable-no-fulltext` → severity **low** ("Citation Not Audited").
+
+Audit only substantive claims — skip background / common-knowledge statements.
+For a large article, audit at least every claim carrying a headline number or
+the central thesis; note in the report if some were skipped for length. The
+50 KB `ncbi_fetch` cap and section-by-section handling are already covered in
+the existing `## Limits` section — rely on them, do not restate.
 
 ### Step 3 — 6 epistemic dimensions
 
@@ -67,8 +95,8 @@ For each high / medium finding, give a concrete action: "drop the claim", "repla
 
 - `science-work_lookup(identifier)` — main tool, called for every citation.
 - `science-citations_by_doi(doi, count_only=true)` — citation-weight check.
-- `science-ncbi_fetch(pmid, mode="fetch")` — PubMed full text (≤50 KB).
-- `science-open_access_search(query)` — fallback for full text outside PubMed.
+- `science-ncbi_fetch(pmid, mode="fetch")` — PubMed/PMC full text (≤50 KB); used in Step 2.5 to audit claim faithfulness.
+- `science-open_access_search(query)` — OA full-text fallback outside PubMed; used in Step 2.5 when there is no PMID or the text exceeds 50 KB.
 
 ## Output format
 
@@ -81,12 +109,14 @@ A file `<input>.review.md` (or `level2_report.md`):
 - Общий балл: <среднее по 6 измерениям>
 - Грейд: Strong Accept / Accept / Weak Accept / Borderline / Reject
 - Найдено критических проблем: <N high>; средних: <M medium>; пожеланий: <K low>.
+- Claim-audit: <S> supported / <P> partial / <NS> unsupported / <NA> not audited.
 
 ## Findings (по severity)
 
 ### High (N)
 - **[Citation #3]** Unresolved Citation: `10.1234/fake` не резолвится через `work_lookup`. Action: проверить DOI или удалить утверждение.
 - **[Section: Results]** Scope Overreach: «метод улучшает выживаемость на 50%», тогда как в источнике [4] только проксиметрика без клинических исходов. Action: переформулировать как «улучшает суррогатный маркер X».
+- **[Claim → Citation #4]** Claim Not Supported by Source: статья утверждает «снижение смертности на 40%», источник [4] (`ncbi_fetch`) сообщает только о суррогатной конечной точке без данных по смертности. Action: удалить утверждение или заменить источник.
 
 ### Medium (M)
 - ...
@@ -106,9 +136,10 @@ A file `<input>.review.md` (or `level2_report.md`):
 | Methodological Rigor | 4 | baseline есть, ablation нет |
 
 ## Карта цитат
-- [1] DOI:10.x/y → resolved, title match: yes
-- [2] PMID:12345 → resolved, title match: yes
-- [3] DOI:10.1234/fake → **UNRESOLVED**
+- [1] DOI:10.x/y → resolved, title match: yes, support: supported
+- [2] PMID:12345 → resolved, title match: yes, support: partial
+- [3] DOI:10.1234/fake → **UNRESOLVED** (support: n/a)
+- [4] PMID:67890 → resolved, support: **unsupported**
 - ...
 ```
 
@@ -117,6 +148,8 @@ A file `<input>.review.md` (or `level2_report.md`):
 - Do not rewrite the article — that is the job of `scientific-article-creator`.
 - Do not invent replacement sources — only flag that the current source does not support the claim.
 - Do not treat human-readable URLs without a canonical identifier as a successful resolve — flag them as "no canonical ID, manual review needed".
+- Do not mark a claim `unsupported` when the full text simply could not be fetched — use `unverifiable-no-fulltext`.
+- Do not audit background or common-knowledge sentences — only substantive claims (numbers, effect sizes, mechanisms, outcomes).
 
 ## Examples
 
@@ -125,6 +158,9 @@ A file `<input>.review.md` (or `level2_report.md`):
 
 **Request:** "Only check the citations; do not touch the methodology."
 → Steps 1–2 + Step 4 (Unresolved / Mismatch findings only), no 6 dimensions.
+
+**Request:** "Check this review, and verify each source actually supports its claim."
+→ Steps 1–2 resolve citations. Step 2.5 fetches each cited source via `ncbi_fetch` / `open_access_search` and judges support. An article claim of "reduces mortality by 80%" backed by a source that only reports a surrogate marker → High finding "Claim Not Supported by Source".
 
 ## Limits
 
