@@ -26,6 +26,7 @@ if TYPE_CHECKING:
 _FUNCTION_CALL_TYPES = frozenset({"function_call", "tool_call"})
 _FUNCTION_OUTPUT_TYPES = frozenset({"function_call_output", "tool_call_output"})
 
+# Страховка pre_run: в штате хватает 1 прохода; лимит на случай «лапши», которая после сжатия всё ещё выше порога.
 _PRE_RUN_SUMMARY_MAX_ROUNDS = 20
 
 

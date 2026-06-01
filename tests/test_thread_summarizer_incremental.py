@@ -16,6 +16,7 @@ from message_policy.user_message_policy import (
     TECHNICAL_TYPE_DIALOG_SUMMARY,
     wrap_technical_user_content,
 )
+from tests.helpers.summary_sample import valid_summary_text_for_tests
 
 
 def _patch_chat_completion(monkeypatch, fake):
@@ -76,15 +77,7 @@ def _flatten_turns(turns):
 
 
 def _valid_summary(seed: str) -> str:
-    return (
-        f"TASK_AND_CONTEXT:\n- {seed} context details and scope.\n\n"
-        "GOALS:\n- goal one\n- goal two\n\n"
-        "PLAN_AND_PROGRESS:\n- [DONE] baseline done\n- [TODO] next step\n\n"
-        "NEXT_ACTIONS:\n- action one\n- action two\n\n"
-        "SPEC_AND_CONSTRAINTS:\n- keep API compatibility\n\n"
-        "RISKS_AND_OPEN_QUESTIONS:\n- edge cases remain\n\n"
-        "IMPORTANT_ARTIFACTS:\n- src/summarize/thread_summarizer.py\n"
-    )
+    return valid_summary_text_for_tests(seed=f"{seed} context details and scope.")
 
 
 def test_summarize_incremental_empty_history_no_model_call(monkeypatch):
@@ -530,15 +523,7 @@ def test_summarize_pipeline_calls_build_history_text_with_max_chars_disabled(mon
     )
 
     def _fake_request(**_kwargs):
-        return (
-            "TASK_AND_CONTEXT:\n- x\n\n"
-            "GOALS:\n- x\n\n"
-            "PLAN_AND_PROGRESS:\n- x\n\n"
-            "NEXT_ACTIONS:\n- x\n\n"
-            "SPEC_AND_CONSTRAINTS:\n- x\n\n"
-            "RISKS_AND_OPEN_QUESTIONS:\n- x\n\n"
-            "IMPORTANT_ARTIFACTS:\n- x\n"
-        )
+        return valid_summary_text_for_tests(seed="x")
 
     monkeypatch.setattr("summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
     _patch_chat_completion(monkeypatch, _fake_request)

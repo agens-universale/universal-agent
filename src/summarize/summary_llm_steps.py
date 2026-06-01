@@ -4,6 +4,7 @@ from typing import Any
 
 import message_format.dialog_history as dialog_history
 from summarize.llm import request_summary_text
+from summarize.summary_spec import format_section_titles_for_repair
 from utils.llm_chat_client import log_llm_prompt_and_result
 
 
@@ -109,8 +110,7 @@ def repair_summary_text(
         f"{project_data_block}"
         "Rewrite summary using the real context above. It must be high-quality, concise, and structured. "
         "Use these section headers (exact UPPERCASE_WITH_UNDERSCORES or Markdown headings with the same words): "
-        "TASK_AND_CONTEXT, GOALS, DECISIONS_AND_RATIONALE, PLAN_AND_PROGRESS, EXECUTION_STAGE, NEXT_ACTIONS, "
-        "SPEC_AND_CONSTRAINTS, RISKS_AND_OPEN_QUESTIONS, IMPORTANT_ARTIFACTS.\n\n"
+        f"{format_section_titles_for_repair()}.\n\n"
         "Execution-stage rule: if user intent says planning/analysis only, set EXECUTION_STAGE=planning and keep NEXT_ACTIONS non-coding "
         "(no implementation, no code edits, no implementation delegation).\n\n"
         "<invalid_summary>\n"

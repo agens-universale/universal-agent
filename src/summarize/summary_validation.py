@@ -1,6 +1,10 @@
 """Эвристики пригодности текста сводки для пайплайна суммаризации."""
 
+from __future__ import annotations
+
 import re
+
+from summarize.summary_spec import MIN_SECTION_HITS, section_titles
 
 INVALID_SUMMARY_PREFIXES = (
     "[tool_call ",
@@ -11,24 +15,17 @@ INVALID_SUMMARY_PREFIXES = (
 
 MIN_SUMMARY_CHARS = 200
 MIN_SUMMARY_LINES = 3
-REQUIRED_SECTION_MARKERS = (
-    "TASK_AND_CONTEXT",
-    "GOALS",
-    "PLAN_AND_PROGRESS",
-    "NEXT_ACTIONS",
-    "SPEC_AND_CONSTRAINTS",
-    "RISKS_AND_OPEN_QUESTIONS",
-    "IMPORTANT_ARTIFACTS",
-)
+REQUIRED_SECTION_MARKERS = section_titles()
+
 FALLBACK_SUMMARY = (
     "Automatic summarization produced no valid output. "
     "Continue from the latest confirmed user requirements and implementation state."
 )
 
-_MIN_SECTION_HITS = 2
 # Части имён секций после split по "_" не считаются ключевыми (союзы и т.п.),
 # иначе «and» в обычном тексте засчитывал бы маркеры вроде TASK_AND_CONTEXT.
-_SECTION_KEYWORD_STOPWORDS = frozenset({"and"})
+# «do»/«not» — иначе DO_NOT_REDO ловится по любому «not» в тексте.
+_SECTION_KEYWORD_STOPWORDS = frozenset({"and", "do", "not"})
 
 
 def _section_marker_hit(text: str, marker: str) -> bool:
@@ -52,22 +49,22 @@ def _section_marker_hit(text: str, marker: str) -> bool:
     )
 
 
+def section_hit_count(text: str) -> int:
+    """Число секций из ``summary_spec``, для которых сработала эвристика."""
+    s = (text or "").strip()
+    return sum(1 for marker in REQUIRED_SECTION_MARKERS if _section_marker_hit(s, marker))
+
+
+def missing_section_titles(text: str) -> tuple[str, ...]:
+    """Заголовки секций из spec, которых нет в тексте сводки."""
+    s = (text or "").strip()
+    return tuple(m for m in REQUIRED_SECTION_MARKERS if not _section_marker_hit(s, m))
+
+
 def validate_summary_text(text: str) -> tuple[bool, str]:
     """Проверяет качество/структуру ответа LLM для сводки диалога.
 
-    Назначение: отсеять пустые, слишком короткие, похожие на мусор или недостаточно
-    структурированные ответы до принятия их как `accumulated_summary`.
-
-    Критерии: непустой текст; не начинается с известных «плохих» префиксов
-    (`INVALID_SUMMARY_PREFIXES`); длина ≥ `MIN_SUMMARY_CHARS`; не меньше
-    `MIN_SUMMARY_LINES` непустых строк; не менее ``_MIN_SECTION_HITS`` «попаданий»
-    по секциям из `REQUIRED_SECTION_MARKERS` — для каждого маркера достаточно,
-    чтобы в тексте как отдельное слово встретился хотя бы один его фрагмент
-    (части имени по ``_``, без учёта регистра; союз ``and`` из имени не используется),
-    например ``Task and context`` закрывает ``TASK_AND_CONTEXT``.
-
-    Args:
-        text: Строка сводки от модели.
+    Секции для подсчёта — ``summary_spec.section_titles()``; порог — ``MIN_SECTION_HITS``.
 
     Returns:
         Пара (успех, код причины): при успехе ``(True, "ok")``; иначе ``False`` и
@@ -84,25 +81,12 @@ def validate_summary_text(text: str) -> tuple[bool, str]:
     non_empty_lines = [line for line in s.splitlines() if line.strip()]
     if len(non_empty_lines) < MIN_SUMMARY_LINES:
         return False, "too_few_lines"
-    section_hits = sum(
-        1 for marker in REQUIRED_SECTION_MARKERS if _section_marker_hit(s, marker)
-    )
-    if section_hits < _MIN_SECTION_HITS:
+    if section_hit_count(s) < MIN_SECTION_HITS:
         return False, "missing_structure"
     return True, "ok"
 
 
 def is_valid_summary_text(text: str) -> bool:
-    """Возвращает True, если черновик сводки проходит эвристическую валидацию.
-
-    Назначение: быстрая проверка без разбора кода причины отказа; детали см.
-    в `validate_summary_text`.
-
-    Args:
-        text: Ответ модели с текстом сводки.
-
-    Returns:
-        ``True``/``False`` по результату валидации.
-    """
+    """Возвращает True, если черновик сводки проходит эвристическую валидацию."""
     status, _ = validate_summary_text(text)
     return status

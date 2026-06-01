@@ -9,6 +9,7 @@ from summarize.compaction import (
     maybe_run_summary_compaction,
 )
 from thread_store import ThreadSession, append_new_thread_messages, load_thread_meta
+from tests.helpers.summary_sample import valid_summary_text_for_tests
 
 
 def _patch_chat_completion(monkeypatch, fake):
@@ -53,15 +54,7 @@ def _state():
 
 
 def _valid_summary(seed: str) -> str:
-    return (
-        f"TASK_AND_CONTEXT:\n- {seed}\n\n"
-        "GOALS:\n- goal\n\n"
-        "PLAN_AND_PROGRESS:\n- done\n\n"
-        "NEXT_ACTIONS:\n- next\n\n"
-        "SPEC_AND_CONSTRAINTS:\n- keep\n\n"
-        "RISKS_AND_OPEN_QUESTIONS:\n- none\n\n"
-        "IMPORTANT_ARTIFACTS:\n- src/summarize/compaction.py\n"
-    )
+    return valid_summary_text_for_tests(seed=seed)
 
 
 def _read_current_data_rows(tmp_dir: str, thread_id: str):

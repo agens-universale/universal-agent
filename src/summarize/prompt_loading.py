@@ -2,6 +2,8 @@
 
 import os
 
+from summarize.summary_spec import SUMMARY_SECTIONS_PLACEHOLDER, render_sections_for_prompt
+
 
 def default_prompt_path() -> str:
     """Возвращает путь к файлу системного промпта суммаризации по умолчанию.
@@ -10,11 +12,11 @@ def default_prompt_path() -> str:
     инструкций для LLM, если в конфиге не задан свой путь.
 
     Returns:
-        Абсолютный путь к `src/prompts/chat_completions_summary_prompt.md`
-        относительно расположения этого модуля.
+        Абсолютный путь к `prompts/chat_completions_summary_prompt.md` в корне репозитория.
     """
     base_dir = os.path.dirname(os.path.abspath(__file__))
-    return os.path.join(base_dir, "..", "prompts", "chat_completions_summary_prompt.md")
+    project_root = os.path.abspath(os.path.join(base_dir, "..", ".."))
+    return os.path.join(project_root, "prompts", "chat_completions_summary_prompt.md")
 
 
 def load_prompt_template(path: str) -> str:
@@ -34,4 +36,9 @@ def load_prompt_template(path: str) -> str:
         prompt = fd.read().strip()
     if not prompt:
         raise ValueError(f"Summary prompt file is empty: {path}")
+    if SUMMARY_SECTIONS_PLACEHOLDER in prompt:
+        prompt = prompt.replace(
+            SUMMARY_SECTIONS_PLACEHOLDER,
+            render_sections_for_prompt(),
+        )
     return prompt
