@@ -5,8 +5,8 @@ from unittest.mock import patch
 import pytest
 
 from long_memory.compaction import CompactionResult
-from tools.simple_tools.long_memory import LongMemory
-from tools.simple_tools import get_simple_tools_data
+from tools.session.long_memory import LongMemory
+from tools.registry import get_builtin_tools_data
 
 
 def _make_tool(tmp_path) -> LongMemory:
@@ -224,7 +224,7 @@ def test_tool_unknown_action(tmp_path):
 
 
 def test_long_memory_registered_by_default():
-    data = get_simple_tools_data({})
+    data = get_builtin_tools_data({})
     assert "long_memory" in data
     entry = data["long_memory"]
     assert entry["spec"]["name"] == "long_memory"
@@ -232,5 +232,5 @@ def test_long_memory_registered_by_default():
 
 
 def test_long_memory_filtered_by_stop_tools():
-    data = get_simple_tools_data({"stop_tools": ["long_memory"]})
+    data = get_builtin_tools_data({"stop_tools": ["long_memory"]})
     assert "long_memory" not in data

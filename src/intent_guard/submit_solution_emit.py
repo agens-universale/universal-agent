@@ -6,7 +6,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 from intent_guard.agent_logging import log_finish_gate_output_patched
 from intent_guard.guard import FinishGateDecision
-from tools.simple_tools.submit_solution import SubmitSolution
+from tools.session.submit_solution import SubmitSolution
 
 _logger = logging.getLogger(__name__)
 

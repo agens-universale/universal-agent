@@ -15,7 +15,7 @@ from intent_scope.hook import maybe_update_intent_scope_from_tool
 from message_policy.cycle_stop import append_cycle_stop_tool_outputs_for_batch
 from request_backend_policy import request_chat_completions_with_policy
 from tools import apply_tool, WrongFunctionArgumentsException
-from tools.stored_outputs.wrapping import maybe_store_and_wrap_tool_output
+from tools.session.stored_outputs.wrapping import maybe_store_and_wrap_tool_output
 from utils.connect_backend import create_call_headers
 from utils.connect_backend import request_backend_responses as request_backend
 from utils.connect_backend import create_call_data_responses as create_call_data

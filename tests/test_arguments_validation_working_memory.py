@@ -7,7 +7,7 @@ from tools.arguments_validation import (
     parse_and_validate_tool_arguments,
     resolve_tool_arguments_feedback_hint,
 )
-from tools.simple_tools.working_memory import WorkingMemory
+from tools.session.working_memory import WorkingMemory
 
 
 def test_working_memory_path_hint_from_tool_hook():

@@ -130,7 +130,7 @@ def test_finish_gate_reject_submit_in_current_without_flush():
         get_function_call_output_text,
     )
     from intent_guard.validation_result import ValidationResult
-    from tools.simple_tools.submit_solution import SubmitSolution
+    from tools.session.submit_solution import SubmitSolution
 
     state = _make_state()
     seed_state_intent(state, log=["closed turn"], current="open question")

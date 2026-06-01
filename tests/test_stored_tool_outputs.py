@@ -29,12 +29,12 @@ _stub_optional_web_parsers()
 from processing_responses import process_tool_calls
 from persistence.state_storage import StateStorage
 from states import State
-from tools.stored_outputs.read_stored_tool_output import ReadStoredToolOutput
-from tools.stored_outputs.tool_call_outputs_store import (
+from tools.session.stored_outputs.read_stored_tool_output import ReadStoredToolOutput
+from tools.session.stored_outputs.tool_call_outputs_store import (
     ToolCallOutputRecord,
     ToolCallOutputsStore,
 )
-from tools.stored_outputs.wrapping import maybe_store_and_wrap_tool_output
+from tools.session.stored_outputs.wrapping import maybe_store_and_wrap_tool_output
 
 
 def _make_state() -> State:

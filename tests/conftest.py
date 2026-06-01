@@ -80,32 +80,31 @@ def preload_minimal_tools_package() -> None:
     tools_pkg.__path__ = [str(_TOOLS_DIR)]
     sys.modules["tools"] = tools_pkg
 
-    stored_pkg = types.ModuleType("tools.stored_outputs")
-    stored_pkg.__path__ = [str(_TOOLS_DIR / "stored_outputs")]
-    sys.modules["tools.stored_outputs"] = stored_pkg
+    session_pkg = types.ModuleType("tools.session")
+    session_pkg.__path__ = [str(_TOOLS_DIR / "session")]
+    sys.modules["tools.session"] = session_pkg
+    setattr(tools_pkg, "session", session_pkg)
+
+    stored_pkg = types.ModuleType("tools.session.stored_outputs")
+    stored_pkg.__path__ = [str(_TOOLS_DIR / "session" / "stored_outputs")]
+    sys.modules["tools.session.stored_outputs"] = stored_pkg
+    setattr(session_pkg, "stored_outputs", stored_pkg)
     _load_file_module(
-        "tools.stored_outputs.tool_call_outputs_store",
-        "tools/stored_outputs/tool_call_outputs_store.py",
+        "tools.session.stored_outputs.tool_call_outputs_store",
+        "tools/session/stored_outputs/tool_call_outputs_store.py",
     )
-    wrapping_mod = types.ModuleType("tools.stored_outputs.wrapping")
+    wrapping_mod = types.ModuleType("tools.session.stored_outputs.wrapping")
     wrapping_mod.maybe_store_and_wrap_tool_output = lambda tool_res, **_kw: tool_res
-    sys.modules["tools.stored_outputs.wrapping"] = wrapping_mod
+    sys.modules["tools.session.stored_outputs.wrapping"] = wrapping_mod
 
     skills_pkg = types.ModuleType("tools.skills")
     skills_pkg.__path__ = [str(_TOOLS_DIR / "skills")]
     sys.modules["tools.skills"] = skills_pkg
 
-    simple_tools_pkg = types.ModuleType("tools.simple_tools")
-    simple_tools_pkg.__path__ = [str(_TOOLS_DIR / "simple_tools")]
-    sys.modules["tools.simple_tools"] = simple_tools_pkg
     _load_file_module("tools.simple_tool_base", "tools/simple_tool_base.py")
     _load_file_module(
-        "tools.simple_tools.abstract_simple_tool",
-        "tools/simple_tools/abstract_simple_tool.py",
-    )
-    _load_file_module(
-        "tools.simple_tools.submit_solution",
-        "tools/simple_tools/submit_solution.py",
+        "tools.session.submit_solution",
+        "tools/session/submit_solution.py",
     )
 
     connect_mcp_pkg = types.ModuleType("tools.connect_mcp")

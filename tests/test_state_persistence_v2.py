@@ -15,7 +15,7 @@ from persistence.state_repository import StateRepository
 from persistence.state_serializer import StateSerializer
 from persistence.thread_meta_mapper import ThreadMetaMapper
 from states import SharedStateData, State
-from tools.stored_outputs.tool_call_outputs_store import (
+from tools.session.stored_outputs.tool_call_outputs_store import (
     ToolCallOutputRecord,
     ToolCallOutputsStore,
 )

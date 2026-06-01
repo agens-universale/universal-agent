@@ -7,7 +7,7 @@ cd "$ROOT"
 
 echo "== rg memory_files (src/) — informational =="
 rg 'memory_files' src/ || true
-echo "(enforce: only deprecated_tools/memory_files.py + persistence/schema.py)"
+echo "(enforce: only tools/deprecated/memory_files.py + persistence/schema.py)"
 echo
 
 echo "== rg journal (src/summarize/) =="

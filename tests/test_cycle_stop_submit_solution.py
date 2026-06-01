@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 from message_policy.cycle_stop import append_cycle_stop_tool_outputs_for_batch
 from states import State
-from tools.simple_tools.submit_solution import SubmitSolution
+from tools.session.submit_solution import SubmitSolution
 
 
 def _make_state() -> State:

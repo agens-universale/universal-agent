@@ -4,8 +4,8 @@ from typing import Any, Callable, Dict, List, Optional
 
 from tools import apply_tool
 from tools.simple_tool_base import AbstractSimpleTool
-from tools.simple_tools.submit_solution import SubmitSolution
-from tools.stored_outputs.wrapping import maybe_store_and_wrap_tool_output
+from tools.session.submit_solution import SubmitSolution
+from tools.session.stored_outputs.wrapping import maybe_store_and_wrap_tool_output
 from utils.generate_message_id import generate_msg_id_sha256 as generate_message_id_func
 
 

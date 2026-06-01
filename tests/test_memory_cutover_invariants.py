@@ -8,7 +8,7 @@ SRC = ROOT / "src"
 # Единственные допустимые вхождения memory_files вне deprecated-зоны (fail-fast reject).
 _ALLOWED_MEMORY_FILES_RELPATHS = frozenset(
     {
-        "src/tools/simple_tools/deprecated_tools/memory_files.py",
+        "src/tools/deprecated/memory_files.py",
         "src/persistence/schema.py",
     }
 )
@@ -19,7 +19,7 @@ def _relpath(path: Path) -> str:
 
 
 def test_memory_files_only_in_allowed_locations() -> None:
-    """rg \"memory_files\" src/ — только deprecated_tools и schema reject."""
+    """rg \"memory_files\" src/ — только tools/deprecated и schema reject."""
     unexpected: list[str] = []
     for path in sorted(SRC.rglob("*.py")):
         if "memory_files" not in path.read_text(encoding="utf-8"):

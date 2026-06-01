@@ -11,7 +11,7 @@ from tools.arguments_validation import (
 )
 from tools.skills.registry import get_skills_registry
 from tools.skills.skills_tools import get_skills_tools_data
-from tools.simple_tools import get_simple_tools_data
+from tools.registry import get_builtin_tools_data
 from tools.subagents.registry import is_subagent_tool
 from tools.inject_tool_fields import (
     apply_injected_fields_to_spec,
@@ -66,8 +66,8 @@ def build_tools_data(
     """
     tools_data: Dict[str, Dict[str, Any]] = {}
 
-    simple_tools_data = get_simple_tools_data(config_dict)
-    for k, v in simple_tools_data.items():
+    builtin_tools_data = get_builtin_tools_data(config_dict)
+    for k, v in builtin_tools_data.items():
         tools_data[k] = v
 
     skills_registry = get_skills_registry(config_dict)

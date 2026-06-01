@@ -7,7 +7,7 @@ from intent_guard.submit_solution_emit import (
 )
 from intent_guard.validation_result import ValidationResult
 from states import State
-from tools.simple_tools.submit_solution import SubmitSolution
+from tools.session.submit_solution import SubmitSolution
 
 
 def _make_state() -> State:

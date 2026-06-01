@@ -12,7 +12,7 @@ from persistence.schema import (
     validate_state_snapshot_for_load,
 )
 from states import SharedStateData, State
-from tools.stored_outputs.tool_call_outputs_store import ToolCallOutputsStore
+from tools.session.stored_outputs.tool_call_outputs_store import ToolCallOutputsStore
 
 
 def load_state_from_snapshot(payload: Mapping[str, Any]) -> State:

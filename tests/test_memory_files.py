@@ -1,11 +1,11 @@
-"""Tests for deprecated tools.simple_tools.deprecated_tools.memory_files.MemoryFiles"""
+"""Tests for deprecated tools.deprecated.memory_files.MemoryFiles"""
 
 import json
 from types import SimpleNamespace
 
 import pytest
 
-from tools.simple_tools.deprecated_tools.memory_files import (
+from tools.deprecated.memory_files import (
     MemoryFiles,
     _DEFAULT_MAX_FILE_CHARS,
     _DEFAULT_MAX_FILES,

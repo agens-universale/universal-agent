@@ -6,7 +6,7 @@ import pytest
 
 @pytest.fixture(autouse=True)
 def _ensure_real_tools_module():
-    """Восстановить реальный модуль tools, если он был подменён simple_tools/conftest.py."""
+    """Восстановить реальный модуль tools, если он был подменён tests/tools/conftest.py."""
     stale = [name for name in sys.modules if name == "tools" or name.startswith("tools.")]
     for name in stale:
         sys.modules.pop(name, None)

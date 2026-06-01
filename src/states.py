@@ -3,7 +3,7 @@ from uuid import uuid4
 from typing import Any, Dict, List, Optional
 from long_memory import attach_status_to_prompt_vars
 from utils.project_data import get_project_data
-from tools.stored_outputs.tool_call_outputs_store import ToolCallOutputsStore
+from tools.session.stored_outputs.tool_call_outputs_store import ToolCallOutputsStore
 from message_policy.tool_usage_notice.state import hydrate_tool_usage_notice_state
 from tools.skills.skills_policy import render_skills_catalog
 from intent_log import IntentRecord, deserialize_list, flush
