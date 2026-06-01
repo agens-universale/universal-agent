@@ -113,7 +113,7 @@ class FinishGateTraceDigestTest(unittest.TestCase):
                     "type": "function_call",
                     "call_id": "ss_old",
                     "name": "submit_solution",
-                    "arguments": {"solution_type": "answer_question", "task_report": "old"},
+                    "arguments": {"solution_type": "direct_answer", "task_report": "old"},
                 },
                 {"role": "user", "content": "technical feedback after reject"},
                 {
@@ -130,7 +130,7 @@ class FinishGateTraceDigestTest(unittest.TestCase):
         self.assertNotIn('"task_report": "new"', text)
         self.assertNotIn("full_solution", text)
         self.assertIn("[function_call] submit_solution", text)
-        self.assertIn("answer_question", text)
+        self.assertIn("direct_answer", text)
 
     def test_build_history_text_matches_summarizer_pipeline(self) -> None:
         messages = [

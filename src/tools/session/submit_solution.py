@@ -11,7 +11,7 @@ if TYPE_CHECKING:
 SOLUTION_TYPES = (
     "full_solution",
     "partial_solution",
-    "answer_question",
+    "direct_answer",
     "couldnt_solve",
     "need_additional_info",
     "abandoned",
@@ -189,7 +189,7 @@ class SubmitSolution(AbstractSimpleTool):
                         "type": "string",
                         "description": (
                             "Turn outcome: full_solution (objective done), partial_solution (meaningful progress, not done), "
-                            "answer_question (direct answer completed this turn), couldnt_solve, need_additional_info (blocked), "
+                            "direct_answer (direct answer/explanation completed this turn), couldnt_solve, need_additional_info (blocked), "
                             "abandoned."
                         ),
                     },
@@ -228,7 +228,7 @@ Use solution_type to classify the turn outcome; task_report for what was done in
 
 Input schema:
 {
-  "solution_type": "full_solution" | "partial_solution" | "answer_question" | "couldnt_solve" | "need_additional_info" | "abandoned",
+  "solution_type": "full_solution" | "partial_solution" | "direct_answer" | "couldnt_solve" | "need_additional_info" | "abandoned",
   "task_report": "string (required)",
   "comment": "string (optional)",
   "handoff": "{\"key\":\"value\"}" (required JSON object string)
@@ -254,7 +254,7 @@ Readiness checklist before calling:
 Choosing solution_type (for current turn):
 - full_solution: turn objective fully completed.
 - partial_solution: meaningful partial progress, but objective not fully completed.
-- answer_question: user asked for a direct answer/explanation.
+- direct_answer: user asked for a direct answer/explanation and it is complete this turn.
 - need_additional_info: blocked by missing user input/context.
 - couldnt_solve: attempted but could not solve with available means.
 - abandoned: stopped by explicit choice/instruction.

@@ -53,7 +53,7 @@ def test_append_cycle_stop_writes_submit_output_from_arguments_not_stub():
     state = _make_state()
     arguments = json.dumps(
         {
-            "solution_type": "answer_question",
+            "solution_type": "direct_answer",
             "task_report": "Ответ на вопрос пользователя",
             "handoff": "{}",
         },
@@ -83,7 +83,7 @@ def test_append_cycle_stop_writes_submit_output_from_arguments_not_stub():
     )
     payload = json.loads(output_msg["output"])
     assert payload["task_report"] == "Ответ на вопрос пользователя"
-    assert payload["solution_type"] == "answer_question"
+    assert payload["solution_type"] == "direct_answer"
     assert "Dialog turn finished" not in output_msg["output"]
 
 

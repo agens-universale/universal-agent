@@ -372,7 +372,7 @@ def synthesize_tool_call(response: Any, tools: list[dict]) -> dict:
         # Only fires when submit_solution is one of the declared tools (it
         # always is in our agent setup). Wrapping non-finalizer content
         # avoids the Undefined-mode retry loop and saves 2-3 backend calls.
-        # NOTE: solution_type is hardcoded to "answer_question" — strictly
+        # NOTE: solution_type is hardcoded to "direct_answer" — strictly
         # correct only for read-only intents; for file-creation tasks the
         # agent expects "full_solution". Acceptable trade-off given the
         # alternative is the retry loop.
@@ -381,7 +381,7 @@ def synthesize_tool_call(response: Any, tools: list[dict]) -> dict:
             args = {
                 "handoff": text,
                 "task_report": text,
-                "solution_type": "answer_question",
+                "solution_type": "direct_answer",
             }
             if set_message_tool_call(
                 message,

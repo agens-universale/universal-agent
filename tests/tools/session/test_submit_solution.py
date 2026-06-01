@@ -5,7 +5,7 @@ from tools.session.submit_solution import SubmitSolution
 VALID_TYPES = (
     "full_solution",
     "partial_solution",
-    "answer_question",
+    "direct_answer",
     "couldnt_solve",
     "need_additional_info",
     "abandoned",

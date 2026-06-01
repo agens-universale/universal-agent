@@ -1,6 +1,6 @@
 """Stage 2: session tools declare interaction roles in API descriptions."""
 
-from tools.session.answer_question import AnswerQuestion
+from tools.session.intermediate_reply import IntermediateReply
 from tools.session.ask_human import AskHuman
 from tools.session.submit_solution import SubmitSolution
 from tools.session.working_memory import WorkingMemory
@@ -10,8 +10,8 @@ from tools.session.stored_outputs.read_stored_tool_output import ReadStoredToolO
 from tools.session.read_user_intent_log import ReadUserIntentLog
 
 
-def test_answer_question_intermediate_non_final():
-    desc = AnswerQuestion.tool_description()["description"].lower()
+def test_intermediate_reply_non_final():
+    desc = IntermediateReply.tool_description()["description"].lower()
     assert "intermediate" in desc or "non-final" in desc
     assert "not complete" in desc
     assert "final" in desc

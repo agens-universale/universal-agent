@@ -11,7 +11,7 @@ from tools.exec.calculator import Calculator
 from tools.exec.execute_command import ExecuteCommand
 from tools.exec.run_python_code import RunPythonCode
 from tools.exec.sleep_tool import Sleep
-from tools.session.answer_question import AnswerQuestion
+from tools.session.intermediate_reply import IntermediateReply
 from tools.session.ask_human import AskHuman
 from tools.session.long_memory import LongMemory
 from tools.session.read_user_intent_log import ReadUserIntentLog
@@ -63,7 +63,7 @@ def _session_registry(config_dict: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
         "read_stored_tool_output": _tool_entry(ReadStoredToolOutput),
         "submit_solution": _tool_entry(SubmitSolution),
         "ask_human": _tool_entry(AskHuman),
-        "answer_question": _tool_entry(AnswerQuestion),
+        "intermediate_reply": _tool_entry(IntermediateReply),
         "working_memory": _tool_entry(WorkingMemory),
     }
 

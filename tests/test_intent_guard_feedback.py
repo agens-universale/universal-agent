@@ -36,12 +36,12 @@ class FinishGateFeedbackTest(unittest.TestCase):
                 action="fix_report",
                 trace_ok=True,
                 report_ok=False,
-                report_mismatches=["solution_type должен быть answer_question"],
+                report_mismatches=["solution_type должен быть direct_answer"],
             )
         )
         self.assertTrue(text.startswith("Finish gate: fix_report."))
         self.assertIn("без повторения", text)
-        self.assertIn("answer_question", text)
+        self.assertIn("direct_answer", text)
         self.assertNotIn("ask_human", text.lower())
 
     def test_continue_work_lists_trace_gaps(self) -> None:
@@ -79,14 +79,14 @@ class FinishGateFeedbackTest(unittest.TestCase):
                 action="fix_report",
                 trace_ok=True,
                 report_ok=False,
-                report_mismatches=["solution_type должен быть answer_question"],
+                report_mismatches=["solution_type должен быть direct_answer"],
             )
         )
         text = build_finish_gate_reject_technical_user_content(feedback)
         self.assertIn("не соответствует интенту", text.lower())
         self.assertIn("продолжай работу", text.lower())
         self.assertIn("fix_report", text)
-        self.assertIn("answer_question", text)
+        self.assertIn("direct_answer", text)
 
 
 if __name__ == "__main__":

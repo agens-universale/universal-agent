@@ -68,7 +68,7 @@ def test_apply_finish_gate_to_submit_output_in_state_patches_message():
     raw = SubmitSolution.output_from_cycle_stop_arguments(
         json.dumps(
             {
-                "solution_type": "answer_question",
+                "solution_type": "direct_answer",
                 "task_report": "ответ",
                 "handoff": "{}",
             },

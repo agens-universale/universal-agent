@@ -9,7 +9,7 @@ class FormatJsonForDisplayTest(unittest.TestCase):
         self.assertEqual(format_json_for_display(None), "")
 
     def test_compact_json_string_is_pretty_printed(self):
-        raw = json.dumps({"solution_type": "answer_question", "reason": "done"})
+        raw = json.dumps({"solution_type": "direct_answer", "reason": "done"})
         out = format_json_for_display(raw)
         self.assertIn('\n  "solution_type"', out)
         self.assertEqual(json.loads(out), json.loads(raw))
@@ -18,7 +18,7 @@ class FormatJsonForDisplayTest(unittest.TestCase):
         inner = {"result": "ok", "modes": {"raw": "plain text"}}
         raw = json.dumps(
             {
-                "solution_type": "answer_question",
+                "solution_type": "direct_answer",
                 "handoff": json.dumps(inner, ensure_ascii=False),
             },
             ensure_ascii=False,

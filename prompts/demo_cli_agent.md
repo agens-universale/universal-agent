@@ -82,7 +82,7 @@ Call the turn-finalizing tool from `<tools>` only when ALL of the following are 
 ### Choosing outcome type (per tool schema)
 - `full_solution`: the turn objective is fully completed.
 - `partial_solution`: meaningful progress, but the objective is not fully completed.
-- `answer_question`: a direct answer/explanation is requested and completed for this turn.
+- `direct_answer`: a direct answer/explanation is requested and completed for this turn.
 - `need_additional_info`: blocked due to missing user input or missing required data.
 - `couldnt_solve`: attempted but unable to complete the objective with available tools.
 - `abandoned`: explicitly stopped by instruction or choice.

@@ -275,7 +275,7 @@ def test_run_agent_accept_clears_current_user_intent_for_subagent(monkeypatch):
     )
 
     result = run_agent(
-        [_submit_solution_call(solution_type="answer_question")],
+        [_submit_solution_call(solution_type="direct_answer")],
         state,
         _make_ctx(),
     )
@@ -375,7 +375,7 @@ def test_main_accept_after_ask_human_trace(monkeypatch):
         args = kwargs["submit_solution_arguments"]
         if isinstance(args, str):
             args = json.loads(args)
-        assert args.get("solution_type") == "answer_question"
+        assert args.get("solution_type") == "direct_answer"
         return ValidationResult(
             ok=True,
             action="accept",
@@ -404,7 +404,7 @@ def test_main_accept_after_ask_human_trace(monkeypatch):
     )
 
     result = run_agent(
-        [_submit_solution_call(solution_type="answer_question")],
+        [_submit_solution_call(solution_type="direct_answer")],
         state,
         _make_ctx(),
     )
@@ -549,7 +549,7 @@ def test_run_agent_reject_continues_turn_with_technical_user_message(monkeypatch
     def _stub_user_ask(in_messages, _state, _ctx):
         user_ask_batches.append(list(in_messages))
         return (
-            [_submit_solution_call(solution_type="answer_question")],
+            [_submit_solution_call(solution_type="direct_answer")],
             "rid_retry",
         )
 
