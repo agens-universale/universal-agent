@@ -38,6 +38,7 @@ from config_modules.summary import (
     DEFAULT_MAX_ACCUMULATED_SUMMARY_CHARS,
     DEFAULT_MAX_DIALOGUE_CHARS,
     DEFAULT_MAX_MESSAGE_CHARS,
+    DEFAULT_TURN_END_TRIGGER_RATIO,
     SummaryConfig,
 )
 
@@ -106,6 +107,16 @@ def resolve_paths(cfg: AppConfig, config_dir: str) -> None:
         cfg.summary.intent_log_preview_chars = DEFAULT_INTENT_LOG_PREVIEW_CHARS
     if cfg.summary.chat_completions_summary_trigger_chars < 0:
         cfg.summary.chat_completions_summary_trigger_chars = 0
+    turn_end_raw = cfg.summary.chat_completions_summary_turn_end_trigger_chars
+    if turn_end_raw is None:
+        trigger = cfg.summary.chat_completions_summary_trigger_chars
+        cfg.summary.chat_completions_summary_turn_end_trigger_chars = (
+            max(1, int(trigger * DEFAULT_TURN_END_TRIGGER_RATIO))
+            if trigger > 0
+            else 0
+        )
+    elif turn_end_raw <= 0:
+        cfg.summary.chat_completions_summary_turn_end_trigger_chars = 0
     if cfg.summary.last_dialog_steps_count <= 0:
         cfg.summary.last_dialog_steps_count = DEFAULT_LAST_DIALOG_STEPS_COUNT
     if cfg.summary.last_dialog_step_message_max_chars <= 0:

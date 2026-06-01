@@ -16,7 +16,10 @@ from run_context import RunContext
 from config_modules.stored_outputs import get_stored_tool_outputs_max_entries
 from message_policy.chat_completions import repair_tool_call_pairing
 from run_summary_coordinator import RunSummaryCoordinator
-from summarize.config import parse_summary_trigger_chars
+from summarize.config import (
+    parse_summary_trigger_chars,
+    parse_summary_turn_end_trigger_chars,
+)
 from persistence.state_storage import dump_storage, save_state
 from persistence.thread_meta_mapper import ThreadMetaMapper
 from intent_log.user_turn import append_user_ask_deduped, append_user_asks_from_messages
@@ -103,6 +106,7 @@ class AgentExecutor:
             system_id = system or "cli"
         is_cli_mode = system_id == "cli"
         summary_trigger_chars = parse_summary_trigger_chars(config_dict)
+        turn_end_trigger_chars = parse_summary_turn_end_trigger_chars(config_dict)
 
         chat_completions_system_prompt: str | None = None
         rendered_system_prompt: str | None = None
@@ -197,6 +201,7 @@ class AgentExecutor:
             state=state,
             thread_session=thread_session,
             summary_trigger_chars=summary_trigger_chars,
+            turn_end_trigger_chars=turn_end_trigger_chars,
             is_cli_mode=is_cli_mode,
             pre_backend_trigger_reason="pre_backend",
             logger=logger,
@@ -322,6 +327,7 @@ class AgentExecutor:
                 get_full_history_messages=get_full_history_messages,
                 persist_messages_callback=persist_messages_callback,
                 pre_backend_compaction_hook=summary.pre_backend_compaction_hook,
+                turn_end_compaction_hook=summary.turn_end_compact_if_needed,
                 get_pending_messages=get_pending_messages,
                 check_stop=check_stop,
                 session_meta=(

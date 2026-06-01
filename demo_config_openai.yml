@@ -77,6 +77,7 @@ long_memory:
 
 summary:
   chat_completions_summary_trigger_chars: 200000
+  chat_completions_summary_turn_end_trigger_chars: 120000
   incremental_batch_chars: 280000
   max_message_chars: 30000
   max_dialogue_chars: 1000000

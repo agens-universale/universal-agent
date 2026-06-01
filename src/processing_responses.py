@@ -338,6 +338,7 @@ def run_agent(
     get_full_history_messages: Optional[Callable[[], List[Dict]]] = None,
     persist_messages_callback: Optional[Callable[[List[Dict]], None]] = None,
     pre_backend_compaction_hook: Optional[Callable[[List[Dict], str], None]] = None,
+    turn_end_compaction_hook: Optional[Callable[[], None]] = None,
     get_pending_messages: Optional[Callable[[], List[Dict]]] = None,
     check_stop: Optional[Callable[[], bool]] = None,
     session_meta: Optional[Dict[str, Any]] = None,
@@ -581,12 +582,18 @@ def run_agent(
                                 "fail_open_limit",
                             ):
                                 state.flush_current_user_intent()
+                                if turn_end_compaction_hook is not None:
+                                    turn_end_compaction_hook()
                                 return finish_arguments
                             elif decision.outcome == "accept":
                                 state.flush_current_user_intent()
+                                if turn_end_compaction_hook is not None:
+                                    turn_end_compaction_hook()
                                 return finish_arguments
                             else:
                                 state.flush_current_user_intent()
+                                if turn_end_compaction_hook is not None:
+                                    turn_end_compaction_hook()
                                 return finish_arguments
                         else:
                             state.current_user_intent = []

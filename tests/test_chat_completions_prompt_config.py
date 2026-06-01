@@ -55,6 +55,10 @@ class ChatCompletionsPromptConfigTest(unittest.TestCase):
             self.assertEqual(
                 cfg["summary_params"]["chat_completions_summary_trigger_chars"], 0
             )
+            self.assertEqual(
+                cfg["summary_params"]["chat_completions_summary_turn_end_trigger_chars"],
+                0,
+            )
             self.assertEqual(cfg["summary_params"]["incremental_batch_chars"], 0)
             self.assertFalse(cfg["logging_params"]["full_log_backend"])
             self.assertTrue(cfg["logging_params"]["console_trace"])
@@ -75,6 +79,10 @@ class ChatCompletionsPromptConfigTest(unittest.TestCase):
                 cfg["summary_params"]["chat_completions_summary_trigger_chars"], 123
             )
             self.assertEqual(cfg["summary_params"]["incremental_batch_chars"], 172)
+            self.assertEqual(
+                cfg["summary_params"]["chat_completions_summary_turn_end_trigger_chars"],
+                73,
+            )
 
     def test_summary_params_defaults(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -93,6 +101,10 @@ class ChatCompletionsPromptConfigTest(unittest.TestCase):
                 cfg["summary_params"]["max_accumulated_summary_chars"], 20000
             )
             self.assertEqual(cfg["summary_params"]["intent_log_preview_chars"], 10000)
+            self.assertEqual(
+                cfg["summary_params"]["chat_completions_summary_turn_end_trigger_chars"],
+                0,
+            )
             self.assertNotIn("original_user_messages_max_chars", cfg["summary_params"])
             self.assertTrue(
                 cfg["summary_params"][
@@ -159,6 +171,41 @@ class ChatCompletionsPromptConfigTest(unittest.TestCase):
             cfg = load_config(cfg_path)
             self.assertEqual(
                 cfg["summary_params"]["incremental_batch_chars"], 70000
+            )
+            self.assertEqual(
+                cfg["summary_params"]["chat_completions_summary_turn_end_trigger_chars"],
+                30000,
+            )
+
+    def test_turn_end_trigger_chars_explicit_and_disabled(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            cfg_path = os.path.join(tmp_dir, "config.yml")
+            with open(cfg_path, "w", encoding="utf-8") as fd:
+                fd.write(
+                    "backend:\n  api_mode: chat_completions\n"
+                    "summary:\n"
+                    "  chat_completions_summary_trigger_chars: 200000\n"
+                    "  chat_completions_summary_turn_end_trigger_chars: '80000'\n"
+                )
+            cfg = load_config(cfg_path)
+            self.assertEqual(
+                cfg["summary_params"]["chat_completions_summary_turn_end_trigger_chars"],
+                80000,
+            )
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            cfg_path = os.path.join(tmp_dir, "config.yml")
+            with open(cfg_path, "w", encoding="utf-8") as fd:
+                fd.write(
+                    "backend:\n  api_mode: chat_completions\n"
+                    "summary:\n"
+                    "  chat_completions_summary_trigger_chars: 200000\n"
+                    "  chat_completions_summary_turn_end_trigger_chars: 0\n"
+                )
+            cfg = load_config(cfg_path)
+            self.assertEqual(
+                cfg["summary_params"]["chat_completions_summary_turn_end_trigger_chars"],
+                0,
             )
 
     def test_chat_completion_authorization_header_loaded_from_backend_section(self):

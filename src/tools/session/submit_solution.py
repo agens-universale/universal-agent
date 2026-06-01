@@ -178,7 +178,7 @@ class SubmitSolution(AbstractSimpleTool):
                 "End-of-turn, not end-of-thread. Use for done / partial / blocked outcomes with a self-contained report "
                 "and machine-readable handoff. "
                 "Do NOT use for brainstorming, mid-task status, or 'I explained something' while work continues — "
-                "use the intermediate-reply tool. Do NOT use to ask the user a question — use the ask-user tool. "
+                "use the intermediate-reply tool. Do NOT use to ask the user a question — use the ask-user tool instead if such tool available. "
                 "Call only after reasonable work and verification for this turn when needed. "
                 "Do not call early just to return control."
             ),

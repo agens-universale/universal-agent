@@ -11,6 +11,15 @@ from message_format.serialization import (
     calc_history_chars_for_trigger,
     calc_messages_chars_total,
 )
+from summarize.summary_logging import (
+    SummaryCompactionLog,
+    log_compaction_completed,
+    log_compaction_precheck,
+    log_compaction_started,
+    log_summary_message_body,
+    log_summary_raw_text,
+    logger_from_ctx,
+)
 from summarize.summary_message_body import (
     build_dialog_summary_content,
     resolve_intent_log_preview_chars,
@@ -149,27 +158,26 @@ def run_summary_compaction(
     trigger_reason: str,
     is_cli_mode: bool,
     on_summary_applied: Optional[Callable[[Dict[str, Any]], None]] = None,
+    trigger_threshold_chars: int | None = None,
 ) -> None:
-    logger = getattr(ctx, "logger", None)
+    logger = logger_from_ctx(ctx)
     thread_id = getattr(state, "thread_id", None)
     full_messages = without_system_messages(getattr(state, "messages", []))
     trigger_volume = calc_history_chars_for_trigger(full_messages)
     serialized_chars = calc_messages_chars_total(full_messages)
-    if logger is not None:
-        logger.info(
-            "summary_triggered reason=%s thread_id=%s trigger_volume=%s serialized_chars=%s history_messages=%s",
-            trigger_reason,
-            thread_id,
-            trigger_volume,
-            serialized_chars,
-            len(full_messages),
-        )
-    if is_cli_mode:
-        print(
-            "[summary] Запущена суммаризация: "
-            f"thread={thread_id}, trigger_volume={trigger_volume}, "
-            f"serialized_chars={serialized_chars}"
-        )
+    log_ctx = SummaryCompactionLog(
+        trigger_reason=trigger_reason,
+        thread_id=thread_id,
+        trigger_volume=trigger_volume,
+        trigger_threshold_chars=trigger_threshold_chars,
+        is_cli_mode=is_cli_mode,
+    )
+    log_compaction_started(
+        logger,
+        log_ctx,
+        serialized_chars=serialized_chars,
+        history_messages_count=len(full_messages),
+    )
 
     source_user_log = list(getattr(state, "user_intent_log", []) or [])
     source_current_intent = list(getattr(state, "current_user_intent", []) or [])
@@ -193,11 +201,7 @@ def run_summary_compaction(
     memory_append_touched = summary_result.get("memory_append_touched")
     memory_replace_touched = summary_result.get("memory_replace_touched")
     preview_chars = _intent_log_preview_chars_from_ctx(ctx)
-    if logger is not None:
-        logger.info("summary_received_raw_text=\n%s", raw_summary)
-    if is_cli_mode:
-        print("[summary] Полученный raw summary:")
-        print(raw_summary)
+    log_summary_raw_text(logger, log_ctx, raw_summary)
 
     summary_message_content = apply_summary_state_patch(
         state=state,
@@ -215,8 +219,7 @@ def run_summary_compaction(
         final_out = trace.get("final_output")
         if isinstance(final_out, dict):
             final_out["summary_message_content"] = summary_message_content
-    if logger is not None:
-        logger.info("summary_received_message_content=\n%s", summary_message_content)
+    log_summary_message_body(logger, log_ctx, summary_message_content)
 
     _shared = getattr(state, "shared", None)
     summary_payload = {
@@ -236,19 +239,24 @@ def run_summary_compaction(
         "user_turn_seq": int(getattr(state, "user_turn_seq", 0) or 0),
         "dialog_steps_offset": int(getattr(state, "dialog_steps_offset", 0) or 0),
     }
+    summary_event: Dict[str, Any] = {
+        "trigger_reason": trigger_reason,
+        "summary_payload": summary_payload,
+        "summary_trace": summary_result.get("trace", {}),
+        "newly_summarized_message_id": str(
+            state.messages[0].get("id")
+            if isinstance(getattr(state, "messages", []), list) and state.messages
+            else ""
+        ),
+    }
     if on_summary_applied is not None:
-        on_summary_applied(
-            {
-                "trigger_reason": trigger_reason,
-                "summary_payload": summary_payload,
-                "summary_trace": summary_result.get("trace", {}),
-                "newly_summarized_message_id": str(
-                    state.messages[0].get("id")
-                    if isinstance(getattr(state, "messages", []), list) and state.messages
-                    else ""
-                ),
-            }
-        )
+        on_summary_applied(summary_event)
+
+    archive_suffix = summary_event.get("archive_suffix")
+    if isinstance(archive_suffix, str):
+        archive_suffix = archive_suffix.strip() or None
+    else:
+        archive_suffix = None
 
     new_serialized = calc_messages_chars_total(
         without_system_messages(getattr(state, "messages", []))
@@ -259,25 +267,16 @@ def run_summary_compaction(
     delta_chars = sum(len(v) for v in memory_append_deltas.to_dict().values()) + sum(
         len(v) for v in memory_replace_deltas.to_dict().values()
     )
-    if logger is not None:
-        logger.info(
-            "summary_completed reason=%s thread_id=%s trigger_volume=%s serialized_before=%s serialized_after=%s compression_ratio=%s num_batches=%s memory_delta_chars=%s",
-            trigger_reason,
-            thread_id,
-            trigger_volume,
-            serialized_chars,
-            new_serialized,
-            ratio,
-            summary_result.get("num_batches"),
-            delta_chars,
-        )
-    if is_cli_mode:
-        print(
-            "[summary] Завершена: "
-            f"serialized_before={serialized_chars}, serialized_after={new_serialized}, ratio={ratio}, "
-            f"batches={summary_result.get('num_batches')}, "
-            f"memory_delta_chars={delta_chars}"
-        )
+    log_compaction_completed(
+        logger,
+        log_ctx,
+        serialized_before=serialized_chars,
+        serialized_after=new_serialized,
+        compression_ratio=ratio,
+        num_batches=summary_result.get("num_batches"),
+        memory_delta_chars=delta_chars,
+        archive_suffix=archive_suffix,
+    )
 
 
 def maybe_run_summary_compaction(
@@ -289,23 +288,22 @@ def maybe_run_summary_compaction(
     is_cli_mode: bool,
     on_summary_applied: Optional[Callable[[Dict[str, Any]], None]] = None,
 ) -> bool:
-    logger = getattr(ctx, "logger", None)
+    logger = logger_from_ctx(ctx)
     thread_id = getattr(state, "thread_id", None)
     if summary_trigger_chars <= 0:
         return False
     full_messages = without_system_messages(getattr(state, "messages", []))
     trigger_volume = calc_history_chars_for_trigger(full_messages)
     serialized_chars = calc_messages_chars_total(full_messages)
-    if logger is not None:
-        logger.info(
-            "summary_precheck reason=%s thread_id=%s history_messages=%s trigger_volume=%s serialized_chars=%s threshold=%s",
-            trigger_reason,
-            thread_id,
-            len(full_messages),
-            trigger_volume,
-            serialized_chars,
-            summary_trigger_chars,
-        )
+    log_compaction_precheck(
+        logger,
+        trigger_reason=trigger_reason,
+        thread_id=thread_id,
+        history_messages_count=len(full_messages),
+        trigger_volume=trigger_volume,
+        serialized_chars=serialized_chars,
+        threshold=summary_trigger_chars,
+    )
     if trigger_volume <= summary_trigger_chars:
         return False
 
@@ -315,5 +313,6 @@ def maybe_run_summary_compaction(
         trigger_reason=trigger_reason,
         is_cli_mode=is_cli_mode,
         on_summary_applied=on_summary_applied,
+        trigger_threshold_chars=summary_trigger_chars,
     )
     return True

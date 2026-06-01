@@ -284,6 +284,8 @@ class SummaryTriggersTest(unittest.TestCase):
 
             hook = captured.get("pre_backend_compaction_hook")
             self.assertTrue(callable(hook))
+            turn_end_hook = captured.get("turn_end_compaction_hook")
+            self.assertTrue(callable(turn_end_hook))
 
     def test_thread_history_not_readded_into_current_user_intent(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
