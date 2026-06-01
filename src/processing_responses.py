@@ -580,7 +580,7 @@ def run_agent(
                                 "fail_open_error",
                                 "fail_open_limit",
                             ):
-                                state.current_user_intent = []
+                                state.flush_current_user_intent()
                                 return finish_arguments
                             elif decision.outcome == "accept":
                                 state.flush_current_user_intent()

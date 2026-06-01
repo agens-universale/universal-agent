@@ -101,9 +101,11 @@ def test_subagent_gate_validates_assignment_not_orchestrator_cli_intent():
     assert decision.outcome == "reject"
     assert decision.validation is not None
     assert decision.validation.action == "continue_work"
-    requests = captured["current_user_requests"]
+    from intent_fixtures import intent_user_ask_texts_from_jsonl
+
+    requests = intent_user_ask_texts_from_jsonl(captured["current_user_requests"])
     assert requests == [assignment]
-    assert "бухгалтерии" not in " ".join(requests)
+    assert "бухгалтерии" not in " ".join(captured["current_user_requests"])
     assert "continue_work" in decision.feedback_text.lower()
     assert "foo.py" in decision.feedback_text
 

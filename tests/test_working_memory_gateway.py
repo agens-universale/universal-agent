@@ -80,17 +80,31 @@ something else
 </goal>
 """
 
-    deltas = parse_memory_deltas(raw)
+    deltas, present = parse_memory_deltas(raw)
 
     assert deltas == WorkingMemoryDeltas(
         goal="- finalize cutover",
         state="New status line",
     )
+    assert present == frozenset({"goal", "state"})
 
 
 def test_parse_memory_deltas_returns_empty_on_broken_or_empty_payload():
-    assert parse_memory_deltas("just text without tags") == WorkingMemoryDeltas()
-    assert parse_memory_deltas("<goal></goal><state>   </state>") == WorkingMemoryDeltas()
+    deltas, present = parse_memory_deltas("just text without tags")
+    assert deltas == WorkingMemoryDeltas()
+    assert present == frozenset()
+
+    deltas, present = parse_memory_deltas("<goal></goal><state>   </state>")
+    assert deltas == WorkingMemoryDeltas(goal="", state="")
+    assert present == frozenset({"goal", "state"})
+
+
+def test_parse_memory_deltas_omits_empty_append_tags():
+    deltas, present = parse_memory_deltas(
+        "<knowledge></knowledge><constraints>  </constraints><knowledge>fact</knowledge>"
+    )
+    assert deltas == WorkingMemoryDeltas(knowledge="fact")
+    assert present == frozenset({"knowledge"})
 
 
 def test_register_merge_modes_match_spec():
@@ -144,6 +158,23 @@ def test_apply_replace_deltas_only_replace_registers():
     assert updated.state == "new state snapshot"
     assert updated.constraints == "existing constraints"
     assert updated.knowledge == "existing knowledge"
+
+
+def test_apply_replace_deltas_clears_register_when_touched_and_empty():
+    snapshot = WorkingMemorySnapshot(
+        goal="old goal",
+        state="old state",
+    )
+    deltas = WorkingMemoryDeltas(goal="", state="done")
+
+    updated = apply_replace_deltas(
+        snapshot,
+        deltas,
+        touched=frozenset({"goal", "state"}),
+    )
+
+    assert updated.goal == ""
+    assert updated.state == "done"
 
 
 def test_apply_memory_patch_combines_append_and_replace():
@@ -217,7 +248,7 @@ def test_parse_memory_deltas_with_repair_invokes_callback_once():
         assert text == raw
         return "<goal>recovered goal</goal>"
 
-    deltas, attempted, repaired_raw = parse_memory_deltas_with_repair(
+    deltas, present, attempted, repaired_raw = parse_memory_deltas_with_repair(
         raw,
         repair_fn=_repair,
         min_chars_for_repair=100,
@@ -226,6 +257,7 @@ def test_parse_memory_deltas_with_repair_invokes_callback_once():
     assert attempted is True
     assert repaired_raw == "<goal>recovered goal</goal>"
     assert deltas == WorkingMemoryDeltas(goal="recovered goal")
+    assert present == frozenset({"goal"})
     assert calls["count"] == 1
 
 
@@ -260,7 +292,7 @@ def test_parse_memory_deltas_with_repair_skips_callback_when_not_needed():
         calls["count"] += 1
         return "<goal>unexpected</goal>"
 
-    deltas, attempted, repaired_raw = parse_memory_deltas_with_repair(
+    deltas, present, attempted, repaired_raw = parse_memory_deltas_with_repair(
         raw,
         repair_fn=_repair,
         min_chars_for_repair=100,
@@ -269,4 +301,5 @@ def test_parse_memory_deltas_with_repair_skips_callback_when_not_needed():
     assert attempted is False
     assert repaired_raw == raw
     assert deltas == WorkingMemoryDeltas(state="ok")
+    assert present == frozenset({"state"})
     assert calls["count"] == 0

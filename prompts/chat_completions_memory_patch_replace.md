@@ -4,16 +4,17 @@ You receive:
 1) full dialog history
 2) current summary (rolling continuation context)
 
-Return full register snapshots. Use one or both of these tags (include only registers that need updates):
+Return **full snapshots** for replace registers. You **must** output **both** tags on every run:
+
 <goal>...</goal>
 <state>...</state>
 
 Rules:
-- Output complete current snapshot for each tag (replace semantics downstream), not incremental deltas.
-- goal: one clear statement of the current user objective or task.
-- state: open TODOs, blockers, next step — current status only; drop completed or stale items.
-- Base content on dialog + summary only.
+- **Replace semantics downstream:** the text inside each tag becomes the **entire** new value of that register (not an incremental delta).
+- **Always include both `<goal>` and `<state>`** with up-to-date text after summarization. Do not omit a tag to mean “unchanged”.
+- **goal:** current user objective, success criteria, or definition of done — one clear snapshot.
+- **state:** open TODOs, blockers, next step — current status only; drop completed or stale items.
+- Base content on dialog + summary only. After a normal turn there is almost always something meaningful for goal and/or state.
+- An **empty tag body** (`<goal></goal>`) means **clear that register** — use only if the thread truly has no remaining objective (goal) or no open work/blockers (state). Do **not** leave both empty unless the task is fully closed with nothing pending; that case should be rare.
 - Do NOT include verbose tool logs or repeated phrasing.
 - Do not add facts that are not supported by dialog/summary.
-- If there is no meaningful update for a register, omit that tag entirely.
-- If there is no meaningful update at all, return an empty response (no tags).

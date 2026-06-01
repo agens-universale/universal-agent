@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import json
+
 from intent_log import (
     ACTION_USER_ASK,
     IntentRecord,
     append_user_ask,
+    records_to_jsonl_lines,
     serialize_for_meta,
 )
 
@@ -38,6 +41,22 @@ def intent_user_ask_texts(records) -> list[str]:
         for record in records
         if getattr(record, "action", None) == ACTION_USER_ASK
     ]
+
+
+def intent_jsonl_lines(records) -> list[str]:
+    """Canonical JSONL wire lines for finish gate / validator payloads."""
+    return records_to_jsonl_lines(records)
+
+
+def intent_user_ask_texts_from_jsonl(lines: list[str]) -> list[str]:
+    out: list[str] = []
+    for line in lines or []:
+        if not isinstance(line, str) or not line.strip():
+            continue
+        obj = json.loads(line)
+        if obj.get("action") == ACTION_USER_ASK:
+            out.append(str(obj.get("content") or ""))
+    return out
 
 
 def seed_state_intent(

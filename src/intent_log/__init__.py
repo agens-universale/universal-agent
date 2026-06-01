@@ -19,8 +19,7 @@ from intent_log.record import (
 )
 from intent_log.serialize import (
     deserialize_list,
-    render_for_finish_gate,
-    records_to_summary_lines,
+    records_to_jsonl_lines,
     serialize,
     serialize_for_meta,
 )
@@ -41,8 +40,7 @@ __all__ = [
     "record_from_dict",
     "serialize",
     "serialize_for_meta",
-    "render_for_finish_gate",
-    "records_to_summary_lines",
+    "records_to_jsonl_lines",
     "tail_preview",
     "utc_now_ts",
     "validate_record",

@@ -148,7 +148,9 @@ def build_memory_deltas_format_repair_messages(raw_output: str) -> List[Dict[str
     system_prompt = (
         "You are a strict formatter. Convert input text into working_memory register tags only. "
         f"Use zero or more of: {register_tags}. "
-        "Do not add new facts. Preserve meaning. Omit empty registers."
+        "Do not add new facts. Preserve meaning. "
+        "Append step: omit empty append-register tags. "
+        "Replace step: keep empty replace-register tags (empty body means clear)."
     )
     user_prompt = (
         "<raw_memory_step_output>\n"
@@ -161,18 +163,24 @@ def build_memory_deltas_format_repair_messages(raw_output: str) -> List[Dict[str
     ]
 
 
-def parse_memory_deltas(raw_output: str) -> WorkingMemoryDeltas:
+def parse_memory_deltas(raw_output: str) -> tuple[WorkingMemoryDeltas, frozenset[str]]:
+    """Parse register tags; return deltas and which register names were present in output."""
     text = str(raw_output or "")
     deltas: Dict[str, str] = {}
+    present: set[str] = set()
     for name in REGISTER_ORDER:
         pattern = rf"<{name}>\s*(.*?)\s*</{name}>"
-        match = re.search(pattern, text, re.IGNORECASE | re.DOTALL)
-        if not match:
+        matches = list(re.finditer(pattern, text, re.IGNORECASE | re.DOTALL))
+        if not matches:
             continue
-        value = (match.group(1) or "").strip()
+        value = (matches[-1].group(1) or "").strip()
         if value:
             deltas[name] = value
-    return _deltas_from_mapping(deltas)
+            present.add(name)
+        elif REGISTER_MERGE_MODES.get(name) == "replace":
+            deltas[name] = ""
+            present.add(name)
+    return _deltas_from_mapping(deltas), frozenset(present)
 
 
 def should_attempt_memory_deltas_repair(
@@ -193,23 +201,26 @@ def parse_memory_deltas_with_repair(
     *,
     repair_fn: Callable[[str], str] | None = None,
     min_chars_for_repair: int = 100,
-) -> tuple[WorkingMemoryDeltas, bool, str]:
-    first_pass = parse_memory_deltas(raw_output)
+) -> tuple[WorkingMemoryDeltas, frozenset[str], bool, str]:
+    first_pass, first_present = parse_memory_deltas(raw_output)
     if not should_attempt_memory_deltas_repair(
         raw_output,
         first_pass,
         min_chars_for_repair=min_chars_for_repair,
     ):
-        return first_pass, False, str(raw_output or "")
+        return first_pass, first_present, False, str(raw_output or "")
     if repair_fn is None:
-        return first_pass, False, str(raw_output or "")
+        return first_pass, first_present, False, str(raw_output or "")
     repaired_output = str(repair_fn(str(raw_output or "")) or "")
-    return parse_memory_deltas(repaired_output), True, repaired_output
+    repaired_pass, repaired_present = parse_memory_deltas(repaired_output)
+    return repaired_pass, repaired_present, True, repaired_output
 
 
 def apply_append_deltas(
     snapshot: WorkingMemorySnapshot,
     deltas: WorkingMemoryDeltas | Mapping[str, str] | None,
+    *,
+    touched: frozenset[str] | None = None,
 ) -> WorkingMemorySnapshot:
     delta_map: Mapping[str, str] = coerce_working_memory_deltas(deltas).to_dict(
         skip_empty=False
@@ -217,6 +228,8 @@ def apply_append_deltas(
     merged: Dict[str, str] = snapshot.to_dict()
     for name in REGISTER_ORDER:
         if REGISTER_MERGE_MODES.get(name) != "append":
+            continue
+        if touched is not None and name not in touched:
             continue
         delta_text = _normalize_register_text(delta_map.get(name))
         if not delta_text:
@@ -229,6 +242,8 @@ def apply_append_deltas(
 def apply_replace_deltas(
     snapshot: WorkingMemorySnapshot,
     deltas: WorkingMemoryDeltas | Mapping[str, str] | None,
+    *,
+    touched: frozenset[str] | None = None,
 ) -> WorkingMemorySnapshot:
     delta_map: Mapping[str, str] = coerce_working_memory_deltas(deltas).to_dict(
         skip_empty=False
@@ -237,10 +252,15 @@ def apply_replace_deltas(
     for name in REGISTER_ORDER:
         if REGISTER_MERGE_MODES.get(name) != "replace":
             continue
-        delta_text = _normalize_register_text(delta_map.get(name))
-        if not delta_text:
+        if touched is not None:
+            if name not in touched:
+                continue
+        elif isinstance(deltas, Mapping) and name not in deltas:
             continue
-        merged[name] = delta_text
+        elif touched is None and not isinstance(deltas, Mapping):
+            if not _normalize_register_text(delta_map.get(name)):
+                continue
+        merged[name] = _normalize_register_text(delta_map.get(name, ""))
     return _snapshot_from_mapping(merged)
 
 
@@ -248,9 +268,16 @@ def apply_memory_patch(
     snapshot: WorkingMemorySnapshot,
     append_deltas: WorkingMemoryDeltas | Mapping[str, str] | None,
     replace_deltas: WorkingMemoryDeltas | Mapping[str, str] | None,
+    *,
+    append_touched: frozenset[str] | None = None,
+    replace_touched: frozenset[str] | None = None,
 ) -> WorkingMemorySnapshot:
-    updated = apply_append_deltas(snapshot, append_deltas)
-    return apply_replace_deltas(updated, replace_deltas)
+    updated = apply_append_deltas(
+        snapshot, append_deltas, touched=append_touched
+    )
+    return apply_replace_deltas(
+        updated, replace_deltas, touched=replace_touched
+    )
 
 
 def render_working_memory_for_summary_message(snapshot: WorkingMemorySnapshot) -> str:

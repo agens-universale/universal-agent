@@ -113,26 +113,9 @@ def serialize_for_meta(records: Iterable[IntentRecord | Mapping[str, Any]]) -> l
     return [validate_record(item).to_dict() for item in records]
 
 
-def render_for_finish_gate(items: Iterable[Any] | None) -> list[str]:
-    """Flat text lines for finish gate validator (structured + legacy meta)."""
-    return records_to_summary_lines(deserialize_list(items))
-
-
-def records_to_summary_lines(records: Iterable[IntentRecord]) -> list[str]:
-    """Flat lines for summary prompts and finish gate."""
-    lines: list[str] = []
-    for item in records:
-        record = validate_record(item)
-        if record.action == ACTION_USER_ASK:
-            lines.append(str(record.content))
-        elif record.action == ACTION_TOOL_AGGREGATED:
-            prefix = str(record.tool_name or "tool")
-            if record.fallback:
-                prefix = f"{prefix} [fallback]"
-            lines.append(f"[{prefix}] {record.content}")
-        elif record.action == ACTION_TOOL_RAW:
-            lines.append(
-                f"[intent_scope:raw] {record.tool_name}: "
-                f"{json.dumps(record.content, ensure_ascii=False)}"
-            )
-    return lines
+def records_to_jsonl_lines(records: Iterable[IntentRecord | Mapping[str, Any]]) -> list[str]:
+    """One canonical JSONL line per IntentRecord (§2.1)."""
+    text = serialize(records)
+    if not text:
+        return []
+    return text.splitlines()

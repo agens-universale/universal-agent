@@ -9,7 +9,7 @@ from intent_scope.agent_logging import (
     log_intent_scope_summary_start,
 )
 from config_modules.intent_scope import IntentScopeConfig
-from intent_log.serialize import records_to_summary_lines
+from intent_log.serialize import deserialize_list, records_to_jsonl_lines
 from message_format.dialog_history import truncate_text
 from summarize.llm import request_summary_text
 from utils.llm_chat_client import log_llm_prompt_and_result
@@ -53,10 +53,10 @@ def _load_system_prompt(ctx: Any) -> str:
 
 
 def _format_prior_intent(current_user_intent: List[Any]) -> str:
-    lines = records_to_summary_lines(list(current_user_intent or []))
+    lines = records_to_jsonl_lines(deserialize_list(current_user_intent or []))
     if not lines:
         return "(empty)"
-    return "\n".join(f"- {line}" for line in lines)
+    return "\n".join(lines)
 
 
 def _build_user_prompt(

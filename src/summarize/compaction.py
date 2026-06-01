@@ -1,4 +1,4 @@
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, Iterable, List, Optional
 
 from intent_log import serialize, serialize_for_meta, tail_preview
 from message_policy.user_message_policy import (
@@ -53,6 +53,8 @@ def apply_summary_state_patch(
     last_dialog_steps: str,
     memory_append_deltas: WorkingMemoryDeltas | Dict[str, str] | None = None,
     memory_replace_deltas: WorkingMemoryDeltas | Dict[str, str] | None = None,
+    memory_append_touched: Iterable[str] | None = None,
+    memory_replace_touched: Iterable[str] | None = None,
     summarized_messages_count: int,
     intent_log_preview_chars: int | None = None,
 ) -> str:
@@ -66,8 +68,16 @@ def apply_summary_state_patch(
     snapshot = read_snapshot_from_state(state)
     append_deltas = coerce_working_memory_deltas(memory_append_deltas)
     replace_deltas = coerce_working_memory_deltas(memory_replace_deltas)
-    if not append_deltas.is_empty() or not replace_deltas.is_empty():
-        snapshot = apply_memory_patch(snapshot, append_deltas, replace_deltas)
+    append_touched_f = frozenset(memory_append_touched or ())
+    replace_touched_f = frozenset(memory_replace_touched or ())
+    if append_touched_f or replace_touched_f or not append_deltas.is_empty() or not replace_deltas.is_empty():
+        snapshot = apply_memory_patch(
+            snapshot,
+            append_deltas,
+            replace_deltas,
+            append_touched=append_touched_f or None,
+            replace_touched=replace_touched_f or None,
+        )
 
     wm_dict = {name: snapshot.to_dict().get(name, "") for name in REGISTER_ORDER}
     shared.working_memory = wm_dict
@@ -180,6 +190,8 @@ def run_summary_compaction(
     memory_replace_deltas = coerce_working_memory_deltas(
         summary_result.get("memory_replace_deltas")
     )
+    memory_append_touched = summary_result.get("memory_append_touched")
+    memory_replace_touched = summary_result.get("memory_replace_touched")
     preview_chars = _intent_log_preview_chars_from_ctx(ctx)
     if logger is not None:
         logger.info("summary_received_raw_text=\n%s", raw_summary)
@@ -193,6 +205,8 @@ def run_summary_compaction(
         last_dialog_steps=str(summary_result.get("last_dialog_steps") or ""),
         memory_append_deltas=memory_append_deltas,
         memory_replace_deltas=memory_replace_deltas,
+        memory_append_touched=memory_append_touched,
+        memory_replace_touched=memory_replace_touched,
         summarized_messages_count=len(full_messages),
         intent_log_preview_chars=preview_chars,
     )

@@ -11,7 +11,11 @@ import pytest
 import requests
 
 from intent_guard.validation_result import ValidationResult
-from intent_fixtures import intent_user_ask_texts, seed_state_intent
+from intent_fixtures import (
+    intent_user_ask_texts,
+    intent_user_ask_texts_from_jsonl,
+    seed_state_intent,
+)
 
 
 def teardown_module(_module) -> None:
@@ -413,6 +417,7 @@ def test_submit_solution_validation_failure_fails_open(monkeypatch):
 
     assert result == _expected_finish_return()
     assert state.current_user_intent == []
+    assert intent_user_ask_texts(state.user_intent_log) == ["актуальный вопрос"]
     synthetic_outputs = [
         m
         for m in state.messages
@@ -477,8 +482,12 @@ def test_submit_solution_validation_receives_context_and_current_scope(monkeypat
     )
 
     assert result == _expected_finish_return()
-    assert captured["current_user_requests"] == ["актуальный вопрос", "уточнение"]
-    assert captured["context_user_messages"] == ["старый вопрос"]
+    assert intent_user_ask_texts_from_jsonl(
+        captured["current_user_requests"]
+    ) == ["актуальный вопрос", "уточнение"]
+    assert intent_user_ask_texts_from_jsonl(
+        captured["context_user_messages"]
+    ) == ["старый вопрос"]
 
 
 def test_finish_gate_builds_trace_digest_from_state_messages(monkeypatch):

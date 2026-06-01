@@ -97,6 +97,30 @@ def test_hook_appends_aggregated_record_after_llm_summary(monkeypatch):
     assert record.fallback is None
 
 
+def test_hook_raw_truncates_oversized_output(monkeypatch):
+    monkeypatch.setattr(
+        "intent_scope.hook.summarize_tool_intent_line",
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError("LLM must not run for raw")),
+    )
+    state = _make_state()
+    huge = "z" * 20_000
+    maybe_update_intent_scope_from_tool(
+        tool_name="submit_solution",
+        tool_output_raw=json.dumps({"blob": huge}),
+        tool_arguments='{"task_report":"done"}',
+        state=state,
+        ctx=_ctx(
+            backend="chat_completions",
+            tools=_tool("submit_solution", record="raw"),
+        ),
+    )
+    record = state.current_user_intent[0]
+    out_text = record.content["output"]
+    assert isinstance(out_text, str)
+    assert "[TEXT CUTTED]" in out_text
+    assert len(json.dumps(record.content, ensure_ascii=False)) <= 5200
+
+
 def test_hook_submit_solution_raw_skips_llm_and_stores_object(monkeypatch):
     monkeypatch.setattr(
         "intent_scope.hook.summarize_tool_intent_line",

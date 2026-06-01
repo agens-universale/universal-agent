@@ -159,8 +159,10 @@ def test_registered_only_for_chat_completions():
     assert tools["read_user_intent_log"]["tool_fabric"] is ReadUserIntentLog
 
 
-def test_render_for_finish_gate_round_trip_in_guard_path():
-    from intent_log import render_for_finish_gate
+def test_records_to_jsonl_lines_round_trip_for_guard_path():
+    import json
+
+    from intent_log import records_to_jsonl_lines
 
     current = append_user_ask([], "open ask", user_turn_seq=1, ts=FIXED_TS)
     current = append_tool_aggregated(
@@ -172,6 +174,8 @@ def test_render_for_finish_gate_round_trip_in_guard_path():
     )
     closed, log, _ = flush(current, [], user_turn_seq=1)
 
-    lines = render_for_finish_gate(log)
-    assert lines == ["open ask", "[ask_human] picked topic"]
-    assert render_for_finish_gate([]) == []
+    lines = records_to_jsonl_lines(log)
+    assert len(lines) == 2
+    assert json.loads(lines[0])["content"] == "open ask"
+    assert json.loads(lines[1])["action"] == "tool_result_aggregated"
+    assert records_to_jsonl_lines([]) == []

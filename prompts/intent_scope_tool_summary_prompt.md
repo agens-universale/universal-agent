@@ -4,7 +4,7 @@ You receive:
 - tool_name
 - tool_arguments (optional, may be truncated)
 - tool_output (raw tool response; JSON, markdown, or plain text)
-- prior_intent (bullet list of intent lines accumulated in the open user turn)
+- prior_intent (serialized intent for the open user turn so far: user asks, summaries, and outputs from earlier steps)
 
 Rules:
 - Output **1–2 sentences** of plain text only (no lists, no markdown headings, no reasoning).

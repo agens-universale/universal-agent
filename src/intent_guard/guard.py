@@ -4,7 +4,7 @@ import logging
 from dataclasses import dataclass
 from typing import Any, Literal
 
-from intent_log import render_for_finish_gate
+from intent_log import deserialize_list, records_to_jsonl_lines
 from intent_guard.agent_logging import (
     log_finish_gate_decision,
     log_finish_gate_skipped,
@@ -143,11 +143,11 @@ class FinishGateGuard:
             )
             return decision
 
-        current_user_intent = render_for_finish_gate(
-            list(getattr(self._state, "current_user_intent", []) or [])
+        current_user_intent = records_to_jsonl_lines(
+            deserialize_list(getattr(self._state, "current_user_intent", []) or [])
         )
-        user_intent_log = render_for_finish_gate(
-            list(getattr(self._state, "user_intent_log", []) or [])
+        user_intent_log = records_to_jsonl_lines(
+            deserialize_list(getattr(self._state, "user_intent_log", []) or [])
         )
 
         digest_chars = 0

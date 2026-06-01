@@ -11,6 +11,7 @@ from intent_scope.agent_logging import (
 )
 from config_modules.intent_scope import intent_scope_active, intent_scope_tool_record
 from intent_scope.append import append_tool_aggregated_to_current, append_tool_raw_to_current
+from intent_scope.raw_payload import truncate_raw_tool_payload
 from intent_scope.summarizer import (
     build_fallback_aggregated_content,
     summarize_tool_intent_line,
@@ -96,10 +97,16 @@ def _append_raw_tool_intent(
     tool_output_raw: str,
     tool_arguments: str,
     state: Any,
+    ctx: Any,
     log: Any,
 ) -> None:
+    scope_cfg = getattr(ctx, "intent_scope", None)
+    max_raw = int(getattr(scope_cfg, "max_raw_record_chars", 0) or 0)
     arguments = _parse_tool_arguments(tool_arguments)
     output = _parse_tool_output(tool_output_raw)
+    arguments, output = truncate_raw_tool_payload(
+        arguments, output, max_chars=max_raw
+    )
     appended = append_tool_raw_to_current(state, tool_name, arguments, output)
     if appended:
         log_intent_scope_delta_appended(
@@ -151,6 +158,7 @@ def maybe_update_intent_scope_from_tool(
             tool_output_raw=tool_output_raw,
             tool_arguments=tool_arguments,
             state=state,
+            ctx=ctx,
             log=log,
         )
         return

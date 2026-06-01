@@ -78,8 +78,8 @@ def validate_final_report_vs_user_intent(
 ) -> ValidationResult:
     """Run finish gate LLM validator.
 
-    ``current_user_requests`` and ``context_user_messages`` are flat lines from
-    ``intent_log.render_for_finish_gate`` (open turn and closed log).
+    ``current_user_requests`` and ``context_user_messages`` are JSONL lines
+    (one ``IntentRecord`` per line, §2.1) via ``records_to_jsonl_lines(deserialize_list(...))``.
     """
     args = _parse_submit_solution_args(submit_solution_arguments)
     active_user_requests = [str(x) for x in current_user_requests if isinstance(x, str)]

@@ -369,6 +369,8 @@ def summarize_dialog_via_chat_completions(
 
     memory_append_deltas = WorkingMemoryDeltas()
     memory_replace_deltas = WorkingMemoryDeltas()
+    append_touched: frozenset[str] = frozenset()
+    replace_touched: frozenset[str] = frozenset()
 
     def _repair_fn(raw: str) -> str:
         return memory_suggestions.request_memory_deltas_format_repair(
@@ -380,14 +382,14 @@ def summarize_dialog_via_chat_completions(
 
     def _run_patch_step(
         llm_result: Any,
-    ) -> tuple[WorkingMemoryDeltas, bool, bool, str]:
-        deltas, repair_attempted, raw_used = parse_memory_deltas_with_repair(
+    ) -> tuple[WorkingMemoryDeltas, frozenset[str], bool, bool, str]:
+        deltas, touched, repair_attempted, raw_used = parse_memory_deltas_with_repair(
             llm_result.raw_response,
             repair_fn=_repair_fn,
             min_chars_for_repair=100,
         )
-        repair_success = repair_attempted and not deltas.is_empty()
-        return deltas, repair_attempted, repair_success, raw_used
+        repair_success = repair_attempted and (bool(touched) or not deltas.is_empty())
+        return deltas, touched, repair_attempted, repair_success, raw_used
 
     if len(batches) <= 1:
         append_result = memory_suggestions.request_patch_append(
@@ -403,12 +405,20 @@ def summarize_dialog_via_chat_completions(
             history_text=full_history_text,
             summary_text=text,
         )
-        memory_append_deltas, append_repair, append_repair_ok, append_raw = _run_patch_step(
-            append_result
-        )
-        memory_replace_deltas, replace_repair, replace_repair_ok, replace_raw = _run_patch_step(
-            replace_result
-        )
+        (
+            memory_append_deltas,
+            append_touched,
+            append_repair,
+            append_repair_ok,
+            append_raw,
+        ) = _run_patch_step(append_result)
+        (
+            memory_replace_deltas,
+            replace_touched,
+            replace_repair,
+            replace_repair_ok,
+            replace_raw,
+        ) = _run_patch_step(replace_result)
         trace["memory_patch"] = {
             "executed": True,
             "input": {
@@ -477,6 +487,8 @@ def summarize_dialog_via_chat_completions(
         "current_user_intent": serialize_for_meta(open_records),
         "memory_append_deltas": memory_append_deltas,
         "memory_replace_deltas": memory_replace_deltas,
+        "memory_append_touched": sorted(append_touched),
+        "memory_replace_touched": sorted(replace_touched),
         "last_dialog_steps": last_dialog_steps,
         "num_batches": len(batches),
         "trace": trace,

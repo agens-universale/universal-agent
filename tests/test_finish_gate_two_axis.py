@@ -13,7 +13,11 @@ import importlib
 import intent_guard.guard as intent_guard_guard
 import pytest
 
-from intent_fixtures import intent_user_ask_texts, seed_state_intent
+from intent_fixtures import (
+    intent_user_ask_texts,
+    intent_user_ask_texts_from_jsonl,
+    seed_state_intent,
+)
 from intent_log import append_tool_aggregated
 from intent_guard.feedback import build_finish_gate_feedback
 from intent_guard.guard import FinishGateGuard
@@ -499,11 +503,13 @@ def test_guard_passes_structured_intent_lines_to_validator(monkeypatch):
     guard = FinishGateGuard(ctx=_make_ctx(), state=state)
     guard.evaluate_submit_solution(submit_solution_arguments={"solution_type": "full_solution"})
 
-    assert captured["current_user_requests"] == [
+    assert intent_user_ask_texts_from_jsonl(captured["current_user_requests"]) == [
         "open task",
-        "[ask_human] topic chosen",
     ]
-    assert captured["context_user_messages"] == ["closed task"]
+    assert len(captured["current_user_requests"]) == 2
+    assert intent_user_ask_texts_from_jsonl(captured["context_user_messages"]) == [
+        "closed task",
+    ]
 
 
 def test_run_agent_reject_continues_turn_with_technical_user_message(monkeypatch):

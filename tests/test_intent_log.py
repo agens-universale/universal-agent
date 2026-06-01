@@ -247,8 +247,10 @@ def test_tail_preview_returns_full_log_when_short():
     assert preview["content"] == serialize(records)
 
 
-def test_render_for_finish_gate_structured_and_legacy_strings():
-    from intent_log import render_for_finish_gate
+def test_records_to_jsonl_lines_emits_canonical_wire():
+    import json
+
+    from intent_log import deserialize_list, records_to_jsonl_lines
 
     records = [
         _user_ask("user line"),
@@ -260,6 +262,14 @@ def test_render_for_finish_gate_structured_and_legacy_strings():
             content="summary",
         ),
     ]
-    assert render_for_finish_gate(records) == ["user line", "[ask_human] summary"]
-    assert render_for_finish_gate(["legacy plain ask"]) == ["legacy plain ask"]
-    assert render_for_finish_gate(["[tool] legacy aggregated"]) == ["[tool] legacy aggregated"]
+    lines = records_to_jsonl_lines(records)
+    assert len(lines) == 2
+    assert json.loads(lines[0])["action"] == ACTION_USER_ASK
+    assert json.loads(lines[0])["content"] == "user line"
+    assert json.loads(lines[1])["action"] == ACTION_TOOL_AGGREGATED
+    assert json.loads(lines[1])["tool_name"] == "ask_human"
+
+    legacy_ask = records_to_jsonl_lines(deserialize_list(["legacy plain ask"]))
+    assert len(legacy_ask) == 1
+    assert json.loads(legacy_ask[0])["action"] == ACTION_USER_ASK
+    assert json.loads(legacy_ask[0])["content"] == "legacy plain ask"

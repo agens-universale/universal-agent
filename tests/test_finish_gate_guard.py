@@ -1,7 +1,9 @@
+import json
 import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from intent_log import ACTION_USER_ASK, append_user_ask, flush
 from intent_guard import guard as intent_guard_guard_module
 from intent_guard.guard import FinishGateGuard, resolve_finish_gate_max_rejections
 from intent_guard.validation_result import ValidationResult
@@ -123,6 +125,57 @@ class FinishGateGuardTest(unittest.TestCase):
 
         self.assertEqual(d.outcome, "fail_open_error")
         self.assertEqual(state.finish_gate_rejection_count, 0)
+
+    def test_validate_receives_jsonl_intent_lines(self) -> None:
+        ctx = SimpleNamespace(
+            config_dict={
+                "backend_api_mode": "chat_completions",
+                "strict_submit_solution_validation": True,
+                "finish_gate_max_iterations": 10,
+            }
+        )
+        closed_turn = append_user_ask([], "closed ask", user_turn_seq=0)
+        closed_turn, log, seq = flush(closed_turn, [], user_turn_seq=0)
+        open_turn = append_user_ask(closed_turn, "open ask", user_turn_seq=seq)
+        state = SimpleNamespace(
+            parent_state_id=None,
+            current_user_intent=open_turn,
+            user_intent_log=log,
+            finish_gate_rejection_count=0,
+        )
+        captured: dict[str, list[str]] = {}
+
+        def _capture(**kwargs):
+            captured["current"] = list(kwargs.get("current_user_requests") or [])
+            captured["context"] = list(kwargs.get("context_user_messages") or [])
+            return ValidationResult(
+                ok=True,
+                action="accept",
+                trace_ok=True,
+                report_ok=True,
+                trace_gaps=[],
+                report_mismatches=[],
+                missing_requirements=[],
+                conflicts=[],
+                coverage_score=1.0,
+                feedback_for_agent="",
+            )
+
+        with patch.object(
+            intent_guard_guard_module,
+            "validate_final_report_vs_user_intent",
+            _capture,
+        ):
+            FinishGateGuard(ctx=ctx, state=state).evaluate_submit_solution(
+                submit_solution_arguments={}
+            )
+
+        assert len(captured["current"]) == 1
+        row = json.loads(captured["current"][0])
+        assert row["action"] == ACTION_USER_ASK
+        assert row["content"] == "open ask"
+        assert len(captured["context"]) == 1
+        assert json.loads(captured["context"][0])["content"] == "closed ask"
 
 
 if __name__ == "__main__":
