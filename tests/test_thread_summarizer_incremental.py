@@ -46,7 +46,6 @@ def _ctx(trigger_chars: int = 120000):
                 "chat_completions_summary_trigger_chars": trigger_chars,
                 "incremental_batch_chars": incremental_batch_chars,
                 "max_accumulated_summary_chars": 20000,
-                "original_user_messages_max_chars": 20000,
                 "last_dialog_steps_count": 5,
                 "last_dialog_step_message_max_chars": 5000,
             },

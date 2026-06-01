@@ -29,7 +29,7 @@ class IntentScopeConfig(BaseModel):
     max_tool_output_chars: int = DEFAULT_INTENT_SCOPE_MAX_TOOL_OUTPUT_CHARS
     max_raw_record_chars: int = DEFAULT_INTENT_SCOPE_MAX_RAW_RECORD_CHARS
     read_page_record_limit: int = DEFAULT_INTENT_LOG_READ_PAGE_RECORD_LIMIT
-    fallback_raw_on_llm_error: bool = False
+    fallback_raw_on_llm_error: bool = True
     intent_scope_tool_summary_prompt_path: str | None = None
 
 

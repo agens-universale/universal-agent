@@ -81,7 +81,6 @@ summary:
   max_message_chars: 30000
   max_dialogue_chars: 1000000
   max_accumulated_summary_chars: 60000
-  original_user_messages_max_chars: 20000
   last_dialog_steps_count: 4
   last_dialog_step_message_max_chars: 6000
 

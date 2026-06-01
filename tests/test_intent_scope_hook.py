@@ -121,6 +121,107 @@ def test_hook_raw_truncates_oversized_output(monkeypatch):
     assert len(json.dumps(record.content, ensure_ascii=False)) <= 5200
 
 
+def test_finish_gate_reject_submit_in_current_without_flush():
+    """Ветка processing_responses после reject: patch output + hook, без flush."""
+    from intent_fixtures import intent_user_ask_texts, seed_state_intent
+    from intent_guard.guard import FinishGateDecision
+    from intent_guard.submit_solution_emit import (
+        apply_finish_gate_to_submit_output_in_state,
+        get_function_call_output_text,
+    )
+    from intent_guard.validation_result import ValidationResult
+    from tools.simple_tools.submit_solution import SubmitSolution
+
+    state = _make_state()
+    seed_state_intent(state, log=["closed turn"], current="open question")
+    closed_seq = state.user_turn_seq
+    closed_log_len = len(state.user_intent_log)
+    flush_calls: list[str] = []
+    real_flush = state.flush_current_user_intent
+
+    def _tracked_flush() -> None:
+        flush_calls.append("flush")
+        real_flush()
+
+    state.flush_current_user_intent = _tracked_flush
+
+    args = json.dumps(
+        {
+            "solution_type": "full_solution",
+            "task_report": "Сделано по запросу пользователя",
+            "handoff": "{}",
+        },
+        ensure_ascii=False,
+    )
+    raw_ok = SubmitSolution.output_from_cycle_stop_arguments(args)
+    assert raw_ok is not None
+    state.messages = [
+        {
+            "type": "function_call",
+            "name": "submit_solution",
+            "call_id": "call_finish",
+            "arguments": args,
+        },
+        {
+            "type": "function_call_output",
+            "call_id": "call_finish",
+            "output": raw_ok,
+        },
+    ]
+    validation = ValidationResult(
+        ok=False,
+        action="fix_report_and_continue",
+        trace_ok=False,
+        report_ok=False,
+        trace_gaps=["gap"],
+        report_mismatches=["mismatch"],
+        missing_requirements=["req"],
+        conflicts=["conflict"],
+        coverage_score=0.0,
+        feedback_for_agent="improve the answer",
+    )
+    decision = FinishGateDecision(
+        outcome="reject",
+        validation=validation,
+        feedback_text="Finish gate: fix report.",
+    )
+    apply_finish_gate_to_submit_output_in_state(
+        state=state,
+        finish_call_id="call_finish",
+        decision=decision,
+    )
+    final_output = get_function_call_output_text(state.messages, "call_finish") or ""
+    maybe_update_intent_scope_from_tool(
+        tool_name="submit_solution",
+        tool_output_raw=final_output,
+        tool_arguments=args,
+        state=state,
+        ctx=_ctx(
+            backend="chat_completions",
+            tools=_tool("submit_solution", record="raw"),
+        ),
+    )
+
+    assert flush_calls == []
+    assert state.user_turn_seq == closed_seq
+    assert len(state.user_intent_log) == closed_log_len
+    assert intent_user_ask_texts(state.user_intent_log) == ["closed turn"]
+    assert intent_user_ask_texts(state.current_user_intent) == ["open question"]
+
+    submit_records = [
+        r
+        for r in state.current_user_intent
+        if getattr(r, "tool_name", None) == "submit_solution"
+    ]
+    assert len(submit_records) == 1
+    assert submit_records[0].action == ACTION_TOOL_RAW
+    output = submit_records[0].content.get("output")
+    assert isinstance(output, dict)
+    assert output.get("ok") is False
+    assert output.get("status") == "rejected_by_finish_gate"
+    assert output.get("finish_gate", {}).get("action") == "fix_report_and_continue"
+
+
 def test_hook_submit_solution_raw_skips_llm_and_stores_object(monkeypatch):
     monkeypatch.setattr(
         "intent_scope.hook.summarize_tool_intent_line",

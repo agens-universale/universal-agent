@@ -48,6 +48,7 @@ def test_intent_scope_from_config_dict_from_params():
 def test_intent_scope_from_config_dict_defaults():
     cfg = intent_scope_from_config_dict({})
     assert cfg.tools == {}
+    assert cfg.fallback_raw_on_llm_error is True
     assert cfg.read_page_record_limit == DEFAULT_INTENT_LOG_READ_PAGE_RECORD_LIMIT
     assert cfg.max_raw_record_chars == DEFAULT_INTENT_SCOPE_MAX_RAW_RECORD_CHARS
 

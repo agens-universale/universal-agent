@@ -92,10 +92,8 @@ class ChatCompletionsPromptConfigTest(unittest.TestCase):
             self.assertEqual(
                 cfg["summary_params"]["max_accumulated_summary_chars"], 20000
             )
-            self.assertEqual(
-                cfg["summary_params"]["original_user_messages_max_chars"], 20000
-            )
             self.assertEqual(cfg["summary_params"]["intent_log_preview_chars"], 10000)
+            self.assertNotIn("original_user_messages_max_chars", cfg["summary_params"])
             self.assertTrue(
                 cfg["summary_params"][
                     "chat_completions_memory_patch_append_prompt_path"
@@ -126,7 +124,6 @@ class ChatCompletionsPromptConfigTest(unittest.TestCase):
                     "  max_message_chars: '45000'\n"
                     "  max_dialogue_chars: '900000'\n"
                     "  max_accumulated_summary_chars: '15000'\n"
-                    "  original_user_messages_max_chars: '12000'\n"
                     "  last_dialog_steps_count: '7'\n"
                     "  last_dialog_step_message_max_chars: '2500'\n"
                 )
@@ -143,9 +140,6 @@ class ChatCompletionsPromptConfigTest(unittest.TestCase):
             self.assertEqual(cfg["summary_params"]["max_dialogue_chars"], 900000)
             self.assertEqual(
                 cfg["summary_params"]["max_accumulated_summary_chars"], 15000
-            )
-            self.assertEqual(
-                cfg["summary_params"]["original_user_messages_max_chars"], 12000
             )
             self.assertEqual(cfg["summary_params"]["last_dialog_steps_count"], 7)
             self.assertEqual(
@@ -182,6 +176,18 @@ class ChatCompletionsPromptConfigTest(unittest.TestCase):
                 cfg["chat_completion_headers"]["Authorization"],
                 "Bearer sk-or-v1-test-token",
             )
+
+    def test_summary_original_user_messages_max_chars_in_yaml_is_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            cfg_path = os.path.join(tmp_dir, "config.yml")
+            with open(cfg_path, "w", encoding="utf-8") as fd:
+                fd.write(
+                    "backend:\n  api_mode: chat_completions\n"
+                    "summary:\n"
+                    "  original_user_messages_max_chars: 12000\n"
+                )
+            with self.assertRaises(ValidationError):
+                load_config(cfg_path)
 
     def test_summary_llm_in_yaml_is_rejected(self):
         with tempfile.TemporaryDirectory() as tmp_dir:

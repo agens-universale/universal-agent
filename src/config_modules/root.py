@@ -38,7 +38,6 @@ from config_modules.summary import (
     DEFAULT_MAX_ACCUMULATED_SUMMARY_CHARS,
     DEFAULT_MAX_DIALOGUE_CHARS,
     DEFAULT_MAX_MESSAGE_CHARS,
-    DEFAULT_ORIGINAL_USER_MESSAGES_MAX_CHARS,
     SummaryConfig,
 )
 
@@ -119,10 +118,6 @@ def resolve_paths(cfg: AppConfig, config_dir: str) -> None:
         cfg.summary.max_dialogue_chars = DEFAULT_MAX_DIALOGUE_CHARS
     if cfg.summary.max_accumulated_summary_chars <= 0:
         cfg.summary.max_accumulated_summary_chars = DEFAULT_MAX_ACCUMULATED_SUMMARY_CHARS
-    if cfg.summary.original_user_messages_max_chars <= 0:
-        cfg.summary.original_user_messages_max_chars = (
-            DEFAULT_ORIGINAL_USER_MESSAGES_MAX_CHARS
-        )
     if cfg.summary.incremental_batch_chars is None or cfg.summary.incremental_batch_chars <= 0:
         trigger = cfg.summary.chat_completions_summary_trigger_chars
         cfg.summary.incremental_batch_chars = (
