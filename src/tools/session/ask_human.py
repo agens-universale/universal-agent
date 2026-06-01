@@ -20,15 +20,16 @@ _RESPONSE_HINT = (
 )
 
 _TOOL_DESCRIPTION = (
-    "Ask the human user and wait for their free-form reply. "
-    "Use for clarification, confirmation, subjective judgment, or continuing a dialogue. "
+    "Request user input and wait for their reply (non-final). "
+    "Use to ask for a choice, clarification, missing data, or explicit confirmation before risky or irreversible actions. "
+    "Do NOT use for one-way status or explanations — use the intermediate-reply tool. "
+    "Do NOT use as the final report of a completed task — use the turn-finalizing tool. "
     "Be clear and include necessary context; avoid vague questions. "
-    "The `question` must be concise and should contain only the actual question (plus minimal context). "
-    "Do not put long explanations, full comparisons, or large background dumps into `question`; "
-    "deliver detailed material as a separate user-facing artifact when you can, and keep `question` to a short prompt that points to that artifact and states what you need. "
-    "When a finite choice set fits, prefer explicit options (A/B/C, numbered list, yes/no) "
-    "to minimize follow-up; otherwise ask openly. "
-    "After each call, follow the hint field in the tool result to handle the user's reply."
+    "The `question` must be concise: the actual question plus minimal context only. "
+    "Do not put long comparisons or background dumps into `question`; "
+    "put detailed material in a separate artifact and reference it briefly here. "
+    "When a finite choice set fits, prefer explicit options (A/B/C, numbered list, yes/no). "
+    "After each call, follow the hint field in the tool result to classify and act on the reply."
 )
 
 
@@ -70,9 +71,9 @@ class AskHuman(AbstractSimpleTool):
                     "question": {
                         "type": "string",
                         "description": (
-                            "Concise message to the human (markdown ok): the question, minimal context, "
-                            "and explicit answer options when choices are known. Not for long content—"
-                            "provide that as a separate artifact and reference it here."
+                            "Concise question to the human (markdown ok): what you need from them, "
+                            "minimal context, and explicit options when choices are known. "
+                            "Not for long content — use an artifact + short pointer here."
                         ),
                     }
                 },

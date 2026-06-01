@@ -27,7 +27,8 @@ class ReadStoredToolOutput(AbstractSimpleTool):
             "type": "function",
             "name": _TOOL_NAME,
             "description": (
-                "Reads a paginated fragment from a previously stored large tool output by output_ref."
+                "Read a paginated fragment of a previously stored large tool output by output_ref. "
+                "Pagination uses **characters** (Unicode code points): `offset` + `limit`."
             ),
             "parameters": {
                 "type": "object",
@@ -38,11 +39,16 @@ class ReadStoredToolOutput(AbstractSimpleTool):
                     },
                     "offset": {
                         "type": "integer",
-                        "description": "Character offset (Unicode code points). Default: 0.",
+                        "description": (
+                            "Character offset (Unicode code points) into the stored body. Default: 0."
+                        ),
                     },
                     "limit": {
                         "type": "integer",
-                        "description": "Requested max chars for page. Clamped to tool_output_inline_max_chars.",
+                        "description": (
+                            "Max characters to return from offset (not lines or records). "
+                            "Clamped to tool_output_inline_max_chars."
+                        ),
                     },
                 },
                 "required": ["output_ref"],

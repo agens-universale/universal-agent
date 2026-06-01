@@ -17,8 +17,9 @@ def test_tool_description_is_short():
 
 def test_tool_description_states_purpose_and_actions():
     desc = LongMemory.tool_description()["description"]
-    assert "Persistent project-scoped markdown memory" in desc
-    assert "Survives CLI restarts" in desc
+    assert "Project/long memory" in desc
+    assert "FUTURE sessions" in desc
+    assert "Survives restarts" in desc
     # Three actions must be named in description (so model knows action enum
     # carries meaning) but without per-action workflow prose.
     assert "read" in desc

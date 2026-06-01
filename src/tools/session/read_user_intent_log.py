@@ -33,10 +33,10 @@ class ReadUserIntentLog(AbstractSimpleTool):
             "type": "function",
             "name": _TOOL_NAME,
             "description": (
-                "Read-only access to the closed user intent log (chronological record of "
-                "user asks and scoped tool results from completed turns). "
-                "Use action=info for totals; action=read for a paginated JSONL page. "
-                "Open-turn records in current_user_intent are not included."
+                "Read-only access to the closed user intent log (completed turns). "
+                "Pagination for action=read uses **records** (JSONL entries), not lines or characters. "
+                "action=info returns totals; action=read returns a page from record index offset. "
+                "Open-turn data in current_user_intent is not included."
             ),
             "parameters": {
                 "type": "object",
@@ -52,7 +52,7 @@ class ReadUserIntentLog(AbstractSimpleTool):
                     "offset": {
                         "type": "integer",
                         "description": (
-                            "For action=read only. Record index to start from (0-based)."
+                            "For action=read only. 0-based **record** index (not char/line). Default: 0."
                         ),
                         "default": 0,
                     },

@@ -13,10 +13,9 @@ class AppendToFile(AbstractSimpleTool):
             "type": "function",
             "name": "append_to_file",
             "description": (
-                "Appends text to the end of a file. Use several calls with moderate `content` blocks to build large "
-                "files—do not put an entire long document in a single append. By default the file must exist, but it "
-                "can optionally be created. Returns a JSON string with fields: ok, path, created, bytes_appended, "
-                "separator, error."
+                "Append text to the end of an existing file (optional create). "
+                "Build large files with several moderate `content` chunks — not one huge append. "
+                "Use after an initial write stub, or to add sections incrementally; read back to verify when needed."
             ),
             "parameters": {
                 "type": "object",

@@ -13,12 +13,10 @@ class WriteToFile(AbstractSimpleTool):
             "type": "function",
             "name": "write_to_file",
             "description": (
-                "Writes text content to a file (optionally creating parent directories). By default overwrites the "
-                "target file. Keep each call small: `content` must be short (outline, stub, or first section only). "
-                "For long documents or articles, write a minimal file here, then append the rest with multiple "
-                "`append_to_file` calls (moderate-sized chunks per call). One huge `content` often breaks tool-call "
-                "JSON in chat APIs. Returns a JSON string with fields: ok, path, created, bytes_written, "
-                "mode, backup_path, error."
+                "Create or overwrite a text file (optional parent dirs). Keep each call small — stub or first section only. "
+                "For long documents: minimal write here, then chain append calls with moderate chunks. "
+                "Huge single `content` often breaks tool-call JSON. "
+                "Prefer this when you need a new file or full replace; use append to grow an existing file."
             ),
             "parameters": {
                 "type": "object",

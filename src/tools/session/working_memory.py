@@ -97,9 +97,10 @@ class WorkingMemory(AbstractSimpleTool):
             "type": "function",
             "name": "working_memory",
             "description": (
-                "Persistent per-thread operational memory for the agent. "
-                "This tool does NOT write files to disk or filesystem. "
-                "It stores compact durable task state that survives dialog summarization. "
+                "Thread/session memory for THIS dialogue only — not project-wide 'remember forever'. "
+                "Do not append on every trivial step; write after meaningful progress or before handoff/delegation. "
+                "This tool does NOT write files to disk. "
+                "Stores compact state that survives dialog summarization. "
                 "Use fixed registers only: "
                 "goal = user intent, desired outcome, success criteria, definition of done; "
                 "constraints = hard requirements, preferences, prohibitions, format/technical/safety limits; "

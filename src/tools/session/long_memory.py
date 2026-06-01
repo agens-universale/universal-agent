@@ -44,12 +44,10 @@ class LongMemory(AbstractSimpleTool):
             "type": "function",
             "name": "long_memory",
             "description": (
-                "Persistent project-scoped markdown memory. "
-                "Survives CLI restarts, process kills, machine reboots. "
-                "Three actions: read (load full content), append (add a short "
-                "delta), write (replace entirely; rare). "
-                "Use for project conventions, decisions, constraints, naming "
-                "rules — anything a future session must know."
+                "Project/long memory: durable facts for FUTURE sessions ('remember this rule', conventions, "
+                "artifact-first preferences, stable decisions). Not for turn-by-turn chat progress — use thread memory. "
+                "Survives restarts. Actions: read, append (short delta), write (full replace; rare). "
+                "Append verified bullets only; no secrets, chain-of-thought, or guesses as facts."
             ),
             "parameters": {
                 "type": "object",

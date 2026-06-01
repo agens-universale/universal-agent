@@ -7,11 +7,12 @@ from tools.simple_tool_base import AbstractSimpleTool
 _MAX_DIRECT_ANSWER_CHARS = 4096
 
 _TOOL_DESCRIPTION = (
-    "Provide a direct answer to the human user without requesting input. "
-    "Use this for one-way explanations, clarifications, or status updates. "
-    "Keep `answer` concise; for long material provide it as a separate user-facing artifact "
-    "and include only a short summary plus artifact path in `answer`. "
-    "Omit `artifact_path` when there is no separate artifact; if set, it must be a non-empty path."
+    "Intermediate user-visible reply (non-final): status, hypothesis, mini-explanation, or progress update. "
+    "The current task is NOT complete — you will continue with more tools after this. "
+    "Do NOT use for the final report of a multi-step task; use the turn-finalizing tool instead. "
+    "Do NOT use when you need the user's answer — use the ask-user tool. "
+    "Keep `answer` concise; for long material use a separate artifact and put only summary + path in `answer`. "
+    "Omit `artifact_path` when there is no artifact; if set, it must be a non-empty path."
 )
 
 
@@ -46,8 +47,8 @@ class AnswerQuestion(AbstractSimpleTool):
                     "answer": {
                         "type": "string",
                         "description": (
-                            "Concise user-facing answer text. Avoid long narratives; "
-                            "if details are long, provide short summary here and put full text into an artifact."
+                            "Concise intermediate user-facing text (status, partial insight, short clarification). "
+                            "Not a final task report. For long content: short summary here; full text in artifact."
                         ),
                     },
                     "artifact_path": {

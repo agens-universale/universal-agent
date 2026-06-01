@@ -174,24 +174,31 @@ class SubmitSolution(AbstractSimpleTool):
             "type": "function",
             "name": "submit_solution",
             "description": (
-                "Signals that the AI agent has finished the CURRENT USER TURN and is ready to hand control "
-                "back to the user. This is end-of-turn, not end-of-thread/session. "
-                "Use solution_type to indicate completeness for this turn. task_report describes what was done; "
-                "comment is for caveats, risks, or next steps. "
-                "Call exactly once at the end of each completed turn, and only after the agent has performed "
-                "all reasonable work it can do for this turn (including relevant tool use/verification when needed). "
-                "Do not call this tool early just to hand back control."
+                "Finalize the current user turn (turn-finalizing tool): call exactly once when you stop for this step. "
+                "End-of-turn, not end-of-thread. Use for done / partial / blocked outcomes with a self-contained report "
+                "and machine-readable handoff. "
+                "Do NOT use for brainstorming, mid-task status, or 'I explained something' while work continues — "
+                "use the intermediate-reply tool. Do NOT use to ask the user a question — use the ask-user tool. "
+                "Call only after reasonable work and verification for this turn when needed. "
+                "Do not call early just to return control."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "solution_type": {
                         "type": "string",
-                        "description": "Outcome type for the CURRENT TURN: full_solution (turn objective fully done), partial_solution (partially done), answer_question (direct answer to user question), couldnt_solve (failed to solve), need_additional_info (blocked, need more from user), abandoned (stopped by choice).",
+                        "description": (
+                            "Turn outcome: full_solution (objective done), partial_solution (meaningful progress, not done), "
+                            "answer_question (direct answer completed this turn), couldnt_solve, need_additional_info (blocked), "
+                            "abandoned."
+                        ),
                     },
                     "task_report": {
                         "type": "string",
-                        "description": "What was done in this turn: key steps, final result, assumptions, and evidence basis if tools were used. Plain text, no markdown. Required for full_solution, partial_solution, answer_question. For failure types: brief explanation of what happened.",
+                        "description": (
+                            "Final human-facing summary for this turn: what was done, result, assumptions, evidence. "
+                            "Plain text, no markdown. Not for mid-task status updates."
+                        ),
                     },
                     "comment": {
                         "type": "string",
