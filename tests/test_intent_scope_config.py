@@ -1,5 +1,5 @@
 from config_modules.intent_scope import (
-    DEFAULT_INTENT_LOG_READ_PAGE_LIMIT,
+    DEFAULT_INTENT_LOG_READ_PAGE_RECORD_LIMIT,
     IntentScopeConfig,
     IntentScopeToolConfig,
     backend_allows_intent_scope_hook,
@@ -47,20 +47,20 @@ def test_intent_scope_from_config_dict_from_params():
 def test_intent_scope_from_config_dict_defaults():
     cfg = intent_scope_from_config_dict({})
     assert cfg.tools == {}
-    assert cfg.read_page_limit == DEFAULT_INTENT_LOG_READ_PAGE_LIMIT
+    assert cfg.read_page_record_limit == DEFAULT_INTENT_LOG_READ_PAGE_RECORD_LIMIT
 
 
-def test_intent_scope_read_page_limit_from_config():
+def test_intent_scope_read_page_record_limit_from_config():
     cfg = intent_scope_from_config_dict(
-        {"intent_scope_params": {"read_page_limit": 8000}}
+        {"intent_scope_params": {"read_page_record_limit": 25}}
     )
-    assert cfg.read_page_limit == 8000
+    assert cfg.read_page_record_limit == 25
 
 
-def test_normalize_intent_scope_config_clamps_invalid_read_page_limit():
-    cfg = IntentScopeConfig(read_page_limit=0)
+def test_normalize_intent_scope_config_clamps_invalid_read_page_record_limit():
+    cfg = IntentScopeConfig(read_page_record_limit=0)
     normalize_intent_scope_config(cfg)
-    assert cfg.read_page_limit == DEFAULT_INTENT_LOG_READ_PAGE_LIMIT
+    assert cfg.read_page_record_limit == DEFAULT_INTENT_LOG_READ_PAGE_RECORD_LIMIT
 
 
 def test_backend_allows_intent_scope_hook_only_chat_completions():
@@ -80,4 +80,3 @@ def test_intent_scope_tools_map_accepts_record_modes():
     assert intent_scope_tool_record(cfg, "ask_human") == "aggregated"
     assert intent_scope_tool_record(cfg, "submit_solution") == "raw"
     assert intent_scope_tool_record(cfg, "missing") is None
-

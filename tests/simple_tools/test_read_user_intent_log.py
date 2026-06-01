@@ -3,7 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from config_modules.intent_scope import DEFAULT_INTENT_LOG_READ_PAGE_LIMIT
+from config_modules.intent_scope import DEFAULT_INTENT_LOG_READ_PAGE_RECORD_LIMIT
 from intent_log import (
     ACTION_TOOL_AGGREGATED,
     ACTION_USER_ASK,
@@ -73,17 +73,18 @@ def test_info_reports_closed_log_totals():
     assert res["action"] == "info"
     assert res["total_records"] == 2
     assert res["total_chars"] == len(serialize(records))
-    assert res["default_limit"] == DEFAULT_INTENT_LOG_READ_PAGE_LIMIT
+    assert res["default_limit"] == DEFAULT_INTENT_LOG_READ_PAGE_RECORD_LIMIT
     assert res["error"] is None
 
 
 def test_read_pagination_matches_read_page():
-    long_text = "x" * 30
-    records = [_record(long_text), _record("tail", turn=2)]
+    records = [_record("alpha"), _record("beta", turn=2), _record("gamma", turn=3)]
     state = _make_state(log=records)
-    page = read_page(records, offset=5, limit=10, default_limit=DEFAULT_INTENT_LOG_READ_PAGE_LIMIT)
+    page = read_page(
+        records, offset=1, limit=1, default_limit=DEFAULT_INTENT_LOG_READ_PAGE_RECORD_LIMIT
+    )
 
-    res = _call(state, action="read", offset=5, limit=10)
+    res = _call(state, action="read", offset=1, limit=1)
 
     assert res["ok"] is True
     assert res["action"] == "read"
@@ -94,6 +95,8 @@ def test_read_pagination_matches_read_page():
     assert res["truncated"] == page["truncated"]
     assert res["total_chars"] == page["total_chars"]
     assert res["total_records"] == page["total_records"]
+    assert res["page_records"] == 1
+    assert json.loads(res["content"].strip())["content"] == "beta"
 
 
 def test_read_default_limit_from_config():
@@ -102,7 +105,7 @@ def test_read_default_limit_from_config():
     ctx = SimpleNamespace(
         config_dict={
             "backend_api_mode": "chat_completions",
-            "intent_scope_params": {"read_page_limit": 123},
+            "intent_scope_params": {"read_page_record_limit": 123},
         }
     )
     tool = ReadUserIntentLog(ctx=ctx, state=state, config_dict=ctx.config_dict)
@@ -119,13 +122,16 @@ def test_read_offset_zero_after_long_thread():
     _seed_closed_log(state, *contents)
     full_log = list(state.user_intent_log)
 
-    res = _call(state, action="read", offset=0, limit=5000)
+    res = _call(state, action="read", offset=0, limit=10)
 
     assert res["ok"] is True
     assert res["offset"] == 0
-    assert res["content"] == serialize(full_log)[:5000]
+    assert res["limit"] == 10
+    assert res["content"] == serialize(full_log[:10])
+    assert res["page_records"] == 10
     assert res["total_records"] == len(full_log)
-    assert res["truncated"] is (len(serialize(full_log)) > 5000)
+    assert res["truncated"] is True
+    assert res["next_offset"] == 10
 
 
 def test_excludes_current_user_intent():

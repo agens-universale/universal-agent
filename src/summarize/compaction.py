@@ -1,6 +1,5 @@
 from typing import Any, Callable, Dict, List, Optional
 
-from config_modules.summary import DEFAULT_INTENT_LOG_PREVIEW_CHARS
 from intent_log import serialize, serialize_for_meta, tail_preview
 from message_policy.user_message_policy import (
     TECHNICAL_TYPE_DIALOG_SUMMARY,
@@ -12,7 +11,10 @@ from message_format.serialization import (
     calc_history_chars_for_trigger,
     calc_messages_chars_total,
 )
-from summarize.summary_message_body import build_dialog_summary_content
+from summarize.summary_message_body import (
+    build_dialog_summary_content,
+    resolve_intent_log_preview_chars,
+)
 from summarize.thread_summarizer import summarize_dialog_via_chat_completions
 from summarize.working_memory_gateway import (
     REGISTER_ORDER,
@@ -38,14 +40,10 @@ def without_system_messages(messages_list: List[dict]) -> List[dict]:
 
 def _intent_log_preview_chars_from_ctx(ctx: Any | None) -> int:
     if ctx is None:
-        return DEFAULT_INTENT_LOG_PREVIEW_CHARS
+        return resolve_intent_log_preview_chars(None)
     cfg = getattr(ctx, "config_dict", {}) or {}
     summary_params = cfg.get("summary_params") if isinstance(cfg.get("summary_params"), dict) else {}
-    try:
-        value = int(summary_params.get("intent_log_preview_chars", DEFAULT_INTENT_LOG_PREVIEW_CHARS))
-    except (TypeError, ValueError):
-        value = DEFAULT_INTENT_LOG_PREVIEW_CHARS
-    return value if value > 0 else DEFAULT_INTENT_LOG_PREVIEW_CHARS
+    return resolve_intent_log_preview_chars(summary_params)
 
 
 def apply_summary_state_patch(
@@ -56,7 +54,7 @@ def apply_summary_state_patch(
     memory_append_deltas: WorkingMemoryDeltas | Dict[str, str] | None = None,
     memory_replace_deltas: WorkingMemoryDeltas | Dict[str, str] | None = None,
     summarized_messages_count: int,
-    intent_log_preview_chars: int = DEFAULT_INTENT_LOG_PREVIEW_CHARS,
+    intent_log_preview_chars: int | None = None,
 ) -> str:
     shared = getattr(state, "shared", None)
     if shared is None:
@@ -77,7 +75,11 @@ def apply_summary_state_patch(
     working_memory_block = render_working_memory_for_summary_message(snapshot)
     closed_records = list(getattr(state, "user_intent_log", []) or [])
     open_records = list(getattr(state, "current_user_intent", []) or [])
-    preview_chars = intent_log_preview_chars if intent_log_preview_chars > 0 else DEFAULT_INTENT_LOG_PREVIEW_CHARS
+    preview_chars = (
+        resolve_intent_log_preview_chars({"intent_log_preview_chars": intent_log_preview_chars})
+        if intent_log_preview_chars is not None
+        else resolve_intent_log_preview_chars(None)
+    )
     summary_message_content = build_dialog_summary_content(
         summary_text=str(raw_summary or ""),
         last_dialog_steps=str(last_dialog_steps or ""),

@@ -114,6 +114,37 @@ def flush(
     return [], new_log, int(user_turn_seq) + 1
 
 
+def _log_totals(records: list[IntentRecord]) -> tuple[int, int]:
+    text = serialize(records)
+    return len(records), len(text)
+
+
+def _suffix_records_within_char_budget(
+    records: list[IntentRecord],
+    max_chars: int,
+) -> tuple[list[IntentRecord], int]:
+    """Largest suffix of ``records`` whose JSONL fits in ``max_chars`` (whole records only)."""
+    total = len(records)
+    if total == 0:
+        return [], 0
+    safe_max = max(0, int(max_chars))
+    if safe_max == 0:
+        return [], total
+
+    best_start = total
+    for start in range(total):
+        chunk = records[start:]
+        if len(serialize(chunk)) <= safe_max:
+            best_start = start
+            break
+
+    if best_start < total:
+        return records[best_start:], best_start
+
+    # Single record exceeds budget — still return the last record whole.
+    return records[-1:], total - 1
+
+
 def read_page(
     records: list[IntentRecord],
     offset: int,
@@ -121,15 +152,28 @@ def read_page(
     *,
     default_limit: int,
 ) -> dict[str, Any]:
-    """Char-offset slice over serialized closed log (read tool semantics)."""
-    text = serialize(records)
-    total_chars = len(text)
-    total_records = len(records)
+    """Paginate closed intent log by **record index** (``read_user_intent_log``).
+
+    ``offset`` and ``limit`` are counts of ``IntentRecord`` entries, not characters.
+    Page slice: ``records[offset : offset + limit]``; ``content`` is JSONL of that slice
+    (always whole lines).
+
+    Returned dict:
+    - ``offset``, ``limit``, ``next_offset`` — record indices (0-based);
+    - ``total_records``, ``total_chars`` — full closed log;
+    - ``default_limit`` — suggested ``limit`` when caller omits it (from config);
+    - ``page_records``, ``page_chars`` — size of this page;
+    - ``truncated`` — ``True`` if more records exist after this page.
+    """
+    total_records, total_chars = _log_totals(records)
     safe_offset = max(0, int(offset))
+    if safe_offset > total_records:
+        safe_offset = total_records
     safe_limit = max(0, int(limit))
-    content = text[safe_offset : safe_offset + safe_limit]
-    next_offset = safe_offset + len(content)
-    truncated = next_offset < total_chars
+    page_records = records[safe_offset : safe_offset + safe_limit]
+    content = serialize(page_records)
+    next_offset = safe_offset + len(page_records)
+    truncated = next_offset < total_records
     return {
         "total_chars": total_chars,
         "total_records": total_records,
@@ -139,6 +183,8 @@ def read_page(
         "content": content,
         "next_offset": next_offset,
         "truncated": truncated,
+        "page_chars": len(content),
+        "page_records": len(page_records),
     }
 
 
@@ -147,10 +193,11 @@ def read_info(
     *,
     default_limit: int,
 ) -> dict[str, Any]:
-    text = serialize(records)
+    """Totals for closed log; ``default_limit`` is records-per-page hint (not chars)."""
+    total_records, total_chars = _log_totals(records)
     return {
-        "total_chars": len(text),
-        "total_records": len(records),
+        "total_chars": total_chars,
+        "total_records": total_records,
         "default_limit": int(default_limit),
     }
 
@@ -159,26 +206,23 @@ def tail_preview(
     records: list[IntentRecord],
     max_chars: int,
 ) -> dict[str, Any]:
-    """Tail slice for summary preview (same offset/limit contract as read_page)."""
-    text = serialize(records)
-    total_chars = len(text)
-    total_records = len(records)
-    safe_max = max(0, int(max_chars))
-    if total_chars <= safe_max:
-        return {
-            "offset": 0,
-            "limit": safe_max,
-            "content": text,
-            "truncated": False,
-            "total_chars": total_chars,
-            "total_records": total_records,
-        }
-    offset = total_chars - safe_max
+    """Tail slice for dialog_summary: last records whose JSONL fits in ``max_chars``.
+
+    ``max_chars`` is a **character** budget; ``offset`` / ``limit`` in the result are
+    **record** index and count (same meaning as :func:`read_page`), not char positions.
+    """
+    total_records, total_chars = _log_totals(records)
+    tail_records, record_offset = _suffix_records_within_char_budget(records, max_chars)
+    content = serialize(tail_records)
+    page_records = len(tail_records)
+    truncated = record_offset > 0
     return {
-        "offset": offset,
-        "limit": safe_max,
-        "content": text[offset:],
-        "truncated": True,
+        "offset": record_offset,
+        "limit": page_records,
+        "content": content,
+        "truncated": truncated,
         "total_chars": total_chars,
         "total_records": total_records,
+        "page_chars": len(content),
+        "page_records": page_records,
     }

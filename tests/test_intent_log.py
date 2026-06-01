@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from config_modules.intent_scope import DEFAULT_INTENT_LOG_READ_PAGE_LIMIT
+from config_modules.intent_scope import DEFAULT_INTENT_LOG_READ_PAGE_RECORD_LIMIT
 from intent_log import (
     ACTION_TOOL_AGGREGATED,
     ACTION_TOOL_RAW,
@@ -154,51 +154,96 @@ def test_flush_moves_current_to_log_and_increments_seq():
     assert seq == 1
 
 
-def test_read_page_slices_by_characters():
+def test_read_page_slices_by_record_offset():
     records = [
         _user_ask("aaaa"),
         _user_ask("bbbb"),
+        _user_ask("cccc", turn=2),
     ]
-    full_text = serialize(records)
     page = read_page(
         records,
-        offset=0,
-        limit=20,
-        default_limit=DEFAULT_INTENT_LOG_READ_PAGE_LIMIT,
+        offset=1,
+        limit=1,
+        default_limit=DEFAULT_INTENT_LOG_READ_PAGE_RECORD_LIMIT,
     )
 
-    assert page["total_records"] == 2
-    assert page["total_chars"] == len(full_text)
-    assert page["content"] == full_text[:20]
-    assert page["truncated"] is (len(full_text) > 20)
-    assert page["next_offset"] == len(page["content"])
+    assert page["total_records"] == 3
+    assert page["offset"] == 1
+    assert page["limit"] == 1
+    assert page["page_records"] == 1
+    assert page["content"] == serialize([records[1]])
+    assert page["next_offset"] == 2
+    assert page["truncated"] is True
+    lines = page["content"].strip().splitlines()
+    assert len(lines) == 1
+    assert json.loads(lines[0])["content"] == "bbbb"
+
+
+def test_read_page_returns_valid_jsonl_for_every_page():
+    records = [_user_ask(f"line-{i}") for i in range(5)]
+    offset = 0
+    while offset < len(records):
+        page = read_page(
+            records,
+            offset,
+            2,
+            default_limit=DEFAULT_INTENT_LOG_READ_PAGE_RECORD_LIMIT,
+        )
+        if not page["content"]:
+            break
+        for line in page["content"].strip().splitlines():
+            json.loads(line)
+        offset = page["next_offset"]
 
 
 def test_read_info_reports_totals():
     records = [_user_ask("hello")]
-    info = read_info(records, default_limit=DEFAULT_INTENT_LOG_READ_PAGE_LIMIT)
+    info = read_info(records, default_limit=DEFAULT_INTENT_LOG_READ_PAGE_RECORD_LIMIT)
 
     assert info["total_records"] == 1
     assert info["total_chars"] == len(serialize(records))
-    assert info["default_limit"] == DEFAULT_INTENT_LOG_READ_PAGE_LIMIT
+    assert info["default_limit"] == DEFAULT_INTENT_LOG_READ_PAGE_RECORD_LIMIT
 
 
-def test_tail_preview_returns_tail_slice():
-    records = [_user_ask("x" * 10), _user_ask("y" * 10)]
-    preview = tail_preview(records, max_chars=15)
+def test_tail_preview_returns_suffix_records_within_char_budget():
+    records = [_user_ask("x" * 10), _user_ask("y" * 10, turn=2)]
+    preview = tail_preview(records, max_chars=10_000)
+
+    assert preview["truncated"] is False
+    assert preview["offset"] == 0
+    assert preview["limit"] == 2
+    assert preview["content"] == serialize(records)
+    for line in preview["content"].strip().splitlines():
+        json.loads(line)
+
+
+def test_tail_preview_truncates_by_records_not_mid_line():
+    records = [_user_ask("x" * 5), _user_ask("y" * 30, turn=2)]
+    preview = tail_preview(records, max_chars=50)
 
     assert preview["truncated"] is True
-    assert preview["offset"] == preview["total_chars"] - 15
-    assert len(preview["content"]) == 15
-    assert preview["content"] == serialize(records)[-15:]
+    assert preview["offset"] == 1
+    assert preview["limit"] == 1
+    assert preview["content"] == serialize([records[1]])
+    assert json.loads(preview["content"].strip())["content"] == "y" * 30
 
 
-def test_tail_preview_returns_full_text_when_short():
+def test_tail_preview_includes_oversized_single_record_whole():
+    records = [_user_ask("x" * 5), _user_ask("y" * 200, turn=2)]
+    preview = tail_preview(records, max_chars=20)
+
+    assert preview["offset"] == 1
+    assert preview["limit"] == 1
+    assert preview["content"] == serialize([records[1]])
+
+
+def test_tail_preview_returns_full_log_when_short():
     records = [_user_ask("short")]
     preview = tail_preview(records, max_chars=1000)
 
     assert preview["truncated"] is False
     assert preview["offset"] == 0
+    assert preview["limit"] == 1
     assert preview["content"] == serialize(records)
 
 

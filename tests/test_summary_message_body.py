@@ -3,9 +3,12 @@
 from intent_log import IntentRecord, read_page, serialize, tail_preview
 from intent_log.operations import utc_now_ts
 from intent_log.record import ACTION_USER_ASK
-from config_modules.intent_scope import DEFAULT_INTENT_LOG_READ_PAGE_LIMIT
+from config_modules.intent_scope import DEFAULT_INTENT_LOG_READ_PAGE_RECORD_LIMIT
 
-from summarize.summary_message_body import build_dialog_summary_content
+from summarize.summary_message_body import (
+    build_dialog_summary_content,
+    build_intent_blocks_prefix,
+)
 
 
 def _user_ask(content: str, *, turn: int = 1) -> IntentRecord:
@@ -94,16 +97,30 @@ def test_empty_current_skips_current_section():
     assert "<current_user_intent>" not in body
 
 
+def test_build_intent_blocks_prefix_matches_dialog_summary_wire_format():
+    closed = [_user_ask("closed turn"), _user_ask("older", turn=1)]
+    open_turn = [_user_ask("open turn")]
+    prefix = build_intent_blocks_prefix(closed, open_turn, intent_log_preview_chars=10_000)
+    assert "<user_intent_log " in prefix
+    assert '"action": "user_ask"' in prefix
+    assert "closed turn" in prefix
+    assert "<current_user_intent>" in prefix
+    assert "open turn" in prefix
+    assert "[intent_scope:raw]" not in prefix
+    assert "\n- closed" not in prefix
+
+
 def test_summary_intent_tail_matches_read_page_slice():
     closed = [_user_ask("x" * 20), _user_ask("y" * 20, turn=2)]
-    preview = tail_preview(closed, max_chars=25)
+    preview = tail_preview(closed, max_chars=120)
     page = read_page(
         closed,
         preview["offset"],
         preview["limit"],
-        default_limit=DEFAULT_INTENT_LOG_READ_PAGE_LIMIT,
+        default_limit=DEFAULT_INTENT_LOG_READ_PAGE_RECORD_LIMIT,
     )
     assert page["content"] == preview["content"]
+    assert preview["truncated"] is True
     body = build_dialog_summary_content(
         summary_text="S",
         last_dialog_steps="",

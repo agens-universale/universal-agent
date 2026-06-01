@@ -2,12 +2,16 @@ from typing import Any, Dict, List
 
 from config import _DEFAULT_LAST_DIALOG_STEP_MESSAGE_MAX_CHARS
 import message_format.dialog_history as dialog_history
-from intent_log import IntentRecord, records_to_summary_lines, serialize_for_meta
+from intent_log import IntentRecord, serialize_for_meta
 from summarize import (
     memory_suggestions,
     prompt_loading,
     summary_llm_steps,
     summary_message_body,
+)
+from summarize.summary_message_body import (
+    build_intent_blocks_prefix,
+    resolve_intent_log_preview_chars,
 )
 from summarize.summary_validation import FALLBACK_SUMMARY, validate_summary_text
 from summarize.llm import request_summary_text
@@ -179,26 +183,16 @@ def summarize_dialog_via_chat_completions(
     )
     closed_records = list(user_intent_log or [])
     open_records = list(current_user_intent or [])
-    closed_intent = records_to_summary_lines(closed_records)
-    open_intent = records_to_summary_lines(open_records)
-    closed_intent_text = (
-        "\n".join(f"- {x}" for x in closed_intent) if closed_intent else "- not found"
-    )
-    open_intent_text = (
-        "\n".join(f"- {x}" for x in open_intent) if open_intent else "- not found"
-    )
     persistent_state_block = resolve_persistent_state_block(
         state, persistent_state_block
     )
-    intent_blocks_prefix = (
-        "<user_intent_log>\n"
-        f"{closed_intent_text}\n"
-        "</user_intent_log>\n\n"
-        "<current_user_intent>\n"
-        f"{open_intent_text}\n"
-        "</current_user_intent>\n\n"
-        f"{persistent_state_block}\n\n"
+    intent_blocks_prefix = build_intent_blocks_prefix(
+        closed_records,
+        open_records,
+        intent_log_preview_chars=resolve_intent_log_preview_chars(summary_params),
     )
+    if persistent_state_block.strip():
+        intent_blocks_prefix = f"{intent_blocks_prefix}{persistent_state_block.strip()}\n\n"
     batches = dialog_history.split_turns_into_char_batches(
         dialog_history.group_into_turns(history_for_summary),
         batch_chars_limit=batch_chars_limit,

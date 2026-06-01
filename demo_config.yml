@@ -141,7 +141,7 @@ intent_scope:
       record: raw
   max_summary_chars: 500
   max_tool_output_chars: 8000
-  read_page_limit: 5000
+  read_page_record_limit: 10
   fallback_raw_on_llm_error: true
 
 summary:

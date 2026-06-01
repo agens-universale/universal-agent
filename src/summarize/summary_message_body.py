@@ -1,6 +1,10 @@
 """Тело сообщения с резюме треда: разметка секций и связанные строковые константы."""
 
-from typing import Any, Mapping
+from typing import Any, Iterable, Mapping
+
+from config_modules.summary import DEFAULT_INTENT_LOG_PREVIEW_CHARS
+from intent_log import serialize, tail_preview
+from intent_log.record import IntentRecord
 
 _WORKING_MEMORY_HINT = (
     "The block above inlines the current working_memory snapshot for this thread. "
@@ -15,7 +19,13 @@ def _bool_attr(value: bool) -> str:
 
 
 def render_user_intent_log_block(preview: Mapping[str, Any]) -> str:
-    """Closed log tail slice with read_user_intent_log-compatible attributes."""
+    """Closed log tail (from :func:`intent_log.tail_preview`) for dialog_summary.
+
+    ``preview`` is the dict from ``tail_preview`` / ``read_page``: ``offset`` and
+    ``limit`` are **record** index and count; ``total_chars`` is the full closed log.
+    Char budget for the tail comes from ``summary.intent_log_preview_chars``, not
+    from ``intent_scope.read_page_record_limit``.
+    """
     total_records = int(preview.get("total_records") or 0)
     content = str(preview.get("content") or "")
     if total_records <= 0 and not content.strip():
@@ -37,6 +47,47 @@ def render_current_user_intent_block(current_jsonl: str) -> str:
     if not body.strip():
         return ""
     return f"<current_user_intent>\n{body}\n</current_user_intent>"
+
+
+def resolve_intent_log_preview_chars(summary_params: Mapping[str, Any] | None) -> int:
+    """``summary_params.intent_log_preview_chars`` (closed-log tail budget in characters)."""
+    if not isinstance(summary_params, Mapping):
+        return DEFAULT_INTENT_LOG_PREVIEW_CHARS
+    try:
+        value = int(
+            summary_params.get("intent_log_preview_chars", DEFAULT_INTENT_LOG_PREVIEW_CHARS)
+        )
+    except (TypeError, ValueError):
+        value = DEFAULT_INTENT_LOG_PREVIEW_CHARS
+    return value if value > 0 else DEFAULT_INTENT_LOG_PREVIEW_CHARS
+
+
+def build_intent_blocks_prefix(
+    closed_records: Iterable[IntentRecord],
+    open_records: Iterable[IntentRecord],
+    *,
+    intent_log_preview_chars: int,
+) -> str:
+    """XML intent blocks for summary LLM (same wire format as ``dialog_summary``).
+
+    Closed log: ``tail_preview`` (whole records within char budget). Open turn: full JSONL.
+    """
+    safe_chars = (
+        int(intent_log_preview_chars)
+        if int(intent_log_preview_chars) > 0
+        else DEFAULT_INTENT_LOG_PREVIEW_CHARS
+    )
+    preview = tail_preview(list(closed_records), safe_chars)
+    parts: list[str] = []
+    log_block = render_user_intent_log_block(preview)
+    if log_block:
+        parts.append(log_block)
+    current_block = render_current_user_intent_block(serialize(list(open_records)))
+    if current_block:
+        parts.append(current_block)
+    if not parts:
+        return ""
+    return "\n\n".join(parts) + "\n\n"
 
 
 def build_dialog_summary_content(

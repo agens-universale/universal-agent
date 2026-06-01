@@ -2,7 +2,7 @@ import json
 from typing import Any, Dict, Optional
 
 from config_modules.intent_scope import (
-    DEFAULT_INTENT_LOG_READ_PAGE_LIMIT,
+    DEFAULT_INTENT_LOG_READ_PAGE_RECORD_LIMIT,
     intent_scope_from_config_dict,
 )
 from intent_log import deserialize_list, read_info, read_page
@@ -16,7 +16,9 @@ class ReadUserIntentLog(AbstractSimpleTool):
 
     def _default_limit(self) -> int:
         cfg = intent_scope_from_config_dict(self._config_dict or {})
-        return int(cfg.read_page_limit or DEFAULT_INTENT_LOG_READ_PAGE_LIMIT)
+        return int(
+            cfg.read_page_record_limit or DEFAULT_INTENT_LOG_READ_PAGE_RECORD_LIMIT
+        )
 
     def _closed_log(self) -> list:
         if self._state is None:
@@ -26,13 +28,14 @@ class ReadUserIntentLog(AbstractSimpleTool):
 
     @classmethod
     def tool_description(cls) -> Dict[str, Any]:
+        default_records = DEFAULT_INTENT_LOG_READ_PAGE_RECORD_LIMIT
         return {
             "type": "function",
             "name": _TOOL_NAME,
             "description": (
                 "Read-only access to the closed user intent log (chronological record of "
                 "user asks and scoped tool results from completed turns). "
-                "Use action=info for totals; action=read for a paginated JSONL slice. "
+                "Use action=info for totals; action=read for a paginated JSONL page. "
                 "Open-turn records in current_user_intent are not included."
             ),
             "parameters": {
@@ -43,24 +46,22 @@ class ReadUserIntentLog(AbstractSimpleTool):
                         "enum": ["info", "read"],
                         "description": (
                             "info = total_chars and total_records; "
-                            "read = paginated JSONL slice with offset and limit."
+                            "read = paginated JSONL page (offset/limit in records)."
                         ),
                     },
                     "offset": {
                         "type": "integer",
                         "description": (
-                            "For action=read only. Character offset into serialized log."
+                            "For action=read only. Record index to start from (0-based)."
                         ),
                         "default": 0,
                     },
                     "limit": {
                         "type": "integer",
                         "description": (
-                            "For action=read only. Max chars per page "
-                            f"(default {DEFAULT_INTENT_LOG_READ_PAGE_LIMIT}; "
-                            "overridden by intent_scope.read_page_limit when configured)."
+                            f"For action=read only. Max records per page (default {default_records})."
                         ),
-                        "default": DEFAULT_INTENT_LOG_READ_PAGE_LIMIT,
+                        "default": default_records,
                     },
                 },
                 "required": ["action"],
@@ -71,7 +72,7 @@ class ReadUserIntentLog(AbstractSimpleTool):
 
     @classmethod
     def prompt_description(cls) -> str:
-        page_limit = DEFAULT_INTENT_LOG_READ_PAGE_LIMIT
+        page_limit = DEFAULT_INTENT_LOG_READ_PAGE_RECORD_LIMIT
         return f"""Tool name: read_user_intent_log
 Tool description: Read-only paginated access to closed user_intent_log (completed turns).
 
@@ -80,9 +81,9 @@ Input schema:
 
 Behavior:
 - Source: state.user_intent_log only (not current_user_intent).
-- action=info: total_chars, total_records (no pagination; default_limit in response is the suggested page size for read).
-- action=read: offset (default 0), limit (default {page_limit}), content (JSONL), next_offset, truncated.
-- Slice is over serialize(log) character indices (same contract as dialog_summary tail preview).
+- action=info: total_chars, total_records, default_limit (suggested records per read page).
+- action=read: offset/limit in **records** (default limit {page_limit}), content (valid JSONL), next_offset, truncated, page_chars, page_records.
+- Same record offset/limit contract as dialog_summary intent log tail preview.
 """
 
     def _payload(self, *, ok: bool, action: str, body: Dict[str, Any]) -> str:

@@ -9,7 +9,7 @@ _logger = logging.getLogger(__name__)
 
 DEFAULT_INTENT_SCOPE_MAX_SUMMARY_CHARS = 500
 DEFAULT_INTENT_SCOPE_MAX_TOOL_OUTPUT_CHARS = 8000
-DEFAULT_INTENT_LOG_READ_PAGE_LIMIT = 5000
+DEFAULT_INTENT_LOG_READ_PAGE_RECORD_LIMIT = 10
 
 IntentScopeRecordMode = Literal["aggregated", "raw"]
 
@@ -26,7 +26,7 @@ class IntentScopeConfig(BaseModel):
     tools: dict[str, IntentScopeToolConfig] = Field(default_factory=dict)
     max_summary_chars: int = DEFAULT_INTENT_SCOPE_MAX_SUMMARY_CHARS
     max_tool_output_chars: int = DEFAULT_INTENT_SCOPE_MAX_TOOL_OUTPUT_CHARS
-    read_page_limit: int = DEFAULT_INTENT_LOG_READ_PAGE_LIMIT
+    read_page_record_limit: int = DEFAULT_INTENT_LOG_READ_PAGE_RECORD_LIMIT
     fallback_raw_on_llm_error: bool = False
     intent_scope_tool_summary_prompt_path: str | None = None
 
@@ -46,13 +46,13 @@ def normalize_intent_scope_config(cfg: IntentScopeConfig) -> None:
             DEFAULT_INTENT_SCOPE_MAX_TOOL_OUTPUT_CHARS,
         )
         cfg.max_tool_output_chars = DEFAULT_INTENT_SCOPE_MAX_TOOL_OUTPUT_CHARS
-    if cfg.read_page_limit <= 0:
+    if cfg.read_page_record_limit <= 0:
         _logger.warning(
-            "intent_scope.read_page_limit=%s must be > 0; using %s",
-            cfg.read_page_limit,
-            DEFAULT_INTENT_LOG_READ_PAGE_LIMIT,
+            "intent_scope.read_page_record_limit=%s must be > 0; using %s",
+            cfg.read_page_record_limit,
+            DEFAULT_INTENT_LOG_READ_PAGE_RECORD_LIMIT,
         )
-        cfg.read_page_limit = DEFAULT_INTENT_LOG_READ_PAGE_LIMIT
+        cfg.read_page_record_limit = DEFAULT_INTENT_LOG_READ_PAGE_RECORD_LIMIT
 
 
 def intent_scope_active(cfg: IntentScopeConfig) -> bool:
