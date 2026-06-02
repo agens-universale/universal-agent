@@ -1,0 +1,11 @@
+id: science-article-creator
+name: Science Article Creator
+description: |
+  Pack for scientific literature work: search papers and preprints in
+  arXiv/bioRxiv/medRxiv/OpenAlex/PubMed via science-mcp, build topical
+  reviews with verified citations, fact-check existing scientific articles,
+  structure raw research material into a research artifact, and orchestrate
+  long-running scientific investigations. Separate from the `articles` pack
+  so everyday article authoring is unaffected by academic-grade routing.
+version: 0.1.0
+bootstrap_skill: using-science-article-creator

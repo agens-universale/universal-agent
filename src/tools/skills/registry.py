@@ -240,6 +240,7 @@ class SkillsRegistry:
         system_root: Optional[str] = None,
         user_root: Optional[str] = None,
         project_root: Optional[str] = None,
+        disable_skills: Optional[List[str]] = None,
     ) -> None:
         # Legacy: если передан skills_root и никаких новых — режим single-source.
         # В этом режиме все скиллы помечаются как source="user".
@@ -264,6 +265,11 @@ class SkillsRegistry:
                 project_root if project_root is not None else _project_skills_root()
             )
             self._walk_packs_enabled = True
+        # Canonical id'ы скиллов / паков, исключаемых при загрузке.
+        # Пакет (`pack-id`) убирает и bootstrap, и все inner. Flat-скилл
+        # (`skill-id`) убирает один. Поведение list_skills() / load_skill()
+        # неизменно — отключённого скилла «как будто нет».
+        self._disabled: set[str] = set(disable_skills or [])
         self._skills_by_id: Dict[str, Skill] = {}
         self._packs_by_id: Dict[str, Dict[str, Any]] = {}
         self._loaded: bool = False
@@ -302,7 +308,7 @@ class SkillsRegistry:
                     self._load_pack_contents(entry_path, dir_name=entry, source=source)
                 elif has_skill_md:
                     skill = self._load_skill_dir(entry_path, dir_name=entry, source=source)
-                    if skill is not None:
+                    if skill is not None and skill.id not in self._disabled:
                         self._skills_by_id[skill.id] = skill
                 # else: пусто, скип
 
@@ -374,6 +380,9 @@ class SkillsRegistry:
         manifest = _load_pack_manifest(pack_dir, dir_name=dir_name)
         manifest["source"] = source
         canonical_pack_id = manifest["id"]
+        # Disable целого пакета: ни manifest, ни inner-скиллы не регистрируем.
+        if canonical_pack_id in self._disabled:
+            return
         self._packs_by_id[canonical_pack_id] = manifest
 
         for inner_entry in sorted(os.listdir(pack_dir)):
@@ -388,7 +397,7 @@ class SkillsRegistry:
                 source=source,
                 pack_id=canonical_pack_id,
             )
-            if skill is not None:
+            if skill is not None and skill.id not in self._disabled:
                 self._skills_by_id[skill.id] = skill
 
     # Публичный API реестра
@@ -665,16 +674,24 @@ def get_skills_registry(config_dict: Optional[Dict[str, Any]] = None) -> SkillsR
       + Project (<cwd>/.gc/skills/), приоритет project > user > system.
     """
     skills_root: Optional[str] = None
+    disable_skills: List[str] = []
     if config_dict is not None:
         raw = config_dict.get("skills_data_path")
         if isinstance(raw, str):
             path = raw.strip()
             if path:
                 skills_root = path
+        raw_disabled = config_dict.get("disable_skills")
+        if isinstance(raw_disabled, list):
+            disable_skills = [
+                str(item).strip()
+                for item in raw_disabled
+                if isinstance(item, (str, int)) and str(item).strip()
+            ]
 
     if skills_root is not None:
-        return SkillsRegistry(skills_root=skills_root)
-    return SkillsRegistry()
+        return SkillsRegistry(skills_root=skills_root, disable_skills=disable_skills)
+    return SkillsRegistry(disable_skills=disable_skills)
 
 
 __all__ = [

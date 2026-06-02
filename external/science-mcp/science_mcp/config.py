@@ -13,6 +13,7 @@ _DEFAULT_MAILTO = "team@company.example"
 # YAML explode loudly instead of being silently ignored.
 _YAML_KEYS = frozenset({
     "mailto",
+    "openalex_api_key",
     "ncbi_api_key",
     "semantic_scholar_api_key",
     "core_api_key",
@@ -51,6 +52,7 @@ def _env_int(name: str, default: int) -> int:
 @dataclass(frozen=True)
 class Config:
     mailto: str
+    openalex_api_key: Optional[str]
     ncbi_api_key: Optional[str]
     semantic_scholar_api_key: Optional[str]
     core_api_key: Optional[str]
@@ -63,6 +65,7 @@ class Config:
 
     def keys_configured(self) -> dict[str, bool]:
         return {
+            "openalex": self.openalex_api_key is not None,
             "ncbi": self.ncbi_api_key is not None,
             "semantic_scholar": self.semantic_scholar_api_key is not None,
             "core": self.core_api_key is not None,
@@ -114,6 +117,7 @@ def load_config(yaml_path: Optional[Path] = None) -> Config:
 
     return Config(
         mailto=y.get("mailto") or os.environ.get("SCIENCE_MCP_MAILTO") or _DEFAULT_MAILTO,
+        openalex_api_key=y.get("openalex_api_key") or os.environ.get("OPENALEX_API_KEY") or None,
         ncbi_api_key=y.get("ncbi_api_key") or os.environ.get("NCBI_API_KEY") or None,
         semantic_scholar_api_key=(
             y.get("semantic_scholar_api_key")
