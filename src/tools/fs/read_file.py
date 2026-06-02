@@ -4,6 +4,7 @@ import os
 import json
 
 from utils.tool_report_paths import tool_report_abspath
+from security.read_guard import enforce_read_guard
 
 DEFAULT_READ_FILE_CHAR_LIMIT = 10_000
 # Whole-file read is for sources/configs that fit in model context; not for huge logs.
@@ -231,6 +232,7 @@ Usage:
 '''
         return description
 
+    @enforce_read_guard(path_arg="path")
     def __call__(
         self,
         path: str,
