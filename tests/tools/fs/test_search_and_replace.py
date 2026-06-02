@@ -180,7 +180,8 @@ def test_dry_run_and_return_diff(tmp_path):
     assert res["ok"] is True and res["matched"] is True
     assert res["applied"] is False
     assert res["replaced"] == 0
-    assert isinstance(res["diff"], str) and "@@ " in res["diff"] and "-hello world" in res["diff"] and "+hello team" in res["diff"]
+    assert isinstance(res["diff"], str) and "@@ " in res["diff"]
+    assert "-hello world\n" in res["diff"] and "+hello team\n" in res["diff"]
     assert res["diff_truncated"] is False
     assert p.read_text(encoding="utf-8") == "hello world"
 

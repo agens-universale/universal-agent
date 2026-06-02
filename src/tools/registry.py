@@ -1,6 +1,7 @@
 from typing import Any, Dict
 
 from tools.fs.append_to_file import AppendToFile
+from tools.fs.apply_file_edits import ApplyFileEdits
 from tools.fs.list_files import ListFiles
 from tools.fs.read_file import ReadFile
 from tools.fs.save_base64_file import SaveBase64File
@@ -38,6 +39,7 @@ def _fs_registry() -> Dict[str, Dict[str, Any]]:
     return {
         "write_to_file": _tool_entry(WriteToFile),
         "append_to_file": _tool_entry(AppendToFile),
+        "apply_file_edits": _tool_entry(ApplyFileEdits),
         "read_file": _tool_entry(ReadFile),
         "list_files": _tool_entry(ListFiles),
         "search_files": _tool_entry(SearchFiles),

@@ -124,9 +124,10 @@ class SearchAndReplace(AbstractSimpleTool):
         max_chars: int,
     ) -> tuple[str, bool]:
         diff_text = "".join(
-            difflib.unified_diff(
-                old_content.splitlines(),
-                new_content.splitlines(),
+            line if line.endswith("\n") else f"{line}\n"
+            for line in difflib.unified_diff(
+                old_content.splitlines(keepends=True),
+                new_content.splitlines(keepends=True),
                 fromfile=path,
                 tofile=path,
                 n=context_lines,
