@@ -3,6 +3,7 @@ from typing import Any, Dict, Optional
 import os
 import json
 
+from utils.file_text import read_text_for_edit, sha256_hex_of_text
 from utils.tool_report_paths import tool_report_abspath
 
 DEFAULT_READ_FILE_CHAR_LIMIT = 10_000
@@ -54,12 +55,14 @@ class ReadFile(AbstractSimpleTool):
         content_truncated: bool,
         next_char_offset: Optional[int],
         file_size_bytes: Optional[int],
+        sha256: str,
     ) -> str:
         return json.dumps(
             {
                 "tool": "read_file",
                 "ok": True,
                 "path": tool_report_abspath(path),
+                "sha256": sha256,
                 "file_size_bytes": file_size_bytes,
                 "start_line": start_line,
                 "end_line": end_line,
@@ -99,6 +102,7 @@ class ReadFile(AbstractSimpleTool):
                 "tool": "read_file",
                 "ok": False,
                 "path": tool_report_abspath(path),
+                "sha256": None,
                 "file_size_bytes": file_size_bytes,
                 "start_line": 0,
                 "end_line": 0,
@@ -130,6 +134,7 @@ class ReadFile(AbstractSimpleTool):
             "name": "read_file",
             "description": (
                 "Read a text file from the local filesystem. "
+                "Always includes full-file sha256 (for expected_file_sha256 in edit tools). "
                 "Line pagination: `offset` (1-based), `limit` (max lines). "
                 "Within selected lines: `char_offset` (0-based), "
                 f"`char_limit` (default {DEFAULT_READ_FILE_CHAR_LIMIT}) for very long single lines."
@@ -212,6 +217,7 @@ Input schema: {
 
 Return format:
 - The tool ALWAYS returns a JSON string with the following fields (metadata first, "content" last):
+  - "sha256": string — SHA-256 hex digest of the full file (same canonical read as edit tools / file_info).
   - "file_size_bytes": integer or null — on-disk file size when the path is a readable file.
   - "start_line": integer — 1-based number of the first line returned.
   - "end_line": integer — 1-based number of the last line returned.
@@ -352,9 +358,18 @@ Usage:
         resolved_char_limit = self._resolve_char_limit(char_limit)
         resolved_char_offset = 0 if char_offset is None else char_offset
 
-        with open(path, 'r', encoding='utf-8') as fd:
-            lines = fd.readlines()
+        try:
+            full_text = read_text_for_edit(path)
+        except OSError as e:
+            return self._error_result(
+                path=path,
+                error_type="read_failed",
+                message=f"Failed to read file: {e}",
+                file_size_bytes=file_size_bytes,
+            )
 
+        file_sha256 = sha256_hex_of_text(full_text)
+        lines = full_text.splitlines(keepends=True)
         total_lines = len(lines)
 
         if offset is not None or limit is not None:
@@ -412,4 +427,5 @@ Usage:
             content_truncated=content_truncated,
             next_char_offset=next_char_offset,
             file_size_bytes=file_size_bytes,
+            sha256=file_sha256,
         )

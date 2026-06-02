@@ -5,6 +5,11 @@ import os
 from typing import Any, Dict, List, Tuple
 
 from security.path_policy import enforce_root_box
+from utils.file_text import (
+    check_expected_file_sha256,
+    is_valid_sha256_hex,
+    read_text_for_edit,
+)
 from tools.simple_tool_base import AbstractSimpleTool
 from utils.tool_report_paths import tool_report_abspath
 
@@ -78,6 +83,13 @@ class ApplyFileEdits(AbstractSimpleTool):
                     "return_diff": {"type": "boolean"},
                     "diff_context_lines": {"type": "integer", "minimum": 0},
                     "max_diff_chars": {"type": "integer", "minimum": 1},
+                    "expected_file_sha256": {
+                        "type": "string",
+                        "description": (
+                            "Optional SHA-256 hex digest from file_info(include_hash=true). "
+                            "Batch aborts with stale_file if file content changed."
+                        ),
+                    },
                 },
                 "required": ["path", "edits"],
                 "additionalProperties": False,
@@ -93,6 +105,7 @@ class ApplyFileEdits(AbstractSimpleTool):
             "If any edit fails validation or matching, no file changes are written.\n"
             "edits_would_apply/total_would_replace count in-memory simulation; "
             "edits_applied/total_replaced are non-zero only when applied=true.\n"
+            "Pass expected_file_sha256 from file_info(include_hash=true) to detect stale readback.\n"
         )
 
     @staticmethod
@@ -293,6 +306,7 @@ class ApplyFileEdits(AbstractSimpleTool):
         return_diff: bool = False,
         diff_context_lines: int = default_diff_context_lines,
         max_diff_chars: int = default_max_diff_chars,
+        expected_file_sha256: str | None = None,
         **kwargs,
     ) -> str:
         _result = functools.partial(self._result, path=path)
@@ -312,6 +326,9 @@ class ApplyFileEdits(AbstractSimpleTool):
             return _result(ok=False, applied=False, edits_would_apply=0, total_would_replace=0, edits_applied=0, total_replaced=0, edit_results=[], message="Argument 'diff_context_lines' must be a non-negative integer.", error={"type": "invalid_argument", "field": "diff_context_lines"})
         if not isinstance(max_diff_chars, int) or max_diff_chars < 1:
             return _result(ok=False, applied=False, edits_would_apply=0, total_would_replace=0, edits_applied=0, total_replaced=0, edit_results=[], message="Argument 'max_diff_chars' must be a positive integer.", error={"type": "invalid_argument", "field": "max_diff_chars"})
+        if expected_file_sha256 is not None:
+            if not isinstance(expected_file_sha256, str) or not is_valid_sha256_hex(expected_file_sha256):
+                return _result(ok=False, applied=False, edits_would_apply=0, total_would_replace=0, edits_applied=0, total_replaced=0, edit_results=[], message="Argument 'expected_file_sha256' must be a 64-character hex SHA-256 digest.", error={"type": "invalid_argument", "field": "expected_file_sha256"})
 
         if not os.path.exists(path):
             return _result(ok=False, applied=False, edits_would_apply=0, total_would_replace=0, edits_applied=0, total_replaced=0, edit_results=[], message="File not found.", error={"type": "not_found"})
@@ -325,10 +342,23 @@ class ApplyFileEdits(AbstractSimpleTool):
             return _result(ok=False, applied=False, edits_would_apply=0, total_would_replace=0, edits_applied=0, total_replaced=0, edit_results=[], message=f"File is too large for apply_file_edits: {file_size} bytes (max {self.max_file_size_bytes} bytes).", error={"type": "file_too_large", "actual_bytes": file_size, "max_bytes": self.max_file_size_bytes})
 
         try:
-            with open(path, "r", encoding="utf-8", errors="ignore") as f:
-                original = f.read()
+            original = read_text_for_edit(path)
         except Exception as e:
             return _result(ok=False, applied=False, edits_would_apply=0, total_would_replace=0, edits_applied=0, total_replaced=0, edit_results=[], message="Failed to read file.", error={"type": "read_failed", "message": str(e)})
+
+        stale_error = check_expected_file_sha256(original, expected_file_sha256)
+        if stale_error is not None:
+            return _result(
+                ok=False,
+                applied=False,
+                edits_would_apply=0,
+                total_would_replace=0,
+                edits_applied=0,
+                total_replaced=0,
+                edit_results=[],
+                message=stale_error["message"],
+                error=stale_error,
+            )
 
         current = original
         edit_results: list[Dict[str, Any]] = []

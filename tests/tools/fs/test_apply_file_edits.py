@@ -1,6 +1,7 @@
 import json
 
 from tools.fs.apply_file_edits import ApplyFileEdits
+from utils.file_text import sha256_hex_of_text
 
 
 def test_apply_batch_success(tmp_path):
@@ -64,6 +65,22 @@ def test_apply_batch_dry_run(tmp_path):
     assert isinstance(res["diff"], str)
     assert "-foo bar\n" in res["diff"] and "+FOO bar\n" in res["diff"]
     assert p.read_text(encoding="utf-8") == "foo bar\n"
+
+
+def test_apply_batch_stale_file_guard(tmp_path):
+    p = tmp_path / "f.txt"
+    p.write_text("live content", encoding="utf-8")
+    res = json.loads(
+        ApplyFileEdits()(
+            path=str(p),
+            edits=[{"search": "live", "replace": "dead"}],
+            expected_file_sha256=sha256_hex_of_text("old content"),
+        )
+    )
+    assert res["ok"] is False and res["applied"] is False
+    assert res["edits_applied"] == 0
+    assert res["error"]["type"] == "stale_file"
+    assert p.read_text(encoding="utf-8") == "live content"
 
 
 def test_apply_batch_backup_once(tmp_path):

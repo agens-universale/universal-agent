@@ -1,10 +1,22 @@
 import json
 
+from tools.fs.file_info import FileInfo
 from tools.fs.read_file import (
     ReadFile,
     DEFAULT_READ_FILE_CHAR_LIMIT,
     DEFAULT_READ_FILE_MAX_BYTES,
 )
+from utils.file_text import sha256_hex_of_text
+
+
+def test_read_returns_sha256_for_full_file(tmp_path):
+    text = "hello\nworld\n"
+    p = tmp_path / "h.txt"
+    p.write_text(text, encoding="utf-8")
+    res = json.loads(ReadFile()(path=str(p), offset=1, limit=1))
+    assert res["sha256"] == sha256_hex_of_text(text)
+    info = json.loads(FileInfo()(path=str(p), include_hash=True))
+    assert res["sha256"] == info["sha256"]
 
 
 def test_read_default_preview_and_pagination(tmp_path):

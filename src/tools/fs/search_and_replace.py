@@ -6,6 +6,7 @@ from typing import Dict, Any
 from tools.simple_tool_base import AbstractSimpleTool
 from utils.tool_report_paths import tool_report_abspath
 from security.path_policy import enforce_root_box
+from utils.file_text import check_expected_file_sha256, is_valid_sha256_hex, read_text_for_edit
 
 
 class SearchAndReplace(AbstractSimpleTool):
@@ -207,7 +208,14 @@ class SearchAndReplace(AbstractSimpleTool):
                         "type": "integer",
                         "minimum": 1,
                         "description": "Maximum number of characters returned in diff output. Default 12000."
-                    }
+                    },
+                    "expected_file_sha256": {
+                        "type": "string",
+                        "description": (
+                            "Optional SHA-256 hex digest from file_info(include_hash=true). "
+                            "Edit aborts with stale_file if file content changed."
+                        ),
+                    },
                 },
                 "required": ["path", "search", "replace"],
                 "additionalProperties": False
@@ -359,6 +367,7 @@ Update version string:
         return_diff: bool = False,
         diff_context_lines: int = default_diff_context_lines,
         max_diff_chars: int = default_max_diff_chars,
+        expected_file_sha256: str | None = None,
         **kwargs,
     ) -> str:
         _result = functools.partial(self._result, path=path, applied=False)
@@ -530,6 +539,21 @@ Update version string:
                 suggestions_total=0,
                 error={"type": "invalid_argument", "field": "max_diff_chars"},
             )
+        if expected_file_sha256 is not None:
+            if not isinstance(expected_file_sha256, str) or not is_valid_sha256_hex(
+                expected_file_sha256
+            ):
+                return _result(
+                    ok=False,
+                    matched=False,
+                    replaced=0,
+                    match_count=0,
+                    line_numbers=[],
+                    message="Argument 'expected_file_sha256' must be a 64-character hex SHA-256 digest.",
+                    suggestions=[],
+                    suggestions_total=0,
+                    error={"type": "invalid_argument", "field": "expected_file_sha256"},
+                )
 
         if not path:
             return _result(
@@ -615,8 +639,7 @@ Update version string:
             )
 
         try:
-            with open(path, 'r', encoding='utf-8', errors='ignore') as f:
-                content = f.read()
+            content = read_text_for_edit(path)
         except Exception as e:
             return _result(
                 ok=False,
@@ -628,6 +651,20 @@ Update version string:
                 suggestions=[],
                 suggestions_total=0,
                 error={"type": "read_failed", "message": str(e)},
+            )
+
+        stale_error = check_expected_file_sha256(content, expected_file_sha256)
+        if stale_error is not None:
+            return _result(
+                ok=False,
+                matched=False,
+                replaced=0,
+                match_count=0,
+                line_numbers=[],
+                message=stale_error["message"],
+                suggestions=[],
+                suggestions_total=0,
+                error=stale_error,
             )
 
         total_lines = content.count("\n") + 1
