@@ -4,6 +4,9 @@ import re
 from datetime import datetime, timezone
 from typing import Dict, List, Tuple, Any, Set, Optional
 
+from message_policy.tool_usage_notice.state import merge_tool_usage_notice_meta_to_base
+from intent_log.serialize import deserialize_list, serialize_for_meta
+from persistence.thread_meta_mapper import ThreadMetaMapper
 from message_policy.user_message_policy import (
     TECHNICAL_TYPE_DIALOG_SUMMARY,
     wrap_technical_user_content,
@@ -13,7 +16,7 @@ from utils.generate_message_id import generate_msg_id_sha256 as generate_message
 
 _THREAD_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]+$")
 _SYSTEM_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]+$")
-_META_SCHEMA_VERSION = 1
+_META_SCHEMA_VERSION = 2
 
 
 def _utc_now_iso() -> str:
@@ -213,7 +216,7 @@ def save_thread_meta(
     _, meta_path = _thread_paths(threads_dir, sys_norm, thread_id)
     ensure_threads_dir(threads_dir)
 
-    to_save = dict(meta)
+    to_save = ThreadMetaMapper.ensure_v2_meta(dict(meta))
     to_save["thread_id"] = validate_thread_id(thread_id)
     to_save["system"] = sys_norm
     to_save["schema_version"] = _META_SCHEMA_VERSION
@@ -368,7 +371,7 @@ class ThreadSession:
             self.history_messages.append(message)
             known_seen.add(key)
         self.previous_response_id = previous_response_id
-        # Preserve arbitrary meta fields (e.g. memory_files), otherwise tools that
+        # Preserve arbitrary meta fields (e.g. shared.working_memory), otherwise tools that
         # update meta would get their data wiped on the next persist_batch().
         base_meta = (
             load_thread_meta(self.threads_dir, self.system_id, self.thread_id) or {}
@@ -381,18 +384,16 @@ class ThreadSession:
             base_meta["shared"] = self.meta["shared"]
         if isinstance(self.meta.get("last_backend_response_id"), str):
             base_meta["last_backend_response_id"] = self.meta.get("last_backend_response_id")
-        if isinstance(self.meta.get("user_messages_log"), list):
-            base_meta["user_messages_log"] = [
-                str(x).strip()
-                for x in self.meta.get("user_messages_log", [])
-                if str(x).strip()
-            ]
-        if isinstance(self.meta.get("current_user_messages"), list):
-            base_meta["current_user_messages"] = [
-                str(x).strip()
-                for x in self.meta.get("current_user_messages", [])
-                if str(x).strip()
-            ]
+        if isinstance(self.meta.get("user_intent_log"), list):
+            base_meta["user_intent_log"] = serialize_for_meta(
+                deserialize_list(self.meta.get("user_intent_log"))
+            )
+        if isinstance(self.meta.get("current_user_intent"), list):
+            base_meta["current_user_intent"] = serialize_for_meta(
+                deserialize_list(self.meta.get("current_user_intent"))
+            )
+        if "user_turn_seq" in self.meta:
+            base_meta["user_turn_seq"] = int(self.meta.get("user_turn_seq") or 0)
         # Persist rendered chat/completions system prompt for transparency/debugging.
         # Must stay identical to актуальным данным: when we are in `responses`
         # mode, there is no system prompt in messages, so it must not be present in meta.
@@ -402,6 +403,7 @@ class ThreadSession:
                 base_meta["chat_completions_system_prompt_rendered"] = prompt
         else:
             base_meta.pop("chat_completions_system_prompt_rendered", None)
+        merge_tool_usage_notice_meta_to_base(base_meta, self.meta)
         save_thread_meta(self.threads_dir, self.system_id, self.thread_id, base_meta)
 
     def archive_and_compact_summary_payload(
@@ -409,7 +411,7 @@ class ThreadSession:
         summary_payload: Dict[str, Any],
     ) -> Dict[str, Any]:
         summary_text = str(summary_payload.get("summary_message_content") or "").strip()
-        user_messages_log = summary_payload.get("user_messages_log")
+        user_intent_log = summary_payload.get("user_intent_log")
         dialog_steps_offset = summary_payload.get("dialog_steps_offset", 0)
         data_path, meta_path = _thread_paths(self.threads_dir, self.system_id, self.thread_id)
         ts_suffix = _utc_now_suffix()
@@ -486,22 +488,23 @@ class ThreadSession:
         if effective_steps_offset < 0:
             effective_steps_offset = 0
         new_meta["dialog_steps_offset"] = effective_steps_offset
-        if isinstance(user_messages_log, list):
-            new_meta["user_messages_log"] = [
-                str(x).strip() for x in user_messages_log if str(x).strip()
-            ]
-        elif isinstance(existing_meta.get("user_messages_log"), list):
-            new_meta["user_messages_log"] = [
-                str(x).strip()
-                for x in existing_meta.get("user_messages_log", [])
-                if str(x).strip()
-            ]
-        if isinstance(existing_meta.get("current_user_messages"), list):
-            new_meta["current_user_messages"] = [
-                str(x).strip()
-                for x in existing_meta.get("current_user_messages", [])
-                if str(x).strip()
-            ]
+        if isinstance(user_intent_log, list):
+            new_meta["user_intent_log"] = serialize_for_meta(
+                deserialize_list(user_intent_log)
+            )
+        elif isinstance(existing_meta.get("user_intent_log"), list):
+            new_meta["user_intent_log"] = serialize_for_meta(
+                deserialize_list(existing_meta.get("user_intent_log"))
+            )
+        if isinstance(existing_meta.get("current_user_intent"), list):
+            new_meta["current_user_intent"] = serialize_for_meta(
+                deserialize_list(existing_meta.get("current_user_intent"))
+            )
+        user_turn_seq = summary_payload.get("user_turn_seq")
+        if user_turn_seq is not None:
+            new_meta["user_turn_seq"] = int(user_turn_seq or 0)
+        elif "user_turn_seq" in existing_meta:
+            new_meta["user_turn_seq"] = int(existing_meta.get("user_turn_seq") or 0)
         prompt = existing_meta.get("chat_completions_system_prompt_rendered")
         if isinstance(prompt, str) and prompt.strip():
             new_meta["chat_completions_system_prompt_rendered"] = prompt

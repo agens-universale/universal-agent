@@ -1,75 +1,130 @@
 """Тесты разметки тела сообщения после суммаризации."""
 
-from summarize.summary_message_body import build_dialog_summary_content
+from intent_log import IntentRecord, read_page, serialize, tail_preview
+from intent_log.operations import utc_now_ts
+from intent_log.record import ACTION_USER_ASK
+from config_modules.intent_scope import DEFAULT_INTENT_LOG_READ_PAGE_RECORD_LIMIT
+
+from summarize.summary_message_body import (
+    build_dialog_summary_content,
+    build_intent_blocks_prefix,
+)
 
 
-def test_journal_inlined_other_registers_index_only():
+def _user_ask(content: str, *, turn: int = 1) -> IntentRecord:
+    return IntentRecord(
+        turn=turn,
+        ts=utc_now_ts(),
+        action=ACTION_USER_ASK,
+        tool_name=None,
+        content=content,
+    )
+
+
+def test_working_memory_block_inlined():
     body = build_dialog_summary_content(
         summary_text="S",
         last_dialog_steps="",
-        memory_files={
-            "journal": "full journal body",
-            "arch": "secret arch content\nline2",
-            "zeta": "z",
-        },
+        working_memory_block=(
+            "<working_memory>\n"
+            "<goal>full goal body</goal>\n"
+            "<knowledge>secret knowledge</knowledge>\n"
+            "</working_memory>"
+        ),
     )
-    assert '<file name="journal">' in body
-    assert "full journal body" in body
-    assert "secret arch content" not in body
-    assert "<other_registers>" in body
-    assert 'name="arch"' in body
-    assert 'chars="25"' in body  # len("secret arch content\\nline2")
-    assert 'name="zeta"' in body
-    assert 'chars="1"' in body
-    assert 'action "read"' in body
+    assert "<working_memory>" in body
+    assert "full goal body" in body
+    assert "<knowledge>" in body
+    assert "secret knowledge" in body
+    assert "<memory_files>" not in body
 
 
-def test_only_journal_no_other_registers_block():
-    body = build_dialog_summary_content(
-        summary_text="S",
-        last_dialog_steps="",
-        memory_files={"journal": "only j"},
-    )
-    assert "<other_registers>" not in body
-    assert "only j" in body
-
-
-def test_no_journal_only_named_registers():
-    body = build_dialog_summary_content(
-        summary_text="S",
-        last_dialog_steps="",
-        memory_files={"notes": "n1\nn2"},
-    )
-    assert "<file name=\"journal\">" not in body
-    assert "n1" not in body
-    assert "other_registers" in body
-    assert 'name="notes"' in body
-
-
-def test_empty_memory_files_skips_section_and_hint():
+def test_empty_working_memory_block_skips_section_and_hint():
     body = build_dialog_summary_content(
         summary_text="S",
         last_dialog_steps="tail",
-        memory_files={},
+        working_memory_block="",
     )
-    assert "<memory_files>" not in body
-    assert "The block above inlines" not in body
+    assert "<working_memory>" not in body
+    assert "working_memory tool" not in body
     assert "<last_dialog_steps>" in body
     assert "tail" in body
 
 
-def test_user_messages_log_section_added_with_intent_hint():
+def test_user_intent_log_tail_attrs_and_jsonl_current():
+    closed = [_user_ask("closed turn one"), _user_ask("closed turn two", turn=2)]
+    open_turn = [_user_ask("open turn detail")]
+    preview = tail_preview(closed, max_chars=10_000)
+    current_jsonl = serialize(open_turn)
+
     body = build_dialog_summary_content(
         summary_text="S",
         last_dialog_steps="tail",
-        memory_files={},
-        user_messages_log=[
-            "пока не правь код, только анализ",
-            "сделай только план",
-        ],
+        user_intent_log_preview=preview,
+        current_user_intent_jsonl=current_jsonl,
     )
-    assert "<user_messages_log>" in body
-    assert "- пока не правь код, только анализ" in body
-    assert "- сделай только план" in body
-    assert "authoritative source of original user intent" in body
-    assert "</user_messages_log>" in body
+
+    assert '<user_intent_log total_chars="' in body
+    assert 'total_records="2"' in body
+    assert 'truncated="false"' in body
+    assert preview["content"].strip() in body
+    assert "<current_user_intent>" in body
+    assert '"action": "user_ask"' in body
+    assert "open turn detail" in body
+    assert "- closed turn" not in body
+
+
+def test_empty_closed_log_omits_user_intent_log_block():
+    body = build_dialog_summary_content(
+        summary_text="S",
+        last_dialog_steps="",
+        user_intent_log_preview=tail_preview([], max_chars=1000),
+        current_user_intent_jsonl=serialize([_user_ask("only open")]),
+    )
+    assert "<user_intent_log" not in body
+    assert "<current_user_intent>" in body
+
+
+def test_empty_current_skips_current_section():
+    closed = [_user_ask("closed only")]
+    body = build_dialog_summary_content(
+        summary_text="S",
+        last_dialog_steps="",
+        user_intent_log_preview=tail_preview(closed, max_chars=1000),
+        current_user_intent_jsonl=serialize([]),
+    )
+    assert "<user_intent_log" in body
+    assert "<current_user_intent>" not in body
+
+
+def test_build_intent_blocks_prefix_matches_dialog_summary_wire_format():
+    closed = [_user_ask("closed turn"), _user_ask("older", turn=1)]
+    open_turn = [_user_ask("open turn")]
+    prefix = build_intent_blocks_prefix(closed, open_turn, intent_log_preview_chars=10_000)
+    assert "<user_intent_log " in prefix
+    assert '"action": "user_ask"' in prefix
+    assert "closed turn" in prefix
+    assert "<current_user_intent>" in prefix
+    assert "open turn" in prefix
+    assert "[intent_scope:raw]" not in prefix
+    assert "\n- closed" not in prefix
+
+
+def test_summary_intent_tail_matches_read_page_slice():
+    closed = [_user_ask("x" * 20), _user_ask("y" * 20, turn=2)]
+    preview = tail_preview(closed, max_chars=120)
+    page = read_page(
+        closed,
+        preview["offset"],
+        preview["limit"],
+        default_limit=DEFAULT_INTENT_LOG_READ_PAGE_RECORD_LIMIT,
+    )
+    assert page["content"] == preview["content"]
+    assert preview["truncated"] is True
+    body = build_dialog_summary_content(
+        summary_text="S",
+        last_dialog_steps="",
+        user_intent_log_preview=preview,
+    )
+    assert preview["content"].strip() in body
+    assert 'truncated="true"' in body

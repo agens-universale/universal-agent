@@ -11,6 +11,11 @@ import pytest
 import requests
 
 from intent_guard.validation_result import ValidationResult
+from intent_fixtures import (
+    intent_user_ask_texts,
+    intent_user_ask_texts_from_jsonl,
+    seed_state_intent,
+)
 
 
 def teardown_module(_module) -> None:
@@ -139,10 +144,22 @@ def _submit_solution_call():
     return {
         "type": "function_call",
         "name": "submit_solution",
-        "arguments": '{"ok": true}',
+        "arguments": json.dumps(
+            {
+                "solution_type": "full_solution",
+                "task_report": "Сделано по запросу пользователя",
+                "handoff": "{}",
+            },
+            ensure_ascii=False,
+        ),
         "call_id": "call_finish",
         "id": "fc_finish",
     }
+
+
+def _expected_finish_return() -> str:
+    """run_agent возвращает finish_arguments (JSON arguments submit_solution)."""
+    return _submit_solution_call()["arguments"]
 
 
 def _generic_tool_call(*, call_id: str = "call_other", name: str = "memory_files"):
@@ -194,7 +211,7 @@ def test_run_agent_calls_pre_backend_hook_before_user_message_backend(monkeypatc
         pre_backend_compaction_hook=_pre_backend_hook,
     )
 
-    assert result == '{"ok": true}'
+    assert result == _expected_finish_return()
     assert order == ["pre:user_ask", "backend"]
 
 
@@ -226,7 +243,7 @@ def test_run_agent_calls_pre_backend_hook_before_tool_output_backend(monkeypatch
         pre_backend_compaction_hook=_pre_backend_hook,
     )
 
-    assert result == '{"ok": true}'
+    assert result == _expected_finish_return()
     assert order == ["pre:function_call_output", "backend"]
 
 
@@ -249,7 +266,7 @@ def test_run_agent_responses_mode_does_not_call_pre_backend_hook(monkeypatch):
         pre_backend_compaction_hook=_pre_backend_hook,
     )
 
-    assert result == '{"ok": true}'
+    assert result == _expected_finish_return()
     assert hook_calls == []
 
 
@@ -351,9 +368,9 @@ def test_chat_completions_connection_error_does_not_lower_max_tokens(monkeypatch
     assert max_tokens_seen == [100]
 
 
-def test_submit_solution_clears_current_user_messages_on_success():
+def test_submit_solution_commits_current_user_intent_on_success():
     state = _make_state()
-    state.current_user_messages = ["актуальный вопрос", "уточнение"]
+    seed_state_intent(state, current=["актуальный вопрос", "уточнение"])
 
     result = run_agent(
         [_submit_solution_call()],
@@ -361,20 +378,27 @@ def test_submit_solution_clears_current_user_messages_on_success():
         _make_ctx(strict_submit_solution_validation=False),
     )
 
-    assert result == '{"ok": true}'
-    assert state.current_user_messages == []
+    assert result == _expected_finish_return()
+    assert state.current_user_intent == []
+    assert intent_user_ask_texts(state.user_intent_log) == [
+        "актуальный вопрос",
+        "уточнение",
+    ]
     synthetic_outputs = [
         m
         for m in state.messages
         if m.get("type") == "function_call_output" and m.get("call_id") == "call_finish"
     ]
     assert len(synthetic_outputs) == 1
-    assert "Task outcome submitted." in synthetic_outputs[0]["output"]
+    output_payload = json.loads(synthetic_outputs[0]["output"])
+    assert output_payload["message"] == "Task outcome submitted."
+    assert output_payload["task_report"] == "Сделано по запросу пользователя"
+    assert "Dialog turn finished" not in synthetic_outputs[0]["output"]
 
 
 def test_submit_solution_validation_failure_fails_open(monkeypatch):
     state = _make_state()
-    state.current_user_messages = ["актуальный вопрос"]
+    seed_state_intent(state, current=["актуальный вопрос"])
 
     def _raise_validation(*_args, **_kwargs):
         raise RuntimeError("validation backend failure")
@@ -391,8 +415,9 @@ def test_submit_solution_validation_failure_fails_open(monkeypatch):
         _make_ctx(strict_submit_solution_validation=True),
     )
 
-    assert result == '{"ok": true}'
-    assert state.current_user_messages == []
+    assert result == _expected_finish_return()
+    assert state.current_user_intent == []
+    assert intent_user_ask_texts(state.user_intent_log) == ["актуальный вопрос"]
     synthetic_outputs = [
         m
         for m in state.messages
@@ -409,19 +434,24 @@ def test_cycle_stop_generates_outputs_for_all_pending_tool_calls():
         _make_ctx(strict_submit_solution_validation=False),
     )
 
-    assert result == '{"ok": true}'
+    assert result == _expected_finish_return()
     outputs = [m for m in state.messages if m.get("type") == "function_call_output"]
     by_call = {m.get("call_id"): m for m in outputs}
     assert "call_finish" in by_call
     assert "call_other" in by_call
-    assert "Task outcome submitted." in by_call["call_finish"]["output"]
+    finish_payload = json.loads(by_call["call_finish"]["output"])
+    assert finish_payload["task_report"] == "Сделано по запросу пользователя"
+    assert "Dialog turn finished" not in by_call["call_finish"]["output"]
     assert "skipped_on_cycle_stop" in by_call["call_other"]["output"]
 
 
 def test_submit_solution_validation_receives_context_and_current_scope(monkeypatch):
     state = _make_state()
-    state.user_messages_log = ["старый вопрос", "актуальный вопрос", "уточнение"]
-    state.current_user_messages = ["актуальный вопрос", "уточнение"]
+    seed_state_intent(
+        state,
+        log=["старый вопрос"],
+        current=["актуальный вопрос", "уточнение"],
+    )
     captured: dict[str, object] = {}
 
     def _fake_validation(**kwargs):
@@ -451,9 +481,13 @@ def test_submit_solution_validation_receives_context_and_current_scope(monkeypat
         _make_ctx(strict_submit_solution_validation=True),
     )
 
-    assert result == '{"ok": true}'
-    assert captured["current_user_requests"] == ["актуальный вопрос", "уточнение"]
-    assert captured["context_user_messages"] == ["старый вопрос"]
+    assert result == _expected_finish_return()
+    assert intent_user_ask_texts_from_jsonl(
+        captured["current_user_requests"]
+    ) == ["актуальный вопрос", "уточнение"]
+    assert intent_user_ask_texts_from_jsonl(
+        captured["context_user_messages"]
+    ) == ["старый вопрос"]
 
 
 def test_finish_gate_builds_trace_digest_from_state_messages(monkeypatch):
@@ -471,8 +505,7 @@ def test_finish_gate_builds_trace_digest_from_state_messages(monkeypatch):
             "arguments": {"path": "x.py"},
         },
     ]
-    state.current_user_messages = ["сделай X"]
-    state.user_messages_log = ["сделай X"]
+    seed_state_intent(state, log=["сделай X"], current=["сделай X"])
     digest = FinishGateTraceDigest(
         trace_digest_text='<message n="1">\n[user] сделай X\n</message>',
         digest_chars=30,
@@ -555,8 +588,7 @@ def test_finish_gate_rejection_still_appends_cycle_stop_tool_outputs(monkeypatch
     monkeypatch.setattr(processing_module, "process_user_ask", _stub_user_ask)
 
     state = _make_state(max_steps=0)
-    state.user_messages_log = ["user question"]
-    state.current_user_messages = ["user question"]
+    seed_state_intent(state, log=["user question"], current=["user question"])
 
     run_agent(
         [_submit_solution_call()],

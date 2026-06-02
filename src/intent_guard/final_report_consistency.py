@@ -8,6 +8,7 @@ from intent_guard.validation_result import (
     fail_open_validation_result,
     parse_validator_response,
 )
+from summarize.llm import auxiliary_llm_completion_kwargs
 from utils.llm_chat_client import log_llm_prompt_and_result, request_chat_completion_text
 
 _BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -75,6 +76,11 @@ def validate_final_report_vs_user_intent(
     submit_solution_arguments: Any,
     trace_digest: FinishGateTraceDigest | None = None,
 ) -> ValidationResult:
+    """Run finish gate LLM validator.
+
+    ``current_user_requests`` and ``context_user_messages`` are JSONL lines
+    (one ``IntentRecord`` per line, §2.1) via ``records_to_jsonl_lines(deserialize_list(...))``.
+    """
     args = _parse_submit_solution_args(submit_solution_arguments)
     active_user_requests = [str(x) for x in current_user_requests if isinstance(x, str)]
     user_context = [str(x) for x in (context_user_messages or []) if isinstance(x, str)]
@@ -111,6 +117,7 @@ def validate_final_report_vs_user_intent(
         messages=request_messages,
         max_tokens=_FINISH_GATE_MAX_TOKENS,
         request_label="intent_guard_finish_gate",
+        payload_overrides=auxiliary_llm_completion_kwargs(ctx),
     )
     log_llm_prompt_and_result(
         logger=getattr(ctx, "logger", None),

@@ -3,15 +3,18 @@ import os
 import tempfile
 import types
 
+from intent_fixtures import intent_user_ask_texts
+from intent_log import deserialize_list
 from summarize.compaction import (
     maybe_run_summary_compaction,
 )
 from thread_store import ThreadSession, append_new_thread_messages, load_thread_meta
+from tests.helpers.summary_sample import valid_summary_text_for_tests
 
 
 def _patch_chat_completion(monkeypatch, fake):
-    monkeypatch.setattr("summarize.thread_summarizer.request_chat_completion_text", fake)
-    monkeypatch.setattr("summarize.summary_llm_steps.request_chat_completion_text", fake)
+    monkeypatch.setattr("summarize.thread_summarizer.request_summary_text", fake)
+    monkeypatch.setattr("summarize.summary_llm_steps.request_summary_text", fake)
 
 
 def _ctx():
@@ -23,9 +26,14 @@ def _ctx():
                 "chat_completions_summary_trigger_chars": 1,
                 "incremental_batch_chars": 2,
                 "max_accumulated_summary_chars": 20000,
-                "original_user_messages_max_chars": 20000,
                 "last_dialog_steps_count": 5,
                 "last_dialog_step_message_max_chars": 5000,
+            },
+            "chat_completions_params": {
+                "llm": {
+                    "max_tokens": 8192,
+                    "completion_kwargs": {},
+                },
             },
         },
         logger=None,
@@ -35,23 +43,18 @@ def _ctx():
 def _state():
     return types.SimpleNamespace(
         default_model="test-model",
-        memory_files={},
+        shared=types.SimpleNamespace(working_memory={}),
         dialog_steps_offset=0,
         previous_response_id=None,
-        user_messages_log=[],
+        user_intent_log=[],
+        current_user_intent=[],
+        user_turn_seq=0,
+        messages=[],
     )
 
 
 def _valid_summary(seed: str) -> str:
-    return (
-        f"TASK_AND_CONTEXT:\n- {seed}\n\n"
-        "GOALS:\n- goal\n\n"
-        "PLAN_AND_PROGRESS:\n- done\n\n"
-        "NEXT_ACTIONS:\n- next\n\n"
-        "SPEC_AND_CONSTRAINTS:\n- keep\n\n"
-        "RISKS_AND_OPEN_QUESTIONS:\n- none\n\n"
-        "IMPORTANT_ARTIFACTS:\n- src/summarize/compaction.py\n"
-    )
+    return valid_summary_text_for_tests(seed=seed)
 
 
 def _read_current_data_rows(tmp_dir: str, thread_id: str):
@@ -88,14 +91,23 @@ def test_e2e_two_sequential_summaries_keep_user_log_order_and_no_original_block(
         state = _state()
         state.thread_id = thread_id
         state.messages = session.get_full_history_messages()
-        state.user_messages_log = ["first request", "second request"]
+        state.user_intent_log = deserialize_list(["first request", "second request"])
+        state.user_turn_seq = 1
 
         monkeypatch.setattr("summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
         _patch_chat_completion(
             monkeypatch,
             lambda **_kwargs: _valid_summary("s"),
         )
-        monkeypatch.setattr("summarize.memory_suggestions.suggest_updated_journal", lambda **_k: "")
+        empty_patch = types.SimpleNamespace(request_messages=[], raw_response="")
+        monkeypatch.setattr(
+            "summarize.memory_suggestions.request_patch_append",
+            lambda **_k: empty_patch,
+        )
+        monkeypatch.setattr(
+            "summarize.memory_suggestions.request_patch_replace",
+            lambda **_k: empty_patch,
+        )
 
         assert maybe_run_summary_compaction(
             ctx=_ctx(),
@@ -114,7 +126,9 @@ def test_e2e_two_sequential_summaries_keep_user_log_order_and_no_original_block(
         assert "<original_user_messages>" not in first_compact_content
         assert "Summarized context from previous dialogue." in first_compact_content
 
-        state.user_messages_log.extend(["third request", "fourth request"])
+        state.user_intent_log.extend(
+            deserialize_list(["third request", "fourth request"])
+        )
         session.persist_batch(
             [
                 {"role": "user", "content": "third request"},
@@ -138,7 +152,7 @@ def test_e2e_two_sequential_summaries_keep_user_log_order_and_no_original_block(
         )
         assert int(state.dialog_steps_offset) > prev_offset
 
-        assert state.user_messages_log == [
+        assert intent_user_ask_texts(state.user_intent_log) == [
             "first request",
             "second request",
             "third request",
@@ -147,13 +161,14 @@ def test_e2e_two_sequential_summaries_keep_user_log_order_and_no_original_block(
         assert state.previous_response_id is None
         meta_after_second = load_thread_meta(tmp_dir, system_id, thread_id)
         assert meta_after_second.get("backend_api_mode") == "chat_completions"
-        # При пустом updated_journal (нет LLM-переписи) journal в state не меняется.
-        mf = meta_after_second.get("memory_files", {})
-        assert mf.get("journal", "") == ""
+        wm = meta_after_second.get("shared", {}).get("working_memory", {})
+        assert wm == {} or all(not str(v).strip() for v in wm.values())
         assert isinstance(meta_after_second.get("dialog_steps_offset"), int)
         assert meta_after_second.get("messages_count") == 1
         assert meta_after_second.get("previous_response_id") is None
-        assert meta_after_second.get("user_messages_log") == [
+        assert intent_user_ask_texts(
+            deserialize_list(meta_after_second.get("user_intent_log"))
+        ) == [
             "first request",
             "second request",
             "third request",
@@ -199,17 +214,28 @@ def test_e2e_user_log_skips_technical_and_tool_messages(monkeypatch):
         state = _state()
         state.thread_id = thread_id
         state.messages = session.get_full_history_messages()
-        state.user_messages_log = [
-            '<current_context>client has non-empty thread notes; call `thread_notes` with action="read" to load them.</current_context>',
-            "real request",
-        ]
+        state.user_intent_log = deserialize_list(
+            [
+                '<current_context>client has non-empty thread notes; call `thread_notes` with action="read" to load them.</current_context>',
+                "real request",
+            ]
+        )
+        state.user_turn_seq = 1
 
         monkeypatch.setattr("summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
         _patch_chat_completion(
             monkeypatch,
             lambda **_kwargs: _valid_summary("s-tech"),
         )
-        monkeypatch.setattr("summarize.memory_suggestions.suggest_updated_journal", lambda **_k: "")
+        empty_patch = types.SimpleNamespace(request_messages=[], raw_response="")
+        monkeypatch.setattr(
+            "summarize.memory_suggestions.request_patch_append",
+            lambda **_k: empty_patch,
+        )
+        monkeypatch.setattr(
+            "summarize.memory_suggestions.request_patch_replace",
+            lambda **_k: empty_patch,
+        )
 
         assert maybe_run_summary_compaction(
             ctx=_ctx(),
@@ -223,7 +249,7 @@ def test_e2e_user_log_skips_technical_and_tool_messages(monkeypatch):
         )
         # После compaction user log в state не перезаписывается: source of truth
         # для него формируется инкрементально в runtime и здесь сохраняется как есть.
-        assert state.user_messages_log == [
+        assert intent_user_ask_texts(state.user_intent_log) == [
             '<current_context>client has non-empty thread notes; call `thread_notes` with action="read" to load them.</current_context>',
             "real request",
         ]

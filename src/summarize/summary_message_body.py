@@ -1,115 +1,123 @@
 """Тело сообщения с резюме треда: разметка секций и связанные строковые константы."""
 
-from typing import Dict, List
+from typing import Any, Iterable, Mapping
 
-from xml.sax.saxutils import quoteattr
+from config_modules.summary import DEFAULT_INTENT_LOG_PREVIEW_CHARS
+from intent_log import serialize, tail_preview
+from intent_log.record import IntentRecord
 
-_JOURNAL_REGISTER = "journal"
-
-
-def _register_meta(raw: str) -> tuple[int, int]:
-    """Число символов и логических строк (как у splitlines) для метаданных."""
-    text = raw or ""
-    return len(text), len(text.splitlines())
-
-
-def _render_memory_files_section(memory_files: Dict[str, str]) -> str:
-    """Рендерит блок memory_files: journal целиком, остальные — индекс с метаданными.
-
-    Journal соответствует регистру ``journal`` (как у инструмента ``memory_files``).
-    Остальные ключи не встраиваются полностью — только имя, число символов и строк,
-    чтобы модель при необходимости вызвала ``memory_files`` / ``read``.
-    """
-    if not memory_files:
-        return ""
-    parts: List[str] = ["<memory_files>"]
-
-    if _JOURNAL_REGISTER in memory_files:
-        content = (memory_files[_JOURNAL_REGISTER] or "").strip()
-        parts.append(f'<file name="{_JOURNAL_REGISTER}">')
-        parts.append(content)
-        parts.append("</file>")
-
-    others = sorted(name for name in memory_files if name != _JOURNAL_REGISTER)
-    if others:
-        parts.append("<other_registers>")
-        parts.append(
-            "These registers exist for this thread but are not inlined after summarization. "
-            "When you need their full text, call the memory_files tool with action \"read\" "
-            "and the corresponding file_name."
-        )
-        for name in others:
-            chars, lines = _register_meta(memory_files[name] or "")
-            parts.append(
-                "<register "
-                f"name={quoteattr(name)} chars={quoteattr(str(chars))} lines={quoteattr(str(lines))} "
-                "/>"
-            )
-        parts.append("</other_registers>")
-
-    parts.append("</memory_files>")
-    return "\n".join(parts)
-
-
-_MEMORY_FILES_HINT = (
-    "The block above inlines the updated journal only. Other registers (if listed) are "
-    "described by metadata; read them with memory_files when needed. "
-    "Continue to append or update registers as the thread progresses."
+_WORKING_MEMORY_HINT = (
+    "The block above inlines the current working_memory snapshot for this thread. "
+    "Prefer this snapshot when present; use working_memory tool only if you need "
+    "content updated after this summary. Continue to append durable deltas as the "
+    "thread progresses."
 )
 
 
-def _render_user_messages_log_section(user_messages_log: List[str]) -> str:
-    """Рендерит блок с журналом исходных пользовательских запросов."""
-    if not user_messages_log:
+def _bool_attr(value: bool) -> str:
+    return "true" if value else "false"
+
+
+def render_user_intent_log_block(preview: Mapping[str, Any]) -> str:
+    """Closed log tail (from :func:`intent_log.tail_preview`) for dialog_summary.
+
+    ``preview`` is the dict from ``tail_preview`` / ``read_page``: ``offset`` and
+    ``limit`` are **record** index and count; ``total_chars`` is the full closed log.
+    Char budget for the tail comes from ``summary.intent_log_preview_chars``, not
+    from ``intent_scope.read_page_record_limit``.
+    """
+    total_records = int(preview.get("total_records") or 0)
+    content = str(preview.get("content") or "")
+    if total_records <= 0 and not content.strip():
         return ""
-    parts: List[str] = ["<user_messages_log>"]
-    for item in user_messages_log:
-        text = str(item or "").strip()
-        if text:
-            parts.append(f"- {text}")
-    parts.append("</user_messages_log>")
-    return "\n".join(parts)
+    attrs = (
+        f'total_chars="{int(preview.get("total_chars") or 0)}" '
+        f'total_records="{total_records}" '
+        f'offset="{int(preview.get("offset") or 0)}" '
+        f'limit="{int(preview.get("limit") or 0)}" '
+        f'truncated="{_bool_attr(bool(preview.get("truncated")))}">'
+    )
+    body = content.rstrip("\n")
+    return f"<user_intent_log {attrs}\n{body}\n</user_intent_log>"
+
+
+def render_current_user_intent_block(current_jsonl: str) -> str:
+    """Full JSONL of the open user turn (no pagination)."""
+    body = str(current_jsonl or "").rstrip("\n")
+    if not body.strip():
+        return ""
+    return f"<current_user_intent>\n{body}\n</current_user_intent>"
+
+
+def resolve_intent_log_preview_chars(summary_params: Mapping[str, Any] | None) -> int:
+    """``summary_params.intent_log_preview_chars`` (closed-log tail budget in characters)."""
+    if not isinstance(summary_params, Mapping):
+        return DEFAULT_INTENT_LOG_PREVIEW_CHARS
+    try:
+        value = int(
+            summary_params.get("intent_log_preview_chars", DEFAULT_INTENT_LOG_PREVIEW_CHARS)
+        )
+    except (TypeError, ValueError):
+        value = DEFAULT_INTENT_LOG_PREVIEW_CHARS
+    return value if value > 0 else DEFAULT_INTENT_LOG_PREVIEW_CHARS
+
+
+def build_intent_blocks_prefix(
+    closed_records: Iterable[IntentRecord],
+    open_records: Iterable[IntentRecord],
+    *,
+    intent_log_preview_chars: int,
+) -> str:
+    """XML intent blocks for summary LLM (same wire format as ``dialog_summary``).
+
+    Closed log: ``tail_preview`` (whole records within char budget). Open turn: full JSONL.
+    """
+    safe_chars = (
+        int(intent_log_preview_chars)
+        if int(intent_log_preview_chars) > 0
+        else DEFAULT_INTENT_LOG_PREVIEW_CHARS
+    )
+    preview = tail_preview(list(closed_records), safe_chars)
+    parts: list[str] = []
+    log_block = render_user_intent_log_block(preview)
+    if log_block:
+        parts.append(log_block)
+    current_block = render_current_user_intent_block(serialize(list(open_records)))
+    if current_block:
+        parts.append(current_block)
+    if not parts:
+        return ""
+    return "\n\n".join(parts) + "\n\n"
 
 
 def build_dialog_summary_content(
     summary_text: str,
     last_dialog_steps: str,
-    memory_files: Dict[str, str] | None = None,
-    user_messages_log: List[str] | None = None,
+    working_memory_block: str = "",
+    user_intent_log_preview: Mapping[str, Any] | None = None,
+    current_user_intent_jsonl: str = "",
 ) -> str:
-    """Собирает итоговое тело сообщения-резюме треда для подстановки в историю чата.
-
-    Назначение: один каноничный формат «сводки» с зонами: текст сводки,
-    memory files (journal полностью после шага памяти, прочие — индекс) и последние шаги диалога.
-
-    Args:
-        summary_text: Основной текст суммаризации (сводка LLM).
-        last_dialog_steps: Отформатированный хвост диалога.
-        memory_files: Dict[str, str] с содержимым memory-файлов (может быть пустым).
-        user_messages_log: Список "живых" пользовательских запросов (без техсообщений).
-
-    Returns:
-        Единая строка с размеченными секциями.
-    """
-    lines: List[str] = ["<summary>"]
+    """Собирает итоговое тело сообщения-резюме треда для подстановки в историю чата."""
+    lines: list[str] = ["<summary>"]
     lines.append(summary_text.strip())
     lines.append("</summary>")
 
-    lines.append("")
-    mf = memory_files or {}
-    mem_section = _render_memory_files_section(mf)
-    if mem_section:
-        lines.append(mem_section)
-        lines.append(_MEMORY_FILES_HINT)
-
-    user_log = user_messages_log or []
-    user_log_section = _render_user_messages_log_section(user_log)
-    if user_log_section:
+    wm_block = str(working_memory_block or "").strip()
+    if wm_block:
         lines.append("")
-        lines.append(user_log_section)
-        lines.append(
-            "Treat this block as the authoritative source of original user intent."
-        )
+        lines.append(wm_block)
+        lines.append(_WORKING_MEMORY_HINT)
+
+    if user_intent_log_preview is not None:
+        log_section = render_user_intent_log_block(user_intent_log_preview)
+        if log_section:
+            lines.append("")
+            lines.append(log_section)
+
+    current_section = render_current_user_intent_block(current_user_intent_jsonl)
+    if current_section:
+        lines.append("")
+        lines.append(current_section)
 
     lines.append("")
     lines.append("<last_dialog_steps>")
@@ -118,8 +126,9 @@ def build_dialog_summary_content(
     lines.append("</last_dialog_steps>")
     lines.append("")
     lines.append(
-        "Continue the dialogue from here after summarization step. Summarization compresses history of dialogue — actively append "
-        "durable decisions, constraints, URLs/paths, and verified facts to memory_files as the thread "
-        "goes on so later turns stay consistent after future summarizations."
+        "Continue the dialogue from here after summarization step. Summarization compresses "
+        "history of dialogue — actively append durable decisions, constraints, URLs/paths, "
+        "and verified facts to working_memory as the thread goes on so later turns stay "
+        "consistent after future summarizations."
     )
     return "\n".join(lines)

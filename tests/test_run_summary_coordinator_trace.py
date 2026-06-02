@@ -9,6 +9,7 @@ from unittest.mock import MagicMock
 import pytest
 
 import run_summary_coordinator as rsc
+import summarize.summary_logging as summary_logging
 from run_summary_coordinator import RunSummaryCoordinator
 
 
@@ -107,7 +108,7 @@ def test_archive_called_on_summary_applied(monkeypatch, coordinator_ctx):
         is_cli_mode=False,
         pre_backend_trigger_reason="pre_backend",
     )
-    monkeypatch.setattr(coord, "_append_summary_trace", lambda **k: None)
+    monkeypatch.setattr(summary_logging, "append_summary_trace_record", lambda *a, **k: None)
 
     coord.on_summary_applied(
         {

@@ -1,0 +1,38 @@
+# science-mcp config — primary source for runtime settings.
+# Copy this file to science-mcp.yaml (gitignored by default in real deployments)
+# and fill in the values that apply to you. Every key is optional; omitted keys
+# fall back to env vars (NCBI_API_KEY, SEMANTIC_SCHOLAR_API_KEY, etc) and then
+# to built-in defaults.
+#
+# Launch with explicit path:
+#   science-mcp --transport http --config ./science-mcp.yaml
+# Or rely on auto-discovery (./science-mcp.yaml, ~/.config/science-mcp.yaml).
+
+# OpenAlex polite-pool + CrossRef User-Agent. Replace with a real contact email
+# to get higher rate limits and priority in shared-pool incidents.
+mailto: team@company.example
+
+# Daemon bind address. 127.0.0.1 = localhost only. Use 0.0.0.0 to expose on LAN
+# (combine with reverse proxy / auth in production).
+host: 127.0.0.1
+port: 8765
+
+# API keys — all optional. Without ncbi key: 3 req/s; with key: 10 req/s.
+# Without S2 key: instant 429 on every request. Without CORE key: stability
+# degrades, may see 401/403.
+ncbi_api_key: null
+semantic_scholar_api_key: null
+core_api_key: null
+
+# Disk JSON cache for upstream responses. TTL: 1h for search results, 24h for
+# DOI/ID lookups. Set cache_enabled: false to bypass entirely.
+cache_dir: ~/.cache/science-mcp
+cache_enabled: true
+
+# Per-request HTTP timeout in seconds (default 15). DBLP adapter overrides to
+# 25 internally. Bump if upstream is slow on your network.
+http_timeout_sec: 15
+
+# Maximum wait in throttler queue before a tool call gives up (default 120s).
+# Reached when a provider's rate limit forces requests to serialize.
+queue_timeout_sec: 120

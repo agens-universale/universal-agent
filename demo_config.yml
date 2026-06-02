@@ -50,6 +50,15 @@ backend:
   use_ssl: false
   use_retry: true
 
+# Вспомогательные LLM (summary, finish gate, intent scope) — без thinking.
+chat_completions:
+  llm:
+    max_tokens: 8192
+    completion_kwargs:
+      separate_reasoning: false
+      chat_template_kwargs:
+        enable_thinking: false
+
 agent:
   model: MiniMax-M2.7
   system_prompt_id: v1
@@ -106,15 +115,58 @@ quality_gate:
   max_dialogue_chars: 200000
   max_message_chars: 5000
 
+working_memory:
+  max_chars_goal: 2000
+  max_chars_constraints: 4000
+  max_chars_state: 6000
+  max_chars_knowledge: 8000
+  total_budget_chars: 20000
+
+# Technical hints о памяти (tool_usage_notice, long memory)
+tool_usage_notice:
+  - tool_name: working_memory
+    step_messages_count: 10
+    notice_message: "You have not used working_memory for some steps. Review/update thread memory if needed."
+long_memory:
+  enable_long_memory_notice: true
+  check_interval_messages: 5
+
+# Intent scope: LLM post-hook после human-facing tools (только chat_completions).
+# tools: [] — выключить. Параметры LLM — chat_completions.llm.
+intent_scope:
+  # tools.<name>.record:
+  # - aggregated: хранить только текстовую сводку (без arguments/output полей)
+  # - raw: хранить структурированный payload по флагам ниже
+  #
+  # tools.<name>.store_arguments / store_output:
+  # - применяются только для record=raw
+  # - если оба false -> невалидный конфиг (старт с ошибкой)
+  tools:
+    ask_human:
+      record: aggregated
+    submit_solution:
+      record: raw
+      # submit_solution output уже содержит итоговый report/handoff/status,
+      # поэтому arguments обычно дублируют данные.
+      store_arguments: false
+      store_output: true
+  max_summary_chars: 500
+  max_tool_output_chars: 8000
+  max_raw_record_chars: 5000
+  read_page_record_limit: 10
+  fallback_raw_on_llm_error: true
+
 summary:
   chat_completions_summary_trigger_chars: 200000
+  # Turn-end compaction после accept submit_solution (по умолчанию = 60% trigger)
+  chat_completions_summary_turn_end_trigger_chars: 120000
   incremental_batch_chars: 280000
   max_message_chars: 30000
   max_dialogue_chars: 1000000
   max_accumulated_summary_chars: 60000
-  original_user_messages_max_chars: 20000
   last_dialog_steps_count: 4
   last_dialog_step_message_max_chars: 5000
+  intent_log_preview_chars: 10000
 
 security:
   # =========================================================================

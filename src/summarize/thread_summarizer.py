@@ -2,19 +2,25 @@ from typing import Any, Dict, List
 
 from config import _DEFAULT_LAST_DIALOG_STEP_MESSAGE_MAX_CHARS
 import message_format.dialog_history as dialog_history
+from intent_log import IntentRecord, serialize_for_meta
 from summarize import (
     memory_suggestions,
     prompt_loading,
     summary_llm_steps,
     summary_message_body,
 )
-from summarize.summary_validation import FALLBACK_SUMMARY, validate_summary_text
-from message_policy.user_message_policy import normalize_user_log_entries
-from utils.llm_chat_client import (
-    log_llm_prompt_and_result,
-    request_chat_completion_text,
-    shorten_for_log,
+from summarize.summary_message_body import (
+    build_intent_blocks_prefix,
+    resolve_intent_log_preview_chars,
 )
+from summarize.summary_validation import FALLBACK_SUMMARY, validate_summary_text
+from summarize.llm import request_summary_text
+from summarize.working_memory_gateway import (
+    WorkingMemoryDeltas,
+    parse_memory_deltas_with_repair,
+    resolve_persistent_state_block,
+)
+from utils.llm_chat_client import log_llm_prompt_and_result, shorten_for_log
 from utils.project_data import get_project_data
 
 
@@ -23,16 +29,17 @@ def summarize_dialog_via_chat_completions(
     ctx: Any,
     state: Any,
     full_history_messages: List[Dict[str, Any]],
-    current_memory: str = "",
-    user_messages_log: List[str] | None = None,
-    max_tokens: int = 2500,
+    persistent_state_block: str | None = None,
+    user_intent_log: List[IntentRecord] | None = None,
+    current_user_intent: List[IntentRecord] | None = None,
+    max_tokens: int | None = None,
     steps_offset: int = 0,
 ) -> Dict[str, Any]:
     """Строит структурированную сводку диалога через chat completions (в т.ч. батчами).
 
     Назначение: основной оркестратор слоя суммаризации — подготовить текст для
-    сообщения-резюме треда, опционально переписать journal через LLM, вернуть
-    размеченный контент и подробный `trace` для наблюдаемости.
+    сообщения-резюме треда, опционально получить дельты working_memory через LLM,
+    вернуть размеченный контент и подробный `trace` для наблюдаемости.
 
     Поведение (кратко):
         - Читает параметры из `ctx.config_dict["summary_params"]` (лимиты символов,
@@ -45,21 +52,22 @@ def summarize_dialog_via_chat_completions(
           обновление `previous_summary`; валидирует ответ, при провале —
           `summary_llm_steps.repair_summary_text`, иначе fallback на предыдущую сводку или `FALLBACK_SUMMARY`.
         - По необходимости сжимает накопленную сводку через `summary_llm_steps.compress_summary_text`.
-        - Шаг `memory_suggestions.suggest_updated_journal` выполняется только если весь диалог уложился
-          в один батч (мультибатч: в trace фиксируется пропуск).
+        - Шаги `memory_suggestions.request_patch_append` и `request_patch_replace` выполняются
+          только если весь диалог уложился в один батч (мультибатч: `memory_patch.executed = false`,
+          reason `skipped_multi_batch`).
         - Форматирует `last_dialog_steps` через `dialog_history.format_last_dialog_steps`.
-          Полное тело сообщения для чата собирает `apply_summary_state_patch` после обновления
-          `state.shared.memory_files` (см. `compaction.run_summary_compaction`).
+          Полное тело сообщения для чата собирает `apply_summary_state_patch` после apply дельт в
+          `state.shared.working_memory` (см. `compaction.run_summary_compaction`).
 
     Args:
         ctx: Контекст с `config_dict` и `logger`.
         state: Состояние сессии (модель, заголовки бэкенда).
         full_history_messages: Полная история сообщений треда.
-        current_memory: Актуальные заметки/память для вставки в итоговое сообщение
-            и в шаг памяти.
-        user_messages_log: Внешний журнал реплик пользователя (`None` допустим):
-            нормализуется и усекается, затем входит в блок `<user_requests_log>`;
-            при пустом результате в промпт подставляется маркер `- not found`.
+        persistent_state_block: Готовый блок ``<persistent_state>`` для prompt'ов (opaque).
+            Если ``None`` — gateway соберёт snapshot из ``state.shared.working_memory``.
+        user_intent_log: Закрытые user turn'ы (`None` допустим): нормализуется и усекается,
+            затем входит в блок `<user_intent_log>`; при пустом — `- not found`.
+        current_user_intent: Открытый user turn: блок `<current_user_intent>`; при пустом — `- not found`.
         max_tokens: Лимит ответа LLM на батч и связанные вызовы (сжатие/починка).
         steps_offset: Сдвиг нумерации в `dialog_history.format_last_dialog_steps` (инкрементальные сценарии).
 
@@ -68,10 +76,9 @@ def summarize_dialog_via_chat_completions(
             ``raw_summary`` — текст сводки без блока предложенной памяти;
             ``summary_message_content`` — для непустой истории пустая строка; итоговое тело строит
                 ``apply_summary_state_patch``. Для пустой истории — готовое тело без вызова compaction;
-            ``user_messages_log`` — очищенный список пользовательских строк;
-            ``memory_additions`` — устаревшее имя ключа; то же, что ``updated_journal`` (полный текст
-                journal после LLM-переписывания) или пусто;
-            ``updated_journal`` — полная актуализированная версия journal (не дельта) или пусто;
+            ``user_intent_log`` / ``current_user_intent`` — нормализованные снимки для persisted summary;
+            ``memory_append_deltas`` / ``memory_replace_deltas`` — ``WorkingMemoryDeltas``
+                (пустые DTO для multi-batch);
             ``last_dialog_steps`` — форматированный хвост диалога;
             ``num_batches`` — число батчей LLM;
             ``trace`` — структура с шагами, промптами и результатами для отладки.
@@ -80,10 +87,10 @@ def summarize_dialog_via_chat_completions(
     logger = getattr(ctx, "logger", None)
     trace: Dict[str, Any] = {
         "step1_batches": [],
-        "step2_memory_update": {
+        "memory_patch": {
             "executed": False,
-            "input": {},
-            "output": "",
+            "append": {},
+            "replace": {},
         },
         "final_output": {},
     }
@@ -96,14 +103,18 @@ def summarize_dialog_via_chat_completions(
         )
         trace["final_output"] = {
             "raw_summary": "",
-            "memory_additions": "",
+            "memory_append_deltas": {},
+            "memory_replace_deltas": {},
             "summary_message_content": summary_content,
         }
+        empty_deltas = WorkingMemoryDeltas()
         return {
             "raw_summary": "",
             "summary_message_content": summary_content,
-            "user_messages_log": [],
-            "memory_additions": "",
+            "user_intent_log": [],
+            "current_user_intent": [],
+            "memory_append_deltas": empty_deltas,
+            "memory_replace_deltas": empty_deltas,
             "last_dialog_steps": "",
             "num_batches": 0,
             "trace": trace,
@@ -146,14 +157,6 @@ def summarize_dialog_via_chat_completions(
         max_accumulated_summary_chars = 20000
     if max_accumulated_summary_chars <= 0:
         max_accumulated_summary_chars = 20000
-    try:
-        original_user_messages_max_chars = int(
-            summary_params.get("original_user_messages_max_chars", 20000)
-        )
-    except (TypeError, ValueError):
-        original_user_messages_max_chars = 20000
-    if original_user_messages_max_chars <= 0:
-        original_user_messages_max_chars = 20000
     # Размер батча для инкрементальной суммаризации.
     # По умолчанию нормализуется в config.py как int(trigger * 1.4).
     try:
@@ -172,22 +175,24 @@ def summarize_dialog_via_chat_completions(
         max_dialogue_chars=max_dialogue_chars,
         max_message_chars=max_message_chars,
     )
-    # Полный текст усечённой истории (для шага journal и, при одном батче, совпадает с первым тактом).
+    # Полный текст усечённой истории (для memory patch step при single-batch).
     full_history_text = dialog_history.build_history_text(
         history_for_summary,
         max_chars=0,
         max_message_chars=max_message_chars,
     )
-    # `state.user_messages_log` is expected to be already filtered and deduplicated by State
-    # via user_message_policy. We still normalize defensively here because this function can be
-    # called with persisted/raw data in tests and integrations.
-    user_requests = normalize_user_log_entries(user_messages_log)
-    user_requests = dialog_history.trim_original_user_messages_to_max_chars(
-        user_requests, original_user_messages_max_chars
+    closed_records = list(user_intent_log or [])
+    open_records = list(current_user_intent or [])
+    persistent_state_block = resolve_persistent_state_block(
+        state, persistent_state_block
     )
-    user_requests_text = (
-        "\n".join(f"- {x}" for x in user_requests) if user_requests else "- not found"
+    intent_blocks_prefix = build_intent_blocks_prefix(
+        closed_records,
+        open_records,
+        intent_log_preview_chars=resolve_intent_log_preview_chars(summary_params),
     )
+    if persistent_state_block.strip():
+        intent_blocks_prefix = f"{intent_blocks_prefix}{persistent_state_block.strip()}\n\n"
     batches = dialog_history.split_turns_into_char_batches(
         dialog_history.group_into_turns(history_for_summary),
         batch_chars_limit=batch_chars_limit,
@@ -234,9 +239,7 @@ def summarize_dialog_via_chat_completions(
             )
         if batch_index == 1:
             user_prompt = (
-                "<user_requests_log>\n"
-                f"{user_requests_text}\n"
-                "</user_requests_log>\n\n"
+                f"{intent_blocks_prefix}"
                 "<dialog_history>\n"
                 f"{batch_history_text}\n"
                 "</dialog_history>\n\n"
@@ -245,9 +248,7 @@ def summarize_dialog_via_chat_completions(
             )
         else:
             user_prompt = (
-                "<user_requests_log>\n"
-                f"{user_requests_text}\n"
-                "</user_requests_log>\n\n"
+                f"{intent_blocks_prefix}"
                 "<previous_summary>\n"
                 f"{accumulated_summary}\n"
                 "</previous_summary>\n\n"
@@ -277,12 +278,12 @@ def summarize_dialog_via_chat_completions(
                 len(batches),
                 request_messages,
             )
-        text = request_chat_completion_text(
+        text = request_summary_text(
             ctx=ctx,
             state=state,
             messages=request_messages,
-            max_tokens=max_tokens,
             request_label=f"summary_batch_{batch_index}",
+            max_tokens=max_tokens,
         )
         log_llm_prompt_and_result(
             logger=logger,
@@ -315,14 +316,14 @@ def summarize_dialog_via_chat_completions(
                     len(batches),
                     reason,
                     len(batch_history_text),
-                    len(user_requests_text),
+                    len(intent_blocks_prefix),
                     len(text or ""),
                 )
             repaired = summary_llm_steps.repair_summary_text(
                 ctx=ctx,
                 state=state,
                 history_text=batch_history_text,
-                user_requests_text=user_requests_text,
+                intent_blocks_prefix=intent_blocks_prefix,
                 invalid_summary=text,
                 reason=reason,
                 max_tokens=max_tokens,
@@ -366,57 +367,105 @@ def summarize_dialog_via_chat_completions(
             )
     text = accumulated_summary or FALLBACK_SUMMARY
 
-    # Второй такт: LLM полностью переписывает journal (не дельта). Для multi-batch пока пропускаем.
-    updated_journal = ""
+    memory_append_deltas = WorkingMemoryDeltas()
+    memory_replace_deltas = WorkingMemoryDeltas()
+    append_touched: frozenset[str] = frozenset()
+    replace_touched: frozenset[str] = frozenset()
+
+    def _repair_fn(raw: str) -> str:
+        return memory_suggestions.request_memory_deltas_format_repair(
+            ctx=ctx,
+            state=state,
+            raw_output=raw,
+            max_tokens=max_tokens,
+        )
+
+    def _run_patch_step(
+        llm_result: Any,
+    ) -> tuple[WorkingMemoryDeltas, frozenset[str], bool, bool, str]:
+        deltas, touched, repair_attempted, raw_used = parse_memory_deltas_with_repair(
+            llm_result.raw_response,
+            repair_fn=_repair_fn,
+            min_chars_for_repair=100,
+        )
+        repair_success = repair_attempted and (bool(touched) or not deltas.is_empty())
+        return deltas, touched, repair_attempted, repair_success, raw_used
+
     if len(batches) <= 1:
-        trace["step2_memory_update"] = {
-            "executed": True,
-            "input": {
-                "history_text": full_history_text,
-                "summary_text": text,
-                "current_journal": current_memory,
-            },
-            "output": "",
-            "llm": {},
-        }
-        memory_result = memory_suggestions.suggest_updated_journal(
+        append_result = memory_suggestions.request_patch_append(
             ctx=ctx,
             state=state,
             history_text=full_history_text,
             summary_text=text,
-            current_memory=current_memory,
+            persistent_state_block=persistent_state_block,
         )
-        if isinstance(memory_result, str):
-            memory_result = memory_suggestions.UpdatedJournalResult(
-                updated_journal=memory_result,
-                request_messages=[],
-                raw_response="",
-            )
-        updated_journal = memory_result.updated_journal
-        trace["step2_memory_update"]["output"] = updated_journal
-        trace["step2_memory_update"]["llm"] = {
-            "request_messages": memory_result.request_messages,
-            "raw_response": memory_result.raw_response,
-            "updated_journal": memory_result.updated_journal,
-        }
-    else:
-        trace["step2_memory_update"] = {
-            "executed": False,
+        replace_result = memory_suggestions.request_patch_replace(
+            ctx=ctx,
+            state=state,
+            history_text=full_history_text,
+            summary_text=text,
+        )
+        (
+            memory_append_deltas,
+            append_touched,
+            append_repair,
+            append_repair_ok,
+            append_raw,
+        ) = _run_patch_step(append_result)
+        (
+            memory_replace_deltas,
+            replace_touched,
+            replace_repair,
+            replace_repair_ok,
+            replace_raw,
+        ) = _run_patch_step(replace_result)
+        trace["memory_patch"] = {
+            "executed": True,
             "input": {
                 "history_text": full_history_text,
                 "summary_text": text,
-                "current_memory": current_memory,
-                "reason": "skipped_for_multi_batch",
+                "persistent_state": persistent_state_block,
             },
-            "output": "",
+            "append": {
+                "output": memory_append_deltas.to_dict(),
+                "format_repair_attempted": append_repair,
+                "format_repair_success": append_repair_ok,
+                "llm": {
+                    "request_messages": append_result.request_messages,
+                    "raw_response": append_result.raw_response,
+                    "raw_response_parsed": append_raw,
+                },
+            },
+            "replace": {
+                "output": memory_replace_deltas.to_dict(),
+                "format_repair_attempted": replace_repair,
+                "format_repair_success": replace_repair_ok,
+                "llm": {
+                    "request_messages": replace_result.request_messages,
+                    "raw_response": replace_result.raw_response,
+                    "raw_response_parsed": replace_raw,
+                },
+            },
+        }
+    else:
+        trace["memory_patch"] = {
+            "executed": False,
+            "reason": "skipped_multi_batch",
+            "input": {
+                "history_text": full_history_text,
+                "summary_text": text,
+                "persistent_state": persistent_state_block,
+            },
+            "append": {"output": {}},
+            "replace": {"output": {}},
         }
     if logger is not None:
         logger.info(
-            "summary_finish batches=%s journal_update_executed=%s raw_summary_chars=%s updated_journal_chars=%s",
+            "summary_finish batches=%s memory_patch_executed=%s raw_summary_chars=%s memory_delta_registers=%s",
             len(batches),
             len(batches) <= 1,
             len(text),
-            len(updated_journal or ""),
+            len(memory_append_deltas.to_dict()) + len(memory_replace_deltas.to_dict()),
         )
         logger.info("summary_final_raw_text=\n%s", text)
 
@@ -428,15 +477,18 @@ def summarize_dialog_via_chat_completions(
     )
     trace["final_output"] = {
         "raw_summary": text,
-        "memory_additions": updated_journal,
-        "updated_journal": updated_journal,
+        "memory_append_deltas": memory_append_deltas.to_dict(),
+        "memory_replace_deltas": memory_replace_deltas.to_dict(),
     }
     return {
         "raw_summary": text,
         "summary_message_content": "",
-        "user_messages_log": user_requests,
-        "memory_additions": updated_journal,
-        "updated_journal": updated_journal,
+        "user_intent_log": serialize_for_meta(closed_records),
+        "current_user_intent": serialize_for_meta(open_records),
+        "memory_append_deltas": memory_append_deltas,
+        "memory_replace_deltas": memory_replace_deltas,
+        "memory_append_touched": sorted(append_touched),
+        "memory_replace_touched": sorted(replace_touched),
         "last_dialog_steps": last_dialog_steps,
         "num_batches": len(batches),
         "trace": trace,

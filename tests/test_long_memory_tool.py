@@ -5,8 +5,8 @@ from unittest.mock import patch
 import pytest
 
 from long_memory.compaction import CompactionResult
-from tools.simple_tools.long_memory import LongMemory
-from tools.simple_tools import get_simple_tools_data
+from tools.session.long_memory import LongMemory
+from tools.registry import get_builtin_tools_data
 
 
 def _make_tool(tmp_path) -> LongMemory:
@@ -116,7 +116,7 @@ def test_tool_append_overflow_triggers_compaction(tmp_path):
         captured["input"] = text
         return CompactionResult(ok=True, text="COMPACTED", error_type=None, error_message=None)
 
-    with patch("tools.simple_tools.long_memory.compaction.compact_text", side_effect=fake_compact):
+    with patch("long_memory.compaction.compact_text", side_effect=fake_compact):
         res = json.loads(tool(action="append", content=delta))
 
     # Combined text fed to compaction was existing + \n\n + delta, both stripped.
@@ -139,7 +139,7 @@ def test_tool_append_overflow_compaction_failed(tmp_path):
     failed = CompactionResult(
         ok=False, text="", error_type="backend_error", error_message="boom"
     )
-    with patch("tools.simple_tools.long_memory.compaction.compact_text", return_value=failed):
+    with patch("long_memory.compaction.compact_text", return_value=failed):
         res = json.loads(tool(action="append", content="y" * 200))
 
     assert res["ok"] is False
@@ -156,7 +156,7 @@ def test_tool_append_overflow_compaction_result_still_too_large(tmp_path):
     over = CompactionResult(
         ok=True, text="z" * 50_001, error_type=None, error_message=None
     )
-    with patch("tools.simple_tools.long_memory.compaction.compact_text", return_value=over):
+    with patch("long_memory.compaction.compact_text", return_value=over):
         res = json.loads(tool(action="append", content="y" * 200))
 
     assert res["ok"] is False
@@ -166,7 +166,7 @@ def test_tool_append_overflow_compaction_result_still_too_large(tmp_path):
 
 def test_tool_append_fast_path_does_not_call_compaction(tmp_path):
     tool = _make_tool(tmp_path)
-    with patch("tools.simple_tools.long_memory.compaction.compact_text") as mocked:
+    with patch("long_memory.compaction.compact_text") as mocked:
         json.loads(tool(action="append", content="small"))
     assert not mocked.called
 
@@ -190,7 +190,7 @@ def test_tool_write_over_max_chars_refuses_no_compaction(tmp_path):
     tool = _make_tool(tmp_path)
     huge = "x" * (50_001)
 
-    with patch("tools.simple_tools.long_memory.compaction.compact_text") as mocked:
+    with patch("long_memory.compaction.compact_text") as mocked:
         res = json.loads(tool(action="write", content=huge))
 
     assert res["ok"] is False
@@ -224,7 +224,7 @@ def test_tool_unknown_action(tmp_path):
 
 
 def test_long_memory_registered_by_default():
-    data = get_simple_tools_data({})
+    data = get_builtin_tools_data({})
     assert "long_memory" in data
     entry = data["long_memory"]
     assert entry["spec"]["name"] == "long_memory"
@@ -232,5 +232,5 @@ def test_long_memory_registered_by_default():
 
 
 def test_long_memory_filtered_by_stop_tools():
-    data = get_simple_tools_data({"stop_tools": ["long_memory"]})
+    data = get_builtin_tools_data({"stop_tools": ["long_memory"]})
     assert "long_memory" not in data

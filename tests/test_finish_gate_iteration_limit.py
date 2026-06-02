@@ -48,8 +48,8 @@ class FinishGateIterationLimitTest(unittest.TestCase):
         )
         state = SimpleNamespace(
             parent_state_id=None,
-            current_user_messages=["task"],
-            user_messages_log=["task"],
+            current_user_intent=["task"],
+            user_intent_log=["task"],
             finish_gate_rejection_count=0,
         )
         validate_calls: list[int] = []

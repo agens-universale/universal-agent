@@ -3,7 +3,9 @@
 from typing import Any
 
 import message_format.dialog_history as dialog_history
-from utils.llm_chat_client import log_llm_prompt_and_result, request_chat_completion_text
+from summarize.llm import request_summary_text
+from summarize.summary_spec import format_section_titles_for_repair
+from utils.llm_chat_client import log_llm_prompt_and_result
 
 
 def compress_summary_text(
@@ -44,12 +46,12 @@ def compress_summary_text(
         {"role": "system", "content": system},
         {"role": "user", "content": summary_text},
     ]
-    text = request_chat_completion_text(
+    text = request_summary_text(
         ctx=ctx,
         state=state,
         messages=request_messages,
-        max_tokens=max_tokens,
         request_label="summary_compress",
+        max_tokens=max_tokens,
     )
     log_llm_prompt_and_result(
         logger=getattr(ctx, "logger", None),
@@ -70,7 +72,7 @@ def repair_summary_text(
     ctx: Any,
     state: Any,
     history_text: str,
-    user_requests_text: str,
+    intent_blocks_prefix: str,
     invalid_summary: str,
     reason: str,
     max_tokens: int,
@@ -85,7 +87,7 @@ def repair_summary_text(
         ctx: Контекст выполнения.
         state: Состояние сессии.
         history_text: Текст истории батча, на котором сорвалась валидация.
-        user_requests_text: Отформатированный список пользовательских запросов.
+        intent_blocks_prefix: Блоки ``<user_intent_log>`` и ``<current_user_intent>`` (как в основном батче).
         invalid_summary: Исходный невалидный ответ.
         reason: Код от `validate_summary_text` для включения в user-промпт.
         max_tokens: Лимит длины исправленной сводки.
@@ -101,17 +103,14 @@ def repair_summary_text(
     )
     user = (
         f"Previous summary is invalid. Reason: {reason}.\n\n"
-        "<user_requests_log>\n"
-        f"{user_requests_text}\n"
-        "</user_requests_log>\n\n"
+        f"{intent_blocks_prefix}"
         "<dialog_history>\n"
         f"{history_text}\n"
         "</dialog_history>\n\n"
         f"{project_data_block}"
         "Rewrite summary using the real context above. It must be high-quality, concise, and structured. "
         "Use these section headers (exact UPPERCASE_WITH_UNDERSCORES or Markdown headings with the same words): "
-        "TASK_AND_CONTEXT, GOALS, DECISIONS_AND_RATIONALE, PLAN_AND_PROGRESS, EXECUTION_STAGE, NEXT_ACTIONS, "
-        "SPEC_AND_CONSTRAINTS, RISKS_AND_OPEN_QUESTIONS, IMPORTANT_ARTIFACTS.\n\n"
+        f"{format_section_titles_for_repair()}.\n\n"
         "Execution-stage rule: if user intent says planning/analysis only, set EXECUTION_STAGE=planning and keep NEXT_ACTIONS non-coding "
         "(no implementation, no code edits, no implementation delegation).\n\n"
         "<invalid_summary>\n"
@@ -122,12 +121,12 @@ def repair_summary_text(
         {"role": "system", "content": system},
         {"role": "user", "content": user},
     ]
-    out = request_chat_completion_text(
+    out = request_summary_text(
         ctx=ctx,
         state=state,
         messages=request_messages,
-        max_tokens=max_tokens,
         request_label="summary_repair",
+        max_tokens=max_tokens,
     )
     log_llm_prompt_and_result(
         logger=getattr(ctx, "logger", None),

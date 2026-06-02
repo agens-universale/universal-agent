@@ -4,8 +4,36 @@ from typing import Any, Callable, Dict, List, Optional
 
 from tools import apply_tool
 from tools.simple_tool_base import AbstractSimpleTool
-from tools.stored_outputs.wrapping import maybe_store_and_wrap_tool_output
+from tools.session.submit_solution import SubmitSolution
+from tools.session.stored_outputs.wrapping import maybe_store_and_wrap_tool_output
 from utils.generate_message_id import generate_msg_id_sha256 as generate_message_id_func
+
+
+def _resolve_submit_solution_output_on_cycle_stop(
+    *,
+    state: Any,
+    ctx: Any,
+    tool_arguments: str,
+    run_agent_func: Callable,
+) -> str:
+    candidate = SubmitSolution.output_from_cycle_stop_arguments(tool_arguments)
+    if isinstance(candidate, str) and candidate.strip():
+        return candidate
+    try:
+        applied = apply_tool(
+            tool_name="submit_solution",
+            arguments=tool_arguments,
+            ctx=ctx,
+            state=state,
+            run_agent_func=run_agent_func,
+        )
+        if isinstance(applied, str) and applied.strip():
+            return applied
+    except Exception:
+        pass
+    return SubmitSolution.cycle_stop_output_error(
+        detail="Could not build submit_solution output from function_call.arguments.",
+    )
 
 
 def _resolve_tool_output_on_cycle_stop(
@@ -16,6 +44,14 @@ def _resolve_tool_output_on_cycle_stop(
     tool_arguments: str,
     run_agent_func: Callable,
 ) -> str:
+    if tool_name == "submit_solution":
+        return _resolve_submit_solution_output_on_cycle_stop(
+            state=state,
+            ctx=ctx,
+            tool_arguments=tool_arguments,
+            run_agent_func=run_agent_func,
+        )
+
     tool_res = None
     tools_data = getattr(ctx, "tools_data", None)
     if isinstance(tools_data, dict):
@@ -36,17 +72,6 @@ def _resolve_tool_output_on_cycle_stop(
                         tool_res = candidate
             except Exception:
                 tool_res = None
-    if (not isinstance(tool_res, str) or not tool_res.strip()) and tool_name == "submit_solution":
-        try:
-            tool_res = apply_tool(
-                tool_name=tool_name,
-                arguments=tool_arguments,
-                ctx=ctx,
-                state=state,
-                run_agent_func=run_agent_func,
-            )
-        except Exception:
-            tool_res = None
     if not isinstance(tool_res, str) or not tool_res.strip():
         tool_res = AbstractSimpleTool.fallback_tool_output_on_cycle_stop(tool_name)
     return tool_res

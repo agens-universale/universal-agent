@@ -1,8 +1,15 @@
 import json
 
+from intent_log import ACTION_TOOL_AGGREGATED, ACTION_TOOL_RAW, ACTION_USER_ASK
+from intent_log.user_turn import (
+    append_user_ask_deduped,
+    append_user_asks_from_messages,
+    init_subagent_open_turn,
+)
+from intent_scope.append import append_tool_aggregated_to_current, append_tool_raw_to_current
 from message_policy.user_message_policy import extract_real_user_message_text
+from persistence.state_serializer import StateSerializer
 from states import State
-
 
 
 def _make_state() -> State:
@@ -18,18 +25,22 @@ def _make_state() -> State:
     )
 
 
-def test_new_state_has_empty_user_messages_log():
-    """Fresh State always starts with an empty user_messages_log."""
+def _user_ask_contents(records) -> list[str]:
+    return [
+        str(record.content)
+        for record in records
+        if record.action == ACTION_USER_ASK
+    ]
+
+
+def test_new_state_has_empty_user_intent_log():
     state = _make_state()
-    assert state.user_messages_log == []
+    assert state.user_intent_log == []
+    assert state.current_user_intent == []
+    assert state.user_turn_seq == 0
 
 
-def test_append_user_messages_to_log_seeds_initial_user_turn():
-    """Regression for finish_gate rejecting valid submit_solution with
-    'user_messages_log is empty'. agent_executor.run_agent must seed
-    the log with the current user message BEFORE run_step/finish_gate;
-    the _persist_*_batch callbacks only see step_messages from subsequent
-    assistant turns, never the initiating user message."""
+def test_append_user_asks_from_messages_only_updates_current():
     state = _make_state()
     new_user_message = {
         "role": "user",
@@ -37,56 +48,186 @@ def test_append_user_messages_to_log_seeds_initial_user_turn():
         "id": "m_abc",
     }
 
-    state.append_user_messages_to_log([new_user_message])
+    state.current_user_intent = append_user_asks_from_messages(
+        state.current_user_intent,
+        [new_user_message],
+        user_turn_seq=state.user_turn_seq,
+    )
 
-    assert state.user_messages_log == [
+    assert _user_ask_contents(state.current_user_intent) == [
         "открой приложение Jazz и создай видеовстречу",
     ]
+    assert state.user_intent_log == []
 
 
-def test_append_user_messages_to_log_is_idempotent_for_same_message():
-    """Calling append twice with the same message must not duplicate it —
-    safe to re-seed on branches that may run the init path more than once."""
+def test_append_user_asks_from_messages_is_idempotent_for_same_message():
     state = _make_state()
     msg = {"role": "user", "content": "ping", "id": "m_1"}
-    state.append_user_messages_to_log([msg])
-    state.append_user_messages_to_log([msg])
-    assert state.user_messages_log == ["ping"]
+    state.current_user_intent = append_user_asks_from_messages(
+        state.current_user_intent, [msg], user_turn_seq=state.user_turn_seq
+    )
+    state.current_user_intent = append_user_asks_from_messages(
+        state.current_user_intent, [msg], user_turn_seq=state.user_turn_seq
+    )
+    assert _user_ask_contents(state.current_user_intent) == ["ping"]
 
 
-def test_append_user_messages_to_log_preserves_initial_across_step_batches():
-    """After seeding with the initial user turn, subsequent step_messages
-    batches (assistant output + tool calls) must NOT wipe the initial entry."""
+def test_append_user_asks_preserves_initial_across_step_batches():
     state = _make_state()
     initial = {"role": "user", "content": "do the thing", "id": "m_user"}
-    state.append_user_messages_to_log([initial])
+    state.current_user_intent = append_user_asks_from_messages(
+        state.current_user_intent, [initial], user_turn_seq=state.user_turn_seq
+    )
 
-    # Subsequent step batch: assistant reply + tool call — no real user msg.
     step_batch = [
         {"role": "assistant", "content": "working on it", "id": "m_a1"},
-        {"type": "function_call", "name": "some_tool", "arguments": "{}",
-         "call_id": "c1", "id": "fc_1"},
+        {
+            "role": "tool",
+            "type": "function_call",
+            "name": "some_tool",
+            "arguments": "{}",
+            "call_id": "c1",
+            "id": "fc_1",
+        },
     ]
-    state.append_user_messages_to_log(step_batch)
+    state.current_user_intent = append_user_asks_from_messages(
+        state.current_user_intent, step_batch, user_turn_seq=state.user_turn_seq
+    )
 
-    assert state.user_messages_log == ["do the thing"]
+    assert _user_ask_contents(state.current_user_intent) == ["do the thing"]
+    assert state.user_intent_log == []
 
 
-def test_seed_new_user_turn_appends_to_current_scope_and_global_log():
+def test_init_subagent_open_turn_without_policy_filter():
+    assignment = (
+        'Assignment:\n{"task": "fix foo"}\n\n'
+        "<current_context>scope hint</current_context>"
+    )
     state = _make_state()
-    state.current_user_messages = ["active intent 1"]
-    state.user_messages_log = ["old intent 1", "active intent 1"]
+    init_subagent_open_turn(state, assignment)
+
+    assert _user_ask_contents(state.current_user_intent) == [assignment]
+    assert state.user_intent_log == []
+    assert state.user_turn_seq == 0
+    assert state.finish_gate_rejection_count == 0
+
+    state2 = _make_state()
+    text = extract_real_user_message_text(
+        {"role": "user", "content": assignment, "id": "m_sub"}
+    )
+    if text:
+        state2.current_user_intent = append_user_ask_deduped(
+            state2.current_user_intent, text, user_turn_seq=state2.user_turn_seq
+        )
+    assert state2.current_user_intent == []
+
+
+def test_seed_user_ask_appends_only_to_current():
+    from intent_log import append_user_ask
+
+    state = _make_state()
+    state.user_intent_log = append_user_ask(
+        [], "old intent 1", user_turn_seq=0, ts="2026-05-30T11:35:08Z"
+    )
+    state.flush_current_user_intent()
+    state.current_user_intent = append_user_ask(
+        [], "active intent 1", user_turn_seq=state.user_turn_seq, ts="2026-05-30T11:35:08Z"
+    )
     new_user_message = {"role": "user", "content": "fresh request", "id": "m_new"}
 
-    state.seed_new_user_turn(new_user_message)
+    state.finish_gate_rejection_count = 0
+    text = extract_real_user_message_text(new_user_message)
+    state.current_user_intent = append_user_ask_deduped(
+        state.current_user_intent, text, user_turn_seq=state.user_turn_seq
+    )
 
-    assert state.current_user_messages == ["active intent 1", "fresh request"]
-    assert state.user_messages_log == [
-        "old intent 1",
+    assert _user_ask_contents(state.current_user_intent) == [
         "active intent 1",
         "fresh request",
     ]
+    assert _user_ask_contents(state.user_intent_log) == ["old intent 1"]
 
+
+def test_multiple_user_asks_at_open_turn_like_agent_executor():
+    state = _make_state()
+    bodies = ["первый запрос", "второй запрос", "третий запрос"]
+    for idx, body in enumerate(bodies):
+        state.finish_gate_rejection_count = 0
+        state.current_user_intent = append_user_ask_deduped(
+            state.current_user_intent,
+            body,
+            user_turn_seq=state.user_turn_seq,
+        )
+
+    assert _user_ask_contents(state.current_user_intent) == bodies
+    assert state.user_intent_log == []
+    assert state.finish_gate_rejection_count == 0
+
+    state.current_user_intent = append_user_ask_deduped(
+        state.current_user_intent,
+        "второй запрос",
+        user_turn_seq=state.user_turn_seq,
+    )
+    assert _user_ask_contents(state.current_user_intent) == bodies
+
+
+def test_flush_moves_current_to_log_without_dedup():
+    from intent_log import append_user_ask
+
+    state = _make_state()
+    state.user_intent_log = append_user_ask(
+        [], "closed turn", user_turn_seq=0, ts="2026-05-30T11:35:08Z"
+    )
+    state.flush_current_user_intent()
+    state.current_user_intent = append_user_ask(
+        [], "line a", user_turn_seq=state.user_turn_seq, ts="2026-05-30T11:35:08Z"
+    )
+    state.current_user_intent = append_user_ask(
+        state.current_user_intent,
+        "line b",
+        user_turn_seq=state.user_turn_seq,
+        ts="2026-05-30T11:35:08Z",
+    )
+    state.current_user_intent = append_user_ask(
+        state.current_user_intent,
+        "line a",
+        user_turn_seq=state.user_turn_seq,
+        ts="2026-05-30T11:35:08Z",
+    )
+
+    state.flush_current_user_intent()
+
+    assert state.current_user_intent == []
+    assert _user_ask_contents(state.user_intent_log) == [
+        "closed turn",
+        "line a",
+        "line b",
+        "line a",
+    ]
+
+
+def test_append_tool_aggregated_dedups_within_current():
+    state = _make_state()
+    append_tool_aggregated_to_current(state, "ask_human", "first")
+    append_tool_aggregated_to_current(state, "ask_human", "first")
+    append_tool_aggregated_to_current(state, "submit_solution", "second")
+
+    assert len(state.current_user_intent) == 2
+    assert state.current_user_intent[0].action == ACTION_TOOL_AGGREGATED
+    assert state.current_user_intent[0].content == "first"
+    assert state.current_user_intent[1].content == "second"
+    assert state.user_intent_log == []
+
+
+def test_append_tool_raw_dedups_within_current():
+    state = _make_state()
+    payload = {"task_report": "done"}
+    output = {"ok": True}
+    append_tool_raw_to_current(state, "submit_solution", payload, output)
+    append_tool_raw_to_current(state, "submit_solution", payload, output)
+
+    assert len(state.current_user_intent) == 1
+    assert state.current_user_intent[0].action == ACTION_TOOL_RAW
 
 
 def test_extract_real_user_message_text_skips_current_context_as_technical():
@@ -115,12 +256,11 @@ def test_extract_real_user_message_text_keeps_regular_user_message():
 
 def test_state_to_dict_roundtrip_is_json_serializable_and_restores_shared_and_store():
     state = _make_state()
-    state.shared.memory_files["journal"] = "entry"
+    state.shared.working_memory["state"] = "entry"
     state.shared.notes_md = "notes"
     state.shared.fetch_url_cache["https://example.com"] = {"content": "ok"}
 
-    # Наполняем store, чтобы проверить его сериализацию/десериализацию.
-    from tools.stored_outputs.tool_call_outputs_store import (  # noqa: E402
+    from tools.session.stored_outputs.tool_call_outputs_store import (  # noqa: E402
         ToolCallOutputRecord,
     )
 
@@ -135,11 +275,12 @@ def test_state_to_dict_roundtrip_is_json_serializable_and_restores_shared_and_st
         )
     )
 
-    payload = state.to_dict()
+    payload = StateSerializer.serialize(state)
     raw_json = json.dumps(payload, ensure_ascii=False)
-    restored = State.from_dict(json.loads(raw_json))
+    restored = StateSerializer.deserialize(json.loads(raw_json))
 
-    assert restored.shared.memory_files["journal"] == "entry"
+    assert restored.shared.working_memory["state"] == "entry"
+    assert StateSerializer.serialize(restored)["state_schema_version"] == "v2"
     assert restored.shared.notes_md == "notes"
     assert restored.shared.fetch_url_cache["https://example.com"] == {"content": "ok"}
     rec = restored.tool_call_outputs_store.peek("out_1")
@@ -149,7 +290,8 @@ def test_state_to_dict_roundtrip_is_json_serializable_and_restores_shared_and_st
 
 
 def test_state_roundtrip_with_monster_payload_preserves_core_runtime_fields():
-    """Проверка round-trip на максимально насыщенном state payload."""
+    from intent_log import append_user_ask
+
     state = State(
         verbose=True,
         model="CodeChat-Pro",
@@ -176,8 +318,24 @@ def test_state_roundtrip_with_monster_payload_preserves_core_runtime_fields():
     state.last_backend_response_id = "resp_last"
     state.steps = 42
     state.stop_requested = True
-    state.user_messages_log = ["msg one", "msg two"]
-    state.current_user_messages = ["active one", "active two"]
+    state.user_intent_log = append_user_ask(
+        [], "msg one", user_turn_seq=0, ts="2026-05-30T11:35:08Z"
+    )
+    state.flush_current_user_intent()
+    state.user_intent_log = append_user_ask(
+        state.user_intent_log, "msg two", user_turn_seq=state.user_turn_seq, ts="2026-05-30T11:35:08Z"
+    )
+    state.flush_current_user_intent()
+    state.current_user_intent = append_user_ask(
+        [], "active one", user_turn_seq=state.user_turn_seq, ts="2026-05-30T11:35:08Z"
+    )
+    state.current_user_intent = append_user_ask(
+        state.current_user_intent,
+        "active two",
+        user_turn_seq=state.user_turn_seq,
+        ts="2026-05-30T11:35:08Z",
+    )
+    state.user_turn_seq = 2
     state.call_metadata["extra"] = {
         "nested": [{"k": "v"}, {"n": 1}, {"flags": [True, False, None]}],
         "meta": {"a": 1, "b": "x"},
@@ -193,18 +351,18 @@ def test_state_roundtrip_with_monster_payload_preserves_core_runtime_fields():
         {"id": "t1", "type": "function_call", "name": "memory_files", "arguments": "{\"action\":\"list\"}"},
     ]
 
-    state.shared.memory_files.update(
+    state.shared.working_memory.update(
         {
-            "journal": "line1\nline2",
-            "arch": "decision: keep explicit serializers",
-            "notes": "long text " * 5,
+            "state": "line1\nline2",
+            "knowledge": "decision: keep explicit serializers",
+            "goal": "long text " * 5,
         }
     )
     state.shared.notes_md = "# Notes\n- item1\n- item2"
     state.shared.fetch_url_cache["https://example.com/a"] = {"content": "AAA", "ts": "2026-05-06T11:00:00Z"}
     state.shared.fetch_url_cache["https://example.com/b"] = {"content": "BBB", "ts": "2026-05-06T11:01:00Z"}
 
-    from tools.stored_outputs.tool_call_outputs_store import (  # noqa: E402
+    from tools.session.stored_outputs.tool_call_outputs_store import (  # noqa: E402
         ToolCallOutputRecord,
     )
 
@@ -230,11 +388,10 @@ def test_state_roundtrip_with_monster_payload_preserves_core_runtime_fields():
         )
     )
 
-    raw = state.to_dict()
+    raw = StateSerializer.serialize(state)
     blob = json.dumps(raw, ensure_ascii=False)
-    restored = State.from_dict(json.loads(blob))
+    restored = StateSerializer.deserialize(json.loads(blob))
 
-    # Core scalar/runtime fields.
     assert restored.verbose is True
     assert restored.default_model == "CodeChat-Pro"
     assert restored.system_prompt_id == "v2-monster"
@@ -251,20 +408,18 @@ def test_state_roundtrip_with_monster_payload_preserves_core_runtime_fields():
     assert restored.stop_requested is True
     assert restored.max_steps == 99
 
-    # Complex collections.
     assert len(restored.messages) == 3
     assert restored.messages[1]["tokens"]["output"] == 55
-    assert restored.user_messages_log == ["msg one", "msg two"]
-    assert restored.current_user_messages == ["active one", "active two"]
+    assert _user_ask_contents(restored.user_intent_log) == ["msg one", "msg two"]
+    assert _user_ask_contents(restored.current_user_intent) == ["active one", "active two"]
+    assert restored.user_turn_seq == 2
     assert restored.call_metadata["extra"]["nested"][2]["flags"] == [True, False, None]
 
-    # Shared dataclass and nested maps.
-    assert restored.shared.memory_files["journal"] == "line1\nline2"
-    assert restored.shared.memory_files["arch"] == "decision: keep explicit serializers"
+    assert restored.shared.working_memory["state"] == "line1\nline2"
+    assert restored.shared.working_memory["knowledge"] == "decision: keep explicit serializers"
     assert restored.shared.notes_md == "# Notes\n- item1\n- item2"
     assert restored.shared.fetch_url_cache["https://example.com/b"]["content"] == "BBB"
 
-    # Tool output store.
     assert restored.tool_call_outputs_store.max_entries == 5
     rec_alpha = restored.tool_call_outputs_store.peek("out_alpha")
     rec_beta = restored.tool_call_outputs_store.peek("out_beta")

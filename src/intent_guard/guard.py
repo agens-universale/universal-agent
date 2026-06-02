@@ -4,6 +4,13 @@ import logging
 from dataclasses import dataclass
 from typing import Any, Literal
 
+from intent_log import deserialize_list, records_to_jsonl_lines
+from intent_guard.agent_logging import (
+    log_finish_gate_decision,
+    log_finish_gate_skipped,
+    log_finish_gate_validate_done,
+    log_finish_gate_validate_start,
+)
 from intent_guard.feedback import build_finish_gate_feedback
 from intent_guard.final_report_consistency import validate_final_report_vs_user_intent
 from intent_guard.validation_result import ValidationResult
@@ -61,7 +68,7 @@ class FinishGateDecision:
 
 
 class FinishGateGuard:
-    """Оркестратор finish gate на один (ctx, state) — см. SPEC §5.6."""
+    """Оркестратор finish gate (quality gate) на один (ctx, state) — см. SPEC §5.6."""
 
     def __init__(
         self,
@@ -88,17 +95,34 @@ class FinishGateGuard:
         *,
         submit_solution_arguments: Any,
     ) -> FinishGateDecision:
-        if not self.enabled:
-            return FinishGateDecision(outcome="skipped")
-
         cfg = getattr(self._ctx, "config_dict", {}) or {}
         if not isinstance(cfg, dict):
             cfg = {}
+        backend = str(cfg.get("backend_api_mode") or "").strip().lower()
+        parent_state_id = getattr(self._state, "parent_state_id", None)
+        agent_kind = "subagent" if parent_state_id is not None else "main"
+
+        if not self.enabled:
+            reason = "disabled"
+            if not bool(cfg.get("strict_submit_solution_validation", True)):
+                reason = "strict_submit_solution_validation=false"
+            elif backend != "chat_completions":
+                reason = f"backend_api_mode={backend}"
+            log_finish_gate_skipped(
+                self._logger,
+                reason=reason,
+                backend_api_mode=backend,
+            )
+            decision = FinishGateDecision(outcome="skipped")
+            log_finish_gate_decision(
+                self._logger,
+                outcome=decision.outcome,
+                agent_kind=agent_kind,
+            )
+            return decision
 
         max_r = resolve_finish_gate_max_rejections(cfg, self._state)
         count_before = int(getattr(self._state, "finish_gate_rejection_count", 0) or 0)
-        parent_state_id = getattr(self._state, "parent_state_id", None)
-        agent_kind = "subagent" if parent_state_id is not None else "main"
 
         if count_before >= max_r:
             self._logger.warning(
@@ -109,27 +133,48 @@ class FinishGateGuard:
                 agent_kind,
                 parent_state_id,
             )
-            return FinishGateDecision(outcome="fail_open_limit")
+            decision = FinishGateDecision(outcome="fail_open_limit")
+            log_finish_gate_decision(
+                self._logger,
+                outcome=decision.outcome,
+                agent_kind=agent_kind,
+                rejection_count=count_before,
+                max_rejections=max_r,
+            )
+            return decision
 
-        active_user_messages = list(
-            getattr(self._state, "current_user_messages", []) or []
+        current_user_intent = records_to_jsonl_lines(
+            deserialize_list(getattr(self._state, "current_user_intent", []) or [])
         )
-        full_user_messages_log = list(
-            getattr(self._state, "user_messages_log", []) or []
+        user_intent_log = records_to_jsonl_lines(
+            deserialize_list(getattr(self._state, "user_intent_log", []) or [])
         )
-        if not active_user_messages:
-            active_user_messages = full_user_messages_log
-        active_set = set(active_user_messages)
-        context_user_messages = [
-            msg for msg in full_user_messages_log if msg not in active_set
-        ]
+
+        digest_chars = 0
+        try:
+            from intent_guard.trace_digest import build_finish_gate_trace_digest
+
+            digest = build_finish_gate_trace_digest(state=self._state, cfg=cfg)
+            digest_chars = len(digest.trace_digest_text or "")
+        except Exception:
+            digest_chars = 0
+
+        log_finish_gate_validate_start(
+            self._logger,
+            agent_kind=agent_kind,
+            current_intent_lines=len(current_user_intent),
+            user_intent_log_lines=len(user_intent_log),
+            rejection_count=count_before,
+            max_rejections=max_r,
+            digest_chars=digest_chars,
+        )
 
         try:
             validation = validate_final_report_vs_user_intent(
                 ctx=self._ctx,
                 state=self._state,
-                current_user_requests=active_user_messages,
-                context_user_messages=context_user_messages,
+                current_user_requests=current_user_intent,
+                context_user_messages=user_intent_log,
                 submit_solution_arguments=submit_solution_arguments,
             )
         except Exception as exc:
@@ -139,29 +184,48 @@ class FinishGateGuard:
                 exc,
                 exc_info=True,
             )
-            return FinishGateDecision(outcome="fail_open_error")
+            decision = FinishGateDecision(outcome="fail_open_error")
+            log_finish_gate_decision(
+                self._logger,
+                outcome=decision.outcome,
+                agent_kind=agent_kind,
+                rejection_count=count_before,
+                max_rejections=max_r,
+            )
+            return decision
+
+        log_finish_gate_validate_done(
+            self._logger,
+            agent_kind=agent_kind,
+            validation=validation,
+        )
 
         if validation.ok:
-            return FinishGateDecision(outcome="accept", validation=validation)
+            decision = FinishGateDecision(outcome="accept", validation=validation)
+            log_finish_gate_decision(
+                self._logger,
+                outcome=decision.outcome,
+                agent_kind=agent_kind,
+                rejection_count=count_before,
+                max_rejections=max_r,
+                validation=validation,
+            )
+            return decision
 
         self._state.finish_gate_rejection_count = count_before + 1
         feedback_text = build_finish_gate_feedback(validation)
-        self._logger.warning(
-            "finish_gate_rejected finish_gate_rejection_count=%s/%s agent_kind=%s "
-            "parent_state_id=%s action=%s trace_ok=%s report_ok=%s "
-            "report_mismatches=%s trace_gaps=%s",
-            self._state.finish_gate_rejection_count,
-            max_r,
-            agent_kind,
-            parent_state_id,
-            validation.action,
-            validation.trace_ok,
-            validation.report_ok,
-            validation.report_mismatches,
-            validation.trace_gaps,
-        )
-        return FinishGateDecision(
+        decision = FinishGateDecision(
             outcome="reject",
             validation=validation,
             feedback_text=feedback_text,
         )
+        log_finish_gate_decision(
+            self._logger,
+            outcome=decision.outcome,
+            agent_kind=agent_kind,
+            rejection_count=self._state.finish_gate_rejection_count,
+            max_rejections=max_r,
+            validation=validation,
+            feedback_preview=feedback_text,
+        )
+        return decision

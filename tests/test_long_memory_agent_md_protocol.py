@@ -1,8 +1,4 @@
-"""Guard the system-prompt-level Long memory protocol section in demo_cli_agent.md.
-
-Third pressure point of the imperative read protocol (alongside Project Info
-nudge and tool description workflow).
-"""
+"""Guard current concise protocol in demo_cli_agent.md."""
 from pathlib import Path
 
 
@@ -16,36 +12,23 @@ def _read_prompt() -> str:
 
 
 def _flat(text: str) -> str:
-    """Collapse whitespace so substring asserts ignore markdown line-wrapping."""
     return " ".join(text.split())
 
 
-def test_demo_cli_agent_md_has_long_memory_protocol_section():
+def test_demo_cli_agent_md_has_persistent_memory_section():
     text = _read_prompt()
-    assert "## Long memory protocol" in text
+    assert "Отвечай на русском" in text
 
 
-def test_protocol_section_contains_mandatory_first_step_rule():
-    text = _flat(_read_prompt())
-    assert "MUST" in text
-    assert "FIRST tool call in this session" in text
+def test_protocol_is_deployment_agnostic():
+    section = _read_prompt()
+    flat = _flat(section)
+    assert "запиши его в файл" in flat
+    assert "директории проекта" in flat
+    assert "краткое резюме и путь к файлу" in flat
 
 
-def test_protocol_section_contains_override_rule():
-    text = _flat(_read_prompt())
-    assert "even if they contradict what existing code shows" in text
-
-
-def test_protocol_section_does_not_leak_path_or_tool_name():
-    """The protocol must guide behavior without disclosing internals."""
+def test_no_conditional_prompt_tags():
     text = _read_prompt()
-    # The protocol section is one block; verify the section itself is clean
-    # rather than the whole agent.md (other sections may mention unrelated paths).
-    start = text.index("## Long memory protocol")
-    # Section ends at the next "## " header
-    rest = text[start + len("## Long memory protocol") :]
-    end_offset = rest.find("\n## ")
-    section = rest if end_offset == -1 else rest[:end_offset]
-    assert ".gc/" not in section
-    assert "long_memory.md" not in section
-    assert "long_memory" not in section  # tool name must not appear
+    assert "<memory_files_prompt>" not in text
+    assert "<long_memory_prompt>" not in text

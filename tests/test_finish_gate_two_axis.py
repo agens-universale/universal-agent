@@ -13,6 +13,12 @@ import importlib
 import intent_guard.guard as intent_guard_guard
 import pytest
 
+from intent_fixtures import (
+    intent_user_ask_texts,
+    intent_user_ask_texts_from_jsonl,
+    seed_state_intent,
+)
+from intent_log import append_tool_aggregated
 from intent_guard.feedback import build_finish_gate_feedback
 from intent_guard.guard import FinishGateGuard
 from intent_guard.validation_result import ValidationResult
@@ -125,9 +131,11 @@ def _submit_solution_call(
     solution_type: str = "full_solution",
     handoff: dict | None = None,
 ):
-    args: dict = {"solution_type": solution_type, "task_report": "done"}
-    if handoff is not None:
-        args["handoff"] = handoff
+    args: dict = {
+        "solution_type": solution_type,
+        "task_report": "done",
+        "handoff": json.dumps(handoff if handoff is not None else {}, ensure_ascii=False),
+    }
     return {
         "type": "function_call",
         "name": "submit_solution",
@@ -173,8 +181,11 @@ def test_guard_reject_uses_structured_feedback_not_raw_llm(monkeypatch):
         _scenario_12_validation,
     )
     state = _make_state()
-    state.current_user_messages = ["спроси меня что нибудь"]
-    state.user_messages_log = ["спроси меня что нибудь"]
+    seed_state_intent(
+        state,
+        current="спроси меня что нибудь",
+        log="спроси меня что нибудь",
+    )
     guard = FinishGateGuard(ctx=_make_ctx(), state=state)
     decision = guard.evaluate_submit_solution(
         submit_solution_arguments={"solution_type": "full_solution"},
@@ -209,8 +220,11 @@ def test_run_agent_rejects_submit_with_fix_report_feedback(monkeypatch):
     monkeypatch.setattr(processing_module, "process_user_ask", _stub_user_ask)
 
     state = _make_state(max_steps=0)
-    state.current_user_messages = ["спроси меня что нибудь"]
-    state.user_messages_log = ["спроси меня что нибудь"]
+    seed_state_intent(
+        state,
+        current="спроси меня что нибудь",
+        log="спроси меня что нибудь",
+    )
 
     run_agent(
         [_submit_solution_call()],
@@ -218,19 +232,21 @@ def test_run_agent_rejects_submit_with_fix_report_feedback(monkeypatch):
         _make_ctx(),
     )
 
-    technical = [
+    tool_output = next(
         m
         for m in state.messages
-        if m.get("role") == "user" and "Finish gate:" in (m.get("content") or "")
-    ]
-    assert technical, "ожидали technical user с feedback finish gate"
-    text = technical[-1]["content"]
-    assert "fix_report" in text
-    assert "задай вопрос" not in text.lower()
-    assert "снова вызови ask_human" not in text.lower()
+        if m.get("type") == "function_call_output" and m.get("call_id") == "call_finish"
+    )
+    payload = json.loads(tool_output["output"])
+    assert payload["ok"] is False
+    assert payload["status"] == "rejected_by_finish_gate"
+    assert "fix_report" in payload["message"]
+    assert payload["finish_gate"]["action"] == "fix_report"
+    assert "задай вопрос" not in payload["message"].lower()
+    assert "снова вызови ask_human" not in payload["message"].lower()
 
 
-def test_run_agent_accept_clears_current_user_messages_for_subagent(monkeypatch):
+def test_run_agent_accept_clears_current_user_intent_for_subagent(monkeypatch):
     def _accept(**_kwargs):
         return ValidationResult(
             ok=True,
@@ -252,17 +268,20 @@ def test_run_agent_accept_clears_current_user_messages_for_subagent(monkeypatch)
     )
 
     state = _make_state(parent_state_id="orch-parent")
-    state.current_user_messages = ["subagent task"]
-    state.user_messages_log = ["subagent task"]
+    seed_state_intent(
+        state,
+        current="subagent task",
+        log="subagent task",
+    )
 
     result = run_agent(
-        [_submit_solution_call(solution_type="answer_question")],
+        [_submit_solution_call(solution_type="direct_answer")],
         state,
         _make_ctx(),
     )
 
     assert result is not None
-    assert state.current_user_messages == []
+    assert state.current_user_intent == []
 
 
 def _continue_work_validation(**_kwargs):
@@ -324,8 +343,11 @@ def test_run_agent_continue_work_feedback_lists_trace_gaps(monkeypatch):
     monkeypatch.setattr(processing_module, "process_user_ask", _stub_user_ask)
 
     state = _make_state(max_steps=0)
-    state.current_user_messages = ["создай report.md"]
-    state.user_messages_log = ["создай report.md"]
+    seed_state_intent(
+        state,
+        current="создай report.md",
+        log="создай report.md",
+    )
 
     run_agent(
         [_submit_solution_call()],
@@ -333,12 +355,15 @@ def test_run_agent_continue_work_feedback_lists_trace_gaps(monkeypatch):
         _make_ctx(),
     )
 
-    technical = [
+    tool_output = next(
         m
         for m in state.messages
-        if m.get("role") == "user" and "Finish gate:" in (m.get("content") or "")
-    ]
-    text = technical[-1]["content"]
+        if m.get("type") == "function_call_output" and m.get("call_id") == "call_finish"
+    )
+    payload = json.loads(tool_output["output"])
+    assert payload["ok"] is False
+    assert payload["status"] == "rejected_by_finish_gate"
+    text = payload["message"]
     assert "continue_work" in text.lower()
     assert "write_to_file" in text
     assert "report.md" in text
@@ -350,7 +375,7 @@ def test_main_accept_after_ask_human_trace(monkeypatch):
         args = kwargs["submit_solution_arguments"]
         if isinstance(args, str):
             args = json.loads(args)
-        assert args.get("solution_type") == "answer_question"
+        assert args.get("solution_type") == "direct_answer"
         return ValidationResult(
             ok=True,
             action="accept",
@@ -372,20 +397,24 @@ def test_main_accept_after_ask_human_trace(monkeypatch):
 
     state = _make_state(max_steps=0)
     state.messages = _ask_human_scenario_messages(include_pending_submit=False)
-    state.current_user_messages = ["спроси меня что нибудь"]
-    state.user_messages_log = [
-        "предыдущий запрос в треде",
-        "спроси меня что нибудь",
-    ]
+    seed_state_intent(
+        state,
+        current="спроси меня что нибудь",
+        log="предыдущий запрос в треде",
+    )
 
     result = run_agent(
-        [_submit_solution_call(solution_type="answer_question")],
+        [_submit_solution_call(solution_type="direct_answer")],
         state,
         _make_ctx(),
     )
 
     assert result is not None
-    assert state.current_user_messages == []
+    assert state.current_user_intent == []
+    assert intent_user_ask_texts(state.user_intent_log) == [
+        "предыдущий запрос в треде",
+        "спроси меня что нибудь",
+    ]
 
 
 def test_run_agent_handoff_phantom_artifact_fix_report(monkeypatch):
@@ -411,8 +440,11 @@ def test_run_agent_handoff_phantom_artifact_fix_report(monkeypatch):
     monkeypatch.setattr(processing_module, "process_user_ask", _stub_user_ask)
 
     state = _make_state(max_steps=0)
-    state.current_user_messages = ["спроси меня что нибудь"]
-    state.user_messages_log = ["спроси меня что нибудь"]
+    seed_state_intent(
+        state,
+        current="спроси меня что нибудь",
+        log="спроси меня что нибудь",
+    )
 
     run_agent(
         [
@@ -424,10 +456,129 @@ def test_run_agent_handoff_phantom_artifact_fix_report(monkeypatch):
         _make_ctx(),
     )
 
-    text = next(
-        m["content"]
+    tool_output = next(
+        m
         for m in state.messages
-        if m.get("role") == "user" and "Finish gate:" in (m.get("content") or "")
+        if m.get("type") == "function_call_output" and m.get("call_id") == "call_finish"
     )
-    assert "fix_report" in text
-    assert "phantom_plan.md" in text
+    payload = json.loads(tool_output["output"])
+    assert payload["ok"] is False
+    assert "fix_report" in payload["message"]
+    assert "phantom_plan.md" in payload["message"]
+
+
+def test_guard_passes_structured_intent_lines_to_validator(monkeypatch):
+    captured: dict = {}
+
+    def _capture(**kwargs):
+        captured.update(kwargs)
+        return ValidationResult(
+            ok=True,
+            action="accept",
+            trace_ok=True,
+            report_ok=True,
+            trace_gaps=[],
+            report_mismatches=[],
+            missing_requirements=[],
+            conflicts=[],
+            coverage_score=1.0,
+            feedback_for_agent="",
+        )
+
+    monkeypatch.setattr(
+        intent_guard_guard,
+        "validate_final_report_vs_user_intent",
+        _capture,
+    )
+    state = _make_state()
+    seed_state_intent(state, current="open task", log="closed task")
+    state.current_user_intent = append_tool_aggregated(
+        list(state.current_user_intent),
+        "ask_human",
+        "topic chosen",
+        user_turn_seq=state.user_turn_seq,
+        ts="2026-05-30T11:35:08Z",
+    )
+
+    guard = FinishGateGuard(ctx=_make_ctx(), state=state)
+    guard.evaluate_submit_solution(submit_solution_arguments={"solution_type": "full_solution"})
+
+    assert intent_user_ask_texts_from_jsonl(captured["current_user_requests"]) == [
+        "open task",
+    ]
+    assert len(captured["current_user_requests"]) == 2
+    assert intent_user_ask_texts_from_jsonl(captured["context_user_messages"]) == [
+        "closed task",
+    ]
+
+
+def test_run_agent_reject_continues_turn_with_technical_user_message(monkeypatch):
+    """Reject finish gate must not return finish_arguments; inject technical user feedback."""
+    validate_calls = {"n": 0}
+
+    def _validate(**_kwargs):
+        validate_calls["n"] += 1
+        if validate_calls["n"] == 1:
+            return _scenario_12_validation()
+        return ValidationResult(
+            ok=True,
+            action="accept",
+            trace_ok=True,
+            report_ok=True,
+            trace_gaps=[],
+            report_mismatches=[],
+            missing_requirements=[],
+            conflicts=[],
+            coverage_score=1.0,
+            feedback_for_agent="",
+        )
+
+    monkeypatch.setattr(
+        intent_guard_guard,
+        "validate_final_report_vs_user_intent",
+        _validate,
+    )
+    monkeypatch.setattr(
+        processing_module,
+        "maybe_update_intent_scope_from_tool",
+        lambda **_kwargs: None,
+    )
+
+    user_ask_batches: list[list] = []
+
+    def _stub_user_ask(in_messages, _state, _ctx):
+        user_ask_batches.append(list(in_messages))
+        return (
+            [_submit_solution_call(solution_type="direct_answer")],
+            "rid_retry",
+        )
+
+    monkeypatch.setattr(processing_module, "process_user_ask", _stub_user_ask)
+
+    state = _make_state(max_steps=10)
+    seed_state_intent(
+        state,
+        current="спроси меня что нибудь",
+        log="предыдущий ход",
+    )
+
+    result = run_agent([_submit_solution_call()], state, _make_ctx())
+
+    assert validate_calls["n"] == 2
+    assert result is not None
+    assert intent_user_ask_texts(state.user_intent_log) == [
+        "предыдущий ход",
+        "спроси меня что нибудь",
+    ]
+    assert len(user_ask_batches) == 1
+    assert len(user_ask_batches[0]) == 1
+    tech_content = str(user_ask_batches[0][0].get("content") or "")
+    assert "интент" in tech_content.lower()
+    assert "продолжай работу" in tech_content.lower()
+    assert "<technical" in tech_content.lower()
+    assert any(
+        "quality gate" in str(m.get("content") or "").lower()
+        or "интент" in str(m.get("content") or "").lower()
+        for m in state.messages
+        if m.get("role") == "user"
+    )

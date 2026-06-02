@@ -6,6 +6,7 @@ from summarize.summary_validation import (
     is_valid_summary_text,
     validate_summary_text,
 )
+from tests.helpers.summary_sample import valid_summary_text_for_tests
 from message_policy.user_message_policy import append_user_log_entries
 
 
@@ -23,29 +24,27 @@ class ThreadSummarizerTest(unittest.TestCase):
         self.assertEqual(log, ["Сделай рефакторинг parser слоя"])
 
     def test_is_valid_summary_text(self) -> None:
-        good_summary = (
-            "TASK_AND_CONTEXT:\n- context details.\n\n"
-            "GOALS:\n- goal.\n\n"
-            "PLAN_AND_PROGRESS:\n- [DONE] something.\n\n"
-            "NEXT_ACTIONS:\n- action.\n\n"
-            "SPEC_AND_CONSTRAINTS:\n- constraints.\n\n"
-            "IMPORTANT_ARTIFACTS:\n- src/summarize/thread_summarizer.py\n"
-        )
+        good_summary = valid_summary_text_for_tests()
         self.assertTrue(is_valid_summary_text(good_summary))
         human_headers = (
             "# Task and context\n"
-            "- User wants a fact-check of acp2.md and acp3.md output.\n\n"
-            "## Goals\n"
-            "- Verify claims; produce corrected doc.\n\n"
-            "### Plan and progress\n"
-            "- [DONE] Read official docs.\n\n"
+            "- User wants a fact-check of acp2.md and acp3.md output.\n"
+            "- Goal: verify claims and produce corrected doc.\n"
+            "- Open question: minor site wording may change.\n\n"
+            "## Execution stage\n"
+            "- planning-only\n\n"
+            "### Recent progress\n"
+            "- [DONE] Read official docs.\n"
+            "- Current approach: reviewing sources.\n\n"
+            "### Active skill\n"
+            "- n/a\n\n"
             "### Next actions\n"
             "- Draft acp3.md.\n\n"
+            "### Do not redo\n"
+            "- n/a\n\n"
             "### Spec and constraints\n"
             "- Preserve full article structure.\n\n"
-            "### Risks and open questions\n"
-            "- Minor site wording may change.\n\n"
-            "### Important artifacts\n"
+            "### Recent artifacts and sources\n"
             "- prompts/chat_completions_summary_prompt.md\n"
         )
         self.assertTrue(

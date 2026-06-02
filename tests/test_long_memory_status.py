@@ -28,11 +28,12 @@ def test_status_populated_file(tmp_path):
     p.write_text(body, encoding="utf-8")
     text = build_long_memory_status(p)
     assert "project has long memory" in text
+    assert "MUST" not in text
+    assert "FIRST STEP" not in text
     assert f"{len(body)} chars" in text
     assert "lines" in text
-    assert "MUST call the appropriate memory tool with action=read" in text
-    assert "AS YOUR FIRST STEP" in text
-    assert "Skip ONLY if" in text
+    assert "appropriate memory tool" in text
+    assert "not on every turn" in text
 
 
 def test_status_no_path_or_tool_name_leaked(tmp_path):

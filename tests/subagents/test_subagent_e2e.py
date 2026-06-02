@@ -5,7 +5,8 @@ import json
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch, AsyncMock
 
-from states import State, SharedStateData, save_state
+from persistence.state_storage import save_state, state_storage
+from states import State, SharedStateData
 from tools.subagents import runner as runner_module
 from tools.subagents.runner import SubagentRunner
 
@@ -21,7 +22,7 @@ def _make_orchestrator_state(system_prompt="System\n<specific_role>x</specific_r
         system_prompt_id="test-prompt",
         use_server_subagents=False,
         chat_completions_system_prompt=system_prompt,
-        shared=SharedStateData(memory_files={"journal": "initial"}),
+        shared=SharedStateData(working_memory={"state": "initial"}),
     )
     state.backend_api_mode = "chat_completions"
     save_state(state)
@@ -118,14 +119,14 @@ class TestSubagentRunnerRun:
         assert "stopped" in payload["error"]["message"].lower()
 
     def test_shared_mutations_visible_to_orchestrator(self):
-        """Subagent mutations on shared.memory_files are visible in orchestrator state."""
+        """Subagent mutations on shared.working_memory are visible in orchestrator state."""
         orch = _make_orchestrator_state()
         cfg = _make_config()
         ctx = _make_ctx(cfg)
 
         def fake_run_agent(messages, child_state, child_ctx, **kwargs):
-            child_state.shared.memory_files["journal"] = "updated by subagent"
-            child_state.shared.memory_files["new_file"] = "created"
+            child_state.shared.working_memory["state"] = "updated by subagent"
+            child_state.shared.working_memory["knowledge"] = "created"
             return "Subagent done"
 
         runner = SubagentRunner(ctx, orch, cfg)
@@ -133,8 +134,8 @@ class TestSubagentRunnerRun:
         with patch.object(runner, "_build_child_ctx", return_value=SimpleNamespace()):
             runner.run("subagent_worker", {"task": "modify memory"}, fake_run_agent)
 
-        assert orch.shared.memory_files["journal"] == "updated by subagent"
-        assert orch.shared.memory_files["new_file"] == "created"
+        assert orch.shared.working_memory["state"] == "updated by subagent"
+        assert orch.shared.working_memory["knowledge"] == "created"
 
     def test_child_state_has_correct_parent_id(self):
         """Child state created by run() has parent_state_id == orchestrator state_id."""
@@ -156,7 +157,7 @@ class TestSubagentRunnerRun:
 
     def test_child_state_saved_to_storage(self):
         """Child state should be saved via save_state before run_agent_func is called."""
-        from states import state_storage
+        from persistence.state_storage import state_storage
 
         orch = _make_orchestrator_state()
         cfg = _make_config()

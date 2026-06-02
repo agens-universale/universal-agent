@@ -2,11 +2,20 @@ import json
 from types import SimpleNamespace
 
 from config import parse_chat_completions_max_tokens
+from intent_guard.feedback import (
+    build_finish_gate_feedback,
+    build_finish_gate_reject_technical_user_content,
+)
 from intent_guard.guard import FinishGateGuard
+from intent_guard.submit_solution_emit import (
+    apply_finish_gate_to_submit_output_in_state,
+    get_function_call_output_text,
+)
+from intent_scope.hook import maybe_update_intent_scope_from_tool
 from message_policy.cycle_stop import append_cycle_stop_tool_outputs_for_batch
 from request_backend_policy import request_chat_completions_with_policy
 from tools import apply_tool, WrongFunctionArgumentsException
-from tools.stored_outputs.wrapping import maybe_store_and_wrap_tool_output
+from tools.session.stored_outputs.wrapping import maybe_store_and_wrap_tool_output
 from utils.connect_backend import create_call_headers
 from utils.connect_backend import request_backend_responses as request_backend
 from utils.connect_backend import create_call_data_responses as create_call_data
@@ -25,6 +34,7 @@ from message_policy.no_tool_call_bounce import (
     extract_last_assistant_text,
     format_no_tool_call_bounce,
 )
+from message_policy.tool_usage_notice.apply import apply_tool_usage_notice_before_llm
 from message_policy.user_message_policy import (
     TECHNICAL_TYPE_TECHNICAL,
     TECHNICAL_TYPE_ERROR_MESSAGE,
@@ -273,21 +283,31 @@ def process_tool_calls(
 
     tools_outputs = []
     for m in grouped_messages["tool_calls"]:
-        tool_res = apply_tool(
-            tool_name=m["name"],
-            arguments=m["arguments"],
+        tool_name = str(m.get("name") or "")
+        tool_arguments = str(m.get("arguments", ""))
+        tool_res_raw = apply_tool(
+            tool_name=tool_name,
+            arguments=tool_arguments,
             ctx=ctx,
             state=state,
             run_agent_func=run_agent_func,
         )
         tool_res = maybe_store_and_wrap_tool_output(
-            tool_res,
+            tool_res_raw,
             call_id=m["call_id"],
-            tool_name=m["name"],
+            tool_name=tool_name,
             state=state,
             config=getattr(ctx, "config_dict", {}) or {},
             logger=getattr(ctx, "logger", None),
         )
+        if tool_name != "submit_solution":
+            maybe_update_intent_scope_from_tool(
+                tool_name=tool_name,
+                tool_output_raw=tool_res_raw,
+                tool_arguments=tool_arguments,
+                state=state,
+                ctx=ctx,
+            )
         new_message = {
             "id": generate_message_id_func("fco"),
             "type": "function_call_output",
@@ -318,8 +338,10 @@ def run_agent(
     get_full_history_messages: Optional[Callable[[], List[Dict]]] = None,
     persist_messages_callback: Optional[Callable[[List[Dict]], None]] = None,
     pre_backend_compaction_hook: Optional[Callable[[List[Dict], str], None]] = None,
+    turn_end_compaction_hook: Optional[Callable[[], None]] = None,
     get_pending_messages: Optional[Callable[[], List[Dict]]] = None,
     check_stop: Optional[Callable[[], bool]] = None,
+    session_meta: Optional[Dict[str, Any]] = None,
 ) -> Union[str, None]:
     tool_error_cnt = 0
     run_logger = getattr(ctx, "logger", None) or _fallback_logger
@@ -420,6 +442,39 @@ def run_agent(
                         pre_backend_exc,
                         exc_info=True,
                     )
+            if (
+                backend_mode == "chat_completions"
+                and _mode_requires_backend_call(mode)
+                and isinstance(session_meta, dict)
+            ):
+                try:
+                    _messages_before_notice = len(messages)
+                    messages = apply_tool_usage_notice_before_llm(
+                        messages,
+                        state,
+                        ctx,
+                        session_meta,
+                        step_messages=messages,
+                        logger=run_logger,
+                    )
+                    notice_messages = messages[_messages_before_notice:]
+                    if notice_messages:
+                        state.messages += notice_messages
+                        if persist_messages_callback is not None:
+                            try:
+                                persist_messages_callback(notice_messages)
+                            except Exception as persist_exc:
+                                run_logger.warning(
+                                    "Thread notice messages persist warning: %s",
+                                    persist_exc,
+                                    exc_info=True,
+                                )
+                except Exception as mem_exc:
+                    run_logger.warning(
+                        "Memory messages hook warning: %s",
+                        mem_exc,
+                        exc_info=True,
+                    )
         except Exception as e:
             # Ошибки до успешного разбора батча (санитайз, check_mode, …) — bounce.
             run_logger.error(e, exc_info=True)
@@ -490,18 +545,58 @@ def run_agent(
                             decision = gate.evaluate_submit_solution(
                                 submit_solution_arguments=finish_arguments,
                             )
+                            apply_finish_gate_to_submit_output_in_state(
+                                state=state,
+                                finish_call_id=finish_call_id,
+                                decision=decision,
+                                logger=run_logger,
+                                persist_messages_callback=persist_messages_callback,
+                            )
+                            final_submit_output = get_function_call_output_text(
+                                state.messages, finish_call_id
+                            )
+                            maybe_update_intent_scope_from_tool(
+                                tool_name="submit_solution",
+                                tool_output_raw=final_submit_output or "",
+                                tool_arguments=finish_arguments or "",
+                                state=state,
+                                ctx=ctx,
+                            )
                             if decision.outcome == "reject":
+                                feedback = (decision.feedback_text or "").strip()
+                                if not feedback and decision.validation is not None:
+                                    feedback = build_finish_gate_feedback(
+                                        decision.validation
+                                    )
                                 messages = [
                                     _make_technical_feedback_user_message(
-                                        decision.feedback_text,
+                                        build_finish_gate_reject_technical_user_content(
+                                            feedback
+                                        ),
                                         technical_type=TECHNICAL_TYPE_TECHNICAL,
                                     )
                                 ]
                                 continue
-                            if decision.outcome in ("fail_open_error", "fail_open_limit"):
-                                state.clear_current_user_messages()
+                            elif decision.outcome in (
+                                "fail_open_error",
+                                "fail_open_limit",
+                            ):
+                                state.flush_current_user_intent()
+                                if turn_end_compaction_hook is not None:
+                                    turn_end_compaction_hook()
                                 return finish_arguments
-                        state.clear_current_user_messages()
+                            elif decision.outcome == "accept":
+                                state.flush_current_user_intent()
+                                if turn_end_compaction_hook is not None:
+                                    turn_end_compaction_hook()
+                                return finish_arguments
+                            else:
+                                state.flush_current_user_intent()
+                                if turn_end_compaction_hook is not None:
+                                    turn_end_compaction_hook()
+                                return finish_arguments
+                        else:
+                            state.current_user_intent = []
                         return finish_arguments
                     messages = process_tool_calls(messages, state, ctx, run_agent_func=run_agent)
                     tool_error_cnt = 0
@@ -511,13 +606,15 @@ def run_agent(
                         state.previous_response_id = response_id
                     state.last_backend_response_id = response_id
                 elif mode == "text_response":
+                    assistant_text = extract_last_assistant_text(messages)
                     run_logger.warning(
                         "Agent returned text response without tool call, requesting tool call"
                     )
                     tool_error_cnt += 1
+                    bounce_msg = format_no_tool_call_bounce(assistant_text)
                     messages = [
                         _make_technical_feedback_user_message(
-                            "There is no tool call in Agent response. Please send appropriate tool call",
+                            bounce_msg,
                             technical_type=TECHNICAL_TYPE_TECHNICAL,
                         )
                     ]

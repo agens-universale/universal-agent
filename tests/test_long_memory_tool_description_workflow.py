@@ -4,7 +4,7 @@ After iter-3 the description is intentionally minimal (~250 chars):
 no workflow, no negation, no mention of other tools. Workflow lives in
 the system prompt (`prompts/<agent_md>`::## Long memory protocol).
 """
-from tools.simple_tools.long_memory import LongMemory
+from tools.session.long_memory import LongMemory
 
 
 def test_tool_description_is_short():
@@ -17,8 +17,9 @@ def test_tool_description_is_short():
 
 def test_tool_description_states_purpose_and_actions():
     desc = LongMemory.tool_description()["description"]
-    assert "Persistent project-scoped markdown memory" in desc
-    assert "Survives CLI restarts" in desc
+    assert "Project/long memory" in desc
+    assert "FUTURE sessions" in desc
+    assert "Survives restarts" in desc
     # Three actions must be named in description (so model knows action enum
     # carries meaning) but without per-action workflow prose.
     assert "read" in desc

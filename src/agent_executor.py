@@ -16,9 +16,15 @@ from run_context import RunContext
 from config_modules.stored_outputs import get_stored_tool_outputs_max_entries
 from message_policy.chat_completions import repair_tool_call_pairing
 from run_summary_coordinator import RunSummaryCoordinator
-from summarize.config import parse_summary_trigger_chars
-from message_format.serialization import history_has_dialog_summary_message
-from states import State, SharedStateData, save_state, dump_storage
+from summarize.config import (
+    parse_summary_trigger_chars,
+    parse_summary_turn_end_trigger_chars,
+)
+from persistence.state_storage import dump_storage, save_state
+from persistence.thread_meta_mapper import ThreadMetaMapper
+from intent_log.user_turn import append_user_ask_deduped, append_user_asks_from_messages
+from message_policy.user_message_policy import extract_real_user_message_text
+from states import State, SharedStateData
 from thread_store import (
     ThreadSession,
     make_message_key,
@@ -28,21 +34,18 @@ from thread_store import (
 from tools.connect_mcp.persistent_stdio import PersistentStdioRegistry
 from tools.connect_mcp.stream_client import _SESSION_MANAGER as _STREAM_SESSION_MANAGER
 from tools.skills.registry import get_skills_registry
-from message_policy.user_message_policy import (
-    TECHNICAL_TYPE_CURRENT_CONTEXT,
-    wrap_technical_user_content,
-)
+from message_policy.tool_usage_notice.state import persist_tool_usage_notice_state
 from utils.generate_message_id import generate_msg_id_sha256 as generate_message_id_func
 from utils.local_render_system_prompt import render_system_prompt
 
 ORCHESTRATOR_SPECIFIC_ROLE = (
-    "You are an orchestrator agent. Your job is to delegate tasks to subagents and validate their results.\n"
-    "- Decompose complex user requests into logical subtasks and delegate appropriately.\n"
-    "- Favor planning and delegation over direct execution when specialized agents can improve quality or efficiency.\n"
-    "At the beginning of a task, if needed, prefer using the planner subagent to build an execution plan. "
-    "After delegating a task to a subagent, you must validate the result either yourself or by delegating "
-    "a dedicated review to the critic subagent.\n"
-    
+    "You are an orchestrator agent. You may execute work yourself or delegate to subagents when that clearly pays off.\n"
+    "- Handle simple, local tasks yourself (small edits, one-off questions, quick checks) — do not delegate by default.\n"
+    "- Delegate only when the task is genuinely complex, parallelizable, or needs a specialized role "
+    "(e.g. deep review, large exploration) and delegation tools are listed in `<tools>`.\n"
+    "- For complex work, decompose into subtasks and delegate appropriately; validate outcomes yourself "
+    "or via a review subagent when quality or risk warrants it.\n"
+    "- At the start of a large task, use a planner subagent only when planning overhead is justified.\n"
 )
 
 
@@ -98,20 +101,12 @@ class AgentExecutor:
             if backend_api_mode == "responses":
                 previous_response_id = thread_session.previous_response_id
             meta = getattr(thread_session, "meta", None) or {}
-            shared_raw = meta.get("shared") or {}
-            if isinstance(shared_raw, dict) and shared_raw:
-                thread_shared = SharedStateData(
-                    memory_files=dict(shared_raw.get("memory_files", {})),
-                    notes_md=str(shared_raw.get("notes_md", "")),
-                )
-            else:
-                maybe_memory_files = meta.get("memory_files")
-                if isinstance(maybe_memory_files, dict):
-                    thread_shared = SharedStateData(memory_files=dict(maybe_memory_files))
+            thread_shared = ThreadMetaMapper.shared_from_meta(meta)
         else:
             system_id = system or "cli"
         is_cli_mode = system_id == "cli"
         summary_trigger_chars = parse_summary_trigger_chars(config_dict)
+        turn_end_trigger_chars = parse_summary_turn_end_trigger_chars(config_dict)
 
         chat_completions_system_prompt: str | None = None
         rendered_system_prompt: str | None = None
@@ -155,8 +150,11 @@ class AgentExecutor:
         state.dialog_steps_offset = 0
         if thread_session is not None:
             meta = getattr(thread_session, "meta", None) or {}
-            state.init_user_messages_log(meta.get("user_messages_log"))
-            state.init_current_user_messages(meta.get("current_user_messages"))
+            state.init_user_intent_log(meta.get("user_intent_log"))
+            state.init_current_user_intent(meta.get("current_user_intent"))
+            state.init_user_turn_seq(meta.get("user_turn_seq"))
+            state.infer_user_turn_seq_if_missing()
+            state.init_tool_usage_notice_from_meta(meta)
             state.dialog_steps_offset = int(meta.get("dialog_steps_offset", 0) or 0)
         if (
             backend_api_mode == "chat_completions"
@@ -203,6 +201,7 @@ class AgentExecutor:
             state=state,
             thread_session=thread_session,
             summary_trigger_chars=summary_trigger_chars,
+            turn_end_trigger_chars=turn_end_trigger_chars,
             is_cli_mode=is_cli_mode,
             pre_backend_trigger_reason="pre_backend",
             logger=logger,
@@ -223,48 +222,18 @@ class AgentExecutor:
             }
             for body in user_bodies
         ]
-        # На старте user turn используем уже имеющийся active scope из state
-        # и дописываем в него текущий запрос (только если это реальное user
-        # сообщение, не technical). Параллельно пополняем общий user log.
+        # На старте user turn дописываем текущий CLI-запрос в current_user_intent
+        # (только реальные user-сообщения, не technical). user_intent_log — только
+        # user_intent_log — только после flush при accept submit_solution.
         for new_user_message in new_user_messages:
-            state.seed_new_user_turn(new_user_message)
-        technical_user_message = None
-        _thread_mf = thread_shared.memory_files if thread_shared is not None else {}
-        _has_memory = (
-            isinstance(_thread_mf, dict)
-            and any(v.strip() for v in _thread_mf.values() if isinstance(v, str))
-        )
-        if (
-            thread_session is not None
-            and _has_memory
-            and not history_has_dialog_summary_message(thread_session.history_messages)
-        ):
-            technical_user_message = {
-                "role": "user",
-                "content": wrap_technical_user_content(
-                    (
-                        'client has non-empty memory files; call `memory_files` '
-                        'with action="list" to see available files, then read what you need.'
-                    ),
-                    technical_type=TECHNICAL_TYPE_CURRENT_CONTEXT,
-                ),
-                "id": generate_message_id_func("m"),
-            }
-            if logger is not None:
-                logger.info(
-                    "summary_context_message_added thread_id=%s reason=memory_files_present_no_dialog_summary",
-                    thread_session.thread_id,
+            state.finish_gate_rejection_count = 0
+            text = extract_real_user_message_text(new_user_message)
+            if text:
+                state.current_user_intent = append_user_ask_deduped(
+                    state.current_user_intent,
+                    text,
+                    user_turn_seq=state.user_turn_seq,
                 )
-        elif (
-            thread_session is not None
-            and _has_memory
-            and history_has_dialog_summary_message(thread_session.history_messages)
-            and logger is not None
-        ):
-            logger.info(
-                "summary_context_message_skipped thread_id=%s reason=dialog_summary_already_present",
-                thread_session.thread_id,
-            )
 
         messages = list(new_user_messages)
 
@@ -284,10 +253,7 @@ class AgentExecutor:
             # не "сдвигались" из-за старых сообщений, будем пропускать инкремент
             # счётчика шагов на первом `user_ask`-цикле, если история непустая.
             state.skip_initial_user_ask_step_when_history = len(base_messages) > 0
-            messages = [*base_messages]
-            if technical_user_message is not None:
-                messages.append(technical_user_message)
-            messages.extend(new_user_messages)
+            messages = [*base_messages, *new_user_messages]
 
             def _persist_thread_batch(step_messages: list[dict]) -> None:
                 # Persist notes from in-memory state into thread meta.
@@ -302,20 +268,25 @@ class AgentExecutor:
                     ] = rendered_system_prompt
                 _shared = getattr(state, "shared", None)
                 if isinstance(_shared, SharedStateData):
-                    thread_session.meta["shared"] = {
-                        "memory_files": _shared.memory_files,
-                        "notes_md": _shared.notes_md,
-                    }
+                    thread_session.meta = ThreadMetaMapper.merge_shared_into_meta(
+                        thread_session.meta, _shared
+                    )
                 known_before = set(thread_session.known_message_keys)
                 step_messages_for_user_scope = [
                     m for m in step_messages
                     if make_message_key(m) not in known_before
                 ]
-                state.append_user_messages_to_log(step_messages_for_user_scope)
-                thread_session.meta["user_messages_log"] = state.user_messages_log
-                thread_session.meta["current_user_messages"] = state.current_user_messages
+                state.current_user_intent = append_user_asks_from_messages(
+                    state.current_user_intent,
+                    step_messages_for_user_scope,
+                    user_turn_seq=state.user_turn_seq,
+                )
+                thread_session.meta = ThreadMetaMapper.merge_state_into_meta(
+                    thread_session.meta, state
+                )
                 thread_session.meta["backend_api_mode"] = state.backend_api_mode
                 thread_session.backend_api_mode = state.backend_api_mode
+                persist_tool_usage_notice_state(state, thread_session.meta)
                 last_backend_response_id = getattr(
                     state, "last_backend_response_id", None
                 )
@@ -331,7 +302,11 @@ class AgentExecutor:
             get_full_history_messages = thread_session.get_full_history_messages
         elif backend_api_mode == "chat_completions" and summary_trigger_chars > 0:
             def _persist_runtime_batch(step_messages: list[dict]) -> None:
-                state.append_user_messages_to_log(step_messages)
+                state.current_user_intent = append_user_asks_from_messages(
+                    state.current_user_intent,
+                    step_messages,
+                    user_turn_seq=state.user_turn_seq,
+                )
 
             persist_messages_callback = _persist_runtime_batch
 
@@ -352,13 +327,21 @@ class AgentExecutor:
                 get_full_history_messages=get_full_history_messages,
                 persist_messages_callback=persist_messages_callback,
                 pre_backend_compaction_hook=summary.pre_backend_compaction_hook,
+                turn_end_compaction_hook=summary.turn_end_compact_if_needed,
                 get_pending_messages=get_pending_messages,
                 check_stop=check_stop,
+                session_meta=(
+                    thread_session.meta
+                    if thread_session is not None
+                    else None
+                ),
             )
             if thread_session is not None:
-                thread_session.meta["user_messages_log"] = state.user_messages_log
-                thread_session.meta["current_user_messages"] = state.current_user_messages
+                thread_session.meta = ThreadMetaMapper.merge_state_into_meta(
+                    thread_session.meta, state
+                )
                 thread_session.meta["backend_api_mode"] = state.backend_api_mode
+                persist_tool_usage_notice_state(state, thread_session.meta)
                 thread_session.persist_batch(
                     [], previous_response_id=state.previous_response_id
                 )

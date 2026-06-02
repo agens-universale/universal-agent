@@ -1,7 +1,34 @@
 import json
-from typing import Any, Dict
+from typing import Any, Dict, Type
 
 from tools.connect_mcp.validation import _validate_tool_arguments
+
+
+def resolve_tool_arguments_feedback_hint(
+    tool_fabric: Type[Any] | None,
+    *,
+    received_args: str,
+    parsed_args: dict[str, Any] | None,
+    message: str,
+) -> str | None:
+    """Delegate optional hint to tool class when it defines wrong_arguments_feedback_hint."""
+    if tool_fabric is None:
+        return None
+    hook = getattr(tool_fabric, "wrong_arguments_feedback_hint", None)
+    if not callable(hook):
+        return None
+    try:
+        hint = hook(
+            received_args=received_args,
+            parsed_args=parsed_args,
+            _message=message,
+        )
+    except Exception:  # noqa: BLE001
+        return None
+    if hint is None:
+        return None
+    text = str(hint).strip()
+    return text if text else None
 
 
 class WrongFunctionArgumentsException(Exception):
@@ -11,12 +38,14 @@ class WrongFunctionArgumentsException(Exception):
         received_args: str,
         expected_schema: dict | None = None,
         tool_name: str | None = None,
+        extra_hint: str | None = None,
     ):
         super().__init__(message)
         self.message = message
         self.received_args = received_args
         self.expected_schema = expected_schema
         self.tool_name = tool_name
+        self.extra_hint = extra_hint
 
     def to_llm_feedback(self) -> str:
         """
@@ -28,19 +57,11 @@ class WrongFunctionArgumentsException(Exception):
         args_display = self.received_args if self.received_args else "(empty)"
         feedback += f"You sent: `{args_display}`\n\n"
 
-        # Special hint: model is trying to write a filesystem file via memory_files
-        if self.tool_name == "memory_files" and self.received_args:
-            try:
-                import json as _json
-                _sent = _json.loads(self.received_args) if isinstance(self.received_args, str) else self.received_args
-                if isinstance(_sent, dict) and "path" in _sent:
-                    feedback += (
-                        "💡 Hint: `memory_files` is for INTERNAL AGENT MEMORY only — it does NOT write files to disk.\n"
-                        "To create files on the filesystem (e.g. fibonacci.py, test_fibonacci.py, data.json), "
-                        "use the `write_to_file` tool with `path` (absolute path) and `content` arguments.\n\n"
-                    )
-            except Exception:
-                pass
+        if self.extra_hint:
+            hint = str(self.extra_hint).strip()
+            feedback += hint if hint.endswith("\n") else f"{hint}\n"
+            if not feedback.endswith("\n\n"):
+                feedback += "\n"
 
         if self.expected_schema:
             params = self.expected_schema.get("parameters", {}) if isinstance(self.expected_schema, dict) else {}
@@ -87,12 +108,36 @@ class WrongFunctionArgumentsException(Exception):
         return feedback
 
 
+def _raise_wrong_function_arguments(
+    *,
+    message: str,
+    received_args: str,
+    expected_schema: dict | None,
+    tool_name: str,
+    tool_fabric: Type[Any] | None,
+    parsed_args: dict[str, Any] | None,
+) -> None:
+    raise WrongFunctionArgumentsException(
+        message=message,
+        received_args=received_args,
+        expected_schema=expected_schema,
+        tool_name=tool_name,
+        extra_hint=resolve_tool_arguments_feedback_hint(
+            tool_fabric,
+            received_args=received_args,
+            parsed_args=parsed_args,
+            message=message,
+        ),
+    )
+
+
 def parse_and_validate_tool_arguments(
     *,
     tool_name: str,
     arguments: str | Dict[str, Any] | None,
     tool_spec: Dict[str, Any],
     allow_empty_for_empty_schema: bool,
+    tool_fabric: Type[Any] | None = None,
 ) -> Dict[str, Any]:
     params_schema = tool_spec.get("parameters", {}) if isinstance(tool_spec, dict) else {}
     params_schema = params_schema if isinstance(params_schema, dict) else {}
@@ -108,39 +153,47 @@ def parse_and_validate_tool_arguments(
             if allow_empty_for_empty_schema and is_empty_schema:
                 parsed_args = {}
             else:
-                raise WrongFunctionArgumentsException(
+                _raise_wrong_function_arguments(
                     message="аргументы инструмента пустые, ожидается валидный JSON-объект",
                     received_args=str(arguments),
                     expected_schema=tool_spec,
                     tool_name=tool_name,
+                    tool_fabric=tool_fabric,
+                    parsed_args=None,
                 )
         else:
             try:
                 parsed_args = json.loads(arg_str)
             except Exception as e:  # noqa: BLE001
-                raise WrongFunctionArgumentsException(
+                _raise_wrong_function_arguments(
                     message=f"некорректный JSON: {e}",
                     received_args=str(arguments),
                     expected_schema=tool_spec,
                     tool_name=tool_name,
+                    tool_fabric=tool_fabric,
+                    parsed_args=None,
                 )
 
     if not isinstance(parsed_args, dict):
-        raise WrongFunctionArgumentsException(
+        _raise_wrong_function_arguments(
             message="аргументы инструмента должны быть JSON-объектом",
             received_args=str(arguments),
             expected_schema=tool_spec,
             tool_name=tool_name,
+            tool_fabric=tool_fabric,
+            parsed_args=None,
         )
 
     try:
         _validate_tool_arguments(tool_name, params_schema, parsed_args)
     except Exception as e:  # noqa: BLE001
-        raise WrongFunctionArgumentsException(
+        _raise_wrong_function_arguments(
             message=str(e),
             received_args=json.dumps(parsed_args, ensure_ascii=False),
             expected_schema=tool_spec,
             tool_name=tool_name,
+            tool_fabric=tool_fabric,
+            parsed_args=parsed_args,
         )
 
     return parsed_args
@@ -149,4 +202,5 @@ def parse_and_validate_tool_arguments(
 __all__ = [
     "WrongFunctionArgumentsException",
     "parse_and_validate_tool_arguments",
+    "resolve_tool_arguments_feedback_hint",
 ]

@@ -8,6 +8,8 @@ from message_format.serialization import (
     calc_messages_chars_total,
     message_text_for_summary,
 )
+from intent_fixtures import intent_user_ask_texts
+from intent_log import deserialize_list
 from thread_store import (
     ThreadSession,
     append_new_thread_messages,
@@ -89,10 +91,10 @@ class ThreadSummaryTest(unittest.TestCase):
                 {
                     "summary_message_content": "compressed summary",
                     "shared": {
-                        "memory_files": {"journal": "## Thread summary\n\ncompressed summary"},
+                        "working_memory": {"state": "## Thread summary\n\ncompressed summary"},
                         "notes_md": "",
                     },
-                    "user_messages_log": ["req1", "req2"],
+                    "user_intent_log": ["req1", "req2"],
                     "dialog_steps_offset": 12,
                 }
             )
@@ -116,13 +118,16 @@ class ThreadSummaryTest(unittest.TestCase):
 
             meta = load_thread_meta(tmp_dir, system_id, thread_id)
             self.assertEqual(
-                meta.get("shared", {}).get("memory_files", {}).get("journal"),
+                meta.get("shared", {}).get("working_memory", {}).get("state"),
                 "## Thread summary\n\ncompressed summary",
             )
             self.assertEqual(meta.get("backend_api_mode"), "chat_completions")
             self.assertEqual(meta.get("messages_count"), 1)
             self.assertEqual(meta.get("dialog_steps_offset"), 12)
-            self.assertEqual(meta.get("user_messages_log"), ["req1", "req2"])
+            self.assertEqual(
+                intent_user_ask_texts(deserialize_list(meta.get("user_intent_log"))),
+                ["req1", "req2"],
+            )
             self.assertIsNone(meta.get("previous_response_id"))
             self.assertEqual(meta.get("chat_completions_system_prompt_rendered"), "SYSTEM")
             self.assertEqual(meta.get("created_at"), "2026-01-01T00:00:00+00:00")
@@ -161,7 +166,7 @@ class ThreadSummaryTest(unittest.TestCase):
                 {
                     "summary_message_content": summary_text,
                     "shared": {
-                        "memory_files": {"journal": "notes"},
+                        "working_memory": {"state": "notes"},
                         "notes_md": "",
                     },
                 }

@@ -4,6 +4,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from config_modules.intent_scope import IntentScopeConfig, intent_scope_from_config_dict
+from config_modules.chat_completions import (
+    ChatCompletionsLlmConfig,
+    chat_completions_llm_from_config_dict,
+)
 from utils.prod_auth import AuthConnector
 from utils.logging_module import create_run_logger
 from utils.logging_module import generate_run_id
@@ -21,6 +26,8 @@ class RunContext:
     - auth_connector — коннектор авторизации для бэкенда;
     - logger / logging_path — логгер и путь к файлу логов для этого запуска;
     - summary_trace_path — отдельный файл trace для суммаризации;
+    - chat_completions_llm — LLM-профиль (chat_completions.llm): summary, finish gate, intent scope;
+    - intent_scope — параметры intent-scope hook (из intent_scope в config);
     - tools_data / tools_spec / tools_description — подготовленные данные о тулах;
     - project_gc_dir — папка project-local артефактов (<cwd>/.gc/).
     """
@@ -31,6 +38,8 @@ class RunContext:
     logger: logging.Logger
     logging_path: str
     summary_trace_path: str
+    chat_completions_llm: ChatCompletionsLlmConfig
+    intent_scope: IntentScopeConfig
     tools_data: Dict[str, Dict[str, Any]]
     tools_spec: List[Dict[str, Any]]
     tools_description: List[str]
@@ -63,6 +72,8 @@ def create_run_context(
     #    json.dumps(tools_spec, ensure_ascii=False, indent=2),
     #)
 
+    chat_completions_llm = chat_completions_llm_from_config_dict(config_dict)
+
     ctx = RunContext(
         config_dict=config_dict,
         run_id=effective_run_id,
@@ -70,6 +81,8 @@ def create_run_context(
         logger=run_logger,
         logging_path=logging_path,
         summary_trace_path=summary_trace_path,
+        chat_completions_llm=chat_completions_llm,
+        intent_scope=intent_scope_from_config_dict(config_dict),
         tools_data=tools_data,
         tools_spec=tools_spec,
         tools_description=tools_description,

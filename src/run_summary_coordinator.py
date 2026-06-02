@@ -6,14 +6,19 @@
 
 from __future__ import annotations
 
-import json
-import os
 from copy import copy as shallow_copy
 from typing import TYPE_CHECKING, Any
 
 from summarize.compaction import (
     history_exceeds_summary_trigger,
     run_summary_compaction,
+    without_system_messages,
+)
+from summarize.summary_logging import (
+    SummaryCompactionLog,
+    append_summary_trace_record,
+    log_compaction_failed,
+    log_pre_run_max_rounds,
 )
 from message_policy.user_message_policy import extract_real_user_message_text
 from thread_store import make_message_key
@@ -26,6 +31,7 @@ if TYPE_CHECKING:
 _FUNCTION_CALL_TYPES = frozenset({"function_call", "tool_call"})
 _FUNCTION_OUTPUT_TYPES = frozenset({"function_call_output", "tool_call_output"})
 
+# Страховка pre_run: в штате хватает 1 прохода; лимит на случай «лапши», которая после сжатия всё ещё выше порога.
 _PRE_RUN_SUMMARY_MAX_ROUNDS = 20
 
 
@@ -154,6 +160,7 @@ class RunSummaryCoordinator:
         state: State,
         thread_session: ThreadSession | None,
         summary_trigger_chars: int,
+        turn_end_trigger_chars: int = 0,
         is_cli_mode: bool,
         pre_backend_trigger_reason: str,
         logger: Any | None = None,
@@ -162,50 +169,21 @@ class RunSummaryCoordinator:
         self._state = state
         self._thread_session = thread_session
         self._summary_trigger_chars = summary_trigger_chars
+        self._turn_end_trigger_chars = turn_end_trigger_chars
         self._is_cli_mode = is_cli_mode
         self._pre_backend_trigger_reason = pre_backend_trigger_reason
         self._logger = logger
 
-    # --- Trace / archive ---
-
-    def _resolve_trace_path(self) -> str:
-        path = getattr(self._ctx, "summary_trace_path", "")
-        if isinstance(path, str) and path.strip():
-            return path.strip()
-        cfg = getattr(self._ctx, "config_dict", {}) or {}
-        if not cfg.get("save_logs", False):
-            return ""
-        base_dir = cfg.get("logs_dump_dir") or os.getcwd()
-        return os.path.join(base_dir, "summary_trace.jsonl")
-
-    def _append_summary_trace(
-        self,
-        *,
-        trigger_reason: str,
-        trace_data: dict,
-        newly_summarized_message_id: str,
-    ) -> None:
-        trace_path = self._resolve_trace_path()
-        if not trace_path:
-            return
-        trace_dir = os.path.dirname(trace_path)
-        if trace_dir:
-            os.makedirs(trace_dir, exist_ok=True)
-        payload = {
-            "trigger_reason": trigger_reason,
-            "summary_trace": trace_data or {},
-            "newly_summarized_message_id": newly_summarized_message_id,
-        }
-        with open(trace_path, "a", encoding="utf-8") as fd:
-            fd.write(json.dumps(payload, ensure_ascii=False))
-            fd.write("\n")
-
     def on_summary_applied(self, event: dict[str, Any]) -> None:
         if self._thread_session is not None:
-            self._thread_session.archive_and_compact_summary_payload(
+            archive_result = self._thread_session.archive_and_compact_summary_payload(
                 event.get("summary_payload", {})
             )
-        self._append_summary_trace(
+            suffix = archive_result.get("archive_suffix")
+            if isinstance(suffix, str) and suffix.strip():
+                event["archive_suffix"] = suffix.strip()
+        append_summary_trace_record(
+            self._ctx,
             trigger_reason=str(event.get("trigger_reason") or ""),
             trace_data=event.get("summary_trace", {}),
             newly_summarized_message_id=str(
@@ -226,12 +204,11 @@ class RunSummaryCoordinator:
             ):
                 rounds += 1
                 if rounds > _PRE_RUN_SUMMARY_MAX_ROUNDS:
-                    if logger is not None:
-                        logger.warning(
-                            "summary_pre_run_max_rounds thread_id=%s rounds=%s",
-                            getattr(self._thread_session, "thread_id", None),
-                            _PRE_RUN_SUMMARY_MAX_ROUNDS,
-                        )
+                    log_pre_run_max_rounds(
+                        logger,
+                        thread_id=getattr(self._thread_session, "thread_id", None),
+                        max_rounds=_PRE_RUN_SUMMARY_MAX_ROUNDS,
+                    )
                     break
                 run_summary_compaction(
                     ctx=self._ctx,
@@ -239,28 +216,19 @@ class RunSummaryCoordinator:
                     trigger_reason=trigger_reason,
                     is_cli_mode=self._is_cli_mode,
                     on_summary_applied=self.on_summary_applied,
+                    trigger_threshold_chars=self._summary_trigger_chars,
                 )
         except Exception as summarize_exc:
-            ts = self._thread_session
-            if logger is not None:
-                if ts is not None:
-                    logger.warning(
-                        "summary_failed reason=pre_run thread_id=%s error=%s",
-                        ts.thread_id,
-                        summarize_exc,
-                        exc_info=True,
-                    )
-                else:
-                    logger.warning(
-                        "summary_failed reason=pre_run error=%s",
-                        summarize_exc,
-                        exc_info=True,
-                    )
-            if self._is_cli_mode:
-                print(
-                    "[summary] Ошибка суммаризации: "
-                    f"error={summarize_exc}"
-                )
+            log_compaction_failed(
+                logger,
+                SummaryCompactionLog(
+                    trigger_reason=trigger_reason,
+                    thread_id=getattr(self._thread_session, "thread_id", None)
+                    or getattr(state, "thread_id", None),
+                    is_cli_mode=self._is_cli_mode,
+                ),
+                summarize_exc,
+            )
 
     def pre_backend_compaction_hook(
         self,
@@ -305,6 +273,7 @@ class RunSummaryCoordinator:
             trigger_reason=self._pre_backend_trigger_reason,
             is_cli_mode=self._is_cli_mode,
             on_summary_applied=self.on_summary_applied,
+            trigger_threshold_chars=self._summary_trigger_chars,
         )
         msgs = getattr(state, "messages", None)
         if isinstance(msgs, list):
@@ -318,3 +287,38 @@ class RunSummaryCoordinator:
 
         # После суммаризации + extend следующий шаг обрабатывает только preserved_batch.
         current_messages[:] = preserved_batch
+
+    def turn_end_compact_if_needed(self) -> None:
+        """Compaction после accept ``submit_solution`` (turn-end trigger)."""
+        state = self._state
+        if state.backend_api_mode != "chat_completions":
+            return
+        if self._turn_end_trigger_chars <= 0:
+            return
+        if not history_exceeds_summary_trigger(
+            state=state,
+            summary_trigger_chars=self._turn_end_trigger_chars,
+        ):
+            return
+
+        logger = self._logger
+        try:
+            run_summary_compaction(
+                ctx=self._ctx,
+                state=state,
+                trigger_reason="turn_end",
+                is_cli_mode=self._is_cli_mode,
+                on_summary_applied=self.on_summary_applied,
+                trigger_threshold_chars=self._turn_end_trigger_chars,
+            )
+        except Exception as summarize_exc:
+            log_compaction_failed(
+                logger,
+                SummaryCompactionLog(
+                    trigger_reason="turn_end",
+                    thread_id=getattr(self._thread_session, "thread_id", None)
+                    or getattr(state, "thread_id", None),
+                    is_cli_mode=self._is_cli_mode,
+                ),
+                summarize_exc,
+            )

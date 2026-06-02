@@ -1,5 +1,5 @@
 """
-Undo the tools-package stub injected by tests/simple_tools/conftest.py.
+Undo the tools-package stub injected by tests/tools/conftest.py.
 
 That conftest replaces ``sys.modules["tools"]`` with a bare ModuleType
 before collection of *any* test file. Subagent tests need the real

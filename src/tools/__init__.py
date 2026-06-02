@@ -11,7 +11,7 @@ from tools.arguments_validation import (
 )
 from tools.skills.registry import get_skills_registry
 from tools.skills.skills_tools import get_skills_tools_data
-from tools.simple_tools import get_simple_tools_data
+from tools.registry import get_builtin_tools_data
 from tools.subagents.registry import is_subagent_tool
 from tools.inject_tool_fields import (
     apply_injected_fields_to_spec,
@@ -66,8 +66,8 @@ def build_tools_data(
     """
     tools_data: Dict[str, Dict[str, Any]] = {}
 
-    simple_tools_data = get_simple_tools_data(config_dict)
-    for k, v in simple_tools_data.items():
+    builtin_tools_data = get_builtin_tools_data(config_dict)
+    for k, v in builtin_tools_data.items():
         tools_data[k] = v
 
     skills_registry = get_skills_registry(config_dict)
@@ -160,14 +160,15 @@ def apply_tool(
         run_agent_func = kwargs.get("run_agent_func")
         if orchestrator_state is None or run_agent_func is None:
             return f"Subagent {tool_name}: missing state or run_agent_func"
-        tool_spec = tools_data_.get(tool_name, {}).get("spec", {}) or {}
+        entry = tools_data_.get(tool_name) or {}
+        tool_spec = entry.get("spec", {}) or {}
         parsed_args = parse_and_validate_tool_arguments(
             tool_name=tool_name,
             arguments=arguments,
             tool_spec=tool_spec,
             allow_empty_for_empty_schema=False,
+            tool_fabric=entry.get("tool_fabric"),
         )
-        entry = tools_data_.get(tool_name) or {}
         parsed_args = strip_injected_tool_args(
             parsed_args,
             injected_fields=entry.get("injected_fields") or [],
@@ -200,6 +201,7 @@ def apply_tool(
         arguments=arguments,
         tool_spec=spec,
         allow_empty_for_empty_schema=True,
+        tool_fabric=tool_fabric,
     )
     entry = tools_data_[tool_name]
     arguments = strip_injected_tool_args(

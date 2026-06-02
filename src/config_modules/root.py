@@ -17,15 +17,28 @@ from config_modules.mcp import McpConfig
 from config_modules.paths import PathsConfig
 from config_modules.security import SecurityConfig
 from config_modules.stored_outputs import normalize_tool_output_limits
+from config_modules.intent_scope import IntentScopeConfig, normalize_intent_scope_config
 from config_modules.quality_gate import QualityGateConfig, normalize_quality_gate_config
+from config_modules.working_memory import (
+    WorkingMemoryConfig,
+    normalize_working_memory_config,
+)
+from config_modules.message_notice import (
+    LongMemoryNoticeConfig,
+    ToolUsageNoticeRule,
+    normalize_long_memory_notice_config,
+    normalize_tool_usage_notice_rules,
+)
+from config_modules.chat_completions import ChatCompletionsConfig
 from config_modules.summary import (
     DEFAULT_INCREMENTAL_BATCH_MULTIPLIER,
+    DEFAULT_INTENT_LOG_PREVIEW_CHARS,
     DEFAULT_LAST_DIALOG_STEP_MESSAGE_MAX_CHARS,
     DEFAULT_LAST_DIALOG_STEPS_COUNT,
     DEFAULT_MAX_ACCUMULATED_SUMMARY_CHARS,
     DEFAULT_MAX_DIALOGUE_CHARS,
     DEFAULT_MAX_MESSAGE_CHARS,
-    DEFAULT_ORIGINAL_USER_MESSAGES_MAX_CHARS,
+    DEFAULT_TURN_END_TRIGGER_RATIO,
     SummaryConfig,
 )
 
@@ -38,10 +51,15 @@ class AppConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     backend: BackendConfig = Field(default_factory=BackendConfig)
+    chat_completions: ChatCompletionsConfig = Field(default_factory=ChatCompletionsConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
     security: SecurityConfig = Field(default_factory=SecurityConfig)
     summary: SummaryConfig = Field(default_factory=SummaryConfig)
     quality_gate: QualityGateConfig = Field(default_factory=QualityGateConfig)
+    intent_scope: IntentScopeConfig = Field(default_factory=IntentScopeConfig)
+    working_memory: WorkingMemoryConfig = Field(default_factory=WorkingMemoryConfig)
+    tool_usage_notice: list[ToolUsageNoticeRule] = Field(default_factory=list)
+    long_memory: LongMemoryNoticeConfig = Field(default_factory=LongMemoryNoticeConfig)
     paths: PathsConfig = Field(default_factory=PathsConfig)
     agent: AgentConfig = Field(default_factory=AgentConfig)
     mcp: McpConfig = Field(default_factory=McpConfig)
@@ -75,8 +93,30 @@ def resolve_paths(cfg: AppConfig, config_dir: str) -> None:
     cfg.summary.chat_completions_summary_prompt_path = to_abs(
         cfg.summary.chat_completions_summary_prompt_path
     ) or os.path.join(config_dir, "prompts", "chat_completions_summary_prompt.md")
+    cfg.summary.chat_completions_memory_patch_append_prompt_path = to_abs(
+        cfg.summary.chat_completions_memory_patch_append_prompt_path
+    ) or os.path.join(
+        config_dir, "prompts", "chat_completions_memory_patch_append.md"
+    )
+    cfg.summary.chat_completions_memory_patch_replace_prompt_path = to_abs(
+        cfg.summary.chat_completions_memory_patch_replace_prompt_path
+    ) or os.path.join(
+        config_dir, "prompts", "chat_completions_memory_patch_replace.md"
+    )
+    if cfg.summary.intent_log_preview_chars <= 0:
+        cfg.summary.intent_log_preview_chars = DEFAULT_INTENT_LOG_PREVIEW_CHARS
     if cfg.summary.chat_completions_summary_trigger_chars < 0:
         cfg.summary.chat_completions_summary_trigger_chars = 0
+    turn_end_raw = cfg.summary.chat_completions_summary_turn_end_trigger_chars
+    if turn_end_raw is None:
+        trigger = cfg.summary.chat_completions_summary_trigger_chars
+        cfg.summary.chat_completions_summary_turn_end_trigger_chars = (
+            max(1, int(trigger * DEFAULT_TURN_END_TRIGGER_RATIO))
+            if trigger > 0
+            else 0
+        )
+    elif turn_end_raw <= 0:
+        cfg.summary.chat_completions_summary_turn_end_trigger_chars = 0
     if cfg.summary.last_dialog_steps_count <= 0:
         cfg.summary.last_dialog_steps_count = DEFAULT_LAST_DIALOG_STEPS_COUNT
     if cfg.summary.last_dialog_step_message_max_chars <= 0:
@@ -89,16 +129,19 @@ def resolve_paths(cfg: AppConfig, config_dir: str) -> None:
         cfg.summary.max_dialogue_chars = DEFAULT_MAX_DIALOGUE_CHARS
     if cfg.summary.max_accumulated_summary_chars <= 0:
         cfg.summary.max_accumulated_summary_chars = DEFAULT_MAX_ACCUMULATED_SUMMARY_CHARS
-    if cfg.summary.original_user_messages_max_chars <= 0:
-        cfg.summary.original_user_messages_max_chars = (
-            DEFAULT_ORIGINAL_USER_MESSAGES_MAX_CHARS
-        )
     if cfg.summary.incremental_batch_chars is None or cfg.summary.incremental_batch_chars <= 0:
         trigger = cfg.summary.chat_completions_summary_trigger_chars
         cfg.summary.incremental_batch_chars = (
             int(trigger * DEFAULT_INCREMENTAL_BATCH_MULTIPLIER) if trigger > 0 else 0
         )
     normalize_quality_gate_config(cfg.quality_gate)
+    normalize_working_memory_config(cfg.working_memory)
+    cfg.tool_usage_notice = normalize_tool_usage_notice_rules(cfg.tool_usage_notice)
+    normalize_long_memory_notice_config(cfg.long_memory)
+    normalize_intent_scope_config(cfg.intent_scope)
+    cfg.intent_scope.intent_scope_tool_summary_prompt_path = to_abs(
+        cfg.intent_scope.intent_scope_tool_summary_prompt_path
+    ) or os.path.join(config_dir, "prompts", "intent_scope_tool_summary_prompt.md")
     if cfg.agent.finish_gate_max_iterations < 1:
         logging.getLogger(__name__).warning(
             "finish_gate_reject_limit_invalid finish_gate_max_iterations=%s; using %s",

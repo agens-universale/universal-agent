@@ -2,8 +2,8 @@ import json
 import sys
 
 import security.command_moderation as command_moderation
-from tools.simple_tools.execute_command import ExecuteCommand
-from tools.simple_tools.run_python_code import RunPythonCode
+from tools.exec.execute_command import ExecuteCommand
+from tools.exec.run_python_code import RunPythonCode
 
 
 def _config(tmp_path):

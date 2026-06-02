@@ -1,0 +1,305 @@
+import types
+
+from summarize.working_memory_gateway import (
+    WorkingMemoryDeltas,
+    WorkingMemorySnapshot,
+    REGISTER_MERGE_MODES,
+    apply_append_deltas,
+    apply_memory_patch,
+    apply_replace_deltas,
+    coerce_working_memory_deltas,
+    build_memory_deltas_format_repair_messages,
+    parse_memory_deltas,
+    parse_memory_deltas_with_repair,
+    read_snapshot_from_state,
+    render_persistent_state_for_prompt,
+    render_working_memory_for_summary_message,
+    resolve_persistent_state_block,
+    should_attempt_memory_deltas_repair,
+)
+
+
+def test_read_snapshot_from_state_normalizes_registers():
+    state = types.SimpleNamespace(
+        shared=types.SimpleNamespace(
+            working_memory={
+                "goal": "  finish migration  ",
+                "constraints": None,
+                "state": "in progress",
+                "knowledge": 42,
+            }
+        )
+    )
+
+    snapshot = read_snapshot_from_state(state)
+
+    assert snapshot == WorkingMemorySnapshot(
+        goal="finish migration",
+        constraints="",
+        state="in progress",
+        knowledge="",
+    )
+
+
+def test_render_persistent_state_for_prompt_contains_all_registers():
+    snapshot = WorkingMemorySnapshot(
+        goal="G",
+        constraints="C",
+        state="S",
+        knowledge="K",
+    )
+
+    rendered = render_persistent_state_for_prompt(snapshot)
+
+    assert "<persistent_state>" in rendered
+    assert "<working_memory>" in rendered
+    assert "<goal>" in rendered and "</goal>" in rendered
+    assert "<constraints>" in rendered and "</constraints>" in rendered
+    assert "<state>" in rendered and "</state>" in rendered
+    assert "<knowledge>" in rendered and "</knowledge>" in rendered
+    assert "G" in rendered and "C" in rendered and "S" in rendered and "K" in rendered
+
+
+def test_coerce_working_memory_deltas_accepts_dto_and_mapping():
+    dto = WorkingMemoryDeltas(goal="g", state="s")
+    assert coerce_working_memory_deltas(dto) is dto
+    assert coerce_working_memory_deltas({"goal": " g ", "state": "s"}) == WorkingMemoryDeltas(
+        goal="g",
+        state="s",
+    )
+    assert coerce_working_memory_deltas(None) == WorkingMemoryDeltas()
+
+
+def test_parse_memory_deltas_parses_valid_and_partial_registers():
+    raw = """
+noise
+<state>New status line</state>
+something else
+<goal>
+- finalize cutover
+</goal>
+"""
+
+    deltas, present = parse_memory_deltas(raw)
+
+    assert deltas == WorkingMemoryDeltas(
+        goal="- finalize cutover",
+        state="New status line",
+    )
+    assert present == frozenset({"goal", "state"})
+
+
+def test_parse_memory_deltas_returns_empty_on_broken_or_empty_payload():
+    deltas, present = parse_memory_deltas("just text without tags")
+    assert deltas == WorkingMemoryDeltas()
+    assert present == frozenset()
+
+    deltas, present = parse_memory_deltas("<goal></goal><state>   </state>")
+    assert deltas == WorkingMemoryDeltas(goal="", state="")
+    assert present == frozenset({"goal", "state"})
+
+
+def test_parse_memory_deltas_omits_empty_append_tags():
+    deltas, present = parse_memory_deltas(
+        "<knowledge></knowledge><constraints>  </constraints><knowledge>fact</knowledge>"
+    )
+    assert deltas == WorkingMemoryDeltas(knowledge="fact")
+    assert present == frozenset({"knowledge"})
+
+
+def test_register_merge_modes_match_spec():
+    assert REGISTER_MERGE_MODES == {
+        "knowledge": "append",
+        "constraints": "append",
+        "goal": "replace",
+        "state": "replace",
+    }
+
+
+def test_apply_append_deltas_only_append_registers():
+    snapshot = WorkingMemorySnapshot(
+        goal="existing goal",
+        constraints="",
+        state="existing state",
+        knowledge="",
+    )
+    deltas = {
+        "goal": "new goal delta",
+        "constraints": "must keep tests green",
+        "state": "new state delta",
+        "knowledge": "verified fact",
+    }
+
+    updated = apply_append_deltas(snapshot, deltas)
+
+    assert updated.goal == "existing goal"
+    assert updated.state == "existing state"
+    assert updated.constraints == "must keep tests green"
+    assert updated.knowledge == "verified fact"
+
+
+def test_apply_replace_deltas_only_replace_registers():
+    snapshot = WorkingMemorySnapshot(
+        goal="existing goal",
+        constraints="existing constraints",
+        state="existing state",
+        knowledge="existing knowledge",
+    )
+    deltas = {
+        "goal": "new goal snapshot",
+        "constraints": "ignored constraints delta",
+        "state": "new state snapshot",
+        "knowledge": "ignored knowledge delta",
+    }
+
+    updated = apply_replace_deltas(snapshot, deltas)
+
+    assert updated.goal == "new goal snapshot"
+    assert updated.state == "new state snapshot"
+    assert updated.constraints == "existing constraints"
+    assert updated.knowledge == "existing knowledge"
+
+
+def test_apply_replace_deltas_clears_register_when_touched_and_empty():
+    snapshot = WorkingMemorySnapshot(
+        goal="old goal",
+        state="old state",
+    )
+    deltas = WorkingMemoryDeltas(goal="", state="done")
+
+    updated = apply_replace_deltas(
+        snapshot,
+        deltas,
+        touched=frozenset({"goal", "state"}),
+    )
+
+    assert updated.goal == ""
+    assert updated.state == "done"
+
+
+def test_apply_memory_patch_combines_append_and_replace():
+    snapshot = WorkingMemorySnapshot(
+        goal="old goal",
+        constraints="old constraints",
+        state="stale TODO",
+        knowledge="old knowledge",
+    )
+    append_deltas = {
+        "constraints": "new rule",
+        "knowledge": "new fact",
+        "state": "must not append",
+    }
+    replace_deltas = {
+        "goal": "fresh goal",
+        "state": "fresh state",
+        "knowledge": "must not replace",
+    }
+
+    updated = apply_memory_patch(snapshot, append_deltas, replace_deltas)
+
+    assert updated.goal == "fresh goal"
+    assert updated.state == "fresh state"
+    assert updated.constraints == "old constraints\n\nnew rule"
+    assert updated.knowledge == "old knowledge\n\nnew fact"
+
+
+def test_render_working_memory_for_summary_message_skips_empty_registers():
+    snapshot = WorkingMemorySnapshot(
+        goal="finalize",
+        constraints="",
+        state="",
+        knowledge="ref: docs_md/memory-files-to-working-memory-spec.md",
+    )
+
+    rendered = render_working_memory_for_summary_message(snapshot)
+
+    assert rendered.startswith("<working_memory>")
+    assert "<goal>" in rendered and "finalize" in rendered
+    assert "<knowledge>" in rendered and "ref: docs_md/memory-files-to-working-memory-spec.md" in rendered
+    assert "<constraints>" not in rendered
+    assert "<state>" not in rendered
+    assert rendered.strip().endswith("</working_memory>")
+
+
+def test_should_attempt_memory_deltas_repair_when_large_unparsed_text():
+    raw = "x" * 120
+    deltas = WorkingMemoryDeltas()
+    assert should_attempt_memory_deltas_repair(raw, deltas, min_chars_for_repair=100) is True
+
+
+def test_should_not_attempt_memory_deltas_repair_when_short_or_parsed():
+    assert should_attempt_memory_deltas_repair("short", WorkingMemoryDeltas(), min_chars_for_repair=100) is False
+    assert (
+        should_attempt_memory_deltas_repair(
+            "x" * 120,
+            WorkingMemoryDeltas(goal="parsed"),
+            min_chars_for_repair=100,
+        )
+        is False
+    )
+
+
+def test_parse_memory_deltas_with_repair_invokes_callback_once():
+    raw = "narrative text without tags " + ("x" * 120)
+    calls = {"count": 0}
+
+    def _repair(text: str) -> str:
+        calls["count"] += 1
+        assert text == raw
+        return "<goal>recovered goal</goal>"
+
+    deltas, present, attempted, repaired_raw = parse_memory_deltas_with_repair(
+        raw,
+        repair_fn=_repair,
+        min_chars_for_repair=100,
+    )
+
+    assert attempted is True
+    assert repaired_raw == "<goal>recovered goal</goal>"
+    assert deltas == WorkingMemoryDeltas(goal="recovered goal")
+    assert present == frozenset({"goal"})
+    assert calls["count"] == 1
+
+
+def test_build_memory_deltas_format_repair_messages_lists_register_tags():
+    messages = build_memory_deltas_format_repair_messages("free text")
+    assert messages[0]["role"] == "system"
+    assert "<goal>" in messages[0]["content"]
+    assert "<knowledge>" in messages[0]["content"]
+    assert "free text" in messages[1]["content"]
+
+
+def test_resolve_persistent_state_block_uses_explicit_block():
+    state = types.SimpleNamespace(shared=types.SimpleNamespace(working_memory={"goal": "from state"}))
+    explicit = "<persistent_state>explicit</persistent_state>"
+    assert resolve_persistent_state_block(state, explicit) == explicit
+
+
+def test_resolve_persistent_state_block_reads_from_state_when_none():
+    state = types.SimpleNamespace(
+        shared=types.SimpleNamespace(working_memory={"goal": "from state"})
+    )
+    resolved = resolve_persistent_state_block(state, None)
+    assert "<persistent_state>" in resolved
+    assert "from state" in resolved
+
+
+def test_parse_memory_deltas_with_repair_skips_callback_when_not_needed():
+    raw = "<state>ok</state>"
+    calls = {"count": 0}
+
+    def _repair(_text: str) -> str:
+        calls["count"] += 1
+        return "<goal>unexpected</goal>"
+
+    deltas, present, attempted, repaired_raw = parse_memory_deltas_with_repair(
+        raw,
+        repair_fn=_repair,
+        min_chars_for_repair=100,
+    )
+
+    assert attempted is False
+    assert repaired_raw == raw
+    assert deltas == WorkingMemoryDeltas(state="ok")
+    assert present == frozenset({"state"})
+    assert calls["count"] == 0

@@ -1,142 +1,78 @@
-"""Шаг обновления памяти: запрос к LLM и разбор `<updated_journal>`."""
+"""Transport-only LLM calls for working_memory patch steps after summary."""
 
 import os
-import re
 from dataclasses import dataclass
 from typing import Any, Dict, List
 
+from summarize.llm import request_summary_text
+from summarize.working_memory_gateway import (
+    MEMORY_DELTAS_FORMAT_REPAIR_REQUEST_LABEL,
+    build_memory_deltas_format_repair_messages,
+)
 from utils.llm_chat_client import (
     log_llm_prompt_and_result,
-    request_chat_completion_text,
     shorten_for_log,
 )
 
 _BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 _PROJECT_ROOT = os.path.abspath(os.path.join(_BASE_DIR, "..", ".."))
-DEFAULT_MEMORY_UPDATE_PROMPT_PATH = os.path.abspath(
-    os.path.join(_PROJECT_ROOT, "prompts", "chat_completions_memory_update_prompt.md")
+DEFAULT_MEMORY_PATCH_APPEND_PROMPT_PATH = os.path.abspath(
+    os.path.join(_PROJECT_ROOT, "prompts", "chat_completions_memory_patch_append.md")
+)
+DEFAULT_MEMORY_PATCH_REPLACE_PROMPT_PATH = os.path.abspath(
+    os.path.join(_PROJECT_ROOT, "prompts", "chat_completions_memory_patch_replace.md")
 )
 
 
 @dataclass
-class UpdatedJournalResult:
-    """Результат LLM-шага полной актуализации ``memory_files["journal"]``.
+class MemoryPatchLlmResult:
+    """Raw LLM transport result for a memory patch step (no parsing here)."""
 
-    Назначение: зафиксировать переписанный journal и артефакты запроса (сообщения,
-    сырой ответ) для трассировки и отладки.
-
-    Attributes:
-        updated_journal: Текст нового journal из ``<updated_journal>...</updated_journal>``;
-            при ошибке формата ответа — пустая строка.
-        request_messages: Сообщения (обычно system + user), отправленные в chat completions.
-        raw_response: Полный текст ответа модели до извлечения XML-фрагмента.
-    """
-
-    updated_journal: str
     request_messages: List[Dict[str, str]]
     raw_response: str
 
 
-def extract_updated_journal(block: str) -> str:
-    """Достаёт содержимое первого парного тега `<updated_journal>...</updated_journal>`.
-
-    Назначение: распарсить строго ожидаемый формат ответа шага актуализации journal.
-
-    Args:
-        block: Сырой текст ответа модели.
-
-    Returns:
-        Внутренность тега с обрезанными краевыми пробелами или пустая строка.
-    """
-    match = re.search(
-        r"<updated_journal>\s*(.*?)\s*</updated_journal>",
-        block,
-        re.DOTALL | re.IGNORECASE,
-    )
-    if not match:
-        return ""
-    return match.group(1).strip()
+def _resolve_prompt_path(ctx: Any, config_key: str, default_path: str) -> str:
+    cfg = getattr(ctx, "config_dict", {}) or {}
+    summary_params = cfg.get("summary_params") if isinstance(cfg.get("summary_params"), dict) else {}
+    prompt_path_raw = str(summary_params.get(config_key) or default_path).strip()
+    if not prompt_path_raw:
+        raise ValueError(f"summary_params.{config_key} is empty")
+    if os.path.isabs(prompt_path_raw):
+        return prompt_path_raw
+    return os.path.abspath(os.path.join(_PROJECT_ROOT, prompt_path_raw))
 
 
-def suggest_updated_journal(
+def _load_system_prompt(path: str) -> str:
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"Memory patch prompt file not found: {path}")
+    try:
+        with open(path, "r", encoding="utf-8") as fd:
+            system = fd.read().strip()
+    except OSError as prompt_exc:
+        raise OSError(f"Failed to read memory patch prompt file: {path}") from prompt_exc
+    if not system:
+        raise ValueError(f"Memory patch prompt file is empty: {path}")
+    return system
+
+
+def _request_patch(
     *,
     ctx: Any,
     state: Any,
-    history_text: str,
-    summary_text: str,
-    current_memory: str,
-) -> UpdatedJournalResult:
-    """Запрашивает у LLM полную актуальную версию journal в `<updated_journal>`.
-
-    Назначение: второй такт после сводки (когда включён) — не дельта, а **перепись**
-    ``journal`` целиком по истории диалога, итоговой сводке и предыдущему journal,
-    чтобы убрать дубликаты и устаревшие промежуточные статусы.
-
-    Поведение: system из файла промпта; user с блоками ``<dialog_history>``,
-    ``<current_summary>``, ``<current_journal>``; вызов
-    ``utils.llm_chat_client.request_chat_completion_text``; логирование; разбор
-    ``<updated_journal>`` → поле ``updated_journal`` в ``UpdatedJournalResult``.
-
-    Args:
-        ctx: Контекст с конфигом и логгером.
-        state: Состояние для выбора модели и запроса к бэкенду.
-        history_text: Текст диалога в формате ``dialog_history.build_history_text``.
-        summary_text: Итоговая сводка после шага суммаризации.
-        current_memory: Текущий journal треда до переписывания.
-
-    Returns:
-        ``UpdatedJournalResult`` с полями ``updated_journal``, ``request_messages``, ``raw_response``.
-    """
-    cfg = getattr(ctx, "config_dict", {}) or {}
-    summary_params = cfg.get("summary_params") if isinstance(cfg.get("summary_params"), dict) else {}
-    prompt_path_raw = str(
-        summary_params.get("chat_completions_memory_update_prompt_path")
-        or DEFAULT_MEMORY_UPDATE_PROMPT_PATH
-    ).strip()
-    if not prompt_path_raw:
-        raise ValueError(
-            "summary_params.chat_completions_memory_update_prompt_path is empty"
-        )
-    prompt_path = (
-        prompt_path_raw
-        if os.path.isabs(prompt_path_raw)
-        else os.path.abspath(os.path.join(_PROJECT_ROOT, prompt_path_raw))
-    )
-    if not os.path.exists(prompt_path):
-        raise FileNotFoundError(
-            f"Memory update prompt file not found: {prompt_path}"
-        )
-    try:
-        with open(prompt_path, "r", encoding="utf-8") as fd:
-            system = fd.read().strip()
-    except OSError as prompt_exc:
-        raise OSError(
-            f"Failed to read memory update prompt file: {prompt_path}"
-        ) from prompt_exc
-    if not system:
-        raise ValueError(f"Memory update prompt file is empty: {prompt_path}")
+    system_prompt: str,
+    user_prompt: str,
+    request_label: str,
+) -> MemoryPatchLlmResult:
     logger = getattr(ctx, "logger", None)
-    user_prompt = (
-        "<dialog_history>\n"
-        f"{history_text}\n"
-        "</dialog_history>\n\n"
-        "<current_summary>\n"
-        f"{summary_text}\n"
-        "</current_summary>\n\n"
-        "<current_journal>\n"
-        f"{current_memory}\n"
-        "</current_journal>\n"
-    )
     request_messages = [
-        {"role": "system", "content": system},
+        {"role": "system", "content": system_prompt},
         {"role": "user", "content": user_prompt},
     ]
-    request_label = "journal_update_after_summary"
-    raw_llm_response = request_chat_completion_text(
+    raw_llm_response = request_summary_text(
         ctx=ctx,
         state=state,
         messages=request_messages,
-        max_tokens=1200,
         request_label=request_label,
     )
     log_llm_prompt_and_result(
@@ -147,19 +83,94 @@ def suggest_updated_journal(
     )
     if logger is not None:
         logger.info(
-            "journal_update_after_summary_raw chars=%s preview=%s",
+            "%s_raw chars=%s preview=%s",
+            request_label,
             len(raw_llm_response or ""),
             shorten_for_log(raw_llm_response or "", max_chars=500),
         )
-    updated_journal_text = extract_updated_journal(raw_llm_response)
-    if logger is not None:
-        logger.info(
-            "journal_update_after_summary_parsed chars=%s preview=%s",
-            len(updated_journal_text or ""),
-            shorten_for_log(updated_journal_text or "", max_chars=500),
-        )
-    return UpdatedJournalResult(
-        updated_journal=updated_journal_text,
+    return MemoryPatchLlmResult(
         request_messages=request_messages,
         raw_response=raw_llm_response,
+    )
+
+
+def request_patch_append(
+    *,
+    ctx: Any,
+    state: Any,
+    history_text: str,
+    summary_text: str,
+    persistent_state_block: str,
+) -> MemoryPatchLlmResult:
+    """LLM step 2a: append deltas for knowledge and constraints registers."""
+    prompt_path = _resolve_prompt_path(
+        ctx,
+        "chat_completions_memory_patch_append_prompt_path",
+        DEFAULT_MEMORY_PATCH_APPEND_PROMPT_PATH,
+    )
+    system = _load_system_prompt(prompt_path)
+    user_prompt = (
+        "<dialog_history>\n"
+        f"{history_text}\n"
+        "</dialog_history>\n\n"
+        "<current_summary>\n"
+        f"{summary_text}\n"
+        "</current_summary>\n\n"
+        f"{persistent_state_block.strip()}\n"
+    )
+    return _request_patch(
+        ctx=ctx,
+        state=state,
+        system_prompt=system,
+        user_prompt=user_prompt,
+        request_label="working_memory_patch_append_after_summary",
+    )
+
+
+def request_patch_replace(
+    *,
+    ctx: Any,
+    state: Any,
+    history_text: str,
+    summary_text: str,
+) -> MemoryPatchLlmResult:
+    """LLM step 2b: replace snapshots for goal and state registers."""
+    prompt_path = _resolve_prompt_path(
+        ctx,
+        "chat_completions_memory_patch_replace_prompt_path",
+        DEFAULT_MEMORY_PATCH_REPLACE_PROMPT_PATH,
+    )
+    system = _load_system_prompt(prompt_path)
+    user_prompt = (
+        "<dialog_history>\n"
+        f"{history_text}\n"
+        "</dialog_history>\n\n"
+        "<current_summary>\n"
+        f"{summary_text}\n"
+        "</current_summary>\n"
+    )
+    return _request_patch(
+        ctx=ctx,
+        state=state,
+        system_prompt=system,
+        user_prompt=user_prompt,
+        request_label="working_memory_patch_replace_after_summary",
+    )
+
+
+def request_memory_deltas_format_repair(
+    *,
+    ctx: Any,
+    state: Any,
+    raw_output: str,
+    max_tokens: int | None = None,
+) -> str:
+    """LLM transport: переформатировать сырой ответ memory-step в register-теги."""
+    request_messages = build_memory_deltas_format_repair_messages(raw_output)
+    return request_summary_text(
+        ctx=ctx,
+        state=state,
+        messages=request_messages,
+        request_label=MEMORY_DELTAS_FORMAT_REPAIR_REQUEST_LABEL,
+        max_tokens=max_tokens,
     )

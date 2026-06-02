@@ -7,7 +7,8 @@ from unittest.mock import patch, MagicMock
 
 import pytest
 
-from states import State, SharedStateData, save_state
+from persistence.state_storage import save_state
+from states import State, SharedStateData
 from tools.subagents import special_agent as special_agent_module
 from tools.subagents.special_agent import SpecialAgent
 from tools.subagents import runner as runner_module

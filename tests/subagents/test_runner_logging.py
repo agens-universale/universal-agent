@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 from states import SharedStateData
 from states import State
-from states import save_state
+from persistence.state_storage import save_state
 from tools.subagents.runner import SubagentRunner
 
 
@@ -38,6 +38,12 @@ def _make_config(tmp_path):
         "mcp_servers": [],
         "model": "test-model",
         "system_prompt_id": "test-prompt",
+        "chat_completions_params": {
+            "llm": {
+                "max_tokens": 8192,
+                "completion_kwargs": {},
+            },
+        },
     }
 
 

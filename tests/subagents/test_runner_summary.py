@@ -3,7 +3,8 @@
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from states import State, SharedStateData, save_state
+from persistence.state_storage import save_state
+from states import State, SharedStateData
 from tools.subagents import runner as runner_module
 from tools.subagents.runner import SubagentRunner
 
@@ -39,6 +40,12 @@ def _make_config(trigger=100):
         "system_prompt_id": "test-prompt",
         "summary_params": {
             "chat_completions_summary_trigger_chars": trigger,
+        },
+        "chat_completions_params": {
+            "llm": {
+                "max_tokens": 8192,
+                "completion_kwargs": {},
+            },
         },
     }
 
@@ -127,6 +134,7 @@ class TestRunnerSummary:
         with patch.object(runner, "_build_child_ctx", return_value=SimpleNamespace()):
             runner.run("subagent_worker", {"task": "task"}, fake_run_agent)
 
-        assert captured.get("persist_messages_callback") is None
+        assert captured.get("persist_messages_callback") is not None
         assert captured.get("pre_backend_compaction_hook") is None
+        assert captured.get("session_meta") == {}
         assert "post_step_hook" not in captured

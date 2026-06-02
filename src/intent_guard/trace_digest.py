@@ -41,7 +41,7 @@ def build_finish_gate_trace_digest(
     """
     ``list(state.messages)`` → trim → ``build_history_text`` (§5.2–5.3.1).
 
-    Intent для оси A — отдельно из ``state.current_user_messages``; в digest не дублируется.
+    Intent для оси A — отдельно из ``state.current_user_intent``; в digest не дублируется.
     """
     history_messages = [
         m for m in (getattr(state, "messages", None) or []) if isinstance(m, dict)

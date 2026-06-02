@@ -8,7 +8,9 @@ import intent_guard.guard as intent_guard_guard
 
 from intent_guard.guard import FinishGateGuard
 from intent_guard.validation_result import ValidationResult
-from states import SharedStateData, State, save_state
+from intent_log.user_turn import init_subagent_open_turn
+from persistence.state_storage import save_state
+from states import SharedStateData, State
 from tools.subagents.runner import SubagentRunner
 
 
@@ -26,8 +28,8 @@ def _make_orchestrator_state():
         shared=SharedStateData(),
     )
     state.backend_api_mode = "chat_completions"
-    state.current_user_messages = ["создай приложение для бухгалтерии"]
-    state.user_messages_log = ["создай приложение для бухгалтерии"]
+    state.current_user_intent = ["создай приложение для бухгалтерии"]
+    state.user_intent_log = []
     save_state(state)
     return state
 
@@ -67,7 +69,7 @@ def test_subagent_gate_validates_assignment_not_orchestrator_cli_intent():
     assignment = "измени foo.py"
     user_message = _user_msg(assignment)
     runner._build_initial_messages(child, "worker", user_message)
-    child.seed_new_user_turn(user_message)
+    init_subagent_open_turn(child, assignment)
 
     captured: dict[str, object] = {}
 
@@ -99,9 +101,11 @@ def test_subagent_gate_validates_assignment_not_orchestrator_cli_intent():
     assert decision.outcome == "reject"
     assert decision.validation is not None
     assert decision.validation.action == "continue_work"
-    requests = captured["current_user_requests"]
+    from intent_fixtures import intent_user_ask_texts_from_jsonl
+
+    requests = intent_user_ask_texts_from_jsonl(captured["current_user_requests"])
     assert requests == [assignment]
-    assert "бухгалтерии" not in " ".join(requests)
+    assert "бухгалтерии" not in " ".join(captured["current_user_requests"])
     assert "continue_work" in decision.feedback_text.lower()
     assert "foo.py" in decision.feedback_text
 
@@ -115,8 +119,13 @@ def test_subagent_seed_keeps_orchestrator_cli_scope_unchanged():
     task_text = "добавь тесты в foo.py"
     user_message = _user_msg(task_text)
     runner._build_initial_messages(child, "worker", user_message)
-    child.seed_new_user_turn(user_message)
+    init_subagent_open_turn(child, task_text)
 
-    assert child.current_user_messages == [task_text]
+    from intent_log import ACTION_USER_ASK
+
+    assert len(child.current_user_intent) == 1
+    assert child.current_user_intent[0].action == ACTION_USER_ASK
+    assert child.current_user_intent[0].content == task_text
     assert child.parent_state_id == orch.state_id
-    assert orch.current_user_messages == ["создай приложение для бухгалтерии"]
+    assert orch.current_user_intent == ["создай приложение для бухгалтерии"]
+    assert orch.user_intent_log == []
