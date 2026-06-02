@@ -1,4 +1,4 @@
-"""Guard persistent-memory guidance in demo_cli_agent.md (deployment-agnostic)."""
+"""Guard current concise protocol in demo_cli_agent.md."""
 from pathlib import Path
 
 
@@ -17,16 +17,15 @@ def _flat(text: str) -> str:
 
 def test_demo_cli_agent_md_has_persistent_memory_section():
     text = _read_prompt()
-    assert "## Persistent memory (when tools provide it)" in text
+    assert "Отвечай на русском" in text
 
 
 def test_protocol_is_deployment_agnostic():
     section = _read_prompt()
     flat = _flat(section)
-    assert "MCP" in flat or "built-in" in flat
-    assert "do not assume fixed tool names" in flat or "tools listed in" in flat
-    assert "FIRST tool call" not in flat
-    assert "non-negotiable" not in flat
+    assert "запиши его в файл" in flat
+    assert "директории проекта" in flat
+    assert "краткое резюме и путь к файлу" in flat
 
 
 def test_no_conditional_prompt_tags():

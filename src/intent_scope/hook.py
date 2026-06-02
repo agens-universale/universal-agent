@@ -9,7 +9,11 @@ from intent_scope.agent_logging import (
     log_intent_scope_skipped,
     log_intent_scope_summary_done,
 )
-from config_modules.intent_scope import intent_scope_active, intent_scope_tool_record
+from config_modules.intent_scope import (
+    intent_scope_active,
+    intent_scope_tool_record,
+    intent_scope_tool_store_flags,
+)
 from intent_scope.append import append_tool_aggregated_to_current, append_tool_raw_to_current
 from intent_scope.raw_payload import truncate_raw_tool_payload
 from intent_scope.summarizer import (
@@ -99,20 +103,32 @@ def _append_raw_tool_intent(
     state: Any,
     ctx: Any,
     log: Any,
+    store_arguments: bool,
+    store_output: bool,
 ) -> None:
     scope_cfg = getattr(ctx, "intent_scope", None)
     max_raw = int(getattr(scope_cfg, "max_raw_record_chars", 0) or 0)
-    arguments = _parse_tool_arguments(tool_arguments)
-    output = _parse_tool_output(tool_output_raw)
-    arguments, output = truncate_raw_tool_payload(
-        arguments, output, max_chars=max_raw
-    )
+    arguments = _parse_tool_arguments(tool_arguments) if store_arguments else None
+    output = _parse_tool_output(tool_output_raw) if store_output else None
+    if store_arguments:
+        arguments, output = truncate_raw_tool_payload(
+            arguments or {}, output, max_chars=max_raw
+        )
+        if not store_output:
+            output = None
+    elif store_output:
+        _, output = truncate_raw_tool_payload({}, output, max_chars=max_raw)
     appended = append_tool_raw_to_current(state, tool_name, arguments, output)
     if appended:
+        payload: dict[str, Any] = {}
+        if arguments is not None:
+            payload["arguments"] = arguments
+        if output is not None:
+            payload["output"] = output
         log_intent_scope_delta_appended(
             log,
             tool_name=tool_name,
-            delta_chars=len(json.dumps({"arguments": arguments, "output": output}, ensure_ascii=False)),
+            delta_chars=len(json.dumps(payload, ensure_ascii=False)),
         )
 
 
@@ -148,7 +164,14 @@ def maybe_update_intent_scope_from_tool(
     if record_mode is None:
         log_intent_scope_skipped(log, tool_name=tool_name, reason="tool_not_listed")
         return
-    if not str(tool_output_raw or "").strip():
+    store_arguments, store_output = intent_scope_tool_store_flags(scope_cfg, tool_name)
+    if record_mode == "raw" and not store_arguments and not store_output:
+        log_intent_scope_skipped(log, tool_name=tool_name, reason="raw_store_disabled")
+        return
+    if record_mode != "raw" and not str(tool_output_raw or "").strip():
+        log_intent_scope_skipped(log, tool_name=tool_name, reason="empty_output")
+        return
+    if record_mode == "raw" and store_output and not str(tool_output_raw or "").strip():
         log_intent_scope_skipped(log, tool_name=tool_name, reason="empty_output")
         return
 
@@ -160,6 +183,8 @@ def maybe_update_intent_scope_from_tool(
             state=state,
             ctx=ctx,
             log=log,
+            store_arguments=store_arguments,
+            store_output=store_output,
         )
         return
 

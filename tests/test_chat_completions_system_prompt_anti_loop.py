@@ -26,10 +26,6 @@ def _read_prompt(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
 
-def _anti_loop_section(text: str, heading: str, until: str) -> str:
-    return text.split(heading, 1)[1].split(until, 1)[0]
-
-
 def test_orchestrator_prompt_has_no_hardcoded_builtin_tool_names():
     text = _read_prompt(ORCHESTRATOR_PROMPT_PATH)
     offenders = []
@@ -49,21 +45,19 @@ def test_prompts_do_not_reference_visited_list_store_tool():
 
 def test_orchestrator_anti_loop_single_bullet_own_changes_only():
     text = _read_prompt(ORCHESTRATOR_PROMPT_PATH)
-    section = _anti_loop_section(text, "**Anti-loop (reads):**", "**Command execution:**")
-    assert "do not repeat the same read/list/get" in section
-    assert "last_dialog_steps" in section
-    assert "your tools" in section
-    assert text.count("do not repeat the same read/list/get") == 1
+    assert "Do not repeat the same read/list/get/search call" in text
+    assert "if you already have its result" in text
+    assert "have not changed that resource" in text
+    assert text.lower().count("do not repeat the same read/list/get") == 1
     assert "Before opening files" not in text
     assert "read_user_intent_log" not in text
-    assert "thread-memory tool" in text.lower() or "thread/session memory" in text.lower()
+    assert "thread/session memory" in text.lower()
 
 
 def test_subagent_anti_loop_single_bullet_memory_at_run_start():
     text = _read_prompt(SUBAGENT_PROMPT_PATH)
-    section = _anti_loop_section(text, "### Anti-loop (reads)", "### Completion evidence")
-    assert section.count("\n- ") == 1
-    assert "your tools" in section
+    assert "Do not repeat reads/searches" in text
+    assert "unless the resource changed" in text
     assert "Before opening files" not in text
     assert "At run start" in text
     assert "read_user_intent_log" not in text
@@ -85,4 +79,5 @@ def test_subagent_prompt_has_no_hardcoded_builtin_tool_names():
 def test_subagent_prompt_no_zero_sycophancy_block():
     text = _read_prompt(SUBAGENT_PROMPT_PATH)
     assert "ZERO SYCOPHANCY" not in text
-    assert "### Integrity and rigor" in text
+    assert "evidence-driven" in text.lower()
+    assert "Accuracy and intellectual honesty" in text

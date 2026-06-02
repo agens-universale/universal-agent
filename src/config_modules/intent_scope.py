@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 _logger = logging.getLogger(__name__)
 
@@ -19,6 +19,17 @@ class IntentScopeToolConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     record: IntentScopeRecordMode = "aggregated"
+    store_arguments: bool = True
+    store_output: bool = True
+
+    @model_validator(mode="after")
+    def _validate_store_flags(self) -> "IntentScopeToolConfig":
+        if self.record == "raw" and not self.store_arguments and not self.store_output:
+            raise ValueError(
+                "intent_scope.tools.* raw config requires at least one of "
+                "store_arguments/store_output to be true"
+            )
+        return self
 
 
 class IntentScopeConfig(BaseModel):
@@ -75,6 +86,15 @@ def intent_scope_tool_record(
     if tool_cfg is None:
         return None
     return tool_cfg.record
+
+
+def intent_scope_tool_store_flags(
+    cfg: IntentScopeConfig, tool_name: str
+) -> tuple[bool, bool]:
+    tool_cfg = cfg.tools.get(tool_name)
+    if tool_cfg is None:
+        return True, True
+    return bool(tool_cfg.store_arguments), bool(tool_cfg.store_output)
 
 
 def intent_scope_from_config_dict(config_dict: dict[str, Any] | None) -> IntentScopeConfig:

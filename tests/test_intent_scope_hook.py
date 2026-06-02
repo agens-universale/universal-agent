@@ -1,6 +1,8 @@
 import json
 from types import SimpleNamespace
 
+import pytest
+
 from config_modules.intent_scope import IntentScopeConfig, IntentScopeToolConfig
 from intent_log import ACTION_TOOL_AGGREGATED, ACTION_TOOL_RAW, append_user_ask
 from intent_scope.append import append_tool_aggregated_to_current, append_tool_raw_to_current
@@ -39,6 +41,11 @@ def _ctx(
 
 def _tool(name: str, *, record: str = "aggregated") -> dict[str, IntentScopeToolConfig]:
     return {name: IntentScopeToolConfig(record=record)}
+
+
+def test_raw_store_flags_require_at_least_one_enabled():
+    with pytest.raises(ValueError, match="requires at least one"):
+        IntentScopeToolConfig(record="raw", store_arguments=False, store_output=False)
 
 
 def test_hook_skipped_on_responses_backend():
@@ -245,6 +252,35 @@ def test_hook_submit_solution_raw_skips_llm_and_stores_object(monkeypatch):
     assert record.tool_name == "submit_solution"
     assert record.content["arguments"] == {"task_report": "done"}
     assert record.content["output"]["rejected_by_finish_gate"] is True
+
+
+def test_hook_submit_solution_raw_can_store_only_output(monkeypatch):
+    monkeypatch.setattr(
+        "intent_scope.hook.summarize_tool_intent_line",
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError("LLM must not run for raw")),
+    )
+    state = _make_state()
+    maybe_update_intent_scope_from_tool(
+        tool_name="submit_solution",
+        tool_output_raw='{"ok":true,"status":"submitted"}',
+        tool_arguments='{"task_report":"done"}',
+        state=state,
+        ctx=_ctx(
+            backend="chat_completions",
+            tools={
+                "submit_solution": IntentScopeToolConfig(
+                    record="raw",
+                    store_arguments=False,
+                    store_output=True,
+                )
+            },
+        ),
+    )
+    assert len(state.current_user_intent) == 1
+    record = state.current_user_intent[0]
+    assert record.action == ACTION_TOOL_RAW
+    assert "arguments" not in record.content
+    assert record.content["output"]["ok"] is True
 
 
 def test_hook_aggregated_fallback_stores_truncated_content_with_flag(monkeypatch):

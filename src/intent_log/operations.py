@@ -77,7 +77,7 @@ def append_tool_aggregated(
 def append_tool_raw(
     current: list[IntentRecord],
     tool_name: str,
-    arguments: Mapping[str, Any],
+    arguments: Mapping[str, Any] | None = None,
     output: Any = None,
     *,
     user_turn_seq: int,
@@ -86,9 +86,13 @@ def append_tool_raw(
     name = str(tool_name or "").strip()
     if not name:
         raise ValueError("tool_name is required for raw tool result")
-    if not isinstance(arguments, Mapping):
-        raise TypeError("arguments must be a mapping")
-    content: dict[str, Any] = {"arguments": dict(arguments)}
+    if arguments is None and output is None:
+        raise ValueError("append_tool_raw requires at least one of arguments/output")
+    content: dict[str, Any] = {}
+    if arguments is not None:
+        if not isinstance(arguments, Mapping):
+            raise TypeError("arguments must be a mapping when provided")
+        content["arguments"] = dict(arguments)
     if output is not None:
         content["output"] = output
     record = validate_record(

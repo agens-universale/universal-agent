@@ -35,7 +35,7 @@ def _current_has_aggregated(
 def _current_has_raw(
     current: list[Any],
     tool_name: str,
-    arguments: dict[str, Any],
+    arguments: dict[str, Any] | None,
     output: Any,
 ) -> bool:
     name = str(tool_name or "").strip()
@@ -44,7 +44,12 @@ def _current_has_raw(
             continue
         if not isinstance(record.content, dict):
             continue
-        if dict(record.content.get("arguments") or {}) != dict(arguments):
+        expected_args = None if arguments is None else dict(arguments)
+        got_args = record.content.get("arguments")
+        if expected_args is None:
+            if "arguments" in record.content:
+                continue
+        elif dict(got_args or {}) != expected_args:
             continue
         if record.content.get("output") != output:
             continue
@@ -80,14 +85,14 @@ def append_tool_aggregated_to_current(
 def append_tool_raw_to_current(
     state: Any,
     tool_name: str,
-    arguments: dict[str, Any],
+    arguments: dict[str, Any] | None = None,
     output: Any = None,
 ) -> bool:
     """Append raw tool result to ``state.current_user_intent``. Returns True if appended."""
     name = str(tool_name or "").strip()
     if not name:
         return False
-    args = dict(arguments or {})
+    args = None if arguments is None else dict(arguments)
     current = list(getattr(state, "current_user_intent", []) or [])
     if _current_has_raw(current, name, args, output):
         return False

@@ -134,11 +134,22 @@ long_memory:
 # Intent scope: LLM post-hook после human-facing tools (только chat_completions).
 # tools: [] — выключить. Параметры LLM — chat_completions.llm.
 intent_scope:
+  # tools.<name>.record:
+  # - aggregated: хранить только текстовую сводку (без arguments/output полей)
+  # - raw: хранить структурированный payload по флагам ниже
+  #
+  # tools.<name>.store_arguments / store_output:
+  # - применяются только для record=raw
+  # - если оба false -> невалидный конфиг (старт с ошибкой)
   tools:
     ask_human:
       record: aggregated
     submit_solution:
       record: raw
+      # submit_solution output уже содержит итоговый report/handoff/status,
+      # поэтому arguments обычно дублируют данные.
+      store_arguments: false
+      store_output: true
   max_summary_chars: 500
   max_tool_output_chars: 8000
   max_raw_record_chars: 5000
