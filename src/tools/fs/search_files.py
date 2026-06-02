@@ -88,7 +88,7 @@ Important Usage Rules
   - No recursive or deeply nested patterns
 - **No multiline matching**: patterns must match within a **single line**.
 - Use **simple, efficient regex patterns** to avoid performance issues or excessive results.
-- Always escape special sequences with **double backslashes**: use `\\d`, `\\s`, `\\w`, `\\.` instead of `\d`, `\s`, etc.
+- Always escape special sequences with **double backslashes**: use `\\d`, `\\s`, `\\w`, `\\.` instead of `\\d`, `\\s`, etc.
 - Use `file_pattern` to narrow scope (e.g., `"*.ts"`, `"tests/**/*"`) when possible.
 
 Supported Glob Patterns in `file_pattern`

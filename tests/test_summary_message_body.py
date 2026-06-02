@@ -49,6 +49,8 @@ def test_empty_working_memory_block_skips_section_and_hint():
     assert "working_memory tool" not in body
     assert "<last_dialog_steps>" in body
     assert "tail" in body
+    assert "Treat summaries as context" in body
+    assert "do not rerun completed experiments unless the user asks or evidence is stale" in body
 
 
 def test_user_intent_log_tail_attrs_and_jsonl_current():
