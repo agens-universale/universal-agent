@@ -39,9 +39,9 @@ Produces a 1500–5000-word scientific text in Russian where every non-trivial c
 ### Step 2 — literature collection
 
 If no sources list is provided on input:
-- Call (or delegate to `scientific-research`) — `science-literature_search` with 2–4 topical queries, collect 15–30 candidates.
-- Add `science-preprint_search` for hot subareas.
-- Run every selected work through `science-work_lookup` to ensure a normalized `WorkRecord`.
+- Call (or delegate to `scientific-research`) — `literature_search` with 2–4 topical queries, collect 15–30 candidates.
+- Add `preprint_search` for hot subareas.
+- Run every selected work through `work_lookup` to ensure a normalized `WorkRecord`.
 - Pick 8–15 key works for inclusion in the text.
 
 ### Step 3 — draft with inline citations
@@ -62,7 +62,7 @@ Every identifier comes from an MCP response — never from model memory.
 
 ### Step 5 — citation strength check
 
-For critical claims (central hypothesis, headline numbers) call `science-citations_by_doi(doi=…, count_only=true)`. If a work older than 2 years has 0 citations, mark it as "weak evidence" inline or seek additional support.
+For critical claims (central hypothesis, headline numbers) call `citations_by_doi(doi=…, count_only=true)`. If a work older than 2 years has 0 citations, mark it as "weak evidence" inline or seek additional support.
 
 ### Step 6 — final pass
 
@@ -72,10 +72,10 @@ For critical claims (central hypothesis, headline numbers) call `science-citatio
 
 ## MCP tools
 
-- `science-literature_search`, `science-preprint_search` — search.
-- `science-work_lookup(identifier)` — normalization before adding to the bibliography.
-- `science-citations_by_doi(doi, count_only=true)` — citation-weight check.
-- `science-open_access_search` — when full text is needed for deeper extraction.
+- `literature_search`, `preprint_search` — search.
+- `work_lookup(identifier)` — normalization before adding to the bibliography.
+- `citations_by_doi(doi, count_only=true)` — citation-weight check.
+- `open_access_search` — when full text is needed for deeper extraction.
 
 ## Output format
 

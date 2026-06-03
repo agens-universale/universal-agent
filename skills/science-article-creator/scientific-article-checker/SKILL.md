@@ -38,10 +38,10 @@ Runs a two-track check: (1) every citation actually exists and matches what the 
 ### Step 2 — MCP resolution
 
 For each citation:
-1. `science-work_lookup(identifier)` — try to resolve via 6 sources.
+1. `work_lookup(identifier)` — try to resolve via 6 sources.
 2. If it does not resolve → finding **"Unresolved Citation"** (severity: high).
 3. If it resolves but the title / authors materially disagree with how the article cites it → finding **"Citation Mismatch"** (severity: medium).
-4. `science-citations_by_doi(doi, count_only=true)` — if a key claim relies on a work with 0–2 citations and age >2 years → **"Weak Evidence"** (severity: low–medium).
+4. `citations_by_doi(doi, count_only=true)` — if a key claim relies on a work with 0–2 citations and age >2 years → **"Weak Evidence"** (severity: low–medium).
 
 ### Step 2.5 — claim-audit (faithfulness of cited sources)
 
@@ -50,10 +50,10 @@ For each citation that resolved in Step 2 AND backs a substantive claim
 
 1. **Locate the claim** the citation is attached to in the article text.
 2. **Fetch source text**, in priority order:
-   - the abstract already returned by `science-work_lookup`;
-   - if a PMID/PMCID exists → `science-ncbi_fetch(pmid=..., mode="fetch")`
+   - the abstract already returned by `work_lookup`;
+   - if a PMID/PMCID exists → `ncbi_fetch(pmid=..., mode="fetch")`
      (full text, capped at 50 KB);
-   - else → `science-open_access_search(query="<title or DOI>")`.
+   - else → `open_access_search(query="<title or DOI>")`.
 3. **Judge support** — compare the article's claim against the fetched text:
    - **supported** — the source states the claim (or a stronger version).
    - **partial** — the source is related but weaker / narrower / a different
@@ -93,10 +93,10 @@ For each high / medium finding, give a concrete action: "drop the claim", "repla
 
 ## MCP tools
 
-- `science-work_lookup(identifier)` — main tool, called for every citation.
-- `science-citations_by_doi(doi, count_only=true)` — citation-weight check.
-- `science-ncbi_fetch(pmid, mode="fetch")` — PubMed/PMC full text (≤50 KB); used in Step 2.5 to audit claim faithfulness.
-- `science-open_access_search(query)` — OA full-text fallback outside PubMed; used in Step 2.5 when there is no PMID or the text exceeds 50 KB.
+- `work_lookup(identifier)` — main tool, called for every citation.
+- `citations_by_doi(doi, count_only=true)` — citation-weight check.
+- `ncbi_fetch(pmid, mode="fetch")` — PubMed/PMC full text (≤50 KB); used in Step 2.5 to audit claim faithfulness.
+- `open_access_search(query)` — OA full-text fallback outside PubMed; used in Step 2.5 when there is no PMID or the text exceeds 50 KB.
 
 ## Output format
 

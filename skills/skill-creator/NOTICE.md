@@ -11,7 +11,7 @@ upstream version:
 
 - `SKILL.md` — rewritten to match this project's lean workflow (no
   full eval-loop; capture intent + interview + draft + lightweight
-  self-check + optional package). Adapted for our subagent_worker tool,
+  self-check + optional package). Adapted for our delegated subagent tool,
   three-layer skills model, and headless environment.
 - `scripts/quick_validate.py` — extended `ALLOWED_PROPERTIES` to
   recognise this project's frontmatter (`id`, `version`); relaxed
@@ -37,7 +37,7 @@ The following upstream files are NOT included in this distribution:
 `references/agents/{grader,analyzer,comparator}.md`,
 `eval-viewer/{generate_review.py, viewer.html}`,
 `assets/eval_review.html`. These files implement the full eval-loop
-workflow (parallel subagent_worker runs, grading, benchmarking, HTML
+workflow (parallel delegated subagent runs, grading, benchmarking, HTML
 viewer, blind comparison, description optimization) which is not part
 of this lean version. They live in the experimental branch
 `experiment/skill-creator-full-workflow` for further research and may

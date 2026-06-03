@@ -26,14 +26,14 @@ Manages a long-running research session with two control loops: a fast inner loo
 
 The orchestrator **coordinates**, it does not execute. It is forbidden from doing by hand what inner skills cover:
 
-- Literature search → **only** via `skills_load("science-article-creator:scientific-research")`, not directly through `science-literature_search` / `science-preprint_search`.
+- Literature search → **only** via `skills_load("science-article-creator:scientific-research")`, not by calling literature/preprint search on science-mcp directly from the orchestrator.
 - Structuring results → **only** via `skills_load("science-article-creator:research-artifact-compiler")`.
 - Writing the report → **only** via `skills_load("science-article-creator:scientific-article-creator")`.
 - Self-review of the final document → **only** via `skills_load("science-article-creator:scientific-article-checker")`.
 
-The orchestrator may call `science-*` MCP tools directly **only** in two cases:
-1. Pre-flight `science-explain_sources` once at the start of the session.
-2. A single `science-work_lookup` to resolve one identifier the user named in the prompt (not an identifier from search results — that belongs to inner skills).
+The orchestrator may call science-mcp directly **only** in two cases:
+1. Pre-flight **explain_sources** once at the start of the session.
+2. A single **work_lookup** to resolve one identifier the user named in the prompt (not an identifier from search results — that belongs to inner skills).
 
 If the log shows the orchestrator running many direct searches or lookups, it is not delegating. That is an execution failure, not "efficiency". Restart with an explicit reminder about delegation.
 
@@ -88,8 +88,8 @@ When the outer loop returns `Conclude`:
 ## MCP tools
 
 The orchestrator itself calls only:
-- `science-explain_sources` — pre-flight, once per session.
-- `science-work_lookup` — point-resolve when the user named an identifier in the prompt (not from search results).
+- **explain_sources** on science-mcp — pre-flight, once per session.
+- **work_lookup** on science-mcp — point-resolve when the user named an identifier in the prompt (not from search results).
 
 Everything else (`literature_search`, `preprint_search`, `open_access_search`, `citations_by_doi`, `ncbi_fetch`) is **delegated** to inner skills that already know how and when to invoke them.
 
@@ -114,7 +114,7 @@ review.md               # optional, from scientific-article-checker
 - Do not collapse inner and outer loop into one phase — the outer loop runs only after ≥2 inner iterations.
 - Do not rewrite prior `observations.md` retroactively. If a mistake was made, add a new entry marking the correction.
 - Do not invent gates ("data is sufficient") without an explicit criterion in `master_plan.md`.
-- Do not duplicate inner-skill function — delegate via `skills_load`. A direct call to `science-literature_search`, `science-preprint_search`, or `science-citations_by_doi` from the orchestrator is a bug, not a feature.
+- Do not duplicate inner-skill function — delegate via `skills_load`. Direct literature/preprint search or citations-by-DOI calls from the orchestrator are a bug, not a feature.
 - Do not write the final report yourself. The final text is produced by `scientific-article-creator` from the assembled artifact.
 
 ## Examples

@@ -49,13 +49,13 @@ Lenses are a tool, not a mandatory step. If the request already names key terms,
 
 ### Phase 2 — search
 
-1. Call `science-explain_sources` once at the start of the session (if not called yet) to record which sources are available (API keys).
+1. Call `explain_sources` once at the start of the session (if not called yet) to record which sources are available (API keys).
 2. For each formulated query:
-   - `science-literature_search` — broad pass (journals + aggregators).
-   - `science-preprint_search` — when "fresh, pre-peer-review" matters (arXiv by default, add bioRxiv / medRxiv for biomedical topics).
-   - `science-open_access_search` — when the user needs full text.
+   - `literature_search` — broad pass (journals + aggregators).
+   - `preprint_search` — when "fresh, pre-peer-review" matters (arXiv by default, add bioRxiv / medRxiv for biomedical topics).
+   - `open_access_search` — when the user needs full text.
 3. Deduplicate by DOI / arXiv ID.
-4. For the top-N (10–30) call `science-work_lookup` to obtain a normalized `WorkRecord` (unless the entry is already normalized).
+4. For the top-N (10–30) call `work_lookup` to obtain a normalized `WorkRecord` (unless the entry is already normalized).
 
 ### Phase 3 — synthesis
 
@@ -63,13 +63,13 @@ Lenses are a tool, not a mandatory step. If the request already names key terms,
 - Grouping: foundational / methodological / applied / contested.
 - For each work — confidence rating (high / medium / low) based on: present in ≥2 databases, DOI resolves cleanly, `citation_count` > 5 (for works older than a year).
 
-## MCP tools
+## MCP tools (science-mcp capabilities)
 
-- `science-literature_search(query: str, year_from?: int, year_to?: int, limit?: int)` — main search. `year_from` / `year_to` are accepted here.
-- `science-preprint_search(query: str, sources?: ["arxiv","biorxiv","medrxiv"], limit?: int)` — preprints. Note: this tool does **not** accept `year_from` / `year_to`; filter by year in post-processing or use `literature_search`.
-- `science-open_access_search(query: str, limit?: int)` — OA-only.
-- `science-work_lookup(identifier: str)` — single-record normalization.
-- `science-explain_sources()` — pre-flight availability check.
+- `literature_search(query: str, year_from?: int, year_to?: int, limit?: int)` — main search. `year_from` / `year_to` are accepted here.
+- `preprint_search(query: str, sources?: ["arxiv","biorxiv","medrxiv"], limit?: int)` — preprints. Note: this tool does **not** accept `year_from` / `year_to`; filter by year in post-processing or use `literature_search`.
+- `open_access_search(query: str, limit?: int)` — OA-only.
+- `work_lookup(identifier: str)` — single-record normalization.
+- `explain_sources()` — pre-flight availability check.
 
 ## Output format
 

@@ -44,8 +44,8 @@ Scan the input and tag:
 ### Step 2 — citation normalization (optional)
 
 For each external reference, decide whether normalization is needed:
-- If the input already provides authors / title / year / journal — copy the entry as-is. Do not call `science-work_lookup`.
-- If the input has only a bare identifier (just a DOI or PMID, no other metadata), call `science-work_lookup(identifier)` once to enrich the record.
+- If the input already provides authors / title / year / journal — copy the entry as-is. Do not call `work_lookup`.
+- If the input has only a bare identifier (just a DOI or PMID, no other metadata), call `work_lookup(identifier)` once to enrich the record.
 - An identifier that fails to resolve is tagged `unresolved` in `sources.json` and surfaced in the chat summary. Verification beyond that is the checker's job, not the compiler's.
 
 ### Step 3 — build the 4 layers
@@ -112,8 +112,8 @@ Surface the validation report to the user.
 
 ## MCP tools
 
-- `science-work_lookup(identifier)` — **only** when a reference is missing metadata. Not called for already-complete entries.
-- `science-citations_by_doi(doi, count_only=true)` — optional, for citation-weight notes in `related_work.md`.
+- `work_lookup(identifier)` — **only** when a reference is missing metadata. Not called for already-complete entries.
+- `citations_by_doi(doi, count_only=true)` — optional, for citation-weight notes in `related_work.md`.
 
 This skill does not run full verification. If the user asks "are these citations valid?" — hand off to `scientific-article-checker` after compilation.
 
