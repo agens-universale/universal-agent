@@ -4,7 +4,7 @@ import json
 import os
 from typing import Any, Dict, List, Tuple
 
-from security.path_policy import enforce_root_box
+from security.path_policy import enforce_write_guard
 from tools.simple_tool_base import AbstractSimpleTool
 from utils.tool_report_paths import tool_report_abspath
 
@@ -282,7 +282,7 @@ class ApplyFileEdits(AbstractSimpleTool):
             "match_ranges": ranges,
         }, None
 
-    @enforce_root_box(path_arg="path", operation="write")
+    @enforce_write_guard(path_arg="path", operation="write")
     def __call__(
         self,
         path: str,
