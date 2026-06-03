@@ -356,18 +356,18 @@ def prompt_user_confirmation(
     Унифицированный prompt подтверждения для security-слоёв.
 
     Формат:
-        {title}: требуется подтверждение.
+        {title}: confirmation required.
         {field_1}: {value_1}
         {field_2}: {value_2}
         ...
         {question} [y/N]:
 
-    Возвращает True при ответе yes/y/да/д, иначе False.
+    Возвращает True при ответе yes/y, иначе False.
     Auto-decline если stdin не tty (фоновый/CI запуск).
     """
     if not sys.stdin or not sys.stdin.isatty():
         return False
-    lines = [f"\n{title}: требуется подтверждение."]
+    lines = [f"\n{title}: confirmation required."]
     for label, value in fields:
         lines.append(f"{label}: {value}")
     lines.append(f"{question} [y/N]: ")
@@ -378,7 +378,7 @@ def prompt_user_confirmation(
         answer = input().strip().lower()
     except (EOFError, KeyboardInterrupt):
         return False
-    return answer in {"y", "yes", "д", "да"}
+    return answer in {"y", "yes"}
 
 
 def _ask_user_confirmation_for_write(
@@ -391,12 +391,12 @@ def _ask_user_confirmation_for_write(
     return prompt_user_confirmation(
         title="Write guard",
         fields=[
-            ("Тул", tool_name),
-            ("Операция", operation),
-            ("Путь", path),
-            ("Разрешённые корни", error.get("allowed_write_roots") or []),
+            ("Tool", tool_name),
+            ("Operation", operation),
+            ("Path", path),
+            ("Allowed roots", error.get("allowed_write_roots") or []),
         ],
-        question="Разрешить запись вне периметра?",
+        question="Allow write outside perimeter?",
     )
 
 

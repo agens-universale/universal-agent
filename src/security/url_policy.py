@@ -158,12 +158,12 @@ def enforce_url_policy(
                 confirmed = prompt_user_confirmation(
                     title="URL policy",
                     fields=[
-                        ("Тул", _tool_name(func, args)),
+                        ("Tool", _tool_name(func, args)),
                         ("URL", decision.url),
-                        ("Причина", decision.reason or ""),
+                        ("Reason", decision.reason or ""),
                         ("Matched rule", decision.matched_rule or "-"),
                     ],
-                    question="Разрешить запрос к URL вне policy?",
+                    question="Allow URL request outside policy?",
                 )
                 if confirmed:
                     audit_policy_decision(

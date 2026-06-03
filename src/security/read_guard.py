@@ -383,12 +383,12 @@ def enforce_read_guard(
                     confirmed = prompt_user_confirmation(
                         title="Read guard",
                         fields=[
-                            ("Тул", _tool_name(func, args)),
-                            ("Операция", "read"),
-                            ("Путь", exc.error.get("path", candidate_path)),
-                            ("Причина", exc.error.get("reason", "")),
+                            ("Tool", _tool_name(func, args)),
+                            ("Operation", "read"),
+                            ("Path", exc.error.get("path", candidate_path)),
+                            ("Reason", exc.error.get("reason", "")),
                         ],
-                        question="Разрешить чтение вне периметра?",
+                        question="Allow read outside perimeter?",
                     )
                     if confirmed:
                         audit_policy_decision(

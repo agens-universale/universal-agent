@@ -492,12 +492,12 @@ def _ask_user_confirmation(
     return prompt_user_confirmation(
         title="Command moderation",
         fields=[
-            ("Тул", context.tool_name),
-            ("Причина", decision.reason),
+            ("Tool", context.tool_name),
+            ("Reason", decision.reason),
             ("Risk flags", ", ".join(decision.risk_flags) or "-"),
             ("Preview", _payload_preview(payload)),
         ],
-        question="Разрешить выполнение?",
+        question="Allow execution?",
     )
 
 
