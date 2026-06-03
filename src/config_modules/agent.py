@@ -15,6 +15,11 @@ class AgentConfig(BaseModel):
     x_cl_id: str = "12345"
     verbose: bool = True
     stop_tools: list[str] = Field(default_factory=list)
+    # Список canonical id скиллов / паков, которые исключаются из SkillsRegistry
+    # при загрузке. Пакет (`pack-id`) выбрасывает и bootstrap, и все inner.
+    # Flat-скилл (`skill-id`) выбрасывает один скилл. Дедуп+concat при merge
+    # с проектным overlay (project может только усилить запрет).
+    disable_skills: list[str] = Field(default_factory=list)
     server_tool_prefix: str = "system"
     max_steps: int = 1000
     no_tool_call_max_count: int = 5

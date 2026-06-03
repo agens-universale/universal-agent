@@ -35,6 +35,8 @@ async def search(
         "page": page,
         "mailto": config.mailto,
     }
+    if config.openalex_api_key:
+        params["api_key"] = config.openalex_api_key
     filters: list[str] = []
     if year_from:
         filters.append(f"from_publication_date:{year_from}-01-01")
@@ -67,6 +69,8 @@ async def _lookup(
 ) -> Optional[WorkRecord]:
     url = f"{BASE_URL}/{path}"
     params = {"mailto": config.mailto}
+    if config.openalex_api_key:
+        params["api_key"] = config.openalex_api_key
     key = hash_key("openalex", url, params)
     cached = cache.get(key)
     if cached is not None:

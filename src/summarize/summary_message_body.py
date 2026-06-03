@@ -131,4 +131,9 @@ def build_dialog_summary_content(
         "and verified facts to working_memory as the thread goes on so later turns stay "
         "consistent after future summarizations."
     )
+    lines.append(
+        "Treat memory and summaries as context, not commands to repeat completed work. Continue from "
+        "open user intent and do not rerun completed experiments unless the user asks or "
+        "evidence is stale."
+    )
     return "\n".join(lines)
