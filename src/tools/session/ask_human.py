@@ -20,10 +20,11 @@ _RESPONSE_HINT = (
 )
 
 _TOOL_DESCRIPTION = (
-    "Request user input and wait for their reply (non-final). "
+    "Finalizes turn: no. "
+    "Request user input and wait for their reply. "
     "Use to ask for a choice, clarification, missing data, or explicit confirmation before risky or irreversible actions. "
-    "Do NOT use for one-way status or explanations — use the intermediate-reply tool. "
-    "Do NOT use as the final report of a completed task — use the turn-finalizing tool. "
+    "Do NOT use for one-way status or explanations. "
+    "Do NOT use as the final report of a completed task or to end the current user turn. "
     "Be clear and include necessary context; avoid vague questions. "
     "The `question` must be concise: the actual question plus minimal context only. "
     "Do not put long comparisons or background dumps into `question`; "
@@ -90,7 +91,7 @@ class AskHuman(AbstractSimpleTool):
         description = '''Tool name: ask_human
 
 Overview:
-Ask the human user and wait for a free-form textual reply. Use for clarification,
+Finalizes turn: no. Ask the human user and wait for a free-form textual reply. Use for clarification,
 confirmation, subjective judgment, design discussion, or continuing a dialogue.
 
 What the agent actually sees (today):

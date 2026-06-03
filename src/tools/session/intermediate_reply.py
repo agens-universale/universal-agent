@@ -7,10 +7,11 @@ from tools.simple_tool_base import AbstractSimpleTool
 _MAX_REPLY_CHARS = 4096
 
 _TOOL_DESCRIPTION = (
-    "Intermediate user-visible reply (non-final): status, hypothesis, mini-explanation, or progress update. "
+    "Finalizes turn: no. "
+    "Intermediate user-visible reply: status, hypothesis, mini-explanation, or progress update. "
     "The current task is NOT complete — you will continue with more tools after this. "
-    "Do NOT use for the final report of a multi-step task; use the turn-finalizing tool instead. "
-    "Do NOT use when you need the user's answer — use the ask-user tool. "
+    "Do NOT use for the final report of a multi-step task or to end the current user turn. "
+    "Do NOT use when you need the user's answer — this tool does not wait for a reply. "
     "Keep `answer` concise; for long material use a separate artifact and put only summary + path in `answer`. "
     "Omit `artifact_path` when there is no artifact; if set, it must be a non-empty path."
 )
@@ -70,15 +71,15 @@ class IntermediateReply(AbstractSimpleTool):
         return """Tool name: intermediate_reply
 
 Overview:
-Send a non-final, one-way message to the user while the turn is still in progress (status, hypothesis, mini-explanation, progress). The turn is NOT complete after this call.
+Finalizes turn: no. Send a one-way message to the user while the turn is still in progress (status, hypothesis, mini-explanation, progress). The turn is NOT complete after this call.
 
 Input schema:
 {"type":"object","properties":{"answer":{"type":"string"},"artifact_path":{"type":"string"}},"required":["answer"],"additionalProperties":false}
 
 Usage:
 - Use only while more tool work remains in this turn.
-- Do NOT use for the final turn report — use the turn-finalizing tool instead.
-- Do NOT use when you need the user's input — use the ask-user tool.
+- Do NOT use for the final turn report or to end the current user turn.
+- Do NOT use when you need the user's input — this tool does not wait for a reply.
 - Keep `answer` concise and readable.
 - For long content, create a user-facing artifact and include only a brief summary in `answer` plus `artifact_path` (omit the field when unused).
 - Hard limit: 4096 characters in `answer`.

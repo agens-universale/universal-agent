@@ -174,11 +174,11 @@ class SubmitSolution(AbstractSimpleTool):
             "type": "function",
             "name": "submit_solution",
             "description": (
-                "Finalize the current user turn (turn-finalizing tool): call exactly once when you stop for this step. "
-                "End-of-turn, not end-of-thread. Use for done / partial / blocked outcomes with a self-contained report "
+                "Finalizes turn: yes. "
+                "Call exactly once when you end the current user turn (not the whole thread/session). "
+                "Use for done / partial / blocked outcomes with a self-contained report "
                 "and machine-readable handoff. "
-                "Do NOT use for brainstorming, mid-task status, or 'I explained something' while work continues — "
-                "use the intermediate-reply tool. Do NOT use to ask the user a question — use the ask-user tool instead if such tool available. "
+                "Do NOT use for brainstorming, mid-task status, or progress while work continues. "
                 "Call only after reasonable work and verification for this turn when needed. "
                 "Do not call early just to return control."
             ),
@@ -222,7 +222,7 @@ class SubmitSolution(AbstractSimpleTool):
     @classmethod
     def prompt_description(cls) -> str:
         return '''Tool name: submit_solution
-Tool description: Signals that the CURRENT USER TURN is finished and the outcome is ready to hand back to the user.
+Tool description: Finalizes turn: yes. Signals that the CURRENT USER TURN is finished and the outcome is ready to hand back to the user.
 IMPORTANT: This marks end of the current turn, NOT end of the whole thread/session.
 Use solution_type to classify the turn outcome; task_report for what was done in this turn; comment for caveats or next steps.
 
