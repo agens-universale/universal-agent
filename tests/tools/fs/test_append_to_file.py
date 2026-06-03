@@ -1,6 +1,9 @@
+import copy
 import json
 
+from tools.arguments_validation import parse_and_validate_tool_arguments
 from tools.fs.append_to_file import AppendToFile
+from tools.schema_optional import apply_openai_strict_parameters
 
 
 def test_append_success_existing_file(tmp_path):
@@ -21,6 +24,52 @@ def test_append_create_missing_with_dirs(tmp_path):
     assert res["ok"] is True
     assert res["created"] is True
     assert p.read_text(encoding="utf-8") == "hello"
+
+
+def test_parse_preserves_empty_separator_non_strict():
+    spec = AppendToFile.tool_description()
+    args = parse_and_validate_tool_arguments(
+        tool_name="fs_append_file",
+        arguments={"path": "/tmp/note.txt", "content": "x", "separator": ""},
+        tool_spec=spec,
+        allow_empty_for_empty_schema=False,
+    )
+    assert args["separator"] == ""
+
+
+def test_parse_preserves_empty_separator_strict():
+    spec = copy.deepcopy(AppendToFile.tool_description())
+    apply_openai_strict_parameters(spec["parameters"])
+    args = parse_and_validate_tool_arguments(
+        tool_name="fs_append_file",
+        arguments={
+            "path": "/tmp/note.txt",
+            "content": "x",
+            "separator": "",
+            "create_if_missing": False,
+            "make_dirs": False,
+            "encoding": "utf-8",
+        },
+        tool_spec=spec,
+        allow_empty_for_empty_schema=False,
+    )
+    assert args["separator"] == ""
+
+
+def test_append_empty_separator_after_validation(tmp_path):
+    p = tmp_path / "note.txt"
+    p.write_text("Line alpha\n", encoding="utf-8")
+    spec = AppendToFile.tool_description()
+    args = parse_and_validate_tool_arguments(
+        tool_name="fs_append_file",
+        arguments={"path": str(p), "content": "Line gamma", "separator": ""},
+        tool_spec=spec,
+        allow_empty_for_empty_schema=False,
+    )
+    res = json.loads(AppendToFile()(**args))
+    assert res["ok"] is True
+    assert res["separator"] == ""
+    assert p.read_text(encoding="utf-8") == "Line alpha\nLine gamma"
 
 
 def test_append_errors(tmp_path):

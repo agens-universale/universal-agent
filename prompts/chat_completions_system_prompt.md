@@ -77,7 +77,7 @@ For each user turn:
 3. If the task has multiple steps, make a short plan first; revise it when observations change the situation.
 4. Choose the smallest safe route: answer, ask, inspect, research, edit/create artifact, execute/check, delegate, or stop as blocked.
 5. Use only tools needed for that route.
-6. After each tool observation, update the plan from evidence.
+6. After each tool observation, update the plan from evidence; for cumulative deliverables, append new findings to the artifact when a block is done.
 7. Verify according to risk and available tools.
 8. Persist durable context only when it must survive summarization, handoff, or later turns.
 9. Finalize exactly once with an accurate report when the current turn is done or clearly blocked.
@@ -103,6 +103,7 @@ Do not assume a fixed professional role. Infer the needed behavior from the user
 ### Filesystem and Artifacts
 - Never assume file contents. Read/list/search before editing unless you created the content in the current trace.
 - Write only under allowed workspace paths.
+- For cumulative deliverables (reports, specs, plans, research, audits, long analysis): write the artifact early with an outline or skeleton, then append verified findings after each meaningful block; do not keep the full deliverable only in trace until finalization.
 - Prefer a file for reports, specs, plans, long research, generated documents, audits, or when the user asks.
 - Do not create files for short Q&A unless runtime or user preference requires it.
 - Verify important writes by readback or another reliable observation when tools exist.

@@ -5,10 +5,11 @@ from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
 from utils.file_text import (
+    classify_file_content,
     count_lines_in_text,
-    guess_is_binary,
     read_text_for_edit,
     sha256_hex_of_file,
+    sha256_hex_of_file_bytes,
 )
 from tools.simple_tool_base import AbstractSimpleTool
 from utils.tool_report_paths import tool_report_abspath
@@ -144,7 +145,9 @@ class FileInfo(AbstractSimpleTool):
                 line_count=None,
                 encoding_guess=None,
                 is_binary=None,
+                binary_detection_reason=None,
                 sha256=None,
+                hash_mode=None,
                 hash_skipped_reason=None,
                 message="Path does not exist.",
             )
@@ -180,12 +183,16 @@ class FileInfo(AbstractSimpleTool):
         line_count: Optional[int] = None
         encoding_guess: Optional[str] = None
         is_binary: Optional[bool] = None
+        binary_detection_reason: Optional[str] = None
         sha256: Optional[str] = None
+        hash_mode: Optional[str] = None
         hash_skipped_reason: Optional[str] = None
 
         if is_file and readable:
-            is_binary = guess_is_binary(stat_path)
-            encoding_guess = None if is_binary else "utf-8"
+            classification = classify_file_content(stat_path)
+            is_binary = classification.is_binary
+            encoding_guess = classification.encoding_guess
+            binary_detection_reason = classification.binary_detection_reason
 
             if include_line_count and not is_binary:
                 try:
@@ -200,11 +207,14 @@ class FileInfo(AbstractSimpleTool):
             if include_hash:
                 if size_bytes > self.max_hash_bytes:
                     hash_skipped_reason = "file_too_large"
-                elif is_binary:
-                    hash_skipped_reason = "binary_file"
                 else:
                     try:
-                        sha256 = sha256_hex_of_file(stat_path)
+                        if is_binary:
+                            sha256 = sha256_hex_of_file_bytes(stat_path)
+                            hash_mode = "bytes"
+                        else:
+                            sha256 = sha256_hex_of_file(stat_path)
+                            hash_mode = "text"
                     except OSError as e:
                         return self._error(
                             path=path,
@@ -228,7 +238,9 @@ class FileInfo(AbstractSimpleTool):
             line_count=line_count,
             encoding_guess=encoding_guess,
             is_binary=is_binary,
+            binary_detection_reason=binary_detection_reason,
             sha256=sha256,
+            hash_mode=hash_mode,
             hash_skipped_reason=hash_skipped_reason,
             message="File info collected.",
         )

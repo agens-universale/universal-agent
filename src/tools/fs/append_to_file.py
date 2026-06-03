@@ -1,6 +1,7 @@
 import json
 import os
 
+from tools.schema_optional import X_PRESERVE_EMPTY_STRING
 from tools.simple_tool_base import AbstractSimpleTool
 from utils.tool_report_paths import tool_report_abspath
 from security.path_policy import enforce_root_box
@@ -33,7 +34,12 @@ class AppendToFile(AbstractSimpleTool):
                     },
                     "separator": {
                         "type": "string",
-                        "description": "String inserted before appended content. Default '\\n\\n'."
+                        X_PRESERVE_EMPTY_STRING: True,
+                        "description": (
+                            "String inserted before appended content. "
+                            "Omit for default '\\n\\n'. "
+                            "Pass empty string \"\" for no separator (append flush to file end)."
+                        ),
                     },
                     "create_if_missing": {
                         "type": "boolean",
@@ -64,7 +70,7 @@ Input schema: {"type": "object", "properties": {"path": {"type": "string", "desc
 Usage:
 - The target file MUST exist. If the file does not exist, write the file first (use a short initial write for new long files).
 - **Chunking:** for large bodies, append in multiple steps; each `content` should be modest. Do not send an entire article or huge blob in one call.
-- The tool automatically adds a newline separator before the new content to ensure distinct entries.
+- Optional `separator` before new content: default is a blank line (`\\n\\n`); pass empty string for no separator.
 - Ideal for accumulating analysis notes, debugging logs, or review comments without overwriting previous data.
 - Do not use for modifying source code logic.
 '''
