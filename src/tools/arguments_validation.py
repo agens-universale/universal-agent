@@ -2,6 +2,10 @@ import json
 from typing import Any, Dict, Type
 
 from tools.connect_mcp.validation import _validate_tool_arguments
+from tools.schema_optional import (
+    normalize_optional_empty_as_omit,
+    resolve_optional_property_keys,
+)
 
 
 def resolve_tool_arguments_feedback_hint(
@@ -67,6 +71,7 @@ class WrongFunctionArgumentsException(Exception):
             params = self.expected_schema.get("parameters", {}) if isinstance(self.expected_schema, dict) else {}
             properties = params.get("properties", {}) or {}
             required_fields = params.get("required", []) or []
+            optional_keys = set(resolve_optional_property_keys(params))
             required_entries = []
             optional_entries = []
             for field, spec in properties.items():
@@ -76,7 +81,9 @@ class WrongFunctionArgumentsException(Exception):
                 entry = f'  "{field}": <{ftype}>'
                 if fdesc_short:
                     entry += f"  // {fdesc_short}"
-                if field in required_fields:
+                if field in optional_keys:
+                    optional_entries.append(entry)
+                elif field in required_fields:
                     required_entries.append(entry)
                 else:
                     optional_entries.append(entry)
@@ -196,7 +203,7 @@ def parse_and_validate_tool_arguments(
             parsed_args=parsed_args,
         )
 
-    return parsed_args
+    return normalize_optional_empty_as_omit(parsed_args, params_schema)
 
 
 __all__ = [

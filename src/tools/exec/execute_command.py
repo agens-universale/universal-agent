@@ -44,7 +44,10 @@ class ExecuteCommand(AbstractSimpleTool):
                     },
                     "cwd": {
                         "type": "string",
-                        "description": "Optional working directory. If omitted, uses current working directory.",
+                        "description": (
+                            "Working directory for this command (absolute or relative). "
+                            "When unset, uses the current working directory."
+                        ),
                     },
                     "env_vars": {
                         "type": "array",

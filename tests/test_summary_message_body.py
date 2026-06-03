@@ -21,31 +21,31 @@ def _user_ask(content: str, *, turn: int = 1) -> IntentRecord:
     )
 
 
-def test_working_memory_block_inlined():
+def test_session_memory_block_inlined():
     body = build_dialog_summary_content(
         summary_text="S",
         last_dialog_steps="",
-        working_memory_block=(
-            "<working_memory>\n"
+        session_memory_block=(
+            "<session_memory>\n"
             "<goal>full goal body</goal>\n"
             "<knowledge>secret knowledge</knowledge>\n"
-            "</working_memory>"
+            "</session_memory>"
         ),
     )
-    assert "<working_memory>" in body
+    assert "<session_memory>" in body
     assert "full goal body" in body
     assert "<knowledge>" in body
     assert "secret knowledge" in body
     assert "<memory_files>" not in body
 
 
-def test_empty_working_memory_block_skips_section_and_hint():
+def test_empty_session_memory_block_skips_section_and_hint():
     body = build_dialog_summary_content(
         summary_text="S",
         last_dialog_steps="tail",
-        working_memory_block="",
+        session_memory_block="",
     )
-    assert "<working_memory>" not in body
+    assert "<session_memory>" not in body
     assert "session memory tool" not in body.lower()
     assert "<last_dialog_steps>" in body
     assert "tail" in body

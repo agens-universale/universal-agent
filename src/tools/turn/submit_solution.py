@@ -202,14 +202,17 @@ class SubmitSolution(AbstractSimpleTool):
                     },
                     "comment": {
                         "type": "string",
-                        "description": "Optional. Caveats, risks, unresolved items, or suggested next steps for the user.",
+                        "description": (
+                            "Caveats, risks, unresolved items, or suggested next steps for the user."
+                        ),
                     },
                     "handoff": {
                         "type": "string",
                         "description": (
-                            "Required machine-readable handoff payload as a JSON object string. "
-                            "Must decode to a JSON object (dictionary), not an array/string/number. "
-                            "Example: '{\"result\":\"ok\",\"artifacts\":[\"report.md\"]}'."
+                            "Must decode to a JSON object (dictionary), not an array, scalar, or null. "
+                            "Pass the object as one JSON string (this field is string-typed, not a nested object). "
+                            "Machine-readable payload for downstream workflows; use \"{}\" when nothing extra is needed. "
+                            "Example: '{\"artifacts\":[\"report.md\"]}'."
                         ),
                     },
                 },
@@ -231,8 +234,14 @@ Input schema:
   "solution_type": "full_solution" | "partial_solution" | "direct_answer" | "couldnt_solve" | "need_additional_info" | "abandoned",
   "task_report": "string (required)",
   "comment": "string (optional)",
-  "handoff": "{\"key\":\"value\"}" (required JSON object string)
+  "handoff": "{}" (required; JSON object encoded as a string)
 }
+
+Handoff format:
+- handoff is always a string whose content is valid JSON that parses to an object.
+- Use "{}" when the turn has no machine-readable extras.
+- Do not pass a nested JSON object in the tool call; serialize the object to a string first.
+- Use standard JSON quoting; escape inner double quotes correctly.
 
 Handoff policy:
 - turn_finish does not enforce a specific handoff schema.
@@ -249,7 +258,7 @@ Readiness checklist before calling:
 - Relevant tools/search/verification for this turn have been performed when needed.
 - Key claims in task_report are grounded in actual tool outputs (not assumptions).
 - Known limitations/risks are captured in comment when relevant.
-- If this turn benefits from machine-readable transfer, include handoff JSON.
+- If this turn benefits from machine-readable transfer, include structured keys in handoff; otherwise use "{}".
 
 Choosing solution_type (for current turn):
 - full_solution: turn objective fully completed.
@@ -261,7 +270,7 @@ Choosing solution_type (for current turn):
 
 - task_report: What was done in this turn (steps, result, assumptions/evidence). Plain text, brief.
 - comment: Optional caveats, risks, unresolved items, or next steps.
-- handoff: Required structured payload for downstream machine-readable workflows.
+- handoff: Required JSON object string (see Handoff format). Minimal valid value: "{}".
 
 Return format (JSON string): {"tool":"turn_finish","ok":true,"status":"...","message":"...","error":null,"solution_type":"...","comment":"..."|null,"handoff":{...},"task_report":"..."}
 '''
@@ -366,7 +375,10 @@ Return format (JSON string): {"tool":"turn_finish","ok":true,"status":"...","mes
                 error={
                     "type": "invalid_argument",
                     "field": "handoff",
-                    "message": "handoff is required and must be a JSON object string.",
+                    "message": (
+                        "handoff is required. Must decode to a JSON object; "
+                        "pass it as a JSON string (e.g. \"{}\")."
+                    ),
                 },
             )
 

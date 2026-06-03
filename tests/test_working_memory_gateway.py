@@ -14,7 +14,7 @@ from summarize.working_memory_gateway import (
     parse_memory_deltas_with_repair,
     read_snapshot_from_state,
     render_persistent_state_for_prompt,
-    render_working_memory_for_summary_message,
+    render_session_memory_for_summary_message,
     resolve_persistent_state_block,
     should_attempt_memory_deltas_repair,
 )
@@ -53,7 +53,7 @@ def test_render_persistent_state_for_prompt_contains_all_registers():
     rendered = render_persistent_state_for_prompt(snapshot)
 
     assert "<persistent_state>" in rendered
-    assert "<working_memory>" in rendered
+    assert "<session_memory>" in rendered
     assert "<goal>" in rendered and "</goal>" in rendered
     assert "<constraints>" in rendered and "</constraints>" in rendered
     assert "<state>" in rendered and "</state>" in rendered
@@ -253,7 +253,7 @@ def test_apply_memory_patch_combines_append_and_replace():
     assert updated.knowledge == "must not replace"
 
 
-def test_render_working_memory_for_summary_message_skips_empty_registers():
+def test_render_session_memory_for_summary_message_skips_empty_registers():
     snapshot = WorkingMemorySnapshot(
         goal="finalize",
         constraints="",
@@ -261,14 +261,14 @@ def test_render_working_memory_for_summary_message_skips_empty_registers():
         knowledge="ref: docs_md/memory-files-to-working-memory-spec.md",
     )
 
-    rendered = render_working_memory_for_summary_message(snapshot)
+    rendered = render_session_memory_for_summary_message(snapshot)
 
-    assert rendered.startswith("<working_memory>")
+    assert rendered.startswith("<session_memory>")
     assert "<goal>" in rendered and "finalize" in rendered
     assert "<knowledge>" in rendered and "ref: docs_md/memory-files-to-working-memory-spec.md" in rendered
     assert "<constraints>" not in rendered
     assert "<state>" not in rendered
-    assert rendered.strip().endswith("</working_memory>")
+    assert rendered.strip().endswith("</session_memory>")
 
 
 def test_should_attempt_memory_deltas_repair_when_large_unparsed_text():

@@ -1,7 +1,12 @@
-"""Gateway for working_memory snapshot/render/parse operations.
+"""Gateway for session-memory snapshot/render/parse (internal name: working_memory).
 
-1) **Trace** — ``working_memory`` tool: ``append`` or ``rewrite`` on any register.
-2) **Summarization** — LLM patch via ``apply_summary_memory_patch``: full replace of all four registers.
+Naming map (same four registers everywhere):
+- ``state.shared.working_memory`` / JSON ``shared.working_memory`` — persist
+- ``session_memory`` — builtin tool for the agent
+- ``<session_memory>`` inside ``<persistent_state>`` — summary / patch prompts
+
+1) **Trace** — ``session_memory`` tool: ``append`` or ``rewrite`` on any register.
+2) **Summarization** — LLM patch via ``apply_summary_memory_patch``: full replace.
 
 Parsed/applied gateway deltas always use replace semantics (``REGISTER_MERGE_MODES``).
 """
@@ -25,7 +30,7 @@ REGISTER_ORDER = (
 )
 
 # Parsed/applied LLM memory patches: every register is a full replace (not append).
-# The ``working_memory`` tool does not use this map.
+# The ``session_memory`` tool trace path does not use this map.
 REGISTER_MERGE_MODES: Dict[str, str] = {
     REGISTER_GOAL: "replace",
     REGISTER_CONSTRAINTS: "replace",
@@ -124,7 +129,7 @@ def _register_tags_for_repair_prompt() -> str:
 def render_persistent_state_for_prompt(snapshot: WorkingMemorySnapshot) -> str:
     parts = [
         "<persistent_state>",
-        "<working_memory>",
+        "<session_memory>",
         f"<{REGISTER_GOAL}>",
         snapshot.goal,
         f"</{REGISTER_GOAL}>",
@@ -137,7 +142,7 @@ def render_persistent_state_for_prompt(snapshot: WorkingMemorySnapshot) -> str:
         f"<{REGISTER_KNOWLEDGE}>",
         snapshot.knowledge,
         f"</{REGISTER_KNOWLEDGE}>",
-        "</working_memory>",
+        "</session_memory>",
         "</persistent_state>",
     ]
     return "\n".join(parts)
@@ -164,7 +169,7 @@ def build_memory_deltas_format_repair_messages(
         "keep empty tags when the source meant to clear a register (empty body means clear)."
     )
     system_prompt = (
-        "You are a strict formatter. Convert input text into working_memory register tags only. "
+        "You are a strict formatter. Convert input text into session memory register tags only. "
         f"Use zero or more of: {register_tags}. "
         "Do not add new facts. Preserve meaning. "
         f"{replace_hint}"
@@ -347,8 +352,8 @@ def apply_summary_memory_patch(
     )
 
 
-def render_working_memory_for_summary_message(snapshot: WorkingMemorySnapshot) -> str:
-    parts = ["<working_memory>"]
+def render_session_memory_for_summary_message(snapshot: WorkingMemorySnapshot) -> str:
+    parts = ["<session_memory>"]
     for name in REGISTER_ORDER:
         value = _normalize_register_text(snapshot.to_dict().get(name))
         if not value:
@@ -356,7 +361,7 @@ def render_working_memory_for_summary_message(snapshot: WorkingMemorySnapshot) -
         parts.append(f"<{name}>")
         parts.append(value)
         parts.append(f"</{name}>")
-    parts.append("</working_memory>")
+    parts.append("</session_memory>")
     return "\n".join(parts)
 
 
@@ -379,5 +384,5 @@ __all__ = [
     "apply_replace_deltas",
     "apply_memory_patch",
     "apply_summary_memory_patch",
-    "render_working_memory_for_summary_message",
+    "render_session_memory_for_summary_message",
 ]

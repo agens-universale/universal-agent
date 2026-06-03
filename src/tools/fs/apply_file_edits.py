@@ -10,6 +10,7 @@ from utils.file_text import (
     is_valid_sha256_hex,
     read_text_for_edit,
 )
+from tools.schema_optional import coalesce_optional_string
 from tools.simple_tool_base import AbstractSimpleTool
 from utils.tool_report_paths import tool_report_abspath
 
@@ -86,7 +87,7 @@ class ApplyFileEdits(AbstractSimpleTool):
                     "expected_file_sha256": {
                         "type": "string",
                         "description": (
-                            "Optional SHA-256 hex digest from file_info(include_hash=true). "
+                            "SHA-256 hex digest from file_info(include_hash=true). "
                             "Batch aborts with stale_file if file content changed."
                         ),
                     },
@@ -309,6 +310,7 @@ class ApplyFileEdits(AbstractSimpleTool):
         expected_file_sha256: str | None = None,
         **kwargs,
     ) -> str:
+        expected_file_sha256 = coalesce_optional_string(expected_file_sha256)
         _result = functools.partial(self._result, path=path)
         if not isinstance(path, str):
             return _result(ok=False, applied=False, edits_would_apply=0, total_would_replace=0, edits_applied=0, total_replaced=0, edit_results=[], message="Argument 'path' must be a string.", error={"type": "invalid_argument", "field": "path"})

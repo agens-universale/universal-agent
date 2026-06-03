@@ -33,7 +33,7 @@ from summarize.working_memory_gateway import (
     coerce_working_memory_deltas,
     read_snapshot_from_state,
     render_persistent_state_for_prompt,
-    render_working_memory_for_summary_message,
+    render_session_memory_for_summary_message,
 )
 
 
@@ -98,7 +98,7 @@ def apply_summary_state_patch(
     wm_dict = {name: snapshot.to_dict().get(name, "") for name in REGISTER_ORDER}
     shared.working_memory = wm_dict
 
-    working_memory_block = render_working_memory_for_summary_message(snapshot)
+    session_memory_block = render_session_memory_for_summary_message(snapshot)
     closed_records = list(getattr(state, "user_intent_log", []) or [])
     open_records = list(getattr(state, "current_user_intent", []) or [])
     preview_chars = (
@@ -109,7 +109,7 @@ def apply_summary_state_patch(
     summary_message_content = build_dialog_summary_content(
         summary_text=str(raw_summary or ""),
         last_dialog_steps=str(last_dialog_steps or ""),
-        working_memory_block=working_memory_block,
+        session_memory_block=session_memory_block,
         user_intent_log_preview=tail_preview(closed_records, preview_chars),
         current_user_intent_jsonl=serialize(open_records),
     )

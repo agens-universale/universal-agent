@@ -141,6 +141,7 @@ def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
         "chat_completions_params": app_cfg.chat_completions.model_dump(),
         "chat_completions_llm": app_cfg.chat_completions.llm,
         "quality_gate_params": app_cfg.quality_gate.model_dump(),
+        # Limits for ``session_memory`` tool; yaml/config keys stay ``working_memory*``.
         "working_memory": app_cfg.working_memory,
         "working_memory_params": app_cfg.working_memory.model_dump(),
         "working_memory_max_chars_goal": app_cfg.working_memory.max_chars_goal,

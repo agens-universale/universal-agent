@@ -171,7 +171,7 @@ def test_memory_deltas_applied_to_working_memory_not_inside_summary(monkeypatch)
     assert "<add_to_memory>" not in content
     inner = content.split("<summary>")[1].split("</summary>")[0]
     assert "bullet one" not in inner
-    assert "<working_memory>" in content
+    assert "<session_memory>" in content
     assert "bullet one" in content
     assert state.shared.working_memory["goal"] == "existing note"
     assert "bullet one" in state.shared.working_memory["knowledge"]
@@ -236,7 +236,7 @@ def test_memory_patch_replace_overwrites_stale_state_register(monkeypatch):
     assert "old blocker" not in wm_state
     assert "[TODO] run tests" in wm_state
     assert "<state>" in content
-    assert "stale TODO" not in content.split("<working_memory>")[1]
+    assert "stale TODO" not in content.split("<session_memory>")[1]
 
 
 def test_summarize_incremental_two_batches_previous_summary_passed(monkeypatch):

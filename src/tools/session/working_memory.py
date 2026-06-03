@@ -1,3 +1,9 @@
+"""Thread session registers (goal/constraints/state/knowledge).
+
+Naming: agent-visible tool ``session_memory``; storage ``state.shared.working_memory``
+and yaml ``working_memory:`` limits — unchanged for saved-thread compatibility.
+"""
+
 import json
 from typing import Any, Dict, Optional
 

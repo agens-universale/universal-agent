@@ -14,6 +14,8 @@ DEFAULT_TOTAL_BUDGET_CHARS = 20_000
 
 
 class WorkingMemoryConfig(BaseModel):
+    """Yaml section ``working_memory:`` — char limits for ``session_memory`` registers."""
+
     model_config = ConfigDict(extra="forbid")
 
     max_chars_goal: int = DEFAULT_MAX_CHARS_GOAL

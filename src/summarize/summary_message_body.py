@@ -6,7 +6,7 @@ from config_modules.summary import DEFAULT_INTENT_LOG_PREVIEW_CHARS
 from intent_log import serialize, tail_preview
 from intent_log.record import IntentRecord
 
-_WORKING_MEMORY_HINT = (
+_SESSION_MEMORY_HINT = (
     "The block above inlines the current session memory snapshot for this thread. "
     "Prefer this snapshot when present; use the session memory tool (append or rewrite "
     "on any register) if you need updates after this summary."
@@ -92,7 +92,7 @@ def build_intent_blocks_prefix(
 def build_dialog_summary_content(
     summary_text: str,
     last_dialog_steps: str,
-    working_memory_block: str = "",
+    session_memory_block: str = "",
     user_intent_log_preview: Mapping[str, Any] | None = None,
     current_user_intent_jsonl: str = "",
 ) -> str:
@@ -101,11 +101,11 @@ def build_dialog_summary_content(
     lines.append(summary_text.strip())
     lines.append("</summary>")
 
-    wm_block = str(working_memory_block or "").strip()
-    if wm_block:
+    sm_block = str(session_memory_block or "").strip()
+    if sm_block:
         lines.append("")
-        lines.append(wm_block)
-        lines.append(_WORKING_MEMORY_HINT)
+        lines.append(sm_block)
+        lines.append(_SESSION_MEMORY_HINT)
 
     if user_intent_log_preview is not None:
         log_section = render_user_intent_log_block(user_intent_log_preview)

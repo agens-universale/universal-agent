@@ -113,7 +113,7 @@ def repair_summary_text(
         f"{format_section_titles_for_repair()}.\n\n"
         "OPEN_TASKS rule: if user intent says planning/analysis only, set `mode: planning-only` and keep task bullets non-coding "
         "(no implementation, no code edits, no implementation delegation). "
-        "Do not duplicate content already in <persistent_state> working_memory registers.\n\n"
+        "Do not duplicate content already in <persistent_state> session memory registers.\n\n"
         "<invalid_summary>\n"
         f"{invalid_summary}\n"
         "</invalid_summary>"

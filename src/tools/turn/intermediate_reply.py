@@ -13,7 +13,7 @@ _TOOL_DESCRIPTION = (
     "Do NOT use for the final report of a multi-step task or to end the current user turn. "
     "Do NOT use when you need the user's answer — this tool does not wait for a reply. "
     "Keep `answer` concise; for long material use a separate artifact and put only summary + path in `answer`. "
-    "Omit `artifact_path` when there is no artifact; if set, it must be a non-empty path."
+    "Omit `artifact_path` when there is no artifact; if the tool schema requires every key (strict mode), pass \"\" instead. When set, path must be non-empty."
 )
 
 
@@ -55,8 +55,7 @@ class IntermediateReply(AbstractSimpleTool):
                     "artifact_path": {
                         "type": "string",
                         "description": (
-                            "Optional. Path to a detailed user-facing artifact. "
-                            "Omit this field entirely when there is no artifact — do not pass an empty string."
+                            "Path to a detailed user-facing artifact when long content lives in a file."
                         ),
                     },
                 },
@@ -81,7 +80,7 @@ Usage:
 - Do NOT use for the final turn report or to end the current user turn.
 - Do NOT use when you need the user's input — this tool does not wait for a reply.
 - Keep `answer` concise and readable.
-- For long content, create a user-facing artifact and include only a brief summary in `answer` plus `artifact_path` (omit the field when unused).
+- For long content, create a user-facing artifact and include only a brief summary in `answer` plus `artifact_path` (omit when unused; use \"\" only if the schema requires all keys).
 - Hard limit: 4096 characters in `answer`.
 """
 

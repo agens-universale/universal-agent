@@ -3,6 +3,7 @@ import functools
 import os
 import stat
 from typing import List, Dict, Any, Optional
+from tools.schema_optional import coalesce_optional_string
 from tools.simple_tool_base import AbstractSimpleTool
 from utils.glob_to_regex import compile_glob
 from utils.tool_report_paths import tool_report_abspath
@@ -35,9 +36,9 @@ class ListFiles(AbstractSimpleTool):
                     "glob": {
                         "type": "string",
                         "description": (
-                            "Optional glob pattern to filter entries by their relative path from `path` "
-                            "(e.g., '*.py', '**/*.md', 'src/**'). If omitted, all entries are returned."
-                        )
+                            "Glob pattern to filter entries by their relative path from `path` "
+                            "(e.g., '*.py', '**/*.md', 'src/**'). When unset, all entries are returned."
+                        ),
                     },
                     "max_depth": {
                         "type": "integer",
@@ -147,6 +148,7 @@ List deeper files (example):
         max_depth: Optional[int] = None,
         max_entries: Optional[int] = 200,
     ) -> str:
+        glob = coalesce_optional_string(glob)
         effective_max_depth: int = 0 if max_depth is None else max_depth
 
         _result = functools.partial(

@@ -97,6 +97,7 @@ def normalize_working_memory(raw: Any) -> dict[str, str]:
 
 
 def serialize_shared_block(shared: Any) -> dict[str, Any]:
+    # JSON key ``working_memory`` — legacy persist name; same dict as ``session_memory`` tool.
     working_memory = normalize_working_memory(getattr(shared, "working_memory", None))
     notes_md = str(getattr(shared, "notes_md", "") or "")
     fetch_url_cache = getattr(shared, "fetch_url_cache", None)

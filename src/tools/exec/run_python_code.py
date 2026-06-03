@@ -58,8 +58,8 @@ class RunPythonCode(AbstractSimpleTool):
                     "cwd": {
                         "type": "string",
                         "description": (
-                            "Optional working directory for the subprocess (absolute or relative to the host). "
-                            "If omitted, defaults to this agent's configured project/workspace root so relative paths "
+                            "Working directory for the subprocess (absolute or relative to the host). "
+                            "When unset, defaults to this agent's configured project/workspace root so relative paths "
                             "resolve under the project. If the default is missing, read-only, or unsuitable, set cwd "
                             "explicitly. When the tool returns an error with allowed_write_paths, use one of those "
                             "paths as cwd (they are the permitted writable locations for this run)."

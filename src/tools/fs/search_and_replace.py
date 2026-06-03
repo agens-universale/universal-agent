@@ -6,6 +6,7 @@ from typing import Dict, Any
 from tools.simple_tool_base import AbstractSimpleTool
 from utils.tool_report_paths import tool_report_abspath
 from security.path_policy import enforce_root_box
+from tools.schema_optional import coalesce_optional_string
 from utils.file_text import check_expected_file_sha256, is_valid_sha256_hex, read_text_for_edit
 
 
@@ -212,7 +213,7 @@ class SearchAndReplace(AbstractSimpleTool):
                     "expected_file_sha256": {
                         "type": "string",
                         "description": (
-                            "Optional SHA-256 hex digest from file_info(include_hash=true). "
+                            "SHA-256 hex digest from file_info(include_hash=true). "
                             "Edit aborts with stale_file if file content changed."
                         ),
                     },
@@ -370,6 +371,7 @@ Update version string:
         expected_file_sha256: str | None = None,
         **kwargs,
     ) -> str:
+        expected_file_sha256 = coalesce_optional_string(expected_file_sha256)
         _result = functools.partial(self._result, path=path, applied=False)
 
         # Input validation

@@ -3,6 +3,7 @@ import functools
 import os
 import re
 from typing import Optional, List, Dict, Any, Tuple
+from tools.schema_optional import coalesce_optional_string
 from tools.simple_tool_base import AbstractSimpleTool
 from utils.glob_to_regex import compile_glob
 from utils.tool_report_paths import tool_report_abspath
@@ -37,7 +38,10 @@ class SearchFiles(AbstractSimpleTool):
                     },
                     "file_pattern": {
                         "type": "string",
-                        "description": "Optional glob pattern to filter files (e.g., '*.py', 'src/**/*.rs'). If not provided, all files are searched."
+                        "description": (
+                            "Glob pattern to filter files (e.g., '*.py', 'src/**/*.rs'). "
+                            "When unset, all files are searched."
+                        ),
                     },
                     "offset": {
                         "type": "integer",
@@ -257,6 +261,7 @@ Search for error logs in Rust source files:
         limit: Optional[int] = None,
         **kwargs,
     ) -> str:
+        file_pattern = coalesce_optional_string(file_pattern)
         _result = functools.partial(
             self._result, path=path, regex=regex, file_pattern=file_pattern
         )

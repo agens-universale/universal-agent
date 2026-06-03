@@ -12,6 +12,9 @@ from intent_log import IntentRecord, deserialize_list, flush
 @dataclass
 class SharedStateData:
     """Данные, разделяемые между оркестратором и его субагентами."""
+    # In-process + persist key ``working_memory`` (goal/constraints/state/knowledge).
+    # Agent tool API: ``session_memory``; summary wire: ``<session_memory>`` inside
+    # ``<persistent_state>``. Intentionally not renamed in JSON/yaml (thread compat).
     working_memory: Dict[str, str] = field(default_factory=dict)
     notes_md: str = ""
     fetch_url_cache: Dict[str, str] = field(default_factory=dict)

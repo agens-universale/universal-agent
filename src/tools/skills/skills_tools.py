@@ -60,6 +60,9 @@ class SkillsListTool:
         self._registry = registry
 
     def __call__(self, pack: Optional[str] = None, **kwargs: Any) -> Dict[str, Any]:
+        from tools.schema_optional import coalesce_optional_string
+
+        pack = coalesce_optional_string(pack)
         try:
             skills = self._registry.list_skills(pack=pack)
             return _wrap(tool="skills_list", ok=True, result={"skills": skills})
@@ -327,9 +330,8 @@ def get_skills_tools_data(skills_registry: SkillsRegistry) -> Dict[str, Dict[str
                         "pack": {
                             "type": "string",
                             "description": (
-                                "Optional pack ID to drill into. When set, returns ONLY internal "
-                                "skills of that pack (including bootstrap). Default: omit to get "
-                                "flat skills + pack bootstrap entries."
+                                "Pack ID to drill into internal skills only (including bootstrap). "
+                                "When unset, returns flat skills plus one bootstrap entry per pack."
                             ),
                         },
                     },
@@ -412,8 +414,10 @@ def get_skills_tools_data(skills_registry: SkillsRegistry) -> Dict[str, Dict[str
                         "args": {
                             "type": "string",
                             "description": (
-                                "Optional JSON object string with script arguments passed via stdin. "
-                                "Must decode to a JSON object (dictionary), not an array/string/number. "
+                                "Must decode to a JSON object (dictionary), not an array, scalar, or null. "
+                                "When provided, pass script arguments as one JSON string "
+                                "(this field is string-typed, not a nested object). "
+                                "The script receives the parsed object on stdin. "
                                 "Example: '{\"input\":\"hello\",\"limit\":3}'."
                             ),
                         },
@@ -433,7 +437,9 @@ def get_skills_tools_data(skills_registry: SkillsRegistry) -> Dict[str, Dict[str
                 "Usage:\n"
                 "- Use this tool when a skill defines executable logic in its scripts/ directory.\n"
                 "- If you don't know the script name, omit it to run scripts/main.py by default.\n"
-                "- Provide any arguments the script expects inside the 'args' JSON object string.\n"
+                "- Provide script arguments in args only when the skill expects them.\n"
+                "- args must decode to a JSON object; pass it as a string, not a nested object "
+                "(e.g. '{\"input\":\"hello\"}').\n"
                 "- The result includes stdout, stderr and the exit code."
             ),
         },
