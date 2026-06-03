@@ -4,25 +4,25 @@ from pydantic import ValidationError
 
 from config import load_config
 from config_modules.message_notice import (
-    LongMemoryNoticeConfig,
+    ProjectMemoryNoticeConfig,
     ToolUsageNoticeRule,
     active_tool_usage_notice_rules,
-    long_memory_notice_enabled,
-    long_memory_notice_from_config_dict,
-    normalize_long_memory_notice_config,
+    project_memory_notice_enabled,
+    project_memory_notice_from_config_dict,
+    normalize_project_memory_notice_config,
     tool_usage_notice_rules_from_config_dict,
 )
 from config_modules.root import AppConfig
 
 
-def test_long_memory_notice_defaults():
-    cfg = LongMemoryNoticeConfig()
+def test_project_memory_notice_defaults():
+    cfg = ProjectMemoryNoticeConfig()
     assert cfg.check_interval_messages == 5
 
 
 def test_normalize_long_memory_notice_rejects_non_positive():
-    cfg = LongMemoryNoticeConfig(check_interval_messages=-1)
-    normalize_long_memory_notice_config(cfg)
+    cfg = ProjectMemoryNoticeConfig(check_interval_messages=-1)
+    normalize_project_memory_notice_config(cfg)
     assert cfg.check_interval_messages == 5
 
 
@@ -33,16 +33,16 @@ tool_usage_notice:
   - tool_name: working_memory
     step_messages_count: 40
     notice_message: "Review thread memory."
-long_memory:
-  enable_long_memory_notice: false
+project_memory:
+  enable_project_memory_notice: false
   check_interval_messages: 7
 """
     )
     app = AppConfig.model_validate(raw)
     assert len(app.tool_usage_notice) == 1
     assert app.tool_usage_notice[0].step_messages_count == 40
-    assert app.long_memory.enable_long_memory_notice is False
-    assert app.long_memory.check_interval_messages == 7
+    assert app.project_memory.enable_project_memory_notice is False
+    assert app.project_memory.check_interval_messages == 7
 
 
 def test_app_config_rejects_unknown_keys_in_notice_sections():
@@ -56,9 +56,9 @@ def test_app_config_rejects_unknown_keys_in_notice_sections():
         )
 
 
-def test_long_memory_notice_from_config_dict_from_params():
-    cfg = long_memory_notice_from_config_dict(
-        {"long_memory_params": {"check_interval_messages": 3}}
+def test_project_memory_notice_from_config_dict_from_params():
+    cfg = project_memory_notice_from_config_dict(
+        {"project_memory_params": {"check_interval_messages": 3}}
     )
     assert cfg.check_interval_messages == 3
 
@@ -113,12 +113,12 @@ tool_usage_notice:
     assert app.tool_usage_notice[0].notice_message == "Review thread memory."
 
 
-def test_long_memory_notice_enabled_from_nested_and_flat_config():
-    assert not long_memory_notice_enabled({})
-    assert long_memory_notice_enabled(
-        {"long_memory_params": {"enable_long_memory_notice": True}}
+def test_project_memory_notice_enabled_from_nested_and_flat_config():
+    assert not project_memory_notice_enabled({})
+    assert project_memory_notice_enabled(
+        {"project_memory_params": {"enable_project_memory_notice": True}}
     )
-    assert long_memory_notice_enabled({"enable_long_memory_notice": True})
+    assert project_memory_notice_enabled({"enable_project_memory_notice": True})
 
 
 def test_load_config_includes_message_notice_keys(tmp_path, monkeypatch):
@@ -132,8 +132,8 @@ tool_usage_notice:
   - tool_name: working_memory
     step_messages_count: 25
     notice_message: "Review thread memory."
-long_memory:
-  enable_long_memory_notice: true
+project_memory:
+  enable_project_memory_notice: true
   check_interval_messages: 4
 """,
         encoding="utf-8",
@@ -141,8 +141,8 @@ long_memory:
     monkeypatch.setattr("config._project_local_config_path", lambda: None)
     monkeypatch.setattr("config._xdg_config_path", lambda: None)
     cfg = load_config(str(cfg_path))
-    assert cfg["long_memory_check_interval_messages"] == 4
-    assert cfg["enable_long_memory_notice"] is True
-    assert cfg["long_memory_params"]["check_interval_messages"] == 4
+    assert cfg["project_memory_check_interval_messages"] == 4
+    assert cfg["enable_project_memory_notice"] is True
+    assert cfg["project_memory_params"]["check_interval_messages"] == 4
     assert len(cfg["tool_usage_notice_params"]) == 1
     assert cfg["tool_usage_notice_params"][0]["step_messages_count"] == 25

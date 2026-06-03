@@ -86,20 +86,20 @@ class ThreadSummarizerTest(unittest.TestCase):
     def test_format_last_dialog_steps_keeps_tool_call_and_output_in_one_turn(self) -> None:
         steps = format_last_dialog_steps(
             [
-                {"type": "function_call", "call_id": "c1", "name": "read_file", "arguments": {"path": "/tmp/a.txt"}},
+                {"type": "function_call", "call_id": "c1", "name": "fs_read_file", "arguments": {"path": "/tmp/a.txt"}},
                 {"type": "function_call_output", "call_id": "c1", "output": {"ok": True}},
             ],
             max_steps=5,
             message_max_chars=5000,
         )
         self.assertEqual(steps.count("<turn "), 1)
-        self.assertIn("[function_call] read_file", steps)
+        self.assertIn("[function_call] fs_read_file", steps)
         self.assertIn("[function_call_output]", steps)
 
     def test_group_into_turns_supports_tool_call_aliases(self) -> None:
         turns = group_into_turns(
             [
-                {"type": "tool_call", "call_id": "c1", "name": "read_file", "arguments": "{}"},
+                {"type": "tool_call", "call_id": "c1", "name": "fs_read_file", "arguments": "{}"},
                 {"type": "tool_call_output", "call_id": "c1", "output": "ok"},
             ]
         )

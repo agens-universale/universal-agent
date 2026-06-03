@@ -6,7 +6,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 from intent_guard.agent_logging import log_finish_gate_output_patched
 from intent_guard.guard import FinishGateDecision
-from tools.session.submit_solution import SubmitSolution
+from tools.turn.submit_solution import SubmitSolution
 
 _logger = logging.getLogger(__name__)
 
@@ -42,7 +42,7 @@ def patch_function_call_output(
     return None
 
 
-def apply_finish_gate_to_submit_output_in_state(
+def apply_finish_gate_to_turn_finish_output_in_state(
     *,
     state: Any,
     finish_call_id: str,
@@ -51,13 +51,13 @@ def apply_finish_gate_to_submit_output_in_state(
     persist_messages_callback: Optional[Callable[[List[Dict]], None]] = None,
 ) -> bool:
     """
-    Merge finish gate (quality gate) decision into persisted submit_solution tool output.
+    Merge finish-gate decision into the persisted finish-turn tool output envelope.
     """
     log = logger if logger is not None else _logger
     raw_output = get_function_call_output_text(state.messages, finish_call_id)
     if not isinstance(raw_output, str) or not raw_output.strip():
         log.warning(
-            "finish_gate submit_solution_output_patch_skipped call_id=%s reason=no_output",
+            "finish_gate finish_turn_output_patch_skipped call_id=%s reason=no_output",
             finish_call_id,
         )
         return False
@@ -70,7 +70,7 @@ def apply_finish_gate_to_submit_output_in_state(
     )
     if updated_message is None:
         log.warning(
-            "finish_gate submit_solution_output_patch_skipped call_id=%s reason=message_not_found",
+            "finish_gate finish_turn_output_patch_skipped call_id=%s reason=message_not_found",
             finish_call_id,
         )
         return False
@@ -99,7 +99,7 @@ def apply_finish_gate_to_submit_output_in_state(
             persist_messages_callback([updated_message])
         except Exception as exc:
             log.warning(
-                "finish_gate submit_solution_output_persist_warning call_id=%s error=%s",
+                "finish_gate finish_turn_output_persist_warning call_id=%s error=%s",
                 finish_call_id,
                 exc,
                 exc_info=True,

@@ -14,34 +14,34 @@ from config_modules.intent_scope import (
 def test_intent_scope_active_requires_non_empty_tools():
     assert not intent_scope_active(IntentScopeConfig(tools={}))
     assert intent_scope_active(
-        IntentScopeConfig(tools={"ask_human": IntentScopeToolConfig(record="aggregated")})
+        IntentScopeConfig(tools={"turn_ask_human": IntentScopeToolConfig(record="aggregated")})
     )
 
 
 def test_intent_scope_from_config_dict_prefers_model_on_dict():
     model = IntentScopeConfig(
-        tools={"submit_solution": IntentScopeToolConfig(record="raw")}
+        tools={"turn_finish": IntentScopeToolConfig(record="raw")}
     )
     cfg = intent_scope_from_config_dict(
         {
             "intent_scope": model,
-            "intent_scope_params": {"tools": {"ask_human": {"record": "aggregated"}}},
+            "intent_scope_params": {"tools": {"turn_ask_human": {"record": "aggregated"}}},
         }
     )
     assert cfg is model
-    assert cfg.tools["submit_solution"].record == "raw"
+    assert cfg.tools["turn_finish"].record == "raw"
 
 
 def test_intent_scope_from_config_dict_from_params():
     cfg = intent_scope_from_config_dict(
         {
             "intent_scope_params": {
-                "tools": {"ask_human": {"record": "aggregated"}},
+                "tools": {"turn_ask_human": {"record": "aggregated"}},
                 "max_summary_chars": 400,
             }
         }
     )
-    assert cfg.tools["ask_human"].record == "aggregated"
+    assert cfg.tools["turn_ask_human"].record == "aggregated"
     assert cfg.max_summary_chars == 400
 
 
@@ -81,11 +81,11 @@ def test_intent_scope_tools_map_accepts_record_modes():
     cfg = IntentScopeConfig.model_validate(
         {
             "tools": {
-                "ask_human": {"record": "aggregated"},
-                "submit_solution": {"record": "raw"},
+                "turn_ask_human": {"record": "aggregated"},
+                "turn_finish": {"record": "raw"},
             }
         }
     )
-    assert intent_scope_tool_record(cfg, "ask_human") == "aggregated"
-    assert intent_scope_tool_record(cfg, "submit_solution") == "raw"
+    assert intent_scope_tool_record(cfg, "turn_ask_human") == "aggregated"
+    assert intent_scope_tool_record(cfg, "turn_finish") == "raw"
     assert intent_scope_tool_record(cfg, "missing") is None

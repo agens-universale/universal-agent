@@ -1,0 +1,24 @@
+"""Canonical agent-visible builtin tool names (TOOL_NAMESPACES_SPEC v1.1)."""
+
+# Turn
+FINISH_TOOL_NAME = "turn_finish"
+ASK_HUMAN_TOOL_NAME = "turn_ask_human"
+INTERMEDIATE_REPLY_TOOL_NAME = "turn_intermediate_reply"
+
+# Session
+SESSION_MEMORY_TOOL_NAME = "session_memory"
+SESSION_THINK_TOOL_NAME = "session_think"
+READ_STORED_TOOL_OUTPUT_NAME = "session_read_stored_tool_output"
+READ_USER_INTENT_LOG_NAME = "session_read_user_intent_log"
+
+# Project
+PROJECT_MEMORY_TOOL_NAME = "project_memory"
+
+# FS (representative; prefer cls.tool_description()["name"] in tool implementations)
+FS_READ_FILE_NAME = "fs_read_file"
+FS_WRITE_FILE_NAME = "fs_write_file"
+
+# Exec (representative)
+EXEC_COMMAND_NAME = "exec_command"
+EXEC_PYTHON_NAME = "exec_python"
+EXEC_FETCH_URL_NAME = "exec_fetch_url"

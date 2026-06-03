@@ -79,7 +79,7 @@ def test_function_call_output_pair_in_current_batch():
     call = {
         "type": "function_call",
         "call_id": "c1",
-        "name": "read_file",
+        "name": "fs_read_file",
         "arguments": "{}",
         "id": "fc_1",
     }

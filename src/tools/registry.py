@@ -13,14 +13,14 @@ from tools.exec.calculator import Calculator
 from tools.exec.execute_command import ExecuteCommand
 from tools.exec.run_python_code import RunPythonCode
 from tools.exec.sleep_tool import Sleep
-from tools.session.intermediate_reply import IntermediateReply
-from tools.session.ask_human import AskHuman
-from tools.session.long_memory import LongMemory
+from tools.project.project_memory import ProjectMemory
 from tools.session.read_user_intent_log import ReadUserIntentLog
-from tools.session.submit_solution import SubmitSolution
 from tools.session.think import Think
 from tools.session.working_memory import WorkingMemory
 from tools.session.stored_outputs.read_stored_tool_output import ReadStoredToolOutput
+from tools.turn.submit_solution import SubmitSolution
+from tools.turn.intermediate_reply import IntermediateReply
+from tools.turn.ask_human import AskHuman
 
 try:
     from tools.exec.fetch_url import FetchUrl
@@ -38,44 +38,54 @@ def _tool_entry(tool_cls: type) -> Dict[str, Any]:
 
 def _fs_registry() -> Dict[str, Dict[str, Any]]:
     return {
-        "write_to_file": _tool_entry(WriteToFile),
-        "append_to_file": _tool_entry(AppendToFile),
-        "apply_file_edits": _tool_entry(ApplyFileEdits),
-        "read_file": _tool_entry(ReadFile),
-        "file_info": _tool_entry(FileInfo),
-        "list_files": _tool_entry(ListFiles),
-        "search_files": _tool_entry(SearchFiles),
-        "search_and_replace": _tool_entry(SearchAndReplace),
-        "save_base64_file": _tool_entry(SaveBase64File),
+        "fs_write_file": _tool_entry(WriteToFile),
+        "fs_append_file": _tool_entry(AppendToFile),
+        "fs_apply_file_edits": _tool_entry(ApplyFileEdits),
+        "fs_read_file": _tool_entry(ReadFile),
+        "fs_file_info": _tool_entry(FileInfo),
+        "fs_list_files": _tool_entry(ListFiles),
+        "fs_search_files": _tool_entry(SearchFiles),
+        "fs_search_and_replace": _tool_entry(SearchAndReplace),
+        "fs_save_base64_file": _tool_entry(SaveBase64File),
     }
 
 
 def _exec_registry() -> Dict[str, Dict[str, Any]]:
     return {
-        "execute_command": _tool_entry(ExecuteCommand),
-        "calculator": _tool_entry(Calculator),
-        "sleep": _tool_entry(Sleep),
-        "run_python_code": _tool_entry(RunPythonCode),
-        "fetch_url": _tool_entry(FetchUrl),
+        "exec_command": _tool_entry(ExecuteCommand),
+        "exec_calculator": _tool_entry(Calculator),
+        "exec_sleep": _tool_entry(Sleep),
+        "exec_python": _tool_entry(RunPythonCode),
+        "exec_fetch_url": _tool_entry(FetchUrl),
+    }
+
+
+def _turn_registry() -> Dict[str, Dict[str, Any]]:
+    return {
+        "turn_ask_human": _tool_entry(AskHuman),
+        "turn_intermediate_reply": _tool_entry(IntermediateReply),
+        "turn_finish": _tool_entry(SubmitSolution),
     }
 
 
 def _session_registry(config_dict: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
     registry: Dict[str, Dict[str, Any]] = {
-        "long_memory": _tool_entry(LongMemory),
-        "think": _tool_entry(Think),
-        "read_stored_tool_output": _tool_entry(ReadStoredToolOutput),
-        "submit_solution": _tool_entry(SubmitSolution),
-        "ask_human": _tool_entry(AskHuman),
-        "intermediate_reply": _tool_entry(IntermediateReply),
-        "working_memory": _tool_entry(WorkingMemory),
+        "session_think": _tool_entry(Think),
+        "session_read_stored_tool_output": _tool_entry(ReadStoredToolOutput),
+        "session_memory": _tool_entry(WorkingMemory),
     }
 
     backend_mode = str(config_dict.get("backend_api_mode", "responses")).strip().lower()
     if backend_mode == "chat_completions":
-        registry["read_user_intent_log"] = _tool_entry(ReadUserIntentLog)
+        registry["session_read_user_intent_log"] = _tool_entry(ReadUserIntentLog)
 
     return registry
+
+
+def _project_registry() -> Dict[str, Dict[str, Any]]:
+    return {
+        "project_memory": _tool_entry(ProjectMemory),
+    }
 
 
 def _apply_stop_tools(
@@ -110,8 +120,17 @@ def get_builtin_tools_data(config_dict: Dict[str, Any]) -> Dict[str, Dict[str, A
     tools_data: Dict[str, Dict[str, Any]] = {}
     tools_data.update(_fs_registry())
     tools_data.update(_exec_registry())
+    tools_data.update(_turn_registry())
     tools_data.update(_session_registry(config_dict))
+    tools_data.update(_project_registry())
     return _apply_stop_tools(tools_data, config_dict)
 
 
-__all__ = ["get_builtin_tools_data"]
+__all__ = [
+    "get_builtin_tools_data",
+    "_fs_registry",
+    "_exec_registry",
+    "_turn_registry",
+    "_session_registry",
+    "_project_registry",
+]

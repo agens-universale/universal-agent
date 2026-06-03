@@ -23,7 +23,7 @@ class ApplyFileEdits(AbstractSimpleTool):
     def tool_description(cls) -> Dict[str, Any]:
         return {
             "type": "function",
-            "name": "apply_file_edits",
+            "name": "fs_apply_file_edits",
             "description": (
                 "Apply multiple literal search/replace edits to one file atomically. "
                 "All edits are validated and applied in-memory first; if any edit fails, file is unchanged."
@@ -100,7 +100,7 @@ class ApplyFileEdits(AbstractSimpleTool):
     @classmethod
     def prompt_description(cls) -> str:
         return (
-            "Tool name: apply_file_edits\n"
+            "Tool name: fs_apply_file_edits\n"
             "Apply multiple exact literal edits to one file atomically.\n"
             "If any edit fails validation or matching, no file changes are written.\n"
             "edits_would_apply/total_would_replace count in-memory simulation; "
@@ -128,7 +128,7 @@ class ApplyFileEdits(AbstractSimpleTool):
     ) -> str:
         return json.dumps(
             {
-                "tool": "apply_file_edits",
+                "tool": ApplyFileEdits.registered_tool_name(),
                 "ok": ok,
                 "applied": applied,
                 "path": tool_report_abspath(path),

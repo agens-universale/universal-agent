@@ -18,7 +18,7 @@ class ListFiles(AbstractSimpleTool):
     def tool_description(cls):
         return {
             "type": "function",
-            "name": "list_files",
+            "name": "fs_list_files",
             "description": (
                 "Lists files and directories within a specified absolute path. Supports flat listing (default) "
                 "and deeper traversal limited by `max_depth`. Optionally filters results by a glob pattern matched against the "
@@ -65,7 +65,7 @@ class ListFiles(AbstractSimpleTool):
 
     @classmethod
     def prompt_description(cls):
-        description = '''Tool name: list_files  
+        description = '''Tool name: fs_list_files  
 Tool description: Lists files and directories in the specified directory with optional depth/size limits.
 Input schema: {"type": "object", "properties": {"path": {"type": "string", "description": "The directory absolute path to list contents for."}, "max_depth": {"type": "integer", "minimum": 0, "description": "Max directory depth to traverse. Default 0 = only immediate children."}, "max_entries": {"type": "integer", "minimum": 1, "description": "Max number of returned entries. Default 200."}, "glob": {"type": "string"}}, "required": ["path"], "additionalProperties": false}
 
@@ -76,7 +76,7 @@ Usage:
 - Set `max_entries` to limit output size.
 - Return format (JSON string):
 {
-  "tool": "list_files",
+  "tool": "fs_list_files",
   "ok": true|false,
   "path": "...",
   "max_depth": integer,
@@ -124,7 +124,7 @@ List deeper files (example):
         error: Optional[Dict[str, Any]] = None,
     ) -> str:
         payload = {
-            "tool": "list_files",
+            "tool": ListFiles.registered_tool_name(),
             "ok": ok,
             "path": tool_report_abspath(path),
             "max_depth": max_depth,

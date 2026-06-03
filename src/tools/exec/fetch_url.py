@@ -33,7 +33,7 @@ class FetchUrl(AbstractSimpleTool):
     def tool_description(cls):
         return {
             "type": "function",
-            "name": "fetch_url",
+            "name": "exec_fetch_url",
             "description": (
                 "Fetches a URL via HTTP GET and returns extracted readable text when possible. "
                 "Uses external network; does not execute local code or shell commands. "
@@ -79,7 +79,7 @@ class FetchUrl(AbstractSimpleTool):
 
     @classmethod
     def prompt_description(cls):
-        return f"""Tool name: fetch_url
+        return f"""Tool name: exec_fetch_url
 Tool description: Downloads a web page via HTTP GET and extracts the main text content using trafilatura.
 Input schema: {{"type": "object", "properties": {{"url": {{"type": "string", "description": "Absolute URL to fetch."}}, "timeout_seconds": {{"type": "integer", "description": "HTTP timeout in seconds."}}, "offset": {{"type": "integer", "description": "Character offset for paginated reads."}}, "limit": {{"type": "integer", "description": "Max characters to return in this call."}}}}, "required": ["url"], "additionalProperties": false}}
 
@@ -220,7 +220,7 @@ Usage:
         meta: Optional[Dict[str, Optional[str]]] = None,
     ) -> str:
         payload: Dict[str, Any] = {
-            "tool": "fetch_url",
+            "tool": FetchUrl.registered_tool_name(),
             "ok": ok,
             "url": url,
             "final_url": final_url,

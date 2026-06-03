@@ -18,13 +18,13 @@ _lock = threading.Lock()
 
 
 @dataclass(frozen=True)
-class LongMemoryStat:
+class ProjectMemoryStat:
     exists: bool
     chars: int
     lines: int
 
 
-class LongMemoryError(Exception):
+class ProjectMemoryError(Exception):
     """Raised by storage write/append on validation failures.
 
     `code` is a stable string id ("limit_exceeded", "empty_content", "io_error")
@@ -43,21 +43,21 @@ def _count_lines(text: str) -> int:
     return text.count("\n") + (0 if text.endswith("\n") else 1)
 
 
-def stat(path: Path) -> LongMemoryStat:
+def stat(path: Path) -> ProjectMemoryStat:
     """Return existence + char/line counts of the long-memory file at `path`.
 
-    Returns `LongMemoryStat(exists=False, chars=0, lines=0)` if the file is missing
+    Returns `ProjectMemoryStat(exists=False, chars=0, lines=0)` if the file is missing
     or unreadable. Other readers/writers in this process won't observe partial state
     because the operation runs under `_lock`.
     """
     with _lock:
         if not path.is_file():
-            return LongMemoryStat(exists=False, chars=0, lines=0)
+            return ProjectMemoryStat(exists=False, chars=0, lines=0)
         try:
             text = path.read_text(encoding="utf-8")
         except OSError:
-            return LongMemoryStat(exists=False, chars=0, lines=0)
-        return LongMemoryStat(
+            return ProjectMemoryStat(exists=False, chars=0, lines=0)
+        return ProjectMemoryStat(
             exists=True,
             chars=len(text),
             lines=_count_lines(text),
@@ -101,19 +101,19 @@ def _atomic_write(path: Path, content: str) -> None:
     os.replace(tmp, path)
 
 
-def append(path: Path, delta: str) -> LongMemoryStat:
+def append(path: Path, delta: str) -> ProjectMemoryStat:
     """Append `delta` (stripped) to the long-memory file separated by a blank line.
 
     Result format: ``existing.strip() + "\\n\\n" + delta.strip()``. If the file
     is missing or empty, the result is just the stripped delta. Read-modify-write
     runs under `_lock` so concurrent appends from multiple threads do not lose data.
 
-    Raises LongMemoryError("empty_content") if `delta` is empty/whitespace.
-    Raises LongMemoryError("limit_exceeded") when the resulting size would exceed
+    Raises ProjectMemoryError("empty_content") if `delta` is empty/whitespace.
+    Raises ProjectMemoryError("limit_exceeded") when the resulting size would exceed
     MAX_CHARS; in that case the file on disk is left unchanged.
     """
     if not isinstance(delta, str) or not delta.strip():
-        raise LongMemoryError("empty_content", "delta must be non-empty for append.")
+        raise ProjectMemoryError("empty_content", "delta must be non-empty for append.")
     with _lock:
         existing = path.read_text(encoding="utf-8") if path.is_file() else ""
         existing_stripped = existing.strip()
@@ -124,36 +124,36 @@ def append(path: Path, delta: str) -> LongMemoryStat:
             else delta_stripped
         )
         if len(new_text) > MAX_CHARS:
-            raise LongMemoryError(
+            raise ProjectMemoryError(
                 "limit_exceeded",
                 f"resulting length {len(new_text)} exceeds limit {MAX_CHARS}.",
             )
         _atomic_write(path, new_text)
-    return LongMemoryStat(
+    return ProjectMemoryStat(
         exists=True,
         chars=len(new_text),
         lines=_count_lines(new_text),
     )
 
 
-def write(path: Path, content: str) -> LongMemoryStat:
+def write(path: Path, content: str) -> ProjectMemoryStat:
     """Atomically replace the long-memory file with `content` (stripped).
 
-    Raises LongMemoryError(code="empty_content") if content is empty/whitespace.
-    Raises LongMemoryError(code="limit_exceeded") if stripped content > MAX_CHARS;
+    Raises ProjectMemoryError(code="empty_content") if content is empty/whitespace.
+    Raises ProjectMemoryError(code="limit_exceeded") if stripped content > MAX_CHARS;
     in this case the file on disk is left unchanged.
     """
     if not isinstance(content, str) or not content.strip():
-        raise LongMemoryError("empty_content", "content must be non-empty for write.")
+        raise ProjectMemoryError("empty_content", "content must be non-empty for write.")
     new_text = content.strip()
     if len(new_text) > MAX_CHARS:
-        raise LongMemoryError(
+        raise ProjectMemoryError(
             "limit_exceeded",
             f"content length {len(new_text)} exceeds limit {MAX_CHARS}.",
         )
     with _lock:
         _atomic_write(path, new_text)
-    return LongMemoryStat(
+    return ProjectMemoryStat(
         exists=True,
         chars=len(new_text),
         lines=_count_lines(new_text),

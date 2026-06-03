@@ -13,7 +13,7 @@ class Think(AbstractSimpleTool):
     ) -> str:
         return json.dumps(
             {
-                "tool": "think",
+                "tool": Think.registered_tool_name(),
                 "ok": ok,
                 "error": error,
                 "message": message,
@@ -25,7 +25,7 @@ class Think(AbstractSimpleTool):
     def tool_description(cls):
         description = {
             "type": "function",
-            "name": "think",
+            "name": "session_think",
             "description": (
                 "Think out loud during the current turn. Use it when complex reasoning, "
                 "self-critique, or structured reflection is needed. "
@@ -64,7 +64,7 @@ class Think(AbstractSimpleTool):
 
     @classmethod
     def prompt_description(cls):
-        description = '''Tool name: think
+        description = '''Tool name: session_think
 Tool description: Think out loud for the current turn. Supports structured multi-layer thinking: thoughts, critics, doubts, reflection.
 IMPORTANT: think content is NOT saved to thread memory and NOT saved to any durable storage. It only exists in the current dialogue context.
 RULE: If your think output contains a specific Decision / Canonical target / Plan completed / Verified fact, record it separately via the thread memory tool (append) when one is available so it can persist.
@@ -72,7 +72,7 @@ Input schema: {"type":"object","properties":{"thoughts":{"type":"string"},"criti
 At least one of thoughts, critics, doubts, reflection should be non-empty.
 
 Return format (JSON string):
-{"tool":"think","ok":true,"error":null|{"type":"...","message":"..."},"message":"..."}
+{"tool":"session_think","ok":true,"error":null|{"type":"...","message":"..."},"message":"..."}
 '''
         return description
 

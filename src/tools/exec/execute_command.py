@@ -3,6 +3,7 @@ import subprocess
 import os
 import json
 
+from constants.tool_names import EXEC_COMMAND_NAME
 from security.command_moderation import moderate_command_execution
 
 
@@ -18,7 +19,7 @@ class ExecuteCommand(AbstractSimpleTool):
     def tool_description(cls):
         description = {
             "type": "function",
-            "name": "execute_command",
+            "name": "exec_command",
             "description": (
                 "Executes a command synchronously (no background) and returns a JSON string envelope with "
                 "fields: tool, ok, command, cwd, exit_code, timed_out, truncated, error, then stdout/stderr last. "
@@ -72,12 +73,12 @@ class ExecuteCommand(AbstractSimpleTool):
 
     @classmethod
     def prompt_description(cls):
-        description = ('''Tool name: execute_command
+        description = ('''Tool name: exec_command
 Tool description: Executes a CLI command synchronously and returns stdout/stderr/exit_code as JSON.
 Input schema: {"type": "object", "properties": {"command": {"type": "string", "description": "The CLI command to execute."}, "timeout_seconds": {"type": "integer", "description": "Execution timeout in seconds.", "default": 30}, "max_output_chars": {"type": "integer", "description": "Max chars returned for stdout/stderr each.", "default": 4000}, "cwd": {"type": "string", "description": "Optional working directory (absolute or relative)."}, "env_vars": {"type":"array","description":"Optional env overrides as [{name,value}]","items":{"type":"object","properties":{"name":{"type":"string"},"value":{"type":"string"}},"required":["name","value"],"additionalProperties":false}}}, "required": ["command"], "additionalProperties": false}
 
 Return format (JSON string):
-{"tool":"execute_command","ok":true|false,"command":"...","cwd":"...","exit_code":number|null,"timed_out":true|false,"truncated":true|false,"error":null|{"type":"...","message":"..."},"stdout":"...","stderr":"..."}
+{"tool":"exec_command","ok":true|false,"command":"...","cwd":"...","exit_code":number|null,"timed_out":true|false,"truncated":true|false,"error":null|{"type":"...","message":"..."},"stdout":"...","stderr":"..."}
 
 Usage:
 - Use this tool to run shell commands such as listing directories (`ls`, `dir`), checking versions (`python --version`), or running scripts.
@@ -105,7 +106,7 @@ Important Usage Rules:
    - After ensuring proper quoting, execute the command.
    - Capture the output of the command.
    - When issuing multiple commands, use the ';' or '&&' operator to separate them. DO NOT use newlines (newlines are ok in quoted strings
-3. VERY IMPORTANT: You MUST avoid using search commands like `find` and `grep`. You MUST avoid read tools like `cat`, `head`, `tail`, and `ls`, and instead use tools `search_files`, `list_files`, `read_file`, `search_and_replace`, `Task`.
+3. VERY IMPORTANT: You MUST avoid using search commands like `find` and `grep`. You MUST avoid read tools like `cat`, `head`, `tail`, and `ls`, and instead use filesystem tools (`fs_search_files`, `fs_list_files`, `fs_read_file`, `fs_search_and_replace`, …).
 4. Try to maintain your current working directory throughout the session by using absolute paths and avoiding usage of `cd`. You may use `cd` if the User explicitly requests it.
     <good-example>
     pytest /foo/bar/tests
@@ -140,7 +141,7 @@ Important Usage Rules:
     ) -> str:
         return json.dumps(
             {
-                "tool": "execute_command",
+                "tool": ExecuteCommand.registered_tool_name(),
                 "ok": ok,
                 "command": command,
                 "cwd": cwd,
@@ -176,7 +177,7 @@ Important Usage Rules:
             error=error,
         )
 
-    @moderate_command_execution(payload_arg="command", tool_name="execute_command")
+    @moderate_command_execution(payload_arg="command", tool_name=EXEC_COMMAND_NAME)
     def __call__(
         self,
         command: str,

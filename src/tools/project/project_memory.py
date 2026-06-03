@@ -1,4 +1,4 @@
-"""Long memory simple tool — controller layer.
+"""Project memory simple tool — controller layer.
 
 The agent sees only three actions: read / append / write. Path, lock, atomicity,
 and compaction are entirely under the hood. Errors carry concrete actionable
@@ -10,13 +10,14 @@ import json
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from long_memory import compaction, storage
-from long_memory.compaction import SOFT_APPEND_INPUT_LIMIT_CHARS
-from long_memory.storage import MAX_CHARS, LongMemoryError
-from message_policy.long_memory_notice.policy import touch_long_memory_baseline
+from project_memory import compaction, storage
+from project_memory.compaction import SOFT_APPEND_INPUT_LIMIT_CHARS
+from project_memory.storage import MAX_CHARS, ProjectMemoryError
+from message_policy.project_memory_notice.policy import touch_project_memory_baseline
+from constants.tool_names import PROJECT_MEMORY_TOOL_NAME
 from tools.simple_tool_base import AbstractSimpleTool
 
-_FILE_NAME = "long_memory.md"
+_FILE_NAME = "project_memory.md"
 
 _READ_EMPTY_HINT = (
     "long memory is empty. Use action=write to seed it with important facts "
@@ -28,8 +29,8 @@ _AUTO_COMPACTION_HINT = (
 )
 
 
-class LongMemory(AbstractSimpleTool):
-    tool_name = "long_memory"
+class ProjectMemory(AbstractSimpleTool):
+    tool_name = PROJECT_MEMORY_TOOL_NAME
 
     def __init__(self, ctx: Any = None, state: Any = None, **kwargs: Any) -> None:
         super().__init__(**kwargs)
@@ -42,7 +43,7 @@ class LongMemory(AbstractSimpleTool):
     def tool_description(cls) -> Dict[str, Any]:
         return {
             "type": "function",
-            "name": "long_memory",
+            "name": "project_memory",
             "description": (
                 "Project/long memory: durable facts for FUTURE sessions ('remember this rule', conventions, "
                 "artifact-first preferences, stable decisions). Not for turn-by-turn chat progress — use thread memory. "
@@ -78,7 +79,7 @@ class LongMemory(AbstractSimpleTool):
 
     @classmethod
     def prompt_description(cls) -> str:
-        return '''Tool name: long_memory
+        return '''Tool name: project_memory
 Tool description: Persistent project-scoped markdown memory. Survives CLI restarts.
 Use read when Project Info reports long memory and conventions or durable facts may matter.
 Append short factual deltas; write only for rare full rewrites.
@@ -96,7 +97,7 @@ Input schema: {"type":"object","properties":{"action":{"type":"string","enum":["
 
 Return format (JSON string):
 {
-  "tool":"long_memory",
+  "tool":"project_memory",
   "ok": true|false,
   "action": "read|append|write",
   "length": number,
@@ -119,7 +120,7 @@ Return format (JSON string):
         hint: Optional[str] = None,
     ) -> str:
         payload: Dict[str, Any] = {
-            "tool": "long_memory",
+            "tool": ProjectMemory.registered_tool_name(),
             "ok": True,
             "action": action,
             "length": length,
@@ -136,7 +137,7 @@ Return format (JSON string):
     def _err(self, *, action: str, error_type: str, message: str) -> str:
         return json.dumps(
             {
-                "tool": "long_memory",
+                "tool": ProjectMemory.registered_tool_name(),
                 "ok": False,
                 "action": action,
                 "error": {"type": error_type, "message": message},
@@ -149,7 +150,7 @@ Return format (JSON string):
             return self._err(
                 action=action,
                 error_type="not_configured",
-                message="long_memory path is not available in this context.",
+                message="project_memory path is not available in this context.",
             )
         if action == "read":
             return self._handle_read()
@@ -165,7 +166,7 @@ Return format (JSON string):
 
     def _sync_baseline_after_mutation(self) -> None:
         if self._ctx is not None and self._state is not None:
-            touch_long_memory_baseline(self._state, self._ctx)
+            touch_project_memory_baseline(self._state, self._ctx)
 
     def _handle_read(self) -> str:
         info = storage.stat(self._path)
@@ -209,7 +210,7 @@ Return format (JSON string):
         if len(combined) <= MAX_CHARS:
             try:
                 info = storage.append(self._path, delta_stripped)
-            except LongMemoryError as e:
+            except ProjectMemoryError as e:
                 return self._err(action="append", error_type=e.code, message=e.message)
             self._sync_baseline_after_mutation()
             return self._ok(action="append", length=info.chars, lines=info.lines)
@@ -229,7 +230,7 @@ Return format (JSON string):
             )
         try:
             info = storage.write(self._path, result.text)
-        except LongMemoryError as e:
+        except ProjectMemoryError as e:
             return self._err(action="append", error_type=e.code, message=e.message)
         self._sync_baseline_after_mutation()
         return self._ok(
@@ -264,10 +265,10 @@ Return format (JSON string):
             )
         try:
             info = storage.write(self._path, text_stripped)
-        except LongMemoryError as e:
+        except ProjectMemoryError as e:
             return self._err(action="write", error_type=e.code, message=e.message)
         self._sync_baseline_after_mutation()
         return self._ok(action="write", length=info.chars, lines=info.lines)
 
 
-__all__ = ["LongMemory"]
+__all__ = ["ProjectMemory"]

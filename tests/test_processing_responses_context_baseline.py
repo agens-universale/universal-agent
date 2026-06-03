@@ -71,14 +71,14 @@ def _stub_tools_modules() -> None:
 
     def _apply_tool(*_args, **_kwargs):
         tool_name = _kwargs.get("tool_name")
-        if tool_name == "submit_solution":
+        if tool_name == "turn_finish":
             arguments = _kwargs.get("arguments")
             try:
                 payload = json.loads(arguments) if isinstance(arguments, str) else {}
             except Exception:
                 payload = {}
             result = {
-                "tool": "submit_solution",
+                "tool": "turn_finish",
                 "ok": True,
                 "status": "submitted",
                 "message": "Task outcome submitted.",
@@ -130,7 +130,7 @@ def _make_ctx(**overrides):
         "use_retry": False,
         "console_trace": False,
         "no_tool_call_max_count": 5,
-        "strict_submit_solution_validation": False,
+        "strict_turn_finish_validation": False,
     }
     cfg.update(overrides)
     return SimpleNamespace(
@@ -143,7 +143,7 @@ def _make_ctx(**overrides):
 def _submit_solution_call():
     return {
         "type": "function_call",
-        "name": "submit_solution",
+        "name": "turn_finish",
         "arguments": json.dumps(
             {
                 "solution_type": "full_solution",
@@ -368,14 +368,14 @@ def test_chat_completions_connection_error_does_not_lower_max_tokens(monkeypatch
     assert max_tokens_seen == [100]
 
 
-def test_submit_solution_commits_current_user_intent_on_success():
+def test_turn_finish_commits_current_user_intent_on_success():
     state = _make_state()
     seed_state_intent(state, current=["актуальный вопрос", "уточнение"])
 
     result = run_agent(
         [_submit_solution_call()],
         state,
-        _make_ctx(strict_submit_solution_validation=False),
+        _make_ctx(strict_turn_finish_validation=False),
     )
 
     assert result == _expected_finish_return()
@@ -396,7 +396,7 @@ def test_submit_solution_commits_current_user_intent_on_success():
     assert "Dialog turn finished" not in synthetic_outputs[0]["output"]
 
 
-def test_submit_solution_validation_failure_fails_open(monkeypatch):
+def test_turn_finish_validation_failure_fails_open(monkeypatch):
     state = _make_state()
     seed_state_intent(state, current=["актуальный вопрос"])
 
@@ -412,7 +412,7 @@ def test_submit_solution_validation_failure_fails_open(monkeypatch):
     result = run_agent(
         [_submit_solution_call()],
         state,
-        _make_ctx(strict_submit_solution_validation=True),
+        _make_ctx(strict_turn_finish_validation=True),
     )
 
     assert result == _expected_finish_return()
@@ -431,7 +431,7 @@ def test_cycle_stop_generates_outputs_for_all_pending_tool_calls():
     result = run_agent(
         [_submit_solution_call(), _generic_tool_call()],
         state,
-        _make_ctx(strict_submit_solution_validation=False),
+        _make_ctx(strict_turn_finish_validation=False),
     )
 
     assert result == _expected_finish_return()
@@ -445,7 +445,7 @@ def test_cycle_stop_generates_outputs_for_all_pending_tool_calls():
     assert "skipped_on_cycle_stop" in by_call["call_other"]["output"]
 
 
-def test_submit_solution_validation_receives_context_and_current_scope(monkeypatch):
+def test_turn_finish_validation_receives_context_and_current_scope(monkeypatch):
     state = _make_state()
     seed_state_intent(
         state,
@@ -478,7 +478,7 @@ def test_submit_solution_validation_receives_context_and_current_scope(monkeypat
     result = run_agent(
         [_submit_solution_call()],
         state,
-        _make_ctx(strict_submit_solution_validation=True),
+        _make_ctx(strict_turn_finish_validation=True),
     )
 
     assert result == _expected_finish_return()
@@ -501,7 +501,7 @@ def test_finish_gate_builds_trace_digest_from_state_messages(monkeypatch):
         {
             "type": "function_call",
             "call_id": "t1",
-            "name": "read_file",
+            "name": "fs_read_file",
             "arguments": {"path": "x.py"},
         },
     ]
@@ -526,7 +526,7 @@ def test_finish_gate_builds_trace_digest_from_state_messages(monkeypatch):
             run_agent(
                 [_submit_solution_call()],
                 state,
-                _make_ctx(strict_submit_solution_validation=True),
+                _make_ctx(strict_turn_finish_validation=True),
             )
 
     mock_build.assert_called_once()
@@ -593,7 +593,7 @@ def test_finish_gate_rejection_still_appends_cycle_stop_tool_outputs(monkeypatch
     run_agent(
         [_submit_solution_call()],
         state,
-        _make_ctx(strict_submit_solution_validation=True),
+        _make_ctx(strict_turn_finish_validation=True),
     )
 
     assert recorded == [["call_finish"]]

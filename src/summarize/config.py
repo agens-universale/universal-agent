@@ -24,7 +24,7 @@ def parse_summary_trigger_chars(config_dict: Dict[str, Any]) -> int:
 
 def parse_summary_turn_end_trigger_chars(config_dict: Dict[str, Any]) -> int:
     """
-    Порог turn-end compaction после закрытия turn (``submit_solution``).
+    Порог turn-end compaction после закрытия turn (``turn_finish``).
 
     Ожидается уже нормализованное значение в ``summary_params`` после ``load_config``
     / ``resolve_paths``. Парсер только читает int; дефолт 60% mid-turn задаётся в конфиг-модуле.

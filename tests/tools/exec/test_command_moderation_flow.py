@@ -26,7 +26,7 @@ def _judge(verdict, risk_flags=None):
     }
 
 
-def test_execute_command_allow_mode_skips_judge(tmp_path, monkeypatch):
+def test_exec_command_allow_mode_skips_judge(tmp_path, monkeypatch):
     def fail_if_called(*_args, **_kwargs):
         raise AssertionError("judge should not be called in allow mode")
 
@@ -42,7 +42,7 @@ def test_execute_command_allow_mode_skips_judge(tmp_path, monkeypatch):
     assert result["stdout"] == "123"
 
 
-def test_execute_command_deny_mode_executes_safe_verdict(tmp_path, monkeypatch):
+def test_exec_command_deny_mode_executes_safe_verdict(tmp_path, monkeypatch):
     monkeypatch.setattr(
         command_moderation,
         "_default_judge_client",
@@ -59,7 +59,7 @@ def test_execute_command_deny_mode_executes_safe_verdict(tmp_path, monkeypatch):
     assert result["stdout"] == "456"
 
 
-def test_execute_command_deny_mode_blocks_dangerous_verdict(tmp_path, monkeypatch):
+def test_exec_command_deny_mode_blocks_dangerous_verdict(tmp_path, monkeypatch):
     monkeypatch.setattr(
         command_moderation,
         "_default_judge_client",
@@ -104,7 +104,7 @@ def test_run_python_code_deny_mode_blocks_dangerous_verdict(tmp_path, monkeypatc
     assert not target.exists()
 
 
-def test_execute_command_ask_mode_executes_when_user_confirms(tmp_path):
+def test_exec_command_ask_mode_executes_when_user_confirms(tmp_path):
     marker = tmp_path / "confirmed.txt"
     command = f'"{sys.executable}" -c "from pathlib import Path; Path({str(marker)!r}).write_text(\'ok\')"'
 
@@ -112,7 +112,7 @@ def test_execute_command_ask_mode_executes_when_user_confirms(tmp_path):
     original_call = tool.__call__.__wrapped__
     guarded_call = command_moderation.moderate_command_execution(
         payload_arg="command",
-        tool_name="execute_command",
+        tool_name="exec_command",
         judge_client_extractor=lambda *_args, **_kwargs: _judge(
             "potentially_dangerous",
             ["writes_outside_launch_root"],
@@ -126,7 +126,7 @@ def test_execute_command_ask_mode_executes_when_user_confirms(tmp_path):
     assert marker.read_text(encoding="utf-8") == "ok"
 
 
-def test_execute_command_ask_mode_cancels_when_user_rejects(tmp_path):
+def test_exec_command_ask_mode_cancels_when_user_rejects(tmp_path):
     marker = tmp_path / "cancelled.txt"
     command = f'"{sys.executable}" -c "from pathlib import Path; Path({str(marker)!r}).write_text(\'bad\')"'
 
@@ -134,7 +134,7 @@ def test_execute_command_ask_mode_cancels_when_user_rejects(tmp_path):
     original_call = tool.__call__.__wrapped__
     guarded_call = command_moderation.moderate_command_execution(
         payload_arg="command",
-        tool_name="execute_command",
+        tool_name="exec_command",
         judge_client_extractor=lambda *_args, **_kwargs: _judge(
             "potentially_dangerous",
             ["writes_outside_launch_root"],

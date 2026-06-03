@@ -11,7 +11,7 @@ class WriteToFile(AbstractSimpleTool):
     def tool_description(cls):
         description = {
             "type": "function",
-            "name": "write_to_file",
+            "name": "fs_write_file",
             "description": (
                 "Create or overwrite a text file (optional parent dirs). Keep each call small — stub or first section only. "
                 "For long documents: minimal write here, then chain append calls with moderate chunks. "
@@ -29,8 +29,8 @@ class WriteToFile(AbstractSimpleTool):
                         "type": "string",
                         "description": (
                             "Text to write; must be short. For large output: use a placeholder or opening section "
-                            "only, then add the bulk via several `append_to_file` calls. For code/config, keep to one "
-                            "small file or split across write + appends."
+                            "only, then add the bulk via several append-to-file calls. For code/config, keep to one "
+                            "small file or split across an initial write and appends."
                         ),
                     },
                     "mode": {
@@ -65,14 +65,14 @@ class WriteToFile(AbstractSimpleTool):
 
     @classmethod
     def prompt_description(cls):
-        description = '''Tool name: write_to_file
+        description = '''Tool name: fs_write_file
 Tool description: Writes a file to the local filesystem.
 Input schema: {"type": "object", "properties": {"path": {"type": "string", "description": "The absolute path of the file to write to (must be absolute, not relative)."}, "content": {"type": "string", "description": "The complete content to write to the file."}}, "required": ["path", "content"], "additionalProperties": false}
 
 Usage:
 - This tool will overwrite the existing file if there is one at the provided path.
-- **Payload size:** put only brief `content` here (stub, headers, or first small section). For anything long, call `append_to_file` repeatedly with moderate chunks—never one massive `write_to_file`.
-- If this is an existing file, you MUST use the Read tool first to read the file's contents. This tool will fail if you did not read the file first.
+- **Payload size:** put only brief `content` here (stub, headers, or first small section). For anything long, append to the file repeatedly in moderate chunks—never one massive single write.
+- If this is an existing file, you MUST read the file first (filesystem read). This tool will fail if you did not read the file first.
 - ALWAYS prefer editing existing files in the codebase. NEVER write new files unless explicitly required.
 - NEVER proactively create documentation files (*.md) or README files. Only create documentation files if explicitly requested by the User.
 - Only use emojis if the user explicitly requests it. Avoid writing emojis to files unless asked.
@@ -92,7 +92,7 @@ Usage:
     ) -> str:
         return json.dumps(
             {
-                "tool": "write_to_file",
+                "tool": WriteToFile.registered_tool_name(),
                 "ok": ok,
                 "path": tool_report_abspath(path),
                 "mode": mode,

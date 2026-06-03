@@ -42,7 +42,7 @@ agent:
   server_tool_prefix: system
   max_steps: 1000
   no_tool_call_max_count: 5
-  strict_submit_solution_validation: true
+  strict_turn_finish_validation: true
   tool_output_inline_max_chars: 20000
   stored_tool_outputs_max_entries: 10
 
@@ -68,11 +68,11 @@ working_memory:
   total_budget_chars: 20000
 
 tool_usage_notice:
-  - tool_name: working_memory
+  - tool_name: session_memory
     step_messages_count: 10
-    notice_message: "You have not used working_memory for some steps. Review/update thread memory if needed."
-long_memory:
-  enable_long_memory_notice: true
+    notice_message: "You have not used session memory for some steps. Review/update thread memory if needed."
+project_memory:
+  enable_project_memory_notice: true
   check_interval_messages: 5
 
 summary:

@@ -19,22 +19,22 @@ logging:
   save_logs: false
 
 agent_overrides:
-  # Список simple-tools, запрещённых в серверном режиме (чтобы не портить файлы библиотеки).
+  # Builtin tools, запрещённые в серверном режиме (чтобы не портить файлы библиотеки).
   stop_tools:
     # Отключаем тулы, которые могут повредить файлы библиотеки и работают с файловой системой веб приложения
-    - write_to_file
-    - append_to_file
-    - read_file
-    - list_files
-    - search_files
-    - search_and_replace
-    - execute_command
-    - run_python_code
-    # - fetch_url
-    - ask_human
-    #- think
-    #- working_memory
-    # - calculator
+    - fs_write_file
+    - fs_append_file
+    - fs_read_file
+    - fs_list_files
+    - fs_search_files
+    - fs_search_and_replace
+    - exec_command
+    - exec_python
+    # - exec_fetch_url
+    - turn_ask_human
+    #- session_think
+    #- session_memory
+    # - exec_calculator
     # Отключаем интерактив в консоли
   verbose: false
   use_server_subagents: true
@@ -63,4 +63,3 @@ swarm:
   sandbox_tool: "bubblewrap"
   agentmd_path: "./prompts/swarm_agent.md"
   skills_dir: "./swarm_skills"
-

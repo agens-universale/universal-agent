@@ -32,7 +32,7 @@ class SubmitSolution(AbstractSimpleTool):
         error: Dict[str, Any] | None = None,
     ) -> str:
         out: Dict[str, Any] = {
-            "tool": "submit_solution",
+            "tool": SubmitSolution.registered_tool_name(),
             "ok": ok,
             "status": status,
             "message": message,
@@ -133,7 +133,7 @@ class SubmitSolution(AbstractSimpleTool):
         tool_output_json: str,
         decision: "FinishGateDecision",
     ) -> str:
-        """Patch submit_solution JSON after quality/finish gate (intent_guard)."""
+        """Patch turn_finish JSON after quality/finish gate (intent_guard)."""
         try:
             payload = json.loads(tool_output_json)
         except json.JSONDecodeError:
@@ -172,7 +172,7 @@ class SubmitSolution(AbstractSimpleTool):
     def tool_description(cls) -> Dict[str, Any]:
         return {
             "type": "function",
-            "name": "submit_solution",
+            "name": "turn_finish",
             "description": (
                 "Finalizes turn: yes. "
                 "Call exactly once when you end the current user turn (not the whole thread/session). "
@@ -221,7 +221,7 @@ class SubmitSolution(AbstractSimpleTool):
 
     @classmethod
     def prompt_description(cls) -> str:
-        return '''Tool name: submit_solution
+        return '''Tool name: turn_finish
 Tool description: Finalizes turn: yes. Signals that the CURRENT USER TURN is finished and the outcome is ready to hand back to the user.
 IMPORTANT: This marks end of the current turn, NOT end of the whole thread/session.
 Use solution_type to classify the turn outcome; task_report for what was done in this turn; comment for caveats or next steps.
@@ -235,7 +235,7 @@ Input schema:
 }
 
 Handoff policy:
-- submit_solution does not enforce a specific handoff schema.
+- turn_finish does not enforce a specific handoff schema.
 - If a workflow defines a contract (for example, by role/tool prompt), follow that contract.
 - Otherwise keep handoff minimal, stable, and machine-readable.
 
@@ -263,7 +263,7 @@ Choosing solution_type (for current turn):
 - comment: Optional caveats, risks, unresolved items, or next steps.
 - handoff: Required structured payload for downstream machine-readable workflows.
 
-Return format (JSON string): {"tool":"submit_solution","ok":true,"status":"...","message":"...","error":null,"solution_type":"...","comment":"..."|null,"handoff":{...},"task_report":"..."}
+Return format (JSON string): {"tool":"turn_finish","ok":true,"status":"...","message":"...","error":null,"solution_type":"...","comment":"..."|null,"handoff":{...},"task_report":"..."}
 '''
 
     def __call__(

@@ -84,7 +84,7 @@ def test_sanitize_messages_for_chat_completions_replaces_invalid_tool_call():
             "id": "fc_1",
             "type": "function_call",
             "call_id": "call_1",
-            "name": "write_to_file",
+            "name": "fs_write_file",
             "arguments": '{"path": "/tmp/demo.md"',
             "status": "completed",
         }
@@ -97,7 +97,7 @@ def test_sanitize_messages_for_chat_completions_replaces_invalid_tool_call():
     assert len(sanitized) == 1
     assert sanitized[0]["role"] == "user"
     assert '<technical type="error_message">' in sanitized[0]["content"]
-    assert "write_to_file" in sanitized[0]["content"]
+    assert "fs_write_file" in sanitized[0]["content"]
 
 
 def test_request_backend_canonical_sanitizes_state_history_for_chat_completions(monkeypatch):
@@ -141,7 +141,7 @@ def test_request_backend_canonical_sanitizes_state_history_for_chat_completions(
             "id": "fc_old",
             "type": "function_call",
             "call_id": "call_old",
-            "name": "write_to_file",
+            "name": "fs_write_file",
             "arguments": '{"path": "/tmp/demo.md"',
             "status": "completed",
         }

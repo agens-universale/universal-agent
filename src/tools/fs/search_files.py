@@ -9,7 +9,7 @@ from utils.tool_report_paths import tool_report_abspath
 
 
 class SearchFiles(AbstractSimpleTool):
-    """Paginated grep-style search; default first page mirrors read_file preview (500 items)."""
+    """Paginated grep-style search; default first page mirrors fs_read_file preview (500 items)."""
 
     default_limit = 500
 
@@ -17,7 +17,7 @@ class SearchFiles(AbstractSimpleTool):
     def tool_description(cls):
         return {
             "type": "function",
-            "name": "search_files",
+            "name": "fs_search_files",
             "description": (
                 "Recursively searches for a regex pattern in file contents under a directory, optionally filtered "
                 "by a glob pattern. Returns paginated hits: metadata includes total_matches, offset, limit, truncated, "
@@ -64,7 +64,7 @@ class SearchFiles(AbstractSimpleTool):
 
     @classmethod
     def prompt_description(cls):
-        description = '''Tool name: search_files  
+        description = '''Tool name: fs_search_files  
 Tool description: Recursively searches for a regex pattern in all files within a specified directory, optionally filtered by a glob pattern.
 Input schema: {"type": "object", "properties": {"path": {"type": "string", "description": "The directory to search in."}, "regex": {"type": "string", "description": "The Rust-style regex pattern to search for."}, "file_pattern": {"type": "string", "description": "Glob pattern to filter files (e.g., \'*.py\')."}, "offset": {"type": "integer", "description": "1-based index of the first match to return."}, "limit": {"type": "integer", "description": "Max matches returned for this page."}}, "required": ["path", "regex"], "additionalProperties": false}
 
@@ -75,11 +75,11 @@ Usage:
 - Returns a **paginated** list of matches with file paths and line contents.
 - **`count`** = matches in **this response** (page size). **`total_matches`** = all hits in the scan.
 - If **`truncated`** is true, call again with **`offset` = `next_offset`** (and same or new `limit`) to get more.
-- Omitting **`offset`** and **`limit`** is equivalent to the first page: offset 1 and default **`limit`** (same default window idea as **read_file** preview).
+- Omitting **`offset`** and **`limit`** is equivalent to the first page: offset 1 and default **`limit`** (same default window idea as **fs_read_file** preview).
 - Returns an empty **`matches`** list if none found.
 
 Important Usage Rules
-- **ALWAYS** use `search_files` for searching text or code.
+- **ALWAYS** use `fs_search_files` for searching text or code.
 - **NEVER** use external tools like `grep`, `rg`, or shell commands — this tool is optimized and permission-safe.
 - Always provide a **full absolute path** for the `path` parameter.
 - The `regex` must be a valid Rust-compatible pattern. Avoid unsafe features:
@@ -194,7 +194,7 @@ Search for error logs in Rust source files:
         next_offset: Optional[int] = None,
     ) -> str:
         payload: Dict[str, Any] = {
-            "tool": "search_files",
+            "tool": SearchFiles.registered_tool_name(),
             "ok": ok,
             "path": tool_report_abspath(path),
             "regex": regex,

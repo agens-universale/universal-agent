@@ -123,7 +123,7 @@ def log_finish_gate_output_patched(
     _emit(
         logger,
         logging.INFO,
-        "submit_solution_output_patched",
+        "finish_turn_output_patched",
         quality_gate="finish_gate",
         call_id=call_id,
         outcome=outcome,

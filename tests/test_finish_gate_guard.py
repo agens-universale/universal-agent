@@ -30,20 +30,20 @@ class FinishGateGuardTest(unittest.TestCase):
         ctx = SimpleNamespace(
             config_dict={
                 "backend_api_mode": "responses",
-                "strict_submit_solution_validation": True,
+                "strict_turn_finish_validation": True,
             }
         )
         state = SimpleNamespace(parent_state_id=None)
         guard = FinishGateGuard(ctx=ctx, state=state, logger=None)
         self.assertFalse(guard.enabled)
-        d = guard.evaluate_submit_solution(submit_solution_arguments={})
+        d = guard.evaluate_turn_finish(finish_handoff_arguments={})
         self.assertEqual(d.outcome, "skipped")
 
     def test_iteration_limit_skips_llm(self) -> None:
         ctx = SimpleNamespace(
             config_dict={
                 "backend_api_mode": "chat_completions",
-                "strict_submit_solution_validation": True,
+                "strict_turn_finish_validation": True,
                 "finish_gate_max_iterations": 2,
             }
         )
@@ -55,14 +55,14 @@ class FinishGateGuardTest(unittest.TestCase):
         )
         guard = FinishGateGuard(ctx=ctx, state=state)
         self.assertTrue(guard.enabled)
-        d = guard.evaluate_submit_solution(submit_solution_arguments={})
+        d = guard.evaluate_turn_finish(finish_handoff_arguments={})
         self.assertEqual(d.outcome, "fail_open_limit")
 
     def test_reject_increments_counter(self) -> None:
         ctx = SimpleNamespace(
             config_dict={
                 "backend_api_mode": "chat_completions",
-                "strict_submit_solution_validation": True,
+                "strict_turn_finish_validation": True,
                 "finish_gate_max_iterations": 10,
             }
         )
@@ -93,7 +93,7 @@ class FinishGateGuardTest(unittest.TestCase):
             _reject,
         ):
             guard = FinishGateGuard(ctx=ctx, state=state)
-            d = guard.evaluate_submit_solution(submit_solution_arguments={})
+            d = guard.evaluate_turn_finish(finish_handoff_arguments={})
             self.assertEqual(d.outcome, "reject")
             self.assertEqual(state.finish_gate_rejection_count, 1)
 
@@ -101,7 +101,7 @@ class FinishGateGuardTest(unittest.TestCase):
         ctx = SimpleNamespace(
             config_dict={
                 "backend_api_mode": "chat_completions",
-                "strict_submit_solution_validation": True,
+                "strict_turn_finish_validation": True,
                 "finish_gate_max_iterations": 10,
             }
         )
@@ -121,7 +121,7 @@ class FinishGateGuardTest(unittest.TestCase):
             _raise,
         ):
             guard = FinishGateGuard(ctx=ctx, state=state)
-            d = guard.evaluate_submit_solution(submit_solution_arguments={})
+            d = guard.evaluate_turn_finish(finish_handoff_arguments={})
 
         self.assertEqual(d.outcome, "fail_open_error")
         self.assertEqual(state.finish_gate_rejection_count, 0)
@@ -130,7 +130,7 @@ class FinishGateGuardTest(unittest.TestCase):
         ctx = SimpleNamespace(
             config_dict={
                 "backend_api_mode": "chat_completions",
-                "strict_submit_solution_validation": True,
+                "strict_turn_finish_validation": True,
                 "finish_gate_max_iterations": 10,
             }
         )
@@ -166,8 +166,8 @@ class FinishGateGuardTest(unittest.TestCase):
             "validate_final_report_vs_user_intent",
             _capture,
         ):
-            FinishGateGuard(ctx=ctx, state=state).evaluate_submit_solution(
-                submit_solution_arguments={}
+            FinishGateGuard(ctx=ctx, state=state).evaluate_turn_finish(
+                finish_handoff_arguments={}
             )
 
         assert len(captured["current"]) == 1

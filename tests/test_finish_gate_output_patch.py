@@ -1,13 +1,13 @@
 import json
 
 from intent_guard.guard import FinishGateDecision
-from intent_guard.submit_solution_emit import (
-    apply_finish_gate_to_submit_output_in_state,
+from intent_guard.turn_finish_emit import (
+    apply_finish_gate_to_turn_finish_output_in_state,
     patch_function_call_output,
 )
 from intent_guard.validation_result import ValidationResult
 from states import State
-from tools.session.submit_solution import SubmitSolution
+from tools.turn.submit_solution import SubmitSolution
 
 
 def _make_state() -> State:
@@ -62,7 +62,7 @@ def test_apply_finish_gate_decision_reject_marks_output_not_ok():
     assert "Dialog turn finished" not in patched
 
 
-def test_apply_finish_gate_to_submit_output_in_state_patches_message():
+def test_apply_finish_gate_to_turn_finish_output_in_state_patches_message():
     state = _make_state()
     call_id = "call_finish"
     raw = SubmitSolution.output_from_cycle_stop_arguments(
@@ -96,7 +96,7 @@ def test_apply_finish_gate_to_submit_output_in_state_patches_message():
         feedback_for_agent="",
     )
     decision = FinishGateDecision(outcome="accept", validation=validation)
-    ok = apply_finish_gate_to_submit_output_in_state(
+    ok = apply_finish_gate_to_turn_finish_output_in_state(
         state=state,
         finish_call_id=call_id,
         decision=decision,
@@ -113,11 +113,11 @@ def test_patch_function_call_output_returns_updated_message():
         {
             "type": "function_call_output",
             "call_id": "c1",
-            "output": '{"tool":"submit_solution","ok":true}',
+            "output": '{"tool":"turn_finish","ok":true}',
         }
     ]
     updated = patch_function_call_output(
-        messages, call_id="c1", new_output='{"tool":"submit_solution","ok":false}'
+        messages, call_id="c1", new_output='{"tool":"turn_finish","ok":false}'
     )
     assert updated is not None
     assert json.loads(messages[0]["output"])["ok"] is False

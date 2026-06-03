@@ -316,8 +316,8 @@ def synthesize_tool_call(response: Any, tools: list[dict]) -> dict:
     L1: Form 3 — parse JSON in content (optionally fenced) and match against
         declared tools.
     L2: Form 4 — replace ``<|superquote|>`` tokens, then retry L1.
-    L3: Forms 1/2 (or anything left) — if ``submit_solution`` is declared,
-        wrap content text into a ``submit_solution`` tool_call to finalize.
+    L3: Forms 1/2 (or anything left) — if ``turn_finish`` is declared,
+        wrap content text into a ``turn_finish`` tool_call to finalize.
 
     Skipped if response already has native ``tool_calls``.
     """
@@ -325,7 +325,7 @@ def synthesize_tool_call(response: Any, tools: list[dict]) -> dict:
     if not tools:
         return stats
 
-    has_submit_solution = _find_tool_by_name("submit_solution", tools) is not None
+    has_turn_finish = _find_tool_by_name("turn_finish", tools) is not None
 
     for choice in iter_response_choices(response):
         message = get_message_from_choice(choice)
@@ -368,15 +368,15 @@ def synthesize_tool_call(response: Any, tools: list[dict]) -> dict:
                         stats["l2_superquote"] += 1
                         continue
 
-        # ── L3: bare plain text — wrap in submit_solution if declared ─────
-        # Only fires when submit_solution is one of the declared tools (it
+        # ── L3: bare plain text — wrap in turn_finish if declared ─────
+        # Only fires when turn_finish is one of the declared tools (it
         # always is in our agent setup). Wrapping non-finalizer content
         # avoids the Undefined-mode retry loop and saves 2-3 backend calls.
         # NOTE: solution_type is hardcoded to "direct_answer" — strictly
         # correct only for read-only intents; for file-creation tasks the
         # agent expects "full_solution". Acceptable trade-off given the
         # alternative is the retry loop.
-        if has_submit_solution:
+        if has_turn_finish:
             text = content.strip()
             args = {
                 "handoff": text,
@@ -385,7 +385,7 @@ def synthesize_tool_call(response: Any, tools: list[dict]) -> dict:
             }
             if set_message_tool_call(
                 message,
-                make_tool_call("submit_solution", args, prefix="giga_l3"),
+                make_tool_call("turn_finish", args, prefix="giga_l3"),
             ):
                 set_choice_finish_reason(choice, "tool_calls")
                 stats["l3_submit_wrap"] += 1

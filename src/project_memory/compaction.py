@@ -1,7 +1,7 @@
 """Long memory compaction: text-in, text-out LLM orchestration.
 
 No file I/O. Caller (the tool) decides what to do with the compressed text.
-Used only from the append-overflow path in the long_memory tool.
+Used only from the append-overflow path in the project_memory tool.
 """
 from __future__ import annotations
 
@@ -16,10 +16,10 @@ SOFT_APPEND_INPUT_LIMIT_CHARS: int = 20_000
 _COMPACTION_PROMPT_PATH = (
     Path(__file__).resolve().parent.parent.parent
     / "prompts"
-    / "long_memory_compaction_prompt.md"
+    / "project_memory_compaction_prompt.md"
 )
 
-_COMPACTION_MAX_TOKENS: int = 4_000  # roughly enough for compressed long_memory.md (50k chars).
+_COMPACTION_MAX_TOKENS: int = 4_000  # roughly enough for compressed project_memory.md (50k chars).
 
 
 @dataclass(frozen=True)
@@ -73,7 +73,7 @@ def compact_text(text: str, ctx: Any, state: Any = None) -> CompactionResult:
             state=state,
             messages=messages,
             max_tokens=_COMPACTION_MAX_TOKENS,
-            request_label="long_memory_compaction",
+            request_label="project_memory_compaction",
         )
     except Exception as exc:  # noqa: BLE001 — caller wants explicit ok=false, not exception.
         return CompactionResult(

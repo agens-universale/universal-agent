@@ -21,7 +21,7 @@ FORBIDDEN_RUNTIME_TOOLS = (
     "append_to_file",
     "execute_command",
     "memory_files",
-    "submit_solution",
+    "turn_finish",
 )
 
 _FORBIDDEN_RE = re.compile(r"\b(" + "|".join(FORBIDDEN_RUNTIME_TOOLS) + r")\b")

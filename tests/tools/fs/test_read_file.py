@@ -126,8 +126,8 @@ def test_rejects_file_over_max_bytes(tmp_path):
     assert res["file_size_bytes"] == 200
     assert res["error"]["max_bytes"] == 100
     assert "200" in res["error"]["message"]
-    assert "run_python_code" not in res["error"]["message"].lower()
-    assert "execute_command" not in res["error"]["message"].lower()
+    assert "exec_python" not in res["error"]["message"].lower()
+    assert "exec_command" not in res["error"]["message"].lower()
 
 
 def test_reads_file_at_max_bytes_boundary(tmp_path):

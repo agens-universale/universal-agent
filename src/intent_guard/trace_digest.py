@@ -6,7 +6,9 @@ from typing import Any
 from config_modules.quality_gate import digest_limits_from_params
 from message_format import dialog_history
 
-_SUBMIT_SOLUTION_TOOL_NAMES = frozenset({"submit_solution"})
+from constants.tool_names import FINISH_TOOL_NAME
+
+_FINISH_TOOL_NAMES = frozenset({FINISH_TOOL_NAME})
 
 
 @dataclass(frozen=True)
@@ -15,19 +17,19 @@ class FinishGateTraceDigest:
     digest_chars: int
 
 
-def _is_submit_solution_call(message: dict[str, Any]) -> bool:
+def _is_turn_finish_call(message: dict[str, Any]) -> bool:
     if not isinstance(message, dict):
         return False
     msg_type = str(message.get("type") or "message")
     if msg_type not in ("function_call", "tool_call"):
         return False
-    return str(message.get("name") or "") in _SUBMIT_SOLUTION_TOOL_NAMES
+    return str(message.get("name") or "") in _FINISH_TOOL_NAMES
 
 
-def _without_last_submit_solution_call(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Убрать последний pending ``submit_solution`` (§5.2)."""
+def _without_last_turn_finish_call(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Drop the last pending finish-turn tool_call from digest (§5.2)."""
     for idx in range(len(messages) - 1, -1, -1):
-        if _is_submit_solution_call(messages[idx]):
+        if _is_turn_finish_call(messages[idx]):
             return messages[:idx] + messages[idx + 1 :]
     return list(messages)
 
@@ -36,18 +38,21 @@ def build_finish_gate_trace_digest(
     *,
     state: Any,
     cfg: dict | None = None,
-    exclude_pending_submit_solution: bool = True,
+    exclude_pending_turn_finish: bool = True,
 ) -> FinishGateTraceDigest:
     """
     ``list(state.messages)`` → trim → ``build_history_text`` (§5.2–5.3.1).
 
-    Intent для оси A — отдельно из ``state.current_user_intent``; в digest не дублируется.
+    When ``exclude_pending_turn_finish`` is true, omit the in-flight finish handoff call
+    so the validator compares the report to prior trace only.
+
+    Axis A intent lives in ``state.current_user_intent``; not duplicated in the digest.
     """
     history_messages = [
         m for m in (getattr(state, "messages", None) or []) if isinstance(m, dict)
     ]
-    if exclude_pending_submit_solution:
-        history_messages = _without_last_submit_solution_call(history_messages)
+    if exclude_pending_turn_finish:
+        history_messages = _without_last_turn_finish_call(history_messages)
 
     qg_params = None
     if isinstance(cfg, dict) and isinstance(cfg.get("quality_gate_params"), dict):

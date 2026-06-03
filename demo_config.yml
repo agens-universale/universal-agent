@@ -68,7 +68,7 @@ agent:
   client_name: mini_cli_pub_agent_1
   x_cl_id: "12345"
   verbose: true
-  stop_tools: [ask_human]
+  stop_tools: [turn_ask_human]
   # Отключить целые паки или отдельные flat-скиллы из реестра (по canonical id).
   # Пакет (`pack-id`) убирает и bootstrap, и все inner. Flat-скилл (`skill-id`) — один.
   # По умолчанию пусто — все скиллы видны агенту.
@@ -79,8 +79,8 @@ agent:
   server_tool_prefix: system
   max_steps: 200
   no_tool_call_max_count: 3
-  strict_submit_solution_validation: true
-  # Finish gate (quality gate): макс. reject submit_solution за user turn / subagent run
+  strict_turn_finish_validation: true
+  # Finish gate (quality gate): макс. reject turn_finish за user turn / subagent run
   finish_gate_max_iterations: 10
   subagent_finish_gate_max_iterations: 3
   # finish_gate_use_rule_hints: false  # rule-layer без LLM — вне v1
@@ -131,11 +131,11 @@ working_memory:
 
 # Technical hints о памяти (tool_usage_notice, long memory)
 tool_usage_notice:
-  - tool_name: working_memory
+  - tool_name: session_memory
     step_messages_count: 10
-    notice_message: "You have not used working_memory for some steps. Review/update thread memory if needed."
-long_memory:
-  enable_long_memory_notice: true
+    notice_message: "You have not used session memory for some steps. Review/update thread memory if needed."
+project_memory:
+  enable_project_memory_notice: true
   check_interval_messages: 5
 
 # Intent scope: LLM post-hook после human-facing tools (только chat_completions).
@@ -149,11 +149,11 @@ intent_scope:
   # - применяются только для record=raw
   # - если оба false -> невалидный конфиг (старт с ошибкой)
   tools:
-    ask_human:
+    turn_ask_human:
       record: aggregated
-    submit_solution:
+    turn_finish:
       record: raw
-      # submit_solution output уже содержит итоговый report/handoff/status,
+      # turn_finish output уже содержит итоговый report/handoff/status,
       # поэтому arguments обычно дублируют данные.
       store_arguments: false
       store_output: true
@@ -177,7 +177,7 @@ summary:
 
 security:
   command_moderation:
-    # allow: execute_command/run_python_code run without judge.
+    # allow: exec_command/exec_python run without judge.
     # ask: dangerous verdict requires explicit user confirmation.
     # deny: dangerous verdict is blocked by policy.
     mode: deny

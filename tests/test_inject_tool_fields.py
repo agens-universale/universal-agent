@@ -54,7 +54,7 @@ def _base_config(**overrides):
 def _write_to_file_spec():
     return {
         "type": "function",
-        "name": "write_to_file",
+        "name": "fs_write_file",
         "parameters": {
             "type": "object",
             "properties": {
@@ -132,13 +132,13 @@ class TestStripInjectedToolArgs:
 class TestBuildToolsData:
     def test_disabled_leaves_spec_unchanged(self):
         tools_data, _, _ = build_tools_data(_base_config(inject_tool_fields={}))
-        entry = tools_data["write_to_file"]
+        entry = tools_data["fs_write_file"]
         assert _REASON not in entry["spec"]["parameters"]["properties"]
         assert entry.get("injected_fields", []) == []
 
     def test_enabled_injects_from_config_dict(self):
         tools_data, _, _ = build_tools_data(_base_config(inject_tool_fields=_reason_fields()))
-        entry = tools_data["write_to_file"]
+        entry = tools_data["fs_write_file"]
         props = entry["spec"]["parameters"]["properties"]
         assert list(props.keys())[0] == _REASON
         assert entry["injected_fields"] == [_REASON]
@@ -159,7 +159,7 @@ class TestBuildToolsData:
                 openai_strict_tools_schema=True,
             )
         )
-        params = tools_data["write_to_file"]["spec"]["parameters"]
+        params = tools_data["fs_write_file"]["spec"]["parameters"]
         assert set(params["required"]) == set(params["properties"].keys())
 
 
@@ -185,7 +185,7 @@ class TestApplyTool:
         spec = _write_to_file_spec()
         apply_injected_fields_to_spec(spec, _reason_fields())
         tools_data = {
-            "write_to_file": {
+            "fs_write_file": {
                 "spec": spec,
                 "description": "",
                 "tool_fabric": FakeTool,
@@ -194,7 +194,7 @@ class TestApplyTool:
         }
 
         apply_tool(
-            tool_name="write_to_file",
+            tool_name="fs_write_file",
             arguments=json.dumps(
                 {
                     _REASON: "need to save output",
@@ -254,11 +254,11 @@ class TestApplyTool:
             def __call__(self, **kwargs):
                 return "ok"
 
-        tools_data["write_to_file"]["tool_fabric"] = FakeTool
+        tools_data["fs_write_file"]["tool_fabric"] = FakeTool
 
         with pytest.raises(WrongFunctionArgumentsException):
             apply_tool(
-                tool_name="write_to_file",
+                tool_name="fs_write_file",
                 arguments=json.dumps({"path": "/tmp/x", "content": "y"}),
                 ctx=self._make_ctx(tools_data),
             )
@@ -352,4 +352,4 @@ class TestSubagentChildBuild:
         parent = _base_config(inject_tool_fields=_reason_fields())
         child = {**parent, "use_local_subagents": False}
         tools_data, _, _ = build_tools_data(child)
-        assert tools_data["read_file"]["injected_fields"] == [_REASON]
+        assert tools_data["fs_read_file"]["injected_fields"] == [_REASON]

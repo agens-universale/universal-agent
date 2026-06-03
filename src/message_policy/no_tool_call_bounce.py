@@ -14,7 +14,7 @@ NO_TOOL_CALL_BOUNCE_MESSAGE = (
     "  (1) If you intended an ACTION (read files, explore, search, write, etc.), "
     "call the appropriate tool NOW in this turn.\n"
     "  (2) If you intended to ASK THE USER (present options, get a decision), "
-    "call ask_human(question=...) with a clear, self-contained question."
+    "call the turn tool that asks the user (question=...) with a clear, self-contained question."
 )
 
 
@@ -67,7 +67,7 @@ def format_no_tool_call_bounce(assistant_text: str) -> str:
         "Retry with one of:\n"
         "  (1) If you intended an ACTION (read files, explore, search, "
         "write, etc.), call the appropriate tool NOW in this turn.\n"
-        "  (2) If you intended to ASK THE USER, call ask_human(question=...). "
+        "  (2) If you intended to ASK THE USER, call the turn ask-user tool (question=...). "
         "Reuse the relevant part of the block above VERBATIM where it is the "
         "content the user must react to — do not paraphrase or summarize it."
     )

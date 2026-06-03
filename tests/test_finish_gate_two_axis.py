@@ -50,7 +50,7 @@ def _stub_tools_modules() -> None:
         except Exception:
             payload = {}
         result = {
-            "tool": "submit_solution",
+            "tool": "turn_finish",
             "ok": True,
             "status": "submitted",
             "message": "Task outcome submitted.",
@@ -115,7 +115,7 @@ def _make_state(*, max_steps: int = 5, parent_state_id=None):
 def _make_ctx(**overrides):
     cfg = {
         "backend_api_mode": "chat_completions",
-        "strict_submit_solution_validation": True,
+        "strict_turn_finish_validation": True,
         "finish_gate_max_iterations": 10,
     }
     cfg.update(overrides)
@@ -138,7 +138,7 @@ def _submit_solution_call(
     }
     return {
         "type": "function_call",
-        "name": "submit_solution",
+        "name": "turn_finish",
         "arguments": json.dumps(args, ensure_ascii=False),
         "call_id": "call_finish",
         "id": "fc_finish",
@@ -167,7 +167,7 @@ def test_fix_report_feedback_does_not_repeat_ask_human():
     validation = _scenario_12_validation()
     feedback = build_finish_gate_feedback(validation)
     assert "fix_report" in feedback
-    assert "без повторения" in feedback
+    assert "without repeating" in feedback
     lowered = feedback.lower()
     assert "задай вопрос" not in lowered
     assert "снова вызови ask_human" not in lowered
@@ -187,8 +187,8 @@ def test_guard_reject_uses_structured_feedback_not_raw_llm(monkeypatch):
         log="спроси меня что нибудь",
     )
     guard = FinishGateGuard(ctx=_make_ctx(), state=state)
-    decision = guard.evaluate_submit_solution(
-        submit_solution_arguments={"solution_type": "full_solution"},
+    decision = guard.evaluate_turn_finish(
+        finish_handoff_arguments={"solution_type": "full_solution"},
     )
     assert decision.outcome == "reject"
     lowered = decision.feedback_text.lower()
@@ -290,9 +290,9 @@ def _continue_work_validation(**_kwargs):
         action="continue_work",
         trace_ok=False,
         report_ok=True,
-        trace_gaps=["нет write_to_file для report.md"],
+        trace_gaps=["нет fs_write_file для report.md"],
         report_mismatches=[],
-        missing_requirements=["нет write_to_file для report.md"],
+        missing_requirements=["нет fs_write_file для report.md"],
         conflicts=[],
         coverage_score=0.0,
         feedback_for_agent="создай report.md",
@@ -365,14 +365,14 @@ def test_run_agent_continue_work_feedback_lists_trace_gaps(monkeypatch):
     assert payload["status"] == "rejected_by_finish_gate"
     text = payload["message"]
     assert "continue_work" in text.lower()
-    assert "write_to_file" in text
+    assert "fs_write_file" in text
     assert "report.md" in text
 
 
 def test_main_accept_after_ask_human_trace(monkeypatch):
     def _accept(**kwargs):
-        assert kwargs.get("submit_solution_arguments")
-        args = kwargs["submit_solution_arguments"]
+        assert kwargs.get("finish_handoff_arguments")
+        args = kwargs["finish_handoff_arguments"]
         if isinstance(args, str):
             args = json.loads(args)
         assert args.get("solution_type") == "direct_answer"
@@ -494,14 +494,14 @@ def test_guard_passes_structured_intent_lines_to_validator(monkeypatch):
     seed_state_intent(state, current="open task", log="closed task")
     state.current_user_intent = append_tool_aggregated(
         list(state.current_user_intent),
-        "ask_human",
+        "turn_ask_human",
         "topic chosen",
         user_turn_seq=state.user_turn_seq,
         ts="2026-05-30T11:35:08Z",
     )
 
     guard = FinishGateGuard(ctx=_make_ctx(), state=state)
-    guard.evaluate_submit_solution(submit_solution_arguments={"solution_type": "full_solution"})
+    guard.evaluate_turn_finish(finish_handoff_arguments={"solution_type": "full_solution"})
 
     assert intent_user_ask_texts_from_jsonl(captured["current_user_requests"]) == [
         "open task",
@@ -573,12 +573,12 @@ def test_run_agent_reject_continues_turn_with_technical_user_message(monkeypatch
     assert len(user_ask_batches) == 1
     assert len(user_ask_batches[0]) == 1
     tech_content = str(user_ask_batches[0][0].get("content") or "")
-    assert "интент" in tech_content.lower()
-    assert "продолжай работу" in tech_content.lower()
+    assert "intent" in tech_content.lower()
+    assert "continue working" in tech_content.lower()
     assert "<technical" in tech_content.lower()
     assert any(
         "quality gate" in str(m.get("content") or "").lower()
-        or "интент" in str(m.get("content") or "").lower()
+        or "intent" in str(m.get("content") or "").lower()
         for m in state.messages
         if m.get("role") == "user"
     )

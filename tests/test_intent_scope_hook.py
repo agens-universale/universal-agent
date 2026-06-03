@@ -51,10 +51,10 @@ def test_raw_store_flags_require_at_least_one_enabled():
 def test_hook_skipped_on_responses_backend():
     state = _make_state()
     maybe_update_intent_scope_from_tool(
-        tool_name="ask_human",
+        tool_name="turn_ask_human",
         tool_output_raw='{"response":"hi"}',
         state=state,
-        ctx=_ctx(backend="responses", tools=_tool("ask_human")),
+        ctx=_ctx(backend="responses", tools=_tool("turn_ask_human")),
     )
     assert state.current_user_intent == []
 
@@ -62,7 +62,7 @@ def test_hook_skipped_on_responses_backend():
 def test_hook_skipped_without_intent_scope_on_ctx():
     state = _make_state()
     maybe_update_intent_scope_from_tool(
-        tool_name="ask_human",
+        tool_name="turn_ask_human",
         tool_output_raw='{"response":"hi"}',
         state=state,
         ctx=SimpleNamespace(
@@ -76,7 +76,7 @@ def test_hook_skipped_without_intent_scope_on_ctx():
 def test_hook_skipped_when_tools_empty():
     state = _make_state()
     maybe_update_intent_scope_from_tool(
-        tool_name="ask_human",
+        tool_name="turn_ask_human",
         tool_output_raw='{"response":"hi"}',
         state=state,
         ctx=_ctx(backend="chat_completions", tools={}),
@@ -91,15 +91,15 @@ def test_hook_appends_aggregated_record_after_llm_summary(monkeypatch):
     )
     state = _make_state()
     maybe_update_intent_scope_from_tool(
-        tool_name="ask_human",
+        tool_name="turn_ask_human",
         tool_output_raw='{"response":"B"}',
         state=state,
-        ctx=_ctx(backend="chat_completions", tools=_tool("ask_human")),
+        ctx=_ctx(backend="chat_completions", tools=_tool("turn_ask_human")),
     )
     assert len(state.current_user_intent) == 1
     record = state.current_user_intent[0]
     assert record.action == ACTION_TOOL_AGGREGATED
-    assert record.tool_name == "ask_human"
+    assert record.tool_name == "turn_ask_human"
     assert record.content == "User confirmed option B."
     assert record.fallback is None
 
@@ -112,13 +112,13 @@ def test_hook_raw_truncates_oversized_output(monkeypatch):
     state = _make_state()
     huge = "z" * 20_000
     maybe_update_intent_scope_from_tool(
-        tool_name="submit_solution",
+        tool_name="turn_finish",
         tool_output_raw=json.dumps({"blob": huge}),
         tool_arguments='{"task_report":"done"}',
         state=state,
         ctx=_ctx(
             backend="chat_completions",
-            tools=_tool("submit_solution", record="raw"),
+            tools=_tool("turn_finish", record="raw"),
         ),
     )
     record = state.current_user_intent[0]
@@ -132,12 +132,12 @@ def test_finish_gate_reject_submit_in_current_without_flush():
     """Ветка processing_responses после reject: patch output + hook, без flush."""
     from intent_fixtures import intent_user_ask_texts, seed_state_intent
     from intent_guard.guard import FinishGateDecision
-    from intent_guard.submit_solution_emit import (
-        apply_finish_gate_to_submit_output_in_state,
+    from intent_guard.turn_finish_emit import (
+        apply_finish_gate_to_turn_finish_output_in_state,
         get_function_call_output_text,
     )
     from intent_guard.validation_result import ValidationResult
-    from tools.session.submit_solution import SubmitSolution
+    from tools.turn.submit_solution import SubmitSolution
 
     state = _make_state()
     seed_state_intent(state, log=["closed turn"], current="open question")
@@ -165,7 +165,7 @@ def test_finish_gate_reject_submit_in_current_without_flush():
     state.messages = [
         {
             "type": "function_call",
-            "name": "submit_solution",
+            "name": "turn_finish",
             "call_id": "call_finish",
             "arguments": args,
         },
@@ -192,20 +192,20 @@ def test_finish_gate_reject_submit_in_current_without_flush():
         validation=validation,
         feedback_text="Finish gate: fix report.",
     )
-    apply_finish_gate_to_submit_output_in_state(
+    apply_finish_gate_to_turn_finish_output_in_state(
         state=state,
         finish_call_id="call_finish",
         decision=decision,
     )
     final_output = get_function_call_output_text(state.messages, "call_finish") or ""
     maybe_update_intent_scope_from_tool(
-        tool_name="submit_solution",
+        tool_name="turn_finish",
         tool_output_raw=final_output,
         tool_arguments=args,
         state=state,
         ctx=_ctx(
             backend="chat_completions",
-            tools=_tool("submit_solution", record="raw"),
+            tools=_tool("turn_finish", record="raw"),
         ),
     )
 
@@ -218,7 +218,7 @@ def test_finish_gate_reject_submit_in_current_without_flush():
     submit_records = [
         r
         for r in state.current_user_intent
-        if getattr(r, "tool_name", None) == "submit_solution"
+        if getattr(r, "tool_name", None) == "turn_finish"
     ]
     assert len(submit_records) == 1
     assert submit_records[0].action == ACTION_TOOL_RAW
@@ -240,16 +240,16 @@ def test_hook_submit_solution_raw_skips_llm_and_stores_object(monkeypatch):
         '"finish_gate":{"feedback":"fix tests"}}'
     )
     maybe_update_intent_scope_from_tool(
-        tool_name="submit_solution",
+        tool_name="turn_finish",
         tool_output_raw=reject_output,
         tool_arguments='{"task_report":"done"}',
         state=state,
-        ctx=_ctx(backend="chat_completions", tools=_tool("submit_solution", record="raw")),
+        ctx=_ctx(backend="chat_completions", tools=_tool("turn_finish", record="raw")),
     )
     assert len(state.current_user_intent) == 1
     record = state.current_user_intent[0]
     assert record.action == ACTION_TOOL_RAW
-    assert record.tool_name == "submit_solution"
+    assert record.tool_name == "turn_finish"
     assert record.content["arguments"] == {"task_report": "done"}
     assert record.content["output"]["rejected_by_finish_gate"] is True
 
@@ -261,14 +261,14 @@ def test_hook_submit_solution_raw_can_store_only_output(monkeypatch):
     )
     state = _make_state()
     maybe_update_intent_scope_from_tool(
-        tool_name="submit_solution",
+        tool_name="turn_finish",
         tool_output_raw='{"ok":true,"status":"submitted"}',
         tool_arguments='{"task_report":"done"}',
         state=state,
         ctx=_ctx(
             backend="chat_completions",
             tools={
-                "submit_solution": IntentScopeToolConfig(
+                "turn_finish": IntentScopeToolConfig(
                     record="raw",
                     store_arguments=False,
                     store_output=True,
@@ -291,12 +291,12 @@ def test_hook_aggregated_fallback_stores_truncated_content_with_flag(monkeypatch
     state = _make_state()
     raw = '{"ok":false,"error":"validation"}'
     maybe_update_intent_scope_from_tool(
-        tool_name="ask_human",
+        tool_name="turn_ask_human",
         tool_output_raw=raw,
         state=state,
         ctx=_ctx(
             backend="chat_completions",
-            tools=_tool("ask_human", record="aggregated"),
+            tools=_tool("turn_ask_human", record="aggregated"),
             fallback=True,
         ),
     )
@@ -313,15 +313,15 @@ def test_hook_dedup_within_current(monkeypatch):
         lambda **kwargs: "same line",
     )
     state = _make_state()
-    ctx = _ctx(backend="chat_completions", tools=_tool("ask_human"))
+    ctx = _ctx(backend="chat_completions", tools=_tool("turn_ask_human"))
     maybe_update_intent_scope_from_tool(
-        tool_name="ask_human",
+        tool_name="turn_ask_human",
         tool_output_raw="a",
         state=state,
         ctx=ctx,
     )
     maybe_update_intent_scope_from_tool(
-        tool_name="ask_human",
+        tool_name="turn_ask_human",
         tool_output_raw="b",
         state=state,
         ctx=ctx,
@@ -333,10 +333,10 @@ def test_hook_dedup_within_current(monkeypatch):
 def test_hook_turn_close_flush_increments_seq():
     state = _make_state()
     state.current_user_intent = append_user_ask([], "do task", user_turn_seq=0)
-    append_tool_aggregated_to_current(state, "ask_human", "picked A")
+    append_tool_aggregated_to_current(state, "turn_ask_human", "picked A")
     append_tool_raw_to_current(
         state,
-        "submit_solution",
+        "turn_finish",
         {"task_report": "done"},
         output={"ok": True},
     )

@@ -15,7 +15,7 @@ from summarize.summary_logging import (
 
 
 def test_trigger_reason_labels():
-    assert trigger_reason_label("turn_end") == "конец хода после submit_solution"
+    assert trigger_reason_label("turn_end") == "конец хода после turn_finish"
     assert trigger_reason_label("pre_backend") == "середина хода (окно переполнено)"
 
 

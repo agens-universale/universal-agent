@@ -150,5 +150,5 @@ def test_no_state_error():
 
 def test_registered_in_builtin_tools_data():
     tools = get_builtin_tools_data({})
-    assert "working_memory" in tools
-    assert tools["working_memory"]["tool_fabric"] is WorkingMemory
+    assert "session_memory" in tools
+    assert tools["session_memory"]["tool_fabric"] is WorkingMemory

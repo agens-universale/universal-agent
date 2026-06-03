@@ -153,10 +153,10 @@ def test_invalid_action_and_missing_state():
 
 
 def test_registered_only_for_chat_completions():
-    assert "read_user_intent_log" not in get_builtin_tools_data({"backend_api_mode": "responses"})
+    assert "session_read_user_intent_log" not in get_builtin_tools_data({"backend_api_mode": "responses"})
     tools = get_builtin_tools_data({"backend_api_mode": "chat_completions"})
-    assert "read_user_intent_log" in tools
-    assert tools["read_user_intent_log"]["tool_fabric"] is ReadUserIntentLog
+    assert "session_read_user_intent_log" in tools
+    assert tools["session_read_user_intent_log"]["tool_fabric"] is ReadUserIntentLog
 
 
 def test_records_to_jsonl_lines_round_trip_for_guard_path():
@@ -167,7 +167,7 @@ def test_records_to_jsonl_lines_round_trip_for_guard_path():
     current = append_user_ask([], "open ask", user_turn_seq=1, ts=FIXED_TS)
     current = append_tool_aggregated(
         current,
-        "ask_human",
+        "turn_ask_human",
         "picked topic",
         user_turn_seq=1,
         ts=FIXED_TS,

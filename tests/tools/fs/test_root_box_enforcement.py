@@ -30,7 +30,7 @@ def test_write_to_file_blocks_outside_launch_root(tmp_path):
     )
 
     assert result["ok"] is False
-    assert result["tool"] == "write_to_file"
+    assert result["tool"] == "fs_write_file"
     assert result["error"]["type"] == "root_box_violation"
     assert not outside.exists()
 
@@ -68,7 +68,7 @@ def test_append_to_file_blocks_outside_launch_root(tmp_path):
     )
 
     assert result["ok"] is False
-    assert result["tool"] == "append_to_file"
+    assert result["tool"] == "fs_append_file"
     assert result["error"]["type"] == "root_box_violation"
     assert outside.read_text(encoding="utf-8") == "start"
 
@@ -88,7 +88,7 @@ def test_search_and_replace_blocks_outside_launch_root(tmp_path):
     )
 
     assert result["ok"] is False
-    assert result["tool"] == "search_and_replace"
+    assert result["tool"] == "fs_search_and_replace"
     assert result["error"]["type"] == "root_box_violation"
     assert outside.read_text(encoding="utf-8") == "print('old')"
 

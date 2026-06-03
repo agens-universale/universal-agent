@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 from message_policy.cycle_stop import append_cycle_stop_tool_outputs_for_batch
 from states import State
-from tools.session.submit_solution import SubmitSolution
+from tools.turn.submit_solution import SubmitSolution
 
 
 def _make_state() -> State:
@@ -38,7 +38,7 @@ def test_output_from_cycle_stop_arguments_echoes_fields():
     raw = SubmitSolution.output_from_cycle_stop_arguments(arguments)
     assert raw is not None
     payload = json.loads(raw)
-    assert payload["tool"] == "submit_solution"
+    assert payload["tool"] == "turn_finish"
     assert payload["ok"] is True
     assert payload["solution_type"] == "partial_solution"
     assert payload["task_report"] == "Собран research_report.md"
@@ -62,7 +62,7 @@ def test_append_cycle_stop_writes_submit_output_from_arguments_not_stub():
     tool_calls = [
         {
             "type": "function_call",
-            "name": "submit_solution",
+            "name": "turn_finish",
             "arguments": arguments,
             "call_id": "call_finish",
             "id": "fc_finish",
@@ -104,7 +104,7 @@ def test_invalid_arguments_fall_back_to_cycle_stop_error_without_apply_tool(monk
         tool_calls=[
             {
                 "type": "function_call",
-                "name": "submit_solution",
+                "name": "turn_finish",
                 "arguments": "not-json",
                 "call_id": "call_finish",
                 "id": "fc_finish",

@@ -8,10 +8,22 @@ ORCHESTRATOR_PROMPT_PATH = REPO_ROOT / "prompts" / "chat_completions_system_prom
 SUBAGENT_PROMPT_PATH = REPO_ROOT / "prompts" / "chat_completions_subagent_system_prompt.md"
 
 FORBIDDEN_BUILTIN_NAMES = (
-    "submit_solution",
+    # to-be API names (§7.4)
+    "turn_finish",
+    "fs_write_file",
+    "fs_append_file",
+    "fs_read_file",
+    "exec_command",
+    "turn_ask_human",
+    "session_memory",
+    "project_memory",
+    # legacy as-is (grep gate regression)
     "write_to_file",
     "execute_command",
     "append_to_file",
+    "read_file",
+    "ask_human",
+    "submit_solution",
 )
 _FORBIDDEN_RE = re.compile(r"\b(" + "|".join(FORBIDDEN_BUILTIN_NAMES) + r")\b")
 

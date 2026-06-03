@@ -43,7 +43,7 @@ class ValidateFinalReportConsistencyTest(unittest.TestCase):
             state=self.state,
             current_user_requests=["спроси меня"],
             context_user_messages=["старый"],
-            submit_solution_arguments={"solution_type": "full_solution"},
+            finish_handoff_arguments={"solution_type": "full_solution"},
             trace_digest=self.digest,
         )
         user_content = mock_llm.call_args.kwargs["messages"][1]["content"]
@@ -63,7 +63,7 @@ class ValidateFinalReportConsistencyTest(unittest.TestCase):
             ctx=self.ctx,
             state=self.state,
             current_user_requests=["спроси меня"],
-            submit_solution_arguments={"solution_type": "full_solution"},
+            finish_handoff_arguments={"solution_type": "full_solution"},
             trace_digest=self.digest,
         )
         self.assertFalse(result.ok)
@@ -78,7 +78,7 @@ class ValidateFinalReportConsistencyTest(unittest.TestCase):
             ctx=self.ctx,
             state=self.state,
             current_user_requests=["x"],
-            submit_solution_arguments={},
+            finish_handoff_arguments={},
             trace_digest=self.digest,
         )
         self.assertTrue(result.ok)
@@ -91,7 +91,7 @@ class ValidateFinalReportConsistencyTest(unittest.TestCase):
             ctx=self.ctx,
             state=self.state,
             current_user_requests=["x"],
-            submit_solution_arguments={},
+            finish_handoff_arguments={},
             trace_digest=self.digest,
         )
         self.assertEqual(
@@ -106,7 +106,7 @@ class ValidateFinalReportConsistencyTest(unittest.TestCase):
             ctx=self.ctx,
             state=self.state,
             current_user_requests=["x"],
-            submit_solution_arguments={},
+            finish_handoff_arguments={},
             trace_digest=self.digest,
         )
         self.assertEqual(
@@ -121,7 +121,7 @@ class ValidateFinalReportConsistencyTest(unittest.TestCase):
             ctx=self.ctx,
             state=SimpleNamespace(messages=[], parent_state_id=None),
             current_user_requests=["x"],
-            submit_solution_arguments={},
+            finish_handoff_arguments={},
             trace_digest=self.digest,
         )
         main_content = mock_llm.call_args.kwargs["messages"][1]["content"]
@@ -133,7 +133,7 @@ class ValidateFinalReportConsistencyTest(unittest.TestCase):
             ctx=self.ctx,
             state=SimpleNamespace(messages=[], parent_state_id="parent-uuid"),
             current_user_requests=["x"],
-            submit_solution_arguments={},
+            finish_handoff_arguments={},
             trace_digest=self.digest,
         )
         sub_content = mock_llm.call_args.kwargs["messages"][1]["content"]
@@ -148,7 +148,7 @@ class ValidateFinalReportConsistencyTest(unittest.TestCase):
             ctx=self.ctx,
             state=self.state,
             current_user_requests=["x"],
-            submit_solution_arguments={},
+            finish_handoff_arguments={},
         )
         mock_digest.assert_called_once()
 

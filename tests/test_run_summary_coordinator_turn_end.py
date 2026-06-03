@@ -97,7 +97,7 @@ def test_turn_end_swallows_compaction_errors(monkeypatch, ctx_stub, capsys):
     coord.turn_end_compact_if_needed()
     out = capsys.readouterr().out
     assert "Ошибка суммаризации" in out
-    assert "submit_solution" in out
+    assert "turn_finish" in out
 
 
 def test_turn_end_disabled_when_trigger_zero(monkeypatch, ctx_stub):

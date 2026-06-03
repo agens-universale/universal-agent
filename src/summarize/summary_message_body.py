@@ -7,8 +7,8 @@ from intent_log import serialize, tail_preview
 from intent_log.record import IntentRecord
 
 _WORKING_MEMORY_HINT = (
-    "The block above inlines the current working_memory snapshot for this thread. "
-    "Prefer this snapshot when present; use the working_memory tool (append or rewrite "
+    "The block above inlines the current session memory snapshot for this thread. "
+    "Prefer this snapshot when present; use the session memory tool (append or rewrite "
     "on any register) if you need updates after this summary."
 )
 
@@ -126,7 +126,7 @@ def build_dialog_summary_content(
     lines.append("")
     lines.append(
         "Continue the dialogue from here after summarization. During the trace, update "
-        "working_memory with append or rewrite on any register; the next summarization "
+        "session memory with append or rewrite on any register; the next summarization "
         "will rebuild all registers from dialog + summary."
     )
     lines.append(

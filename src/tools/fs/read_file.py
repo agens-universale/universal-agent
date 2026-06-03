@@ -59,7 +59,7 @@ class ReadFile(AbstractSimpleTool):
     ) -> str:
         return json.dumps(
             {
-                "tool": "read_file",
+                "tool": ReadFile.registered_tool_name(),
                 "ok": True,
                 "path": tool_report_abspath(path),
                 "sha256": sha256,
@@ -99,7 +99,7 @@ class ReadFile(AbstractSimpleTool):
             error_obj.update(error_details)
         return json.dumps(
             {
-                "tool": "read_file",
+                "tool": ReadFile.registered_tool_name(),
                 "ok": False,
                 "path": tool_report_abspath(path),
                 "sha256": None,
@@ -131,7 +131,7 @@ class ReadFile(AbstractSimpleTool):
     def tool_description(cls):
         description = {
             "type": "function",
-            "name": "read_file",
+            "name": "fs_read_file",
             "description": (
                 "Read a text file from the local filesystem. "
                 "Always includes full-file sha256 (for expected_file_sha256 in edit tools). "
@@ -185,7 +185,7 @@ class ReadFile(AbstractSimpleTool):
 
     @classmethod
     def prompt_description(cls):
-        description = '''Tool name: read_file
+        description = '''Tool name: fs_read_file
 Tool description: Reads the contents of a text file from the local filesystem with line and character pagination.
 Input schema: {
   "type": "object",
@@ -346,7 +346,7 @@ Usage:
                 path=path,
                 error_type="file_too_large",
                 message=(
-                    f"File is {file_size_bytes} bytes; read_file limit is {max_bytes} bytes. "
+                    f"File is {file_size_bytes} bytes; fs_read_file limit is {max_bytes} bytes. "
                     "This tool loads the whole file for in-context inspection — too large for that. "
                     "Choose a different approach from <tools> matched to your goal: read a small slice, "
                     "tail/head, search for patterns, or compute a summary — not a full read through this tool."

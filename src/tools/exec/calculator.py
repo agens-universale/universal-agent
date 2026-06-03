@@ -17,7 +17,7 @@ class Calculator(AbstractSimpleTool):
     ) -> str:
         return json.dumps(
             {
-                "tool": "calculator",
+                "tool": Calculator.registered_tool_name(),
                 "ok": ok,
                 "expression": expression,
                 "value_type": value_type,
@@ -31,7 +31,7 @@ class Calculator(AbstractSimpleTool):
     def tool_description(cls):
         description = {
             "type": "function",
-            "name": "calculator",
+            "name": "exec_calculator",
             "description": (
                 "Evaluates a Python expression (pure expression only) and returns a JSON string envelope. "
                 "Returns ok=true with value on success, ok=false with error on failure. "
@@ -54,7 +54,7 @@ class Calculator(AbstractSimpleTool):
 
     @classmethod
     def prompt_description(cls):
-        description = f'''Tool name: calculator
+        description = f'''Tool name: exec_calculator
 Tool description: Evaluates a Python pure expression (no statements) and returns a JSON string.
 Input schema: {{"type": "object", "properties": {{"expression": {{"type": "string", "description": "Python expression to evaluate."}}}}, "required": ["expression"], "additionalProperties": false}}
 
@@ -65,7 +65,7 @@ Usage:
 
 Return format (JSON string):
 {{
-  "tool":"calculator",
+  "tool":"exec_calculator",
   "ok": true|false,
   "expression": "...",
   "value_type": "...",

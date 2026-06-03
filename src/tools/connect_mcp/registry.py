@@ -166,7 +166,7 @@ def _build_tools_registry(
             if not base_name:
                 continue
 
-            combined_name = f"{server_name}_{base_name}"
+            combined_name = f"mcp_{server_name}_{base_name}"
 
             base_description = tool.get("description") or ""
             extra_desc = f"\n\nFrom server: {server_display_name}"

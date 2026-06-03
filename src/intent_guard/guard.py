@@ -86,15 +86,16 @@ class FinishGateGuard:
         cfg = getattr(self._ctx, "config_dict", {}) or {}
         if not isinstance(cfg, dict):
             return False
-        strict = bool(cfg.get("strict_submit_solution_validation", True))
+        strict = bool(cfg.get("strict_turn_finish_validation", True))
         backend = str(cfg.get("backend_api_mode") or "").strip().lower()
         return strict and backend == "chat_completions"
 
-    def evaluate_submit_solution(
+    def evaluate_turn_finish(
         self,
         *,
-        submit_solution_arguments: Any,
+        finish_handoff_arguments: Any,
     ) -> FinishGateDecision:
+        """Run quality gate on the agent's finish-turn handoff (arguments JSON)."""
         cfg = getattr(self._ctx, "config_dict", {}) or {}
         if not isinstance(cfg, dict):
             cfg = {}
@@ -104,8 +105,8 @@ class FinishGateGuard:
 
         if not self.enabled:
             reason = "disabled"
-            if not bool(cfg.get("strict_submit_solution_validation", True)):
-                reason = "strict_submit_solution_validation=false"
+            if not bool(cfg.get("strict_turn_finish_validation", True)):
+                reason = "strict_turn_finish_validation=false"
             elif backend != "chat_completions":
                 reason = f"backend_api_mode={backend}"
             log_finish_gate_skipped(
@@ -175,12 +176,12 @@ class FinishGateGuard:
                 state=self._state,
                 current_user_requests=current_user_intent,
                 context_user_messages=user_intent_log,
-                submit_solution_arguments=submit_solution_arguments,
+                finish_handoff_arguments=finish_handoff_arguments,
             )
         except Exception as exc:
             self._logger.warning(
-                "finish_gate_validation_failed; allow submit_solution "
-                "to avoid inconsistent tool_call history: %s",
+                "finish_gate validator error; fail-open accept so pending finish handoff "
+                "still pairs with its tool_call in chat/completions history: %s",
                 exc,
                 exc_info=True,
             )

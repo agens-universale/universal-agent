@@ -31,7 +31,7 @@ def _to_text(value: Any) -> str:
         return str(value)
 
 
-def _parse_submit_solution_args(arguments: Any) -> Dict[str, Any]:
+def _parse_finish_handoff_args(arguments: Any) -> Dict[str, Any]:
     if isinstance(arguments, dict):
         return arguments
     if not isinstance(arguments, str):
@@ -73,7 +73,7 @@ def validate_final_report_vs_user_intent(
     state: Any,
     current_user_requests: List[str],
     context_user_messages: List[str] | None = None,
-    submit_solution_arguments: Any,
+    finish_handoff_arguments: Any,
     trace_digest: FinishGateTraceDigest | None = None,
 ) -> ValidationResult:
     """Run finish gate LLM validator.
@@ -81,7 +81,7 @@ def validate_final_report_vs_user_intent(
     ``current_user_requests`` and ``context_user_messages`` are JSONL lines
     (one ``IntentRecord`` per line, §2.1) via ``records_to_jsonl_lines(deserialize_list(...))``.
     """
-    args = _parse_submit_solution_args(submit_solution_arguments)
+    args = _parse_finish_handoff_args(finish_handoff_arguments)
     active_user_requests = [str(x) for x in current_user_requests if isinstance(x, str)]
     user_context = [str(x) for x in (context_user_messages or []) if isinstance(x, str)]
 
@@ -98,7 +98,7 @@ def validate_final_report_vs_user_intent(
         "user_context": user_context,
         "current_user_requests": active_user_requests,
         "trace_digest_text": _wrap_trace_digest_text(trace_digest.trace_digest_text),
-        "submit_solution_arguments": args if args else _to_text(submit_solution_arguments),
+        "finish_handoff_arguments": args if args else _to_text(finish_handoff_arguments),
         "agent_kind": "subagent" if is_subagent else "main",
     }
     user_prompt = (

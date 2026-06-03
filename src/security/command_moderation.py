@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from config_modules.security import validate_command_moderation_mode
+from constants.tool_names import EXEC_PYTHON_NAME
 from security.path_policy import (
     ToolSecurityContext,
     audit_policy_decision,
@@ -36,7 +37,7 @@ def effective_command_cwd(
     cwd_arg = kwargs.get("cwd")
     if isinstance(cwd_arg, str) and cwd_arg.strip():
         return os.path.abspath(cwd_arg.strip())
-    if tool_name == "run_python_code":
+    if tool_name == EXEC_PYTHON_NAME:
         return os.path.abspath(str(context.launch_root))
     return os.path.abspath(os.getcwd())
 
@@ -209,7 +210,7 @@ def make_block_error(
     tool_name: str,
     mode: str,
 ) -> dict[str, Any]:
-    preview_key = "code_preview" if tool_name == "run_python_code" else "command_preview"
+    preview_key = "code_preview" if tool_name == EXEC_PYTHON_NAME else "command_preview"
     error = {
         "type": decision.error_type or "unsafe_command_blocked",
         "mode": mode,

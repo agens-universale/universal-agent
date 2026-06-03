@@ -1,15 +1,15 @@
 import json
 
 from message_policy.tool_usage_notice.state import (
-    META_LONG_MEMORY_CHECK_CNT,
-    META_LONG_MEMORY_CONTENT_HASH,
+    META_PROJECT_MEMORY_CHECK_CNT,
+    META_PROJECT_MEMORY_CONTENT_HASH,
     META_MEMORY_NOTICE_CNT,
     META_TOOL_USAGE_NOTICE_CNT,
-    get_long_memory_check_cnt,
+    get_project_memory_check_cnt,
     hydrate_tool_usage_notice_state,
     merge_tool_usage_notice_meta_to_base,
     persist_tool_usage_notice_state,
-    set_long_memory_check_cnt,
+    set_project_memory_check_cnt,
 )
 from intent_log.user_turn import init_subagent_open_turn
 from states import State
@@ -31,7 +31,7 @@ def _make_state() -> State:
 
 def test_new_state_tool_usage_notice_defaults():
     state = _make_state()
-    assert state.long_memory_content_hash is None
+    assert state.project_memory_content_hash is None
     assert state.tool_usage_notice_cnt == {}
 
 
@@ -40,22 +40,22 @@ def test_hydrate_from_meta_restores_state_fields():
     hydrate_tool_usage_notice_state(
         state,
         {
-            META_LONG_MEMORY_CONTENT_HASH: "abc123",
-            META_TOOL_USAGE_NOTICE_CNT: {"working_memory": 7},
-            META_LONG_MEMORY_CHECK_CNT: 2,
+            META_PROJECT_MEMORY_CONTENT_HASH: "abc123",
+            META_TOOL_USAGE_NOTICE_CNT: {"session_memory": 7},
+            META_PROJECT_MEMORY_CHECK_CNT: 2,
         },
     )
-    assert state.long_memory_content_hash == "abc123"
-    assert state.tool_usage_notice_cnt == {"working_memory": 7}
+    assert state.project_memory_content_hash == "abc123"
+    assert state.tool_usage_notice_cnt == {"session_memory": 7}
 
 
-def test_hydrate_maps_legacy_memory_notice_cnt_to_working_memory():
+def test_hydrate_maps_legacy_memory_notice_cnt_to_session_memory():
     state = _make_state()
     hydrate_tool_usage_notice_state(
         state,
         {META_MEMORY_NOTICE_CNT: 4},
     )
-    assert state.tool_usage_notice_cnt == {"working_memory": 4}
+    assert state.tool_usage_notice_cnt == {"session_memory": 4}
 
 
 def test_hydrate_rejects_invalid_hash_and_negative_counter():
@@ -63,81 +63,81 @@ def test_hydrate_rejects_invalid_hash_and_negative_counter():
     hydrate_tool_usage_notice_state(
         state,
         {
-            META_LONG_MEMORY_CONTENT_HASH: 42,
-            META_TOOL_USAGE_NOTICE_CNT: {"working_memory": -3},
+            META_PROJECT_MEMORY_CONTENT_HASH: 42,
+            META_TOOL_USAGE_NOTICE_CNT: {"session_memory": -3},
         },
     )
-    assert state.long_memory_content_hash is None
-    assert state.tool_usage_notice_cnt == {"working_memory": 0}
+    assert state.project_memory_content_hash is None
+    assert state.tool_usage_notice_cnt == {"session_memory": 0}
 
 
 def test_persist_writes_state_fields_to_meta():
     state = _make_state()
-    state.long_memory_content_hash = "deadbeef"
-    state.tool_usage_notice_cnt = {"working_memory": 11}
-    meta: dict = {META_LONG_MEMORY_CHECK_CNT: 4}
+    state.project_memory_content_hash = "deadbeef"
+    state.tool_usage_notice_cnt = {"session_memory": 11}
+    meta: dict = {META_PROJECT_MEMORY_CHECK_CNT: 4}
     persist_tool_usage_notice_state(state, meta)
-    assert meta[META_LONG_MEMORY_CONTENT_HASH] == "deadbeef"
-    assert meta[META_TOOL_USAGE_NOTICE_CNT] == {"working_memory": 11}
-    assert meta[META_LONG_MEMORY_CHECK_CNT] == 4
+    assert meta[META_PROJECT_MEMORY_CONTENT_HASH] == "deadbeef"
+    assert meta[META_TOOL_USAGE_NOTICE_CNT] == {"session_memory": 11}
+    assert meta[META_PROJECT_MEMORY_CHECK_CNT] == 4
 
 
 def test_merge_tool_usage_notice_meta_to_base_preserves_ephemeral_keys():
     base: dict = {"created_at": "t0"}
     session = {
-        META_LONG_MEMORY_CONTENT_HASH: None,
-        META_TOOL_USAGE_NOTICE_CNT: {"working_memory": 3},
-        META_LONG_MEMORY_CHECK_CNT: 2,
+        META_PROJECT_MEMORY_CONTENT_HASH: None,
+        META_TOOL_USAGE_NOTICE_CNT: {"session_memory": 3},
+        META_PROJECT_MEMORY_CHECK_CNT: 2,
     }
     merge_tool_usage_notice_meta_to_base(base, session)
-    assert base[META_LONG_MEMORY_CONTENT_HASH] is None
-    assert base[META_TOOL_USAGE_NOTICE_CNT] == {"working_memory": 3}
-    assert base[META_LONG_MEMORY_CHECK_CNT] == 2
+    assert base[META_PROJECT_MEMORY_CONTENT_HASH] is None
+    assert base[META_TOOL_USAGE_NOTICE_CNT] == {"session_memory": 3}
+    assert base[META_PROJECT_MEMORY_CHECK_CNT] == 2
 
 
 def test_init_tool_usage_notice_from_meta_on_state():
     state = _make_state()
     state.init_tool_usage_notice_from_meta(
-        {META_LONG_MEMORY_CONTENT_HASH: "h1", META_TOOL_USAGE_NOTICE_CNT: {"wm": 5}}
+        {META_PROJECT_MEMORY_CONTENT_HASH: "h1", META_TOOL_USAGE_NOTICE_CNT: {"wm": 5}}
     )
-    assert state.long_memory_content_hash == "h1"
+    assert state.project_memory_content_hash == "h1"
     assert state.tool_usage_notice_cnt == {"wm": 5}
 
 
 def test_init_subagent_tool_usage_notice_resets_isolated_counters():
     state = _make_state()
-    state.long_memory_content_hash = "parent"
-    state.tool_usage_notice_cnt = {"working_memory": 99}
+    state.project_memory_content_hash = "parent"
+    state.tool_usage_notice_cnt = {"session_memory": 99}
     state.init_subagent_tool_usage_notice()
-    assert state.long_memory_content_hash is None
+    assert state.project_memory_content_hash is None
     assert state.tool_usage_notice_cnt == {}
 
 
 def test_init_subagent_current_user_intent_resets_tool_usage_notice():
     state = _make_state()
-    state.long_memory_content_hash = "parent"
-    state.tool_usage_notice_cnt = {"working_memory": 12}
+    state.project_memory_content_hash = "parent"
+    state.tool_usage_notice_cnt = {"session_memory": 12}
     init_subagent_open_turn(state, "do task")
-    assert state.long_memory_content_hash is None
+    assert state.project_memory_content_hash is None
     assert state.tool_usage_notice_cnt == {}
 
 
 def test_state_to_dict_roundtrip_restores_memory_fields():
     state = _make_state()
-    state.long_memory_content_hash = "hash_x"
-    state.tool_usage_notice_cnt = {"working_memory": 8}
+    state.project_memory_content_hash = "hash_x"
+    state.tool_usage_notice_cnt = {"session_memory": 8}
     from persistence.state_serializer import StateSerializer
 
     payload = StateSerializer.serialize(state)
     restored = StateSerializer.deserialize(json.loads(json.dumps(payload)))
-    assert restored.long_memory_content_hash == "hash_x"
-    assert restored.tool_usage_notice_cnt == {"working_memory": 8}
+    assert restored.project_memory_content_hash == "hash_x"
+    assert restored.tool_usage_notice_cnt == {"session_memory": 8}
 
 
 def test_meta_only_long_memory_check_cnt():
     meta: dict = {}
-    set_long_memory_check_cnt(meta, 5)
-    assert get_long_memory_check_cnt(meta) == 5
+    set_project_memory_check_cnt(meta, 5)
+    assert get_project_memory_check_cnt(meta) == 5
 
 
 def test_thread_session_persist_batch_writes_memory_meta(tmp_path, monkeypatch):
@@ -160,9 +160,9 @@ def test_thread_session_persist_batch_writes_memory_meta(tmp_path, monkeypatch):
         backend_api_mode="chat_completions",
     )
     state = _make_state()
-    state.long_memory_content_hash = "disk_hash"
-    state.tool_usage_notice_cnt = {"working_memory": 6}
-    set_long_memory_check_cnt(session.meta, 1)
+    state.project_memory_content_hash = "disk_hash"
+    state.tool_usage_notice_cnt = {"session_memory": 6}
+    set_project_memory_check_cnt(session.meta, 1)
 
     persist_tool_usage_notice_state(state, session.meta)
     session.persist_batch([], previous_response_id=None)
@@ -170,6 +170,6 @@ def test_thread_session_persist_batch_writes_memory_meta(tmp_path, monkeypatch):
     from thread_store import load_thread_meta
 
     saved = load_thread_meta(str(threads_dir), "cli", "t_mem")
-    assert saved[META_LONG_MEMORY_CONTENT_HASH] == "disk_hash"
-    assert saved[META_TOOL_USAGE_NOTICE_CNT] == {"working_memory": 6}
-    assert saved[META_LONG_MEMORY_CHECK_CNT] == 1
+    assert saved[META_PROJECT_MEMORY_CONTENT_HASH] == "disk_hash"
+    assert saved[META_TOOL_USAGE_NOTICE_CNT] == {"session_memory": 6}
+    assert saved[META_PROJECT_MEMORY_CHECK_CNT] == 1

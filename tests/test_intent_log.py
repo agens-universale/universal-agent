@@ -40,7 +40,7 @@ def test_validate_record_accepts_structured_entries():
             "turn": 2,
             "ts": FIXED_TS,
             "action": ACTION_TOOL_AGGREGATED,
-            "tool_name": "ask_human",
+            "tool_name": "turn_ask_human",
             "content": "summary line",
             "fallback": True,
         }
@@ -79,7 +79,7 @@ def test_validate_record_enforces_content_shape():
                 "turn": 1,
                 "ts": FIXED_TS,
                 "action": ACTION_TOOL_RAW,
-                "tool_name": "submit_solution",
+                "tool_name": "turn_finish",
                 "content": "not-an-object",
             }
         )
@@ -92,7 +92,7 @@ def test_serialize_and_deserialize_list_round_trip():
             turn=1,
             ts=FIXED_TS,
             action=ACTION_TOOL_RAW,
-            tool_name="submit_solution",
+            tool_name="turn_finish",
             content={"arguments": {"solution_type": "full_solution"}},
         ),
     ]
@@ -120,14 +120,14 @@ def test_append_tool_variants_use_same_open_turn():
     current = append_user_ask(current, "q", user_turn_seq=2, ts=FIXED_TS)
     current = append_tool_aggregated(
         current,
-        "ask_human",
+        "turn_ask_human",
         "picked topic",
         user_turn_seq=2,
         ts=FIXED_TS,
     )
     current = append_tool_raw(
         current,
-        "submit_solution",
+        "turn_finish",
         {"solution_type": "full_solution"},
         output={"ok": True},
         user_turn_seq=2,
@@ -258,7 +258,7 @@ def test_records_to_jsonl_lines_emits_canonical_wire():
             turn=1,
             ts=FIXED_TS,
             action=ACTION_TOOL_AGGREGATED,
-            tool_name="ask_human",
+            tool_name="turn_ask_human",
             content="summary",
         ),
     ]
@@ -267,7 +267,7 @@ def test_records_to_jsonl_lines_emits_canonical_wire():
     assert json.loads(lines[0])["action"] == ACTION_USER_ASK
     assert json.loads(lines[0])["content"] == "user line"
     assert json.loads(lines[1])["action"] == ACTION_TOOL_AGGREGATED
-    assert json.loads(lines[1])["tool_name"] == "ask_human"
+    assert json.loads(lines[1])["tool_name"] == "turn_ask_human"
 
     legacy_ask = records_to_jsonl_lines(deserialize_list(["legacy plain ask"]))
     assert len(legacy_ask) == 1

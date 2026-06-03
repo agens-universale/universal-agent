@@ -21,11 +21,11 @@ class TestIsSubagentTool:
         assert is_subagent_tool("subagent_planner") is True
         assert is_subagent_tool("subagent_critic") is True
         assert is_subagent_tool("subagent_code_reviewer") is True
-        assert is_subagent_tool("system_subagent_special_agent") is True
+        assert is_subagent_tool("subagent_special_agent") is True
 
     def test_unknown_names(self):
-        assert is_subagent_tool("read_file") is False
-        assert is_subagent_tool("write_to_file") is False
+        assert is_subagent_tool("fs_read_file") is False
+        assert is_subagent_tool("fs_write_file") is False
         assert is_subagent_tool("subagent_nonexistent") is False
         assert is_subagent_tool("") is False
 
@@ -37,7 +37,7 @@ class TestGetSubagentClass:
         assert get_subagent_class("subagent_planner") is Planner
         assert get_subagent_class("subagent_critic") is Critic
         assert get_subagent_class("subagent_code_reviewer") is CodeReviewer
-        assert get_subagent_class("system_subagent_special_agent") is SpecialAgent
+        assert get_subagent_class("subagent_special_agent") is SpecialAgent
 
     def test_unknown_returns_none(self):
         assert get_subagent_class("unknown_tool") is None

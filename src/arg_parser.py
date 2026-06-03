@@ -158,7 +158,7 @@ parser.add_argument(
     "--command-moderation",
     choices=["allow", "ask", "deny"],
     help=(
-        "Режим execute_command/run_python_code: allow без judge, "
+        "Режим exec_command/exec_python: allow без judge, "
         "ask с подтверждением опасного, deny блокирует опасное"
     ),
 )

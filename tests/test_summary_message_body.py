@@ -46,7 +46,7 @@ def test_empty_working_memory_block_skips_section_and_hint():
         working_memory_block="",
     )
     assert "<working_memory>" not in body
-    assert "working_memory tool" not in body
+    assert "session memory tool" not in body.lower()
     assert "<last_dialog_steps>" in body
     assert "tail" in body
     assert "Treat memory and summaries as context" in body

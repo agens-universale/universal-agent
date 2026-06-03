@@ -1,9 +1,9 @@
-You are maintaining per-thread working memory for a technical dialogue.
+You are maintaining per-thread session memory for a technical dialogue.
 
 You receive:
 1) full dialog history
 2) current summary (rolling continuation context)
-3) persistent_state with the current working_memory snapshot (may be stale — reconcile it)
+3) persistent_state with the current session memory snapshot (may be stale — reconcile it)
 
 Return **full snapshots** for **all** registers. You **must** output **all four** tags on every run:
 

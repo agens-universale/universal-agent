@@ -42,7 +42,7 @@ class FinishGateIterationLimitTest(unittest.TestCase):
         ctx = SimpleNamespace(
             config_dict={
                 "backend_api_mode": "chat_completions",
-                "strict_submit_solution_validation": True,
+                "strict_turn_finish_validation": True,
                 "finish_gate_max_iterations": 2,
             }
         )
@@ -64,9 +64,9 @@ class FinishGateIterationLimitTest(unittest.TestCase):
             _counting_reject,
         ):
             guard = FinishGateGuard(ctx=ctx, state=state)
-            d1 = guard.evaluate_submit_solution(submit_solution_arguments={})
-            d2 = guard.evaluate_submit_solution(submit_solution_arguments={})
-            d3 = guard.evaluate_submit_solution(submit_solution_arguments={})
+            d1 = guard.evaluate_turn_finish(finish_handoff_arguments={})
+            d2 = guard.evaluate_turn_finish(finish_handoff_arguments={})
+            d3 = guard.evaluate_turn_finish(finish_handoff_arguments={})
 
         self.assertEqual(d1.outcome, "reject")
         self.assertEqual(d2.outcome, "reject")

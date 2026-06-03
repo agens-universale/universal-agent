@@ -51,7 +51,7 @@ def _make_ctx(**overrides):
         "completions_url": "http://backend.local/v1/chat/completions",
         "console_trace": False,
         "no_tool_call_max_count": 5,
-        "strict_submit_solution_validation": True,
+        "strict_turn_finish_validation": True,
         "summary_params": summary_params,
     }
     cfg.update(overrides)
@@ -65,7 +65,7 @@ def _make_ctx(**overrides):
 def _submit_solution_call():
     return {
         "type": "function_call",
-        "name": "submit_solution",
+        "name": "turn_finish",
         "arguments": json.dumps(
             {
                 "solution_type": "full_solution",
@@ -281,7 +281,7 @@ def test_turn_end_runs_on_fail_open_when_volume_high(monkeypatch):
     result = pr.run_agent(
         [_submit_solution_call()],
         state,
-        _make_ctx(strict_submit_solution_validation=True),
+        _make_ctx(strict_turn_finish_validation=True),
         turn_end_compaction_hook=coord.turn_end_compact_if_needed,
     )
 
@@ -398,7 +398,7 @@ def _agent_executor_config_dict() -> dict:
         "backend_api_mode": "chat_completions",
         "console_trace": False,
         "no_tool_call_max_count": 5,
-        "strict_submit_solution_validation": True,
+        "strict_turn_finish_validation": True,
         "summary_params": {
             "chat_completions_summary_trigger_chars": 0,
             "chat_completions_summary_turn_end_trigger_chars": 1,

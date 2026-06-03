@@ -5,12 +5,12 @@ from typing import Any, Dict, Optional
 from config_modules.stored_outputs import get_tool_output_inline_max_chars
 from tools.simple_tool_base import AbstractSimpleTool
 
-_TOOL_NAME = "read_stored_tool_output"
+_TOOL_NAME = "session_read_stored_tool_output"
 _fallback_logger = logging.getLogger(__name__)
 
 _NOT_FOUND_MESSAGE = (
     "Stored output was evicted or not found. Re-invoke the original source tool to "
-    "regenerate output_ref; retrying read_stored_tool_output with the same ref will not work."
+    "regenerate output_ref; retrying session_read_stored_tool_output with the same ref will not work."
 )
 
 
@@ -59,7 +59,7 @@ class ReadStoredToolOutput(AbstractSimpleTool):
 
     @classmethod
     def prompt_description(cls) -> str:
-        return """Tool name: read_stored_tool_output
+        return """Tool name: session_read_stored_tool_output
 Tool description: Read paginated chunks from stored large tool output using output_ref.
 
 Input schema:
@@ -103,7 +103,7 @@ Behavior:
     ) -> str:
         return json.dumps(
             {
-                "tool": _TOOL_NAME,
+                "tool": ReadStoredToolOutput.registered_tool_name(),
                 "type": "stored_tool_output",
                 "ok": ok,
                 "stored": stored,
@@ -117,7 +117,7 @@ Behavior:
                 "truncated": truncated,
                 "next_offset": next_offset,
                 "content": content,
-                "read_via": _TOOL_NAME,
+                "read_via": ReadStoredToolOutput.registered_tool_name(),
                 "hint": hint,
                 "error": error,
             },

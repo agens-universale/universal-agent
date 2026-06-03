@@ -143,7 +143,7 @@ class SearchAndReplace(AbstractSimpleTool):
     def tool_description(cls) -> Dict[str, Any]:
         return {
             "type": "function",
-            "name": "search_and_replace",
+            "name": "fs_search_and_replace",
             "description": (
                 "Replaces exact text in a file using literal matching. "
                 "Uses literal string matching (case-sensitive, no regex). "
@@ -225,7 +225,7 @@ class SearchAndReplace(AbstractSimpleTool):
 
     @classmethod
     def prompt_description(cls) -> str:
-        description = '''Tool name: search_and_replace  
+        description = '''Tool name: fs_search_and_replace  
 Tool description: Replaces exact text in a file using literal matching; supports dry-run, occurrence selection, expected match count, backup, and optional diff output.
 Input schema: {"type": "object", "properties": {"path": {"type": "string", "description": "The absolute path of the file to modify."}, "search": {"type": "string", "description": "The exact content to find and replace.  May be multiline."}, "replace": {"type": "string", "description": "The new content to replace the found content with.  May be multiline."}, "dry_run": {"type": "boolean"}, "expected_matches": {"type": "integer", "minimum": 0}, "start_line": {"type": "integer", "minimum": 1}, "end_line": {"type": "integer", "minimum": 1}, "occurrence": {"anyOf": [{"type": "string", "enum": ["first", "last", "all"]}, {"type": "integer", "minimum": 1}]}, "backup": {"type": "boolean"}, "return_diff": {"type": "boolean"}, "diff_context_lines": {"type": "integer", "minimum": 0}, "max_diff_chars": {"type": "integer", "minimum": 1}}, "required": ["path", "search", "replace"], "additionalProperties": false}
 
@@ -246,7 +246,7 @@ Usage:
 Important Usage Rules
 - **ALWAYS** use absolute paths for `path`.
 - The `search` string is treated as **literal text**, not regex.
-- To perform regex replacements, use `search_files` first to locate, then decide on literal replacement.
+- To perform regex replacements, use `fs_search_files` first to locate, then decide on literal replacement.
 - If the file does not contain the `search` string, no changes are made.
 - If the file is empty or unreadable, an error is raised.
 - This tool ALWAYS returns a JSON string with fields:
@@ -310,7 +310,7 @@ Update version string:
     ) -> str:
         return json.dumps(
             {
-                "tool": "search_and_replace",
+                "tool": SearchAndReplace.registered_tool_name(),
                 "ok": ok,
                 "applied": applied,
                 "matched": matched,

@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field
 from uuid import uuid4
 from typing import Any, Dict, List, Optional
-from long_memory import attach_status_to_prompt_vars
+from project_memory import attach_status_to_prompt_vars
 from utils.project_data import get_project_data
 from tools.session.stored_outputs.tool_call_outputs_store import ToolCallOutputsStore
 from message_policy.tool_usage_notice.state import hydrate_tool_usage_notice_state
@@ -79,7 +79,7 @@ class State:
         self.current_user_intent: list[IntentRecord] = []
         self.user_turn_seq: int = 0
         self.finish_gate_rejection_count: int = 0
-        self.long_memory_content_hash: Optional[str] = None
+        self.project_memory_content_hash: Optional[str] = None
         self.tool_usage_notice_cnt: dict[str, int] = {}
         self.tool_call_outputs_store = ToolCallOutputsStore()
 
@@ -170,12 +170,12 @@ class State:
         self.user_turn_seq = max(turns) if turns else 1
 
     def init_tool_usage_notice_from_meta(self, meta: Optional[Dict[str, Any]]) -> None:
-        """Восстановить tool_usage_notice / long_memory поля из thread_session.meta или child_meta."""
+        """Восстановить tool_usage_notice / project_memory поля из thread_session.meta или child_meta."""
         hydrate_tool_usage_notice_state(self, meta if isinstance(meta, dict) else None)
 
     def init_subagent_tool_usage_notice(self) -> None:
         """Субагент: изолированный meta/state; wiki общая через shared (D34)."""
-        self.long_memory_content_hash = None
+        self.project_memory_content_hash = None
         self.tool_usage_notice_cnt = {}
 
     def flush_current_user_intent(self) -> None:

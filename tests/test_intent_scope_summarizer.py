@@ -41,7 +41,7 @@ def test_summarize_tool_intent_line_uses_chat_completions_llm_completion_kwargs(
 
     ctx = SimpleNamespace(
         intent_scope=IntentScopeConfig(
-            tools={"ask_human": IntentScopeToolConfig(record="aggregated")},
+            tools={"turn_ask_human": IntentScopeToolConfig(record="aggregated")},
             max_summary_chars=500,
             max_tool_output_chars=1000,
         ),
@@ -58,16 +58,16 @@ def test_summarize_tool_intent_line_uses_chat_completions_llm_completion_kwargs(
     line = summarizer.summarize_tool_intent_line(
         ctx=ctx,
         state=state,
-        tool_name="ask_human",
+        tool_name="turn_ask_human",
         tool_arguments='{"question":"q"}',
         tool_output_raw='{"response":"yes"}',
     )
 
     assert line == "User wants a README section on install."
-    assert captured["label"] == "intent_scope:ask_human"
+    assert captured["label"] == "intent_scope:turn_ask_human"
     assert captured.get("payload_overrides") is None
     user_msg = summarizer._build_user_prompt(
-        tool_name="ask_human",
+        tool_name="turn_ask_human",
         tool_arguments='{"question":"q"}',
         tool_output='{"response":"yes"}',
         prior_intent=state.current_user_intent,
@@ -88,7 +88,7 @@ def test_summarize_tool_intent_line_fail_open_on_llm_error(monkeypatch):
 
     ctx = SimpleNamespace(
         intent_scope=IntentScopeConfig(
-            tools={"ask_human": IntentScopeToolConfig(record="aggregated")}
+            tools={"turn_ask_human": IntentScopeToolConfig(record="aggregated")}
         ),
         chat_completions_llm=SimpleNamespace(
             max_tokens=100, completion_kwargs={}
@@ -101,7 +101,7 @@ def test_summarize_tool_intent_line_fail_open_on_llm_error(monkeypatch):
         summarizer.summarize_tool_intent_line(
             ctx=ctx,
             state=state,
-            tool_name="ask_human",
+            tool_name="turn_ask_human",
             tool_arguments="",
             tool_output_raw='{"ok":true}',
         )

@@ -23,7 +23,7 @@ class FileInfo(AbstractSimpleTool):
     def tool_description(cls) -> Dict[str, Any]:
         return {
             "type": "function",
-            "name": "file_info",
+            "name": "fs_file_info",
             "description": (
                 "Read-only file metadata for preflight before edits: type, size, mtime, "
                 "permissions, readability, binary/text guess, optional line count, SHA-256."
@@ -46,22 +46,22 @@ class FileInfo(AbstractSimpleTool):
     @classmethod
     def prompt_description(cls) -> str:
         return (
-            "Tool name: file_info\n"
+            "Tool name: fs_file_info\n"
             "Cheap read-only metadata before editing a file.\n"
-            "Use include_hash=true to get sha256 for expected_file_sha256 in search_and_replace / apply_file_edits.\n"
-            "Does not return full file content — use read_file for that.\n"
+            "Use include_hash=true to get sha256 for expected_file_sha256 in fs_search_and_replace / fs_apply_file_edits.\n"
+            "Does not return full file content — use fs_read_file for that.\n"
         )
 
     @staticmethod
     def _result(**fields: Any) -> str:
-        payload = {"tool": "file_info", "error": None, **fields}
+        payload = {"tool": FileInfo.registered_tool_name(), "error": None, **fields}
         return json.dumps(payload, ensure_ascii=False)
 
     @staticmethod
     def _error(path: str, error: Dict[str, Any], message: str) -> str:
         return json.dumps(
             {
-                "tool": "file_info",
+                "tool": FileInfo.registered_tool_name(),
                 "ok": False,
                 "path": tool_report_abspath(path),
                 "exists": False,

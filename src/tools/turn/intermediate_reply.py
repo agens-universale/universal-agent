@@ -27,7 +27,7 @@ class IntermediateReply(AbstractSimpleTool):
         error: Optional[Dict[str, Any]] = None,
     ) -> str:
         out: Dict[str, Any] = {
-            "tool": "intermediate_reply",
+            "tool": IntermediateReply.registered_tool_name(),
             "ok": ok,
             "answer": answer,
             "error": error,
@@ -40,7 +40,7 @@ class IntermediateReply(AbstractSimpleTool):
     def tool_description(cls) -> Dict[str, Any]:
         return {
             "type": "function",
-            "name": "intermediate_reply",
+            "name": "turn_intermediate_reply",
             "description": _TOOL_DESCRIPTION,
             "parameters": {
                 "type": "object",
@@ -68,7 +68,7 @@ class IntermediateReply(AbstractSimpleTool):
 
     @classmethod
     def prompt_description(cls) -> str:
-        return """Tool name: intermediate_reply
+        return """Tool name: turn_intermediate_reply
 
 Overview:
 Finalizes turn: no. Send a one-way message to the user while the turn is still in progress (status, hypothesis, mini-explanation, progress). The turn is NOT complete after this call.
