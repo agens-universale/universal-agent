@@ -20,7 +20,7 @@ from tests.helpers.summary_sample import valid_summary_text_for_tests
 class SummarySpecTest(unittest.TestCase):
     def test_section_titles_match_required_markers(self) -> None:
         self.assertEqual(section_titles(), REQUIRED_SECTION_MARKERS)
-        self.assertEqual(len(SUMMARY_SECTIONS), 8)
+        self.assertEqual(len(SUMMARY_SECTIONS), 6)
         self.assertEqual(len(SUMMARY_SECTIONS), len(REQUIRED_SECTION_MARKERS))
 
     def test_prompt_template_injects_sections(self) -> None:
@@ -41,10 +41,10 @@ class SummarySpecTest(unittest.TestCase):
         repair_titles = format_section_titles_for_repair().split(", ")
         self.assertEqual(tuple(repair_titles), section_titles())
 
-    def test_spec_includes_active_skill_and_do_not_redo(self) -> None:
+    def test_spec_includes_do_not_redo_and_open_tasks(self) -> None:
         titles = section_titles()
-        self.assertIn("ACTIVE_SKILL", titles)
         self.assertIn("DO_NOT_REDO", titles)
+        self.assertIn("OPEN_TASKS", titles)
 
     def test_validate_min_section_hits(self) -> None:
         text = valid_summary_text_for_tests()
@@ -59,18 +59,17 @@ class SummarySpecTest(unittest.TestCase):
         self.assertEqual(reason2, "missing_structure")
         self.assertEqual(section_hit_count(one_section), 1)
 
-        three_sections = (
+        four_sections = (
             "TASK_AND_CONTEXT:\n"
             + "\n".join(f"- ctx {i}" for i in range(8))
-            + "\n\nEXECUTION_STAGE:\n- planning-only\n\n"
-            "RECENT_PROGRESS:\n"
+            + "\n\nOPEN_TASKS:\n- mode: planning-only\n"
             + "\n".join(f"- [TODO] step {i}" for i in range(8))
-            + "\n\nNEXT_ACTIONS:\n"
-            + "\n".join(f"- act {i}" for i in range(8))
+            + "\n\nDO_NOT_REDO:\n- n/a\n\nLAST_VERIFIED_FACTS:\n"
+            + "\n".join(f"- fact {i}" for i in range(8))
         )
-        ok3, reason3 = validate_summary_text(three_sections)
+        ok3, reason3 = validate_summary_text(four_sections)
         self.assertTrue(ok3, reason3)
-        self.assertGreaterEqual(section_hit_count(three_sections), MIN_SECTION_HITS)
+        self.assertGreaterEqual(section_hit_count(four_sections), MIN_SECTION_HITS)
 
 
 if __name__ == "__main__":

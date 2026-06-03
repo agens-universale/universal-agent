@@ -29,6 +29,7 @@ from summarize.working_memory_gateway import (
     REGISTER_ORDER,
     WorkingMemoryDeltas,
     apply_memory_patch,
+    apply_summary_memory_patch,
     coerce_working_memory_deltas,
     read_snapshot_from_state,
     render_persistent_state_for_prompt,
@@ -79,7 +80,13 @@ def apply_summary_state_patch(
     replace_deltas = coerce_working_memory_deltas(memory_replace_deltas)
     append_touched_f = frozenset(memory_append_touched or ())
     replace_touched_f = frozenset(memory_replace_touched or ())
-    if append_touched_f or replace_touched_f or not append_deltas.is_empty() or not replace_deltas.is_empty():
+    if replace_touched_f or not replace_deltas.is_empty():
+        snapshot = apply_summary_memory_patch(
+            snapshot,
+            replace_deltas,
+            replace_touched=replace_touched_f or None,
+        )
+    elif append_touched_f or not append_deltas.is_empty():
         snapshot = apply_memory_patch(
             snapshot,
             append_deltas,

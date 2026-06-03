@@ -35,7 +35,7 @@ class FetchUrl(AbstractSimpleTool):
             "type": "function",
             "name": "fetch_url",
             "description": (
-                "Fetches a URL via HTTP GET and returns extracted readable text when possible. "
+                "Fetches a URL via HTTP GET and returns extracted readable text when possible. uses network; does not execute code. "
                 "If the response is binary (e.g., images, PDFs, archives), does NOT return raw bytes; "
                 "instead returns content='binary data' with is_binary=true. "
                 "Stores full extracted text in session in-memory cache by URL and supports paginated reads via offset/limit. "

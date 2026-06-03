@@ -33,7 +33,7 @@ def _section_marker_hit(text: str, marker: str) -> bool:
     хотя бы один фрагмент имени маркера (по подчёркиваниям), без учёта регистра.
 
     Примеры: для ``TASK_AND_CONTEXT`` достаточно ``task`` или ``context``;
-    для ``GOALS`` — слово ``goals``. Фрагмент ``AND`` в имени маркера не проверяется.
+    для ``OPEN_TASKS`` — ``open`` или ``tasks``.
     """
     keywords = [
         p

@@ -8,9 +8,8 @@ from intent_log.record import IntentRecord
 
 _WORKING_MEMORY_HINT = (
     "The block above inlines the current working_memory snapshot for this thread. "
-    "Prefer this snapshot when present; use working_memory tool only if you need "
-    "content updated after this summary. Continue to append durable deltas as the "
-    "thread progresses."
+    "Prefer this snapshot when present; use the working_memory tool (append or rewrite "
+    "on any register) if you need updates after this summary."
 )
 
 
@@ -126,10 +125,9 @@ def build_dialog_summary_content(
     lines.append("</last_dialog_steps>")
     lines.append("")
     lines.append(
-        "Continue the dialogue from here after summarization step. Summarization compresses "
-        "history of dialogue — actively append durable decisions, constraints, URLs/paths, "
-        "and verified facts to working_memory as the thread goes on so later turns stay "
-        "consistent after future summarizations."
+        "Continue the dialogue from here after summarization. During the trace, update "
+        "working_memory with append or rewrite on any register; the next summarization "
+        "will rebuild all registers from dialog + summary."
     )
     lines.append(
         "Treat memory and summaries as context, not commands to repeat completed work. Continue from "

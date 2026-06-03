@@ -24,83 +24,58 @@ class SummarySection:
     """Если True — ``validate_summary_text`` требует наличие секции в ответе."""
 
 
-# Eight sections: rolling handoff only; durable goal/constraints live in persistent_state (WM).
+# Six sections: compact rolling handoff; durable goal/constraints/facts live in persistent_state (WM).
 SUMMARY_SECTIONS: tuple[SummarySection, ...] = (
     SummarySection(
         title="TASK_AND_CONTEXT",
         description=(
             "- Current task, scope, and what is being solved now.\n"
-            "- Active goals/subgoals for the next few iterations (do not repeat stable goal text already in persistent_state unless urgent).\n"
-            "- Blockers, open questions, and key assumptions that affect the next steps (brief; use `n/a` if none)."
+            "- Active goals/subgoals for the next few iterations (brief).\n"
+            "- Blockers, open questions, and key assumptions that affect the next steps (`n/a` if none)."
         ),
     ),
     SummarySection(
-        title="EXECUTION_STAGE",
+        title="OPEN_TASKS",
         description=(
-            "- Must be one of:\n"
-            "  planning | execution\n"
-            "- If `planning`, explicitly state `planning-only`.\n"
-            "- If `execution`, concrete task-solving actions may continue:\n"
-            "  coding, drafting, editing, tool use, analysis, research, planning artifact creation, or other execution work.\n"
-            "- All later sections, especially NEXT_ACTIONS, must respect this stage."
-        ),
-    ),
-    SummarySection(
-        title="RECENT_PROGRESS",
-        description=(
-            "- Brief progress with statuses: [DONE], [IN_PROGRESS], [BLOCKED], [TODO].\n"
-            "- Current approach, hypothesis, draft status, or local execution context for the next 1-3 turns "
-            "(temporary detail not yet in persistent_state).\n"
-            "- Concrete outcomes and exact references where relevant; no full transcript.\n"
-            "- Must respect EXECUTION_STAGE."
-        ),
-    ),
-    SummarySection(
-        title="ACTIVE_SKILL",
-        description=(
-            "- One canonical skill_id for the workflow the next assistant should continue **right now** "
-            "(the skill the session is actually running on, not every skill ever mentioned).\n"
-            "- Derive it from: the latest relevant `skills_load` in dialog_history or dialog_history_batch; "
-            "or, if `<previous_summary>` had ACTIVE_SKILL and the task/workflow is unchanged, carry that id forward.\n"
-            "- Replace or clear the id when the user switches tasks, abandons the skill workflow, or it is clearly finished; then use `n/a`.\n"
-            "- Do not invent skill ids. The catalog stays in system context; this line tells which id to `skills_load` again when the body is still needed.\n"
-            "- If not `n/a`, NEXT_ACTIONS may include `skills_load` for that id when execution continues that workflow."
-        ),
-    ),
-    SummarySection(
-        title="NEXT_ACTIONS",
-        description=(
-            "- 3-7 focused, executable next actions for the next 1-3 iterations.\n"
-            "- If EXECUTION_STAGE is `planning`, next actions must remain planning, analysis, review, or clarification only.\n"
-            "- If EXECUTION_STAGE is `execution`, next actions may include concrete task-solving, tool use, drafting, editing, coding, or research work.\n"
-            "- Must not repeat items listed under DO_NOT_REDO unless the user explicitly requests a retry."
+            "- First line: `mode: planning-only` or `mode: execution` (from explicit user intent; if unclear, `planning-only`).\n"
+            "- Optional second line: `skill: <skill_id>` or `skill: n/a` (workflow to continue now; from latest `skills_load` or previous summary if unchanged).\n"
+            "- 3-7 open work items with statuses [TODO], [IN_PROGRESS], or [BLOCKED] for the next 1-3 iterations (no [DONE] here).\n"
+            "- Brief completed outcomes from this batch belong in LAST_VERIFIED_FACTS, not here.\n"
+            "- If `planning-only`, tasks are analysis, review, clarification, or planning artifacts only (no implementation edits unless user approved).\n"
+            "- If `execution`, concrete solving may continue (tools, edits, drafting, coding, research)."
         ),
     ),
     SummarySection(
         title="DO_NOT_REDO",
         description=(
             "- Approaches, edits, commands, configs, or fixes already tried and rejected, failed, or superseded.\n"
-            "- Include user corrections that ruled something out (\"don't use X\", \"revert Y\", \"that path failed\").\n"
-            "- Include dead ends from tool errors or verification failures when they should not be retried blindly.\n"
+            "- User corrections that ruled something out (\"don't use X\", \"revert Y\", \"that path failed\").\n"
+            "- Dead ends from tool errors or verification failures when they should not be retried blindly.\n"
             "- Use `n/a` only if nothing was explicitly ruled out or abandoned.\n"
             "- Do not invent rejected attempts; every item must be traceable to dialogue, tool output, or user message."
         ),
     ),
     SummarySection(
-        title="SPEC_AND_CONSTRAINTS",
+        title="LAST_VERIFIED_FACTS",
         description=(
-            "- Requirements, contracts, compatibility, acceptance criteria, or preferences **still binding** for continuation.\n"
-            "- Only what is missing from persistent_state or newly changed; do not copy stable constraints already there.\n"
-            "- Use `n/a` if persistent_state already covers constraints for the next steps."
+            "- Compact verified outcomes: path or command → verdict, counts, hashes, test results (one line each).\n"
+            "- Prefer facts costly to rediscover; use `n/a` if none new this batch.\n"
+            "- Do not invent paths, numbers, or outcomes; trace every item to dialogue or tool output."
         ),
     ),
     SummarySection(
-        title="RECENT_ARTIFACTS_AND_SOURCES",
+        title="ACTIVE_CONSTRAINTS",
         description=(
-            "- Recent files, documents, URLs, sources, modules, symbols, tests, commands, endpoints, drafts, outputs, tools, environment details, claims, or evidence.\n"
-            "- Prefer details that are costly to rediscover.\n"
-            "- Every artifact/source/path/reference must be traceable to explicit dialogue, tool output, user message, or provided context.\n"
-            "- Do not invent paths, URLs, citations, sources, or artifacts."
+            "- Requirements, compatibility, acceptance criteria, or preferences still binding for continuation.\n"
+            "- Use `n/a` if none beyond what the session already established."
+        ),
+    ),
+    SummarySection(
+        title="RECENT_ARTIFACTS",
+        description=(
+            "- Recent paths, URLs, modules, symbols, drafts, or outputs as `path -> purpose` (index only, not file contents).\n"
+            "- Do not duplicate LAST_VERIFIED_FACTS; artifacts answer *where*, facts answer *what was proven*.\n"
+            "- Every entry traceable to dialogue, tool output, or user message; do not invent paths or URLs."
         ),
     ),
 )

@@ -31,20 +31,17 @@ class ThreadSummarizerTest(unittest.TestCase):
             "- User wants a fact-check of acp2.md and acp3.md output.\n"
             "- Goal: verify claims and produce corrected doc.\n"
             "- Open question: minor site wording may change.\n\n"
-            "## Execution stage\n"
-            "- planning-only\n\n"
-            "### Recent progress\n"
-            "- [DONE] Read official docs.\n"
-            "- Current approach: reviewing sources.\n\n"
-            "### Active skill\n"
-            "- n/a\n\n"
-            "### Next actions\n"
-            "- Draft acp3.md.\n\n"
+            "## Open tasks\n"
+            "- mode: planning-only\n"
+            "- [IN_PROGRESS] Review sources.\n"
+            "- [TODO] Draft acp3.md.\n\n"
+            "### Last verified facts\n"
+            "- [DONE] Read official docs.\n\n"
             "### Do not redo\n"
             "- n/a\n\n"
-            "### Spec and constraints\n"
+            "### Active constraints\n"
             "- Preserve full article structure.\n\n"
-            "### Recent artifacts and sources\n"
+            "### Recent artifacts\n"
             "- prompts/chat_completions_summary_prompt.md\n"
         )
         self.assertTrue(
@@ -57,6 +54,19 @@ class ThreadSummarizerTest(unittest.TestCase):
                 "TASK_AND_CONTEXT",
             ),
             "conjunction 'and' must not count toward TASK_AND_CONTEXT",
+        )
+        self.assertFalse(
+            _section_marker_hit(
+                "We should not retry the failed patch blindly.",
+                "DO_NOT_REDO",
+            ),
+            "stopword 'not' must not alone count toward DO_NOT_REDO",
+        )
+        self.assertTrue(
+            _section_marker_hit(
+                "DO_NOT_REDO:\n- do not use sed on this repo",
+                "DO_NOT_REDO",
+            ),
         )
         self.assertFalse(is_valid_summary_text(""))
         self.assertFalse(is_valid_summary_text("[assistant] raw transcript"))

@@ -1,4 +1,10 @@
-"""Gateway for working_memory snapshot/render/parse operations."""
+"""Gateway for working_memory snapshot/render/parse operations.
+
+1) **Trace** — ``working_memory`` tool: ``append`` or ``rewrite`` on any register.
+2) **Summarization** — LLM patch via ``apply_summary_memory_patch``: full replace of all four registers.
+
+Parsed/applied gateway deltas always use replace semantics (``REGISTER_MERGE_MODES``).
+"""
 
 from __future__ import annotations
 
@@ -18,12 +24,16 @@ REGISTER_ORDER = (
     REGISTER_KNOWLEDGE,
 )
 
-REGISTER_MERGE_MODES = {
-    REGISTER_KNOWLEDGE: "append",
-    REGISTER_CONSTRAINTS: "append",
+# Parsed/applied LLM memory patches: every register is a full replace (not append).
+# The ``working_memory`` tool does not use this map.
+REGISTER_MERGE_MODES: Dict[str, str] = {
     REGISTER_GOAL: "replace",
+    REGISTER_CONSTRAINTS: "replace",
     REGISTER_STATE: "replace",
+    REGISTER_KNOWLEDGE: "replace",
 }
+
+SUMMARY_PATCH_REPLACE_REGISTERS: frozenset[str] = frozenset(REGISTER_ORDER)
 
 @dataclass(frozen=True)
 class WorkingMemorySnapshot:
@@ -143,14 +153,21 @@ def resolve_persistent_state_block(
     return render_persistent_state_for_prompt(read_snapshot_from_state(state))
 
 
-def build_memory_deltas_format_repair_messages(raw_output: str) -> List[Dict[str, str]]:
+def build_memory_deltas_format_repair_messages(
+    raw_output: str,
+    *,
+    full_replace: bool = False,
+) -> List[Dict[str, str]]:
     register_tags = _register_tags_for_repair_prompt()
+    replace_hint = (
+        "Use all four register tags when the source covers a full memory rebuild; "
+        "keep empty tags when the source meant to clear a register (empty body means clear)."
+    )
     system_prompt = (
         "You are a strict formatter. Convert input text into working_memory register tags only. "
         f"Use zero or more of: {register_tags}. "
         "Do not add new facts. Preserve meaning. "
-        "Append step: omit empty append-register tags. "
-        "Replace step: keep empty replace-register tags (empty body means clear)."
+        f"{replace_hint}"
     )
     user_prompt = (
         "<raw_memory_step_output>\n"
@@ -163,7 +180,16 @@ def build_memory_deltas_format_repair_messages(raw_output: str) -> List[Dict[str
     ]
 
 
-def parse_memory_deltas(raw_output: str) -> tuple[WorkingMemoryDeltas, frozenset[str]]:
+def _register_uses_replace_semantics(name: str, *, full_replace: bool = False) -> bool:
+    del full_replace  # all gateway registers use replace semantics
+    return name in REGISTER_ORDER and REGISTER_MERGE_MODES.get(name) == "replace"
+
+
+def parse_memory_deltas(
+    raw_output: str,
+    *,
+    full_replace: bool = False,
+) -> tuple[WorkingMemoryDeltas, frozenset[str]]:
     """Parse register tags; return deltas and which register names were present in output."""
     text = str(raw_output or "")
     deltas: Dict[str, str] = {}
@@ -177,7 +203,7 @@ def parse_memory_deltas(raw_output: str) -> tuple[WorkingMemoryDeltas, frozenset
         if value:
             deltas[name] = value
             present.add(name)
-        elif REGISTER_MERGE_MODES.get(name) == "replace":
+        elif _register_uses_replace_semantics(name, full_replace=full_replace):
             deltas[name] = ""
             present.add(name)
     return _deltas_from_mapping(deltas), frozenset(present)
@@ -201,8 +227,11 @@ def parse_memory_deltas_with_repair(
     *,
     repair_fn: Callable[[str], str] | None = None,
     min_chars_for_repair: int = 100,
+    full_replace: bool = False,
 ) -> tuple[WorkingMemoryDeltas, frozenset[str], bool, str]:
-    first_pass, first_present = parse_memory_deltas(raw_output)
+    first_pass, first_present = parse_memory_deltas(
+        raw_output, full_replace=full_replace
+    )
     if not should_attempt_memory_deltas_repair(
         raw_output,
         first_pass,
@@ -212,7 +241,9 @@ def parse_memory_deltas_with_repair(
     if repair_fn is None:
         return first_pass, first_present, False, str(raw_output or "")
     repaired_output = str(repair_fn(str(raw_output or "")) or "")
-    repaired_pass, repaired_present = parse_memory_deltas(repaired_output)
+    repaired_pass, repaired_present = parse_memory_deltas(
+        repaired_output, full_replace=full_replace
+    )
     return repaired_pass, repaired_present, True, repaired_output
 
 
@@ -244,13 +275,17 @@ def apply_replace_deltas(
     deltas: WorkingMemoryDeltas | Mapping[str, str] | None,
     *,
     touched: frozenset[str] | None = None,
+    registers: frozenset[str] | None = None,
 ) -> WorkingMemorySnapshot:
     delta_map: Mapping[str, str] = coerce_working_memory_deltas(deltas).to_dict(
         skip_empty=False
     )
     merged: Dict[str, str] = snapshot.to_dict()
+    replace_names = registers if registers is not None else frozenset(
+        name for name in REGISTER_ORDER if REGISTER_MERGE_MODES.get(name) == "replace"
+    )
     for name in REGISTER_ORDER:
-        if REGISTER_MERGE_MODES.get(name) != "replace":
+        if name not in replace_names:
             continue
         if touched is not None:
             if name not in touched:
@@ -272,11 +307,43 @@ def apply_memory_patch(
     append_touched: frozenset[str] | None = None,
     replace_touched: frozenset[str] | None = None,
 ) -> WorkingMemorySnapshot:
-    updated = apply_append_deltas(
-        snapshot, append_deltas, touched=append_touched
-    )
+    """Apply LLM patch deltas; all registers use replace (``replace_deltas`` wins on conflict)."""
+    append_map = coerce_working_memory_deltas(append_deltas).to_dict()
+    replace_map = coerce_working_memory_deltas(replace_deltas).to_dict()
+    combined = {**append_map, **replace_map}
+    touched: set[str] = set()
+    if append_touched:
+        touched.update(append_touched)
+        append_all = coerce_working_memory_deltas(append_deltas).to_dict(skip_empty=False)
+        for name in append_touched:
+            combined[name] = append_all.get(name, "")
+    if replace_touched:
+        touched.update(replace_touched)
+        replace_all = coerce_working_memory_deltas(replace_deltas).to_dict(skip_empty=False)
+        for name in replace_touched:
+            combined[name] = replace_all.get(name, "")
     return apply_replace_deltas(
-        updated, replace_deltas, touched=replace_touched
+        snapshot,
+        combined,
+        touched=frozenset(touched) if touched else None,
+    )
+
+
+def apply_summary_memory_patch(
+    snapshot: WorkingMemorySnapshot,
+    replace_deltas: WorkingMemoryDeltas | Mapping[str, str] | None,
+    *,
+    replace_touched: frozenset[str] | None = None,
+) -> WorkingMemorySnapshot:
+    """After summarization: full replace for registers present in the LLM output only.
+
+    Omitted tags are left unchanged (previous snapshot kept). Empty tag body still
+    clears that register when the tag was present (``replace_touched``).
+    """
+    return apply_replace_deltas(
+        snapshot,
+        replace_deltas,
+        touched=replace_touched,
     )
 
 
@@ -298,6 +365,7 @@ __all__ = [
     "WorkingMemoryDeltas",
     "REGISTER_ORDER",
     "REGISTER_MERGE_MODES",
+    "SUMMARY_PATCH_REPLACE_REGISTERS",
     "MEMORY_DELTAS_FORMAT_REPAIR_REQUEST_LABEL",
     "read_snapshot_from_state",
     "render_persistent_state_for_prompt",
@@ -310,5 +378,6 @@ __all__ = [
     "apply_append_deltas",
     "apply_replace_deltas",
     "apply_memory_patch",
+    "apply_summary_memory_patch",
     "render_working_memory_for_summary_message",
 ]
