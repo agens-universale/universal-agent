@@ -10,6 +10,7 @@ SESSION_MEMORY_TOOL_NAME = "session_memory"
 SESSION_THINK_TOOL_NAME = "session_think"
 READ_STORED_TOOL_OUTPUT_NAME = "session_read_stored_tool_output"
 READ_USER_INTENT_LOG_NAME = "session_read_user_intent_log"
+SESSION_COMPACT_TOOL_NAME = "session_compact"
 
 # Project
 PROJECT_MEMORY_TOOL_NAME = "project_memory"

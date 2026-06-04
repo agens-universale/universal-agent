@@ -17,6 +17,10 @@ from summarize.summary_validation import (
     validate_summary_text,
 )
 from summarize.llm import request_summary_text
+from summarize.summary_logging import (
+    log_memory_patch_skipped_multi_batch,
+    log_memory_patch_wm_unchanged,
+)
 from summarize.working_memory_gateway import (
     WorkingMemoryDeltas,
     parse_memory_deltas_with_repair,
@@ -67,9 +71,8 @@ def summarize_dialog_via_chat_completions(
         full_history_messages: Полная история сообщений треда.
         persistent_state_block: Готовый блок ``<persistent_state>`` для prompt'ов (opaque).
             Если ``None`` — gateway соберёт snapshot из ``state.shared.working_memory``.
-        user_intent_log: Закрытые user turn'ы (`None` допустим): нормализуется и усекается,
-            затем входит в блок `<user_intent_log>`; при пустом — `- not found`.
-        current_user_intent: Открытый user turn: блок `<current_user_intent>`; при пустом — `- not found`.
+        user_intent_log: Закрытые user turn'ы для meta/trace и persisted summary (не в LLM prompt summarizer).
+        current_user_intent: Открытый user turn — то же; intent в ``dialog_summary`` собирает ``compaction``.
         max_tokens: Лимит ответа LLM на батч и связанные вызовы (сжатие/починка).
         steps_offset: Сдвиг нумерации в `dialog_history.format_last_dialog_steps` (инкрементальные сценарии).
 
@@ -436,6 +439,14 @@ def summarize_dialog_via_chat_completions(
                 },
             },
         }
+        if logger is not None and not replace_touched and memory_replace_deltas.is_empty():
+            log_memory_patch_wm_unchanged(
+                logger,
+                batches=len(batches),
+                format_repair_attempted=replace_repair,
+                format_repair_success=replace_repair_ok,
+                raw_response_chars=len(str(replace_result.raw_response or "")),
+            )
     else:
         trace["memory_patch"] = {
             "executed": False,
@@ -448,6 +459,8 @@ def summarize_dialog_via_chat_completions(
             "append": {"output": {}},
             "replace": {"output": {}},
         }
+        if logger is not None:
+            log_memory_patch_skipped_multi_batch(logger, batches=len(batches))
     if logger is not None:
         logger.info(
             "summary_finish batches=%s memory_patch_executed=%s raw_summary_chars=%s memory_delta_registers=%s",

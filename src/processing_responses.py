@@ -6,7 +6,8 @@ from intent_guard.feedback import (
     build_finish_gate_feedback,
     build_finish_gate_reject_technical_user_content,
 )
-from constants.tool_names import FINISH_TOOL_NAME
+from constants.tool_names import FINISH_TOOL_NAME, SESSION_COMPACT_TOOL_NAME
+from run_summary_coordinator import build_preserved_batch
 from intent_guard.guard import FinishGateGuard
 from intent_guard.turn_finish_emit import (
     apply_finish_gate_to_turn_finish_output_in_state,
@@ -60,6 +61,32 @@ def _summarize_call_data_for_log(call_data: Dict[str, Any]) -> Dict[str, Any]:
         "messages_count": len(messages) if isinstance(messages, list) else None,
         "tools_count": len(tools) if isinstance(tools, list) else None,
     }
+
+
+_SESSION_COMPACT_RESUME_USER_TEXT = (
+    "session_compact finished. The dialog summary user message in the trace is the new "
+    "baseline (updated session memory, last_dialog_steps, user intent). Continue from "
+    "that summary. The pre-compaction step-by-step trace is no longer in context."
+)
+
+
+def _without_tool_call_pairs(messages: List[Dict], tool_name: str) -> List[Dict]:
+    """Убрать пары function_call + function_call_output для ``tool_name`` из preserved batch."""
+    out: List[Dict] = []
+    i = 0
+    while i < len(messages):
+        msg = messages[i]
+        if (
+            i + 1 < len(messages)
+            and isinstance(msg, dict)
+            and msg.get("type") == "function_call"
+            and str(msg.get("name") or "") == tool_name
+        ):
+            i += 2
+            continue
+        out.append(msg)
+        i += 1
+    return out
 
 
 def _make_technical_feedback_user_message(
@@ -282,6 +309,10 @@ def process_tool_calls(
     if len(grouped_messages['tool_outputs']) > 0:
         raise ValueError('Messages has tool_outputs')
 
+    batch_snapshot = list(messages)
+    state._session_compact_batch_snapshot = batch_snapshot
+    state.session_compact_applied = False
+
     tools_outputs = []
     for m in grouped_messages["tool_calls"]:
         tool_name = str(m.get("name") or "")
@@ -317,6 +348,23 @@ def process_tool_calls(
         }
 
         tools_outputs.append(new_message)
+
+    if getattr(state, "session_compact_applied", False):
+        state.session_compact_applied = False
+        snapshot = getattr(state, "_session_compact_batch_snapshot", None) or batch_snapshot
+        if hasattr(state, "_session_compact_batch_snapshot"):
+            delattr(state, "_session_compact_batch_snapshot")
+        preserved = build_preserved_batch(
+            current_messages=[*snapshot, *tools_outputs],
+            mode="function_call_output",
+            state_messages=list(getattr(state, "messages", []) or []),
+        )
+        preserved = _without_tool_call_pairs(preserved, SESSION_COMPACT_TOOL_NAME)
+        resume = _make_technical_feedback_user_message(
+            _SESSION_COMPACT_RESUME_USER_TEXT,
+            technical_type=TECHNICAL_TYPE_TECHNICAL,
+        )
+        tools_outputs = [*preserved, resume]
 
     return tools_outputs
 

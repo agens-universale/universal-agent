@@ -55,6 +55,34 @@ def test_search_invalid_and_not_found(tmp_path):
     assert bad_path["ok"] is False and bad_path["error"]["field"] == "path"
 
 
+def test_search_alternation_literal_prefilter(tmp_path):
+    (tmp_path / "t.txt").write_text(
+        "line1 ALPHA\n"
+        "line2 beta\n"
+        "line3 ALPHA beta\n",
+        encoding="utf-8",
+    )
+    tool = SearchFiles()
+    for regex in ("ALPHA|beta", "beta|ALPHA"):
+        data = json.loads(tool(path=str(tmp_path), regex=regex))
+        assert data["ok"] is True
+        assert data["total_matches"] == 3, (regex, data["total_matches"], data["matches"])
+        assert [m["line"] for m in data["matches"]] == [1, 2, 3]
+
+
+def test_search_alternation_cyrillic(tmp_path):
+    (tmp_path / "t.md").write_text(
+        "строка 1: Аудит\n"
+        "строка 2: План проверки\n"
+        "строка 3: Аудит и План проверки\n",
+        encoding="utf-8",
+    )
+    data = json.loads(SearchFiles()(path=str(tmp_path), regex="Аудит|План проверки"))
+    assert data["ok"] is True
+    assert data["total_matches"] == 3
+    assert [m["line"] for m in data["matches"]] == [1, 2, 3]
+
+
 def test_search_validation_and_directory_error(tmp_path):
     tool = SearchFiles()
     bad_regex_type = json.loads(tool(path=str(tmp_path), regex=123))  # type: ignore[arg-type]

@@ -69,9 +69,9 @@ def build_intent_blocks_prefix(
     *,
     intent_log_preview_chars: int,
 ) -> str:
-    """XML intent blocks for summary LLM (same wire format as ``dialog_summary``).
+    """XML intent blocks для ``dialog_summary`` (не для summarizer/patch LLM).
 
-    Closed log: ``tail_preview`` (whole records within char budget). Open turn: full JSONL.
+    Closed log: ``tail_preview``. Open turn: full JSONL. См. ``build_dialog_summary_content``.
     """
     safe_chars = (
         int(intent_log_preview_chars)

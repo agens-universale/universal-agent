@@ -209,15 +209,22 @@ class SpecialAgent(AbstractSubagent):
                     continue
                 headers[k] = v
 
-        call_data = {
+        call_data: Dict[str, Any] = {
             "model": model,
             "messages": messages,
-            "temperature": 0.7,
         }
         if bool(self.config_dict.get("use_max_tokens_param", False)):
             call_data["max_tokens"] = 4096
         else:
             call_data["max_completion_tokens"] = 4096
+
+        protected = {"model", "messages", "max_tokens", "max_completion_tokens"}
+        extra = self.config_dict.get("chat_completion_kwargs")
+        if isinstance(extra, dict) and extra:
+            for key, value in extra.items():
+                if key in protected:
+                    continue
+                call_data[key] = value
 
         res_data = request_backend_chat_completions(
             call_data, headers, url=url, verify=verify,

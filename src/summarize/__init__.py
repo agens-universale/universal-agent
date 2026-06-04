@@ -58,7 +58,7 @@
   ``maybe_run_summary_compaction``, ``apply_summary_state_patch``;
 - ``thread_summarizer`` — сценарий батчей LLM и сборка результата;
 - ``message_format`` (отдельный пакет) — такты, батчи, сериализация сообщений для промпта;
-- ``summary_validation`` — эвристики пригодности сводки;
+- ``summary_validation`` — strict validate ответа summarizer (теги из ``summary_spec``, regex-extract);
 - ``summary_message_body`` — тело сообщения-резюме;
 - ``summary_llm_steps`` — сжатие и починка сводки (отдельные вызовы LLM);
 - ``memory_suggestions`` — шаг предложений для долговременной памяти;

@@ -64,6 +64,10 @@ def test_read_stored_tool_output_pagination_chars():
         ReadStoredToolOutput.tool_description()["description"].lower().split()
     )
     assert "character" in flat
+    assert "eof" in flat
+    prompt = ReadStoredToolOutput.prompt_description().lower()
+    assert "truncated=false" in prompt
+    assert "next_offset" in prompt and "total_chars" in prompt
 
 
 def test_read_user_intent_log_pagination_records():

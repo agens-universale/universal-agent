@@ -143,9 +143,11 @@ class RunSkillScriptTool:
                 script_name=script_name,
                 args=args_data,
             )
+            script_ok = result.get("exit_code", 1) == 0
             return _wrap(
                 tool="skills_run_script",
                 ok=True,
+                script_ok=script_ok,
                 skill_id=skill_id,
                 script_name=script_name,
                 args=args_data,
@@ -392,9 +394,11 @@ def get_skills_tools_data(skills_registry: SkillsRegistry) -> Dict[str, Dict[str
                 "name": "skills_run_script",
                 "description": (
                     "Run a Python script that belongs to a specific skill. "
-                    "Arguments are passed as JSON via stdin. "
+                    "Arguments are passed as JSON via stdin; the script must read and parse stdin "
+                    "(argparse CLI positional/options are not auto-converted from args). "
                     "If script_name is omitted, scripts/main.py is used. "
-                    "Returns a JSON string envelope: {tool, ok, skill_id, script_name, args, error, result}. "
+                    "Returns a JSON string envelope: {tool, ok, script_ok, skill_id, script_name, args, error, result}. "
+                    "ok=true means the wrapper launched the script; script_ok=false when result.exit_code != 0. "
                     "On success, the script output is inside result."
                 ),
                 "parameters": {
@@ -417,7 +421,8 @@ def get_skills_tools_data(skills_registry: SkillsRegistry) -> Dict[str, Dict[str
                                 "Must decode to a JSON object (dictionary), not an array, scalar, or null. "
                                 "When provided, pass script arguments as one JSON string "
                                 "(this field is string-typed, not a nested object). "
-                                "The script receives the parsed object on stdin. "
+                                "The script receives the parsed object on stdin and must read it explicitly "
+                                "(keys are not converted to CLI flags or positionals). "
                                 "Example: '{\"input\":\"hello\",\"limit\":3}'."
                             ),
                         },
@@ -440,7 +445,8 @@ def get_skills_tools_data(skills_registry: SkillsRegistry) -> Dict[str, Dict[str
                 "- Provide script arguments in args only when the skill expects them.\n"
                 "- args must decode to a JSON object; pass it as a string, not a nested object "
                 "(e.g. '{\"input\":\"hello\"}').\n"
-                "- The result includes stdout, stderr and the exit code."
+                "- Scripts must read stdin JSON themselves; args are not mapped to argparse CLI.\n"
+                "- The result includes stdout, stderr, exit_code, and script_ok (false when exit_code != 0)."
             ),
         },
         "skills_load_reference": {

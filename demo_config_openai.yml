@@ -43,8 +43,8 @@ agent:
   max_steps: 1000
   no_tool_call_max_count: 5
   strict_turn_finish_validation: true
-  tool_output_inline_max_chars: 20000
-  stored_tool_outputs_max_entries: 10
+  tool_output_inline_max_chars: 10000
+  stored_tool_outputs_max_entries: 50
 
 logging:
   full_log_backend: false

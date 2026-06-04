@@ -84,6 +84,8 @@ agent:
   finish_gate_max_iterations: 10
   subagent_finish_gate_max_iterations: 3
   # finish_gate_use_rule_hints: false  # rule-layer без LLM — вне v1
+  tool_output_inline_max_chars: 10000
+  stored_tool_outputs_max_entries: 50
   inject_tool_fields:
     reason: "Brief rationale (1–2 sentences): goal, why now, expected outcome."
 

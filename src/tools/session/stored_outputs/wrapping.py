@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import logging
 from typing import Any, Dict, Optional
 from uuid import uuid4
@@ -10,6 +9,11 @@ from config_modules.stored_outputs import (
 )
 from constants.tool_names import READ_STORED_TOOL_OUTPUT_NAME
 from states import State
+from tools.session.stored_outputs.envelope import (
+    PAGINATION_EOF_MARKER_DOC,
+    dumps_stored_tool_output_payload,
+    utf8_byte_length,
+)
 from tools.session.stored_outputs.tool_call_outputs_store import ToolCallOutputRecord
 _fallback_logger = logging.getLogger(__name__)
 
@@ -64,25 +68,24 @@ def maybe_store_and_wrap_tool_output(
 
     content = tool_res[:inline_limit]
     next_offset = len(content)
-    payload = {
-        "type": "stored_tool_output",
-        "ok": True,
-        "stored": True,
-        "reason": "source_tool_output_too_large",
-        "output_ref": output_ref,
-        "from_original_call_id": call_id,
-        "source_tool": tool_name,
-        "offset": 0,
-        "limit": inline_limit,
-        "total_chars": total_chars,
-        "truncated": next_offset < total_chars,
-        "next_offset": next_offset,
-        "content": content,
-        "read_via": READ_STORED_TOOL_OUTPUT_NAME,
-        "hint": (
+    return dumps_stored_tool_output_payload(
+        ok=True,
+        stored=True,
+        output_ref=output_ref,
+        from_original_call_id=call_id,
+        source_tool=tool_name,
+        offset=0,
+        limit=inline_limit,
+        total_chars=total_chars,
+        total_bytes=utf8_byte_length(tool_res),
+        truncated=next_offset < total_chars,
+        next_offset=next_offset,
+        content=content,
+        hint=(
             "The original source_tool output is too large, so this response contains only part. "
-            f"Continue with {READ_STORED_TOOL_OUTPUT_NAME} using output_ref and next_offset. "
+            f"Continue with {READ_STORED_TOOL_OUTPUT_NAME} using output_ref and offset=next_offset "
+            "while truncated=true. "
+            f"{PAGINATION_EOF_MARKER_DOC} "
             "If the record is gone (LRU), re-invoke the original source_tool - the ref cannot be restored."
         ),
-    }
-    return json.dumps(payload, ensure_ascii=False)
+    )

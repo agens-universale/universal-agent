@@ -1,8 +1,12 @@
-import json
 import logging
 from typing import Any, Dict, Optional
 
 from config_modules.stored_outputs import get_tool_output_inline_max_chars
+from tools.session.stored_outputs.envelope import (
+    PAGINATION_EOF_MARKER_DOC,
+    dumps_stored_tool_output_payload,
+    utf8_byte_length,
+)
 from tools.simple_tool_base import AbstractSimpleTool
 
 _TOOL_NAME = "session_read_stored_tool_output"
@@ -28,7 +32,9 @@ class ReadStoredToolOutput(AbstractSimpleTool):
             "name": _TOOL_NAME,
             "description": (
                 "Read a paginated fragment of a previously stored large tool output by output_ref. "
-                "Pagination uses **characters** (Unicode code points): `offset` + `limit`."
+                "Pagination uses **characters** (Unicode code points): `offset` + `limit`. "
+                "Response pages include truncated, total_chars, next_offset, returned_chars. "
+                "EOF: when truncated=false, next_offset equals total_chars (end of body)."
             ),
             "parameters": {
                 "type": "object",
@@ -78,14 +84,19 @@ Behavior:
 - offset default is 0.
 - limit default is tool_output_inline_max_chars.
 - limit is clamped to range [1, tool_output_inline_max_chars].
+- Each page includes pagination metadata: truncated, total_chars, total_bytes, output_ref,
+  offset, returned_chars, next_offset.
+- More pages: truncated=true — continue with offset=next_offset.
+- Last page (EOF): truncated=false and next_offset == total_chars — do not read further.
 - If output_ref is missing/evicted, call the original source tool again to regenerate it.
 """
 
     def _inline_limit(self) -> int:
         return get_tool_output_inline_max_chars(self._config_dict or {})
 
-    @staticmethod
+    @classmethod
     def _payload(
+        cls,
         *,
         ok: bool,
         stored: bool,
@@ -94,34 +105,31 @@ Behavior:
         from_original_call_id: Optional[str],
         offset: int,
         limit: int,
-        total_chars: Optional[int],
+        total_chars: Optional[int] = None,
+        total_bytes: Optional[int] = None,
         truncated: bool,
         next_offset: int,
         content: str,
         error: Optional[Dict[str, Any]],
         hint: str,
     ) -> str:
-        return json.dumps(
-            {
-                "tool": ReadStoredToolOutput.registered_tool_name(),
-                "type": "stored_tool_output",
-                "ok": ok,
-                "stored": stored,
-                "reason": "source_tool_output_too_large",
-                "output_ref": output_ref,
-                "from_original_call_id": from_original_call_id,
-                "source_tool": source_tool,
-                "offset": offset,
-                "limit": limit,
-                "total_chars": total_chars,
-                "truncated": truncated,
-                "next_offset": next_offset,
-                "content": content,
-                "read_via": ReadStoredToolOutput.registered_tool_name(),
-                "hint": hint,
-                "error": error,
-            },
-            ensure_ascii=False,
+        return dumps_stored_tool_output_payload(
+            ok=ok,
+            stored=stored,
+            output_ref=output_ref,
+            from_original_call_id=from_original_call_id,
+            source_tool=source_tool,
+            offset=offset,
+            limit=limit,
+            total_chars=total_chars,
+            total_bytes=total_bytes,
+            truncated=truncated,
+            next_offset=next_offset,
+            content=content,
+            error=error,
+            hint=hint,
+            tool=cls.registered_tool_name(),
+            read_via=cls.registered_tool_name(),
         )
 
     def __call__(
@@ -288,6 +296,17 @@ Behavior:
             next_offset,
             truncated,
         )
+        if truncated:
+            hint = (
+                "Paged fragment of a large stored tool output. "
+                "Continue with output_ref and offset=next_offset while truncated=true. "
+                "If record is gone (LRU), re-invoke source_tool."
+            )
+        else:
+            hint = (
+                "Last page of stored tool output (EOF). "
+                f"{PAGINATION_EOF_MARKER_DOC}"
+            )
         return self._payload(
             ok=True,
             stored=True,
@@ -297,15 +316,12 @@ Behavior:
             offset=safe_offset,
             limit=effective_limit,
             total_chars=total_chars,
+            total_bytes=utf8_byte_length(record.text),
             truncated=truncated,
             next_offset=next_offset,
             content=content,
             error=None,
-            hint=(
-                "Original source_tool output is large; this is a paged fragment. "
-                "Continue with output_ref and next_offset. "
-                "If record is gone (LRU), re-invoke source_tool."
-            ),
+            hint=hint,
         )
 
 

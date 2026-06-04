@@ -18,6 +18,7 @@ from summarize.summary_logging import (
     log_compaction_started,
     log_summary_message_body,
     log_summary_raw_text,
+    log_summary_slice_fallback,
     logger_from_ctx,
 )
 from summarize.summary_message_body import (
@@ -213,6 +214,12 @@ def run_summary_compaction(
     try:
         agent_summary_text = slice_summary(raw_summary, agent_slice)
     except ValueError:
+        log_summary_slice_fallback(
+            logger,
+            log_ctx,
+            slice_mode=agent_slice,
+            raw_summary_chars=len(raw_summary),
+        )
         agent_summary_text = raw_summary
     memory_append_deltas = coerce_working_memory_deltas(
         summary_result.get("memory_append_deltas")
