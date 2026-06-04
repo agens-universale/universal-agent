@@ -7,13 +7,14 @@ from summarize.working_memory_gateway import (
     apply_append_deltas,
     apply_memory_patch,
     apply_replace_deltas,
+    apply_summary_memory_patch,
     coerce_working_memory_deltas,
     build_memory_deltas_format_repair_messages,
     parse_memory_deltas,
     parse_memory_deltas_with_repair,
     read_snapshot_from_state,
     render_persistent_state_for_prompt,
-    render_working_memory_for_summary_message,
+    render_session_memory_for_summary_message,
     resolve_persistent_state_block,
     should_attempt_memory_deltas_repair,
 )
@@ -52,7 +53,7 @@ def test_render_persistent_state_for_prompt_contains_all_registers():
     rendered = render_persistent_state_for_prompt(snapshot)
 
     assert "<persistent_state>" in rendered
-    assert "<working_memory>" in rendered
+    assert "<session_memory>" in rendered
     assert "<goal>" in rendered and "</goal>" in rendered
     assert "<constraints>" in rendered and "</constraints>" in rendered
     assert "<state>" in rendered and "</state>" in rendered
@@ -99,24 +100,24 @@ def test_parse_memory_deltas_returns_empty_on_broken_or_empty_payload():
     assert present == frozenset({"goal", "state"})
 
 
-def test_parse_memory_deltas_omits_empty_append_tags():
+def test_parse_memory_deltas_empty_tag_clears_register():
     deltas, present = parse_memory_deltas(
         "<knowledge></knowledge><constraints>  </constraints><knowledge>fact</knowledge>"
     )
-    assert deltas == WorkingMemoryDeltas(knowledge="fact")
-    assert present == frozenset({"knowledge"})
+    assert deltas == WorkingMemoryDeltas(constraints="", knowledge="fact")
+    assert present == frozenset({"constraints", "knowledge"})
 
 
-def test_register_merge_modes_match_spec():
+def test_register_merge_modes_all_replace():
     assert REGISTER_MERGE_MODES == {
-        "knowledge": "append",
-        "constraints": "append",
         "goal": "replace",
+        "constraints": "replace",
         "state": "replace",
+        "knowledge": "replace",
     }
 
 
-def test_apply_append_deltas_only_append_registers():
+def test_apply_append_deltas_is_noop_when_all_replace():
     snapshot = WorkingMemorySnapshot(
         goal="existing goal",
         constraints="",
@@ -132,13 +133,10 @@ def test_apply_append_deltas_only_append_registers():
 
     updated = apply_append_deltas(snapshot, deltas)
 
-    assert updated.goal == "existing goal"
-    assert updated.state == "existing state"
-    assert updated.constraints == "must keep tests green"
-    assert updated.knowledge == "verified fact"
+    assert updated == snapshot
 
 
-def test_apply_replace_deltas_only_replace_registers():
+def test_apply_replace_deltas_replaces_any_register():
     snapshot = WorkingMemorySnapshot(
         goal="existing goal",
         constraints="existing constraints",
@@ -147,17 +145,17 @@ def test_apply_replace_deltas_only_replace_registers():
     )
     deltas = {
         "goal": "new goal snapshot",
-        "constraints": "ignored constraints delta",
+        "constraints": "new constraints snapshot",
         "state": "new state snapshot",
-        "knowledge": "ignored knowledge delta",
+        "knowledge": "new knowledge snapshot",
     }
 
     updated = apply_replace_deltas(snapshot, deltas)
 
     assert updated.goal == "new goal snapshot"
     assert updated.state == "new state snapshot"
-    assert updated.constraints == "existing constraints"
-    assert updated.knowledge == "existing knowledge"
+    assert updated.constraints == "new constraints snapshot"
+    assert updated.knowledge == "new knowledge snapshot"
 
 
 def test_apply_replace_deltas_clears_register_when_touched_and_empty():
@@ -175,6 +173,58 @@ def test_apply_replace_deltas_clears_register_when_touched_and_empty():
 
     assert updated.goal == ""
     assert updated.state == "done"
+
+
+def test_parse_memory_deltas_full_replace_clears_empty_constraints():
+    deltas, present = parse_memory_deltas(
+        "<constraints></constraints><knowledge>fact</knowledge>",
+        full_replace=True,
+    )
+    assert deltas == WorkingMemoryDeltas(constraints="", knowledge="fact")
+    assert present == frozenset({"constraints", "knowledge"})
+
+
+def test_apply_summary_memory_patch_skips_registers_missing_from_llm_output():
+    snapshot = WorkingMemorySnapshot(
+        goal="old goal",
+        constraints="stale rule",
+        state="stale TODO",
+        knowledge="stale fact",
+    )
+    deltas, present = parse_memory_deltas(
+        "<goal>new goal</goal><state>fresh TODO</state>",
+        full_replace=True,
+    )
+    assert present == frozenset({"goal", "state"})
+    updated = apply_summary_memory_patch(snapshot, deltas, replace_touched=present)
+    assert updated.goal == "new goal"
+    assert updated.state == "fresh TODO"
+    assert updated.constraints == "stale rule"
+    assert updated.knowledge == "stale fact"
+
+
+def test_apply_summary_memory_patch_replaces_all_registers():
+    snapshot = WorkingMemorySnapshot(
+        goal="old goal",
+        constraints="stale rule",
+        state="stale TODO",
+        knowledge="stale fact",
+    )
+    replace_deltas = {
+        "goal": "new goal",
+        "constraints": "new rule",
+        "state": "fresh TODO",
+        "knowledge": "new fact",
+    }
+    updated = apply_summary_memory_patch(
+        snapshot,
+        replace_deltas,
+        replace_touched=frozenset(replace_deltas.keys()),
+    )
+    assert updated.goal == "new goal"
+    assert updated.constraints == "new rule"
+    assert updated.state == "fresh TODO"
+    assert updated.knowledge == "new fact"
 
 
 def test_apply_memory_patch_combines_append_and_replace():
@@ -199,11 +249,11 @@ def test_apply_memory_patch_combines_append_and_replace():
 
     assert updated.goal == "fresh goal"
     assert updated.state == "fresh state"
-    assert updated.constraints == "old constraints\n\nnew rule"
-    assert updated.knowledge == "old knowledge\n\nnew fact"
+    assert updated.constraints == "new rule"
+    assert updated.knowledge == "must not replace"
 
 
-def test_render_working_memory_for_summary_message_skips_empty_registers():
+def test_render_session_memory_for_summary_message_skips_empty_registers():
     snapshot = WorkingMemorySnapshot(
         goal="finalize",
         constraints="",
@@ -211,14 +261,14 @@ def test_render_working_memory_for_summary_message_skips_empty_registers():
         knowledge="ref: docs_md/memory-files-to-working-memory-spec.md",
     )
 
-    rendered = render_working_memory_for_summary_message(snapshot)
+    rendered = render_session_memory_for_summary_message(snapshot)
 
-    assert rendered.startswith("<working_memory>")
+    assert rendered.startswith("<session_memory>")
     assert "<goal>" in rendered and "finalize" in rendered
     assert "<knowledge>" in rendered and "ref: docs_md/memory-files-to-working-memory-spec.md" in rendered
     assert "<constraints>" not in rendered
     assert "<state>" not in rendered
-    assert rendered.strip().endswith("</working_memory>")
+    assert rendered.strip().endswith("</session_memory>")
 
 
 def test_should_attempt_memory_deltas_repair_when_large_unparsed_text():

@@ -4,24 +4,26 @@ from typing import Any, Callable, Dict, List, Optional
 
 from tools import apply_tool
 from tools.simple_tool_base import AbstractSimpleTool
-from tools.session.submit_solution import SubmitSolution
+from constants.tool_names import FINISH_TOOL_NAME
+from tools.turn.submit_solution import SubmitSolution
 from tools.session.stored_outputs.wrapping import maybe_store_and_wrap_tool_output
 from utils.generate_message_id import generate_msg_id_sha256 as generate_message_id_func
 
 
-def _resolve_submit_solution_output_on_cycle_stop(
+def _resolve_finish_turn_output_on_cycle_stop(
     *,
     state: Any,
     ctx: Any,
     tool_arguments: str,
     run_agent_func: Callable,
 ) -> str:
+    """Build finish-turn tool output when the model stopped mid pending tool_calls."""
     candidate = SubmitSolution.output_from_cycle_stop_arguments(tool_arguments)
     if isinstance(candidate, str) and candidate.strip():
         return candidate
     try:
         applied = apply_tool(
-            tool_name="submit_solution",
+            tool_name=FINISH_TOOL_NAME,
             arguments=tool_arguments,
             ctx=ctx,
             state=state,
@@ -32,7 +34,7 @@ def _resolve_submit_solution_output_on_cycle_stop(
     except Exception:
         pass
     return SubmitSolution.cycle_stop_output_error(
-        detail="Could not build submit_solution output from function_call.arguments.",
+        detail="Could not build finish-turn output from function_call.arguments.",
     )
 
 
@@ -44,8 +46,8 @@ def _resolve_tool_output_on_cycle_stop(
     tool_arguments: str,
     run_agent_func: Callable,
 ) -> str:
-    if tool_name == "submit_solution":
-        return _resolve_submit_solution_output_on_cycle_stop(
+    if tool_name == FINISH_TOOL_NAME:
+        return _resolve_finish_turn_output_on_cycle_stop(
             state=state,
             ctx=ctx,
             tool_arguments=tool_arguments,

@@ -8,7 +8,7 @@ from config_modules.intent_scope import (
 from intent_log import deserialize_list, read_info, read_page
 from tools.simple_tool_base import AbstractSimpleTool
 
-_TOOL_NAME = "read_user_intent_log"
+_TOOL_NAME = "session_read_user_intent_log"
 
 
 class ReadUserIntentLog(AbstractSimpleTool):
@@ -73,7 +73,7 @@ class ReadUserIntentLog(AbstractSimpleTool):
     @classmethod
     def prompt_description(cls) -> str:
         page_limit = DEFAULT_INTENT_LOG_READ_PAGE_RECORD_LIMIT
-        return f"""Tool name: read_user_intent_log
+        return f"""Tool name: session_read_user_intent_log
 Tool description: Read-only paginated access to closed user_intent_log (completed turns).
 
 Input schema:
@@ -88,7 +88,7 @@ Behavior:
 
     def _payload(self, *, ok: bool, action: str, body: Dict[str, Any]) -> str:
         payload: Dict[str, Any] = {
-            "tool": _TOOL_NAME,
+            "tool": ReadUserIntentLog.registered_tool_name(),
             "ok": ok,
             "action": action,
         }

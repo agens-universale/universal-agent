@@ -1,10 +1,10 @@
 """Stage 2: session tools declare interaction roles in API descriptions."""
 
-from tools.session.intermediate_reply import IntermediateReply
-from tools.session.ask_human import AskHuman
-from tools.session.submit_solution import SubmitSolution
+from tools.turn.intermediate_reply import IntermediateReply
+from tools.turn.ask_human import AskHuman
+from tools.turn.submit_solution import SubmitSolution
 from tools.session.working_memory import WorkingMemory
-from tools.session.long_memory import LongMemory
+from tools.project.project_memory import ProjectMemory
 from tools.fs.read_file import ReadFile
 from tools.session.stored_outputs.read_stored_tool_output import ReadStoredToolOutput
 from tools.session.read_user_intent_log import ReadUserIntentLog
@@ -12,26 +12,32 @@ from tools.session.read_user_intent_log import ReadUserIntentLog
 
 def test_intermediate_reply_non_final():
     desc = IntermediateReply.tool_description()["description"].lower()
-    assert "intermediate" in desc or "non-final" in desc
+    assert desc.startswith("finalizes turn: no")
+    assert "intermediate" in desc
     assert "not complete" in desc
-    assert "final" in desc
-    assert "multi-step" in desc or "multi-step" in desc
+    assert "does not wait" in desc
+    assert "turn_finish" not in desc
+    assert "ask_human" not in desc
 
 
 def test_ask_human_requests_input_non_final():
     desc = AskHuman.tool_description()["description"].lower()
-    assert "non-final" in desc
+    assert desc.startswith("finalizes turn: no")
+    assert "wait" in desc
     assert "confirmation" in desc or "choice" in desc
-    assert "turn-finalizing" in desc or "final" in desc
+    assert "one-way" in desc
+    assert "turn_finish" not in desc
+    assert "intermediate_reply" not in desc
     assert len(desc) < 950
 
 
 def test_submit_solution_finalize_turn():
     desc = SubmitSolution.tool_description()["description"].lower()
-    assert "finalize" in desc
+    assert desc.startswith("finalizes turn: yes")
     assert "exactly once" in desc
-    assert "intermediate" in desc
-    assert "ask-user" in desc or "ask the user" in desc
+    assert "mid-task" in desc or "progress" in desc
+    assert "intermediate_reply" not in desc
+    assert "ask_human" not in desc
 
 
 def test_working_memory_thread_not_project():
@@ -40,8 +46,8 @@ def test_working_memory_thread_not_project():
     assert "forever" in desc or "project-wide" in desc
 
 
-def test_long_memory_project_future():
-    desc = LongMemory.tool_description()["description"].lower()
+def test_project_memory_project_future():
+    desc = ProjectMemory.tool_description()["description"].lower()
     assert "future" in desc or "future sessions" in desc
     assert "thread" in desc
 

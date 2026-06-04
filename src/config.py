@@ -152,6 +152,7 @@ def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
         "chat_completions_params": app_cfg.chat_completions.model_dump(),
         "chat_completions_llm": app_cfg.chat_completions.llm,
         "quality_gate_params": app_cfg.quality_gate.model_dump(),
+        # Limits for ``session_memory`` tool; yaml/config keys stay ``working_memory*``.
         "working_memory": app_cfg.working_memory,
         "working_memory_params": app_cfg.working_memory.model_dump(),
         "working_memory_max_chars_goal": app_cfg.working_memory.max_chars_goal,
@@ -163,10 +164,10 @@ def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
         "tool_usage_notice_params": [
             rule.model_dump() for rule in app_cfg.tool_usage_notice
         ],
-        "long_memory": app_cfg.long_memory,
-        "long_memory_params": app_cfg.long_memory.model_dump(),
-        "long_memory_check_interval_messages": app_cfg.long_memory.check_interval_messages,
-        "enable_long_memory_notice": app_cfg.long_memory.enable_long_memory_notice,
+        "project_memory": app_cfg.project_memory,
+        "project_memory_params": app_cfg.project_memory.model_dump(),
+        "project_memory_check_interval_messages": app_cfg.project_memory.check_interval_messages,
+        "enable_project_memory_notice": app_cfg.project_memory.enable_project_memory_notice,
         "intent_scope": app_cfg.intent_scope,
         "intent_scope_params": app_cfg.intent_scope.model_dump(),
         "logging_params": app_cfg.logging.model_dump(),
@@ -188,7 +189,7 @@ def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
         "server_tool_prefix": app_cfg.agent.server_tool_prefix,
         "max_steps": app_cfg.agent.max_steps,
         "no_tool_call_max_count": app_cfg.agent.no_tool_call_max_count,
-        "strict_submit_solution_validation": app_cfg.agent.strict_submit_solution_validation,
+        "strict_turn_finish_validation": app_cfg.agent.strict_turn_finish_validation,
         "finish_gate_max_iterations": app_cfg.agent.finish_gate_max_iterations,
         "subagent_finish_gate_max_iterations": app_cfg.agent.subagent_finish_gate_max_iterations,
         "finish_gate_use_rule_hints": app_cfg.agent.finish_gate_use_rule_hints,

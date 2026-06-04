@@ -85,26 +85,26 @@ def test_decide_command_execution_matrix():
     assert cancelled.error_type == "unsafe_command_cancelled_by_user"
 
 
-def test_effective_command_cwd_run_python_defaults_to_launch_root():
+def test_effective_command_cwd_exec_python_defaults_to_launch_root():
     ctx = ToolSecurityContext(
         launch_root="/repo/lr",
         write_guard=WriteGuardConfig(enabled=True, extra_paths=[]),
     )
-    assert effective_command_cwd("run_python_code", {}, ctx) == os.path.abspath("/repo/lr")
+    assert effective_command_cwd("exec_python", {}, ctx) == os.path.abspath("/repo/lr")
 
 
-def test_effective_command_cwd_execute_command_defaults_to_getcwd(tmp_path, monkeypatch):
+def test_effective_command_cwd_exec_command_defaults_to_getcwd(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     ctx = ToolSecurityContext(
         launch_root=str(tmp_path / "lr"),
         write_guard=WriteGuardConfig(enabled=True, extra_paths=[]),
     )
-    assert effective_command_cwd("execute_command", {}, ctx) == os.path.abspath(os.getcwd())
+    assert effective_command_cwd("exec_command", {}, ctx) == os.path.abspath(os.getcwd())
 
 
 def test_build_judge_payload_contains_runtime_context():
     context = ModerationContext(
-        tool_name="execute_command",
+        tool_name="exec_command",
         launch_root="/repo",
         extra_paths=["/tmp/cache"],
         mode="deny",
@@ -115,7 +115,7 @@ def test_build_judge_payload_contains_runtime_context():
         allowed_command_examples=["pytest"],
     )
 
-    payload = build_judge_payload("execute_command", "pytest", context)
+    payload = build_judge_payload("exec_command", "pytest", context)
 
     assert payload["launch_root"] == "/repo"
     assert payload["allowed_write_paths"] == ["/repo", "/tmp/cache"]
@@ -138,7 +138,7 @@ def test_command_judge_prompts_are_loaded_from_files():
 def test_build_judge_messages_uses_external_prompt_templates():
     messages = command_moderation._build_judge_messages(
         {
-            "tool_name": "execute_command",
+            "tool_name": "exec_command",
             "payload": "pytest",
             "launch_root": "/repo",
             "allowed_write_paths": ["/repo"],
@@ -147,7 +147,7 @@ def test_build_judge_messages_uses_external_prompt_templates():
 
     assert messages[0]["role"] == "system"
     assert messages[1]["role"] == "user"
-    assert "execute_command" in messages[1]["content"]
+    assert "exec_command" in messages[1]["content"]
     assert "pytest" in messages[1]["content"]
 
 
@@ -159,7 +159,7 @@ def test_moderate_command_execution_blocks_dangerous_payload(tmp_path):
 
     @moderate_command_execution(
         payload_arg="command",
-        tool_name="execute_command",
+        tool_name="exec_command",
         judge_client_extractor=lambda *_args, **_kwargs: lambda _payload: {
             "verdict": "potentially_dangerous",
             "reasons": ["uses sudo"],
@@ -188,7 +188,7 @@ def test_moderate_command_execution_fail_closed_when_judge_unavailable(tmp_path)
         "command_moderation": {"enabled": True, "mode": "deny"},
     }
 
-    @moderate_command_execution(payload_arg="command", tool_name="execute_command")
+    @moderate_command_execution(payload_arg="command", tool_name="exec_command")
     def run(command: str, config_dict: dict) -> str:
         return json.dumps({"ok": True, "command": command})
 
@@ -214,7 +214,7 @@ def test_moderate_command_execution_audits_without_payload_leak(tmp_path):
 
     @moderate_command_execution(
         payload_arg="command",
-        tool_name="execute_command",
+        tool_name="exec_command",
         judge_client_extractor=lambda *_args, **_kwargs: lambda _payload: {
             "verdict": "potentially_dangerous",
             "reasons": ["uses sudo"],

@@ -4,13 +4,13 @@ from typing import Any
 
 from config_modules.message_notice import (
     active_tool_usage_notice_rules,
-    long_memory_notice_from_config_dict,
+    project_memory_notice_from_config_dict,
 )
-from message_policy.long_memory_notice.policy import (
-    collect_long_memory_hints,
-    long_memory_hints_enabled,
+from message_policy.project_memory_notice.policy import (
+    collect_project_memory_hints,
     on_persist_steps,
-    wrap_long_memory_hint_user_message,
+    project_memory_hints_enabled,
+    wrap_project_memory_hint_user_message,
 )
 from message_policy.notice_policy_log import log_notice_policy_step
 from message_policy.tool_usage_notice.policy import (
@@ -21,7 +21,7 @@ from message_policy.tool_usage_notice.policy import (
     wrap_tool_usage_notice_user_message,
 )
 from message_policy.tool_usage_notice.state import (
-    get_long_memory_check_cnt,
+    get_project_memory_check_cnt,
     persist_tool_usage_notice_state,
 )
 
@@ -66,7 +66,7 @@ def apply_tool_usage_notice_before_llm(
     logger: Any | None = None,
 ) -> list[dict[str, Any]]:
     """
-    После persist-batch, перед LLM: независимые контуры long_memory K-тик и tool_usage_notice.
+    После persist-batch, перед LLM: независимые контуры project_memory K-тик и tool_usage_notice.
     Счётчики не сбрасывают друг друга; снимок — только в текстовый log.
     """
     cfg = getattr(ctx, "config_dict", None) or {}
@@ -77,16 +77,16 @@ def apply_tool_usage_notice_before_llm(
     tool_thresholds = _tool_thresholds(notice_rules)
     counters_before = dict(getattr(state, "tool_usage_notice_cnt", None) or {})
 
-    long_hints_enabled = long_memory_hints_enabled(cfg)
-    long_interval = (
-        long_memory_notice_from_config_dict(cfg).check_interval_messages
-        if long_hints_enabled
+    project_hints_enabled = project_memory_hints_enabled(cfg)
+    project_interval = (
+        project_memory_notice_from_config_dict(cfg).check_interval_messages
+        if project_hints_enabled
         else None
     )
-    long_check_after_tick: int | None = None
+    project_check_after_tick: int | None = None
 
-    if long_hints_enabled:
-        long_check_after_tick = on_persist_steps(meta, steps=1)
+    if project_hints_enabled:
+        project_check_after_tick = on_persist_steps(meta, steps=1)
 
     if notice_rules:
         update_tool_usage_notice_after_persist(state, step_messages, notice_rules)
@@ -94,17 +94,17 @@ def apply_tool_usage_notice_before_llm(
     counters_before_collect = dict(getattr(state, "tool_usage_notice_cnt", None) or {})
     out = list(messages)
 
-    emitted_long_hints: list[str] = []
-    for hint_text in collect_long_memory_hints(state, meta, ctx, cfg):
-        out.append(wrap_long_memory_hint_user_message(hint_text, suffix="mem_long"))
-        emitted_long_hints.append(hint_text)
+    emitted_project_hints: list[str] = []
+    for hint_text in collect_project_memory_hints(state, meta, ctx, cfg):
+        out.append(wrap_project_memory_hint_user_message(hint_text, suffix="mem_project"))
+        emitted_project_hints.append(hint_text)
 
-    long_check_final = get_long_memory_check_cnt(meta) if long_hints_enabled else None
-    long_reset = (
-        long_interval is not None
-        and long_check_after_tick is not None
-        and long_check_after_tick >= long_interval
-        and long_check_final == 0
+    project_check_final = get_project_memory_check_cnt(meta) if project_hints_enabled else None
+    project_reset = (
+        project_interval is not None
+        and project_check_after_tick is not None
+        and project_check_after_tick >= project_interval
+        and project_check_final == 0
     )
 
     shared = getattr(state, "shared", None)
@@ -135,9 +135,9 @@ def apply_tool_usage_notice_before_llm(
         tool_thresholds=tool_thresholds,
         tool_resets=tool_resets,
         tool_emits=sorted(emitted_tools),
-        long_check_cnt=get_long_memory_check_cnt(meta) if long_hints_enabled else None,
-        long_interval=long_interval,
-        long_reset=long_reset,
-        long_emit=bool(emitted_long_hints),
+        long_check_cnt=project_check_final if project_hints_enabled else None,
+        long_interval=project_interval,
+        long_reset=project_reset,
+        long_emit=bool(emitted_project_hints),
     )
     return out

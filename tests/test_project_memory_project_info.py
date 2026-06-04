@@ -7,7 +7,7 @@ rendered prompt.
 """
 from pathlib import Path
 
-from long_memory import attach_status_to_prompt_vars
+from project_memory import attach_status_to_prompt_vars
 
 
 def test_attach_status_with_no_memory_file(tmp_path, monkeypatch):
@@ -21,7 +21,7 @@ def test_attach_status_with_no_memory_file(tmp_path, monkeypatch):
 def test_attach_status_with_populated_memory(tmp_path, monkeypatch):
     (tmp_path / ".gc").mkdir()
     body = "saved fact one\n\nsaved fact two"
-    (tmp_path / ".gc" / "long_memory.md").write_text(body, encoding="utf-8")
+    (tmp_path / ".gc" / "project_memory.md").write_text(body, encoding="utf-8")
     monkeypatch.chdir(tmp_path)
     prompt_vars: dict = {}
     attach_status_to_prompt_vars(prompt_vars)
@@ -34,18 +34,18 @@ def test_attach_status_with_populated_memory(tmp_path, monkeypatch):
 
 def test_attach_status_skipped_when_long_memory_in_stop_tools(tmp_path, monkeypatch):
     (tmp_path / ".gc").mkdir()
-    (tmp_path / ".gc" / "long_memory.md").write_text("body", encoding="utf-8")
+    (tmp_path / ".gc" / "project_memory.md").write_text("body", encoding="utf-8")
     monkeypatch.chdir(tmp_path)
     prompt_vars: dict = {}
     attach_status_to_prompt_vars(
-        prompt_vars, config_dict={"stop_tools": ["long_memory"]}
+        prompt_vars, config_dict={"stop_tools": ["project_memory"]}
     )
     assert "longMemoryStatus" not in prompt_vars
 
 
 def test_attach_status_with_explicit_cwd(tmp_path):
     (tmp_path / ".gc").mkdir()
-    (tmp_path / ".gc" / "long_memory.md").write_text("seeded", encoding="utf-8")
+    (tmp_path / ".gc" / "project_memory.md").write_text("seeded", encoding="utf-8")
     prompt_vars: dict = {}
     attach_status_to_prompt_vars(prompt_vars, cwd=str(tmp_path))
     assert "project has long memory" in prompt_vars["longMemoryStatus"]
@@ -53,14 +53,14 @@ def test_attach_status_with_explicit_cwd(tmp_path):
 
 def test_attach_status_does_not_leak_path_or_tool_name(tmp_path, monkeypatch):
     (tmp_path / ".gc").mkdir()
-    (tmp_path / ".gc" / "long_memory.md").write_text("body", encoding="utf-8")
+    (tmp_path / ".gc" / "project_memory.md").write_text("body", encoding="utf-8")
     monkeypatch.chdir(tmp_path)
     prompt_vars: dict = {}
     attach_status_to_prompt_vars(prompt_vars)
     text = prompt_vars["longMemoryStatus"]
     assert ".gc" not in text
     assert ".md" not in text
-    assert "long_memory" not in text
+    assert "project_memory" not in text
 
 
 def test_main_prompt_template_renders_long_memory_status(tmp_path, monkeypatch):
@@ -68,7 +68,7 @@ def test_main_prompt_template_renders_long_memory_status(tmp_path, monkeypatch):
     from utils.local_render_system_prompt import render_system_prompt
 
     (tmp_path / ".gc").mkdir()
-    (tmp_path / ".gc" / "long_memory.md").write_text("seeded body", encoding="utf-8")
+    (tmp_path / ".gc" / "project_memory.md").write_text("seeded body", encoding="utf-8")
     monkeypatch.chdir(tmp_path)
 
     prompt_vars: dict = {}

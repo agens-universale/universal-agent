@@ -77,9 +77,9 @@ Describe actions in plain language, not by tool name: "read the file",
 "run the tests", "save progress notes", "finalize the result". Do not
 hardcode runtime tool names — skills must stay portable across runtimes.
 
-The only tools you may name explicitly are the skill-discovery tools
-`skills_load` and `skills_list`, because they are intrinsic to the skills
-mechanism itself (e.g. the next-step chaining above).
+The only tools you may name explicitly are the skills mechanism tools
+(`skills_list`, `skills_load`, `skills_run_script`, `skills_load_reference`,
+`skills_load_asset`) — see `tests/test_skills_tool_agnostic.py`.
 
 ## Length budget
 

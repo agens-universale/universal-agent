@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from typing import Any, Mapping
 
 _TRIGGER_REASON_LABELS: dict[str, str] = {
-    "turn_end": "конец хода после submit_solution",
+    "turn_end": "конец хода после turn_finish",
     "pre_run": "старт сессии",
     "pre_backend": "середина хода (окно переполнено)",
     "subagent_pre_backend": "subagent, середина хода",

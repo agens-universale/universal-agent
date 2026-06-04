@@ -326,15 +326,15 @@ class ChatCompletionsPromptConfigTest(unittest.TestCase):
                     "backend:\n  api_mode: chat_completions\n"
                     "intent_scope:\n"
                     "  tools:\n"
-                    "    ask_human:\n"
+                    "    turn_ask_human:\n"
                     "      record: aggregated\n"
-                    "    submit_solution:\n"
+                    "    turn_finish:\n"
                     "      record: raw\n"
                 )
             cfg = load_config(cfg_path)
             tools = cfg["intent_scope_params"]["tools"]
-            self.assertEqual(tools["ask_human"]["record"], "aggregated")
-            self.assertEqual(tools["submit_solution"]["record"], "raw")
+            self.assertEqual(tools["turn_ask_human"]["record"], "aggregated")
+            self.assertEqual(tools["turn_finish"]["record"], "raw")
 
 if __name__ == "__main__":
     unittest.main()

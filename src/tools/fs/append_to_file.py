@@ -1,6 +1,7 @@
 import json
 import os
 
+from tools.schema_optional import X_PRESERVE_EMPTY_STRING
 from tools.simple_tool_base import AbstractSimpleTool
 from utils.tool_report_paths import tool_report_abspath
 from security.path_policy import enforce_write_guard
@@ -11,7 +12,7 @@ class AppendToFile(AbstractSimpleTool):
     def tool_description(cls):
         description = {
             "type": "function",
-            "name": "append_to_file",
+            "name": "fs_append_file",
             "description": (
                 "Append text to the end of an existing file (optional create). "
                 "Build large files with several moderate `content` chunks — not one huge append. "
@@ -28,12 +29,17 @@ class AppendToFile(AbstractSimpleTool):
                         "type": "string",
                         "description": (
                             "Text to append; keep each call a moderate size (e.g. one section or a few KB). "
-                            "For long output, chain many `append_to_file` calls instead of one huge payload."
+                            "For long output, chain many append-to-file calls instead of one huge payload."
                         ),
                     },
                     "separator": {
                         "type": "string",
-                        "description": "String inserted before appended content. Default '\\n\\n'."
+                        X_PRESERVE_EMPTY_STRING: True,
+                        "description": (
+                            "String inserted before appended content. "
+                            "Omit for default '\\n\\n'. "
+                            "Pass empty string \"\" for no separator (append flush to file end)."
+                        ),
                     },
                     "create_if_missing": {
                         "type": "boolean",
@@ -57,14 +63,14 @@ class AppendToFile(AbstractSimpleTool):
 
     @classmethod
     def prompt_description(cls):
-        description = '''Tool name: append_to_file
+        description = '''Tool name: fs_append_file
 Tool description: Appends content to an existing file (e.g., for notes, logs, analysis results).
 Input schema: {"type": "object", "properties": {"path": {"type": "string", "description": "Absolute path to an existing file."}, "content": {"type": "string", "description": "Content to append."}}, "required": ["path", "content"], "additionalProperties": false}
 
 Usage:
-- The target file MUST exist. If the file does not exist, use create_file or write_to_file first (use a short initial `write_to_file` for new long files).
+- The target file MUST exist. If the file does not exist, write the file first (use a short initial write for new long files).
 - **Chunking:** for large bodies, append in multiple steps; each `content` should be modest. Do not send an entire article or huge blob in one call.
-- The tool automatically adds a newline separator before the new content to ensure distinct entries.
+- Optional `separator` before new content: default is a blank line (`\\n\\n`); pass empty string for no separator.
 - Ideal for accumulating analysis notes, debugging logs, or review comments without overwriting previous data.
 - Do not use for modifying source code logic.
 '''
@@ -82,7 +88,7 @@ Usage:
     ) -> str:
         return json.dumps(
             {
-                "tool": "append_to_file",
+                "tool": AppendToFile.registered_tool_name(),
                 "ok": ok,
                 "path": tool_report_abspath(path),
                 "created": created,

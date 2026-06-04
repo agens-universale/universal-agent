@@ -93,7 +93,7 @@ def test_format_contains_two_retry_paths():
     msg = format_no_tool_call_bounce("X")
     assert "(1)" in msg and "(2)" in msg
     assert "action" in msg.lower() or "ACTION" in msg
-    assert "ask_human" in msg
+    assert "ask" in msg.lower() and "user" in msg.lower()
 
 
 # --- decoupled from ask_human-cram wording ---
@@ -123,6 +123,6 @@ def test_bounce_keeps_robustness_signal():
     inlined = format_no_tool_call_bounce("X")
     for msg in (static, inlined):
         assert "(1)" in msg and "(2)" in msg
-        assert "ask_human" in msg
+        assert "ask" in msg.lower() and "user" in msg.lower()
     assert "<<<\nX\n>>>" in inlined
     assert "VERBATIM" in inlined

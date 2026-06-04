@@ -18,7 +18,7 @@ class Sleep(AbstractSimpleTool):
     ) -> str:
         return json.dumps(
             {
-                "tool": "sleep",
+                "tool": Sleep.registered_tool_name(),
                 "ok": ok,
                 "seconds": seconds,
                 "slept_seconds": slept_seconds,
@@ -31,7 +31,7 @@ class Sleep(AbstractSimpleTool):
     def tool_description(cls):
         return {
             "type": "function",
-            "name": "sleep",
+            "name": "exec_sleep",
             "description": (
                 "Pauses execution for the given number of seconds before continuing. "
                 f"Maximum sleep duration is {cls.max_seconds} seconds (3 minutes)."
@@ -52,13 +52,13 @@ class Sleep(AbstractSimpleTool):
 
     @classmethod
     def prompt_description(cls):
-        return f'''Tool name: sleep
+        return f'''Tool name: exec_sleep
 Tool description: Pauses execution for the given number of seconds. Use when waiting for external processes, rate limits, or delayed availability.
 Input schema: {{"type":"object","properties":{{"seconds":{{"type":"number","description":"Sleep duration in seconds (0 to {cls.max_seconds})."}}}},"required":["seconds"],"additionalProperties":false}}
 Maximum sleep duration: {cls.max_seconds} seconds (3 minutes).
 
 Return format (JSON string):
-{{"tool":"sleep","ok":true|false,"seconds":<requested>|null,"slept_seconds":<actual>|null,"error":null|{{"type":"...","message":"..."}}}}
+{{"tool":"exec_sleep","ok":true|false,"seconds":<requested>|null,"slept_seconds":<actual>|null,"error":null|{{"type":"...","message":"..."}}}}
 '''
 
     def __call__(self, seconds: float | int | None = None, **kwargs) -> str:

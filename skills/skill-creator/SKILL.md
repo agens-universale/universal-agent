@@ -9,6 +9,10 @@ version: "0.2.0"
 
 A skill for creating new skills and improving existing ones in a lean way.
 
+**Tool-agnostic wording:** describe actions by role (filesystem write, human
+clarification, finish handoff, delegated subagent, shell invocation). Name
+only `skills_*` tools explicitly — see `supercoder:writing-skills`.
+
 At a high level, the workflow goes:
 
 1. Identify the mode (new skill vs improve existing) — see `## Branching`.
@@ -19,7 +23,7 @@ At a high level, the workflow goes:
 6. Package as `skill-<id>.zip` (with README + skill folder + demo/).
 
 This is the lean version. The full eval-loop workflow (parallel runs through
-subagent_worker, grading, benchmarking, HTML viewer, iteration loop, blind
+delegated subagent runs, grading, benchmarking, HTML viewer, iteration loop, blind
 comparison, description optimization) is intentionally not included here.
 It lives in the experimental branch `experiment/skill-creator-full-workflow`
 and may return in a future iteration.
@@ -44,7 +48,7 @@ When the user asks for skill work, identify the mode first.
 
 **Otherwise** → "new skill" mode (default).
 
-If ambiguous → ONE ask_human: "Это улучшение существующего скилла или новый?"
+If ambiguous → ONE human clarification: "Это улучшение существующего скилла или новый?"
 
 ### Improve existing — find which one
 
@@ -52,14 +56,14 @@ If user didn't name the skill explicitly:
 
 1. Call `skills_list`, read each skill's description AND `source` field.
 2. Match descriptions semantically against the user's intent.
-3. **Exactly 1 strong match** → ask_human:
+3. **Exactly 1 strong match** → human clarification:
    "Я думаю ты про `<id>` (source: **<system|user|project>**, description: «...»). Это он?"
-4. **2+ candidates** → ask_human with all sources visible:
+4. **2+ candidates** → human clarification with all sources visible:
    "Есть несколько кандидатов:
     - `<id1>` (source: system) — description1
     - `<id2>` (source: project) — description2
    Который?"
-5. **0 candidates** → ask_human:
+5. **0 candidates** → human clarification:
    "Не нашёл подходящего скилла. Создаём новый, или ты имел в виду один из: [top-5 by relevance with sources]?"
 
 `source` is ALWAYS shown in the formulations — it's relevant info for the user
@@ -83,7 +87,7 @@ The chosen skill has a `source` field. Behaviour depends on it:
   be read-only in production installs. Create an override on a higher layer
   instead:
 
-  1. ask_human: "Скилл `<id>` — встроенный (bundled). Скопировать в:
+  1. human clarification: "Скилл `<id>` — встроенный (bundled). Скопировать в:
      - `<cwd>/.gc/skills/<id>/` — для этого проекта (попадёт в его репо)
      - `<user-skills-path>/<id>/` — для всех твоих проектов (where
        `<user-skills-path>` = `~/.local/share/gc/skills` on Linux/Mac or
@@ -94,7 +98,7 @@ The chosen skill has a `source` field. Behaviour depends on it:
      copy won't work — registry override is full-replacement, not merge.
   3. Apply improvements to the copy. The override automatically takes
      precedence (project > user > system).
-  4. After self-check and finalization, in submit_solution mention to the user:
+  4. After self-check and finalization, in finish handoff mention to the user:
      - the absolute path where the override now lives;
      - how to revert (delete the override folder; bundled version comes back).
 
@@ -132,7 +136,7 @@ context.
 Before drafting the new SKILL.md, call `skills_list` and check whether
 the chosen `<skill-id>` already exists in any layer (system/user/project).
 
-If yes — single ask_human:
+If yes — single human clarification:
 
   "Скилл `<id>` уже существует (source: <layer>, description: «...»).
    Что делаешь:
@@ -155,7 +159,7 @@ Branch handling:
 Before creating any files for the new skill, ALWAYS ask the user where to
 put it:
 
-  ask_human:
+  human clarification:
   "Положить скилл `<id>` в:
    - `<cwd>/.gc/skills/<id>/` — для этого проекта (попадёт в его репо)
    - `<user-skills-path>/<id>/` — для всех твоих проектов
@@ -193,12 +197,12 @@ This absolute path = `<workspace>` throughout the rest of this document.
 **Wherever you see `<workspace>/...` or a path starting with `_dev/...`**,
 substitute the full absolute path, not a relative one.
 
-**Anti-example:** `write_to_file(path="_dev/intent_brief.md", ...)` →
-the file will land in CWD (project root), NOT in the skill folder.
-That's a bug.
+**Anti-example:** writing to a relative `_dev/intent_brief.md` path from
+project CWD → the file lands in the project root, NOT in the skill folder.
 
-**Correct:** `write_to_file(path="<workspace>/intent_brief.md", ...)`
-where `<workspace>` is the full absolute path you computed above.
+**Correct:** filesystem write to the full absolute path
+`<workspace>/intent_brief.md`, where `<workspace>` is the path you computed
+above.
 
 The folder is created implicitly on the first `write` into it
 (`make_dirs: True`).
@@ -220,7 +224,7 @@ propose the default and ask the user to confirm or correct.
 
 **Interview format rules:**
 
-- **One question per `ask_human` call.** TUI doesn't render checkboxes or
+- **One question per human-clarification turn.** TUI doesn't render checkboxes or
   multi-option lists well. Don't bundle 3-4 questions into one prompt.
 - **Prefer "I'm planning X — does that match what you want, or different?"**
   formulation when there's a sensible default. Helps the user with context
@@ -406,7 +410,7 @@ Packaging does not refuse on missing best-effort files. The substance
 of review findings is reflected in `completion_report.md` anyway
 (section "Эволюция версий" — what was fixed).
 
-**Common rules for all `subagent_worker` calls in self-check:**
+**Common rules for every delegated subagent run in self-check:**
 
 In every task you pass to a subagent:
 
@@ -415,17 +419,18 @@ In every task you pass to a subagent:
 2. **Pass absolute paths to every file** the subagent has to read
    (outputs and so on).
 3. **Require explicitly: "Return the final result in the `task_report`
-   field via `submit_solution`. Do NOT create files on disk
-   (`write_to_file`, `run_python_code` with file output, etc.). Do NOT
-   create `exec_report_*.md`. Leave `artifacts_created` in the handoff
-   as an empty array — we don't expect files from you."** Without this
-   line, `subagent_worker` defaults to creating `exec_report_<step>.md`
+   field via finish handoff (do not write deliverables to disk yourself).
+   Do NOT create files on disk (filesystem writes, Python execution with
+   file output, etc.). Do NOT create exec sidecar reports (`exec_report_*.md`).
+   Leave `artifacts_created` in the handoff as an empty array — we don't
+   expect files from you."** Without this line, a delegated subagent often
+   defaults to creating `exec_report_<step>.md`
    in the project root and emits other side files (including auxiliary
    `*.py` scripts for validation/utility — also unwanted).
 4. If the subagent has to read something from disk — give the absolute
    path explicitly in the task.
 
-**Step 1 — Text-review (subagent_worker × 1).**
+**Step 1 — Text-review (one delegated subagent).**
 
 Pick 2 realistic prompts (one — a simple single-character case, the
 second — with a duet or extended context, to cover different branches).
@@ -433,7 +438,7 @@ Save them to **absolute** paths:
 - `<workspace>/examples/prompt_01.md`
 - `<workspace>/examples/prompt_02.md`
 
-Invoke `subagent_worker × 1` with a task roughly:
+Invoke one delegated subagent with a task roughly:
 
 > "Read SKILL.md at the absolute path `<abs-path-to-SKILL.md>`. Mentally
 > apply it to two prompts that I'm passing inline in this task (they
@@ -444,7 +449,7 @@ Invoke `subagent_worker × 1` with a task roughly:
 > Prompt 1: <contents of prompt_01.md>
 > Prompt 2: <contents of prompt_02.md>
 >
-> Return the report via submit_solution in the `task_report` field. Do
+> Return the report via finish handoff in the `task_report` field. Do
 > NOT create files on disk. Do NOT create exec_report — we will save
 > your report ourselves."
 
@@ -458,9 +463,9 @@ If the reviewer found problems → fix SKILL.md (you can apply several
 recommendations in one pass). If it said "ok" — proceed to Step 2
 without edits.
 
-**Step 2 — Run on 2 prompts (subagent_worker × 2).**
+**Step 2 — Run on 2 prompts (two delegated subagents).**
 
-For each of the 2 prompts invoke a separate `subagent_worker`. In each
+For each of the 2 prompts invoke a separate delegated subagent. In each
 task pass:
 
 - **The full text of the current SKILL.md** (read SKILL.md and inline
@@ -471,9 +476,9 @@ task pass:
 > "Apply this SKILL.md as your instructions for this request. Do not
 > ask clarifying questions — make reasonable defaults. Return the
 > final artifact of the skill (what the user would see) via
-> submit_solution in the `task_report` field. **Do NOT create files on
+> finish handoff in the `task_report` field. **Do NOT create files on
 > disk** (no `*.md`, `*.py`, or other side files). Do NOT create
-> exec_report. Only submit_solution with the final artifact in
+> exec sidecar reports. Only finish handoff with the final artifact in
 > task_report."
 
 Once both subagents return their task_reports — save the contents
@@ -485,9 +490,9 @@ If a subagent failed or returned garbage — save the result with a tag
 at the top of the file: `[degraded output: <reason>]`. Don't block the
 process.
 
-**Step 3 — Hybrid review (subagent_worker × 1).**
+**Step 3 — Hybrid review (one delegated subagent).**
 
-Invoke `subagent_worker × 1`. In the task pass:
+Invoke one delegated subagent. In the task pass:
 
 - **The absolute path to SKILL.md.**
 - **Absolute paths to both output files** (`<workspace>/examples/prompt_01_output.md`
@@ -500,7 +505,7 @@ Invoke `subagent_worker × 1`. In the task pass:
 > locations in the outputs. Return: what to fix in SKILL.md vs what is
 > a model or prompt limitation.
 >
-> Return the report via submit_solution in the `task_report` field. Do
+> Return the report via finish handoff in the `task_report` field. Do
 > NOT create files on disk. Do NOT create exec_report."
 
 Once you get the response — apply the recommendations to SKILL.md.
@@ -523,14 +528,14 @@ If there are problems to fix in SKILL.md:
 If hybrid review said "ok" (no fixes) — Step 2 outputs are already
 final, proceed to Step 5 (completion report).
 
-**Step 4 — Final run (subagent_worker × 2).**
+**Step 4 — Final run (two delegated subagents).**
 
 **Mandatory step if Step 3 applied any fixes.** Skipping Step 4 = ship
 outputs from an outdated version of SKILL.md.
 
 Repeat the calls for each of the 2 prompts following the same rules as
 Step 2 (full SKILL.md inline in the task — **from the updated file**,
-not from memory; instruction "return via submit_solution, do not
+not from memory; instruction "return via finish handoff, do not
 create files"). Overwrite **yourself** at the absolute paths:
 - `<workspace>/examples/prompt_01_output.md`
 - `<workspace>/examples/prompt_02_output.md`
@@ -551,7 +556,7 @@ structure and Russian wording.
 **Step 6 — Package (final session step, mandatory).**
 
 After Step 5 **invoke `package_skill.py` yourself** (via
-`skills_run_script` or `execute_command` — see the `### Package`
+`skills_run_script` or a shell invocation — see the `### Package`
 section below). This is the final step — **don't leave packaging to
 the user**, do it yourself.
 
@@ -560,7 +565,7 @@ When invoked, `package_skill.py` checks the required artifacts in
 message listing the missing files. In that case go back, finish the
 missing pieces, and invoke packaging again.
 
-After a successful packaging → `submit_solution` with the absolute
+After a successful packaging → finish handoff to the user with the absolute
 path to the produced `skill-<id>.zip`.
 
 Final `<workspace>/examples/prompt_NN_output.md` files correspond to
@@ -577,7 +582,7 @@ invoke:
 Going past the limit = overfitting: the model starts adapting to the
 reviewer rather than improving the skill.
 
-**Fallback (no `subagent_worker` available).** Walk through every
+**Fallback (no delegated subagent available).** Walk through every
 step in your head yourself (mental walk-through). Optional reports
 (text_review, self_check) — if you do write them, prefix with
 `[fallback: no subagent]` at the top. Step 2/4 (runs) are skipped —
@@ -610,7 +615,7 @@ skills_run_script(
 All three parameters are required for predictability. `source_layer`
 is the layer the user picked at the start of the session.
 
-**Fallback via `execute_command`** (if `skills_run_script` is not
+**Fallback via shell invocation** (if `skills_run_script` is not
 available or you want to invoke manually):
 
 ```bash
@@ -634,7 +639,7 @@ The script:
    folder contents excluding `_dev/`), `demo/...` (contents of `_dev/`).
 4. **Deletes `_dev/`** from the skill folder after successful packaging.
 
-In `submit_solution` to the user: report the **absolute path to the
+In the finish handoff to the user: report the **absolute path to the
 archive** (`skill-<id>.zip`). The workspace is already removed, no need
 to mention it.
 
@@ -648,8 +653,9 @@ plain `mv` without re-running the script.
 
 This skill runs inside the `gc-cli` agent. Notable differences from upstream:
 
-- **Subagents:** only `subagent_worker(reason, task)` is available (see
-  `src/tools/subagents/worker.py`). Use it whenever you need an independent
+- **Subagents:** only the delegated subagent tool is available (reason +
+  task parameters; see `src/tools/subagents/worker.py`). Use it whenever you
+  need an independent
   LLM session (e.g., the self-check above). Do NOT simulate subagents by
   writing a single Python script that runs both with-skill and baseline in
   the same LLM session — that's the same model evaluating its own output,

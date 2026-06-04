@@ -208,9 +208,9 @@ def test_flush_moves_current_to_log_without_dedup():
 
 def test_append_tool_aggregated_dedups_within_current():
     state = _make_state()
-    append_tool_aggregated_to_current(state, "ask_human", "first")
-    append_tool_aggregated_to_current(state, "ask_human", "first")
-    append_tool_aggregated_to_current(state, "submit_solution", "second")
+    append_tool_aggregated_to_current(state, "turn_ask_human", "first")
+    append_tool_aggregated_to_current(state, "turn_ask_human", "first")
+    append_tool_aggregated_to_current(state, "turn_finish", "second")
 
     assert len(state.current_user_intent) == 2
     assert state.current_user_intent[0].action == ACTION_TOOL_AGGREGATED
@@ -223,8 +223,8 @@ def test_append_tool_raw_dedups_within_current():
     state = _make_state()
     payload = {"task_report": "done"}
     output = {"ok": True}
-    append_tool_raw_to_current(state, "submit_solution", payload, output)
-    append_tool_raw_to_current(state, "submit_solution", payload, output)
+    append_tool_raw_to_current(state, "turn_finish", payload, output)
+    append_tool_raw_to_current(state, "turn_finish", payload, output)
 
     assert len(state.current_user_intent) == 1
     assert state.current_user_intent[0].action == ACTION_TOOL_RAW
@@ -267,7 +267,7 @@ def test_state_to_dict_roundtrip_is_json_serializable_and_restores_shared_and_st
     state.tool_call_outputs_store.put(
         ToolCallOutputRecord(
             output_ref="out_1",
-            source_tool="read_file",
+            source_tool="fs_read_file",
             call_id="call_1",
             total_chars=2,
             text="ok",
@@ -296,10 +296,10 @@ def test_state_roundtrip_with_monster_payload_preserves_core_runtime_fields():
         verbose=True,
         model="CodeChat-Pro",
         tools_spec=[
-            {"type": "function", "function": {"name": "read_file", "parameters": {"type": "object"}}},
-            {"type": "function", "function": {"name": "write_file", "parameters": {"type": "object"}}},
+            {"type": "function", "function": {"name": "fs_read_file", "parameters": {"type": "object"}}},
+            {"type": "function", "function": {"name": "fs_write_file", "parameters": {"type": "object"}}},
         ],
-        tools_descr=[{"name": "read_file", "desc": "Read file"}, {"name": "write_file", "desc": "Write file"}],
+        tools_descr=[{"name": "fs_read_file", "desc": "Read file"}, {"name": "fs_write_file", "desc": "Write file"}],
         skills_list=[{"name": "skill_a", "version": 1}, {"name": "skill_b", "version": 2}],
         max_steps=99,
         system_prompt_id="v2-monster",
@@ -345,7 +345,7 @@ def test_state_roundtrip_with_monster_payload_preserves_core_runtime_fields():
         {
             "id": "a1",
             "role": "assistant",
-            "content": [{"type": "text", "text": "готово"}, {"type": "tool_call", "name": "read_file"}],
+            "content": [{"type": "text", "text": "готово"}, {"type": "tool_call", "name": "fs_read_file"}],
             "tokens": {"input": 120, "output": 55},
         },
         {"id": "t1", "type": "function_call", "name": "memory_files", "arguments": "{\"action\":\"list\"}"},
@@ -370,7 +370,7 @@ def test_state_roundtrip_with_monster_payload_preserves_core_runtime_fields():
     state.tool_call_outputs_store.put(
         ToolCallOutputRecord(
             output_ref="out_alpha",
-            source_tool="read_file",
+            source_tool="fs_read_file",
             call_id="call_a",
             total_chars=3,
             text="abc",

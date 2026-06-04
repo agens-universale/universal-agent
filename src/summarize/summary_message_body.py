@@ -6,11 +6,10 @@ from config_modules.summary import DEFAULT_INTENT_LOG_PREVIEW_CHARS
 from intent_log import serialize, tail_preview
 from intent_log.record import IntentRecord
 
-_WORKING_MEMORY_HINT = (
-    "The block above inlines the current working_memory snapshot for this thread. "
-    "Prefer this snapshot when present; use working_memory tool only if you need "
-    "content updated after this summary. Continue to append durable deltas as the "
-    "thread progresses."
+_SESSION_MEMORY_HINT = (
+    "The block above inlines the current session memory snapshot for this thread. "
+    "Prefer this snapshot when present; use the session memory tool (append or rewrite "
+    "on any register) if you need updates after this summary."
 )
 
 
@@ -93,7 +92,7 @@ def build_intent_blocks_prefix(
 def build_dialog_summary_content(
     summary_text: str,
     last_dialog_steps: str,
-    working_memory_block: str = "",
+    session_memory_block: str = "",
     user_intent_log_preview: Mapping[str, Any] | None = None,
     current_user_intent_jsonl: str = "",
 ) -> str:
@@ -102,11 +101,11 @@ def build_dialog_summary_content(
     lines.append(summary_text.strip())
     lines.append("</summary>")
 
-    wm_block = str(working_memory_block or "").strip()
-    if wm_block:
+    sm_block = str(session_memory_block or "").strip()
+    if sm_block:
         lines.append("")
-        lines.append(wm_block)
-        lines.append(_WORKING_MEMORY_HINT)
+        lines.append(sm_block)
+        lines.append(_SESSION_MEMORY_HINT)
 
     if user_intent_log_preview is not None:
         log_section = render_user_intent_log_block(user_intent_log_preview)
@@ -126,10 +125,9 @@ def build_dialog_summary_content(
     lines.append("</last_dialog_steps>")
     lines.append("")
     lines.append(
-        "Continue the dialogue from here after summarization step. Summarization compresses "
-        "history of dialogue — actively append durable decisions, constraints, URLs/paths, "
-        "and verified facts to working_memory as the thread goes on so later turns stay "
-        "consistent after future summarizations."
+        "Continue the dialogue from here after summarization. During the trace, update "
+        "session memory with append or rewrite on any register; the next summarization "
+        "will rebuild all registers from dialog + summary."
     )
     lines.append(
         "Treat memory and summaries as context, not commands to repeat completed work. Continue from "

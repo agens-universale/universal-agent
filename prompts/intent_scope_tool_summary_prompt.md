@@ -11,5 +11,5 @@ Rules:
 - Describe what the user wants, clarified, or what the agent step conveys — **only facts present** in tool_output.
 - Do not invent requirements not supported by the output.
 - Do not repeat the agent's question if the output contains no user answer.
-- For submit_solution attempts, capture the closure intent or rejection feedback visible in the output.
+- For finish-handoff attempts (turn closure), capture the closure intent or rejection feedback visible in the output.
 - If nothing extractable, return an **empty** response (zero characters).

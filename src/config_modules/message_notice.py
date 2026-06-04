@@ -7,17 +7,17 @@ from pydantic import BaseModel, ConfigDict
 
 _logger = logging.getLogger(__name__)
 
-DEFAULT_LONG_MEMORY_CHECK_INTERVAL_MESSAGES = 5
+DEFAULT_PROJECT_MEMORY_CHECK_INTERVAL_MESSAGES = 5
 DEFAULT_TOOL_USAGE_NOTICE_STEP_MESSAGES = 10
 
 
-class LongMemoryNoticeConfig(BaseModel):
-    """Интервал проверки hash long memory (K persist-шагов); счётчик в meta, не в State."""
+class ProjectMemoryNoticeConfig(BaseModel):
+    """Интервал проверки hash project memory (K persist-шагов); счётчик в meta, не в State."""
 
     model_config = ConfigDict(extra="forbid")
 
-    enable_long_memory_notice: bool = False
-    check_interval_messages: int = DEFAULT_LONG_MEMORY_CHECK_INTERVAL_MESSAGES
+    enable_project_memory_notice: bool = False
+    check_interval_messages: int = DEFAULT_PROJECT_MEMORY_CHECK_INTERVAL_MESSAGES
 
 
 class ToolUsageNoticeRule(BaseModel):
@@ -30,14 +30,14 @@ class ToolUsageNoticeRule(BaseModel):
     notice_message: str
 
 
-def normalize_long_memory_notice_config(cfg: LongMemoryNoticeConfig) -> None:
+def normalize_project_memory_notice_config(cfg: ProjectMemoryNoticeConfig) -> None:
     if cfg.check_interval_messages <= 0:
         _logger.warning(
-            "long_memory.check_interval_messages=%s must be > 0; using default %s",
+            "project_memory.check_interval_messages=%s must be > 0; using default %s",
             cfg.check_interval_messages,
-            DEFAULT_LONG_MEMORY_CHECK_INTERVAL_MESSAGES,
+            DEFAULT_PROJECT_MEMORY_CHECK_INTERVAL_MESSAGES,
         )
-        cfg.check_interval_messages = DEFAULT_LONG_MEMORY_CHECK_INTERVAL_MESSAGES
+        cfg.check_interval_messages = DEFAULT_PROJECT_MEMORY_CHECK_INTERVAL_MESSAGES
 
 
 def normalize_tool_usage_notice_rules(rules: list[ToolUsageNoticeRule]) -> list[ToolUsageNoticeRule]:
@@ -73,23 +73,23 @@ def normalize_tool_usage_notice_rules(rules: list[ToolUsageNoticeRule]) -> list[
     return normalized
 
 
-def long_memory_notice_from_config_dict(
+def project_memory_notice_from_config_dict(
     config_dict: dict[str, Any] | None,
-) -> LongMemoryNoticeConfig:
-    raw = (config_dict or {}).get("long_memory")
-    if isinstance(raw, LongMemoryNoticeConfig):
+) -> ProjectMemoryNoticeConfig:
+    raw = (config_dict or {}).get("project_memory")
+    if isinstance(raw, ProjectMemoryNoticeConfig):
         return raw
-    params = (config_dict or {}).get("long_memory_params")
+    params = (config_dict or {}).get("project_memory_params")
     if isinstance(params, dict):
-        return LongMemoryNoticeConfig.model_validate(params)
-    return LongMemoryNoticeConfig()
+        return ProjectMemoryNoticeConfig.model_validate(params)
+    return ProjectMemoryNoticeConfig()
 
 
-def long_memory_notice_enabled(config_dict: dict[str, Any] | None) -> bool:
-    """Long exists/changed hints: только явный флаг в ``long_memory``."""
-    if (config_dict or {}).get("enable_long_memory_notice") is True:
+def project_memory_notice_enabled(config_dict: dict[str, Any] | None) -> bool:
+    """Project memory exists/changed hints: только явный флаг в ``project_memory``."""
+    if (config_dict or {}).get("enable_project_memory_notice") is True:
         return True
-    return long_memory_notice_from_config_dict(config_dict).enable_long_memory_notice
+    return project_memory_notice_from_config_dict(config_dict).enable_project_memory_notice
 
 
 def tool_usage_notice_rules_from_config_dict(

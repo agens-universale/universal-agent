@@ -12,7 +12,7 @@ class SaveBase64File(AbstractSimpleTool):
     def tool_description(cls):
         return {
             "type": "function",
-            "name": "save_base64_file",
+            "name": "fs_save_base64_file",
             "description": (
                 "Decodes a base64-encoded string and saves it as a binary file. "
                 "Use this to persist images (screenshots, etc.) received as base64 data from MCP tools. "
@@ -39,7 +39,7 @@ class SaveBase64File(AbstractSimpleTool):
     @classmethod
     def prompt_description(cls):
         return (
-            "Tool name: save_base64_file\n"
+            "Tool name: fs_save_base64_file\n"
             "Tool description: Decodes base64 data and saves it as a binary file (e.g. PNG screenshot).\n"
             'Input schema: {"type": "object", "properties": {"path": {"type": "string"}, '
             '"data": {"type": "string"}}, "required": ["path", "data"]}\n\n'
@@ -54,7 +54,7 @@ class SaveBase64File(AbstractSimpleTool):
     def _result(*, ok: bool, path: str, bytes_written: int = 0, error=None) -> str:
         return json.dumps(
             {
-                "tool": "save_base64_file",
+                "tool": SaveBase64File.registered_tool_name(),
                 "ok": ok,
                 "path": tool_report_abspath(path),
                 "bytes_written": bytes_written,

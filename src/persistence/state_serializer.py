@@ -37,6 +37,7 @@ def load_state_from_snapshot(payload: Mapping[str, Any]) -> State:
 
     shared_raw = state.__dict__.get("shared")
     if isinstance(shared_raw, dict):
+        # Persist key ``working_memory`` (not ``session_memory``) — see SharedStateData.
         state.shared = SharedStateData(
             working_memory=normalize_working_memory(shared_raw.get("working_memory")),
             notes_md=str(shared_raw.get("notes_md") or ""),

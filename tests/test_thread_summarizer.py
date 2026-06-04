@@ -31,20 +31,17 @@ class ThreadSummarizerTest(unittest.TestCase):
             "- User wants a fact-check of acp2.md and acp3.md output.\n"
             "- Goal: verify claims and produce corrected doc.\n"
             "- Open question: minor site wording may change.\n\n"
-            "## Execution stage\n"
-            "- planning-only\n\n"
-            "### Recent progress\n"
-            "- [DONE] Read official docs.\n"
-            "- Current approach: reviewing sources.\n\n"
-            "### Active skill\n"
-            "- n/a\n\n"
-            "### Next actions\n"
-            "- Draft acp3.md.\n\n"
+            "## Open tasks\n"
+            "- mode: planning-only\n"
+            "- [IN_PROGRESS] Review sources.\n"
+            "- [TODO] Draft acp3.md.\n\n"
+            "### Last verified facts\n"
+            "- [DONE] Read official docs.\n\n"
             "### Do not redo\n"
             "- n/a\n\n"
-            "### Spec and constraints\n"
+            "### Active constraints\n"
             "- Preserve full article structure.\n\n"
-            "### Recent artifacts and sources\n"
+            "### Recent artifacts\n"
             "- prompts/chat_completions_summary_prompt.md\n"
         )
         self.assertTrue(
@@ -57,6 +54,19 @@ class ThreadSummarizerTest(unittest.TestCase):
                 "TASK_AND_CONTEXT",
             ),
             "conjunction 'and' must not count toward TASK_AND_CONTEXT",
+        )
+        self.assertFalse(
+            _section_marker_hit(
+                "We should not retry the failed patch blindly.",
+                "DO_NOT_REDO",
+            ),
+            "stopword 'not' must not alone count toward DO_NOT_REDO",
+        )
+        self.assertTrue(
+            _section_marker_hit(
+                "DO_NOT_REDO:\n- do not use sed on this repo",
+                "DO_NOT_REDO",
+            ),
         )
         self.assertFalse(is_valid_summary_text(""))
         self.assertFalse(is_valid_summary_text("[assistant] raw transcript"))
@@ -76,20 +86,20 @@ class ThreadSummarizerTest(unittest.TestCase):
     def test_format_last_dialog_steps_keeps_tool_call_and_output_in_one_turn(self) -> None:
         steps = format_last_dialog_steps(
             [
-                {"type": "function_call", "call_id": "c1", "name": "read_file", "arguments": {"path": "/tmp/a.txt"}},
+                {"type": "function_call", "call_id": "c1", "name": "fs_read_file", "arguments": {"path": "/tmp/a.txt"}},
                 {"type": "function_call_output", "call_id": "c1", "output": {"ok": True}},
             ],
             max_steps=5,
             message_max_chars=5000,
         )
         self.assertEqual(steps.count("<turn "), 1)
-        self.assertIn("[function_call] read_file", steps)
+        self.assertIn("[function_call] fs_read_file", steps)
         self.assertIn("[function_call_output]", steps)
 
     def test_group_into_turns_supports_tool_call_aliases(self) -> None:
         turns = group_into_turns(
             [
-                {"type": "tool_call", "call_id": "c1", "name": "read_file", "arguments": "{}"},
+                {"type": "tool_call", "call_id": "c1", "name": "fs_read_file", "arguments": "{}"},
                 {"type": "tool_call_output", "call_id": "c1", "output": "ok"},
             ]
         )

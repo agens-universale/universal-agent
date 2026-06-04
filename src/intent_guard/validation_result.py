@@ -28,7 +28,7 @@ class ValidationResult:
 
 
 def fail_open_validation_result() -> ValidationResult:
-    """Fail-open: не блокировать ``submit_solution`` (§7.2)."""
+    """Fail-open: accept finish handoff when the validator LLM path fails (§7.2)."""
     return ValidationResult(
         ok=True,
         action="accept",

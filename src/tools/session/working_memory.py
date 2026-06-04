@@ -1,3 +1,9 @@
+"""Thread session registers (goal/constraints/state/knowledge).
+
+Naming: agent-visible tool ``session_memory``; storage ``state.shared.working_memory``
+and yaml ``working_memory:`` limits — unchanged for saved-thread compatibility.
+"""
+
 import json
 from typing import Any, Dict, Optional
 
@@ -9,6 +15,7 @@ from config_modules.working_memory import (
     DEFAULT_TOTAL_BUDGET_CHARS as _DEFAULT_TOTAL_BUDGET_CHARS,
     working_memory_limits_from_params,
 )
+from constants.tool_names import SESSION_MEMORY_TOOL_NAME
 from tools.simple_tool_base import AbstractSimpleTool
 
 REGISTER_GOAL = "goal"
@@ -51,7 +58,7 @@ def _total_chars(registers: Dict[str, str]) -> int:
 
 
 class WorkingMemory(AbstractSimpleTool):
-    tool_name = "working_memory"
+    tool_name = SESSION_MEMORY_TOOL_NAME
 
     def __init__(self, ctx: Any = None, state: Any = None, **kwargs: Any) -> None:
         super().__init__(**kwargs)
@@ -95,7 +102,7 @@ class WorkingMemory(AbstractSimpleTool):
     def tool_description(cls) -> Dict[str, Any]:
         return {
             "type": "function",
-            "name": "working_memory",
+            "name": "session_memory",
             "description": (
                 "Thread/session memory for THIS dialogue only — not project-wide 'remember forever'. "
                 "Do not append on every trivial step; write after meaningful progress or before handoff/delegation. "
@@ -169,7 +176,7 @@ class WorkingMemory(AbstractSimpleTool):
 
     @classmethod
     def prompt_description(cls) -> str:
-        return """Tool name: working_memory
+        return """Tool name: session_memory
 Tool description: Persistent per-thread operational memory for the agent.
 This tool does NOT write files to disk or filesystem.
 It stores compact durable task state that survives dialog summarization.
@@ -233,7 +240,7 @@ Input schema: {"type":"object","properties":{"action":{"type":"string","enum":["
     ) -> str:
         current = registers if registers is not None else self._get_registers()
         payload: Dict[str, Any] = {
-            "tool": "working_memory",
+            "tool": WorkingMemory.registered_tool_name(),
             "ok": ok,
             "action": action,
             "error": error,

@@ -6,9 +6,10 @@ from intent_guard.feedback import (
     build_finish_gate_feedback,
     build_finish_gate_reject_technical_user_content,
 )
+from constants.tool_names import FINISH_TOOL_NAME
 from intent_guard.guard import FinishGateGuard
-from intent_guard.submit_solution_emit import (
-    apply_finish_gate_to_submit_output_in_state,
+from intent_guard.turn_finish_emit import (
+    apply_finish_gate_to_turn_finish_output_in_state,
     get_function_call_output_text,
 )
 from intent_scope.hook import maybe_update_intent_scope_from_tool
@@ -255,7 +256,7 @@ def check_trace_finished(messages: List[Dict]) -> Union[Tuple[str, str], None]:
 
     grouped_messages = group_messages(messages)
     for m in grouped_messages['tool_calls']:
-        if m['name'] == 'submit_solution':
+        if m['name'] == FINISH_TOOL_NAME:
             return m['arguments'], m['call_id']
 
     return None
@@ -300,7 +301,7 @@ def process_tool_calls(
             config=getattr(ctx, "config_dict", {}) or {},
             logger=getattr(ctx, "logger", None),
         )
-        if tool_name != "submit_solution":
+        if tool_name != FINISH_TOOL_NAME:
             maybe_update_intent_scope_from_tool(
                 tool_name=tool_name,
                 tool_output_raw=tool_res_raw,
@@ -520,18 +521,16 @@ def run_agent(
                         state.previous_response_id = response_id
                     state.last_backend_response_id = response_id
                 elif mode == "function_call":
-                    # `submit_solution` должен завершать ТЕКУЩИЙ user turn,
-                    # а не сразу срабатывать по истории предыдущих тактов.
-                    # Поэтому проверяем только на этапе обработки новых function_call
-                    # (которые пришли от бэкенда), когда mode == "function_call".
+                    # Finish-turn handoff closes the CURRENT user turn only when we
+                    # process fresh backend function_calls (mode == "function_call"),
+                    # not when replaying older trace.
                     finish_response = check_trace_finished(messages)
                     if finish_response:
                         finish_arguments, finish_call_id = finish_response
                         grouped_messages = group_messages(messages)
                         pending_tool_calls = grouped_messages.get("tool_calls", [])
-                        # Один раз закрываем pending tool_calls (в т.ч. submit_solution):
-                        # chat/completions требует role=tool после assistant.tool_calls; для
-                        # других backend_mode функция no-op.
+                        # Emit synthetic outputs for all pending tool_calls once (incl. finish):
+                        # chat/completions needs tool rows after assistant.tool_calls.
                         append_cycle_stop_tool_outputs_for_batch(
                             state=state,
                             ctx=ctx,
@@ -542,10 +541,10 @@ def run_agent(
                         )
                         if backend_mode == "chat_completions":
                             gate = FinishGateGuard(ctx=ctx, state=state, logger=run_logger)
-                            decision = gate.evaluate_submit_solution(
-                                submit_solution_arguments=finish_arguments,
+                            decision = gate.evaluate_turn_finish(
+                                finish_handoff_arguments=finish_arguments,
                             )
-                            apply_finish_gate_to_submit_output_in_state(
+                            apply_finish_gate_to_turn_finish_output_in_state(
                                 state=state,
                                 finish_call_id=finish_call_id,
                                 decision=decision,
@@ -556,7 +555,7 @@ def run_agent(
                                 state.messages, finish_call_id
                             )
                             maybe_update_intent_scope_from_tool(
-                                tool_name="submit_solution",
+                                tool_name=FINISH_TOOL_NAME,
                                 tool_output_raw=final_submit_output or "",
                                 tool_arguments=finish_arguments or "",
                                 state=state,

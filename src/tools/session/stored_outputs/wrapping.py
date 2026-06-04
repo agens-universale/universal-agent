@@ -8,10 +8,9 @@ from uuid import uuid4
 from config_modules.stored_outputs import (
     get_tool_output_inline_max_chars,
 )
+from constants.tool_names import READ_STORED_TOOL_OUTPUT_NAME
 from states import State
 from tools.session.stored_outputs.tool_call_outputs_store import ToolCallOutputRecord
-
-_READ_STORED_TOOL_OUTPUT_NAME = "read_stored_tool_output"
 _fallback_logger = logging.getLogger(__name__)
 
 
@@ -28,7 +27,7 @@ def maybe_store_and_wrap_tool_output(
     inline_limit = get_tool_output_inline_max_chars(config)
     if state.tool_call_outputs_store.is_disabled():
         return tool_res
-    if tool_name == _READ_STORED_TOOL_OUTPUT_NAME:
+    if tool_name == READ_STORED_TOOL_OUTPUT_NAME:
         return tool_res
 
     total_chars = len(tool_res)
@@ -79,10 +78,10 @@ def maybe_store_and_wrap_tool_output(
         "truncated": next_offset < total_chars,
         "next_offset": next_offset,
         "content": content,
-        "read_via": _READ_STORED_TOOL_OUTPUT_NAME,
+        "read_via": READ_STORED_TOOL_OUTPUT_NAME,
         "hint": (
             "The original source_tool output is too large, so this response contains only part. "
-            "Continue with read_stored_tool_output using output_ref and next_offset. "
+            f"Continue with {READ_STORED_TOOL_OUTPUT_NAME} using output_ref and next_offset. "
             "If the record is gone (LRU), re-invoke the original source_tool - the ref cannot be restored."
         ),
     }

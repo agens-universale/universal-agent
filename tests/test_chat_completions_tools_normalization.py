@@ -13,7 +13,7 @@ class ChatCompletionsToolsNormalizationTest(unittest.TestCase):
         tools = [
             {
                 "type": "function",
-                "name": "write_to_file",
+                "name": "fs_write_file",
                 "description": "Writes text content to a file",
                 "parameters": {
                     "type": "object",
@@ -29,7 +29,7 @@ class ChatCompletionsToolsNormalizationTest(unittest.TestCase):
         self.assertEqual(len(normalized), 1)
         self.assertEqual(normalized[0]["type"], "function")
         self.assertIn("function", normalized[0])
-        self.assertEqual(normalized[0]["function"]["name"], "write_to_file")
+        self.assertEqual(normalized[0]["function"]["name"], "fs_write_file")
         self.assertIn("parameters", normalized[0]["function"])
         self.assertEqual(normalized[0]["function"]["strict"], True)
 
@@ -76,7 +76,7 @@ class ChatCompletionsToolsNormalizationTest(unittest.TestCase):
                 "id": "fc_1",
                 "type": "function_call",
                 "call_id": "call_1",
-                "name": "write_to_file",
+                "name": "fs_write_file",
                 "arguments": '{"path": "/tmp/demo.md"',
                 "status": "completed",
             }
@@ -146,7 +146,7 @@ class ChatCompletionsToolsNormalizationTest(unittest.TestCase):
                 "id": "fc_2",
                 "type": "function_call",
                 "call_id": "call_2",
-                "name": "write_to_file",
+                "name": "fs_write_file",
                 "arguments": "{\"path\": \"/tmp/demo.md\", \"content\": \"x\"}",
                 "status": "completed",
             }

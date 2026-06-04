@@ -109,11 +109,11 @@ Write actual role prompt in format as in examples. Don't use tags <Example>, wri
 
 
 class SpecialAgent(AbstractSubagent):
-    agent_name = "system_subagent_special_agent"
+    agent_name = "subagent_special_agent"
 
     tool_specification = {
         "type": "function",
-        "name": "system_subagent_special_agent",
+        "name": "subagent_special_agent",
         "description": "Creates a specialized AI expert agent tailored to a specific role and task. This tool allows you to dynamically define an expert with a precise skill set and delegate a well-scoped technical or analytical task to them. The agent will act as a knowledgeable consultant, providing implementation-ready solutions, code, or architectural guidance based on the defined role and context.",
         "parameters": {
             "type": "object",

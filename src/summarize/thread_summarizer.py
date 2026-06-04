@@ -52,9 +52,9 @@ def summarize_dialog_via_chat_completions(
           обновление `previous_summary`; валидирует ответ, при провале —
           `summary_llm_steps.repair_summary_text`, иначе fallback на предыдущую сводку или `FALLBACK_SUMMARY`.
         - По необходимости сжимает накопленную сводку через `summary_llm_steps.compress_summary_text`.
-        - Шаги `memory_suggestions.request_patch_append` и `request_patch_replace` выполняются
-          только если весь диалог уложился в один батч (мультибатч: `memory_patch.executed = false`,
-          reason `skipped_multi_batch`).
+        - Шаг `memory_suggestions.request_patch_replace` (полная перезапись всех регистров WM)
+          выполняется только если весь диалог уложился в один батч (мультибатч:
+          `memory_patch.executed = false`, reason `skipped_multi_batch`).
         - Форматирует `last_dialog_steps` через `dialog_history.format_last_dialog_steps`.
           Полное тело сообщения для чата собирает `apply_summary_state_patch` после apply дельт в
           `state.shared.working_memory` (см. `compaction.run_summary_compaction`).
@@ -378,6 +378,7 @@ def summarize_dialog_via_chat_completions(
             state=state,
             raw_output=raw,
             max_tokens=max_tokens,
+            full_replace=True,
         )
 
     def _run_patch_step(
@@ -387,31 +388,19 @@ def summarize_dialog_via_chat_completions(
             llm_result.raw_response,
             repair_fn=_repair_fn,
             min_chars_for_repair=100,
+            full_replace=True,
         )
         repair_success = repair_attempted and (bool(touched) or not deltas.is_empty())
         return deltas, touched, repair_attempted, repair_success, raw_used
 
     if len(batches) <= 1:
-        append_result = memory_suggestions.request_patch_append(
+        replace_result = memory_suggestions.request_patch_replace(
             ctx=ctx,
             state=state,
             history_text=full_history_text,
             summary_text=text,
             persistent_state_block=persistent_state_block,
         )
-        replace_result = memory_suggestions.request_patch_replace(
-            ctx=ctx,
-            state=state,
-            history_text=full_history_text,
-            summary_text=text,
-        )
-        (
-            memory_append_deltas,
-            append_touched,
-            append_repair,
-            append_repair_ok,
-            append_raw,
-        ) = _run_patch_step(append_result)
         (
             memory_replace_deltas,
             replace_touched,
@@ -421,20 +410,16 @@ def summarize_dialog_via_chat_completions(
         ) = _run_patch_step(replace_result)
         trace["memory_patch"] = {
             "executed": True,
+            "mode": "full_replace_all_registers",
             "input": {
                 "history_text": full_history_text,
                 "summary_text": text,
                 "persistent_state": persistent_state_block,
             },
             "append": {
-                "output": memory_append_deltas.to_dict(),
-                "format_repair_attempted": append_repair,
-                "format_repair_success": append_repair_ok,
-                "llm": {
-                    "request_messages": append_result.request_messages,
-                    "raw_response": append_result.raw_response,
-                    "raw_response_parsed": append_raw,
-                },
+                "skipped": True,
+                "reason": "summary_patch_uses_full_replace_only",
+                "output": {},
             },
             "replace": {
                 "output": memory_replace_deltas.to_dict(),

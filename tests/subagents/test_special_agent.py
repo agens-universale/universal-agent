@@ -19,7 +19,7 @@ def _make_orchestrator_state():
     state = State(
         verbose=False,
         model="test-model",
-        tools_spec=[{"name": "read_file"}],
+        tools_spec=[{"name": "fs_read_file"}],
         tools_descr=["read desc"],
         skills_list=[],
         max_steps=100,
@@ -208,7 +208,7 @@ class TestSpecialAgentWithRunner:
             patch.object(runner, "_build_child_ctx", return_value=SimpleNamespace()),
         ):
             result = runner.run(
-                "system_subagent_special_agent",
+                "subagent_special_agent",
                 {
                     "reason": "Need security audit",
                     "role": "Security Auditor",

@@ -3,8 +3,8 @@ from unittest.mock import patch
 
 import pytest
 
-from long_memory import compaction
-from long_memory.compaction import CompactionResult, SOFT_APPEND_INPUT_LIMIT_CHARS
+from project_memory import compaction
+from project_memory.compaction import CompactionResult, SOFT_APPEND_INPUT_LIMIT_CHARS
 
 
 def _make_ctx(backend_mode: str = "chat_completions") -> SimpleNamespace:
@@ -22,7 +22,7 @@ def test_soft_append_input_limit_constant():
 def test_compact_text_happy_path():
     ctx = _make_ctx()
     with patch(
-        "long_memory.compaction.request_chat_completion_text",
+        "project_memory.compaction.request_chat_completion_text",
         return_value="compressed body",
     ) as mocked:
         res = compaction.compact_text("very long original text", ctx)
@@ -35,7 +35,7 @@ def test_compact_text_happy_path():
 def test_compact_text_strips_response():
     ctx = _make_ctx()
     with patch(
-        "long_memory.compaction.request_chat_completion_text",
+        "project_memory.compaction.request_chat_completion_text",
         return_value="  compressed  \n\n",
     ):
         res = compaction.compact_text("text", ctx)
@@ -46,7 +46,7 @@ def test_compact_text_strips_response():
 def test_compact_text_empty_response():
     ctx = _make_ctx()
     with patch(
-        "long_memory.compaction.request_chat_completion_text",
+        "project_memory.compaction.request_chat_completion_text",
         return_value="   \n  ",
     ):
         res = compaction.compact_text("text", ctx)
@@ -58,7 +58,7 @@ def test_compact_text_empty_response():
 def test_compact_text_backend_exception_caught():
     ctx = _make_ctx()
     with patch(
-        "long_memory.compaction.request_chat_completion_text",
+        "project_memory.compaction.request_chat_completion_text",
         side_effect=RuntimeError("network down"),
     ):
         res = compaction.compact_text("text", ctx)
@@ -88,7 +88,7 @@ def test_compact_text_uses_prompt_template_as_system():
         return "compressed"
 
     with patch(
-        "long_memory.compaction.request_chat_completion_text", side_effect=fake_call
+        "project_memory.compaction.request_chat_completion_text", side_effect=fake_call
     ):
         compaction.compact_text("text body", ctx)
 
@@ -96,4 +96,4 @@ def test_compact_text_uses_prompt_template_as_system():
     assert msgs[0]["role"] == "system"
     assert "compaction assistant" in msgs[0]["content"].lower()
     assert msgs[1] == {"role": "user", "content": "text body"}
-    assert captured["label"] == "long_memory_compaction"
+    assert captured["label"] == "project_memory_compaction"

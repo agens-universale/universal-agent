@@ -14,7 +14,7 @@ from intent_guard.trace_digest import build_finish_gate_trace_digest
 
 
 def _ask_human_scenario_messages(*, include_pending_submit: bool = True) -> list[dict]:
-    """Сценарий §1.2: «спроси меня» → ask_human → ответ → write → submit_solution."""
+    """Сценарий §1.2: «спроси меня» → turn_ask_human → ответ → fs_write → turn_finish."""
     messages: list[dict] = [
         {"role": "user", "content": "предыдущий запрос в треде"},
         {"role": "assistant", "content": "ok"},
@@ -22,14 +22,14 @@ def _ask_human_scenario_messages(*, include_pending_submit: bool = True) -> list
         {
             "type": "function_call",
             "call_id": "ah1",
-            "name": "ask_human",
+            "name": "turn_ask_human",
             "arguments": {"question": "Какой навык хочешь прокачать?"},
         },
         {
             "type": "function_call_output",
             "call_id": "ah1",
             "output": {
-                "tool": "ask_human",
+                "tool": "turn_ask_human",
                 "ok": True,
                 "question": "Какой навык хочешь прокачать?",
                 "response": "как осанку исправить",
@@ -38,13 +38,13 @@ def _ask_human_scenario_messages(*, include_pending_submit: bool = True) -> list
         {
             "type": "function_call",
             "call_id": "wf1",
-            "name": "write_to_file",
+            "name": "fs_write_file",
             "arguments": {"path": "posture_plan.md", "content": "plan"},
         },
         {
             "type": "function_call_output",
             "call_id": "wf1",
-            "output": {"tool": "write_to_file", "ok": True, "path": "posture_plan.md"},
+            "output": {"tool": "fs_write_file", "ok": True, "path": "posture_plan.md"},
         },
     ]
     if include_pending_submit:
@@ -52,7 +52,7 @@ def _ask_human_scenario_messages(*, include_pending_submit: bool = True) -> list
             {
                 "type": "function_call",
                 "call_id": "ss1",
-                "name": "submit_solution",
+                "name": "turn_finish",
                 "arguments": {
                     "solution_type": "full_solution",
                     "task_report": "done",
@@ -89,7 +89,7 @@ class FinishGateTraceDigestTest(unittest.TestCase):
         state = SimpleNamespace(messages=_ask_human_scenario_messages())
         digest = build_finish_gate_trace_digest(state=state)
         text = digest.trace_digest_text
-        self.assertIn("[function_call] ask_human", text)
+        self.assertIn("[function_call] turn_ask_human", text)
         self.assertIn("как осанку исправить", text)
         self.assertIn("спроси меня что нибудь", text)
 
@@ -102,7 +102,7 @@ class FinishGateTraceDigestTest(unittest.TestCase):
         state = SimpleNamespace(messages=_ask_human_scenario_messages())
         digest = build_finish_gate_trace_digest(state=state)
         text = digest.trace_digest_text
-        self.assertNotIn("[function_call] submit_solution", text)
+        self.assertNotIn("[function_call] turn_finish", text)
         self.assertNotIn("full_solution", text)
 
     def test_previous_submit_solution_remains_when_not_last(self) -> None:
@@ -112,14 +112,14 @@ class FinishGateTraceDigestTest(unittest.TestCase):
                 {
                     "type": "function_call",
                     "call_id": "ss_old",
-                    "name": "submit_solution",
+                    "name": "turn_finish",
                     "arguments": {"solution_type": "direct_answer", "task_report": "old"},
                 },
                 {"role": "user", "content": "technical feedback after reject"},
                 {
                     "type": "function_call",
                     "call_id": "ss_new",
-                    "name": "submit_solution",
+                    "name": "turn_finish",
                     "arguments": {"solution_type": "full_solution", "task_report": "new"},
                 },
             ]
@@ -129,13 +129,13 @@ class FinishGateTraceDigestTest(unittest.TestCase):
         text = digest.trace_digest_text
         self.assertNotIn('"task_report": "new"', text)
         self.assertNotIn("full_solution", text)
-        self.assertIn("[function_call] submit_solution", text)
+        self.assertIn("[function_call] turn_finish", text)
         self.assertIn("direct_answer", text)
 
     def test_build_history_text_matches_summarizer_pipeline(self) -> None:
         messages = [
             {"role": "user", "content": "hello"},
-            {"type": "function_call", "call_id": "c1", "name": "read_file", "arguments": {"path": "/tmp/a.txt"}},
+            {"type": "function_call", "call_id": "c1", "name": "fs_read_file", "arguments": {"path": "/tmp/a.txt"}},
             {"type": "function_call_output", "call_id": "c1", "output": {"ok": True}},
             {"role": "assistant", "content": "done"},
         ]
@@ -153,7 +153,7 @@ class FinishGateTraceDigestTest(unittest.TestCase):
         state = SimpleNamespace(messages=messages)
         digest = build_finish_gate_trace_digest(
             state=state,
-            exclude_pending_submit_solution=False,
+            exclude_pending_turn_finish=False,
         )
         self.assertEqual(digest.trace_digest_text, expected)
         self.assertEqual(digest.digest_chars, len(expected))

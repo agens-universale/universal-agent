@@ -130,18 +130,22 @@ def test_memory_deltas_applied_to_working_memory_not_inside_summary(monkeypatch)
     def _fake_request(**kwargs):
         return _valid_summary("with-memory")
 
-    def _fake_append(**_kwargs):
+    def _fake_replace(**_kwargs):
         return types.SimpleNamespace(
             request_messages=[],
-            raw_response="<knowledge>- bullet one\n- bullet two</knowledge>",
+            raw_response=(
+                "<goal>existing note</goal>"
+                "<constraints></constraints>"
+                "<state></state>"
+                "<knowledge>- bullet one\n- bullet two</knowledge>"
+            ),
         )
 
     monkeypatch.setattr("summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
     _patch_chat_completion(monkeypatch, _fake_request)
-    monkeypatch.setattr("summarize.memory_suggestions.request_patch_append", _fake_append)
     monkeypatch.setattr(
         "summarize.memory_suggestions.request_patch_replace",
-        lambda **_k: types.SimpleNamespace(request_messages=[], raw_response=""),
+        _fake_replace,
     )
 
     state = types.SimpleNamespace(
@@ -167,11 +171,11 @@ def test_memory_deltas_applied_to_working_memory_not_inside_summary(monkeypatch)
     assert "<add_to_memory>" not in content
     inner = content.split("<summary>")[1].split("</summary>")[0]
     assert "bullet one" not in inner
-    assert "<working_memory>" in content
-    assert "existing note" in content
+    assert "<session_memory>" in content
     assert "bullet one" in content
-    assert state.shared.working_memory["knowledge"].startswith("existing note") is False
+    assert state.shared.working_memory["goal"] == "existing note"
     assert "bullet one" in state.shared.working_memory["knowledge"]
+    assert "existing note" not in state.shared.working_memory["knowledge"]
 
 
 def test_memory_patch_replace_overwrites_stale_state_register(monkeypatch):
@@ -184,15 +188,16 @@ def test_memory_patch_replace_overwrites_stale_state_register(monkeypatch):
     def _fake_replace(**_kwargs):
         return types.SimpleNamespace(
             request_messages=[],
-            raw_response="<state>- [TODO] run tests\n- next: ship</state>",
+            raw_response=(
+                "<goal>finish feature</goal>"
+                "<constraints></constraints>"
+                "<state>- [TODO] run tests\n- next: ship</state>"
+                "<knowledge></knowledge>"
+            ),
         )
 
     monkeypatch.setattr("summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
     _patch_chat_completion(monkeypatch, _fake_request)
-    monkeypatch.setattr(
-        "summarize.memory_suggestions.request_patch_append",
-        lambda **_k: types.SimpleNamespace(request_messages=[], raw_response=""),
-    )
     monkeypatch.setattr("summarize.memory_suggestions.request_patch_replace", _fake_replace)
 
     state = types.SimpleNamespace(
@@ -231,7 +236,7 @@ def test_memory_patch_replace_overwrites_stale_state_register(monkeypatch):
     assert "old blocker" not in wm_state
     assert "[TODO] run tests" in wm_state
     assert "<state>" in content
-    assert "stale TODO" not in content.split("<working_memory>")[1]
+    assert "stale TODO" not in content.split("<session_memory>")[1]
 
 
 def test_summarize_incremental_two_batches_previous_summary_passed(monkeypatch):
@@ -250,12 +255,7 @@ def test_summarize_incremental_two_batches_previous_summary_passed(monkeypatch):
         seen_user_prompts.append(user_content)
         return next(responses)
 
-    append_calls = []
     replace_calls = []
-
-    def _fake_append(**kwargs):
-        append_calls.append(kwargs)
-        return types.SimpleNamespace(request_messages=[], raw_response="")
 
     def _fake_replace(**kwargs):
         replace_calls.append(kwargs)
@@ -263,7 +263,6 @@ def test_summarize_incremental_two_batches_previous_summary_passed(monkeypatch):
 
     monkeypatch.setattr("summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
     _patch_chat_completion(monkeypatch, _fake_request)
-    monkeypatch.setattr("summarize.memory_suggestions.request_patch_append", _fake_append)
     monkeypatch.setattr("summarize.memory_suggestions.request_patch_replace", _fake_replace)
 
     result = summarize_dialog_via_chat_completions(
@@ -276,7 +275,6 @@ def test_summarize_incremental_two_batches_previous_summary_passed(monkeypatch):
     assert len(seen_user_prompts) == 2
     assert "batch-1" in seen_user_prompts[1]
     # Для multi-batch memory patch не выполняется.
-    assert append_calls == []
     assert replace_calls == []
     assert result["memory_append_deltas"] == WorkingMemoryDeltas()
     assert result["memory_replace_deltas"] == WorkingMemoryDeltas()

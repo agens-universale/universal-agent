@@ -3,6 +3,7 @@ from typing import Any, Dict, Optional
 import os
 import json
 
+from utils.file_text import read_text_for_edit, sha256_hex_of_text
 from utils.tool_report_paths import tool_report_abspath
 from security.read_guard import enforce_read_guard
 
@@ -55,12 +56,14 @@ class ReadFile(AbstractSimpleTool):
         content_truncated: bool,
         next_char_offset: Optional[int],
         file_size_bytes: Optional[int],
+        sha256: str,
     ) -> str:
         return json.dumps(
             {
-                "tool": "read_file",
+                "tool": ReadFile.registered_tool_name(),
                 "ok": True,
                 "path": tool_report_abspath(path),
+                "sha256": sha256,
                 "file_size_bytes": file_size_bytes,
                 "start_line": start_line,
                 "end_line": end_line,
@@ -97,9 +100,10 @@ class ReadFile(AbstractSimpleTool):
             error_obj.update(error_details)
         return json.dumps(
             {
-                "tool": "read_file",
+                "tool": ReadFile.registered_tool_name(),
                 "ok": False,
                 "path": tool_report_abspath(path),
+                "sha256": None,
                 "file_size_bytes": file_size_bytes,
                 "start_line": 0,
                 "end_line": 0,
@@ -128,9 +132,10 @@ class ReadFile(AbstractSimpleTool):
     def tool_description(cls):
         description = {
             "type": "function",
-            "name": "read_file",
+            "name": "fs_read_file",
             "description": (
                 "Read a text file from the local filesystem. "
+                "Always includes full-file sha256 (for expected_file_sha256 in edit tools). "
                 "Line pagination: `offset` (1-based), `limit` (max lines). "
                 "Within selected lines: `char_offset` (0-based), "
                 f"`char_limit` (default {DEFAULT_READ_FILE_CHAR_LIMIT}) for very long single lines."
@@ -181,7 +186,7 @@ class ReadFile(AbstractSimpleTool):
 
     @classmethod
     def prompt_description(cls):
-        description = '''Tool name: read_file
+        description = '''Tool name: fs_read_file
 Tool description: Reads the contents of a text file from the local filesystem with line and character pagination.
 Input schema: {
   "type": "object",
@@ -213,6 +218,7 @@ Input schema: {
 
 Return format:
 - The tool ALWAYS returns a JSON string with the following fields (metadata first, "content" last):
+  - "sha256": string — SHA-256 hex digest of the full file (same canonical read as edit tools / file_info).
   - "file_size_bytes": integer or null — on-disk file size when the path is a readable file.
   - "start_line": integer — 1-based number of the first line returned.
   - "end_line": integer — 1-based number of the last line returned.
@@ -342,7 +348,7 @@ Usage:
                 path=path,
                 error_type="file_too_large",
                 message=(
-                    f"File is {file_size_bytes} bytes; read_file limit is {max_bytes} bytes. "
+                    f"File is {file_size_bytes} bytes; fs_read_file limit is {max_bytes} bytes. "
                     "This tool loads the whole file for in-context inspection — too large for that. "
                     "Choose a different approach from <tools> matched to your goal: read a small slice, "
                     "tail/head, search for patterns, or compute a summary — not a full read through this tool."
@@ -354,9 +360,18 @@ Usage:
         resolved_char_limit = self._resolve_char_limit(char_limit)
         resolved_char_offset = 0 if char_offset is None else char_offset
 
-        with open(path, 'r', encoding='utf-8') as fd:
-            lines = fd.readlines()
+        try:
+            full_text = read_text_for_edit(path)
+        except OSError as e:
+            return self._error_result(
+                path=path,
+                error_type="read_failed",
+                message=f"Failed to read file: {e}",
+                file_size_bytes=file_size_bytes,
+            )
 
+        file_sha256 = sha256_hex_of_text(full_text)
+        lines = full_text.splitlines(keepends=True)
         total_lines = len(lines)
 
         if offset is not None or limit is not None:
@@ -414,4 +429,5 @@ Usage:
             content_truncated=content_truncated,
             next_char_offset=next_char_offset,
             file_size_bytes=file_size_bytes,
+            sha256=file_sha256,
         )

@@ -37,8 +37,9 @@ def test_list_validation_and_not_found(tmp_path):
 
 def test_list_extra_validation_and_not_a_directory(tmp_path):
     tool = ListFiles()
-    bad_glob = json.loads(tool(path=str(tmp_path), glob=1))  # type: ignore[arg-type]
-    assert bad_glob["ok"] is False and bad_glob["error"]["field"] == "glob"
+    # Non-string optional glob is coalesced to absent (same as omit / "").
+    coalesced_glob = json.loads(tool(path=str(tmp_path), glob=1))  # type: ignore[arg-type]
+    assert coalesced_glob["ok"] is True and "glob" not in coalesced_glob
     bad_depth = json.loads(tool(path=str(tmp_path), max_depth=-1))
     assert bad_depth["ok"] is False and bad_depth["error"]["field"] == "max_depth"
     bad_entries = json.loads(tool(path=str(tmp_path), max_entries=0))

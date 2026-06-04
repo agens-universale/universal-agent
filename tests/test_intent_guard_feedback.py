@@ -40,7 +40,7 @@ class FinishGateFeedbackTest(unittest.TestCase):
             )
         )
         self.assertTrue(text.startswith("Finish gate: fix_report."))
-        self.assertIn("без повторения", text)
+        self.assertIn("without repeating", text)
         self.assertIn("direct_answer", text)
         self.assertNotIn("ask_human", text.lower())
 
@@ -51,11 +51,11 @@ class FinishGateFeedbackTest(unittest.TestCase):
                 action="continue_work",
                 trace_ok=False,
                 report_ok=True,
-                trace_gaps=["нет write_to_file для X"],
+                trace_gaps=["нет fs_write_file для X"],
             )
         )
         self.assertIn("finish gate: continue_work.", text.lower())
-        self.assertIn("write_to_file", text)
+        self.assertIn("fs_write_file", text)
 
     def test_fix_report_and_continue_both_blocks(self) -> None:
         text = build_finish_gate_feedback(
@@ -70,7 +70,7 @@ class FinishGateFeedbackTest(unittest.TestCase):
         )
         self.assertIn("gap", text)
         self.assertIn("mismatch", text)
-        self.assertIn("Не повторяй", text)
+        self.assertIn("Do not repeat", text)
 
     def test_reject_technical_user_content_includes_continue_work(self) -> None:
         feedback = build_finish_gate_feedback(
@@ -83,8 +83,8 @@ class FinishGateFeedbackTest(unittest.TestCase):
             )
         )
         text = build_finish_gate_reject_technical_user_content(feedback)
-        self.assertIn("не соответствует интенту", text.lower())
-        self.assertIn("продолжай работу", text.lower())
+        self.assertIn("does not match", text.lower())
+        self.assertIn("continue working", text.lower())
         self.assertIn("fix_report", text)
         self.assertIn("direct_answer", text)
 

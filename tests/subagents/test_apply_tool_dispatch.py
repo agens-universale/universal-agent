@@ -15,7 +15,7 @@ def _make_state():
     state = State(
         verbose=False,
         model="test-model",
-        tools_spec=[{"name": "read_file"}],
+        tools_spec=[{"name": "fs_read_file"}],
         tools_descr=["read desc"],
         skills_list=[],
         max_steps=100,
@@ -120,9 +120,9 @@ class TestSubagentDispatch:
                 return f"read: {path}"
 
         tools_data = {
-            "read_file": {
+            "fs_read_file": {
                 "spec": {
-                    "name": "read_file",
+                    "name": "fs_read_file",
                     "parameters": {
                         "type": "object",
                         "properties": {"path": {"type": "string"}},
@@ -137,7 +137,7 @@ class TestSubagentDispatch:
         state = _make_state()
 
         result = apply_tool(
-            tool_name="read_file",
+            tool_name="fs_read_file",
             arguments=json.dumps({"path": "/tmp/test.txt"}),
             ctx=ctx,
             state=state,

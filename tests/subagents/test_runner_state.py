@@ -13,7 +13,7 @@ def _make_orchestrator_state(**overrides):
     state = State(
         verbose=False,
         model="test-model",
-        tools_spec=[{"name": "read_file"}, {"name": "subagent_worker"}],
+        tools_spec=[{"name": "fs_read_file"}, {"name": "subagent_worker"}],
         tools_descr=["read desc", "worker desc"],
         skills_list=[],
         max_steps=100,

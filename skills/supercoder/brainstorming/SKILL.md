@@ -87,7 +87,7 @@ After the user approves the design:
   1. Save the validated design to disk at
      `docs/supercoder/specs/YYYY-MM-DD-<topic>-design.md` with the sections
      described in "Output" above.
-  2. `ask_human` — show the user the saved path and ask them to review and
+  2. **Human clarification** — show the user the saved path and ask them to review and
      confirm: e.g. "Design saved to <path>. Review it and reply 'ok' to
      proceed to the plan, or describe changes."
   3. ONLY after the user confirms: `skills_load("supercoder:writing-plans")`.

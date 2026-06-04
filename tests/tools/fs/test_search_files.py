@@ -59,8 +59,9 @@ def test_search_validation_and_directory_error(tmp_path):
     tool = SearchFiles()
     bad_regex_type = json.loads(tool(path=str(tmp_path), regex=123))  # type: ignore[arg-type]
     assert bad_regex_type["ok"] is False and bad_regex_type["error"]["field"] == "regex"
-    bad_file_pattern_type = json.loads(tool(path=str(tmp_path), regex="x", file_pattern=1))  # type: ignore[arg-type]
-    assert bad_file_pattern_type["ok"] is False and bad_file_pattern_type["error"]["field"] == "file_pattern"
+    # Non-string optional file_pattern is coalesced to absent (same as omit / "").
+    coalesced_pattern = json.loads(tool(path=str(tmp_path), regex="x", file_pattern=1))  # type: ignore[arg-type]
+    assert coalesced_pattern["ok"] is True and coalesced_pattern["file_pattern"] is None
     f = tmp_path / "single.txt"
     f.write_text("x", encoding="utf-8")
     not_dir = json.loads(tool(path=str(f), regex="x"))

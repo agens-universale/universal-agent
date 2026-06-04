@@ -17,7 +17,7 @@ class Calculator(AbstractSimpleTool):
     ) -> str:
         return json.dumps(
             {
-                "tool": "calculator",
+                "tool": Calculator.registered_tool_name(),
                 "ok": ok,
                 "expression": expression,
                 "value_type": value_type,
@@ -31,19 +31,27 @@ class Calculator(AbstractSimpleTool):
     def tool_description(cls):
         description = {
             "type": "function",
-            "name": "calculator",
+            "name": "exec_calculator",
             "description": (
-                "Evaluates a Python expression (pure expression only) and returns a JSON string envelope. "
+                "Evaluates a restricted Python expression (syntax only; not full Python). "
+                "Allowed: numeric/string/bool/None literals, operators, literal containers "
+                "(list/tuple/dict/set), subscripts, comprehensions, and conditional expressions. "
+                "No global or builtin names (sum, len, float, abs, etc.), no imports, no statements. "
+                "Method calls on a literal value (e.g. [1,2,3].count(1)) may work; prefer operators for math. "
+                "Non-JSON values (e.g. set) are returned as strings. "
                 "Returns ok=true with value on success, ok=false with error on failure. "
-                "The expression length is limited to max_expression_chars."
+                "Expression length is limited to max_expression_chars."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "expression": {
                         "type": "string",
-                        "description": "The Python expression to evaluate, for example '1 + 2 * 3' or '(10 / 2) ** 3'."
-                    }
+                        "description": (
+                            "Restricted expression, e.g. '1 + 2 * 3', '(1+2+3)*7', '[1,2,3][0]*7'. "
+                            "Global/builtin callables (sum, len, float, …) are unavailable."
+                        ),
+                    },
                 },
                 "required": ["expression"],
                 "additionalProperties": False
@@ -54,18 +62,21 @@ class Calculator(AbstractSimpleTool):
 
     @classmethod
     def prompt_description(cls):
-        description = f'''Tool name: calculator
-Tool description: Evaluates a Python pure expression (no statements) and returns a JSON string.
-Input schema: {{"type": "object", "properties": {{"expression": {{"type": "string", "description": "Python expression to evaluate."}}}}, "required": ["expression"], "additionalProperties": false}}
+        description = f'''Tool name: exec_calculator
+Tool description: Evaluates a restricted Python expression (literal/operator sandbox; not full Python) and returns a JSON string.
+Input schema: {{"type": "object", "properties": {{"expression": {{"type": "string", "description": "Restricted expression (literals and operators only)."}}}}, "required": ["expression"], "additionalProperties": false}}
 
 Usage:
-- Use this tool for arithmetic and other side-effect-free Python expressions only.
-- The expression must be a valid Python *expression* (no statements like for/while/if/def/etc.).
+- Use for arithmetic and similar calculations without shell or code execution.
+- Syntax is Python *expression* form only (no statements: for/while/if/def/import/etc.).
+- No global/builtin names: sum(), len(), float(), abs(), etc. will fail — use operators and literals (e.g. `(1+2+3)*7`, `[1,2,3][0]*7`).
+- Comprehensions and `x if cond else y` are allowed; method calls on a literal (e.g. `[1,2,3].count(1)`) may work but are not required for arithmetic.
+- set and other non-JSON results come back as strings in `value`.
 - Expression length must be <= {cls.max_expression_chars}.
 
 Return format (JSON string):
 {{
-  "tool":"calculator",
+  "tool":"exec_calculator",
   "ok": true|false,
   "expression": "...",
   "value_type": "...",

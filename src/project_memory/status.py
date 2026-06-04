@@ -10,9 +10,10 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Optional
 
-from long_memory import storage
+from constants.tool_names import PROJECT_MEMORY_TOOL_NAME
+from project_memory import storage
 
-_FILE_NAME = "long_memory.md"
+_FILE_NAME = "project_memory.md"
 
 _EMPTY_STATUS = (
     "project doesn't have long memory yet. "
@@ -22,7 +23,7 @@ _EMPTY_STATUS = (
 )
 
 
-def build_long_memory_status_for_cwd(cwd: Optional[str] = None) -> str:
+def build_project_memory_status_for_cwd(cwd: Optional[str] = None) -> str:
     """Resolve the project-local memory path and build the status string.
 
     Callers that have no business knowing where memory lives use this entry
@@ -30,7 +31,7 @@ def build_long_memory_status_for_cwd(cwd: Optional[str] = None) -> str:
     """
     from config_modules.env_vars import project_gc_dir
 
-    return build_long_memory_status(project_gc_dir(cwd) / _FILE_NAME)
+    return build_project_memory_status(project_gc_dir(cwd) / _FILE_NAME)
 
 
 def attach_status_to_prompt_vars(
@@ -41,18 +42,18 @@ def attach_status_to_prompt_vars(
 ) -> None:
     """Add `longMemoryStatus` to the given prompt-variables dict.
 
-    Не добавляет статус, если ``long_memory`` в ``stop_tools`` (D36).
+    Не добавляет статус, если ``project_memory`` в ``stop_tools`` (D36).
     """
     stop = (config_dict or {}).get("stop_tools")
-    if isinstance(stop, list) and "long_memory" in stop:
+    if isinstance(stop, list) and PROJECT_MEMORY_TOOL_NAME in stop:
         return
     try:
-        prompt_vars["longMemoryStatus"] = build_long_memory_status_for_cwd(cwd)
+        prompt_vars["longMemoryStatus"] = build_project_memory_status_for_cwd(cwd)
     except Exception:  # pragma: no cover — memory must never break metadata
         return
 
 
-def build_long_memory_status(path: Path) -> str:
+def build_project_memory_status(path: Path) -> str:
     """Return the multi-line status injected into Project Info as longMemoryStatus.
 
     Two outputs by file state:

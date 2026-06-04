@@ -18,7 +18,7 @@ def _make_orchestrator_state():
     state = State(
         verbose=False,
         model="test-model",
-        tools_spec=[{"name": "read_file"}],
+        tools_spec=[{"name": "fs_read_file"}],
         tools_descr=["read desc"],
         skills_list=[],
         max_steps=100,
@@ -38,7 +38,7 @@ def _make_config():
     return {
         "use_local_subagents": True,
         "backend_api_mode": "chat_completions",
-        "strict_submit_solution_validation": True,
+        "strict_turn_finish_validation": True,
         "finish_gate_max_iterations": 10,
         "subagent_finish_gate_max_iterations": 3,
         "enabled_tools": [],
@@ -94,8 +94,8 @@ def test_subagent_gate_validates_assignment_not_orchestrator_cli_intent():
         _continue_work,
     ):
         guard = FinishGateGuard(ctx=_make_ctx(cfg), state=child)
-        decision = guard.evaluate_submit_solution(
-            submit_solution_arguments={"solution_type": "full_solution", "task_report": "bar"},
+        decision = guard.evaluate_turn_finish(
+            finish_handoff_arguments={"solution_type": "full_solution", "task_report": "bar"},
         )
 
     assert decision.outcome == "reject"

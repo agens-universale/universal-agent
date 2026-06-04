@@ -3,6 +3,7 @@ import functools
 import os
 import stat
 from typing import List, Dict, Any, Optional
+from tools.schema_optional import coalesce_optional_string
 from tools.simple_tool_base import AbstractSimpleTool
 from utils.glob_to_regex import compile_glob
 from utils.tool_report_paths import tool_report_abspath
@@ -26,7 +27,7 @@ class ListFiles(AbstractSimpleTool):
     def tool_description(cls):
         return {
             "type": "function",
-            "name": "list_files",
+            "name": "fs_list_files",
             "description": (
                 "Lists files and directories within a specified absolute path. Supports flat listing (default) "
                 "and deeper traversal limited by `max_depth`. Optionally filters results by a glob pattern matched against the "
@@ -43,9 +44,9 @@ class ListFiles(AbstractSimpleTool):
                     "glob": {
                         "type": "string",
                         "description": (
-                            "Optional glob pattern to filter entries by their relative path from `path` "
-                            "(e.g., '*.py', '**/*.md', 'src/**'). If omitted, all entries are returned."
-                        )
+                            "Glob pattern to filter entries by their relative path from `path` "
+                            "(e.g., '*.py', '**/*.md', 'src/**'). When unset, all entries are returned."
+                        ),
                     },
                     "max_depth": {
                         "type": "integer",
@@ -73,7 +74,7 @@ class ListFiles(AbstractSimpleTool):
 
     @classmethod
     def prompt_description(cls):
-        description = '''Tool name: list_files  
+        description = '''Tool name: fs_list_files  
 Tool description: Lists files and directories in the specified directory with optional depth/size limits.
 Input schema: {"type": "object", "properties": {"path": {"type": "string", "description": "The directory absolute path to list contents for."}, "max_depth": {"type": "integer", "minimum": 0, "description": "Max directory depth to traverse. Default 0 = only immediate children."}, "max_entries": {"type": "integer", "minimum": 1, "description": "Max number of returned entries. Default 200."}, "glob": {"type": "string"}}, "required": ["path"], "additionalProperties": false}
 
@@ -84,7 +85,7 @@ Usage:
 - Set `max_entries` to limit output size.
 - Return format (JSON string):
 {
-  "tool": "list_files",
+  "tool": "fs_list_files",
   "ok": true|false,
   "path": "...",
   "max_depth": integer,
@@ -132,7 +133,7 @@ List deeper files (example):
         error: Optional[Dict[str, Any]] = None,
     ) -> str:
         payload = {
-            "tool": "list_files",
+            "tool": ListFiles.registered_tool_name(),
             "ok": ok,
             "path": tool_report_abspath(path),
             "max_depth": max_depth,
@@ -171,6 +172,7 @@ List deeper files (example):
         max_depth: Optional[int] = None,
         max_entries: Optional[int] = 200,
     ) -> str:
+        glob = coalesce_optional_string(glob)
         effective_max_depth: int = 0 if max_depth is None else max_depth
         # Per-entry guard для symlink/escape protection во время listing.
         _rg_cfg, _rg_root, _rg_extra = self._resolve_read_guard()

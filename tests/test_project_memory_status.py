@@ -1,32 +1,32 @@
-from long_memory.status import build_long_memory_status
+from project_memory.status import build_project_memory_status
 
 
 def test_status_missing_file(tmp_path):
-    text = build_long_memory_status(tmp_path / "long_memory.md")
+    text = build_project_memory_status(tmp_path / "project_memory.md")
     assert "doesn't have long memory yet" in text
     assert "persist it for future sessions" in text
     assert "appropriate memory tool" in text
 
 
 def test_status_empty_file(tmp_path):
-    p = tmp_path / "long_memory.md"
+    p = tmp_path / "project_memory.md"
     p.write_text("", encoding="utf-8")
-    text = build_long_memory_status(p)
+    text = build_project_memory_status(p)
     assert "doesn't have long memory yet" in text
 
 
 def test_status_whitespace_only_file(tmp_path):
-    p = tmp_path / "long_memory.md"
+    p = tmp_path / "project_memory.md"
     p.write_text("   \n\n  ", encoding="utf-8")
-    text = build_long_memory_status(p)
+    text = build_project_memory_status(p)
     assert "doesn't have long memory yet" in text
 
 
 def test_status_populated_file(tmp_path):
-    p = tmp_path / "long_memory.md"
+    p = tmp_path / "project_memory.md"
     body = "fact one\n\nfact two\n\nfact three"
     p.write_text(body, encoding="utf-8")
-    text = build_long_memory_status(p)
+    text = build_project_memory_status(p)
     assert "project has long memory" in text
     assert "MUST" not in text
     assert "FIRST STEP" not in text
@@ -38,11 +38,11 @@ def test_status_populated_file(tmp_path):
 
 def test_status_no_path_or_tool_name_leaked(tmp_path):
     """Must not leak the file path or the tool name to the model."""
-    p = tmp_path / "long_memory.md"
+    p = tmp_path / "project_memory.md"
     p.write_text("body", encoding="utf-8")
-    text_full = build_long_memory_status(p)
-    text_empty = build_long_memory_status(tmp_path / "missing.md")
+    text_full = build_project_memory_status(p)
+    text_empty = build_project_memory_status(tmp_path / "missing.md")
     for text in (text_full, text_empty):
         assert ".gc/" not in text
         assert ".md" not in text
-        assert "long_memory" not in text  # tool name must not appear
+        assert "project_memory" not in text  # tool name must not appear

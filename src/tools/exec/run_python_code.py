@@ -5,6 +5,7 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+from constants.tool_names import EXEC_PYTHON_NAME
 from security.command_moderation import effective_command_cwd, moderate_command_execution
 from security.path_policy import resolve_tool_context
 from tools.simple_tool_base import AbstractSimpleTool
@@ -27,7 +28,7 @@ class RunPythonCode(AbstractSimpleTool):
     def tool_description(cls):
         description = {
             "type": "function",
-            "name": "run_python_code",
+            "name": "exec_python",
             "description": (
                 "Runs Python code synchronously (no background) in a subprocess and returns a JSON string envelope "
                 "with: tool, ok, return_code, timed_out, truncated, error, then stdout/stderr last. "
@@ -57,8 +58,8 @@ class RunPythonCode(AbstractSimpleTool):
                     "cwd": {
                         "type": "string",
                         "description": (
-                            "Optional working directory for the subprocess (absolute or relative to the host). "
-                            "If omitted, defaults to this agent's configured project/workspace root so relative paths "
+                            "Working directory for the subprocess (absolute or relative to the host). "
+                            "When unset, defaults to this agent's configured project/workspace root so relative paths "
                             "resolve under the project. If the default is missing, read-only, or unsuitable, set cwd "
                             "explicitly. When the tool returns an error with allowed_write_paths, use one of those "
                             "paths as cwd (they are the permitted writable locations for this run)."
@@ -87,7 +88,7 @@ class RunPythonCode(AbstractSimpleTool):
 
     @classmethod
     def prompt_description(cls):
-        description = '''Tool name: run_python_code
+        description = '''Tool name: exec_python
 Tool description: Runs a Python code snippet in a subprocess and returns stdout/stderr as JSON.
 Input schema: {"type": "object", "properties": {"code": {"type": "string", "description": "Python code to execute."}, "timeout_seconds": {"type": "integer", "description": "Execution timeout in seconds.", "default": 10}, "max_output_chars": {"type":"integer","description":"Max chars for stdout/stderr each.","default": 4000}, "cwd": {"type":"string","description":"Working directory (optional)"}, "env_vars": {"type":"array","description":"Env overrides as [{'name','value'}]","items":{"type":"object","properties":{"name":{"type":"string"},"value":{"type":"string"}},"required":["name","value"],"additionalProperties":false}}} , "required": ["code"], "additionalProperties": false}
 
@@ -101,7 +102,7 @@ Usage:
 
 Return format (JSON string):
 {
-  "tool":"run_python_code",
+  "tool":"exec_python",
   "ok": true|false,
   "return_code": number|null,
   "timed_out": true|false,
@@ -134,7 +135,7 @@ Return format (JSON string):
     ) -> str:
         return json.dumps(
             {
-                "tool": "run_python_code",
+                "tool": RunPythonCode.registered_tool_name(),
                 "ok": ok,
                 "return_code": return_code,
                 "timed_out": timed_out,
@@ -166,7 +167,7 @@ Return format (JSON string):
             error=error,
         )
 
-    @moderate_command_execution(payload_arg="code", tool_name="run_python_code")
+    @moderate_command_execution(payload_arg="code", tool_name=EXEC_PYTHON_NAME)
     def __call__(
         self,
         code: str,
@@ -233,7 +234,7 @@ Return format (JSON string):
             )
 
         security_context = resolve_tool_context(self, **kwargs)
-        cwd_used = effective_command_cwd("run_python_code", {"cwd": cwd}, security_context)
+        cwd_used = effective_command_cwd(EXEC_PYTHON_NAME, {"cwd": cwd}, security_context)
 
         if not Path(cwd_used).is_dir():
             launch_abs = os.path.abspath(str(security_context.launch_root))

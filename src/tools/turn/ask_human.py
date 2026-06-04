@@ -9,21 +9,22 @@ _RESPONSE_HINT = (
     "Direct answer (specific choice or instruction) → use it and proceed. "
     "Delegation (user leaves the call to you: 'you decide', 'your call', "
     "'как считаешь', 'на твоё усмотрение') → do not decide silently. "
-    "Investigate/weigh with other tools, then ask_human with your proposed choice, "
+    "Investigate/weigh with other tools, then turn_ask_human with your proposed choice, "
     "reasoning, and explicit confirmation; proceed only after they agree — not a black box. "
     "Meta-question (user asks you back, e.g. 'what do you recommend?') → "
     "do not skip to the next task step. If you need facts, investigate with other tools "
-    "first; reflect, then ask_human in one turn with your answer, reasoning, and "
+    "first; reflect, then turn_ask_human in one turn with your answer, reasoning, and "
     "ask whether they agree or want to settle the original choice — not a snap reply. "
-    "Ambiguous, empty, or off-topic → ask_human again to clarify. "
+    "Ambiguous, empty, or off-topic → turn_ask_human again to clarify. "
     "If still insufficient and the user did not delegate, keep asking — do not guess."
 )
 
 _TOOL_DESCRIPTION = (
-    "Request user input and wait for their reply (non-final). "
+    "Finalizes turn: no. "
+    "Request user input and wait for their reply. "
     "Use to ask for a choice, clarification, missing data, or explicit confirmation before risky or irreversible actions. "
-    "Do NOT use for one-way status or explanations — use the intermediate-reply tool. "
-    "Do NOT use as the final report of a completed task — use the turn-finalizing tool. "
+    "Do NOT use for one-way status or explanations. "
+    "Do NOT use as the final report of a completed task or to end the current user turn. "
     "Be clear and include necessary context; avoid vague questions. "
     "The `question` must be concise: the actual question plus minimal context only. "
     "Do not put long comparisons or background dumps into `question`; "
@@ -44,7 +45,7 @@ class AskHuman(AbstractSimpleTool):
         hint: Optional[str] = None,
     ) -> str:
         payload: Dict[str, Any] = {
-            "tool": "ask_human",
+            "tool": AskHuman.registered_tool_name(),
             "ok": ok,
             "error": error,
             "question": question,
@@ -63,7 +64,7 @@ class AskHuman(AbstractSimpleTool):
     def tool_description(cls) -> Dict[str, Any]:
         return {
             "type": "function",
-            "name": "ask_human",
+            "name": "turn_ask_human",
             "description": _TOOL_DESCRIPTION,
             "parameters": {
                 "type": "object",
@@ -87,10 +88,10 @@ class AskHuman(AbstractSimpleTool):
     def prompt_description(cls) -> str:
         # Legacy channel (tools_descr); not wired to API today — reserved for a future
         # tool_help-style meta-tool. Agent-facing spec: tool_description + result hint.
-        description = '''Tool name: ask_human
+        description = '''Tool name: turn_ask_human
 
 Overview:
-Ask the human user and wait for a free-form textual reply. Use for clarification,
+Finalizes turn: no. Ask the human user and wait for a free-form textual reply. Use for clarification,
 confirmation, subjective judgment, design discussion, or continuing a dialogue.
 
 What the agent actually sees (today):
@@ -124,12 +125,12 @@ Classify the reply before advancing. Same rules as the live hint; four categorie
 1. **Direct answer** — substantive choice or instruction (e.g. "A", "yes", "use approach X"). Use it and proceed.
 
 2. **Delegation to you** — user defers (e.g. "you decide", "your call", "как считаешь", "на твоё усмотрение").
-   **Not** permission to act silently. Investigate/weigh with other tools, then `ask_human` with your **proposed** choice, tradeoffs, and explicit confirmation. Proceed only after they agree — not a black box.
+   **Not** permission to act silently. Investigate/weigh with other tools, then `turn_ask_human` with your **proposed** choice, tradeoffs, and explicit confirmation. Proceed only after they agree — not a black box.
 
 3. **Meta-question or follow-up** — user asks YOU back ("what do you recommend?", "explain X", trailing "?").
-   Do **not** skip to the next methodology step. If facts are needed, use other tools first; reflect; then one `ask_human` turn with your answer, reasoning, and ask to close the original choice — not a snap reply. Pacing follows the user.
+   Do **not** skip to the next methodology step. If facts are needed, use other tools first; reflect; then one `turn_ask_human` turn with your answer, reasoning, and ask to close the original choice — not a snap reply. Pacing follows the user.
 
-4. **Ambiguous / empty / off-topic** — `ask_human` again to clarify (e.g. "Did you mean <X>, or should I propose options?").
+4. **Ambiguous / empty / off-topic** — `turn_ask_human` again to clarify (e.g. "Did you mean <X>, or should I propose options?").
 
 Do not re-ask the same question if you already got a usable direct answer. Empty or irrelevant replies → clarify or reask.
 
@@ -247,7 +248,7 @@ Do not implement until they confirm.
         except Exception as e:
             # Fallback in case of unexpected error
             error_msg = f"(error reading input: {str(e)})"
-            print(f"[ask_human error]: {error_msg}", file=sys.stderr)
+            print(f"[turn_ask_human error]: {error_msg}", file=sys.stderr)
             return self._result(
                 ok=False,
                 question=question,

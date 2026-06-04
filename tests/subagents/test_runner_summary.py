@@ -15,7 +15,7 @@ def _make_orchestrator_state():
     state = State(
         verbose=False,
         model="test-model",
-        tools_spec=[{"name": "read_file"}],
+        tools_spec=[{"name": "fs_read_file"}],
         tools_descr=["read desc"],
         skills_list=[],
         max_steps=100,

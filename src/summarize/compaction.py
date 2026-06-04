@@ -29,10 +29,11 @@ from summarize.working_memory_gateway import (
     REGISTER_ORDER,
     WorkingMemoryDeltas,
     apply_memory_patch,
+    apply_summary_memory_patch,
     coerce_working_memory_deltas,
     read_snapshot_from_state,
     render_persistent_state_for_prompt,
-    render_working_memory_for_summary_message,
+    render_session_memory_for_summary_message,
 )
 
 
@@ -79,7 +80,13 @@ def apply_summary_state_patch(
     replace_deltas = coerce_working_memory_deltas(memory_replace_deltas)
     append_touched_f = frozenset(memory_append_touched or ())
     replace_touched_f = frozenset(memory_replace_touched or ())
-    if append_touched_f or replace_touched_f or not append_deltas.is_empty() or not replace_deltas.is_empty():
+    if replace_touched_f or not replace_deltas.is_empty():
+        snapshot = apply_summary_memory_patch(
+            snapshot,
+            replace_deltas,
+            replace_touched=replace_touched_f or None,
+        )
+    elif append_touched_f or not append_deltas.is_empty():
         snapshot = apply_memory_patch(
             snapshot,
             append_deltas,
@@ -91,7 +98,7 @@ def apply_summary_state_patch(
     wm_dict = {name: snapshot.to_dict().get(name, "") for name in REGISTER_ORDER}
     shared.working_memory = wm_dict
 
-    working_memory_block = render_working_memory_for_summary_message(snapshot)
+    session_memory_block = render_session_memory_for_summary_message(snapshot)
     closed_records = list(getattr(state, "user_intent_log", []) or [])
     open_records = list(getattr(state, "current_user_intent", []) or [])
     preview_chars = (
@@ -102,7 +109,7 @@ def apply_summary_state_patch(
     summary_message_content = build_dialog_summary_content(
         summary_text=str(raw_summary or ""),
         last_dialog_steps=str(last_dialog_steps or ""),
-        working_memory_block=working_memory_block,
+        session_memory_block=session_memory_block,
         user_intent_log_preview=tail_preview(closed_records, preview_chars),
         current_user_intent_jsonl=serialize(open_records),
     )

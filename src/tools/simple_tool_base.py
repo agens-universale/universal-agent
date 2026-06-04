@@ -14,6 +14,16 @@ class AbstractSimpleTool(ABC):
         pass
 
     @classmethod
+    def registered_tool_name(cls) -> str:
+        """API tool name from ``tool_description()`` (same as ``tools_data`` key)."""
+        spec = cls.tool_description()
+        if isinstance(spec, dict):
+            name = spec.get("name")
+            if isinstance(name, str) and name.strip():
+                return name.strip()
+        return "unknown_tool"
+
+    @classmethod
     @abstractmethod
     def prompt_description(cls) -> str:
         pass

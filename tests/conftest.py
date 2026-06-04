@@ -103,8 +103,8 @@ def preload_minimal_tools_package() -> None:
 
     _load_file_module("tools.simple_tool_base", "tools/simple_tool_base.py")
     _load_file_module(
-        "tools.session.submit_solution",
-        "tools/session/submit_solution.py",
+        "tools.turn.submit_solution",
+        "tools/turn/submit_solution.py",
     )
 
     connect_mcp_pkg = types.ModuleType("tools.connect_mcp")

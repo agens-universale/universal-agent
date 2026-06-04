@@ -102,7 +102,7 @@ def request_patch_append(
     summary_text: str,
     persistent_state_block: str,
 ) -> MemoryPatchLlmResult:
-    """LLM step 2a: append deltas for knowledge and constraints registers."""
+    """Legacy optional prompt (not used by default summarization pipeline)."""
     prompt_path = _resolve_prompt_path(
         ctx,
         "chat_completions_memory_patch_append_prompt_path",
@@ -133,8 +133,9 @@ def request_patch_replace(
     state: Any,
     history_text: str,
     summary_text: str,
+    persistent_state_block: str = "",
 ) -> MemoryPatchLlmResult:
-    """LLM step 2b: replace snapshots for goal and state registers."""
+    """LLM step 2: full replace snapshots for all working_memory registers."""
     prompt_path = _resolve_prompt_path(
         ctx,
         "chat_completions_memory_patch_replace_prompt_path",
@@ -147,7 +148,8 @@ def request_patch_replace(
         "</dialog_history>\n\n"
         "<current_summary>\n"
         f"{summary_text}\n"
-        "</current_summary>\n"
+        "</current_summary>\n\n"
+        f"{str(persistent_state_block or '').strip()}\n"
     )
     return _request_patch(
         ctx=ctx,
@@ -164,9 +166,12 @@ def request_memory_deltas_format_repair(
     state: Any,
     raw_output: str,
     max_tokens: int | None = None,
+    full_replace: bool = False,
 ) -> str:
     """LLM transport: переформатировать сырой ответ memory-step в register-теги."""
-    request_messages = build_memory_deltas_format_repair_messages(raw_output)
+    request_messages = build_memory_deltas_format_repair_messages(
+        raw_output, full_replace=full_replace
+    )
     return request_summary_text(
         ctx=ctx,
         state=state,

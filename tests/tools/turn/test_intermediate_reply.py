@@ -1,13 +1,13 @@
 import json
 
-from tools.session.intermediate_reply import IntermediateReply
+from tools.turn.intermediate_reply import IntermediateReply
 
 
 def test_intermediate_reply_success(capsys):
     out = json.loads(IntermediateReply()(answer="hello"))
     assert out["ok"] is True
     assert out["answer"] == "hello"
-    assert out["tool"] == "intermediate_reply"
+    assert out["tool"] == "turn_intermediate_reply"
     assert out["error"] is None
     captured = capsys.readouterr()
     assert "hello" in captured.err

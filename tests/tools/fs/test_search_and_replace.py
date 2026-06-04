@@ -1,5 +1,6 @@
 import json
 
+from utils.file_text import sha256_hex_of_text
 from tools.fs.search_and_replace import SearchAndReplace
 
 
@@ -280,6 +281,39 @@ def test_not_found_suggestions_limit_to_ten(tmp_path):
     assert miss["ok"] is False and miss["matched"] is False
     assert len(miss["suggestions"]) == 10
     assert miss["suggestions_total"] == 20
+
+
+def test_stale_file_sha256_guard(tmp_path):
+    p = tmp_path / "stale.txt"
+    p.write_text("version one", encoding="utf-8")
+    stale_hash = sha256_hex_of_text("version zero")
+    res = json.loads(
+        SearchAndReplace()(
+            path=str(p),
+            search="one",
+            replace="two",
+            expected_file_sha256=stale_hash,
+        )
+    )
+    assert res["ok"] is False and res["applied"] is False
+    assert res["error"]["type"] == "stale_file"
+    assert p.read_text(encoding="utf-8") == "version one"
+
+
+def test_expected_file_sha256_allows_match(tmp_path):
+    p = tmp_path / "fresh.txt"
+    text = "keep me"
+    p.write_text(text, encoding="utf-8")
+    res = json.loads(
+        SearchAndReplace()(
+            path=str(p),
+            search="keep",
+            replace="changed",
+            expected_file_sha256=sha256_hex_of_text(text),
+        )
+    )
+    assert res["ok"] is True and res["applied"] is True
+    assert p.read_text(encoding="utf-8") == "changed me"
 
 
 def test_reject_large_file(tmp_path):

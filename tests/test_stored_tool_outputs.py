@@ -102,13 +102,13 @@ def test_wrap_respects_feature_off_and_skip_self_tool():
 
     on_cfg = {"tool_output_inline_max_chars": 5, "stored_tool_outputs_max_entries": 10}
     res_self = maybe_store_and_wrap_tool_output(
-        '{"tool":"read_stored_tool_output"}',
+        '{"tool":"session_read_stored_tool_output"}',
         call_id="call_4",
-        tool_name="read_stored_tool_output",
+        tool_name="session_read_stored_tool_output",
         state=state,
         config=on_cfg,
     )
-    assert res_self == '{"tool":"read_stored_tool_output"}'
+    assert res_self == '{"tool":"session_read_stored_tool_output"}'
 
 
 def test_store_lru_evicts_old_and_read_updates_recency():
@@ -127,7 +127,7 @@ def test_store_lru_evicts_old_and_read_updates_recency():
     assert store.peek("r3") is r3
 
 
-def test_read_stored_tool_output_pagination_and_unicode():
+def test_session_read_stored_tool_output_pagination_and_unicode():
     state = _make_state()
     state.tool_call_outputs_store.put(
         ToolCallOutputRecord(
@@ -151,7 +151,7 @@ def test_read_stored_tool_output_pagination_and_unicode():
     assert page2["next_offset"] == 4
 
 
-def test_read_stored_tool_output_updates_lru_recency_before_next_put():
+def test_session_read_stored_tool_output_updates_lru_recency_before_next_put():
     state = _make_state()
     state.tool_call_outputs_store.set_max_entries(2)
     state.tool_call_outputs_store.put(
@@ -196,7 +196,7 @@ def test_read_stored_tool_output_updates_lru_recency_before_next_put():
     assert state.tool_call_outputs_store.contains("r3")
 
 
-def test_read_stored_tool_output_invalid_and_not_found():
+def test_session_read_stored_tool_output_invalid_and_not_found():
     state = _make_state()
     tool = ReadStoredToolOutput(state=state, config_dict={"tool_output_inline_max_chars": 5})
     bad = json.loads(tool(output_ref="", offset=0, limit=1))
@@ -210,7 +210,7 @@ def test_read_stored_tool_output_invalid_and_not_found():
     assert missing["next_offset"] == 0
 
 
-def test_read_stored_tool_output_not_found_when_store_missing_has_recover_by():
+def test_session_read_stored_tool_output_not_found_when_store_missing_has_recover_by():
     # Simulate a "state without store" (store is None in the tool).
     state = SimpleNamespace()
     tool = ReadStoredToolOutput(state=state, config_dict={"tool_output_inline_max_chars": 5})
@@ -223,7 +223,7 @@ def test_read_stored_tool_output_not_found_when_store_missing_has_recover_by():
     assert payload["next_offset"] == 0
 
 
-def test_read_stored_tool_output_error_paths_have_zero_next_offset():
+def test_session_read_stored_tool_output_error_paths_have_zero_next_offset():
     state = _make_state()
     tool = ReadStoredToolOutput(state=state, config_dict={"tool_output_inline_max_chars": 5})
 
@@ -269,7 +269,7 @@ def test_not_found_after_real_lru_eviction_has_expected_error_envelope():
     tool = ReadStoredToolOutput(state=state, config_dict={"tool_output_inline_max_chars": 5})
     payload = json.loads(tool(output_ref="evicted_ref", offset=0, limit=5))
 
-    assert payload["tool"] == "read_stored_tool_output"
+    assert payload["tool"] == "session_read_stored_tool_output"
     assert payload["type"] == "stored_tool_output"
     assert payload["ok"] is False
     assert payload["stored"] is False

@@ -24,9 +24,9 @@ from config_modules.working_memory import (
     normalize_working_memory_config,
 )
 from config_modules.message_notice import (
-    LongMemoryNoticeConfig,
+    ProjectMemoryNoticeConfig,
     ToolUsageNoticeRule,
-    normalize_long_memory_notice_config,
+    normalize_project_memory_notice_config,
     normalize_tool_usage_notice_rules,
 )
 from config_modules.chat_completions import ChatCompletionsConfig
@@ -59,7 +59,7 @@ class AppConfig(BaseModel):
     intent_scope: IntentScopeConfig = Field(default_factory=IntentScopeConfig)
     working_memory: WorkingMemoryConfig = Field(default_factory=WorkingMemoryConfig)
     tool_usage_notice: list[ToolUsageNoticeRule] = Field(default_factory=list)
-    long_memory: LongMemoryNoticeConfig = Field(default_factory=LongMemoryNoticeConfig)
+    project_memory: ProjectMemoryNoticeConfig = Field(default_factory=ProjectMemoryNoticeConfig)
     paths: PathsConfig = Field(default_factory=PathsConfig)
     agent: AgentConfig = Field(default_factory=AgentConfig)
     mcp: McpConfig = Field(default_factory=McpConfig)
@@ -137,7 +137,7 @@ def resolve_paths(cfg: AppConfig, config_dir: str) -> None:
     normalize_quality_gate_config(cfg.quality_gate)
     normalize_working_memory_config(cfg.working_memory)
     cfg.tool_usage_notice = normalize_tool_usage_notice_rules(cfg.tool_usage_notice)
-    normalize_long_memory_notice_config(cfg.long_memory)
+    normalize_project_memory_notice_config(cfg.project_memory)
     normalize_intent_scope_config(cfg.intent_scope)
     cfg.intent_scope.intent_scope_tool_summary_prompt_path = to_abs(
         cfg.intent_scope.intent_scope_tool_summary_prompt_path

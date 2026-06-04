@@ -18,6 +18,10 @@ from tools.inject_tool_fields import (
     resolve_inject_tool_fields,
     strip_injected_tool_args,
 )
+from tools.schema_optional import (
+    apply_openai_strict_parameters,
+    augment_optional_property_descriptions,
+)
 
 _fallback_logger = logging.getLogger(__name__)
 
@@ -39,22 +43,12 @@ def _ensure_spec_has_required(spec: Dict[str, Any]) -> None:
 
 
 def _apply_openai_strict_tools_schema(spec: Dict[str, Any]) -> None:
-    """
-    OpenAI-like validators can require object schema to have:
-    - explicit required list
-    - required covering all properties keys
-    """
+    """Delegate to schema_optional (kept for tests that import this name)."""
     if not isinstance(spec, dict):
         return
     params = spec.get("parameters")
-    if not isinstance(params, dict) or params.get("type") != "object":
-        return
-    props = params.get("properties")
-    if not isinstance(props, dict) or not props:
-        return
-    params["required"] = list(props.keys())
-    if "additionalProperties" not in params:
-        params["additionalProperties"] = False
+    if isinstance(params, dict):
+        apply_openai_strict_parameters(params)
 
 
 def build_tools_data(
@@ -105,6 +99,7 @@ def build_tools_data(
                 v["injected_fields"].extend(injected)
             if openai_strict:
                 _apply_openai_strict_tools_schema(spec)
+            augment_optional_property_descriptions(spec, openai_strict=openai_strict)
 
     tools_spec = [v["spec"] for v in tools_data.values()]
     tools_description = [v["description"] for v in tools_data.values()]

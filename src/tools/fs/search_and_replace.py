@@ -6,6 +6,8 @@ from typing import Dict, Any
 from tools.simple_tool_base import AbstractSimpleTool
 from utils.tool_report_paths import tool_report_abspath
 from security.path_policy import enforce_write_guard
+from tools.schema_optional import coalesce_optional_string
+from utils.file_text import check_expected_file_sha256, is_valid_sha256_hex, read_text_for_edit
 
 
 class SearchAndReplace(AbstractSimpleTool):
@@ -142,7 +144,7 @@ class SearchAndReplace(AbstractSimpleTool):
     def tool_description(cls) -> Dict[str, Any]:
         return {
             "type": "function",
-            "name": "search_and_replace",
+            "name": "fs_search_and_replace",
             "description": (
                 "Replaces exact text in a file using literal matching. "
                 "Uses literal string matching (case-sensitive, no regex). "
@@ -207,7 +209,14 @@ class SearchAndReplace(AbstractSimpleTool):
                         "type": "integer",
                         "minimum": 1,
                         "description": "Maximum number of characters returned in diff output. Default 12000."
-                    }
+                    },
+                    "expected_file_sha256": {
+                        "type": "string",
+                        "description": (
+                            "SHA-256 hex digest from file_info(include_hash=true). "
+                            "Edit aborts with stale_file if file content changed."
+                        ),
+                    },
                 },
                 "required": ["path", "search", "replace"],
                 "additionalProperties": False
@@ -217,7 +226,7 @@ class SearchAndReplace(AbstractSimpleTool):
 
     @classmethod
     def prompt_description(cls) -> str:
-        description = '''Tool name: search_and_replace  
+        description = '''Tool name: fs_search_and_replace  
 Tool description: Replaces exact text in a file using literal matching; supports dry-run, occurrence selection, expected match count, backup, and optional diff output.
 Input schema: {"type": "object", "properties": {"path": {"type": "string", "description": "The absolute path of the file to modify."}, "search": {"type": "string", "description": "The exact content to find and replace.  May be multiline."}, "replace": {"type": "string", "description": "The new content to replace the found content with.  May be multiline."}, "dry_run": {"type": "boolean"}, "expected_matches": {"type": "integer", "minimum": 0}, "start_line": {"type": "integer", "minimum": 1}, "end_line": {"type": "integer", "minimum": 1}, "occurrence": {"anyOf": [{"type": "string", "enum": ["first", "last", "all"]}, {"type": "integer", "minimum": 1}]}, "backup": {"type": "boolean"}, "return_diff": {"type": "boolean"}, "diff_context_lines": {"type": "integer", "minimum": 0}, "max_diff_chars": {"type": "integer", "minimum": 1}}, "required": ["path", "search", "replace"], "additionalProperties": false}
 
@@ -238,7 +247,7 @@ Usage:
 Important Usage Rules
 - **ALWAYS** use absolute paths for `path`.
 - The `search` string is treated as **literal text**, not regex.
-- To perform regex replacements, use `search_files` first to locate, then decide on literal replacement.
+- To perform regex replacements, use `fs_search_files` first to locate, then decide on literal replacement.
 - If the file does not contain the `search` string, no changes are made.
 - If the file is empty or unreadable, an error is raised.
 - This tool ALWAYS returns a JSON string with fields:
@@ -302,7 +311,7 @@ Update version string:
     ) -> str:
         return json.dumps(
             {
-                "tool": "search_and_replace",
+                "tool": SearchAndReplace.registered_tool_name(),
                 "ok": ok,
                 "applied": applied,
                 "matched": matched,
@@ -359,8 +368,10 @@ Update version string:
         return_diff: bool = False,
         diff_context_lines: int = default_diff_context_lines,
         max_diff_chars: int = default_max_diff_chars,
+        expected_file_sha256: str | None = None,
         **kwargs,
     ) -> str:
+        expected_file_sha256 = coalesce_optional_string(expected_file_sha256)
         _result = functools.partial(self._result, path=path, applied=False)
 
         # Input validation
@@ -530,6 +541,21 @@ Update version string:
                 suggestions_total=0,
                 error={"type": "invalid_argument", "field": "max_diff_chars"},
             )
+        if expected_file_sha256 is not None:
+            if not isinstance(expected_file_sha256, str) or not is_valid_sha256_hex(
+                expected_file_sha256
+            ):
+                return _result(
+                    ok=False,
+                    matched=False,
+                    replaced=0,
+                    match_count=0,
+                    line_numbers=[],
+                    message="Argument 'expected_file_sha256' must be a 64-character hex SHA-256 digest.",
+                    suggestions=[],
+                    suggestions_total=0,
+                    error={"type": "invalid_argument", "field": "expected_file_sha256"},
+                )
 
         if not path:
             return _result(
@@ -615,8 +641,7 @@ Update version string:
             )
 
         try:
-            with open(path, 'r', encoding='utf-8', errors='ignore') as f:
-                content = f.read()
+            content = read_text_for_edit(path)
         except Exception as e:
             return _result(
                 ok=False,
@@ -628,6 +653,20 @@ Update version string:
                 suggestions=[],
                 suggestions_total=0,
                 error={"type": "read_failed", "message": str(e)},
+            )
+
+        stale_error = check_expected_file_sha256(content, expected_file_sha256)
+        if stale_error is not None:
+            return _result(
+                ok=False,
+                matched=False,
+                replaced=0,
+                match_count=0,
+                line_numbers=[],
+                message=stale_error["message"],
+                suggestions=[],
+                suggestions_total=0,
+                error=stale_error,
             )
 
         total_lines = content.count("\n") + 1

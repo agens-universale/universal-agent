@@ -224,7 +224,7 @@ class AgentExecutor:
         ]
         # На старте user turn дописываем текущий CLI-запрос в current_user_intent
         # (только реальные user-сообщения, не technical). user_intent_log — только
-        # user_intent_log — только после flush при accept submit_solution.
+        # user_intent_log — только после flush при accept turn_finish.
         for new_user_message in new_user_messages:
             state.finish_gate_rejection_count = 0
             text = extract_real_user_message_text(new_user_message)

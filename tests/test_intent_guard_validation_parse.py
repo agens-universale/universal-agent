@@ -48,14 +48,14 @@ class ParseValidatorResponseTest(unittest.TestCase):
                 "action": "continue_work",
                 "trace_ok": False,
                 "report_ok": True,
-                "trace_gaps": ["no ask_human"],
+                "trace_gaps": ["no turn_ask_human"],
             }
         )
         result = parse_validator_response(raw)
         assert result is not None
         self.assertFalse(result.ok)
         self.assertEqual(result.action, "continue_work")
-        self.assertEqual(result.trace_gaps, ["no ask_human"])
+        self.assertEqual(result.trace_gaps, ["no turn_ask_human"])
 
     def test_fix_report_and_continue_axis(self) -> None:
         raw = json.dumps(

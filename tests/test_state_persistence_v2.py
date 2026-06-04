@@ -59,15 +59,15 @@ def test_state_from_snapshot_roundtrip_preserves_runtime_fields():
     state.user_intent_log = deserialize_list([_user_ask_record("closed turn")])
     state.current_user_intent = deserialize_list([_user_ask_record("open turn", turn=2)])
     state.user_turn_seq = 2
-    state.long_memory_content_hash = "lm_hash"
-    state.tool_usage_notice_cnt = {"working_memory": 3}
+    state.project_memory_content_hash = "lm_hash"
+    state.tool_usage_notice_cnt = {"session_memory": 3}
     state.messages = [{"role": "user", "content": "hi", "id": "u1"}]
     state.dialog_steps_offset = 7
     state.tool_call_outputs_store = ToolCallOutputsStore(max_entries=5)
     state.tool_call_outputs_store.put(
         ToolCallOutputRecord(
             output_ref="ref1",
-            source_tool="read_file",
+            source_tool="fs_read_file",
             call_id="c1",
             total_chars=4,
             text="data",
@@ -85,8 +85,8 @@ def test_state_from_snapshot_roundtrip_preserves_runtime_fields():
     assert restored.user_intent_log[0].content == "closed turn"
     assert restored.current_user_intent[0].content == "open turn"
     assert restored.user_turn_seq == 2
-    assert restored.long_memory_content_hash == "lm_hash"
-    assert restored.tool_usage_notice_cnt == {"working_memory": 3}
+    assert restored.project_memory_content_hash == "lm_hash"
+    assert restored.tool_usage_notice_cnt == {"session_memory": 3}
     assert restored.messages == [{"role": "user", "content": "hi", "id": "u1"}]
     assert restored.dialog_steps_offset == 7
     assert restored.tool_call_outputs_store.peek("ref1") is not None

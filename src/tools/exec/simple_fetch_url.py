@@ -37,7 +37,7 @@ class SimpleFetchUrl(AbstractSimpleTool):
     def tool_description(cls):
         return {
             "type": "function",
-            "name": "fetch_url",
+            "name": "exec_fetch_url",
             "description": (
                 "Fetches a URL via HTTP GET and returns readable text extracted from HTML without heavy dependencies. "
                 "If the response is binary, returns content='binary data' with is_binary=true. "
@@ -60,7 +60,7 @@ class SimpleFetchUrl(AbstractSimpleTool):
 
     @classmethod
     def prompt_description(cls):
-        return "Tool name: fetch_url\nTool description: Downloads a URL and extracts readable text using a lightweight HTML cleaner."
+        return "Tool name: exec_fetch_url\nTool description: Downloads a URL and extracts readable text using a lightweight HTML cleaner."
 
     @staticmethod
     def _result(
@@ -88,7 +88,7 @@ class SimpleFetchUrl(AbstractSimpleTool):
         meta: Optional[Dict[str, Optional[str]]] = None,
     ) -> str:
         payload: Dict[str, Any] = {
-            "tool": "fetch_url",
+            "tool": SimpleFetchUrl.registered_tool_name(),
             "ok": ok,
             "url": url,
             "final_url": final_url,

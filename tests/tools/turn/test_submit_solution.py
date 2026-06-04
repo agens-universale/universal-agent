@@ -1,6 +1,6 @@
 import json
 
-from tools.session.submit_solution import SubmitSolution
+from tools.turn.submit_solution import SubmitSolution
 
 VALID_TYPES = (
     "full_solution",
@@ -12,7 +12,7 @@ VALID_TYPES = (
 )
 
 
-def test_submit_solution_success_full_solution():
+def test_turn_finish_success_full_solution():
     tool = SubmitSolution()
     res = json.loads(
         tool(
@@ -28,7 +28,7 @@ def test_submit_solution_success_full_solution():
     assert "comment" not in res or res.get("comment") == ""
 
 
-def test_submit_solution_success_with_comment():
+def test_turn_finish_success_with_comment():
     tool = SubmitSolution()
     res = json.loads(
         tool(
@@ -44,7 +44,7 @@ def test_submit_solution_success_with_comment():
     assert res["comment"] == "Z remains; recommend manual review."
 
 
-def test_submit_solution_normalize():
+def test_turn_finish_normalize():
     tool = SubmitSolution()
     res = json.loads(
         tool(
@@ -57,7 +57,7 @@ def test_submit_solution_normalize():
     assert res["task_report"] == "Done.\nNext"
 
 
-def test_submit_solution_all_types():
+def test_turn_finish_all_types():
     tool = SubmitSolution()
     for st in VALID_TYPES:
         res = json.loads(
@@ -67,7 +67,7 @@ def test_submit_solution_all_types():
         assert res["solution_type"] == st
 
 
-def test_submit_solution_invalid_solution_type():
+def test_turn_finish_invalid_solution_type():
     tool = SubmitSolution()
     bad = json.loads(
         tool(solution_type="invalid", task_report="Some report", handoff='{"x":1}')  # type: ignore[arg-type]
@@ -76,14 +76,14 @@ def test_submit_solution_invalid_solution_type():
     assert bad["error"]["field"] == "solution_type"
 
 
-def test_submit_solution_invalid_task_report_type():
+def test_turn_finish_invalid_task_report_type():
     tool = SubmitSolution()
     bad = json.loads(tool(solution_type="full_solution", task_report=1, handoff='{"x":1}'))  # type: ignore[arg-type]
     assert bad["ok"] is False
     assert bad["error"]["field"] == "task_report"
 
 
-def test_submit_solution_empty_task_report():
+def test_turn_finish_empty_task_report():
     tool = SubmitSolution()
     bad = json.loads(
         tool(solution_type="full_solution", task_report="   ", handoff='{"x":1}')
@@ -92,7 +92,7 @@ def test_submit_solution_empty_task_report():
     assert bad["error"]["field"] == "task_report"
 
 
-def test_submit_solution_task_report_too_long():
+def test_turn_finish_task_report_too_long():
     tool = SubmitSolution()
     bad = json.loads(
         tool(solution_type="full_solution", task_report="x" * 10001, handoff='{"x":1}')
@@ -101,7 +101,7 @@ def test_submit_solution_task_report_too_long():
     assert bad["error"]["type"] == "limit_exceeded"
 
 
-def test_submit_solution_invalid_comment_type():
+def test_turn_finish_invalid_comment_type():
     tool = SubmitSolution()
     bad = json.loads(
         tool(
@@ -115,13 +115,13 @@ def test_submit_solution_invalid_comment_type():
     assert bad["error"]["field"] == "comment"
 
 
-def test_submit_solution_handoff_schema_is_strict_friendly():
+def test_turn_finish_handoff_schema_is_strict_friendly():
     spec = SubmitSolution.tool_description()
     handoff = spec["parameters"]["properties"]["handoff"]
     assert handoff["type"] == "string"
 
 
-def test_submit_solution_rejects_invalid_handoff_json():
+def test_turn_finish_rejects_invalid_handoff_json():
     tool = SubmitSolution()
     bad = json.loads(
         tool(solution_type="full_solution", task_report="Done", handoff='{"x": }')
@@ -130,7 +130,7 @@ def test_submit_solution_rejects_invalid_handoff_json():
     assert bad["error"]["field"] == "handoff"
 
 
-def test_submit_solution_rejects_non_object_handoff_json():
+def test_turn_finish_rejects_non_object_handoff_json():
     tool = SubmitSolution()
     bad = json.loads(
         tool(solution_type="full_solution", task_report="Done", handoff='["x"]')

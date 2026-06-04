@@ -289,7 +289,7 @@ class RunSummaryCoordinator:
         current_messages[:] = preserved_batch
 
     def turn_end_compact_if_needed(self) -> None:
-        """Compaction после accept ``submit_solution`` (turn-end trigger)."""
+        """Compaction после accept ``turn_finish`` (turn-end trigger)."""
         state = self._state
         if state.backend_api_mode != "chat_completions":
             return
