@@ -40,6 +40,7 @@ SUMMARY_SECTIONS: tuple[SummarySection, ...] = (
             "- First line: `mode: planning-only` or `mode: execution` (from explicit user intent; if unclear, `planning-only`).\n"
             "- Optional second line: `skill: <skill_id>` or `skill: n/a` (workflow to continue now; from latest `skills_load` or previous summary if unchanged).\n"
             "- 3-7 open work items with statuses [TODO], [IN_PROGRESS], or [BLOCKED] for the next 1-3 iterations (no [DONE] here).\n"
+            "- If the current user turn/batch is finished with no blocker, use `- none` or one idle line — no hypothetical future [TODO].\n"
             "- Brief completed outcomes from this batch belong in LAST_VERIFIED_FACTS, not here.\n"
             "- If `planning-only`, tasks are analysis, review, clarification, or planning artifacts only (no implementation edits unless user approved).\n"
             "- If `execution`, concrete solving may continue (tools, edits, drafting, coding, research)."
@@ -58,8 +59,9 @@ SUMMARY_SECTIONS: tuple[SummarySection, ...] = (
     SummarySection(
         title="LAST_VERIFIED_FACTS",
         description=(
-            "- Compact verified outcomes: path or command → verdict, counts, hashes, test results (one line each).\n"
-            "- Prefer facts costly to rediscover; use `n/a` if none new this batch.\n"
+            "- **This batch only:** new or changed verified outcomes (command → verdict, or path → what was proven).\n"
+            "- Do **not** repeat sha256/checksum catalogs, path lists, or facts already in `<persistent_state>` unless corrected this batch.\n"
+            "- Prefer `n/a` if nothing new was verified in this batch.\n"
             "- Do not invent paths, numbers, or outcomes; trace every item to dialogue or tool output."
         ),
     ),
@@ -74,8 +76,9 @@ SUMMARY_SECTIONS: tuple[SummarySection, ...] = (
         title="RECENT_ARTIFACTS",
         description=(
             "- Recent paths, URLs, modules, symbols, drafts, or outputs as `path -> purpose` (index only, not file contents).\n"
+            "- No checksum/sha256 lines here (session memory `knowledge` is canonical for those).\n"
             "- Do not duplicate LAST_VERIFIED_FACTS; artifacts answer *where*, facts answer *what was proven*.\n"
-            "- Every entry traceable to dialogue, tool output, or user message; do not invent paths or URLs."
+            "- Use `n/a` if unchanged since persistent_state; every entry traceable to dialogue, tool output, or user message."
         ),
     ),
 )
