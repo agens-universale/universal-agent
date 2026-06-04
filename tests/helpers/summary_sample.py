@@ -1,19 +1,18 @@
-"""Образцы текста сводки для тестов (все секции из ``summary_spec``)."""
+"""Образцы сводки для тестов."""
 
-from summarize.summary_spec import section_titles
+from summarize.summary_spec import assemble_summary_xml, primary_section_tag, section_tags
 
 
-def valid_summary_text_for_tests(
+def valid_summary_xml_for_tests(
     *,
     seed: str | None = None,
     line_filler: str | None = None,
 ) -> str:
-    """Минимально валидная сводка: все обязательные секции, достаточная длина."""
-    filler = line_filler or "- test content for validation padding.\n"
-    parts: list[str] = []
-    for title in section_titles():
+    filler = line_filler or "- test content for validation padding."
+    bodies: dict[str, str] = {}
+    for tag in section_tags():
         body = filler
-        if title == "TASK_AND_CONTEXT" and seed:
+        if tag == primary_section_tag() and seed:
             body = f"- {seed}\n{filler}"
-        parts.append(f"{title}:\n{body}{filler}")
-    return "\n\n".join(parts)
+        bodies[tag] = body
+    return assemble_summary_xml(bodies)

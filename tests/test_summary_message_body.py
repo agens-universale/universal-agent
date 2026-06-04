@@ -8,7 +8,10 @@ from config_modules.intent_scope import DEFAULT_INTENT_LOG_READ_PAGE_RECORD_LIMI
 from summarize.summary_message_body import (
     build_dialog_summary_content,
     build_intent_blocks_prefix,
+    format_summary_block,
 )
+from summarize.summary_spec import hint_section_tags
+from tests.helpers.summary_sample import valid_summary_xml_for_tests
 
 
 def _user_ask(content: str, *, turn: int = 1) -> IntentRecord:
@@ -19,6 +22,23 @@ def _user_ask(content: str, *, turn: int = 1) -> IntentRecord:
         tool_name=None,
         content=content,
     )
+
+
+def test_format_summary_block_wraps_plain_text_once():
+    assert format_summary_block("inner") == "<summary>\ninner\n</summary>"
+
+
+def test_format_summary_block_keeps_existing_summary_root():
+    xml = valid_summary_xml_for_tests()
+    assert format_summary_block(xml) == xml
+
+
+def test_xml_summary_not_double_wrapped_in_dialog_body():
+    xml = valid_summary_xml_for_tests()
+    body = build_dialog_summary_content(summary_text=xml, last_dialog_steps="tail")
+    assert body.count("<summary>") == 1
+    assert body.count("</summary>") == 1
+    assert any(f"<{tag}>" in body for tag in hint_section_tags())
 
 
 def test_session_memory_block_inlined():

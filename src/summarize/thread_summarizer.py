@@ -9,11 +9,13 @@ from summarize import (
     summary_llm_steps,
     summary_message_body,
 )
-from summarize.summary_message_body import (
-    build_intent_blocks_prefix,
-    resolve_intent_log_preview_chars,
+from summarize.summary_validation import (
+    FALLBACK_SUMMARY,
+    merge_repaired_summary,
+    missing_section_tags,
+    resolve_after_repair_failure,
+    validate_summary_text,
 )
-from summarize.summary_validation import FALLBACK_SUMMARY, validate_summary_text
 from summarize.llm import request_summary_text
 from summarize.working_memory_gateway import (
     WorkingMemoryDeltas,
@@ -21,7 +23,6 @@ from summarize.working_memory_gateway import (
     resolve_persistent_state_block,
 )
 from utils.llm_chat_client import log_llm_prompt_and_result, shorten_for_log
-from utils.project_data import get_project_data
 
 
 def summarize_dialog_via_chat_completions(
@@ -50,7 +51,8 @@ def summarize_dialog_via_chat_completions(
         - Группирует сообщения в ходы и делит на батчи по `incremental_batch_chars`.
         - Для каждого батча вызывает LLM: первый батч — «с нуля», следующие —
           обновление `previous_summary`; валидирует ответ, при провале —
-          `summary_llm_steps.repair_summary_text`, иначе fallback на предыдущую сводку или `FALLBACK_SUMMARY`.
+          `summary_llm_steps.repair_summary_text` (без intent-блоков; multi-batch repair с `<previous_summary>`),
+          иначе partial merge / предыдущий батч / `FALLBACK_SUMMARY`.
         - По необходимости сжимает накопленную сводку через `summary_llm_steps.compress_summary_text`.
         - Шаг `memory_suggestions.request_patch_replace` (полная перезапись всех регистров WM)
           выполняется только если весь диалог уложился в один батч (мультибатч:
@@ -186,13 +188,9 @@ def summarize_dialog_via_chat_completions(
     persistent_state_block = resolve_persistent_state_block(
         state, persistent_state_block
     )
-    intent_blocks_prefix = build_intent_blocks_prefix(
-        closed_records,
-        open_records,
-        intent_log_preview_chars=resolve_intent_log_preview_chars(summary_params),
+    summarizer_prefix = (
+        f"{persistent_state_block.strip()}\n\n" if persistent_state_block.strip() else ""
     )
-    if persistent_state_block.strip():
-        intent_blocks_prefix = f"{intent_blocks_prefix}{persistent_state_block.strip()}\n\n"
     batches = dialog_history.split_turns_into_char_batches(
         dialog_history.group_into_turns(history_for_summary),
         batch_chars_limit=batch_chars_limit,
@@ -208,19 +206,6 @@ def summarize_dialog_via_chat_completions(
             len(batches),
             prompt_path,
         )
-    pd = get_project_data(cfg)
-    project_block = (
-        "<project_data>\n"
-        f"OS: {pd['OS']}\n"
-        f"shell: {pd['shell']}\n"
-        f"projectDir: {pd['projectDir']}\n"
-        f"projectDirWritable: {pd['projectDirWritable']}\n"
-        f"allowed_write_paths:\n{pd['allowed_write_paths']}\n"
-        f"currentDate: {pd['currentDate']}\n"
-        f"isGitProject: {pd['isGitProject']}\n"
-        f"projectDirListing:\n{pd['projectDirListing']}\n"
-        "</project_data>\n\n"
-    )
     accumulated_summary = ""
     for batch_index, batch_turns in enumerate(batches, start=1):
         batch: List[Dict[str, Any]] = [m for turn in batch_turns for m in turn]
@@ -239,25 +224,23 @@ def summarize_dialog_via_chat_completions(
             )
         if batch_index == 1:
             user_prompt = (
-                f"{intent_blocks_prefix}"
+                f"{summarizer_prefix}"
                 "<dialog_history>\n"
                 f"{batch_history_text}\n"
                 "</dialog_history>\n\n"
-                f"{project_block}"
-                "Produce the structured summary now."
+                "Produce the structured <summary> now."
             )
         else:
             user_prompt = (
-                f"{intent_blocks_prefix}"
+                f"{summarizer_prefix}"
                 "<previous_summary>\n"
                 f"{accumulated_summary}\n"
                 "</previous_summary>\n\n"
                 "<dialog_history_batch>\n"
                 f"{batch_history_text}\n"
                 "</dialog_history_batch>\n\n"
-                f"{project_block}"
-                "Update previous_summary using this batch. "
-                "Keep all important facts/decisions/constraints from both."
+                "Update <previous_summary> using this batch. "
+                "Output a full <summary> with all required child tags."
             )
         request_messages = [
             {"role": "system", "content": system_prompt},
@@ -316,34 +299,55 @@ def summarize_dialog_via_chat_completions(
                     len(batches),
                     reason,
                     len(batch_history_text),
-                    len(intent_blocks_prefix),
+                    len(summarizer_prefix),
                     len(text or ""),
                 )
+            missing_tags = missing_section_tags(text)
             repaired = summary_llm_steps.repair_summary_text(
                 ctx=ctx,
                 state=state,
                 history_text=batch_history_text,
-                intent_blocks_prefix=intent_blocks_prefix,
+                persistent_state_prefix=summarizer_prefix,
+                previous_summary=accumulated_summary if batch_index > 1 else "",
                 invalid_summary=text,
                 reason=reason,
+                missing_tags=missing_tags,
                 max_tokens=max_tokens,
-                project_data_block=project_block,
             )
+            merged = merge_repaired_summary(invalid_text=text, repaired_text=repaired)
+            merged_valid, _ = validate_summary_text(merged)
             repaired_valid, _ = validate_summary_text(repaired)
-            text = repaired if repaired_valid else (accumulated_summary or FALLBACK_SUMMARY)
+            if merged_valid:
+                text = merged
+                repair_resolution = "merged_valid"
+            elif repaired_valid:
+                text = repaired
+                repair_resolution = "repaired_valid"
+            else:
+                text, repair_resolution = resolve_after_repair_failure(
+                    invalid_text=text,
+                    merged_text=merged,
+                    repaired_text=repaired,
+                    accumulated_summary=accumulated_summary,
+                )
             trace_batch["repair"] = {
                 "reason": reason,
+                "missing_tags": list(missing_tags),
                 "repaired_text": repaired,
+                "merged_text": merged,
                 "repaired_valid": repaired_valid,
+                "merged_valid": merged_valid,
+                "resolution": repair_resolution,
                 "final_text_after_repair": text,
             }
             if logger is not None:
                 logger.info(
-                    "summary_batch_repair_result batch=%s/%s repaired_valid=%s repaired_chars=%s final_chars=%s final_preview=%s",
+                    "summary_batch_repair_result batch=%s/%s merged_valid=%s repaired_chars=%s merged_chars=%s final_chars=%s final_preview=%s",
                     batch_index,
                     len(batches),
-                    repaired_valid,
+                    merged_valid,
                     len(repaired or ""),
+                    len(merged or ""),
                     len(text or ""),
                     shorten_for_log(text or "", max_chars=500),
                 )

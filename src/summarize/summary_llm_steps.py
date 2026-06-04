@@ -4,7 +4,7 @@ from typing import Any
 
 import message_format.dialog_history as dialog_history
 from summarize.llm import request_summary_text
-from summarize.summary_spec import format_section_titles_for_repair
+from summarize.summary_spec import render_output_shape_for_prompt, render_tag_roles_for_prompt
 from utils.llm_chat_client import log_llm_prompt_and_result
 
 
@@ -16,35 +16,24 @@ def compress_summary_text(
     max_chars: int,
     max_tokens: int,
 ) -> str:
-    """Сжимает слишком длинную сводку вторым вызовом LLM с сохранением смысла.
-
-    Назначение: уложить накопленную инкрементальную сводку в `max_accumulated_summary_chars`
-    без механической обрезки посередине абзаца, когда это возможно.
-
-    Поведение: если текст уже короче лимита — возвращается как есть. Иначе
-    запрос с инструкцией сжать; при пустом ответе — запасной вариант: срез исходника
-    до `max_chars`; если ответ длиннее лимита — `dialog_history.truncate_text`.
-
-    Args:
-        ctx: Контекст запроса.
-        state: Состояние для бэкенда.
-        summary_text: Текущая длинная сводка.
-        max_chars: Целевая верхняя граница длины результата.
-        max_tokens: Лимит токенов на ответ при сжатии.
-
-    Returns:
-        Сжатый или усечённый текст, пригодный как новая `accumulated_summary`.
-    """
+    """Сжимает слишком длинную сводку вторым вызовом LLM с сохранением смысла."""
     if not summary_text or len(summary_text) <= max_chars:
         return summary_text
     system = (
-        "You are a summarization assistant. Compress the given summary while preserving "
-        "all critical facts, constraints, decisions, and technical references. "
-        "Output only compressed summary text."
+        "You shorten an existing <summary> XML document. Keep every child tag; "
+        "only shorten text inside tags. Do not drop tags, rename tags, or use prose headers."
     )
     request_messages = [
         {"role": "system", "content": system},
-        {"role": "user", "content": summary_text},
+        {
+            "role": "user",
+            "content": (
+                f"Compress to at most {max_chars} characters total inside all tags combined.\n\n"
+                f"Tag roles (preserve meaning per tag):\n{render_tag_roles_for_prompt()}\n\n"
+                f"Output shape:\n{render_output_shape_for_prompt()}\n\n"
+                f"<summary_to_compress>\n{summary_text}\n</summary_to_compress>"
+            ),
+        },
     ]
     text = request_summary_text(
         ctx=ctx,
@@ -72,48 +61,39 @@ def repair_summary_text(
     ctx: Any,
     state: Any,
     history_text: str,
-    intent_blocks_prefix: str,
+    persistent_state_prefix: str,
     invalid_summary: str,
     reason: str,
+    missing_tags: tuple[str, ...] = (),
+    previous_summary: str = "",
     max_tokens: int,
-    project_data_block: str = "",
 ) -> str:
-    """Перегенерирует сводку, если первичный ответ модели не прошёл `validate_summary_text`.
-
-    Назначение: повысить надёжность конвейера: дать LLM явный контекст (лог запросов,
-    история, причина отказа, черновик) и требование структуры с секциями.
-
-    Args:
-        ctx: Контекст выполнения.
-        state: Состояние сессии.
-        history_text: Текст истории батча, на котором сорвалась валидация.
-        intent_blocks_prefix: Блоки ``<user_intent_log>`` и ``<current_user_intent>`` (как в основном батче).
-        invalid_summary: Исходный невалидный ответ.
-        reason: Код от `validate_summary_text` для включения в user-промпт.
-        max_tokens: Лимит длины исправленной сводки.
-        project_data_block: Фрагмент `<project_data>...</project_data>` (как в основном батче суммаризации).
-
-    Returns:
-        Текст исправленной сводки (может снова быть невалидным — проверяет вызывающий).
-    """
+    """Перегенерирует сводку, если первичный ответ модели не прошёл `validate_summary_text`."""
     system = (
-        "You are fixing an invalid technical summary for a software-engineering dialogue. "
-        "You receive the original user requests log, full dialogue history, and an invalid summary draft. "
-        "Produce a corrected summary that is concise, complete, structured, and actionable."
+        "You fix an invalid <summary> XML document. Use the inputs below. "
+        "Output one complete <summary> with every required child tag filled."
     )
+    missing_line = ""
+    if missing_tags:
+        missing_line = f"Missing child tags (must add): {', '.join(missing_tags)}.\n"
+    previous_block = ""
+    if (previous_summary or "").strip():
+        previous_block = (
+            "<previous_summary>\n"
+            f"{previous_summary.strip()}\n"
+            "</previous_summary>\n\n"
+        )
     user = (
-        f"Previous summary is invalid. Reason: {reason}.\n\n"
-        f"{intent_blocks_prefix}"
+        f"Previous summary is invalid. Reason: {reason}.\n"
+        f"{missing_line}\n"
+        f"{persistent_state_prefix}"
+        f"{previous_block}"
         "<dialog_history>\n"
         f"{history_text}\n"
         "</dialog_history>\n\n"
-        f"{project_data_block}"
-        "Rewrite summary using the real context above. It must be high-quality, concise, and structured. "
-        "Use these section headers (exact UPPERCASE_WITH_UNDERSCORES or Markdown headings with the same words): "
-        f"{format_section_titles_for_repair()}.\n\n"
-        "OPEN_TASKS rule: if user intent says planning/analysis only, set `mode: planning-only` and keep task bullets non-coding "
-        "(no implementation, no code edits, no implementation delegation). "
-        "Do not duplicate content already in <persistent_state> session memory registers.\n\n"
+        f"Tag roles:\n{render_tag_roles_for_prompt()}\n\n"
+        f"Output shape:\n{render_output_shape_for_prompt()}\n\n"
+        "Rewrite from the inputs above. Do not duplicate unchanged <persistent_state> text.\n\n"
         "<invalid_summary>\n"
         f"{invalid_summary}\n"
         "</invalid_summary>"

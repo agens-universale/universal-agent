@@ -16,7 +16,7 @@ from message_policy.user_message_policy import (
     TECHNICAL_TYPE_DIALOG_SUMMARY,
     wrap_technical_user_content,
 )
-from tests.helpers.summary_sample import valid_summary_text_for_tests
+from tests.helpers.summary_sample import valid_summary_xml_for_tests
 
 
 def _patch_chat_completion(monkeypatch, fake):
@@ -77,7 +77,7 @@ def _flatten_turns(turns):
 
 
 def _valid_summary(seed: str) -> str:
-    return valid_summary_text_for_tests(seed=f"{seed} context details and scope.")
+    return valid_summary_xml_for_tests(seed=f"{seed} context details and scope.")
 
 
 def test_summarize_incremental_empty_history_no_model_call(monkeypatch):
@@ -239,6 +239,29 @@ def test_memory_patch_replace_overwrites_stale_state_register(monkeypatch):
     assert "stale TODO" not in content.split("<session_memory>")[1]
 
 
+def test_summarize_user_prompt_excludes_intent_blocks(monkeypatch):
+    history = _flatten_turns([_make_turn("user request", "assistant")])
+
+    def _fake_request(**kwargs):
+        user_content = next((m["content"] for m in kwargs["messages"] if m["role"] == "user"), "")
+        assert "<user_intent_log" not in user_content
+        assert "<current_user_intent>" not in user_content
+        assert "<project_data>" not in user_content
+        return _valid_summary("single")
+
+    monkeypatch.setattr("summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
+    _patch_chat_completion(monkeypatch, _fake_request)
+    _patch_memory_patch_empty(monkeypatch)
+
+    summarize_dialog_via_chat_completions(
+        ctx=_ctx(trigger_chars=999999),
+        state=_state(),
+        full_history_messages=history,
+        user_intent_log=user_ask_records("closed intent", turn=1),
+        current_user_intent=user_ask_records("open intent", turn=2),
+    )
+
+
 def test_summarize_incremental_two_batches_previous_summary_passed(monkeypatch):
     history = _flatten_turns(
         [
@@ -274,6 +297,8 @@ def test_summarize_incremental_two_batches_previous_summary_passed(monkeypatch):
     assert "batch-2" in result["raw_summary"]
     assert len(seen_user_prompts) == 2
     assert "batch-1" in seen_user_prompts[1]
+    assert "<previous_summary>" in seen_user_prompts[1]
+    assert all("<user_intent_log" not in p for p in seen_user_prompts)
     # Для multi-batch memory patch не выполняется.
     assert replace_calls == []
     assert result["memory_append_deltas"] == WorkingMemoryDeltas()
@@ -521,7 +546,7 @@ def test_summarize_pipeline_calls_build_history_text_with_max_chars_disabled(mon
     )
 
     def _fake_request(**_kwargs):
-        return valid_summary_text_for_tests(seed="x")
+        return valid_summary_xml_for_tests(seed="x")
 
     monkeypatch.setattr("summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
     _patch_chat_completion(monkeypatch, _fake_request)

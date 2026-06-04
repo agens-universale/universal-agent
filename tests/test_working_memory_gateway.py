@@ -1,9 +1,13 @@
 import types
 
 from summarize.working_memory_gateway import (
+    SESSION_MEMORY_REGISTERS,
     WorkingMemoryDeltas,
     WorkingMemorySnapshot,
     REGISTER_MERGE_MODES,
+    REGISTER_ORDER,
+    _REGISTER_BODY_PATTERNS,
+    extract_register_bodies,
     apply_append_deltas,
     apply_memory_patch,
     apply_replace_deltas,
@@ -42,6 +46,28 @@ def test_read_snapshot_from_state_normalizes_registers():
     )
 
 
+def test_register_body_patterns_cover_canon():
+    assert set(_REGISTER_BODY_PATTERNS) == set(REGISTER_ORDER)
+    assert len(REGISTER_ORDER) == len(SESSION_MEMORY_REGISTERS)
+
+
+def test_extract_register_bodies_unescaped_ampersand_and_last_match():
+    raw = "<goal>a & b</goal><state>first</state><state>second</state>"
+    bodies = extract_register_bodies(raw)
+    assert bodies["goal"] == "a & b"
+    assert bodies["state"] == "second"
+
+
+def test_render_persistent_state_roundtrip_all_registers():
+    snapshot = WorkingMemorySnapshot(
+        **{name: f"body-{name}" for name in REGISTER_ORDER}
+    )
+    rendered = render_persistent_state_for_prompt(snapshot)
+    extracted = extract_register_bodies(rendered)
+    for name in REGISTER_ORDER:
+        assert extracted[name] == f"body-{name}"
+
+
 def test_render_persistent_state_for_prompt_contains_all_registers():
     snapshot = WorkingMemorySnapshot(
         goal="G",
@@ -54,10 +80,8 @@ def test_render_persistent_state_for_prompt_contains_all_registers():
 
     assert "<persistent_state>" in rendered
     assert "<session_memory>" in rendered
-    assert "<goal>" in rendered and "</goal>" in rendered
-    assert "<constraints>" in rendered and "</constraints>" in rendered
-    assert "<state>" in rendered and "</state>" in rendered
-    assert "<knowledge>" in rendered and "</knowledge>" in rendered
+    for name in REGISTER_ORDER:
+        assert f"<{name}>" in rendered and f"</{name}>" in rendered
     assert "G" in rendered and "C" in rendered and "S" in rendered and "K" in rendered
 
 
@@ -109,12 +133,7 @@ def test_parse_memory_deltas_empty_tag_clears_register():
 
 
 def test_register_merge_modes_all_replace():
-    assert REGISTER_MERGE_MODES == {
-        "goal": "replace",
-        "constraints": "replace",
-        "state": "replace",
-        "knowledge": "replace",
-    }
+    assert REGISTER_MERGE_MODES == {name: "replace" for name in REGISTER_ORDER}
 
 
 def test_apply_append_deltas_is_noop_when_all_replace():

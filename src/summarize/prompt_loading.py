@@ -2,7 +2,17 @@
 
 import os
 
-from summarize.summary_spec import SUMMARY_SECTIONS_PLACEHOLDER, render_sections_for_prompt
+from summarize.summary_spec import (
+    MEMORY_PATCH_SUMMARY_TAGS_PLACEHOLDER,
+    SUMMARY_OUTPUT_SHAPE_PLACEHOLDER,
+    SUMMARY_SECTIONS_PLACEHOLDER,
+    render_output_shape_for_prompt,
+    render_sections_for_prompt,
+    render_summary_tags_for_memory_patch_prompt,
+)
+from summarize.working_memory_gateway import (
+    inject_working_memory_prompt_placeholders,
+)
 
 
 def default_prompt_path() -> str:
@@ -41,4 +51,30 @@ def load_prompt_template(path: str) -> str:
             SUMMARY_SECTIONS_PLACEHOLDER,
             render_sections_for_prompt(),
         )
-    return prompt
+    if SUMMARY_OUTPUT_SHAPE_PLACEHOLDER in prompt:
+        prompt = prompt.replace(
+            SUMMARY_OUTPUT_SHAPE_PLACEHOLDER,
+            render_output_shape_for_prompt(),
+        )
+    return inject_working_memory_prompt_placeholders(prompt)
+
+
+def _load_memory_patch_prompt(path: str) -> str:
+    with open(path, "r", encoding="utf-8") as fd:
+        prompt = fd.read().strip()
+    if not prompt:
+        raise ValueError(f"Memory patch prompt file is empty: {path}")
+    if MEMORY_PATCH_SUMMARY_TAGS_PLACEHOLDER in prompt:
+        prompt = prompt.replace(
+            MEMORY_PATCH_SUMMARY_TAGS_PLACEHOLDER,
+            render_summary_tags_for_memory_patch_prompt(),
+        )
+    return inject_working_memory_prompt_placeholders(prompt)
+
+
+def load_memory_patch_replace_prompt(path: str) -> str:
+    return _load_memory_patch_prompt(path)
+
+
+def load_memory_patch_append_prompt(path: str) -> str:
+    return _load_memory_patch_prompt(path)

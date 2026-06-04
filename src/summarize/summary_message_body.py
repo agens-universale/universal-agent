@@ -1,5 +1,7 @@
 """Тело сообщения с резюме треда: разметка секций и связанные строковые константы."""
 
+import re
+
 from typing import Any, Iterable, Mapping
 
 from config_modules.summary import DEFAULT_INTENT_LOG_PREVIEW_CHARS
@@ -89,6 +91,16 @@ def build_intent_blocks_prefix(
     return "\n\n".join(parts) + "\n\n"
 
 
+def format_summary_block(summary_text: str) -> str:
+    """Одна обёртка ``<summary>``: если текст уже корневой ``<summary>``, не дублирует."""
+    s = (summary_text or "").strip()
+    if not s:
+        return "<summary>\n</summary>"
+    if re.match(r"\s*<summary\b", s, re.IGNORECASE):
+        return s
+    return f"<summary>\n{s}\n</summary>"
+
+
 def build_dialog_summary_content(
     summary_text: str,
     last_dialog_steps: str,
@@ -97,9 +109,7 @@ def build_dialog_summary_content(
     current_user_intent_jsonl: str = "",
 ) -> str:
     """Собирает итоговое тело сообщения-резюме треда для подстановки в историю чата."""
-    lines: list[str] = ["<summary>"]
-    lines.append(summary_text.strip())
-    lines.append("</summary>")
+    lines: list[str] = [format_summary_block(summary_text)]
 
     sm_block = str(session_memory_block or "").strip()
     if sm_block:

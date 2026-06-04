@@ -5,6 +5,10 @@ from dataclasses import dataclass
 from typing import Any, Dict, List
 
 from summarize.llm import request_summary_text
+from summarize.prompt_loading import (
+    load_memory_patch_append_prompt,
+    load_memory_patch_replace_prompt,
+)
 from summarize.working_memory_gateway import (
     MEMORY_DELTAS_FORMAT_REPAIR_REQUEST_LABEL,
     build_memory_deltas_format_repair_messages,
@@ -41,19 +45,6 @@ def _resolve_prompt_path(ctx: Any, config_key: str, default_path: str) -> str:
     if os.path.isabs(prompt_path_raw):
         return prompt_path_raw
     return os.path.abspath(os.path.join(_PROJECT_ROOT, prompt_path_raw))
-
-
-def _load_system_prompt(path: str) -> str:
-    if not os.path.exists(path):
-        raise FileNotFoundError(f"Memory patch prompt file not found: {path}")
-    try:
-        with open(path, "r", encoding="utf-8") as fd:
-            system = fd.read().strip()
-    except OSError as prompt_exc:
-        raise OSError(f"Failed to read memory patch prompt file: {path}") from prompt_exc
-    if not system:
-        raise ValueError(f"Memory patch prompt file is empty: {path}")
-    return system
 
 
 def _request_patch(
@@ -108,7 +99,7 @@ def request_patch_append(
         "chat_completions_memory_patch_append_prompt_path",
         DEFAULT_MEMORY_PATCH_APPEND_PROMPT_PATH,
     )
-    system = _load_system_prompt(prompt_path)
+    system = load_memory_patch_append_prompt(prompt_path)
     user_prompt = (
         "<dialog_history>\n"
         f"{history_text}\n"
@@ -141,7 +132,7 @@ def request_patch_replace(
         "chat_completions_memory_patch_replace_prompt_path",
         DEFAULT_MEMORY_PATCH_REPLACE_PROMPT_PATH,
     )
-    system = _load_system_prompt(prompt_path)
+    system = load_memory_patch_replace_prompt(prompt_path)
     user_prompt = (
         "<dialog_history>\n"
         f"{history_text}\n"

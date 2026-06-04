@@ -1,92 +1,84 @@
-"""Эвристики пригодности текста сводки для пайплайна суммаризации."""
+"""Проверка XML-ответа summarizer."""
 
 from __future__ import annotations
 
-import re
-
-from summarize.summary_spec import MIN_SECTION_HITS, section_titles
-
-INVALID_SUMMARY_PREFIXES = (
-    "[tool_call ",
-    "[assistant",
-    "[user",
-    # "<dialog_summary>",
+from summarize.summary_spec import (
+    assemble_summary_xml,
+    extract_summary_bodies,
+    merge_summary_bodies,
+    primary_section_tag,
+    section_tags,
 )
 
-MIN_SUMMARY_CHARS = 200
-MIN_SUMMARY_LINES = 3
-REQUIRED_SECTION_MARKERS = section_titles()
-
-FALLBACK_SUMMARY = (
+_FALLBACK_MSG = (
     "Automatic summarization produced no valid output. "
     "Continue from the latest confirmed user requirements and implementation state."
 )
 
-# Части имён секций после split по "_" не считаются ключевыми (союзы и т.п.),
-# иначе «and» в обычном тексте засчитывал бы маркеры вроде TASK_AND_CONTEXT.
-# «do»/«not» — иначе DO_NOT_REDO ловится по любому «not» в тексте.
-_SECTION_KEYWORD_STOPWORDS = frozenset({"and", "do", "not"})
+
+def has_extracted_summary_content(text: str) -> bool:
+    return bool(extract_summary_bodies(text))
 
 
-def _section_marker_hit(text: str, marker: str) -> bool:
-    """Секция считается «есть», если в тексте как отдельное слово встречается
-    хотя бы один фрагмент имени маркера (по подчёркиваниям), без учёта регистра.
+def has_nonempty_summary_body(text: str) -> bool:
+    """Хотя бы один известный тег с непустым телом (``- n/a`` допустим)."""
+    return any(extract_summary_bodies(text).values())
 
-    Примеры: для ``TASK_AND_CONTEXT`` достаточно ``task`` или ``context``;
-    для ``OPEN_TASKS`` — ``open`` или ``tasks``.
-    """
-    keywords = [
-        p
-        for p in marker.split("_")
-        if p and p.lower() not in _SECTION_KEYWORD_STOPWORDS
-    ]
-    if not keywords:
-        return False
-    lowered_keywords = [k.lower() for k in keywords]
-    return any(
-        re.search(rf"(?<!\\w){re.escape(kw)}(?!\\w)", text, re.IGNORECASE)
-        for kw in lowered_keywords
+
+def fallback_summary_xml() -> str:
+    filler = "- n/a"
+    bodies = {tag: filler for tag in section_tags()}
+    bodies[primary_section_tag()] = (
+        f"- {_FALLBACK_MSG}\n- Continue from dialog_history and session memory."
     )
+    return assemble_summary_xml(bodies)
 
 
-def section_hit_count(text: str) -> int:
-    """Число секций из ``summary_spec``, для которых сработала эвристика."""
-    s = (text or "").strip()
-    return sum(1 for marker in REQUIRED_SECTION_MARKERS if _section_marker_hit(s, marker))
+# Для импортов; всегда валидный минимальный <summary>.
+FALLBACK_SUMMARY = fallback_summary_xml()
 
 
-def missing_section_titles(text: str) -> tuple[str, ...]:
-    """Заголовки секций из spec, которых нет в тексте сводки."""
-    s = (text or "").strip()
-    return tuple(m for m in REQUIRED_SECTION_MARKERS if not _section_marker_hit(s, m))
+def missing_section_tags(text: str) -> tuple[str, ...]:
+    bodies = extract_summary_bodies(text)
+    return tuple(tag for tag in section_tags() if tag not in bodies)
 
 
 def validate_summary_text(text: str) -> tuple[bool, str]:
-    """Проверяет качество/структуру ответа LLM для сводки диалога.
-
-    Секции для подсчёта — ``summary_spec.section_titles()``; порог — ``MIN_SECTION_HITS``.
-
-    Returns:
-        Пара (успех, код причины): при успехе ``(True, "ok")``; иначе ``False`` и
-        одно из: ``empty``, ``invalid_prefix``, ``too_short``, ``too_few_lines``,
-        ``missing_structure``.
-    """
     s = (text or "").strip()
     if not s:
         return False, "empty"
-    if s.startswith(INVALID_SUMMARY_PREFIXES):
-        return False, "invalid_prefix"
-    if len(s) < MIN_SUMMARY_CHARS:
-        return False, "too_short"
-    non_empty_lines = [line for line in s.splitlines() if line.strip()]
-    if len(non_empty_lines) < MIN_SUMMARY_LINES:
-        return False, "too_few_lines"
-    if section_hit_count(s) < MIN_SECTION_HITS:
+    if missing_section_tags(s):
         return False, "missing_structure"
+    if not has_nonempty_summary_body(s):
+        return False, "empty_content"
     return True, "ok"
 
 
 def is_valid_summary_text(text: str) -> bool:
-    """Возвращает True, если черновик сводки проходит эвристическую валидацию."""
-    status, _ = validate_summary_text(text)
-    return status
+    return validate_summary_text(text)[0]
+
+
+def merge_repaired_summary(*, invalid_text: str, repaired_text: str) -> str:
+    """Склеивает теги из repair поверх сохранённых из невалидного черновика."""
+    preserved = extract_summary_bodies(invalid_text)
+    repaired = extract_summary_bodies(repaired_text)
+    return assemble_summary_xml(merge_summary_bodies(preserved=preserved, repaired=repaired))
+
+
+def resolve_after_repair_failure(
+    *,
+    invalid_text: str,
+    merged_text: str,
+    repaired_text: str,
+    accumulated_summary: str,
+) -> tuple[str, str]:
+    """partial_merged | accumulated | fallback — если strict validate не прошёл."""
+    if (
+        has_extracted_summary_content(merged_text)
+        or has_extracted_summary_content(repaired_text)
+        or has_extracted_summary_content(invalid_text)
+    ):
+        return merged_text, "partial_merged"
+    if (accumulated_summary or "").strip():
+        return accumulated_summary, "accumulated"
+    return fallback_summary_xml(), "fallback"

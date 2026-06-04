@@ -9,7 +9,7 @@ from summarize.compaction import (
     maybe_run_summary_compaction,
 )
 from thread_store import ThreadSession, append_new_thread_messages, load_thread_meta
-from tests.helpers.summary_sample import valid_summary_text_for_tests
+from tests.helpers.summary_sample import valid_summary_xml_for_tests
 
 
 def _patch_chat_completion(monkeypatch, fake):
@@ -54,7 +54,7 @@ def _state():
 
 
 def _valid_summary(seed: str) -> str:
-    return valid_summary_text_for_tests(seed=seed)
+    return valid_summary_xml_for_tests(seed=seed)
 
 
 def _read_current_data_rows(tmp_dir: str, thread_id: str):
