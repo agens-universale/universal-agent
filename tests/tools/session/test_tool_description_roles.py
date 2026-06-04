@@ -46,6 +46,19 @@ def test_working_memory_thread_not_project():
     assert "forever" in desc or "project-wide" in desc
 
 
+def test_working_memory_register_hygiene_in_description():
+    desc = WorkingMemory.tool_description()["description"].lower()
+    prompt = WorkingMemory.prompt_description().lower()
+    for text in (desc, prompt):
+        assert "approach" in text and "exceed" in text
+        assert "rewrite" in text
+        assert "do not wait" in text
+        assert "hygiene" in text
+        assert "deduplicate" in text or "deduplication" in text
+    assert "do not append on every trivial step" in prompt
+    assert "definitions above" in desc or "per the definitions above" in desc
+
+
 def test_project_memory_project_future():
     desc = ProjectMemory.tool_description()["description"].lower()
     assert "future" in desc or "future sessions" in desc
