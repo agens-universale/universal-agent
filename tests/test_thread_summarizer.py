@@ -50,7 +50,7 @@ class ThreadSummarizerTest(unittest.TestCase):
             max_steps=5,
             message_max_chars=5000,
         )
-        self.assertEqual(steps.count("<turn "), 1)
+        self.assertEqual(steps.count("<step "), 1)
         self.assertIn("[function_call] fs_read_file", steps)
         self.assertIn("[function_call_output]", steps)
 
