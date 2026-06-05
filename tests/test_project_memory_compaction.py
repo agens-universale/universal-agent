@@ -16,7 +16,7 @@ def _make_ctx(backend_mode: str = "chat_completions") -> SimpleNamespace:
 
 
 def test_soft_append_input_limit_constant():
-    assert SOFT_APPEND_INPUT_LIMIT_CHARS == 20_000
+    assert SOFT_APPEND_INPUT_LIMIT_CHARS == 3_000
 
 
 def test_compact_text_happy_path():

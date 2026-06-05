@@ -10,9 +10,10 @@ import json
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+from config_modules.project_memory import project_memory_limits_from_config_dict
 from project_memory import compaction, storage
-from project_memory.compaction import SOFT_APPEND_INPUT_LIMIT_CHARS
-from project_memory.storage import MAX_CHARS, ProjectMemoryError
+from project_memory.status import fill_percent
+from project_memory.storage import ProjectMemoryError
 from message_policy.project_memory_notice.policy import touch_project_memory_baseline
 from constants.tool_names import PROJECT_MEMORY_TOOL_NAME
 from tools.simple_tool_base import AbstractSimpleTool
@@ -27,6 +28,13 @@ _AUTO_COMPACTION_HINT = (
     "Memory was compacted to fit the limit. "
     "Call action=read if you want to see what was kept."
 )
+_HIGH_FILL_THRESHOLD_PERCENT = 70
+_HIGH_FILL_HINT = (
+    f"Project memory is over {_HIGH_FILL_THRESHOLD_PERCENT}% full. Consider action=write to reorganize it: "
+    "remove obsolete details, deduplicate, and restructure into concise sections. "
+    "If filesystem or artifact tools are available, move bulky or reference material "
+    "outward and keep only a short index with paths here."
+)
 
 
 class ProjectMemory(AbstractSimpleTool):
@@ -38,6 +46,11 @@ class ProjectMemory(AbstractSimpleTool):
         self._state = state
         gc_dir: Optional[Path] = getattr(ctx, "project_gc_dir", None)
         self._path: Optional[Path] = (Path(gc_dir) / _FILE_NAME) if gc_dir else None
+        limits = project_memory_limits_from_config_dict(
+            getattr(ctx, "config_dict", None) if ctx is not None else None
+        )
+        self._max_chars = limits["max_chars"]
+        self._max_append_chars = limits["max_append_chars"]
 
     @classmethod
     def tool_description(cls) -> Dict[str, Any]:
@@ -48,6 +61,7 @@ class ProjectMemory(AbstractSimpleTool):
                 "Project/long memory: durable facts for FUTURE sessions ('remember this rule', conventions, "
                 "artifact-first preferences, stable decisions). Not for turn-by-turn chat progress — use thread memory. "
                 "Survives restarts. Actions: read, append (short delta), write (full replace; rare). "
+                "Reports fill percent. "
                 "Append verified bullets only; no secrets, chain-of-thought, or guesses as facts."
             ),
             "parameters": {
@@ -102,12 +116,37 @@ Return format (JSON string):
   "action": "read|append|write",
   "length": number,
   "lines": number,
+  "max_chars": number,
+  "fill_percent": number,
+  "max_append_chars": number,
   "error": null|{"type":"...","message":"..."},
   "content": "..." (only for read),
   "compaction": {"performed": bool, "before_chars"?: number, "after_chars"?: number},
-  "hint": "..." (when relevant)
+  "hint": "..." (when relevant; includes reorganize nudge above 70% fill)
 }
 '''
+
+    def _usage_fields(self, length: int) -> Dict[str, int]:
+        return {
+            "max_chars": self._max_chars,
+            "fill_percent": fill_percent(length, self._max_chars),
+            "max_append_chars": self._max_append_chars,
+        }
+
+    def _current_length(self) -> int:
+        if self._path is None:
+            return 0
+        info = storage.stat(self._path)
+        return info.chars if info.exists else 0
+
+    def _high_fill_hint(self, length: int) -> Optional[str]:
+        if fill_percent(length, self._max_chars) > _HIGH_FILL_THRESHOLD_PERCENT:
+            return _HIGH_FILL_HINT
+        return None
+
+    def _resolve_hint(self, length: int, hint: Optional[str] = None) -> Optional[str]:
+        hints = [part for part in (hint, self._high_fill_hint(length)) if part]
+        return "\n\n".join(hints) if hints else None
 
     def _ok(
         self,
@@ -126,24 +165,30 @@ Return format (JSON string):
             "length": length,
             "lines": lines,
             "error": None,
+            **self._usage_fields(length),
         }
         if content is not None:
             payload["content"] = content
         payload["compaction"] = compaction_block or {"performed": False}
-        if hint is not None:
-            payload["hint"] = hint
+        resolved_hint = self._resolve_hint(length, hint)
+        if resolved_hint is not None:
+            payload["hint"] = resolved_hint
         return json.dumps(payload, ensure_ascii=False)
 
     def _err(self, *, action: str, error_type: str, message: str) -> str:
-        return json.dumps(
-            {
-                "tool": ProjectMemory.registered_tool_name(),
-                "ok": False,
-                "action": action,
-                "error": {"type": error_type, "message": message},
-            },
-            ensure_ascii=False,
-        )
+        current_length = self._current_length()
+        payload: Dict[str, Any] = {
+            "tool": ProjectMemory.registered_tool_name(),
+            "ok": False,
+            "action": action,
+            "length": current_length,
+            "error": {"type": error_type, "message": message},
+            **self._usage_fields(current_length),
+        }
+        resolved_hint = self._resolve_hint(current_length)
+        if resolved_hint is not None:
+            payload["hint"] = resolved_hint
+        return json.dumps(payload, ensure_ascii=False)
 
     def __call__(self, action: str, content: str = "", **kwargs: Any) -> str:
         if self._path is None:
@@ -190,13 +235,13 @@ Return format (JSON string):
                 error_type="empty_content",
                 message="content must be non-empty for append.",
             )
-        if len(delta_stripped) > SOFT_APPEND_INPUT_LIMIT_CHARS:
+        if len(delta_stripped) > self._max_append_chars:
             return self._err(
                 action="append",
                 error_type="input_too_long",
                 message=(
                     f"delta is {len(delta_stripped)} chars "
-                    f"(> {SOFT_APPEND_INPUT_LIMIT_CHARS}). "
+                    f"(> {self._max_append_chars}). "
                     "Rewrite more concisely (store facts, not raw text) and retry."
                 ),
             )
@@ -207,9 +252,11 @@ Return format (JSON string):
             if existing_stripped
             else delta_stripped
         )
-        if len(combined) <= MAX_CHARS:
+        if len(combined) <= self._max_chars:
             try:
-                info = storage.append(self._path, delta_stripped)
+                info = storage.append(
+                    self._path, delta_stripped, max_chars=self._max_chars
+                )
             except ProjectMemoryError as e:
                 return self._err(action="append", error_type=e.code, message=e.message)
             self._sync_baseline_after_mutation()
@@ -222,14 +269,14 @@ Return format (JSON string):
                 error_type="compaction_failed",
                 message=result.error_message or "compaction failed",
             )
-        if len(result.text) > MAX_CHARS:
+        if len(result.text) > self._max_chars:
             return self._err(
                 action="append",
                 error_type="limit_exceeded",
                 message="content too large even after compaction.",
             )
         try:
-            info = storage.write(self._path, result.text)
+            info = storage.write(self._path, result.text, max_chars=self._max_chars)
         except ProjectMemoryError as e:
             return self._err(action="append", error_type=e.code, message=e.message)
         self._sync_baseline_after_mutation()
@@ -254,17 +301,17 @@ Return format (JSON string):
                 error_type="empty_content",
                 message="content must be non-empty for write.",
             )
-        if len(text_stripped) > MAX_CHARS:
+        if len(text_stripped) > self._max_chars:
             return self._err(
                 action="write",
                 error_type="input_too_long",
                 message=(
-                    f"content is {len(text_stripped)} chars (> {MAX_CHARS}). "
+                    f"content is {len(text_stripped)} chars (> {self._max_chars}). "
                     "Rewrite more concisely and retry."
                 ),
             )
         try:
-            info = storage.write(self._path, text_stripped)
+            info = storage.write(self._path, text_stripped, max_chars=self._max_chars)
         except ProjectMemoryError as e:
             return self._err(action="write", error_type=e.code, message=e.message)
         self._sync_baseline_after_mutation()

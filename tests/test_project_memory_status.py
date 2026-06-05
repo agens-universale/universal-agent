@@ -6,6 +6,7 @@ def test_status_missing_file(tmp_path):
     assert "doesn't have long memory yet" in text
     assert "persist it for future sessions" in text
     assert "appropriate memory tool" in text
+    assert "Limit: 10000 chars (0% filled)." in text
 
 
 def test_status_empty_file(tmp_path):
@@ -30,7 +31,8 @@ def test_status_populated_file(tmp_path):
     assert "project has long memory" in text
     assert "MUST" not in text
     assert "FIRST STEP" not in text
-    assert f"{len(body)} chars" in text
+    assert f"{len(body)}/10000 chars" in text
+    assert f"({round(len(body) * 100 / 10000)}% filled)" in text
     assert "lines" in text
     assert "appropriate memory tool" in text
     assert "not on every turn" in text

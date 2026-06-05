@@ -11,7 +11,9 @@ from typing import Any, Optional
 
 from utils.llm_chat_client import request_chat_completion_text
 
-SOFT_APPEND_INPUT_LIMIT_CHARS: int = 20_000
+from config_modules.project_memory import DEFAULT_PROJECT_MEMORY_MAX_APPEND_CHARS
+
+SOFT_APPEND_INPUT_LIMIT_CHARS: int = DEFAULT_PROJECT_MEMORY_MAX_APPEND_CHARS
 
 _COMPACTION_PROMPT_PATH = (
     Path(__file__).resolve().parent.parent.parent
@@ -19,7 +21,7 @@ _COMPACTION_PROMPT_PATH = (
     / "project_memory_compaction_prompt.md"
 )
 
-_COMPACTION_MAX_TOKENS: int = 4_000  # roughly enough for compressed project_memory.md (50k chars).
+_COMPACTION_MAX_TOKENS: int = 4_000  # roughly enough for compressed project_memory.md.
 
 
 @dataclass(frozen=True)

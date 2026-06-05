@@ -139,6 +139,8 @@ tool_usage_notice:
 project_memory:
   enable_project_memory_notice: true
   check_interval_messages: 5
+  max_chars: 10000
+  max_append_chars: 3000
 
 # Intent scope: LLM post-hook после human-facing tools (только chat_completions).
 # tools: [] — выключить. Параметры LLM — chat_completions.llm.

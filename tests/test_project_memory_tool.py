@@ -50,6 +50,9 @@ def test_tool_read_missing_file_returns_ok_with_empty_content(tmp_path):
     assert res["content"] == ""
     assert res["length"] == 0
     assert res["lines"] == 0
+    assert res["max_chars"] == 10_000
+    assert res["fill_percent"] == 0
+    assert res["max_append_chars"] == 3_000
     assert "hint" in res
 
 
@@ -62,6 +65,8 @@ def test_tool_read_existing_file_returns_full_content(tmp_path):
     assert res["content"] == "hello world"
     assert res["length"] == len("hello world")
     assert res["lines"] == 1
+    assert res["max_chars"] == 10_000
+    assert res["fill_percent"] == round(len("hello world") * 100 / 10_000)
 
 
 def test_tool_append_with_empty_content_fails(tmp_path):
@@ -73,11 +78,13 @@ def test_tool_append_with_empty_content_fails(tmp_path):
 
 def test_tool_append_over_soft_limit_refuses(tmp_path):
     tool = _make_tool(tmp_path)
-    huge_delta = "x" * 20_001
+    huge_delta = "x" * 3_001
     res = json.loads(tool(action="append", content=huge_delta))
     assert res["ok"] is False
     assert res["error"]["type"] == "input_too_long"
-    assert "20000" in res["error"]["message"]
+    assert "3000" in res["error"]["message"]
+    assert res["max_chars"] == 10_000
+    assert res["fill_percent"] == 0
     # File must not be created.
     assert not (tmp_path / ".gc" / "project_memory.md").exists()
 
@@ -105,10 +112,10 @@ def _seed_memory(tmp_path, content: str) -> None:
 
 
 def test_tool_append_overflow_triggers_compaction(tmp_path):
-    """existing+delta > 50k → compact_text called with combined text → file = compacted."""
-    _seed_memory(tmp_path, "x" * 49_900)
+    """existing+delta > max_chars → compact_text called with combined text → file = compacted."""
+    _seed_memory(tmp_path, "x" * 9_900)
     tool = _make_tool(tmp_path)
-    delta = "y" * 200  # combined > 50_000
+    delta = "y" * 200  # combined > 10_000
 
     captured = {}
 
@@ -120,12 +127,12 @@ def test_tool_append_overflow_triggers_compaction(tmp_path):
         res = json.loads(tool(action="append", content=delta))
 
     # Combined text fed to compaction was existing + \n\n + delta, both stripped.
-    assert "x" * 49_900 in captured["input"]
+    assert "x" * 9_900 in captured["input"]
     assert "y" * 200 in captured["input"]
 
     assert res["ok"] is True
     assert res["compaction"]["performed"] is True
-    assert res["compaction"]["before_chars"] > 50_000
+    assert res["compaction"]["before_chars"] > 10_000
     assert res["compaction"]["after_chars"] == len("COMPACTED")
     assert "Memory was compacted" in res["hint"]
     assert "action=read" in res["hint"]
@@ -133,7 +140,7 @@ def test_tool_append_overflow_triggers_compaction(tmp_path):
 
 
 def test_tool_append_overflow_compaction_failed(tmp_path):
-    _seed_memory(tmp_path, "x" * 49_900)
+    _seed_memory(tmp_path, "x" * 9_900)
     tool = _make_tool(tmp_path)
 
     failed = CompactionResult(
@@ -146,22 +153,22 @@ def test_tool_append_overflow_compaction_failed(tmp_path):
     assert res["error"]["type"] == "compaction_failed"
     assert "boom" in res["error"]["message"]
     # File untouched.
-    assert (tmp_path / ".gc" / "project_memory.md").read_text(encoding="utf-8") == "x" * 49_900
+    assert (tmp_path / ".gc" / "project_memory.md").read_text(encoding="utf-8") == "x" * 9_900
 
 
 def test_tool_append_overflow_compaction_result_still_too_large(tmp_path):
-    _seed_memory(tmp_path, "x" * 49_900)
+    _seed_memory(tmp_path, "x" * 9_900)
     tool = _make_tool(tmp_path)
 
     over = CompactionResult(
-        ok=True, text="z" * 50_001, error_type=None, error_message=None
+        ok=True, text="z" * 10_001, error_type=None, error_message=None
     )
     with patch("project_memory.compaction.compact_text", return_value=over):
         res = json.loads(tool(action="append", content="y" * 200))
 
     assert res["ok"] is False
     assert res["error"]["type"] == "limit_exceeded"
-    assert (tmp_path / ".gc" / "project_memory.md").read_text(encoding="utf-8") == "x" * 49_900
+    assert (tmp_path / ".gc" / "project_memory.md").read_text(encoding="utf-8") == "x" * 9_900
 
 
 def test_tool_append_fast_path_does_not_call_compaction(tmp_path):
@@ -188,14 +195,14 @@ def test_tool_write_under_max_chars_succeeds(tmp_path):
 
 def test_tool_write_over_max_chars_refuses_no_compaction(tmp_path):
     tool = _make_tool(tmp_path)
-    huge = "x" * (50_001)
+    huge = "x" * (10_001)
 
     with patch("project_memory.compaction.compact_text") as mocked:
         res = json.loads(tool(action="write", content=huge))
 
     assert res["ok"] is False
     assert res["error"]["type"] == "input_too_long"
-    assert "50000" in res["error"]["message"]
+    assert "10000" in res["error"]["message"]
     # write never invokes compaction.
     assert not mocked.called
     assert not (tmp_path / ".gc" / "project_memory.md").exists()
@@ -234,3 +241,71 @@ def test_project_memory_registered_by_default():
 def test_project_memory_filtered_by_stop_tools():
     data = get_builtin_tools_data({"stop_tools": ["project_memory"]})
     assert "project_memory" not in data
+
+
+def _make_tool_with_limits(tmp_path, *, max_chars: int) -> ProjectMemory:
+    ctx = SimpleNamespace(
+        project_gc_dir=tmp_path / ".gc",
+        config_dict={
+            "backend_api_mode": "chat_completions",
+            "project_memory_params": {"max_chars": max_chars},
+        },
+        auth_connector=None,
+        logger=None,
+    )
+    return ProjectMemory(ctx=ctx, state=SimpleNamespace())
+
+
+def test_tool_read_high_fill_includes_reorganize_hint(tmp_path):
+    (tmp_path / ".gc").mkdir()
+    (tmp_path / ".gc" / "project_memory.md").write_text("x" * 71, encoding="utf-8")
+    tool = _make_tool_with_limits(tmp_path, max_chars=100)
+    res = json.loads(tool(action="read"))
+    assert res["fill_percent"] == 71
+    assert "reorganize" in res["hint"].lower()
+    assert "action=write" in res["hint"]
+    assert "artifact" in res["hint"].lower()
+
+
+def test_tool_read_at_70_percent_no_reorganize_hint(tmp_path):
+    (tmp_path / ".gc").mkdir()
+    (tmp_path / ".gc" / "project_memory.md").write_text("x" * 70, encoding="utf-8")
+    tool = _make_tool_with_limits(tmp_path, max_chars=100)
+    res = json.loads(tool(action="read"))
+    assert res["fill_percent"] == 70
+    assert "hint" not in res
+
+
+def test_tool_append_high_fill_includes_reorganize_hint(tmp_path):
+    (tmp_path / ".gc").mkdir()
+    (tmp_path / ".gc" / "project_memory.md").write_text("x" * 70, encoding="utf-8")
+    tool = _make_tool_with_limits(tmp_path, max_chars=100)
+    res = json.loads(tool(action="append", content="y"))
+    assert res["fill_percent"] > 70
+    assert "reorganize" in res["hint"].lower()
+
+
+def test_tool_uses_custom_limits_from_config(tmp_path):
+    ctx = SimpleNamespace(
+        project_gc_dir=tmp_path / ".gc",
+        config_dict={
+            "backend_api_mode": "chat_completions",
+            "project_memory_params": {
+                "max_chars": 100,
+                "max_append_chars": 40,
+            },
+        },
+        auth_connector=None,
+        logger=None,
+    )
+    tool = ProjectMemory(ctx=ctx, state=SimpleNamespace())
+
+    res = json.loads(tool(action="append", content="x" * 41))
+    assert res["ok"] is False
+    assert res["error"]["type"] == "input_too_long"
+    assert "40" in res["error"]["message"]
+
+    res = json.loads(tool(action="write", content="y" * 101))
+    assert res["ok"] is False
+    assert res["error"]["type"] == "input_too_long"
+    assert "100" in res["error"]["message"]

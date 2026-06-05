@@ -10,10 +10,20 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Optional
 
+from config_modules.project_memory import (
+    DEFAULT_PROJECT_MEMORY_MAX_CHARS,
+    project_memory_limits_from_config_dict,
+)
 from constants.tool_names import PROJECT_MEMORY_TOOL_NAME
 from project_memory import storage
 
 _FILE_NAME = "project_memory.md"
+
+
+def fill_percent(length: int, max_chars: int) -> int:
+    if max_chars <= 0:
+        return 0
+    return min(100, round(length * 100 / max_chars))
 
 _EMPTY_STATUS = (
     "project doesn't have long memory yet. "
@@ -23,7 +33,11 @@ _EMPTY_STATUS = (
 )
 
 
-def build_project_memory_status_for_cwd(cwd: Optional[str] = None) -> str:
+def build_project_memory_status_for_cwd(
+    cwd: Optional[str] = None,
+    *,
+    config_dict: dict | None = None,
+) -> str:
     """Resolve the project-local memory path and build the status string.
 
     Callers that have no business knowing where memory lives use this entry
@@ -31,7 +45,11 @@ def build_project_memory_status_for_cwd(cwd: Optional[str] = None) -> str:
     """
     from config_modules.env_vars import project_gc_dir
 
-    return build_project_memory_status(project_gc_dir(cwd) / _FILE_NAME)
+    limits = project_memory_limits_from_config_dict(config_dict)
+    return build_project_memory_status(
+        project_gc_dir(cwd) / _FILE_NAME,
+        max_chars=limits["max_chars"],
+    )
 
 
 def attach_status_to_prompt_vars(
@@ -48,12 +66,18 @@ def attach_status_to_prompt_vars(
     if isinstance(stop, list) and PROJECT_MEMORY_TOOL_NAME in stop:
         return
     try:
-        prompt_vars["longMemoryStatus"] = build_project_memory_status_for_cwd(cwd)
+        prompt_vars["longMemoryStatus"] = build_project_memory_status_for_cwd(
+            cwd, config_dict=config_dict
+        )
     except Exception:  # pragma: no cover — memory must never break metadata
         return
 
 
-def build_project_memory_status(path: Path) -> str:
+def build_project_memory_status(
+    path: Path,
+    *,
+    max_chars: int = DEFAULT_PROJECT_MEMORY_MAX_CHARS,
+) -> str:
     """Return the multi-line status injected into Project Info as longMemoryStatus.
 
     Two outputs by file state:
@@ -63,12 +87,20 @@ def build_project_memory_status(path: Path) -> str:
     """
     info = storage.stat(path)
     if not info.exists or info.chars == 0:
-        return _EMPTY_STATUS
+        return (
+            f"{_EMPTY_STATUS}\n"
+            f"Limit: {max_chars} chars (0% filled)."
+        )
     text = storage.read(path)
     if not text.strip():
-        return _EMPTY_STATUS
+        return (
+            f"{_EMPTY_STATUS}\n"
+            f"Limit: {max_chars} chars (0% filled)."
+        )
+    usage_pct = fill_percent(info.chars, max_chars)
     return (
-        f"project has long memory — {info.chars} chars, {info.lines} lines.\n"
+        f"project has long memory — {info.chars}/{max_chars} chars "
+        f"({usage_pct}% filled), {info.lines} lines.\n"
         "Use the appropriate memory tool with action=read when standing goals, rules, "
         "decisions, or durable facts may affect this task — not on every turn."
     )

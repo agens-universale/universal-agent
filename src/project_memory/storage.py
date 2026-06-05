@@ -12,7 +12,10 @@ import threading
 from dataclasses import dataclass
 from pathlib import Path
 
-MAX_CHARS: int = 50_000
+from config_modules.project_memory import DEFAULT_PROJECT_MEMORY_MAX_CHARS
+
+DEFAULT_MAX_CHARS: int = DEFAULT_PROJECT_MEMORY_MAX_CHARS
+MAX_CHARS: int = DEFAULT_MAX_CHARS
 
 _lock = threading.Lock()
 
@@ -101,7 +104,12 @@ def _atomic_write(path: Path, content: str) -> None:
     os.replace(tmp, path)
 
 
-def append(path: Path, delta: str) -> ProjectMemoryStat:
+def append(
+    path: Path,
+    delta: str,
+    *,
+    max_chars: int = DEFAULT_MAX_CHARS,
+) -> ProjectMemoryStat:
     """Append `delta` (stripped) to the long-memory file separated by a blank line.
 
     Result format: ``existing.strip() + "\\n\\n" + delta.strip()``. If the file
@@ -123,10 +131,10 @@ def append(path: Path, delta: str) -> ProjectMemoryStat:
             if existing_stripped
             else delta_stripped
         )
-        if len(new_text) > MAX_CHARS:
+        if len(new_text) > max_chars:
             raise ProjectMemoryError(
                 "limit_exceeded",
-                f"resulting length {len(new_text)} exceeds limit {MAX_CHARS}.",
+                f"resulting length {len(new_text)} exceeds limit {max_chars}.",
             )
         _atomic_write(path, new_text)
     return ProjectMemoryStat(
@@ -136,7 +144,12 @@ def append(path: Path, delta: str) -> ProjectMemoryStat:
     )
 
 
-def write(path: Path, content: str) -> ProjectMemoryStat:
+def write(
+    path: Path,
+    content: str,
+    *,
+    max_chars: int = DEFAULT_MAX_CHARS,
+) -> ProjectMemoryStat:
     """Atomically replace the long-memory file with `content` (stripped).
 
     Raises ProjectMemoryError(code="empty_content") if content is empty/whitespace.
@@ -146,10 +159,10 @@ def write(path: Path, content: str) -> ProjectMemoryStat:
     if not isinstance(content, str) or not content.strip():
         raise ProjectMemoryError("empty_content", "content must be non-empty for write.")
     new_text = content.strip()
-    if len(new_text) > MAX_CHARS:
+    if len(new_text) > max_chars:
         raise ProjectMemoryError(
             "limit_exceeded",
-            f"content length {len(new_text)} exceeds limit {MAX_CHARS}.",
+            f"content length {len(new_text)} exceeds limit {max_chars}.",
         )
     with _lock:
         _atomic_write(path, new_text)

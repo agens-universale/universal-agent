@@ -74,6 +74,8 @@ tool_usage_notice:
 project_memory:
   enable_project_memory_notice: true
   check_interval_messages: 5
+  max_chars: 20000
+  max_append_chars: 5000
 
 summary:
   chat_completions_summary_trigger_chars: 200000

@@ -156,6 +156,8 @@ def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
         "project_memory": app_cfg.project_memory,
         "project_memory_params": app_cfg.project_memory.model_dump(),
         "project_memory_check_interval_messages": app_cfg.project_memory.check_interval_messages,
+        "project_memory_max_chars": app_cfg.project_memory.max_chars,
+        "project_memory_max_append_chars": app_cfg.project_memory.max_append_chars,
         "enable_project_memory_notice": app_cfg.project_memory.enable_project_memory_notice,
         "intent_scope": app_cfg.intent_scope,
         "intent_scope_params": app_cfg.intent_scope.model_dump(),
