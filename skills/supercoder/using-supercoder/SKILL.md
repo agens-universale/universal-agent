@@ -1,7 +1,7 @@
 ---
 id: using-supercoder
 name: Using Supercoder
-description: Entry point of the Supercoder methodology pack. Load FIRST when starting non-trivial coding work (feature, bugfix, refactor, design, planning) or hitting a tricky bug. Maps user intent to the right inner skill from this pack — see the body for the trigger table.
+description: Entry point of the Supercoder methodology pack. Load FIRST when starting non-trivial collaborative coding work (feature, bugfix, refactor, design, planning) or hitting a tricky bug. Do not use as primary for SWE-bench, autonomous coding benchmark, no-HITL issue-to-patch, or eval harness tasks; use autonomous-benchmark-agent. Maps user intent to the right inner skill from this pack — see the body for the trigger table.
 version: 1.0.0
 ---
 
@@ -63,5 +63,7 @@ to use this pack" below — and answer/act directly without methodology.
 - Pure read-only requests ("explain this function", "what does X do") — answer
   directly, no methodology needed.
 - One-step trivial commands ("rename foo to bar in file X") — just do it.
+- SWE-bench, autonomous coding benchmark, no-HITL issue-to-patch, or eval harness
+  tasks requiring machine-checkable artifacts — use `autonomous-benchmark-agent`.
 - Questions about the agent itself, the config, or non-code tasks — out of scope
   for this pack.

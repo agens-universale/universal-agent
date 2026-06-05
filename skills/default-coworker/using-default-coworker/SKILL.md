@@ -53,6 +53,7 @@ Load on a **later** turn when the trigger is real. Do not bundle with the primar
 | User intent (signals) | Consider `skills_load` |
 |---|---|
 | Scientific literature, DOI, PMID, arXiv, peer-reviewed papers | `science-article-creator:using-science-article-creator` |
+| Benchmark/eval/harness/grader/no-HITL task instance; SWE-bench, OSWorld, office/browser/computer-use benchmark; solve and return machine-checkable artifact | `autonomous-benchmark-agent` |
 | General domain, market, vendor, regulatory, web research | `topic-research` |
 | Coding feature, bugfix, refactor, design, implementation plan | `supercoder:using-supercoder` |
 | Read-only codebase explanation, map, or flow trace | `codebase:using-codebase` |
@@ -65,6 +66,10 @@ Load on a **later** turn when the trigger is real. Do not bundle with the primar
 - **Research — specialist-first:** clear scientific literature → `science-article-creator`;
   deep domain/web brief → `topic-research`. `default-coworker:research` only for
   ambiguous triage, lightweight analysis, or workspace-local framing.
+- **Benchmark/eval/no-HITL:** `autonomous-benchmark-agent` wins over `supercoder`,
+  `topic-research`, and default coworker modes. For GUI tasks, load `computer-use`
+  only as required by tool protocol; keep `autonomous-benchmark-agent` as the task
+  contract.
 - **Orchestration:** high-impact multi-step with recovery/planning/critic → primary
   `complex-task-solver`. `handoff-autonomy` lazy for L5/continuity only — not a substitute.
 
