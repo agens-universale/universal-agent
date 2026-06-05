@@ -180,25 +180,159 @@ summary:
   intent_log_preview_chars: 10000
 
 security:
+  # =========================================================================
+  # 4 независимых слоя на одном уровне.
+  # Safe-by-default-OFF: каждый требует `enabled: true`, чтобы активироваться.
+  # Подробная документация — docs/rootbox.md.
+  # =========================================================================
+
   command_moderation:
-    # allow: exec_command/exec_python run without judge.
-    # ask: dangerous verdict requires explicit user confirmation.
-    # deny: dangerous verdict is blocked by policy.
+    # Судья опасных команд/кода через LLM. Применяется к:
+    #   execute_command, run_python_code
+    # При нарушении возвращает envelope:
+    #   { "error": { "type": "unsafe_command_blocked" }, "ok": false }
+    enabled: true
+    # mode:
+    #   allow — судья не вызывается (всё проходит) — эквивалент enabled: false;
+    #   ask   — опасное → запрос подтверждения у пользователя в stdin;
+    #   deny  — опасное → блок.
+    # При недоступности judge'а: fail-CLOSED (опасное блокируется).
     mode: deny
-    root_box:
-      # When enabled, write/edit tools can modify only launch_root
-      # (the directory where gc-cli was started) and extra_write_paths.
-      enabled: true
-      # Additional writable directories. Relative paths are resolved from config.yml.
-      extra_write_paths: []
-    # Positive examples for the command judge. These are not a strict allowlist:
-    # they describe the expected safe command profile for this project.
+    # Positive examples — ориентир безопасного профиля. Не allowlist.
     allowed_command_examples: []
-    url_policy:
-      # fetch_url/simple_fetch_url validate only the original URL before request.
-      allowed_schemes: ["http", "https"]
-      # Exact hosts, glob hosts (*.internal.example), or URL globs can be listed here.
-      url_blacklist: []
+    # allowed_command_examples:
+    #   - "ls -la"
+    #   - "git status"
+    #   - "pytest tests/"
+
+  write_guard:
+    # Write-периметр. Применяется к:
+    #   write_to_file, append_to_file, search_and_replace,
+    #   write-фрагментам внутри execute_command.
+    # При нарушении envelope:
+    #   { "error": { "type": "write_guard_violation" }, "ok": false }
+    enabled: true
+    # mode (как у command_moderation):
+    #   deny  — write вне периметра → блок;
+    #   ask   — write вне периметра → запрос подтверждения;
+    #   allow — write вне периметра → пропустить + audit `out_of_perimeter`.
+    mode: deny
+    # Дополнительные writable directories помимо launch_root.
+    # Относительные пути резолвятся от каталога config.yml.
+    extra_paths: []
+    # extra_paths:
+    #   - "./build"                    # относительно config.yml
+    #   - "/tmp/agent-scratch"         # абсолютный
+    #   - "~/Downloads/agent-out"      # ~ резолвится
+
+  read_guard:
+    # Read-периметр (симметричен write_guard). Применяется к:
+    #   read_file, list_files, search_files
+    # При нарушении envelope:
+    #   { "error": { "type": "read_guard_violation" }, "ok": false }
+    enabled: true
+    # mode:
+    #   deny  — read вне периметра / в denied_* → блок;
+    #   ask   — то же → запрос подтверждения у пользователя;
+    #   allow — то же → пропустить + audit `out_of_perimeter`.
+    mode: deny
+    # -----------------------------------------------------------------
+    # Разница между allowed_read_roots и allowed_read_paths (важно!):
+    #
+    #   allowed_read_roots = "КАРТА разрешённой территории" — большие
+    #     корневые директории, где вообще разрешено читать. Это глобальный
+    #     периметр. Файл вне этих корней → блок.
+    #
+    #   allowed_read_paths = "VIP-пропуск для исключений" — точечные дырки
+    #     в denied_*. Если путь матчит — разрешено, даже если он попадает
+    #     под denied_read_paths / denied_file_patterns / denied_extensions.
+    #
+    # Канонический пример (.gc запрещён, но .gc/skills — exception):
+    #   allowed_read_roots: []                       # = [launch_root]
+    #   denied_read_paths:    [<launch_root>/.gc]    # вся .gc закрыта
+    #   allowed_read_paths:   [<launch_root>/.gc/skills]  # кроме skills/
+    #
+    # Что получится:
+    #   <launch_root>/main.py             → ✅ allow (внутри проекта)
+    #   /etc/passwd                       → ❌ block (вне периметра)
+    #   <launch_root>/.gc/threads.json    → ❌ block (denied .gc)
+    #   <launch_root>/.gc/skills/foo.md   → ✅ allow (exception override)
+    # -----------------------------------------------------------------
+
+    # Где разрешено читать (периметр):
+    #   []        → трактуется как [launch_root] (только проект);
+    #   ["*"]     → allow-by-default по ФС (файловая система), режут только denied_*;
+    #   ["/abs"]  → объединение указанных корней.
+    allowed_read_roots: []
+
+    # Точечные exception-override НАД denied_*. Используется для подкаталогов
+    # внутри denied (например skills/ внутри .gc/ — см. пример выше).
+    allowed_read_paths: []
+    # allowed_read_paths:
+    #   - "~/.local/state/gc/skills"
+    #   - "<launch_root>/.gc/skills"
+    # Запрещённые пути (плейсхолдеры: ~, %USERPROFILE%, <launch_root>):
+    denied_read_paths: []
+    # denied_read_paths:
+    #   - "~/.ssh"
+    #   - "~/.aws"
+    #   - "~/.config/gcloud"
+    #   - "~/.gnupg"
+    #   - "/etc/ssl/private"
+    #   - "/proc"
+    #   - "/sys"
+    #   - "~/.local/state/gc"          # state cli (треды, auth-токены)
+    #   - "<launch_root>/.gc"          # project-local state
+    # Запрещённые паттерны имени файла (fnmatch по basename):
+    denied_file_patterns: []
+    # denied_file_patterns:
+    #   - ".env"
+    #   - ".env.*"
+    #   - "*id_rsa*"
+    #   - "*id_ed25519*"
+    #   - "*.pem"
+    #   - "*credentials*.json"
+    #   - "*.sqlite"
+    # Запрещённые расширения (точное совпадение):
+    denied_extensions: []
+    # denied_extensions:
+    #   - ".key"
+    #   - ".pfx"
+    #   - ".jks"
+
+  url_policy:
+    # Проверка URL до сетевого запроса. Применяется к:
+    #   fetch_url, simple_fetch_url
+    # При нарушении envelope:
+    #   { "error": { "type": "url_blocked_by_policy" | "url_validation_failed" }, "ok": false }
+    # Redirect targets re-validate per-hop ТОЛЬКО в simple_fetch_url.
+    enabled: true
+    # mode:
+    #   deny  — нарушение → блок;
+    #   ask   — нарушение → запрос подтверждения;
+    #   allow — нарушение → пропустить + audit `out_of_perimeter`.
+    mode: deny
+    # Разрешённые URI схемы (всё остальное → url_validation_failed).
+    allowed_schemes: ["http", "https"]
+    # Blacklist хостов / URL-паттернов (fnmatch + special-case "*.suffix"):
+    #   "host"           — точный хост;
+    #   "*.suffix"       — любой ПОДДОМЕН suffix (apex без поддомена не match);
+    #   "10.*"           — fnmatch wildcard;
+    #   "172.1[6-9].*"   — fnmatch character class.
+    url_blacklist: []
+    # Готовый SSRF-blacklist (cloud metadata + loopback + RFC1918):
+    # url_blacklist:
+    #   - "169.254.*"                  # link-local + AWS/GCP IMDS 169.254.169.254
+    #   - "127.*"                      # loopback
+    #   - "10.*"                       # RFC1918 class A
+    #   - "192.168.*"                  # RFC1918 class C
+    #   - "172.1[6-9].*"               # RFC1918 class B 172.16-19
+    #   - "172.2[0-9].*"               # 172.20-29
+    #   - "172.3[0-1].*"               # 172.30-31
+    #   - "0.0.0.0"
+    #   - "localhost"
+    #   - "metadata.google.internal"
+    #   - "*.metadata.google.internal"
 
 mcp:
   servers:

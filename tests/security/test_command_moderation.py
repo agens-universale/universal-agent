@@ -14,7 +14,7 @@ from security.command_moderation import (
     moderate_command_execution,
     validate_judge_result,
 )
-from security.path_policy import RootBoxConfig, ToolSecurityContext
+from security.path_policy import WriteGuardConfig, ToolSecurityContext
 import security.command_moderation as command_moderation
 
 
@@ -61,7 +61,14 @@ def test_decide_command_execution_matrix():
     dangerous = JudgeResult("potentially_dangerous", ["bad"], ["privilege_escalation"], 1.0)
 
     assert decide_command_execution("allow", None, False, None).allowed is True
-    assert decide_command_execution("deny", None, False, None).allowed is True
+    # Fail-CLOSED: при недоступности судьи в режимах ask/deny — блокируем.
+    deny_no_judge = decide_command_execution("deny", None, False, None)
+    assert deny_no_judge.allowed is False
+    assert deny_no_judge.reason_code == "judge_unavailable"
+    assert deny_no_judge.error_type == "unsafe_command_blocked"
+    ask_no_judge = decide_command_execution("ask", None, False, None)
+    assert ask_no_judge.allowed is False
+    assert ask_no_judge.error_type == "unsafe_command_blocked"
     assert decide_command_execution("deny", safe, True, None).allowed is True
 
     denied = decide_command_execution("deny", dangerous, True, None)
@@ -81,7 +88,7 @@ def test_decide_command_execution_matrix():
 def test_effective_command_cwd_exec_python_defaults_to_launch_root():
     ctx = ToolSecurityContext(
         launch_root="/repo/lr",
-        root_box=RootBoxConfig(enabled=True, extra_write_paths=[]),
+        write_guard=WriteGuardConfig(enabled=True, extra_paths=[]),
     )
     assert effective_command_cwd("exec_python", {}, ctx) == os.path.abspath("/repo/lr")
 
@@ -90,7 +97,7 @@ def test_effective_command_cwd_exec_command_defaults_to_getcwd(tmp_path, monkeyp
     monkeypatch.chdir(tmp_path)
     ctx = ToolSecurityContext(
         launch_root=str(tmp_path / "lr"),
-        root_box=RootBoxConfig(enabled=True, extra_write_paths=[]),
+        write_guard=WriteGuardConfig(enabled=True, extra_paths=[]),
     )
     assert effective_command_cwd("exec_command", {}, ctx) == os.path.abspath(os.getcwd())
 
@@ -99,7 +106,7 @@ def test_build_judge_payload_contains_runtime_context():
     context = ModerationContext(
         tool_name="exec_command",
         launch_root="/repo",
-        extra_write_paths=["/tmp/cache"],
+        extra_paths=["/tmp/cache"],
         mode="deny",
         cwd="/repo",
         os_name="Linux",
@@ -112,7 +119,7 @@ def test_build_judge_payload_contains_runtime_context():
 
     assert payload["launch_root"] == "/repo"
     assert payload["allowed_write_paths"] == ["/repo", "/tmp/cache"]
-    assert "extra_write_paths" not in payload
+    assert "extra_paths" not in payload
     assert payload["runtime"]["shell"] == "/bin/bash"
     assert payload["allowed_command_examples"] == ["pytest"]
     assert "mode" not in payload
@@ -147,7 +154,7 @@ def test_build_judge_messages_uses_external_prompt_templates():
 def test_moderate_command_execution_blocks_dangerous_payload(tmp_path):
     config_dict = {
         "launch_root": str(tmp_path),
-        "command_moderation": {"mode": "deny"},
+        "command_moderation": {"enabled": True, "mode": "deny"},
     }
 
     @moderate_command_execution(
@@ -170,10 +177,15 @@ def test_moderate_command_execution_blocks_dangerous_payload(tmp_path):
     assert result["error"]["risk_flags"] == ["privilege_escalation"]
 
 
-def test_moderate_command_execution_fail_open_when_judge_unavailable(tmp_path):
+def test_moderate_command_execution_fail_closed_when_judge_unavailable(tmp_path):
+    """
+    Fail-CLOSED: при недоступности судьи в режимах ask/deny выполнение
+    блокируется. Это изменение от AS-IS (которое было fail-open) — см.
+    T114-finding в hardening_findings_20260518.md.
+    """
     config_dict = {
         "launch_root": str(tmp_path),
-        "command_moderation": {"mode": "deny"},
+        "command_moderation": {"enabled": True, "mode": "deny"},
     }
 
     @moderate_command_execution(payload_arg="command", tool_name="exec_command")
@@ -182,7 +194,12 @@ def test_moderate_command_execution_fail_open_when_judge_unavailable(tmp_path):
 
     result = json.loads(run("echo ok", config_dict=config_dict))
 
-    assert result["ok"] is True
+    assert result["ok"] is False
+    assert result["error"]["type"] == "unsafe_command_blocked"
+    # envelope error от make_block_error содержит mode/reason/risk_flags,
+    # но reason_code остаётся в audit-логе, а не в envelope. Проверяем reason.
+    assert "judge" in result["error"].get("reason", "").lower() \
+        or "fail-closed" in result["error"].get("reason", "").lower()
 
 
 def test_moderate_command_execution_audits_without_payload_leak(tmp_path):
@@ -190,7 +207,7 @@ def test_moderate_command_execution_audits_without_payload_leak(tmp_path):
     ctx = SimpleNamespace(
         config_dict={
             "launch_root": str(tmp_path),
-            "command_moderation": {"mode": "deny"},
+            "command_moderation": {"enabled": True, "mode": "deny"},
         },
         logger=logger,
     )

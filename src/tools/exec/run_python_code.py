@@ -243,7 +243,7 @@ Return format (JSON string):
                     launch_abs,
                     *[
                         os.path.abspath(str(extra))
-                        for extra in (security_context.root_box.extra_write_paths or [])
+                        for extra in (security_context.write_guard.extra_paths or [])
                     ],
                 ]
             )

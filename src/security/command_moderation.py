@@ -51,7 +51,7 @@ _COMMAND_JUDGE_USER_PROMPT_PATH = _SECURITY_PROMPTS_DIR / "command_judge_user.md
 class ModerationContext:
     tool_name: str
     launch_root: str
-    extra_write_paths: list[str] = field(default_factory=list)
+    extra_paths: list[str] = field(default_factory=list)
     mode: str = "deny"
     cwd: str = field(default_factory=os.getcwd)
     os_name: str = field(default_factory=platform.system)
@@ -94,7 +94,7 @@ def build_judge_payload(
         "launch_root": context.launch_root,
         "allowed_write_paths": [
             context.launch_root,
-            *context.extra_write_paths,
+            *context.extra_paths,
         ],
         "runtime": {
             "cwd": context.cwd,
@@ -154,11 +154,15 @@ def decide_command_execution(
             reason="command_moderation.mode=allow",
         )
     if not judge_available or judge_result is None:
+        # Fail-closed: при недоступности судьи в режимах ask/deny — блокируем.
+        # Это изменение от AS-IS, где было fail-open (см. T114-finding).
+        # Режим allow до этой ветки не доходит — он выходит раньше (см. выше).
         return ExecutionDecision(
-            allowed=True,
-            decision="executed",
+            allowed=False,
+            decision="blocked",
             reason_code="judge_unavailable",
-            reason="Judge is unavailable; fail-open policy allows execution.",
+            reason="Judge is unavailable; fail-closed policy blocks execution.",
+            error_type="unsafe_command_blocked",
         )
     if judge_result.verdict == SAFE_VERDICT:
         return ExecutionDecision(
@@ -233,6 +237,21 @@ def moderate_command_execution(
         @functools.wraps(func)
         def wrapper(*args: Any, **kwargs: Any) -> str:
             context = resolve_tool_context(*args, **kwargs)
+            # Если в config_dict отсутствует блок command_moderation вообще —
+            # модерация не сконфигурирована, пропускаем (legacy / unit-test поведение,
+            # симметрично write_guard.enabled default'у).
+            from security.path_policy import _extract_config_dict
+            _cfg = _extract_config_dict(
+                args[0] if args else None,
+                getattr(context, "ctx", None),
+                kwargs,
+            )
+            cm_cfg = _cfg.get("command_moderation")
+            if not isinstance(cm_cfg, dict):
+                return func(*args, **kwargs)
+            # Safe-by-default-OFF: если слой не включён явно — судья не вызывается.
+            if not bool(cm_cfg.get("enabled", False)):
+                return func(*args, **kwargs)
             try:
                 payload = _extract_payload(func, args, kwargs, payload_arg, payload_extractor)
             except ValueError:
@@ -340,7 +359,7 @@ def _build_context(
     return ModerationContext(
         tool_name=tool_name,
         launch_root=context.launch_root,
-        extra_write_paths=context.root_box.extra_write_paths,
+        extra_paths=context.write_guard.extra_paths,
         mode=context.command_moderation_mode,
         cwd=str(cwd_value),
         os_name=platform.system(),
@@ -443,10 +462,22 @@ def _load_prompt_file(path: Path) -> str:
 
 def _parse_judge_json(raw_text: str) -> dict[str, Any]:
     text = (raw_text or "").strip()
+    # Reasoning models (Minimax, DeepSeek-R1 и т.п.) могут встраивать
+    # <think>...</think> блок прямо в content. Отрезаем его, чтобы дальше
+    # json.loads увидел чистый JSON.
+    import re
+    text = re.sub(r"<think\b[^>]*>.*?</think>", "", text, flags=re.DOTALL).strip()
     if text.startswith("```"):
         text = text.strip("`").strip()
         if text.lower().startswith("json"):
             text = text[4:].strip()
+    # Иногда JSON всё ещё окружён prose ("Sure! Here's the verdict:\n{...}\n").
+    # Достаём первый сбалансированный JSON-объект.
+    if text and not text.startswith("{"):
+        start = text.find("{")
+        end = text.rfind("}")
+        if start != -1 and end != -1 and end > start:
+            text = text[start:end + 1]
     try:
         return json.loads(text)
     except json.JSONDecodeError as exc:
@@ -458,20 +489,17 @@ def _ask_user_confirmation(
     context: ModerationContext,
     decision: ExecutionDecision,
 ) -> bool:
-    prompt = (
-        "\nCommand moderation requires confirmation.\n"
-        f"Tool: {context.tool_name}\n"
-        f"Reason: {decision.reason}\n"
-        f"Risk flags: {', '.join(decision.risk_flags) or '-'}\n"
-        f"Payload preview: {_payload_preview(payload)}\n"
-        "Type 'yes' to execute: "
+    from security.path_policy import prompt_user_confirmation
+    return prompt_user_confirmation(
+        title="Command moderation",
+        fields=[
+            ("Tool", context.tool_name),
+            ("Reason", decision.reason),
+            ("Risk flags", ", ".join(decision.risk_flags) or "-"),
+            ("Preview", _payload_preview(payload)),
+        ],
+        question="Allow execution?",
     )
-    try:
-        answer = input(prompt)
-    except EOFError:
-        print("Command moderation confirmation unavailable; cancelling.", file=sys.stderr)
-        return False
-    return answer.strip().lower() in {"yes", "y"}
 
 
 def _tool_blocked_result(args: tuple[Any, ...]) -> Callable[..., str] | None:

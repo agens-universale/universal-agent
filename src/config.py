@@ -82,17 +82,23 @@ def apply_cli_overrides(
     config_dict: Dict[str, Any],
     *,
     extra_overrides: Optional[Dict[str, Any]] = None,
-    root_box_enabled: Optional[bool] = None,
-    no_root_box: bool = False,
+    write_guard_enabled: Optional[bool] = None,
+    no_write_guard: bool = False,
     command_moderation_mode: Optional[str] = None,
+    read_guard_enabled: Optional[bool] = None,
+    no_read_guard: bool = False,
+    read_guard_mode: Optional[str] = None,
 ) -> None:
     if extra_overrides:
         config_dict.update(extra_overrides)
-    effective_root_box_override = False if no_root_box else root_box_enabled
+    effective_write_guard_override = False if no_write_guard else write_guard_enabled
+    effective_read_guard_override = False if no_read_guard else read_guard_enabled
     apply_cli_command_moderation_overrides(
         config_dict,
-        root_box_enabled=effective_root_box_override,
+        write_guard_enabled=effective_write_guard_override,
         command_moderation_mode=command_moderation_mode,
+        read_guard_enabled=effective_read_guard_override,
+        read_guard_mode=read_guard_mode,
     )
     sync_logging_flat_and_params(config_dict)
 
@@ -126,16 +132,21 @@ def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
         "use_ssl": app_cfg.backend.use_ssl,
         "use_retry": app_cfg.backend.use_retry,
         "command_moderation": {
+            "enabled": app_cfg.security.command_moderation.enabled,
             "mode": app_cfg.security.command_moderation.mode,
             "allowed_command_examples": app_cfg.security.command_moderation.allowed_command_examples,
-            "root_box": {
-                "enabled": app_cfg.security.command_moderation.root_box.enabled,
-                "extra_write_paths": app_cfg.security.command_moderation.root_box.extra_write_paths,
-            },
-            "url_policy": {
-                "allowed_schemes": app_cfg.security.command_moderation.url_policy.allowed_schemes,
-                "url_blacklist": app_cfg.security.command_moderation.url_policy.url_blacklist,
-            },
+        },
+        "write_guard": {
+            "enabled": app_cfg.security.write_guard.enabled,
+            "mode": app_cfg.security.write_guard.mode,
+            "extra_paths": app_cfg.security.write_guard.extra_paths,
+        },
+        "read_guard": app_cfg.security.read_guard.model_dump(),
+        "url_policy": {
+            "enabled": app_cfg.security.url_policy.enabled,
+            "mode": app_cfg.security.url_policy.mode,
+            "allowed_schemes": app_cfg.security.url_policy.allowed_schemes,
+            "url_blacklist": app_cfg.security.url_policy.url_blacklist,
         },
         "summary_params": app_cfg.summary.model_dump(),
         "chat_completions_params": app_cfg.chat_completions.model_dump(),

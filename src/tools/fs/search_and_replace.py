@@ -5,7 +5,7 @@ import difflib
 from typing import Dict, Any
 from tools.simple_tool_base import AbstractSimpleTool
 from utils.tool_report_paths import tool_report_abspath
-from security.path_policy import enforce_root_box
+from security.path_policy import enforce_write_guard
 from tools.schema_optional import coalesce_optional_string
 from utils.file_text import check_expected_file_sha256, is_valid_sha256_hex, read_text_for_edit
 
@@ -331,7 +331,7 @@ Update version string:
             ensure_ascii=False,
         )
 
-    def _root_box_blocked_result(
+    def _write_guard_blocked_result(
         self,
         error: Dict[str, Any],
         path: str,
@@ -353,7 +353,7 @@ Update version string:
             error=error,
         )
 
-    @enforce_root_box(path_arg="path", operation="search_and_replace")
+    @enforce_write_guard(path_arg="path", operation="search_and_replace")
     def __call__(
         self,
         path: str,

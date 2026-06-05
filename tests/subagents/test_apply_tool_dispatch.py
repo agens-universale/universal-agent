@@ -144,6 +144,51 @@ class TestSubagentDispatch:
         )
         assert result == "read: /tmp/test.txt"
 
+    def test_regular_tool_receives_ctx_and_config_dict(self):
+        """
+        Regression: apply_tool must propagate ctx and config_dict to tool_fabric
+        kwargs so that security decorators (read_guard, root_box, url_policy,
+        command_moderation) resolve policy via self._ctx.config_dict. Without
+        this, the decorators see empty config_dict and treat the layer as not
+        configured — a bug that previously caused ~49 silent-allow FAILs in
+        rootbox_test_cases_100_v1 (run_20260520T074244Z).
+        """
+        captured = {}
+
+        class FakeTool:
+            def __init__(self, **kw):
+                captured["kwargs"] = kw
+
+            def __call__(self, path=""):
+                return "ok"
+
+        tools_data = {
+            "read_file": {
+                "spec": {
+                    "name": "read_file",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {"path": {"type": "string"}},
+                        "required": ["path"],
+                    },
+                },
+                "description": "Read a file",
+                "tool_fabric": FakeTool,
+            }
+        }
+        ctx = _make_ctx(tools_data, use_local=False)
+        state = _make_state()
+
+        apply_tool(
+            tool_name="read_file",
+            arguments=json.dumps({"path": "/tmp/x"}),
+            ctx=ctx,
+            state=state,
+        )
+
+        assert captured["kwargs"].get("ctx") is ctx
+        assert captured["kwargs"].get("config_dict") is ctx.config_dict
+
     def test_subagent_with_local_disabled_gives_no_such_tool(self):
         """When use_local_subagents=False, subagent tool_name is unknown."""
         tools_data = {}

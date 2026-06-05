@@ -128,9 +128,12 @@ def main() -> int:
     apply_cli_overrides(
         config_dict,
         extra_overrides=getattr(arg_parser, "extra_config_overrides", None),
-        root_box_enabled=arg_parser.run_args.root_box,
-        no_root_box=arg_parser.run_args.no_root_box,
+        write_guard_enabled=arg_parser.run_args.write_guard,
+        no_write_guard=arg_parser.run_args.no_write_guard,
         command_moderation_mode=arg_parser.run_args.command_moderation,
+        read_guard_enabled=getattr(arg_parser.run_args, "read_guard", None),
+        no_read_guard=getattr(arg_parser.run_args, "no_read_guard", False),
+        read_guard_mode=getattr(arg_parser.run_args, "read_guard_mode", None),
     )
     forced_skill_id = _resolve_forced_skill(
         arg_parser.run_args.skill, config_dict

@@ -7,6 +7,14 @@ from tools.schema_optional import coalesce_optional_string
 from tools.simple_tool_base import AbstractSimpleTool
 from utils.glob_to_regex import compile_glob
 from utils.tool_report_paths import tool_report_abspath
+from security.read_guard import (
+    enforce_read_guard,
+    parse_read_guard_config,
+    check_read_path_allowed,
+    ReadGuardViolation,
+    _resolve_skills_root,
+)
+from security.path_policy import resolve_tool_context, _extract_config_dict
 
 
 class ListFiles(AbstractSimpleTool):
@@ -141,6 +149,22 @@ List deeper files (example):
 
         return json.dumps(payload, ensure_ascii=False)
 
+    def _resolve_read_guard(self) -> tuple:
+        """
+        Возвращает (cfg, launch_root, extra_allowed) для per-entry проверки.
+        cfg=None означает что guard не сконфигурирован (legacy / unit-test).
+        `extra_allowed` — программные exceptions (например, путь до skills).
+        """
+        context = resolve_tool_context(self)
+        config_dict = _extract_config_dict(self, getattr(context, "ctx", None), {})
+        cfg = parse_read_guard_config(config_dict)
+        if not cfg.enabled:
+            return None, None, None
+        skills_root = _resolve_skills_root(config_dict)
+        extra_allowed = [skills_root] if skills_root else None
+        return cfg, context.launch_root, extra_allowed
+
+    @enforce_read_guard(path_arg="path")
     def __call__(
         self,
         path: str,
@@ -150,6 +174,8 @@ List deeper files (example):
     ) -> str:
         glob = coalesce_optional_string(glob)
         effective_max_depth: int = 0 if max_depth is None else max_depth
+        # Per-entry guard для symlink/escape protection во время listing.
+        _rg_cfg, _rg_root, _rg_extra = self._resolve_read_guard()
 
         _result = functools.partial(
             self._result,
@@ -225,7 +251,8 @@ List deeper files (example):
 
             if effective_max_depth == 0:
                 hit_limit = self._list_directory(
-                    path, result, file_matcher=file_matcher, max_entries=scan_max_entries
+                    path, result, file_matcher=file_matcher, max_entries=scan_max_entries,
+                    rg_cfg=_rg_cfg, rg_root=_rg_root, rg_extra=_rg_extra,
                 )
             else:
                 hit_limit = self._walk_directory(
@@ -234,6 +261,7 @@ List deeper files (example):
                     file_matcher=file_matcher,
                     max_depth=effective_max_depth,
                     max_entries=scan_max_entries,
+                    rg_cfg=_rg_cfg, rg_root=_rg_root, rg_extra=_rg_extra,
                 )
         except PermissionError as e:
             return _result(
@@ -294,6 +322,24 @@ List deeper files (example):
             "is_hidden": is_hidden
         }
 
+    @staticmethod
+    def _read_guard_pass(filepath: str, rg_cfg, rg_root, rg_extra=None) -> bool:
+        """True если entry разрешён read_guard'ом (или guard отключён)."""
+        if rg_cfg is None:
+            return True
+        try:
+            check_read_path_allowed(
+                filepath,
+                launch_root=rg_root,
+                cfg=rg_cfg,
+                extra_allowed_paths=rg_extra,
+            )
+        except ReadGuardViolation:
+            return False
+        except ValueError:
+            return False
+        return True
+
     def _list_directory(
         self,
         root_path: str,
@@ -301,6 +347,9 @@ List deeper files (example):
         *,
         file_matcher=None,
         max_entries: Optional[int] = None,
+        rg_cfg=None,
+        rg_root=None,
+        rg_extra=None,
     ):
         """List only immediate children of the directory."""
         try:
@@ -316,6 +365,10 @@ List deeper files (example):
                 rel = os.path.relpath(filepath, root_path)
                 if not file_matcher(rel):
                     continue
+            # Per-entry read_guard: пропускаем entries которые резолвятся
+            # в denied paths (включая symlink escape наружу launch_root).
+            if not self._read_guard_pass(filepath, rg_cfg, rg_root, rg_extra):
+                continue
             entry = self._get_entry_info(filepath)
             result.append(entry)
             if max_entries is not None and len(result) >= max_entries:
@@ -331,6 +384,9 @@ List deeper files (example):
         file_matcher=None,
         max_depth: Optional[int] = None,
         max_entries: Optional[int] = None,
+        rg_cfg=None,
+        rg_root=None,
+        rg_extra=None,
     ):
         """Recursively walk through directory and list all entries."""
         for dirpath, dirnames, filenames in os.walk(root_path, followlinks=False):
@@ -344,6 +400,16 @@ List deeper files (example):
             # If current directory depth reached the limit, we can still list its
             # immediate children, but must not descend further.
             prune_children = max_depth is not None and current_depth >= max_depth
+
+            # Prune dirnames in-place чтобы os.walk не заходил в denied поддиректории
+            # (per-entry guard ниже не помог бы для самих children этих dir'ов).
+            if rg_cfg is not None:
+                dirnames[:] = [
+                    d for d in dirnames
+                    if self._read_guard_pass(
+                        os.path.join(dirpath, d), rg_cfg, rg_root, rg_extra,
+                    )
+                ]
 
             # Add directories first
             for dirname in dirnames:
@@ -363,6 +429,9 @@ List deeper files (example):
                     rel = os.path.relpath(fpath, root_path)
                     if not file_matcher(rel):
                         continue
+                # Per-entry read_guard: пропускаем denied файлы (включая symlinks).
+                if not self._read_guard_pass(fpath, rg_cfg, rg_root, rg_extra):
+                    continue
                 result.append(self._get_entry_info(fpath))
                 if max_entries is not None and len(result) >= max_entries:
                     return True

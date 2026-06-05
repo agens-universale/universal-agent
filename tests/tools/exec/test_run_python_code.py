@@ -66,7 +66,8 @@ def test_sanitize_env():
 def _allow_config(project_dir):
     return {
         "launch_root": project_dir,
-        "command_moderation": {"mode": "allow", "root_box": {"enabled": True, "extra_write_paths": []}},
+        "command_moderation": {"mode": "allow"},
+        "write_guard": {"enabled": True, "extra_paths": []},
     }
 
 
@@ -91,10 +92,8 @@ def test_run_python_cwd_invalid_returns_allowed_paths(tmp_path):
     tool = RunPythonCode(
         config_dict={
             "launch_root": str(workspace),
-            "command_moderation": {
-                "mode": "allow",
-                "root_box": {"enabled": True, "extra_write_paths": [str(extra)]},
-            },
+            "command_moderation": {"mode": "allow"},
+            "write_guard": {"enabled": True, "extra_paths": [str(extra)]},
         }
     )
     missing = str(workspace / "nope_missing")
@@ -119,10 +118,8 @@ def test_run_python_cwd_invalid_omits_non_writable_launch_root(tmp_path):
         tool = RunPythonCode(
             config_dict={
                 "launch_root": str(ro_launch),
-                "command_moderation": {
-                    "mode": "allow",
-                    "root_box": {"enabled": True, "extra_write_paths": [str(extra)]},
-                },
+                "command_moderation": {"mode": "allow"},
+                "write_guard": {"enabled": True, "extra_paths": [str(extra)]},
             }
         )
         missing = str(ro_launch / "no_such_subdir")

@@ -168,7 +168,7 @@ def resolve_paths(cfg: AppConfig, config_dir: str) -> None:
         cfg.agent.stored_tool_outputs_max_entries,
     )
     cfg.backend.completions_url = str(cfg.backend.completions_url).strip()
-    root_box = cfg.security.command_moderation.root_box
-    root_box.extra_write_paths = [
-        to_abs(path) or path for path in root_box.extra_write_paths
+    write_guard = cfg.security.write_guard
+    write_guard.extra_paths = [
+        to_abs(path) or path for path in write_guard.extra_paths
     ]

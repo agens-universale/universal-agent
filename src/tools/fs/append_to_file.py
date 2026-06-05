@@ -4,7 +4,7 @@ import os
 from tools.schema_optional import X_PRESERVE_EMPTY_STRING
 from tools.simple_tool_base import AbstractSimpleTool
 from utils.tool_report_paths import tool_report_abspath
-from security.path_policy import enforce_root_box
+from security.path_policy import enforce_write_guard
 
 class AppendToFile(AbstractSimpleTool):
 
@@ -99,7 +99,7 @@ Usage:
             ensure_ascii=False,
         )
 
-    def _root_box_blocked_result(
+    def _write_guard_blocked_result(
         self,
         error: dict,
         path: str,
@@ -110,7 +110,7 @@ Usage:
     ) -> str:
         return self._result(ok=False, path=path, separator=separator, error=error)
 
-    @enforce_root_box(path_arg="path", operation="append")
+    @enforce_write_guard(path_arg="path", operation="append")
     def __call__(
         self,
         path: str,

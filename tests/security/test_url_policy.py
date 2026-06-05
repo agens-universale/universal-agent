@@ -51,11 +51,10 @@ def test_match_url_blacklist_supports_exact_and_glob_rules():
 
 def test_enforce_url_policy_returns_structured_error(tmp_path):
     config_dict = {
-        "command_moderation": {
-            "url_policy": {
-                "allowed_schemes": ["https"],
-                "url_blacklist": ["blocked.example"],
-            }
+        "url_policy": {
+            "enabled": True,
+            "allowed_schemes": ["https"],
+            "url_blacklist": ["blocked.example"],
         }
     }
 
@@ -74,11 +73,10 @@ def test_enforce_url_policy_audits_blocked_decision():
     logger = _Logger()
     ctx = SimpleNamespace(
         config_dict={
-            "command_moderation": {
-                "url_policy": {
-                    "allowed_schemes": ["https"],
-                    "url_blacklist": ["blocked.example"],
-                }
+            "url_policy": {
+                "enabled": True,
+                "allowed_schemes": ["https"],
+                "url_blacklist": ["blocked.example"],
             }
         },
         logger=logger,
@@ -94,3 +92,85 @@ def test_enforce_url_policy_audits_blocked_decision():
     assert '"decision": "blocked"' in logger.messages[-1]
     assert '"reason_code": "policy_deny"' in logger.messages[-1]
     assert '"error_type": "url_blocked_by_policy"' in logger.messages[-1]
+
+
+def test_enforce_url_policy_mode_allow_passes_with_audit():
+    """mode=allow: blocked URL пропускается, в audit log пишется out_of_perimeter."""
+    logger = _Logger()
+    ctx = SimpleNamespace(
+        config_dict={
+            "url_policy": {
+                "enabled": True,
+                "mode": "allow",
+                "allowed_schemes": ["https"],
+                "url_blacklist": ["blocked.example"],
+            }
+        },
+        logger=logger,
+    )
+
+    @enforce_url_policy(url_arg="url")
+    def fetch(url: str, **kwargs) -> str:
+        return json.dumps({"ok": True, "url": url, "fetched": "data"})
+
+    result = json.loads(fetch("https://blocked.example/x", ctx=ctx))
+    assert result["ok"] is True
+    assert result["fetched"] == "data"
+    assert '"decision": "executed"' in logger.messages[-1]
+    assert '"reason_code": "policy_allow_out_of_perimeter"' in logger.messages[-1]
+    assert '"risk_flags": ["out_of_perimeter"]' in logger.messages[-1]
+
+
+def test_enforce_url_policy_mode_ask_confirmed_passes(monkeypatch):
+    """mode=ask + confirm → URL пропускается + audit policy_ask_confirmed."""
+    import security.path_policy as pp
+    monkeypatch.setattr(pp, "prompt_user_confirmation", lambda **_: True)
+
+    logger = _Logger()
+    ctx = SimpleNamespace(
+        config_dict={
+            "url_policy": {
+                "enabled": True,
+                "mode": "ask",
+                "allowed_schemes": ["https"],
+                "url_blacklist": ["blocked.example"],
+            }
+        },
+        logger=logger,
+    )
+
+    @enforce_url_policy(url_arg="url")
+    def fetch(url: str, **kwargs) -> str:
+        return json.dumps({"ok": True, "url": url})
+
+    result = json.loads(fetch("https://blocked.example/x", ctx=ctx))
+    assert result["ok"] is True
+    assert '"reason_code": "policy_ask_confirmed"' in logger.messages[-1]
+
+
+def test_enforce_url_policy_mode_ask_declined_blocks(monkeypatch):
+    """mode=ask + decline → блок, error.type = url_blocked_by_policy_cancelled_by_user."""
+    import security.path_policy as pp
+    monkeypatch.setattr(pp, "prompt_user_confirmation", lambda **_: False)
+
+    logger = _Logger()
+    ctx = SimpleNamespace(
+        config_dict={
+            "url_policy": {
+                "enabled": True,
+                "mode": "ask",
+                "allowed_schemes": ["https"],
+                "url_blacklist": ["blocked.example"],
+            }
+        },
+        logger=logger,
+    )
+
+    @enforce_url_policy(url_arg="url")
+    def fetch(url: str, **kwargs) -> str:
+        return json.dumps({"ok": True, "url": url})
+
+    result = json.loads(fetch("https://blocked.example/x", ctx=ctx))
+    assert result["ok"] is False
+    assert result["error"]["type"] == "url_blocked_by_policy_cancelled_by_user"
+    assert '"reason_code": "policy_ask_cancelled"' in logger.messages[-1]

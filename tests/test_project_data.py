@@ -26,9 +26,7 @@ def test_get_project_data_allowed_paths_skip_non_writable_project_dir(tmp_path):
         root.chmod(0o555)
         cfg = {
             "launch_root": str(root),
-            "command_moderation": {
-                "root_box": {"enabled": True, "extra_write_paths": [str(extra)]},
-            },
+            "write_guard": {"enabled": True, "extra_paths": [str(extra)]},
         }
         data = get_project_data(cfg)
         assert data["projectDirWritable"] == "false"
@@ -46,9 +44,7 @@ def test_get_project_data_merges_config_roots(tmp_path):
     extra.mkdir()
     cfg = {
         "launch_root": str(root),
-        "command_moderation": {
-            "root_box": {"enabled": True, "extra_write_paths": [str(extra)]},
-        },
+        "write_guard": {"enabled": True, "extra_paths": [str(extra)]},
     }
     data = get_project_data(cfg)
     assert data["projectDir"] == os.path.abspath(str(root))

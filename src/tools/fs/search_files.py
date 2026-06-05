@@ -7,6 +7,14 @@ from tools.schema_optional import coalesce_optional_string
 from tools.simple_tool_base import AbstractSimpleTool
 from utils.glob_to_regex import compile_glob
 from utils.tool_report_paths import tool_report_abspath
+from security.read_guard import (
+    enforce_read_guard,
+    parse_read_guard_config,
+    check_read_path_allowed,
+    ReadGuardViolation,
+    _resolve_skills_root,
+)
+from security.path_policy import resolve_tool_context, _extract_config_dict
 
 
 class SearchFiles(AbstractSimpleTool):
@@ -258,6 +266,7 @@ Search for error logs in Rust source files:
 
         return True, None, start_0, lim_eff, off_eff
 
+    @enforce_read_guard(path_arg="path")
     def __call__(
         self,
         path: str,
@@ -293,10 +302,43 @@ Search for error logs in Rust source files:
 
         results = []
 
-        for root, _, files in os.walk(path):
+        # Per-entry read_guard: пропускаем dir'и/файлы которые денилисчены,
+        # включая symlinks ведущие наружу launch_root. Резолвим конфиг один раз.
+        _rg_context = resolve_tool_context(self)
+        _rg_config_dict = _extract_config_dict(self, getattr(_rg_context, "ctx", None), {})
+        _rg_cfg = parse_read_guard_config(_rg_config_dict)
+        _rg_root = _rg_context.launch_root if _rg_cfg.enabled else None
+        _rg_active = _rg_cfg.enabled
+        _rg_extra = None
+        if _rg_active:
+            _skills_root = _resolve_skills_root(_rg_config_dict)
+            if _skills_root:
+                _rg_extra = [_skills_root]
+
+        def _rg_pass(p: str) -> bool:
+            if not _rg_active:
+                return True
+            try:
+                check_read_path_allowed(
+                    p,
+                    launch_root=_rg_root,
+                    cfg=_rg_cfg,
+                    extra_allowed_paths=_rg_extra,
+                )
+            except (ReadGuardViolation, ValueError):
+                return False
+            return True
+
+        for root, dirnames, files in os.walk(path, followlinks=False):
+            # Prune denied subdirs in-place чтобы os.walk туда не спускался.
+            if _rg_active:
+                dirnames[:] = [d for d in dirnames if _rg_pass(os.path.join(root, d))]
             for filename in files:
                 file_path = os.path.join(root, filename)
                 if file_pattern and not file_matcher(file_path, path):
+                    continue
+                # Per-file guard перед открытием.
+                if not _rg_pass(file_path):
                     continue
                 file_result = self._search_in_file(file_path, regex, context_num=5)
                 if len(file_result) > 0:

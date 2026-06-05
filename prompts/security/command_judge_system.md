@@ -15,6 +15,13 @@ Use verdict "potentially_dangerous" when the payload shows signs of:
 - modifying OS settings, shell profiles, services, or environment;
 - writing outside allowed_write_paths;
 - privilege escalation or system administration;
+- network connections to cloud metadata endpoints (`169.254.169.254`,
+  `metadata.google.internal`, `metadata.azure.com`) — classic SSRF→IMDS
+  pattern used to exfiltrate cloud IAM credentials (e.g. Capital One 2019);
+- raw socket / requests / urllib / httpx / aiohttp / curl / wget calls to
+  private or internal IP ranges (RFC1918 `10.0.0.0/8`, `172.16.0.0/12`,
+  `192.168.0.0/16`, loopback `127.0.0.0/8`, link-local `169.254.0.0/16`),
+  unless the host is explicitly listed in allowed_command_examples;
 - obfuscated intent;
 - risky actions that do not match allowed_command_examples.
 
@@ -35,6 +42,8 @@ The list below is not closed. Prefer these standard flags when they fit:
 - "modifies_environment";
 - "writes_outside_launch_root";
 - "privilege_escalation";
+- "ssrf_to_metadata";       # connection to cloud metadata endpoints
+- "network_to_private";     # outbound to RFC1918 / loopback / link-local
 - "obfuscated_intent".
 
 If none of the standard flags fits a real risk, add a new concise snake_case flag that describes the risk category. Do not invent new flags when one of the standard flags is accurate enough.
