@@ -5,53 +5,6 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 ALLOWED_COMMAND_MODES = {"allow", "ask", "deny"}
 ALLOWED_BINARY_READ_MODES = {"allow", "ask", "deny"}
 
-# Built-in denylist of read paths. Поддерживаются плейсхолдеры:
-#   ~              → home директория текущего пользователя;
-#   %USERPROFILE%  → переменная окружения USERPROFILE (Windows);
-#   <launch_root>  → корень запуска (launch_root из ToolSecurityContext).
-_DEFAULT_DENIED_READ_PATHS = [
-    "~/.ssh",
-    "~/.aws",
-    "~/.config/gcloud",
-    "~/.gnupg",
-    "/etc/ssl/private",
-    "/proc",
-    "/sys",
-    "/dev",
-    # gc-state (см. read-guard-spec.md «Защита gc/ директорий»)
-    "~/.local/state/gc",
-    "%USERPROFILE%/.gc",
-    "<launch_root>/.gc",
-]
-
-# Исключения из denylist (явно разрешены, даже если совпадают с denied_*).
-# Нужно для skills/ внутри .gc/ директорий — они public API расширения.
-_DEFAULT_ALLOWED_READ_PATHS = [
-    "~/.local/state/gc/skills",
-    "%USERPROFILE%/.gc/skills",
-    "<launch_root>/.gc/skills",
-]
-
-_DEFAULT_DENIED_FILE_PATTERNS = [
-    ".env",
-    ".env.*",
-    "*id_rsa*",
-    "*id_ed25519*",
-    "*.pem",
-    "*.p12",
-    "*.kdbx",
-    "*credentials*.json",
-    "*.sqlite",
-    "*.db",
-]
-
-_DEFAULT_DENIED_EXTENSIONS = [
-    ".key",
-    ".pfx",
-    ".jks",
-    ".asc",
-]
-
 _DEFAULT_BINARY_ALLOWED_TYPES = [
     "application/pdf",
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -66,35 +19,6 @@ _DEFAULT_BINARY_ALLOWED_EXTENSIONS = [
     ".jpg",
     ".jpeg",
 ]
-
-# Дефолтный blacklist для url_policy — закрывает базовый SSRF.
-# Включает:
-#   - cloud metadata endpoints (AWS, GCP, Azure);
-#   - localhost / loopback;
-#   - RFC1918 private networks.
-# Поддерживаются точные хосты и fnmatch wildcards (см. url_policy.match_url_blacklist).
-_DEFAULT_URL_BLACKLIST = [
-    # Cloud metadata endpoints
-    "169.254.169.254",
-    "metadata.google.internal",
-    "*.metadata.google.internal",
-    "metadata.azure.com",
-    "*.metadata.azure.com",
-    # Loopback / link-local
-    "localhost",
-    "127.0.0.1",
-    "::1",
-    "0.0.0.0",
-    "169.254.*",
-    # RFC1918 private networks (полный 10/8, 172.16/12, 192.168/16)
-    "10.*",
-    "172.16.*", "172.17.*", "172.18.*", "172.19.*",
-    "172.20.*", "172.21.*", "172.22.*", "172.23.*",
-    "172.24.*", "172.25.*", "172.26.*", "172.27.*",
-    "172.28.*", "172.29.*", "172.30.*", "172.31.*",
-    "192.168.*",
-]
-
 
 def validate_command_moderation_mode(raw_mode: Any) -> str:
     mode = str(raw_mode if raw_mode is not None else "deny").strip().lower()
