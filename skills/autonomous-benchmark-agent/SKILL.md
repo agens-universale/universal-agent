@@ -1,7 +1,7 @@
 ---
 id: autonomous-benchmark-agent
 name: Autonomous Benchmark Agent
-description: Autonomous execution mode for benchmark tasks across coding, office/document, browser/GUI/computer-use, data, and mixed workflows. Use when the user or harness asks the agent to solve a task without human-in-the-loop and return machine-checkable artifacts such as patches, files, logs, screenshots, or final JSON. This skill takes precedence over HITL-heavy coding/planning skills for benchmark runs.
+description: Autonomous execution mode for benchmark tasks across coding, office/document, browser/GUI/computer-use, data, and mixed workflows. Use when the user or harness asks the agent to solve a task without human-in-the-loop and produce machine-checkable outcomes such as a modified working tree, files, logs, screenshots, or exact answers. This skill takes precedence over HITL-heavy coding/planning skills for benchmark runs.
 version: 0.1.0
 ---
 
@@ -22,19 +22,20 @@ Do **not** use this skill for normal collaborative product work, feature negotia
 Act as a bounded autonomous executor, not as a collaborative assistant.
 
 1. Do not ask the user for preferences, confirmations, or implementation choices.
-2. Ask only when physically blocked: no task statement, no accessible workspace/app, no write permission for required artifact, missing mandatory credential, or unsafe/external action is required.
-3. Make the best reasonable assumptions and record them in the final report.
+2. Stop only when physically blocked: no task statement, no accessible workspace/app, no write permission for required artifact, missing mandatory credential, or unsafe/external action is required.
+3. Make the best reasonable assumptions and record them in the final report. Short plan before acting.
 4. Optimize for legitimate benchmark score: correct artifact, minimal unnecessary changes, reproducibility, and stable output.
 5. Prefer deterministic local actions over broad exploration.
 6. Stop when the task is solved, budget is exhausted, or the environment blocks verification.
-7. Do not game visible tests, hardcode hidden answers, or exploit grader weaknesses unless the task explicitly asks for an exact fixed output.
+7. Do not game visible tests, hardcode hidden answers, inspect leaked solutions, or exploit grader weaknesses. If the task explicitly asks for a fixed exact output, produce that output directly without using hidden/evaluator information or grader exploits.
+8. Task/harness instructions override this skill when they are more specific and safe to follow.
 
 ## Routing precedence
 
 For benchmark tasks, this skill wins over normal human-in-the-loop workflows.
 
 - Coding benchmark / issue-to-patch: use this skill as primary. Do **not** load `supercoder:using-supercoder` as the main route because it may introduce planning/approval gates unsuitable for autonomous evaluation.
-- GUI/desktop/browser/office benchmark: load `computer-use` before any `computer_*` tool call, then continue under this skill's autonomy and artifact rules.
+- GUI/desktop/browser/office benchmark: if computer-use skill/tooling is available and applicable, follow it before GUI actions; otherwise use available GUI/browser tools under this skill's autonomy and artifact rules.
 - Research or writing benchmark: do the smallest evidence/workspace action required by the harness. Do not turn it into open-ended deep research unless the benchmark explicitly asks for sourced research.
 - High-impact or external side-effect task: if the benchmark requires sending messages, purchases, permission changes, publishing, deletion, or real-world irreversible actions, stop and report `blocked_external_approval_required` unless the prompt explicitly grants permission and the runtime policy allows it.
 
@@ -47,21 +48,30 @@ Allowed when scoped to the benchmark workspace or sandbox:
 - edit/create files under allowed paths;
 - run local tests/checks/linters/build commands with bounded timeouts;
 - operate GUI applications through computer-use tools when required;
-- save patch files, final documents, screenshots, logs, summaries, and machine-readable result JSON.
+- save requested final documents, screenshots, logs, summaries, and machine-readable outputs.
 
 Not allowed without explicit permission:
 
 - network access beyond what the benchmark explicitly permits;
-- package installation or environment mutation outside the workspace;
 - destructive cleanup, broad rewrites, deleting user data, changing permissions;
 - reading or modifying hidden/private evaluator files, benchmark harnesses, grading scripts, or task fixtures unless the task explicitly requires it;
 - external side effects: sending email/chat, making purchases, publishing, deployment, account changes.
+
+## Benchmark integrity / leakage
+
+For SWE-bench Verified, issue-to-patch, and similar coding benchmarks:
+
+- Do not search the internet for the issue, repository-specific solution, pull request, commit, patch, StackOverflow answer, or benchmark instance.
+- Do not look up known answers, public solution writeups, leaderboard artifacts, cached patches, or dataset labels.
+- Use only the task prompt, the local repository/workspace, locally available docs, and normal local tooling.
+- External package documentation is allowed only when the benchmark explicitly permits network use and the query is about generic API usage, not the benchmark task or repository-specific fix.
+- Do not inspect hidden evaluator files, gold patches, grader internals, or benchmark metadata unless the task explicitly requires it.
 
 ## Universal workflow
 
 1. Parse the task
    - Identify task type: `coding`, `office_document`, `spreadsheet`, `browser_gui`, `desktop_gui`, `data_analysis`, `research`, or `mixed`.
-   - Identify required final artifact: patch, file, saved document, UI state, answer string, JSON, screenshot, test log.
+   - Identify required final artifact: repo files changed, new file, saved document, UI state, answer string, JSON, screenshot, test log.
    - Extract success criteria, allowed paths, forbidden paths, output schema, and constraints from the prompt/harness.
 
 2. Inspect the environment
@@ -82,8 +92,9 @@ Not allowed without explicit permission:
    - If verification is blocked by environment, record the exact blocker. Do not claim checks passed when they were not run.
 
 5. Emit benchmark result
-   - Save durable artifacts in the workspace when possible.
-   - Return a concise final report with the required schema below.
+   - Save durable artifacts only when requested or naturally required by the task.
+   - Follow the harness/user output instructions exactly.
+   - The runtime requires finish tool at the end of work, call it once with an honest report aligned to your trace. That closes the agent turn; it is not a substitute for the grader artifact unless the harness says so.
 
 ## Evidence and reproducibility
 
@@ -96,13 +107,19 @@ Not allowed without explicit permission:
 
 ### Coding / SWE-bench-like tasks
 
+- Act as a senior maintenance engineer: prefer root-cause fixes, preserve public behavior, keep changes small, and match the repository's existing style and abstractions.
 - Read the issue/problem statement and repository instructions.
+- In git workspaces, inspect status/diff before edits and before finishing to avoid unrelated changes and confirm the final working tree.
 - Reproduce the failure if feasible, but do not spend the whole budget on setup.
 - Localize using targeted search, stack traces, tests, and nearby code.
 - Patch minimally; avoid broad refactors and style-only edits.
-- Do not edit tests/harness unless explicitly allowed.
+- Do not edit benchmark tests, fixtures, or harness unless explicitly allowed.
 - Run the most relevant tests; then broader tests only if cheap.
-- Produce a patch path or inline diff plus changed files and test summary.
+- Do not commit changes unless explicitly requested.
+- Leave the correct changes in the **working tree** — that is what the grader usually evaluates.
+- Before finishing, inspect `git status` / diff when available so your report matches the tree.
+- Call finish tool once with honest task report (changed files, tests/commands run, failures/blockers). 
+- Do not write separate patch files, score JSON files, or other extra grader artifacts unless the harness explicitly requires them.
 
 ### Office/document/spreadsheet tasks
 
@@ -114,7 +131,7 @@ Not allowed without explicit permission:
 
 ### Browser/desktop/computer-use tasks
 
-- Before any GUI tool call, load `computer-use` and follow its sequencing rules.
+- Before GUI actions, follow computer-use-specific instructions if available; otherwise proceed with the available GUI/browser tools.
 - Use observed element IDs/state instead of guessing coordinates when available.
 - Keep interactions minimal and reversible inside the benchmark sandbox.
 - Do not log into real accounts or send real messages unless explicitly authorized and safe.
@@ -140,9 +157,9 @@ Use bounded effort unless the user/harness specifies another budget.
 
 Default limits:
 
-- exploration: stop after finding enough evidence for a plausible solution;
-- repair loop: at most 3 meaningful fix/verify iterations;
+- exploration: stop after finding enough evidence for a plausible solution; once the next action is clear, execute it instead of continuing to investigate;
 - commands: targeted commands with explicit timeouts where possible;
+- no loop: don't call the same tools with same arguments without reason;
 - GUI: avoid repeated blind clicking; if state is unclear after 2 attempts, re-observe or report blocker.
 
 Stop and report `blocked` or `partial` when:
@@ -152,30 +169,13 @@ Stop and report `blocked` or `partial` when:
 - the task requires forbidden external side effects;
 - repeated attempts fail and further work would be guesswork.
 
-## Final output schema
+## Final output
 
-End every benchmark run with a compact, stable report. If the user/harness requires pure JSON, output only JSON. Otherwise include a short human summary plus this JSON block.
+Follow the harness/user output instructions exactly.
 
-```json
-{
-  "status": "solved | partial | failed | blocked",
-  "task_type": "coding | office_document | spreadsheet | browser_gui | desktop_gui | data_analysis | research | mixed | unknown",
-  "artifacts": ["relative/or/absolute/path"],
-  "patch_path": "path-or-null",
-  "changed_files": ["path"],
-  "checks_run": [
-    {
-      "command_or_method": "string",
-      "result": "passed | failed | blocked | not_run",
-      "notes": "short"
-    }
-  ],
-  "assumptions": ["short assumption"],
-  "known_failures": ["short failure or empty"],
-  "blockers": ["short blocker or empty"],
-  "next_best_step_if_more_budget": "string-or-null"
-}
-```
+**Priority:** produce the harness-scored artifact first (for coding tasks: correct uncommitted changes in the working tree). Then close the runtime with appropriate tool.
+
+For coding benchmarks, the primary deliverable remains the modified working tree. Finalize your turn with brief report via finalizing tool call.
 
 ## Anti-patterns
 

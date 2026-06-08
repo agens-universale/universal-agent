@@ -1,0 +1,137 @@
+# Bench 2×2 (4/4): summary ON, subagents ON
+# Skill autonomous-benchmark-agent включён (disable_skills: []).
+# Запуск: gc-cli --config bench_configs/04_summary_subagents.yml ...
+
+backend:
+  api_mode: chat_completions
+  completions_url: "http://127.0.0.1:8014/v1/chat/completions"
+  chat_completions_max_tokens: 32768
+  use_max_tokens_param: true
+  openai_strict_tools_schema: false
+  chat_completion_kwargs:
+    temperature: 0.7
+    top_p: 0.8
+    top_k: 20
+    min_p: 0.0
+    repetition_penalty: 1.2
+    separate_reasoning: true
+    chat_template_kwargs:
+      enable_thinking: false
+    tool_choice: auto
+  use_ssl: false
+  use_retry: true
+
+chat_completions:
+  llm:
+    max_tokens: 8192
+    completion_kwargs:
+      separate_reasoning: false
+      chat_template_kwargs:
+        enable_thinking: false
+
+agent:
+  model: MiniMax-M2.7
+  system_prompt_id: v1
+  use_server_subagents: false
+  use_local_subagents: true
+  subagent_max_steps: 100
+  client_name: mini_cli_pub_agent_1
+  x_cl_id: "12345"
+  verbose: true
+  stop_tools: [turn_ask_human, project_memory]
+  disable_skills:
+    - supercoder
+    - topic-research
+    - complex-task-solver
+    - science-article-creator
+    - articles
+  server_tool_prefix: system
+  max_steps: 1000
+  no_tool_call_max_count: 5
+  strict_turn_finish_validation: true
+  finish_gate_max_iterations: 10
+  subagent_finish_gate_max_iterations: 3
+  tool_output_inline_max_chars: 10000
+  stored_tool_outputs_max_entries: 50
+  inject_tool_fields:
+    reason: "One short, concrete sentence explaining the immediate purpose of this tool call, why this tool is the right next step, and what observation/change/deliverable you expect; avoid generic filler."
+
+paths:
+  agent_md_path: "../prompts/demo_cli_agent.md"
+  chat_completions_system_prompt_path: "../prompts/chat_completions_system_prompt.md"
+
+logging:
+  full_log_backend: false
+  console_trace: true
+  dump_storage: false
+  save_logs: true
+
+quality_gate:
+  max_dialogue_chars: 200000
+  max_message_chars: 5000
+
+working_memory:
+  max_chars_goal: 2000
+  max_chars_constraints: 4000
+  max_chars_state: 6000
+  max_chars_knowledge: 8000
+  total_budget_chars: 20000
+
+tool_usage_notice:
+  - tool_name: session_memory
+    step_messages_count: 12
+    notice_message: "You have not used session memory for some steps. If durable facts changed, consider updating memory before finalizing"
+
+project_memory:
+  enable_project_memory_notice: false
+
+summary:
+  chat_completions_summary_prompt_path: "../prompts/chat_completions_summary_prompt.md"
+  chat_completions_memory_patch_append_prompt_path: "../prompts/chat_completions_memory_patch_append.md"
+  chat_completions_memory_patch_replace_prompt_path: "../prompts/chat_completions_memory_patch_replace.md"
+  chat_completions_summary_trigger_chars: 150000
+  chat_completions_summary_turn_end_trigger_chars: 90000
+  incremental_batch_chars: 210000
+  max_message_chars: 16000
+  max_dialogue_chars: 400000
+  max_accumulated_summary_chars: 40000
+  last_dialog_steps_count: 3
+  last_dialog_step_message_max_chars: 4000
+  intent_log_preview_chars: 12000
+
+intent_scope:
+  tools:
+    turn_ask_human:
+      record: aggregated
+    turn_finish:
+      record: raw
+      store_arguments: false
+      store_output: true
+  max_summary_chars: 500
+  max_tool_output_chars: 8000
+  max_raw_record_chars: 5000
+  read_page_record_limit: 10
+  fallback_raw_on_llm_error: true
+
+security:
+  command_moderation:
+    enabled: false
+    mode: deny
+    allowed_command_examples: []
+  write_guard:
+    enabled: false
+    mode: deny
+    extra_paths: []
+  read_guard:
+    enabled: false
+    mode: deny
+    allowed_read_roots: []
+    allowed_read_paths: []
+    denied_read_paths: []
+    denied_file_patterns: []
+    denied_extensions: []
+  url_policy:
+    enabled: false
+    mode: deny
+    allowed_schemes: ["http", "https"]
+    url_blacklist: []
