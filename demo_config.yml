@@ -357,3 +357,58 @@ mcp:
   meta:
     tools-cache-ttl: 3600
     request_timeout_sec: 600
+
+# ---------------------------------------------------------------------------
+# Swarm-режим (только Linux). REFERENCE ONLY — поля ниже относятся к
+# config_server.yml серверной обёртки, а НЕ к этому агентскому config.yml.
+# Сюда положены закомментированными для документации; полный pipeline,
+# архитектурные решения (AR-1..AR-9) и troubleshooting — в docs/swarm.md.
+#
+# Что это даёт: REST-сервер форкает CLI в bubblewrap-песочницу на каждый
+# POST /swarm/run. Каждая задача изолирована (новые mnt/pid/user/uts/ipc
+# namespaces; network namespace общий с хостом — AR-8) и ограничена
+# по времени, памяти, диску и CPU.
+# ---------------------------------------------------------------------------
+
+# swarm:
+#   enabled: true                        # safe-by-default-OFF; без этого ручки /swarm/* → 503
+#
+#   # Идемпотентность повторных POST с одним task_id (AR-3):
+#   #   active   → 409 swarm_id_already_active
+#   #   final    → 409 swarm_id_already_finalized
+#   #   continue/fresh → 501 (MVP: только "reject")
+#
+#   # Корни артефактов. Дефолты — <state>/projects/<slug>/swarm/{threads,sandboxes}.
+#   threads_dir:       "/var/lib/gc-cli/swarm/threads"
+#   sandbox_root_dir:  "/var/lib/gc-cli/swarm/sandboxes"
+#
+#   max_concurrent: 10                   # > этого числа активных → 503
+#   ttl_seconds:    86400                # janitor чистит каталоги старше TTL
+#
+#   limits:
+#     timeout_seconds: 1800              # GNU timeout: SIGTERM → 30s grace → SIGKILL
+#     memory_mb:       1024              # enforced через psutil (если установлен)
+#     disk_mb:         2048              # enforced через du -sb по sandbox
+#     cpu_percent:     50                # enforced через psutil
+#
+#   cli_command:  "gc-cli"               # или "gc-cli-swarm" — shim, читающий payload.json
+#   sandbox_tool: "bubblewrap"           # сейчас поддерживается только bwrap
+#   wrapper_path: "/opt/gc-cli/scripts/run-cli-in-sandbox.sh"
+#
+#   # ТОЛЬКО абсолютные пути — относительные молча игнорируются.
+#   cli_venv_root: "/opt/gc-cli/.venv"   # ro-bind venv с gc-cli внутрь песочницы
+#   agent_dep_dir: "/opt/gc-cli/mcp-deps"# зависимости MCP (node, npx и т.п.)
+#   extra_mounts:                        # доп. ro-bind в песочницу
+#     - "/opt/gc-cli/prompts"
+#     - "/opt/gc-cli/skills"
+#
+#   # Материализуются в /work/.gc/ внутри песочницы (опц.):
+#   agentmd_path: "swarm_agent.md"
+#   skills_dir:   "swarm_skills"
+#
+# Эндпоинты при enabled=true:
+#   POST /swarm/run                       — запуск задачи (idempotent по task_id)
+#   GET  /swarm/status/{system}/{task_id} — текущий статус
+#   GET  /swarm/logs/{system}/{task_id}   — meta + messages + stdout/stderr
+#
+# Подробнее: docs/swarm.md

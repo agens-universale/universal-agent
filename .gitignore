@@ -102,3 +102,7 @@ mcp_media/
 # =============================================================
 .docker/
 docs/plans/
+
+# Swarm runtime artifacts (M6 / шаг 3.4)
+swarm_threads/
+.swarm_sandboxes/

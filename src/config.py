@@ -78,6 +78,16 @@ def _xdg_config_path() -> Optional[str]:
     return None
 
 
+def resolve_base_config_path(config_path: Optional[str] = None) -> str:
+    """Резолвить путь к base config.yml без загрузки YAML.
+
+    Использует ту же логику что `load_config`: явный путь → XDG → пакетный
+    дефолт. Нужен swarm-runner'у (см. шаг M4/1.10), чтобы материализовать
+    runtime config.yml внутри песочницы на основании хостового base YAML.
+    """
+    return config_path or _xdg_config_path() or _default_config_path()
+
+
 def apply_cli_overrides(
     config_dict: Dict[str, Any],
     *,
