@@ -320,19 +320,40 @@ security:
     #   "10.*"           — fnmatch wildcard;
     #   "172.1[6-9].*"   — fnmatch character class.
     url_blacklist: []
-    # Готовый SSRF-blacklist (cloud metadata + loopback + RFC1918):
+    # Рекомендованный SSRF-blacklist. Раньше этот набор был дефолтом в коде;
+    # теперь дефолт пустой (url_blacklist: []), поэтому базовую SSRF-защиту
+    # нужно задавать здесь явно. Закрывает три класса internal-таргетов:
+    #
+    #   1) Cloud metadata endpoints — IMDS облачных провайдеров отдают
+    #      креды/токены инстанса. Классический SSRF-pivot: агента просят
+    #      сходить на 169.254.169.254 и слить IAM-роль.
+    #   2) Loopback / link-local — сервисы, слушающие только на localhost
+    #      (админки, debug-порты, незащищённые БД на самом хосте).
+    #   3) RFC1918 private networks — соседи по внутренней сети
+    #      (internal API, БД, k8s-сервисы), которые не должны быть доступны
+    #      агенту через fetch_url.
+    #
+    # Матчинг: fnmatch по host и по полному URL (case-insensitive);
+    # "*.suffix" матчит любой ПОДДОМЕН (apex без поддомена не матчится).
     # url_blacklist:
-    #   - "169.254.*"                  # link-local + AWS/GCP IMDS 169.254.169.254
-    #   - "127.*"                      # loopback
-    #   - "10.*"                       # RFC1918 class A
-    #   - "192.168.*"                  # RFC1918 class C
-    #   - "172.1[6-9].*"               # RFC1918 class B 172.16-19
+    #   # --- Cloud metadata endpoints ---
+    #   - "169.254.169.254"            # AWS / GCP / OpenStack IMDS
+    #   - "metadata.google.internal"   # GCP metadata (apex)
+    #   - "*.metadata.google.internal" # GCP metadata (поддомены)
+    #   - "metadata.azure.com"         # Azure metadata (apex)
+    #   - "*.metadata.azure.com"       # Azure metadata (поддомены)
+    #   # --- Loopback / link-local ---
+    #   - "localhost"
+    #   - "127.*"                      # весь loopback-блок 127.0.0.0/8
+    #   - "::1"                        # IPv6 loopback
+    #   - "0.0.0.0"
+    #   - "169.254.*"                  # link-local (включая IMDS-подсеть)
+    #   # --- RFC1918 private networks ---
+    #   - "10.*"                       # 10.0.0.0/8
+    #   - "192.168.*"                  # 192.168.0.0/16
+    #   - "172.1[6-9].*"               # 172.16-19 (часть 172.16.0.0/12)
     #   - "172.2[0-9].*"               # 172.20-29
     #   - "172.3[0-1].*"               # 172.30-31
-    #   - "0.0.0.0"
-    #   - "localhost"
-    #   - "metadata.google.internal"
-    #   - "*.metadata.google.internal"
 
 mcp:
   servers:
