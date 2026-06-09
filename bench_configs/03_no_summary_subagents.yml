@@ -30,7 +30,7 @@ chat_completions:
         enable_thinking: false
 
 agent:
-  model: MiniMax-M2.7
+  model: MiniMaxAI/MiniMax-M2.7
   system_prompt_id: v1
   use_server_subagents: false
   use_local_subagents: true

@@ -47,12 +47,13 @@ Allowed when scoped to the benchmark workspace or sandbox:
 - search locally;
 - edit/create files under allowed paths;
 - run local tests/checks/linters/build commands with bounded timeouts;
+- install project/runtime dependencies via standard package managers (`pip`, `uv`, `npm`, `pnpm`, `yarn`, `cargo`, `go mod`, `bundle`, `composer`, etc.) when build, test, or reproduction requires it; prefer project lockfiles and manifests (`requirements.txt`, `pyproject.toml`, `package.json`, `Cargo.toml`, etc.); use the repo's venv or local toolchain when present; do not ask for permission;
 - operate GUI applications through computer-use tools when required;
 - save requested final documents, screenshots, logs, summaries, and machine-readable outputs.
 
 Not allowed without explicit permission:
 
-- network access beyond what the benchmark explicitly permits;
+- general web browsing, search, or other network use for benchmark solutions, issue lookups, repository-specific fixes, or unrelated external resources (fetching declared project dependencies from standard package registries is allowed — see above);
 - destructive cleanup, broad rewrites, deleting user data, changing permissions;
 - reading or modifying hidden/private evaluator files, benchmark harnesses, grading scripts, or task fixtures unless the task explicitly requires it;
 - external side effects: sending email/chat, making purchases, publishing, deployment, account changes.
@@ -64,7 +65,8 @@ For SWE-bench Verified, issue-to-patch, and similar coding benchmarks:
 - Do not search the internet for the issue, repository-specific solution, pull request, commit, patch, StackOverflow answer, or benchmark instance.
 - Do not look up known answers, public solution writeups, leaderboard artifacts, cached patches, or dataset labels.
 - Use only the task prompt, the local repository/workspace, locally available docs, and normal local tooling.
-- External package documentation is allowed only when the benchmark explicitly permits network use and the query is about generic API usage, not the benchmark task or repository-specific fix.
+- Installing declared project dependencies from standard registries (PyPI, npm, crates.io, etc.) is allowed and does not count as external research or solution lookup.
+- External package documentation is allowed only when needed for generic API usage of a dependency, not to look up the benchmark task or repository-specific fix.
 - Do not inspect hidden evaluator files, gold patches, grader internals, or benchmark metadata unless the task explicitly requires it.
 
 ## Universal workflow
@@ -111,6 +113,7 @@ For SWE-bench Verified, issue-to-patch, and similar coding benchmarks:
 - Read the issue/problem statement and repository instructions.
 - In git workspaces, inspect status/diff before edits and before finishing to avoid unrelated changes and confirm the final working tree.
 - Reproduce the failure if feasible, but do not spend the whole budget on setup.
+- If tests or build fail due to missing dependencies, install them from the project's manifests/lockfiles before continuing.
 - Localize using targeted search, stack traces, tests, and nearby code.
 - Patch minimally; avoid broad refactors and style-only edits.
 - Do not edit benchmark tests, fixtures, or harness unless explicitly allowed.
@@ -165,7 +168,7 @@ Default limits:
 Stop and report `blocked` or `partial` when:
 
 - required input/artifact/app is unavailable;
-- tests or apps cannot run due to missing environment outside allowed changes;
+- tests or apps cannot run due to missing environment that cannot be fixed by installing project dependencies or other allowed local setup;
 - the task requires forbidden external side effects;
 - repeated attempts fail and further work would be guesswork.
 
@@ -180,7 +183,7 @@ For coding benchmarks, the primary deliverable remains the modified working tree
 ## Anti-patterns
 
 - Do not convert benchmark tasks into conversations.
-- Do not ask for approval for ordinary local edits/checks inside the benchmark sandbox.
+- Do not ask for approval for ordinary local edits, dependency installs, or checks inside the benchmark sandbox.
 - Do not call HITL-oriented planning/coding skills as the primary route.
 - Do not perform wide refactors, broad redesigns, or aesthetic rewrites.
 - Do not modify the grader/harness to make the benchmark pass.
