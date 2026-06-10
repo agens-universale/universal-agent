@@ -4,7 +4,7 @@
 
 | Слой | Что блокирует | Тулы под защитой | Error type |
 |---|---|---|---|
-| `command_moderation.mode` | опасные команды/код через LLM-судью; fail-CLOSED если judge недоступен | `execute_command`, `run_python_code` | `unsafe_command_blocked`, `unsafe_command_cancelled_by_user` |
+| `command_moderation.mode` | опасные команды/код через LLM-судью; в `deny` fail-CLOSED если judge недоступен, в `ask` — запрос пользователю | `execute_command`, `run_python_code` | `unsafe_command_blocked`, `unsafe_command_cancelled_by_user` |
 | `write_guard` | запись вне `launch_root` + `extra_paths` | `write_to_file`, `append_to_file`, `search_and_replace`, write-fragments в `execute_command` | `write_guard_violation` |
 | `read_guard` | чтение вне `allowed_read_roots`, в `denied_*`, по запрещённым паттернам/расширениям | `read_file`, `list_files`, `search_files` | `read_guard_violation` |
 | `url_policy` | URL по схеме или `url_blacklist` (включая SSRF-подсети) | `fetch_url`, `simple_fetch_url` | `url_validation_failed`, `url_blocked_by_policy` |
@@ -40,10 +40,10 @@ security:
 Управляет только `execute_command` и `run_python_code`:
 
 - `allow` — выполнять без judge (документированная дыра — judge просто отключён);
-- `ask` — безопасное выполнять, опасное → запрос подтверждения пользователя;
+- `ask` — `safe` выполнять сразу; `potentially_dangerous` или недоступный judge → запрос подтверждения пользователя;
 - `deny` — безопасное выполнять, опасное → блок с `unsafe_command_blocked`.
 
-**Fail-CLOSED поведение**: если judge недоступен (нет бэкенда, timeout), выполнение блокируется (`reason: "Judge is unavailable; fail-closed policy blocks execution"`). Это закрывает класс атак через python escape: `print(open('/etc/passwd').read())` блокируется в `deny`/`ask` даже если `read_guard` декорирует только `read_file`.
+**Недоступный judge**: в `deny` — fail-CLOSED, блок (`reason: "Judge is unavailable; fail-closed policy blocks execution"`). В `ask` — запрос подтверждения (`reason: "Judge is unavailable; user confirmation is required."`). В `deny` это закрывает класс атак через python escape: `print(open('/etc/passwd').read())` блокируется даже если `read_guard` декорирует только `read_file`.
 
 `allowed_command_examples` — positive examples для LLM judge (ориентир безопасного профиля проекта, не строгий allowlist).
 
@@ -251,13 +251,13 @@ gc-cli -q "..." --write-guard true
   }
 }
 
-// command_moderation fail-closed (judge offline)
+// command_moderation fail-closed (judge offline, mode=deny)
 {
   "tool": "run_python_code",
   "ok": false,
   "error": {
     "type": "unsafe_command_blocked",
-    "mode": "ask",
+    "mode": "deny",
     "reason": "Judge is unavailable; fail-closed policy blocks execution.",
     "code_preview": "print(open('/etc/passwd').read()[:200])"
   }

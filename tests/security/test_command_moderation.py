@@ -5,8 +5,11 @@ from types import SimpleNamespace
 import pytest
 
 from security.command_moderation import (
+    DANGEROUS_VERDICT,
     JudgeResult,
+    JudgeUnavailable,
     ModerationContext,
+    SAFE_VERDICT,
     build_judge_payload,
     decide_command_execution,
     effective_command_cwd,
@@ -21,9 +24,13 @@ import security.command_moderation as command_moderation
 class _Logger:
     def __init__(self):
         self.messages = []
+        self.warnings = []
 
     def info(self, message, *args):
         self.messages.append(message % args if args else message)
+
+    def warning(self, message, *args, **kwargs):
+        self.warnings.append(message % args if args else message)
 
 
 def test_validate_judge_result_accepts_safe_payload():
@@ -44,6 +51,20 @@ def test_validate_judge_result_accepts_safe_payload():
     )
 
 
+def test_validate_judge_result_accepts_string_confidence():
+    """Модели иногда возвращают confidence строкой, например \"0.98\"."""
+    result = validate_judge_result(
+        {
+            "verdict": "safe",
+            "reasons": ["read-only import checks"],
+            "risk_flags": [],
+            "confidence": "0.98",
+        }
+    )
+
+    assert result.confidence == 0.98
+
+
 def test_validate_judge_result_requires_risk_flags_for_dangerous_verdict():
     with pytest.raises(ValueError, match="requires at least one risk flag"):
         validate_judge_result(
@@ -61,14 +82,20 @@ def test_decide_command_execution_matrix():
     dangerous = JudgeResult("potentially_dangerous", ["bad"], ["privilege_escalation"], 1.0)
 
     assert decide_command_execution("allow", None, False, None).allowed is True
-    # Fail-CLOSED: при недоступности судьи в режимах ask/deny — блокируем.
+    # Fail-CLOSED в deny; в ask — запрос подтверждения у пользователя.
     deny_no_judge = decide_command_execution("deny", None, False, None)
     assert deny_no_judge.allowed is False
     assert deny_no_judge.reason_code == "judge_unavailable"
     assert deny_no_judge.error_type == "unsafe_command_blocked"
     ask_no_judge = decide_command_execution("ask", None, False, None)
     assert ask_no_judge.allowed is False
-    assert ask_no_judge.error_type == "unsafe_command_blocked"
+    assert ask_no_judge.requires_confirmation is True
+    assert ask_no_judge.reason_code == "judge_unavailable"
+    assert decide_command_execution("ask", None, False, True).allowed is True
+    assert (
+        decide_command_execution("ask", None, False, False).error_type
+        == "unsafe_command_cancelled_by_user"
+    )
     assert decide_command_execution("deny", safe, True, None).allowed is True
 
     denied = decide_command_execution("deny", dangerous, True, None)
@@ -177,12 +204,8 @@ def test_moderate_command_execution_blocks_dangerous_payload(tmp_path):
     assert result["error"]["risk_flags"] == ["privilege_escalation"]
 
 
-def test_moderate_command_execution_fail_closed_when_judge_unavailable(tmp_path):
-    """
-    Fail-CLOSED: при недоступности судьи в режимах ask/deny выполнение
-    блокируется. Это изменение от AS-IS (которое было fail-open) — см.
-    T114-finding в hardening_findings_20260518.md.
-    """
+def test_moderate_command_execution_fail_closed_when_judge_unavailable_in_deny(tmp_path):
+    """Fail-CLOSED в deny: при недоступности судьи выполнение блокируется."""
     config_dict = {
         "launch_root": str(tmp_path),
         "command_moderation": {"enabled": True, "mode": "deny"},
@@ -196,10 +219,62 @@ def test_moderate_command_execution_fail_closed_when_judge_unavailable(tmp_path)
 
     assert result["ok"] is False
     assert result["error"]["type"] == "unsafe_command_blocked"
-    # envelope error от make_block_error содержит mode/reason/risk_flags,
-    # но reason_code остаётся в audit-логе, а не в envelope. Проверяем reason.
     assert "judge" in result["error"].get("reason", "").lower() \
         or "fail-closed" in result["error"].get("reason", "").lower()
+
+
+def test_moderate_command_execution_logs_judge_failure(tmp_path):
+    logger = _Logger()
+    ctx = SimpleNamespace(
+        config_dict={
+            "launch_root": str(tmp_path),
+            "command_moderation": {"enabled": True, "mode": "deny"},
+        },
+        logger=logger,
+    )
+
+    @moderate_command_execution(
+        payload_arg="command",
+        tool_name="exec_command",
+        judge_client_extractor=lambda *_args, **_kwargs: lambda _payload: {
+            "verdict": "safe",
+            "reasons": [],
+            "risk_flags": [],
+            "confidence": "not-a-number",
+        },
+    )
+    def run(command: str, **kwargs) -> str:
+        return json.dumps({"ok": True, "command": command})
+
+    result = json.loads(run("echo ok", ctx=ctx))
+
+    assert result["ok"] is False
+    assert len(logger.warnings) == 1
+    assert "command_moderation_judge_failed" in logger.warnings[0]
+    assert '"error_type": "ValueError"' in logger.warnings[0]
+    assert "confidence must be numeric" in logger.warnings[0]
+
+
+def test_moderate_command_execution_asks_when_judge_unavailable_in_ask(tmp_path, monkeypatch):
+    """В ask при недоступности судьи запрашиваем подтверждение у пользователя."""
+    config_dict = {
+        "launch_root": str(tmp_path),
+        "command_moderation": {"enabled": True, "mode": "ask"},
+    }
+    monkeypatch.setattr(
+        command_moderation,
+        "_ask_user_confirmation",
+        lambda *_args, **_kwargs: True,
+    )
+
+    @moderate_command_execution(payload_arg="command", tool_name="exec_command")
+    def run(command: str, config_dict: dict) -> str:
+        return json.dumps({"ok": True, "command": command})
+
+    result = json.loads(run("echo ok", config_dict=config_dict))
+
+    assert result["ok"] is True
+    assert result["command"] == "echo ok"
 
 
 def test_moderate_command_execution_audits_without_payload_leak(tmp_path):
@@ -232,3 +307,103 @@ def test_moderate_command_execution_audits_without_payload_leak(tmp_path):
     assert '"reason_code": "judge_verdict"' in logger.messages[-1]
     assert '"risk_flags": ["privilege_escalation"]' in logger.messages[-1]
     assert "sudo apt update" not in logger.messages[-1]
+
+
+def test_parse_judge_json_accepts_valid_json():
+    parsed = command_moderation._parse_judge_json(
+        '{"verdict":"safe","reasons":["ok"],"risk_flags":[],"confidence":0.9}'
+    )
+
+    assert parsed["verdict"] == "safe"
+    assert parsed["confidence"] == 0.9
+
+
+def test_parse_judge_json_regex_fallback_safe_on_malformed_json():
+    raw = (
+        "Sure! Here's the verdict:\n"
+        '{"verdict":"safe","reasons":["read-only"],"risk_flags":[],"confidence":"0.98"'
+    )
+
+    parsed = command_moderation._parse_judge_json(raw)
+
+    assert parsed["verdict"] == SAFE_VERDICT
+    assert validate_judge_result(parsed).verdict == SAFE_VERDICT
+
+
+def test_parse_judge_json_regex_fallback_dangerous_on_malformed_json():
+    raw = (
+        "Analysis:\n"
+        '{"verdict":"potentially_dangerous","reasons":["bad"],"risk_flags":["x"]'
+    )
+
+    parsed = command_moderation._parse_judge_json(raw)
+
+    assert parsed["verdict"] == DANGEROUS_VERDICT
+    assert validate_judge_result(parsed).risk_flags == ["judge_response_malformed"]
+
+
+def test_parse_judge_json_regex_fallback_prefers_dangerous_when_both_present():
+    raw = (
+        '{"verdict":"safe","reasons":[]},'
+        '{"verdict":"potentially_dangerous","reasons":["bad"]'
+    )
+
+    parsed = command_moderation._parse_judge_json(raw)
+
+    assert parsed["verdict"] == DANGEROUS_VERDICT
+
+
+def test_validate_judge_result_rejects_schema_style_verdict():
+    with pytest.raises(ValueError, match="verdict"):
+        validate_judge_result(
+            {
+                "verdict": "safe | potentially_dangerous",
+                "reasons": ["x"],
+                "risk_flags": [],
+                "confidence": 1.0,
+            }
+        )
+
+
+def test_parse_judge_json_unparseable_response_raises():
+    with pytest.raises(JudgeUnavailable, match="unparseable"):
+        command_moderation._parse_judge_json("I cannot classify this payload.")
+
+
+def test_parse_judge_json_logs_regex_fallback(tmp_path):
+    logger = _Logger()
+    raw = 'oops {"verdict":"safe","reasons":["ok"],"risk_flags":[]'
+
+    parsed = command_moderation._parse_judge_json(
+        raw,
+        logger=logger,
+        tool_name="exec_python",
+    )
+
+    assert parsed["verdict"] == SAFE_VERDICT
+    assert len(logger.warnings) == 1
+    assert "command_moderation_judge_regex_fallback" in logger.warnings[0]
+    assert '"matched_verdict": "safe"' in logger.warnings[0]
+    assert '"tool_name": "exec_python"' in logger.warnings[0]
+
+
+def test_moderate_command_execution_blocks_when_json_and_regex_fail(tmp_path):
+    config_dict = {
+        "launch_root": str(tmp_path),
+        "command_moderation": {"enabled": True, "mode": "deny"},
+    }
+
+    @moderate_command_execution(
+        payload_arg="command",
+        tool_name="exec_command",
+        judge_client_extractor=lambda *_args, **_kwargs: lambda _payload: command_moderation._parse_judge_json(
+            "completely unparseable judge output"
+        ),
+    )
+    def run(command: str, config_dict: dict) -> str:
+        return json.dumps({"ok": True, "command": command})
+
+    result = json.loads(run("echo ok", config_dict=config_dict))
+
+    assert result["ok"] is False
+    assert result["error"]["type"] == "unsafe_command_blocked"

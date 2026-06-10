@@ -196,7 +196,7 @@ security:
     #   allow — судья не вызывается (всё проходит) — эквивалент enabled: false;
     #   ask   — опасное → запрос подтверждения у пользователя в stdin;
     #   deny  — опасное → блок.
-    # При недоступности judge'а: fail-CLOSED (опасное блокируется).
+    # При недоступности judge'а: deny → fail-CLOSED; ask → запрос пользователю.
     mode: deny
     # Positive examples — ориентир безопасного профиля. Не allowlist.
     allowed_command_examples: []

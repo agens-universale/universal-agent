@@ -151,11 +151,8 @@ def test_exec_command_ask_mode_cancels_when_user_rejects(tmp_path):
     assert not marker.exists()
 
 
-def test_command_moderation_fail_closed_when_judge_unavailable(tmp_path):
-    """
-    Fail-CLOSED: при недоступности судьи в режимах ask/deny выполнение
-    блокируется. Это hardening-изменение от AS-IS fail-open (см. T114-finding).
-    """
+def test_command_moderation_fail_closed_when_judge_unavailable_in_deny(tmp_path):
+    """Fail-CLOSED в deny: при недоступности судьи выполнение блокируется."""
     result = json.loads(
         ExecuteCommand(config_dict=_config(tmp_path, "deny"))(
             command=f'"{sys.executable}" -c "print(789)"'
@@ -165,3 +162,22 @@ def test_command_moderation_fail_closed_when_judge_unavailable(tmp_path):
     assert result["ok"] is False
     assert result["error"]["type"] == "unsafe_command_blocked"
     assert result["error"]["mode"] == "deny"
+
+
+def test_command_moderation_asks_when_judge_unavailable_in_ask(tmp_path, monkeypatch):
+    """В ask при недоступности судьи запрашиваем подтверждение у пользователя."""
+    marker = tmp_path / "judge_unavailable.txt"
+    command = f'"{sys.executable}" -c "from pathlib import Path; Path({str(marker)!r}).write_text(\'ok\')"'
+
+    tool = ExecuteCommand(config_dict=_config(tmp_path, "ask"))
+    original_call = tool.__call__.__wrapped__
+    guarded_call = command_moderation.moderate_command_execution(
+        payload_arg="command",
+        tool_name="exec_command",
+        user_confirmation_extractor=lambda *_args, **_kwargs: True,
+    )(original_call)
+
+    result = json.loads(guarded_call(tool, command=command))
+
+    assert result["ok"] is True
+    assert marker.read_text(encoding="utf-8") == "ok"

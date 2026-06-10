@@ -5,6 +5,7 @@ import inspect
 import json
 import os
 import platform
+import re
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -21,6 +22,14 @@ from security.path_policy import (
 SAFE_VERDICT = "safe"
 DANGEROUS_VERDICT = "potentially_dangerous"
 ALLOWED_VERDICTS = {SAFE_VERDICT, DANGEROUS_VERDICT}
+_VERDICT_SAFE_RE = re.compile(
+    r'"verdict"\s*:\s*"safe"\s*[,}]',
+    re.IGNORECASE,
+)
+_VERDICT_DANGEROUS_RE = re.compile(
+    r'"verdict"\s*:\s*"(?:potentially_dangerous|dangerous|unsafe)"\s*[,}]',
+    re.IGNORECASE,
+)
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -125,12 +134,7 @@ def validate_judge_result(raw: dict[str, Any]) -> JudgeResult:
     risk_flags = _string_list(raw.get("risk_flags"), field_name="risk_flags")
     if verdict == DANGEROUS_VERDICT and not risk_flags:
         raise ValueError("potentially_dangerous verdict requires at least one risk flag")
-    confidence = raw.get("confidence", 0.0)
-    if not isinstance(confidence, (int, float)):
-        raise ValueError("judge result confidence must be numeric")
-    confidence_float = float(confidence)
-    if confidence_float < 0.0 or confidence_float > 1.0:
-        raise ValueError("judge result confidence must be between 0.0 and 1.0")
+    confidence_float = _parse_judge_confidence(raw.get("confidence", 0.0))
     return JudgeResult(
         verdict=verdict,
         reasons=reasons,
@@ -154,9 +158,30 @@ def decide_command_execution(
             reason="command_moderation.mode=allow",
         )
     if not judge_available or judge_result is None:
-        # Fail-closed: при недоступности судьи в режимах ask/deny — блокируем.
-        # Это изменение от AS-IS, где было fail-open (см. T114-finding).
-        # Режим allow до этой ветки не доходит — он выходит раньше (см. выше).
+        if normalized_mode == "ask":
+            if user_confirmation is True:
+                return ExecutionDecision(
+                    allowed=True,
+                    decision="executed",
+                    reason_code="user_confirmation",
+                    reason="User confirmed execution after judge was unavailable.",
+                )
+            if user_confirmation is False:
+                return ExecutionDecision(
+                    allowed=False,
+                    decision="cancelled",
+                    reason_code="user_confirmation",
+                    reason="User cancelled execution after judge was unavailable.",
+                    error_type="unsafe_command_cancelled_by_user",
+                )
+            return ExecutionDecision(
+                allowed=False,
+                decision="asked",
+                reason_code="judge_unavailable",
+                reason="Judge is unavailable; user confirmation is required.",
+                requires_confirmation=True,
+            )
+        # Fail-closed: при недоступности судьи в deny — блокируем.
         return ExecutionDecision(
             allowed=False,
             decision="blocked",
@@ -278,8 +303,13 @@ def moderate_command_execution(
                     judge_client,
                     build_judge_payload(moderation_context.tool_name, payload, moderation_context),
                 )
-            except Exception:
+            except Exception as exc:
                 judge_available = False
+                _log_command_judge_failure(
+                    context,
+                    tool_name=moderation_context.tool_name,
+                    exc=exc,
+                )
 
             decision = decide_command_execution(
                 moderation_context.mode,
@@ -386,6 +416,49 @@ def _extract_payload(
     return payload
 
 
+def _log_command_judge_failure(
+    context: ToolSecurityContext,
+    *,
+    tool_name: str,
+    exc: BaseException,
+) -> None:
+    logger = context.logger
+    if logger is None or not hasattr(logger, "warning"):
+        return
+    event = {
+        "event": "command_moderation_judge_failed",
+        "tool_name": tool_name,
+        "error_type": type(exc).__name__,
+        "error": str(exc),
+    }
+    try:
+        logger.warning(
+            "command_moderation_judge_failed %s",
+            json.dumps(event, ensure_ascii=False, sort_keys=True),
+            exc_info=(type(exc), exc, exc.__traceback__),
+        )
+    except Exception:
+        return
+
+
+def _parse_judge_confidence(raw: Any) -> float:
+    if isinstance(raw, (int, float)):
+        confidence_float = float(raw)
+    elif isinstance(raw, str):
+        stripped = raw.strip()
+        if not stripped:
+            raise ValueError("judge result confidence must be numeric")
+        try:
+            confidence_float = float(stripped)
+        except ValueError as exc:
+            raise ValueError("judge result confidence must be numeric") from exc
+    else:
+        raise ValueError("judge result confidence must be numeric")
+    if confidence_float < 0.0 or confidence_float > 1.0:
+        raise ValueError("judge result confidence must be between 0.0 and 1.0")
+    return confidence_float
+
+
 def _string_list(raw: Any, *, field_name: str) -> list[str]:
     if raw is None:
         return []
@@ -424,7 +497,11 @@ def _default_judge_client(args: tuple[Any, ...], kwargs: dict[str, Any]) -> Call
             max_tokens=800,
             request_label="command_moderation_judge",
         )
-        return _parse_judge_json(raw_text)
+        return _parse_judge_json(
+            raw_text,
+            logger=getattr(ctx, "logger", None),
+            tool_name=str(judge_payload.get("tool_name") or ""),
+        )
 
     return judge
 
@@ -460,28 +537,100 @@ def _load_prompt_file(path: Path) -> str:
     return text
 
 
-def _parse_judge_json(raw_text: str) -> dict[str, Any]:
+def _strip_judge_response_text(raw_text: str) -> str:
     text = (raw_text or "").strip()
-    # Reasoning models (Minimax, DeepSeek-R1 и т.п.) могут встраивать
-    # <think>...</think> блок прямо в content. Отрезаем его, чтобы дальше
-    # json.loads увидел чистый JSON.
-    import re
-    text = re.sub(r"<think\b[^>]*>.*?</think>", "", text, flags=re.DOTALL).strip()
+    # Reasoning models (Minimax, DeepSeek-R1 и т.п.) могут встраивать thinking-блок в content.
+    for pattern in (
+        r"<think\b[^>]*>.*?</think>",
+        r"<redacted_thinking\b[^>]*>.*?</think>",
+    ):
+        text = re.sub(pattern, "", text, flags=re.DOTALL | re.IGNORECASE).strip()
+    fence_match = re.search(r"```(?:json)?\s*\n?(.*?)\n?```", text, flags=re.DOTALL | re.IGNORECASE)
+    if fence_match:
+        return fence_match.group(1).strip()
     if text.startswith("```"):
         text = text.strip("`").strip()
         if text.lower().startswith("json"):
             text = text[4:].strip()
-    # Иногда JSON всё ещё окружён prose ("Sure! Here's the verdict:\n{...}\n").
-    # Достаём первый сбалансированный JSON-объект.
-    if text and not text.startswith("{"):
-        start = text.find("{")
-        end = text.rfind("}")
-        if start != -1 and end != -1 and end > start:
-            text = text[start:end + 1]
+    return text
+
+
+def _extract_json_candidate(text: str) -> str:
+    if text.startswith("{"):
+        return text
+    start = text.find("{")
+    end = text.rfind("}")
+    if start != -1 and end != -1 and end > start:
+        return text[start:end + 1]
+    return text
+
+
+def _verdict_regex_fallback(text: str) -> dict[str, Any] | None:
+    """
+    Last-resort parser: ищем явное поле verdict в ответе модели.
+    Dangerous проверяем раньше safe (fail-closed при конфликте).
+    """
+    if _VERDICT_DANGEROUS_RE.search(text):
+        return {
+            "verdict": DANGEROUS_VERDICT,
+            "reasons": ["Judge response parsed via regex fallback."],
+            "risk_flags": ["judge_response_malformed"],
+            "confidence": 0.0,
+        }
+    if _VERDICT_SAFE_RE.search(text):
+        return {
+            "verdict": SAFE_VERDICT,
+            "reasons": ["Judge response parsed via regex fallback."],
+            "risk_flags": [],
+            "confidence": 0.0,
+        }
+    return None
+
+
+def _log_command_judge_regex_fallback(
+    logger: Any,
+    *,
+    tool_name: str | None,
+    verdict: str,
+) -> None:
+    if logger is None or not hasattr(logger, "warning"):
+        return
+    event = {
+        "event": "command_moderation_judge_regex_fallback",
+        "tool_name": tool_name or "",
+        "matched_verdict": verdict,
+    }
     try:
-        return json.loads(text)
-    except json.JSONDecodeError as exc:
-        raise JudgeUnavailable("judge returned invalid JSON") from exc
+        logger.warning(
+            "command_moderation_judge_regex_fallback %s",
+            json.dumps(event, ensure_ascii=False, sort_keys=True),
+        )
+    except Exception:
+        return
+
+
+def _parse_judge_json(
+    raw_text: str,
+    *,
+    logger: Any = None,
+    tool_name: str | None = None,
+) -> dict[str, Any]:
+    text = _strip_judge_response_text(raw_text)
+    if not text:
+        raise JudgeUnavailable("judge returned empty content")
+    json_candidate = _extract_json_candidate(text)
+    try:
+        return json.loads(json_candidate)
+    except json.JSONDecodeError:
+        fallback = _verdict_regex_fallback(text)
+        if fallback is None:
+            raise JudgeUnavailable("judge returned unparseable response")
+        _log_command_judge_regex_fallback(
+            logger,
+            tool_name=tool_name,
+            verdict=str(fallback["verdict"]),
+        )
+        return fallback
 
 
 def _ask_user_confirmation(
