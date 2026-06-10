@@ -63,3 +63,11 @@ swarm:
   sandbox_tool: "bubblewrap"
   agentmd_path: "./prompts/swarm_agent.md"
   skills_dir: "./swarm_skills"
+  # Bind-mount пути для wrapper.sh (AR-6 / AR-7). ТОЛЬКО абсолютные пути —
+  # относительные/пустые молча игнорируются (см. swarm/config.py::_abs_or_empty),
+  # и тогда wrapper делает fallback на PATH lookup. Полная дока — docs/swarm.md.
+  # cli_venv_root: "/opt/gc-cli/.venv"      # ro-bind venv c gc-cli внутрь песочницы
+  # agent_dep_dir: "/opt/gc-cli/mcp-deps"   # зависимости MCP (node/npx и т.п.)
+  # extra_mounts:                           # доп. ro-bind (prompts, skills, статика)
+  #   - "/opt/gc-cli/prompts"
+  #   - "/opt/gc-cli/skills"
