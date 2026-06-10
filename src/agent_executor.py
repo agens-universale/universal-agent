@@ -245,17 +245,21 @@ class AgentExecutor:
             state.previous_response_id = previous_response_id
             thread_session.set_runtime_messages(state.messages)
 
-            base_messages: list[dict] = (
-                thread_session.history_messages
-                if backend_api_mode == "chat_completions" or previous_response_id is None
-                else []
-            )
-            # При продолжении через `-t` в chat/completions mode мы отправляем
-            # бэкенду всю историю треда. Чтобы локальные лимиты `max_steps`
-            # не "сдвигались" из-за старых сообщений, будем пропускать инкремент
-            # счётчика шагов на первом `user_ask`-цикле, если история непустая.
-            state.skip_initial_user_ask_step_when_history = len(base_messages) > 0
-            messages = [*base_messages, *new_user_messages]
+            # chat/completions: история уже в state.messages (extend выше).
+            # В run_agent передаём только новый user-батч — backend собирает payload
+            # из state + batch без дублей (см. create_call_data_completions).
+            if backend_api_mode == "chat_completions":
+                base_messages = list(thread_session.history_messages)
+                state.skip_initial_user_ask_step_when_history = len(base_messages) > 0
+                messages = list(new_user_messages)
+            else:
+                base_messages = (
+                    list(thread_session.history_messages)
+                    if previous_response_id is None
+                    else []
+                )
+                state.skip_initial_user_ask_step_when_history = len(base_messages) > 0
+                messages = [*base_messages, *new_user_messages]
 
             def _persist_thread_batch(step_messages: list[dict]) -> None:
                 # Persist notes from in-memory state into thread meta.

@@ -7,7 +7,7 @@ from intent_guard.feedback import (
     build_finish_gate_reject_technical_user_content,
 )
 from constants.tool_names import FINISH_TOOL_NAME, SESSION_COMPACT_TOOL_NAME
-from run_summary_coordinator import build_preserved_batch
+from run_summary_coordinator import build_preserved_batch, filter_messages_not_in_state
 from intent_guard.guard import FinishGateGuard
 from intent_guard.turn_finish_emit import (
     apply_finish_gate_to_turn_finish_output_in_state,
@@ -459,7 +459,12 @@ def run_agent(
                         "\n<message_committed>\n%s\n</message_committed>\n",
                         json.dumps(m, ensure_ascii=False, indent=2, default=str),
                     )
-            state.messages += messages
+            new_state_messages = filter_messages_not_in_state(
+                list(getattr(state, "messages", []) or []),
+                list(messages),
+            )
+            if new_state_messages:
+                state.messages += new_state_messages
             if persist_messages_callback is not None:
                 try:
                     persist_messages_callback(messages)
@@ -508,7 +513,12 @@ def run_agent(
                     )
                     notice_messages = messages[_messages_before_notice:]
                     if notice_messages:
-                        state.messages += notice_messages
+                        to_append = filter_messages_not_in_state(
+                            list(getattr(state, "messages", []) or []),
+                            list(notice_messages),
+                        )
+                        if to_append:
+                            state.messages += to_append
                         if persist_messages_callback is not None:
                             try:
                                 persist_messages_callback(notice_messages)
