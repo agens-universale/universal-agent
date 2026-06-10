@@ -24,7 +24,8 @@ def test_normalize_preserves_anyof_without_forcing_type() -> None:
     normalized = _normalize_schema_recursive(raw, param_name="limit")
 
     assert "anyOf" in normalized
-    assert normalized["anyOf"] == [{"type": "integer"}, {"type": "null"}]
+    assert normalized["anyOf"][0]["type"] == "integer"
+    assert normalized["anyOf"][1]["type"] == "null"
     # The bug: previously normalized["type"] was forced to "string".
     # After fix: either no `type`, or `type` value compatible with anyOf — but NOT
     # an unrelated default like "string".
@@ -106,7 +107,8 @@ def test_full_tool_spec_with_anyof_param_stays_valid() -> None:
     normalized = normalize_tool_spec_for_agent(tool_spec)
     limit = normalized["parameters"]["properties"]["limit"]
     assert "anyOf" in limit
-    assert limit["anyOf"] == [{"type": "integer"}, {"type": "null"}]
+    assert limit["anyOf"][0]["type"] == "integer"
+    assert limit["anyOf"][1]["type"] == "null"
     if "type" in limit:
         assert limit["type"] != "string"
 
@@ -165,3 +167,199 @@ def test_inline_defs_ref_for_openai_strict_workbook() -> None:
     assert "sheets" in workbook["properties"]
     assert "$ref" not in workbook
     assert "$defs" not in normalized["parameters"]
+
+
+def test_nested_object_required_includes_all_properties_for_openai_strict() -> None:
+    """Pydantic optional fields must appear in nested ``required`` under strict mode."""
+    cell_style = {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "range": {"type": "string", "title": "Range"},
+            "align": {
+                "anyOf": [
+                    {"enum": ["left", "center", "right"], "type": "string"},
+                    {"type": "null"},
+                ],
+                "default": None,
+                "title": "Align",
+            },
+            "bold": {
+                "anyOf": [{"type": "boolean"}, {"type": "null"}],
+                "default": None,
+                "title": "Bold",
+            },
+        },
+        "required": ["range"],
+    }
+    tool_spec = {
+        "type": "function",
+        "name": "mcp_office_create_xlsx_file",
+        "description": "Generate xlsx.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string", "title": "Path"},
+                "workbook": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": {
+                        "sheets": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "additionalProperties": False,
+                                "properties": {
+                                    "name": {"type": "string"},
+                                    "cell_styles": {
+                                        "type": "array",
+                                        "items": cell_style,
+                                    },
+                                },
+                                "required": ["name", "cell_styles"],
+                            },
+                        },
+                    },
+                    "required": ["sheets"],
+                },
+            },
+            "required": ["path", "workbook"],
+        },
+    }
+    normalized = normalize_tool_spec_for_agent(tool_spec)
+    cell_items = (
+        normalized["parameters"]["properties"]["workbook"]["properties"]["sheets"]["items"]
+        ["properties"]["cell_styles"]["items"]
+    )
+    assert set(cell_items["required"]) == {"range", "align", "bold"}
+    assert cell_items["x-optional-keys"] == ["align", "bold"]
+    assert set(normalized["parameters"]["required"]) == {"path", "workbook"}
+
+
+def test_anyof_array_branch_items_get_type_for_openai_strict() -> None:
+    """``list | None`` from Pydantic yields ``items: {}`` inside anyOf; OpenAI needs ``type``."""
+    tool_spec = {
+        "type": "function",
+        "name": "mcp_office_query_xlsx",
+        "description": "Query xlsx.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string", "title": "Path"},
+                "filter": {
+                    "anyOf": [
+                        {"items": {}, "type": "array"},
+                        {"type": "null"},
+                    ],
+                    "default": None,
+                    "title": "Filter",
+                },
+            },
+            "required": ["path"],
+        },
+    }
+    normalized = normalize_tool_spec_for_agent(tool_spec)
+    array_branch = normalized["parameters"]["properties"]["filter"]["anyOf"][0]
+    assert array_branch["type"] == "array"
+    assert "type" in array_branch["items"]
+
+
+def test_recursive_defs_ref_keeps_defs_for_openai_strict() -> None:
+    """Recursive Pydantic models must not leave dangling ``$ref`` without ``$defs``."""
+    tool_spec = {
+        "type": "function",
+        "name": "mcp_office_query_xlsx",
+        "description": "Query xlsx.",
+        "parameters": {
+            "type": "object",
+            "$defs": {
+                "FilterClause": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": {
+                        "col": {"type": "string", "title": "Col"},
+                        "op": {"type": "string", "title": "Op"},
+                    },
+                    "required": ["col", "op"],
+                },
+                "OrFilterGroup": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": {
+                        "or": {
+                            "type": "array",
+                            "items": {
+                                "anyOf": [
+                                    {"$ref": "#/$defs/FilterClause"},
+                                    {"$ref": "#/$defs/OrFilterGroup"},
+                                ],
+                            },
+                            "title": "Or",
+                        },
+                    },
+                    "required": ["or"],
+                },
+            },
+            "properties": {
+                "path": {"type": "string", "title": "Path"},
+                "filter": {
+                    "anyOf": [
+                        {
+                            "type": "array",
+                            "items": {
+                                "anyOf": [
+                                    {"$ref": "#/$defs/FilterClause"},
+                                    {"$ref": "#/$defs/OrFilterGroup"},
+                                ],
+                            },
+                        },
+                        {"type": "null"},
+                    ],
+                    "default": None,
+                    "title": "Filter",
+                },
+            },
+            "required": ["path"],
+        },
+    }
+    normalized = normalize_tool_spec_for_agent(tool_spec)
+    params = normalized["parameters"]
+    filter_schema = params["properties"]["filter"]
+    array_branch = filter_schema["anyOf"][0]
+    or_group_branch = array_branch["items"]["anyOf"][1]
+    assert or_group_branch["type"] == "object"
+    nested_or = or_group_branch["properties"]["or"]["items"]["anyOf"][1]
+    assert nested_or == {"$ref": "#/$defs/OrFilterGroup"}
+    assert "FilterClause" in params["$defs"]
+    assert "OrFilterGroup" in params["$defs"]
+    assert params["$defs"]["OrFilterGroup"]["additionalProperties"] is False
+
+
+def test_anyof_array_object_items_get_additional_properties_false() -> None:
+    """``list[dict] | None`` must not keep ``additionalProperties: true`` under strict."""
+    tool_spec = {
+        "type": "function",
+        "name": "mcp_office_query_xlsx",
+        "description": "Query xlsx.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string", "title": "Path"},
+                "sort": {
+                    "anyOf": [
+                        {
+                            "items": {"additionalProperties": True, "type": "object"},
+                            "type": "array",
+                        },
+                        {"type": "null"},
+                    ],
+                    "default": None,
+                    "title": "Sort",
+                },
+            },
+            "required": ["path"],
+        },
+    }
+    normalized = normalize_tool_spec_for_agent(tool_spec)
+    items = normalized["parameters"]["properties"]["sort"]["anyOf"][0]["items"]
+    assert items["additionalProperties"] is False

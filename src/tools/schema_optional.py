@@ -80,27 +80,42 @@ def _is_string_like_property(prop_schema: Any) -> bool:
     return False
 
 
+def apply_openai_strict_object(schema: dict[str, Any]) -> None:
+    """
+    OpenAI strict mode for one object node: every property key is required;
+    remember semantic optional keys before expansion.
+    """
+    if schema.get("type") != "object":
+        return
+    props = schema.get("properties")
+    if not isinstance(props, dict):
+        props = {}
+        schema["properties"] = props
+    if not props:
+        schema["x-openai-strict"] = True
+        schema["required"] = []
+        schema["additionalProperties"] = False
+        return
+    if "x-optional-keys" not in schema:
+        required_before = schema.get("required")
+        if not isinstance(required_before, list):
+            required_before = []
+        schema["x-optional-keys"] = [
+            k
+            for k in props
+            if k not in required_before and not _property_preserves_empty_string(props[k])
+        ]
+    schema["x-openai-strict"] = True
+    schema["required"] = list(props.keys())
+    # OpenAI strict always requires explicit false (Pydantic may emit true for dict types).
+    schema["additionalProperties"] = False
+
+
 def apply_openai_strict_parameters(params: dict[str, Any]) -> None:
-    """
-    OpenAI strict mode: every property key is required; remember semantic optional keys.
-    """
-    if not isinstance(params, dict) or params.get("type") != "object":
+    """OpenAI strict mode for top-level tool parameters (object root)."""
+    if not isinstance(params, dict):
         return
-    props = params.get("properties")
-    if not isinstance(props, dict) or not props:
-        return
-    required_before = params.get("required")
-    if not isinstance(required_before, list):
-        required_before = []
-    params["x-optional-keys"] = [
-        k
-        for k in props
-        if k not in required_before and not _property_preserves_empty_string(props[k])
-    ]
-    params["x-openai-strict"] = True
-    params["required"] = list(props.keys())
-    if "additionalProperties" not in params:
-        params["additionalProperties"] = False
+    apply_openai_strict_object(params)
 
 
 def augment_optional_property_descriptions(
@@ -165,6 +180,7 @@ __all__ = [
     "OPTIONAL_EMPTY_AS_OMIT_HINT",
     "optional_property_description",
     "resolve_optional_property_keys",
+    "apply_openai_strict_object",
     "apply_openai_strict_parameters",
     "augment_optional_property_descriptions",
     "coalesce_optional_string",
