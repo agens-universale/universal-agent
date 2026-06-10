@@ -131,6 +131,13 @@ class ReadGuardConfig(BaseModel):
         return validate_binary_read_policy(value)
 
 
+class DownloadConfig(BaseModel):
+    """Настройки тула download_file: каталог загрузки и лимит размера тела ответа."""
+    model_config = ConfigDict(extra="forbid")
+    download_dir: str = "downloads"
+    max_bytes: int = 52_428_800
+
+
 class CommandModerationConfig(BaseModel):
     """
     Judge-настройки для execute_command/run_python_code. Safe-by-default-OFF.
@@ -164,6 +171,7 @@ class SecurityConfig(BaseModel):
           write_guard:        {enabled, extra_paths}
           read_guard:         {enabled, mode, denied_*, allowed_*}
           url_policy:         {enabled, allowed_schemes, url_blacklist}
+          download:           {download_dir, max_bytes}
     """
     model_config = ConfigDict(extra="forbid")
     command_moderation: CommandModerationConfig = Field(
@@ -172,6 +180,7 @@ class SecurityConfig(BaseModel):
     write_guard: WriteGuardConfig = Field(default_factory=WriteGuardConfig)
     read_guard: ReadGuardConfig = Field(default_factory=ReadGuardConfig)
     url_policy: UrlPolicyConfig = Field(default_factory=UrlPolicyConfig)
+    download: DownloadConfig = Field(default_factory=DownloadConfig)
 
 
 def apply_cli_command_moderation_overrides(

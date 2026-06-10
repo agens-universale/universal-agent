@@ -148,6 +148,7 @@ def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
             "allowed_schemes": app_cfg.security.url_policy.allowed_schemes,
             "url_blacklist": app_cfg.security.url_policy.url_blacklist,
         },
+        "download": app_cfg.security.download.model_dump(),
         "summary_params": app_cfg.summary.model_dump(),
         "chat_completions_params": app_cfg.chat_completions.model_dump(),
         "chat_completions_llm": app_cfg.chat_completions.llm,

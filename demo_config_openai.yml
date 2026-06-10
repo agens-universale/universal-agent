@@ -98,6 +98,9 @@ security:
     enabled: false
     allowed_schemes: ["http", "https"]
     url_blacklist: []
+  download:
+    download_dir: downloads
+    max_bytes: 52428800
 
 mcp:
   servers:

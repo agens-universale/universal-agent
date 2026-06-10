@@ -355,6 +355,13 @@ security:
     #   - "172.2[0-9].*"               # 172.20-29
     #   - "172.3[0-1].*"               # 172.30-31
 
+  download:
+    # Настройки builtin-тула download_file (не отдельный enforcement-слой).
+    # Вкл/выкл тула — agent.stop_tools.
+    download_dir: downloads         # относительный → от launch_root; абсолютный / ~/… — как есть
+    max_bytes: 52428800             # 50 MiB; превышение → file_too_large, файл не создаётся
+    # download_dir: /tmp/agent-scratch/downloads
+
 mcp:
   servers:
     # python recommended_mcp/install.py --config recommended_mcp/config.local.yml

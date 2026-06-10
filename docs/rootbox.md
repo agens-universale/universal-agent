@@ -5,9 +5,9 @@
 | Слой | Что блокирует | Тулы под защитой | Error type |
 |---|---|---|---|
 | `command_moderation.mode` | опасные команды/код через LLM-судью; в `deny` fail-CLOSED если judge недоступен, в `ask` — запрос пользователю | `execute_command`, `run_python_code` | `unsafe_command_blocked`, `unsafe_command_cancelled_by_user` |
-| `write_guard` | запись вне `launch_root` + `extra_paths` | `write_to_file`, `append_to_file`, `search_and_replace`, write-fragments в `execute_command` | `write_guard_violation` |
+| `write_guard` | запись вне `launch_root` + `extra_paths` | `write_to_file`, `append_to_file`, `search_and_replace`, write-fragments в `execute_command`, `download_file` | `write_guard_violation` |
 | `read_guard` | чтение вне `allowed_read_roots`, в `denied_*`, по запрещённым паттернам/расширениям | `read_file`, `list_files`, `search_files` | `read_guard_violation` |
-| `url_policy` | URL по схеме или `url_blacklist` (включая SSRF-подсети) | `fetch_url`, `simple_fetch_url` | `url_validation_failed`, `url_blocked_by_policy` |
+| `url_policy` | URL по схеме или `url_blacklist` (включая SSRF-подсети) | `fetch_url`, `simple_fetch_url`, `download_file` | `url_validation_failed`, `url_blocked_by_policy` |
 
 Слои независимы: `read_guard` блокирует чтение в любом `command_moderation.mode` (даже `allow`); `url_policy` не зависит от `mode`; `write_guard` независим от `read_guard`. **Safe-by-default-OFF**: каждый слой требует явный `enabled: true`, чтобы включиться.
 
@@ -118,7 +118,7 @@ security:
 
 ## `url_policy` — schema + SSRF-blacklist
 
-Проверяется для **исходного** URL в `fetch_url`/`simple_fetch_url` до сетевого запроса. Redirect targets валидируются per-hop **только в `simple_fetch_url`**.
+Проверяется для **исходного** URL в `fetch_url`/`simple_fetch_url`/`download_file` до сетевого запроса. Redirect targets валидируются per-hop в `simple_fetch_url` и `download_file`.
 
 `mode` (как у write/read_guard):
 
@@ -148,6 +148,24 @@ security:
 ```
 
 Матчинг через `fnmatch` по host и по полному URL (case-insensitive).
+
+## `security.download` — каталог и лимит для `download_file`
+
+Не enforcement-слой: только настройки builtin-тула `download_file` (без `enabled` / `mode`). Вкл/выкл тула — через `agent.stop_tools`.
+
+```yaml
+security:
+  download:
+    download_dir: downloads       # default; относительный → от launch_root
+    max_bytes: 52428800           # default 50 MiB; макс. размер тела HTTP-ответа
+```
+
+| Поле | Поведение |
+|---|---|
+| `download_dir` | Каталог сохранения. Относительный путь резолвится от `launch_root` (не от каталога `config.yml`). Абсолютный / `~/…` — после `expanduser` / `expandvars`. Пустой → `invalid_download_dir`. |
+| `max_bytes` | Лимит размера тела ответа при чтении; превышение → `file_too_large`, файл не создаётся. |
+
+Запись в `download_dir` дополнительно проходит `write_guard` (если `enabled: true`): абсолютный каталог вне периметра нужно добавить в `write_guard.extra_paths`.
 
 ### Рекомендованный SSRF-blacklist
 

@@ -9,6 +9,7 @@ from tools.fs.save_base64_file import SaveBase64File
 from tools.fs.search_and_replace import SearchAndReplace
 from tools.fs.search_files import SearchFiles
 from tools.fs.write_to_file_tool import WriteToFile
+from tools.exec.download_file import DownloadFile
 from tools.exec.calculator import Calculator
 from tools.exec.execute_command import ExecuteCommand
 from tools.exec.run_python_code import RunPythonCode
@@ -58,6 +59,7 @@ def _exec_registry() -> Dict[str, Dict[str, Any]]:
         "exec_sleep": _tool_entry(Sleep),
         "exec_python": _tool_entry(RunPythonCode),
         "exec_fetch_url": _tool_entry(FetchUrl),
+        "download_file": _tool_entry(DownloadFile),
     }
 
 
