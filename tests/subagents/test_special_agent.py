@@ -146,6 +146,29 @@ class TestSpecialAgentCreateInstance:
         call_data = mock_llm.call_args[0][0]
         assert call_data["model"] == "gpt-4o-mini"
 
+    def test_chat_completion_kwargs_merged_into_role_generation(self):
+        """Role generation must respect backend chat_completion_kwargs (e.g. OpenAI temperature=1)."""
+        cfg = _make_config(
+            chat_completion_kwargs={"temperature": 1.0, "top_p": 1.0},
+        )
+        with patch.object(
+            special_agent_module, "request_backend_chat_completions",
+            return_value=_mock_llm_response(),
+        ) as mock_llm:
+            asyncio.run(
+                SpecialAgent.create_instance(
+                    role="Dev",
+                    role_description="desc",
+                    task="task",
+                    model="gpt-5.5",
+                    config_dict=cfg,
+                )
+            )
+
+        call_data = mock_llm.call_args[0][0]
+        assert call_data["temperature"] == 1.0
+        assert call_data["top_p"] == 1.0
+
     def test_config_dict_used_for_url_and_auth(self):
         """URL and Authorization header from config_dict should be passed to the LLM call."""
         cfg = _make_config(

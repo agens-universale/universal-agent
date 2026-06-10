@@ -7,8 +7,11 @@ from unittest.mock import patch
 
 import pytest
 
+from mcp_runtime.venv import pip_install_target
 from recommended_mcp import install as install_mod
 from recommended_mcp.manifest import InstallSpec, MCPEntry
+
+_FAKE_MCP_PY = Path("/fake/mcp-env-python")
 
 
 def _entry(
@@ -40,11 +43,12 @@ def test_runs_when_platform_matches(tmp_path: Path) -> None:
 
     entry = _entry(platforms=("win32", "linux"))
     with patch.object(install_mod.sys, "platform", "win32"):
-        with patch("subprocess.run") as sub:
-            install_mod.install_entry(entry, root=tmp_path)
+        with pip_install_target(_FAKE_MCP_PY):
+            with patch("subprocess.run") as sub:
+                install_mod.install_entry(entry, root=tmp_path)
     sub.assert_called_once()
     cmd = sub.call_args.args[0]
-    assert cmd[0] == sys.executable
+    assert cmd[0] == str(_FAKE_MCP_PY)
     assert cmd[1:4] == ["-m", "pip", "install"]
     assert str(wheel) in cmd
 
@@ -91,6 +95,48 @@ def test_unknown_type_raises_fail_fast() -> None:
         install_mod.install_entry(entry, root=Path("."))
 
 
+def test_pypi_calls_pip_install() -> None:
+    entry = MCPEntry(
+        name="duckduckgo_search",
+        path=Path("./duckduckgo_search"),
+        install=InstallSpec(type="pypi", package="ddgs-mcp==0.1.0"),
+    )
+    with pip_install_target(_FAKE_MCP_PY):
+        with patch("recommended_mcp.install.query_installed_version", return_value=None):
+            with patch("subprocess.run") as sub:
+                install_mod.install_entry(entry, root=Path("."))
+    cmd = sub.call_args.args[0]
+    assert cmd == [
+        str(_FAKE_MCP_PY),
+        "-m",
+        "pip",
+        "install",
+        "ddgs-mcp==0.1.0",
+    ]
+
+
+def test_pypi_skips_when_pinned_version_installed() -> None:
+    entry = MCPEntry(
+        name="duckduckgo_search",
+        path=Path("./duckduckgo_search"),
+        install=InstallSpec(type="pypi", package="ddgs-mcp==0.1.0"),
+    )
+    with patch("recommended_mcp.install.query_installed_version", return_value="0.1.0"):
+        with patch("subprocess.run") as sub:
+            install_mod.install_entry(entry, root=Path("."))
+    assert not sub.called
+
+
+def test_pypi_missing_package_raises() -> None:
+    entry = MCPEntry(
+        name="duckduckgo_search",
+        path=Path("./duckduckgo_search"),
+        install=InstallSpec(type="pypi", package=None),
+    )
+    with pytest.raises(install_mod.InstallError, match="install.package"):
+        install_mod.install_entry(entry, root=Path("."))
+
+
 def _source_entry(
     name: str = "x",
     source: str = "../external/x",
@@ -113,11 +159,12 @@ def test_source_calls_pip_install(tmp_path: Path) -> None:
     (src / "pyproject.toml").write_text("[project]\nname = 'x'\n")
 
     entry = _source_entry(source="external/x")
-    with patch("subprocess.run") as sub:
-        install_mod.install_entry(entry, root=tmp_path)
+    with pip_install_target(_FAKE_MCP_PY):
+        with patch("subprocess.run") as sub:
+            install_mod.install_entry(entry, root=tmp_path)
 
     cmd = sub.call_args.args[0]
-    assert cmd[0] == sys.executable
+    assert cmd[0] == str(_FAKE_MCP_PY)
     assert cmd[1:4] == ["-m", "pip", "install"]
     assert "-e" not in cmd
     assert str(src) in cmd
@@ -129,8 +176,9 @@ def test_source_editable_appends_dash_e(tmp_path: Path) -> None:
     (src / "pyproject.toml").write_text("[project]\nname = 'x'\n")
 
     entry = _source_entry(source="external/x")
-    with patch("subprocess.run") as sub:
-        install_mod.install_source_entry(entry, root=tmp_path, editable=True)
+    with pip_install_target(_FAKE_MCP_PY):
+        with patch("subprocess.run") as sub:
+            install_mod.install_source_entry(entry, root=tmp_path, editable=True)
 
     cmd = sub.call_args.args[0]
     assert "-e" in cmd

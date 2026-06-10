@@ -11,8 +11,10 @@ from recommended_mcp.manifest import (
     ManifestError,
     RunSpec,
     default_agent_dep_dir,
+    default_manifest_path,
     load_agent_dep_dir,
     load_manifest,
+    resolve_manifest_path,
 )
 
 
@@ -20,6 +22,38 @@ def _write(tmp_path: Path, content: str) -> Path:
     f = tmp_path / "config.yml"
     f.write_text(dedent(content), encoding="utf-8")
     return f
+
+
+def test_default_manifest_path(tmp_path: Path) -> None:
+    root = tmp_path / "recommended_mcp"
+    root.mkdir()
+    assert default_manifest_path(root) == root / "config.yml"
+
+
+def test_resolve_manifest_path_default(tmp_path: Path) -> None:
+    root = tmp_path / "recommended_mcp"
+    root.mkdir()
+    default = root / "config.yml"
+    default.write_text("mcps: []\n", encoding="utf-8")
+    assert resolve_manifest_path(root, None) == default.resolve()
+
+
+def test_resolve_manifest_path_custom_relative(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / "recommended_mcp"
+    root.mkdir()
+    custom = root / "config.local.yml"
+    custom.write_text("mcps: []\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    assert resolve_manifest_path(root, Path("recommended_mcp/config.local.yml")) == custom.resolve()
+
+
+def test_resolve_manifest_path_missing_raises(tmp_path: Path) -> None:
+    root = tmp_path / "recommended_mcp"
+    root.mkdir()
+    with pytest.raises(ManifestError, match="manifest not found"):
+        resolve_manifest_path(root, tmp_path / "nope.yml")
 
 
 def test_wheel_mcp_without_run_block(tmp_path: Path) -> None:
@@ -43,8 +77,8 @@ def test_wheel_mcp_without_run_block(tmp_path: Path) -> None:
 def test_docker_mcp_with_run_block(tmp_path: Path) -> None:
     f = _write(tmp_path, """
         mcps:
-          - name: office-reader
-            path: ./office-reader
+          - name: my-docker-mcp
+            path: ./my-docker-mcp
             install:
               type: docker
             run:
@@ -147,6 +181,85 @@ def test_source_mcp(tmp_path: Path) -> None:
     assert entry.install.type == "source"
     assert entry.install.source == Path("../external/computer-mcp")
     assert entry.install.platforms == ("win32",)
+
+
+def test_command_run_block(tmp_path: Path) -> None:
+    f = _write(tmp_path, """
+        mcps:
+          - name: science
+            path: ./science
+            install: {type: source, source: ../external/science-mcp}
+            run:
+              type: command
+              command: science-mcp
+              args: ["--transport", "http"]
+              env:
+                SCIENCE_MCP_PORT: "8765"
+    """)
+    entry = load_manifest(f)[0]
+    assert entry.run is not None
+    assert entry.run.type == "command"
+    assert entry.run.command == "science-mcp"
+    assert entry.run.args == ("--transport", "http")
+    assert entry.run.env == (("SCIENCE_MCP_PORT", "8765"),)
+
+
+def test_command_without_command_raises(tmp_path: Path) -> None:
+    f = _write(tmp_path, """
+        mcps:
+          - name: science
+            path: ./science
+            install: {type: source, source: ../external/science-mcp}
+            run:
+              type: command
+    """)
+    with pytest.raises(ManifestError, match="run.type=command requires run.command"):
+        load_manifest(f)
+
+
+def test_pypi_mcp(tmp_path: Path) -> None:
+    f = _write(tmp_path, """
+        mcps:
+          - name: duckduckgo_search
+            path: ./duckduckgo_search
+            install:
+              type: pypi
+              package: ddgs-mcp==0.1.0
+    """)
+    entry = load_manifest(f)[0]
+    assert entry.install.type == "pypi"
+    assert entry.install.package == "ddgs-mcp==0.1.0"
+    assert entry.run is None
+
+
+def test_pypi_without_package_raises(tmp_path: Path) -> None:
+    f = _write(tmp_path, """
+        mcps:
+          - name: duckduckgo_search
+            path: ./duckduckgo_search
+            install:
+              type: pypi
+    """)
+    with pytest.raises(ManifestError, match="install.type=pypi requires install.package"):
+        load_manifest(f)
+
+
+def test_npx_commands_are_parsed(tmp_path: Path) -> None:
+    f = _write(tmp_path, """
+        mcps:
+          - name: browser_playwright
+            path: ./browser_playwright
+            install:
+              type: npx
+              commands:
+                - [npm, install, -g, "@playwright/mcp@0.0.70"]
+                - [npx, -y, playwright, install, chromium]
+    """)
+    entry = load_manifest(f)[0]
+    assert entry.install.commands == (
+        ("npm", "install", "-g", "@playwright/mcp@0.0.70"),
+        ("npx", "-y", "playwright", "install", "chromium"),
+    )
 
 
 def test_source_without_source_field_raises(tmp_path: Path) -> None:

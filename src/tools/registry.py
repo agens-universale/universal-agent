@@ -15,6 +15,7 @@ from tools.exec.run_python_code import RunPythonCode
 from tools.exec.sleep_tool import Sleep
 from tools.project.project_memory import ProjectMemory
 from tools.session.read_user_intent_log import ReadUserIntentLog
+from tools.session.session_compact import SessionCompact
 from tools.session.think import Think
 from tools.session.working_memory import WorkingMemory
 from tools.session.stored_outputs.read_stored_tool_output import ReadStoredToolOutput
@@ -78,6 +79,7 @@ def _session_registry(config_dict: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
     backend_mode = str(config_dict.get("backend_api_mode", "responses")).strip().lower()
     if backend_mode == "chat_completions":
         registry["session_read_user_intent_log"] = _tool_entry(ReadUserIntentLog)
+        registry["session_compact"] = _tool_entry(SessionCompact)
 
     return registry
 

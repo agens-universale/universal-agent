@@ -18,6 +18,8 @@ from config_modules.root import AppConfig
 def test_project_memory_notice_defaults():
     cfg = ProjectMemoryNoticeConfig()
     assert cfg.check_interval_messages == 5
+    assert cfg.max_chars == 10_000
+    assert cfg.max_append_chars == 3_000
 
 
 def test_normalize_long_memory_notice_rejects_non_positive():
@@ -121,6 +123,18 @@ def test_project_memory_notice_enabled_from_nested_and_flat_config():
     assert project_memory_notice_enabled({"enable_project_memory_notice": True})
 
 
+def test_normalize_project_memory_limits_rejects_non_positive():
+    from config_modules.project_memory import (
+        ProjectMemoryConfig,
+        normalize_project_memory_config,
+    )
+
+    cfg = ProjectMemoryConfig(max_chars=-1, max_append_chars=0)
+    normalize_project_memory_config(cfg)
+    assert cfg.max_chars == 10_000
+    assert cfg.max_append_chars == 3_000
+
+
 def test_load_config_includes_message_notice_keys(tmp_path, monkeypatch):
     cfg_path = tmp_path / "config.yml"
     cfg_path.write_text(
@@ -142,6 +156,8 @@ project_memory:
     monkeypatch.setattr("config._xdg_config_path", lambda: None)
     cfg = load_config(str(cfg_path))
     assert cfg["project_memory_check_interval_messages"] == 4
+    assert cfg["project_memory_max_chars"] == 10_000
+    assert cfg["project_memory_max_append_chars"] == 3_000
     assert cfg["enable_project_memory_notice"] is True
     assert cfg["project_memory_params"]["check_interval_messages"] == 4
     assert len(cfg["tool_usage_notice_params"]) == 1

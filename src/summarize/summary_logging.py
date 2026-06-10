@@ -12,6 +12,7 @@ _TRIGGER_REASON_LABELS: dict[str, str] = {
     "pre_run": "старт сессии",
     "pre_backend": "середина хода (окно переполнено)",
     "subagent_pre_backend": "subagent, середина хода",
+    "session_compact": "по запросу агента (session_compact)",
 }
 
 
@@ -254,6 +255,60 @@ def log_compaction_failed(
         _cli_print(
             f"Ошибка суммаризации ({log_ctx.rule_label}): error={error}"
         )
+
+
+def log_summary_slice_fallback(
+    logger: Any | None,
+    log_ctx: SummaryCompactionLog,
+    *,
+    slice_mode: str,
+    raw_summary_chars: int,
+) -> None:
+    if logger is None:
+        return
+    logger.warning(
+        "summary_slice_fallback rule_id=%s thread_id=%s slice_mode=%s "
+        "raw_summary_chars=%s agent_gets_full_raw=true",
+        log_ctx.trigger_reason,
+        log_ctx.thread_id,
+        slice_mode,
+        raw_summary_chars,
+    )
+
+
+def log_memory_patch_wm_unchanged(
+    logger: Any | None,
+    *,
+    batches: int,
+    format_repair_attempted: bool,
+    format_repair_success: bool,
+    raw_response_chars: int,
+) -> None:
+    if logger is None:
+        return
+    logger.warning(
+        "summary_memory_patch_wm_unchanged batches=%s "
+        "format_repair_attempted=%s format_repair_success=%s raw_response_chars=%s "
+        "agent_slice_may_still_be_short=true",
+        batches,
+        format_repair_attempted,
+        format_repair_success,
+        raw_response_chars,
+    )
+
+
+def log_memory_patch_skipped_multi_batch(
+    logger: Any | None,
+    *,
+    batches: int,
+) -> None:
+    if logger is None:
+        return
+    logger.info(
+        "summary_memory_patch_skipped_multi_batch batches=%s "
+        "working_memory_not_updated_from_summary=true",
+        batches,
+    )
 
 
 def log_pre_run_max_rounds(

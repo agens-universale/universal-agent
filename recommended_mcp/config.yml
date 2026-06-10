@@ -25,7 +25,17 @@ mcps:
     install:
       type: source
       source: ../external/science-mcp
-    # daemon — запускать отдельно: science-mcp --transport http
+    run:
+      type: command
+      command: science-mcp
+      args: ["--transport", "http"]
+
+  - name: duckduckgo_search
+    path: ./duckduckgo_search
+    install:
+      type: pypi
+      package: ddgs-mcp==0.1.0
+    # run-блок отсутствует: агент спавнит ddgs-mcp по stdio.
 
   - name: browser_playwright
     path: ./browser_playwright

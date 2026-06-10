@@ -129,6 +129,17 @@ parser.add_argument(
 )
 
 parser.add_argument(
+    "-a",
+    "--auto-mcp",
+    action="store_true",
+    help=(
+        "Поднять HTTP/SSE MCP-daemon'ы из recommended_mcp/ перед запуском "
+        "(если каталог есть в cwd); по завершении gc-cli гасятся только "
+        "процессы, запущенные этим вызовом"
+    ),
+)
+
+parser.add_argument(
     "-n",
     "--new",
     action="store_true",

@@ -37,6 +37,17 @@ from tools.session.stored_outputs.tool_call_outputs_store import (
 from tools.session.stored_outputs.wrapping import maybe_store_and_wrap_tool_output
 
 
+def _assert_pagination_metadata(payload: dict, *, expect_truncated: bool) -> None:
+    assert payload["truncated"] is expect_truncated
+    assert isinstance(payload["total_chars"], int)
+    assert isinstance(payload["total_bytes"], int)
+    assert isinstance(payload["output_ref"], str) and payload["output_ref"]
+    assert isinstance(payload["offset"], int)
+    assert isinstance(payload["returned_chars"], int)
+    assert isinstance(payload["next_offset"], int)
+    assert payload["returned_chars"] == len(payload["content"])
+
+
 def _make_state() -> State:
     return State(
         verbose=False,
@@ -81,7 +92,10 @@ def test_wrap_long_output_stores_and_returns_envelope():
     assert payload["source_tool"] == "some_tool"
     assert payload["content"] == "abcde"
     assert payload["next_offset"] == 5
-    assert payload["truncated"] is True
+    _assert_pagination_metadata(payload, expect_truncated=True)
+    assert payload["returned_chars"] == 5
+    assert payload["total_chars"] == 10
+    assert payload["total_bytes"] == len("abcdefghij".encode("utf-8"))
     assert len(state.tool_call_outputs_store) == 1
     output_ref = payload["output_ref"]
     assert state.tool_call_outputs_store.contains(output_ref)
@@ -144,11 +158,15 @@ def test_session_read_stored_tool_output_pagination_and_unicode():
     assert page1["limit"] == 2
     assert page1["content"] == "A😀"
     assert page1["next_offset"] == 2
-    assert page1["truncated"] is True
+    _assert_pagination_metadata(page1, expect_truncated=True)
+    assert page1["returned_chars"] == 2
+    assert page1["total_chars"] == 4
     page2 = json.loads(tool(output_ref="ref-1", offset=2, limit=2))
     assert page2["content"] == "BC"
-    assert page2["truncated"] is False
-    assert page2["next_offset"] == 4
+    _assert_pagination_metadata(page2, expect_truncated=False)
+    assert page2["returned_chars"] == 2
+    assert page2["next_offset"] == page2["total_chars"] == 4
+    assert "eof" in page2["hint"].lower()
 
 
 def test_session_read_stored_tool_output_updates_lru_recency_before_next_put():
@@ -313,6 +331,7 @@ def test_process_tool_calls_wraps_long_tool_output(monkeypatch):
     payload = json.loads(out[0]["output"])
     assert payload["type"] == "stored_tool_output"
     assert payload["from_original_call_id"] == "call_42"
+    _assert_pagination_metadata(payload, expect_truncated=True)
 
 
 def test_state_serialization_roundtrip_restores_store_and_lru_order(tmp_path):

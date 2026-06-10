@@ -52,6 +52,9 @@ class McpMetaConfig(BaseModel):
 
     tools_cache_ttl: int = Field(default=3600, alias="tools-cache-ttl")
     request_timeout_sec: int = 600
+    recommended_mcp_manifest: str | None = Field(
+        default=None, alias="recommended-mcp-manifest"
+    )
 
     @field_validator("tools_cache_ttl", "request_timeout_sec", mode="before")
     @classmethod

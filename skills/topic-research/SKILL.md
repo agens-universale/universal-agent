@@ -1,7 +1,7 @@
 ---
 id: "topic-research"
 name: "topic-research"
-description: "Conducts deep research on a topic using multiple independent sources, primary evidence, competing viewpoints, reliability assessment, and confidence-rated recommendations. Use when the user asks to investigate, research, compare, benchmark, find sources, or prepare an evidence-backed overview. Best for external or domain questions, market, technology, regulatory, vendor research, and uncertain claims. Do not use for writing full articles, software architecture design, or code implementation."
+description: "Conducts deep research on a topic using multiple independent sources, primary evidence, competing viewpoints, reliability assessment, and confidence-rated recommendations. Use when the user asks to investigate, research, compare, benchmark vendors/products/markets/models, find sources, or prepare an evidence-backed overview. Best for external or domain questions, market, technology, regulatory, vendor research, and uncertain claims. Do not use for automated benchmark/eval task instances requiring no-HITL execution and machine-checkable artifacts; use autonomous-benchmark-agent. Do not use for writing full articles, software architecture design, or code implementation."
 version: "0.1.0"
 ---
 
@@ -19,7 +19,7 @@ Default outcome: deep research artifact with findings, confidence, risks, and ne
 - The user needs recommendations backed by sources and explicit uncertainty.
 - There are conflicting claims and a reasoned position is needed.
 
-Do not use this skill for pure coding tasks, ADR-level architecture design, or full long-form article production.
+Do not use this skill for pure coding tasks, ADR-level architecture design, full long-form article production, or automated benchmark/eval task instances that require no-HITL execution and machine-checkable artifacts.
 
 ## Language Strategy
 - Default to Russian for final user-facing output unless the user requests another language.

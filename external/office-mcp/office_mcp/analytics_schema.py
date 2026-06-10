@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 FilterOp = Literal[
     "==", "!=", ">", ">=", "<", "<=",
@@ -12,12 +12,17 @@ FilterOp = Literal[
     "between",
 ]
 
+FilterScalar = str | int | float | bool
+FilterValue = FilterScalar | list[FilterScalar] | None
+
 
 class FilterClause(BaseModel):
     """A single leaf filter clause. OR-grouping is expressed at the parse_filter level."""
+    model_config = ConfigDict(extra="forbid")
+
     col: str
     op: FilterOp
-    value: Any = None
+    value: FilterValue = None
 
     @model_validator(mode="after")
     def _validate_value_shape(self) -> FilterClause:
@@ -34,6 +39,40 @@ class FilterClause(BaseModel):
             if not isinstance(self.value, str):
                 raise ValueError(f"{self.op!r} requires a string value")
         return self
+
+
+class OrFilterGroup(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    or_: list[FilterClause | OrFilterGroup] = Field(alias="or")
+
+
+OrFilterGroup.model_rebuild()
+
+FilterNode = FilterClause | OrFilterGroup
+
+
+def _coerce_filter_node(node: FilterNode | dict) -> FilterNode:
+    if isinstance(node, (FilterClause, OrFilterGroup)):
+        return node
+    if isinstance(node, dict):
+        if "or" in node:
+            return OrFilterGroup.model_validate(node)
+        return FilterClause.model_validate(node)
+    raise TypeError(f"filter node must be dict or FilterNode, got {type(node).__name__}")
+
+
+def filter_node_to_dict(node: FilterNode | dict) -> dict:
+    coerced = _coerce_filter_node(node)
+    if isinstance(coerced, OrFilterGroup):
+        return {"or": [filter_node_to_dict(child) for child in coerced.or_]}
+    return coerced.model_dump()
+
+
+def filter_nodes_to_raw(nodes: list[FilterNode | dict] | None) -> list[dict]:
+    if not nodes:
+        return []
+    return [filter_node_to_dict(node) for node in nodes]
 
 
 def parse_filter(raw: list[dict] | None) -> dict:
@@ -67,8 +106,55 @@ AGG_FUNCS = frozenset({
 
 
 class SortSpec(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     col: str
     order: Literal["asc", "desc"] = "asc"
+
+
+def sort_specs_to_models(sort: list[SortSpec | dict] | None) -> list[SortSpec]:
+    if not sort:
+        return []
+    out: list[SortSpec] = []
+    for item in sort:
+        if isinstance(item, SortSpec):
+            out.append(item)
+        elif isinstance(item, dict):
+            out.append(SortSpec.model_validate(item))
+        else:
+            raise TypeError(f"sort item must be dict or SortSpec, got {type(item).__name__}")
+    return out
+
+
+class AggColumnSpec(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    col: str
+    func: str | list[str]
+
+
+def agg_columns_to_dict(
+    columns: list[AggColumnSpec | dict] | None,
+) -> dict[str, str | list[str]]:
+    if not columns:
+        return {}
+    out: dict[str, str | list[str]] = {}
+    for column in columns:
+        spec = (
+            column
+            if isinstance(column, AggColumnSpec)
+            else AggColumnSpec.model_validate(column)
+        )
+        out[spec.col] = spec.func
+    return out
+
+
+class OutputFileInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    path: str
+    sheet: str = "Sheet1"
+    overwrite: bool = False
 
 
 class OutputSpec(BaseModel):
@@ -92,5 +178,12 @@ class OutputSpec(BaseModel):
                 path=raw["path"],
                 sheet=raw.get("sheet", "Sheet1"),
                 overwrite=raw.get("overwrite", False),
+            )
+        if isinstance(raw, OutputFileInput):
+            return cls(
+                kind="file",
+                path=raw.path,
+                sheet=raw.sheet,
+                overwrite=raw.overwrite,
             )
         raise ValueError(f"output must be None | 'data' | dict, got {type(raw).__name__}")

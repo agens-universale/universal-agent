@@ -12,10 +12,12 @@ from project_memory.status import (
     attach_status_to_prompt_vars,
     build_project_memory_status,
     build_project_memory_status_for_cwd,
+    fill_percent,
 )
 from project_memory.storage import (
     ProjectMemoryError,
     ProjectMemoryStat,
+    DEFAULT_MAX_CHARS,
     MAX_CHARS,
     append,
     content_hash,
@@ -45,6 +47,7 @@ __all__ = [
     "CompactionResult",
     "ProjectMemoryError",
     "ProjectMemoryStat",
+    "DEFAULT_MAX_CHARS",
     "MAX_CHARS",
     "SOFT_APPEND_INPUT_LIMIT_CHARS",
     "append",
@@ -53,6 +56,7 @@ __all__ = [
     "get_hash",
     "build_project_memory_status",
     "build_project_memory_status_for_cwd",
+    "fill_percent",
     "compact_text",
     "read",
     "resolve_project_memory_path",

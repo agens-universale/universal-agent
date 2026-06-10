@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "office-mcp"
-version = "0.3.0"
+version = "0.3.1"
 description = "MCP server for reading and writing office documents (pdf, docx, xls, xlsx, pptx, csv, html, msg) with xlsx analytics"
 requires-python = ">=3.10"
 dependencies = [

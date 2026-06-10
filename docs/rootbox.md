@@ -149,6 +149,50 @@ security:
 
 Матчинг через `fnmatch` по host и по полному URL (case-insensitive).
 
+### Рекомендованный SSRF-blacklist
+
+> ⚠️ `url_blacklist` по умолчанию **пустой** — встроенного дефолта в коде нет.
+> Чтобы получить базовую SSRF-защиту, добавьте набор ниже вручную (например,
+> в global `config.yml` или per-project `.gc/config.yml`). Списки в security
+> мерджатся конкатенацией с dedup, поэтому проектные правила его расширяют,
+> а не сбрасывают.
+
+Набор закрывает три класса internal-таргетов, к которым агента нельзя
+пускать через `fetch_url` / `simple_fetch_url`:
+
+| Группа | Что закрывает | Зачем |
+|---|---|---|
+| **Cloud metadata** | `169.254.169.254`, `metadata.google.internal` (+поддомены), `metadata.azure.com` (+поддомены) | IMDS облачных провайдеров отдаёт креды/токены инстанса. Классический SSRF-pivot: агента просят сходить на metadata-endpoint и слить IAM-роль. |
+| **Loopback / link-local** | `localhost`, `127.*`, `::1`, `0.0.0.0`, `169.254.*` | Сервисы, слушающие только на localhost (админки, debug-порты, незащищённые локальные БД), и весь link-local блок. |
+| **RFC1918 private** | `10.*`, `172.16–31.*`, `192.168.*` | Соседи по внутренней сети (internal API, БД, k8s-сервисы), которые не должны быть доступны агенту. |
+
+```yaml
+security:
+  url_policy:
+    enabled: true
+    mode: deny
+    allowed_schemes: ["http", "https"]
+    url_blacklist:
+      # --- Cloud metadata endpoints ---
+      - "169.254.169.254"              # AWS / GCP / OpenStack IMDS
+      - "metadata.google.internal"     # GCP metadata (apex)
+      - "*.metadata.google.internal"   # GCP metadata (поддомены)
+      - "metadata.azure.com"           # Azure metadata (apex)
+      - "*.metadata.azure.com"         # Azure metadata (поддомены)
+      # --- Loopback / link-local ---
+      - "localhost"
+      - "127.*"                        # весь loopback-блок 127.0.0.0/8
+      - "::1"                          # IPv6 loopback
+      - "0.0.0.0"
+      - "169.254.*"                    # link-local (включая IMDS-подсеть)
+      # --- RFC1918 private networks ---
+      - "10.*"                         # 10.0.0.0/8
+      - "192.168.*"                    # 192.168.0.0/16
+      - "172.1[6-9].*"                 # 172.16-19 (часть 172.16.0.0/12)
+      - "172.2[0-9].*"                 # 172.20-29
+      - "172.3[0-1].*"                 # 172.30-31
+```
+
 ## CLI override'ы
 
 Любую секцию security можно переключить флагом без правки `config.yml`:

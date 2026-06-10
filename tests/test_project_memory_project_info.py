@@ -16,6 +16,7 @@ def test_attach_status_with_no_memory_file(tmp_path, monkeypatch):
     attach_status_to_prompt_vars(prompt_vars)
     assert "longMemoryStatus" in prompt_vars
     assert "doesn't have long memory yet" in prompt_vars["longMemoryStatus"]
+    assert "Limit: 10000 chars (0% filled)." in prompt_vars["longMemoryStatus"]
 
 
 def test_attach_status_with_populated_memory(tmp_path, monkeypatch):
@@ -26,7 +27,8 @@ def test_attach_status_with_populated_memory(tmp_path, monkeypatch):
     prompt_vars: dict = {}
     attach_status_to_prompt_vars(prompt_vars)
     assert "project has long memory" in prompt_vars["longMemoryStatus"]
-    assert f"{len(body)} chars" in prompt_vars["longMemoryStatus"]
+    assert f"{len(body)}/10000 chars" in prompt_vars["longMemoryStatus"]
+    assert "% filled" in prompt_vars["longMemoryStatus"]
     assert "appropriate memory tool" in prompt_vars["longMemoryStatus"]
     assert "MUST" not in prompt_vars["longMemoryStatus"]
     assert "FIRST STEP" not in prompt_vars["longMemoryStatus"]
@@ -41,6 +43,20 @@ def test_attach_status_skipped_when_long_memory_in_stop_tools(tmp_path, monkeypa
         prompt_vars, config_dict={"stop_tools": ["project_memory"]}
     )
     assert "longMemoryStatus" not in prompt_vars
+
+
+def test_attach_status_uses_configured_limit(tmp_path, monkeypatch):
+    (tmp_path / ".gc").mkdir()
+    body = "seeded"
+    (tmp_path / ".gc" / "project_memory.md").write_text(body, encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    prompt_vars: dict = {}
+    attach_status_to_prompt_vars(
+        prompt_vars,
+        config_dict={"project_memory_params": {"max_chars": 1000}},
+    )
+    assert f"{len(body)}/1000 chars" in prompt_vars["longMemoryStatus"]
+    assert "% filled" in prompt_vars["longMemoryStatus"]
 
 
 def test_attach_status_with_explicit_cwd(tmp_path):
@@ -113,3 +129,4 @@ def test_subagent_prompt_template_renders_empty_status(tmp_path, monkeypatch):
     )
 
     assert "doesn't have long memory yet" in rendered
+    assert "Limit: 10000 chars (0% filled)." in rendered

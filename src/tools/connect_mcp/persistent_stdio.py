@@ -58,7 +58,9 @@ def _spawn_detached_stdio_process(server_cfg: Dict[str, Any]) -> subprocess.Pope
     cmd = [command] + [str(a) for a in args]
     cwd = server_cfg.get("cwd")
     env_extra = server_cfg.get("env") or {}
-    env = os.environ.copy()
+    from mcp_runtime.env import augment_process_env
+
+    env = augment_process_env()
     for k, v in env_extra.items():
         env[str(k)] = str(v)
 

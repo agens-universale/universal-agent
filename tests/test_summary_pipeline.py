@@ -7,7 +7,7 @@ from summarize.compaction import (
     maybe_run_summary_compaction,
 )
 from thread_store import ThreadSession, append_new_thread_messages, save_thread_meta
-from tests.helpers.summary_sample import valid_summary_text_for_tests
+from tests.helpers.summary_sample import valid_summary_xml_for_tests
 
 TS = "2026-05-30T11:35:08Z"
 
@@ -116,7 +116,7 @@ def test_maybe_run_summary_compaction_twice_uses_meta_user_log(monkeypatch):
         monkeypatch.setattr("summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
         _patch_chat_completion(
             monkeypatch,
-            lambda **_kwargs: valid_summary_text_for_tests(seed="context"),
+            lambda **_kwargs: valid_summary_xml_for_tests(seed="context"),
         )
         empty_patch = types.SimpleNamespace(request_messages=[], raw_response="")
         monkeypatch.setattr(
@@ -212,7 +212,7 @@ def test_maybe_run_summary_compaction_works_without_thread(monkeypatch):
     monkeypatch.setattr("summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
     _patch_chat_completion(
         monkeypatch,
-        lambda **_kwargs: valid_summary_text_for_tests(seed="context"),
+        lambda **_kwargs: valid_summary_xml_for_tests(seed="context"),
     )
     empty_patch = types.SimpleNamespace(request_messages=[], raw_response="")
     monkeypatch.setattr(
@@ -250,7 +250,7 @@ def test_maybe_run_summary_compaction_preserves_system_and_state_metadata(monkey
     monkeypatch.setattr("summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
     _patch_chat_completion(
         monkeypatch,
-        lambda **_kwargs: valid_summary_text_for_tests(seed="context"),
+        lambda **_kwargs: valid_summary_xml_for_tests(seed="context"),
     )
     empty_patch = types.SimpleNamespace(request_messages=[], raw_response="")
     monkeypatch.setattr(

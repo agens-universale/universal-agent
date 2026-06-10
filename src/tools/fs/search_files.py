@@ -21,6 +21,7 @@ class SearchFiles(AbstractSimpleTool):
     """Paginated grep-style search; default first page mirrors fs_read_file preview (500 items)."""
 
     default_limit = 500
+    _literal_word_re = re.compile(r"[a-zA-Z_а-яА-Я][a-zA-Z0-9_а-яА-Я]+")
 
     @classmethod
     def tool_description(cls):
@@ -127,10 +128,16 @@ Search for error logs in Rust source files:
 '''
         return description
 
-    def _extract_literal(self, pattern: str) -> Optional[str]:
-        """Пытается найти буквенный фрагмент в регулярке для быстрой фильтрации."""
-        match = re.search(r'[a-zA-Z_а-яА-Я][a-zA-Z0-9_а-яА-Я]+', pattern)
-        return match.group(0) if match else None
+    def _extract_literals(self, pattern: str) -> Tuple[str, ...]:
+        """Буквенные фрагменты паттерна для быстрой фильтрации строк (OR, не AND)."""
+        seen: set[str] = set()
+        literals: List[str] = []
+        for match in self._literal_word_re.finditer(pattern):
+            word = match.group(0)
+            if word not in seen:
+                seen.add(word)
+                literals.append(word)
+        return tuple(literals)
 
     def _search_in_file(self, file_path: str, regex: str, context_num=5) -> List[Dict[str, Any]]:
         try:
@@ -138,7 +145,7 @@ Search for error logs in Rust source files:
         except re.error as e:
             raise ValueError(f"Invalid regex pattern '{regex}': {str(e)}")
 
-        literal_hint = self._extract_literal(regex)
+        literal_hints = self._extract_literals(regex)
 
         results = []
         buffer = []
@@ -156,9 +163,8 @@ Search for error logs in Rust source files:
                         results.append(found_data)
                         found_data = None
 
-                    if literal_hint and literal_hint not in line:
+                    if literal_hints and not any(hint in line for hint in literal_hints):
                         buffer = buffer[-context_num:]
-                        # print(f'literal_hint: {literal_hint} - skip: ', line)
                         continue
 
                     res = compiled_regex.search(line)

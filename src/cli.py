@@ -15,6 +15,7 @@ from message_policy.user_message_policy import (
     wrap_technical_user_content,
 )
 from run_context import RunContext, create_run_context
+from mcp_daemon_autostart import ensure_mcp_daemons, shutdown_mcp_daemons
 from utils.json_text import format_json_for_display
 
 
@@ -140,6 +141,9 @@ def main() -> int:
     )
 
     auth_connector = build_auth_connector(config_dict)
+    auto_mcp = getattr(arg_parser.run_args, "auto_mcp", False)
+    if auto_mcp:
+        ensure_mcp_daemons(config_dict)
     ctx = create_run_context(config_dict, auth_connector=auth_connector)
 
     user_parts: list[str] = [arg_parser.run_args.query]
@@ -155,12 +159,16 @@ def main() -> int:
     start_new_thread = arg_parser.run_args.new
 
     executor = AgentExecutor(ctx)
-    response = executor.run(
-        user_parts,
-        thread_id=thread_id,
-        start_new_thread=start_new_thread,
-        verbose=verbose,
-    )
+    try:
+        response = executor.run(
+            user_parts,
+            thread_id=thread_id,
+            start_new_thread=start_new_thread,
+            verbose=verbose,
+        )
+    finally:
+        if auto_mcp:
+            shutdown_mcp_daemons()
     if config_dict.get("console_trace", True):
         formatted = format_json_for_display(response)
         if formatted:

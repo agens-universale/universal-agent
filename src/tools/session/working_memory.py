@@ -114,7 +114,11 @@ class WorkingMemory(AbstractSimpleTool):
                 "state = current plan, progress, completed steps, open TODOs, blockers, next actions, active hypotheses; "
                 "knowledge = stable verified facts, architecture decisions, implementation notes, artifact references, evidence. "
                 "Actions: list, read, append, rewrite. "
+                "Every response includes per-register length vs limit in registers. "
                 "Use append for compact new deltas only. Use rewrite for compaction, cleanup, deduplication, or removing obsolete information. "
+                "Maintenance: when register sizes in that metadata approach or exceed limits, proactively compact the affected register—read it, then rewrite (deduplicate, drop obsolete detail; do not keep appending into an overfull register). "
+                "Move bulky details to a file/artifact when needed; keep a concise form of what belongs in that register per the definitions above (e.g. facts, decisions, plan/TODOs, blockers, artifact links—not chain-of-thought or raw dumps). "
+                "Do not wait for the user to ask; memory hygiene is part of using this tool. "
                 "Do NOT store chain-of-thought, verbose reasoning, raw logs, large blobs, full file contents, repetitive history, or transient chatter. "
                 "Register selection: objective/done criteria -> goal; requirements/preferences -> constraints; progress/TODO/blocker/next action -> state; stable fact/decision/artifact/evidence -> knowledge. "
                 "If unsure: actionable unresolved information -> state; stable reusable information -> knowledge; requirement/preference -> constraints; desired outcome -> goal. "
@@ -177,7 +181,9 @@ class WorkingMemory(AbstractSimpleTool):
     @classmethod
     def prompt_description(cls) -> str:
         return """Tool name: session_memory
-Tool description: Persistent per-thread operational memory for the agent.
+Tool description: Thread/session memory for THIS dialogue only — not project-wide remember-forever.
+Persistent per-thread operational memory for the agent.
+Do not append on every trivial step; write after meaningful progress or before handoff/delegation.
 This tool does NOT write files to disk or filesystem.
 It stores compact durable task state that survives dialog summarization.
 
@@ -192,6 +198,12 @@ Actions:
 - read: return one register
 - append: add compact new deltas only
 - rewrite: fully replace a register for compaction, cleanup, deduplication, or removing obsolete information
+
+Maintenance (register hygiene):
+- Every tool response includes per-register length vs limit in `registers`.
+- When sizes approach or exceed limits, read the affected register and rewrite it compactly (deduplicate, drop obsolete detail; do not keep appending into an overfull register).
+- Move bulky details to a file/artifact when needed; keep a concise form of register-appropriate content per definitions above (facts, decisions, plan/TODOs, blockers, artifact links—not chain-of-thought or raw dumps).
+- Do not wait for the user to ask; memory hygiene is part of using this tool.
 
 Register selection:
 - objective/done criteria -> goal

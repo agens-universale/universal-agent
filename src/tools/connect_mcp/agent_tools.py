@@ -8,6 +8,7 @@ from typing import Any, Dict
 
 from tools.connect_mcp.api import call_mcp_tool
 from tools.connect_mcp.registry import ToolsCache
+from tools.schema_optional import apply_openai_strict_object
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +44,96 @@ class MCPToolWrapper:
         )
 
 
+def _collect_schema_refs(node: Any) -> set[str]:
+    """Collect ``#/$defs/...`` names still referenced anywhere in *node*."""
+    refs: set[str] = set()
+    if isinstance(node, dict):
+        ref = node.get("$ref")
+        if isinstance(ref, str) and ref.startswith("#/$defs/"):
+            refs.add(ref.rsplit("/", 1)[-1])
+        for value in node.values():
+            refs |= _collect_schema_refs(value)
+    elif isinstance(node, list):
+        for item in node:
+            refs |= _collect_schema_refs(item)
+    return refs
+
+
+def _resolve_schema_refs(
+    node: Any,
+    defs: dict[str, Any],
+    depth: int = 0,
+    resolving: frozenset[str] | None = None,
+) -> Any:
+    """Inline ``#/$defs/...`` refs (OpenAI strict rejects bare ``$ref`` property schemas)."""
+    if resolving is None:
+        resolving = frozenset()
+    if depth > 64:
+        return node
+    if isinstance(node, dict):
+        ref = node.get("$ref")
+        if isinstance(ref, str) and ref.startswith("#/$defs/"):
+            name = ref.rsplit("/", 1)[-1]
+            target = defs.get(name)
+            if isinstance(target, dict):
+                if name in resolving:
+                    return {"$ref": ref}
+                resolved = _resolve_schema_refs(
+                    target, defs, depth + 1, resolving | {name}
+                )
+                merged = dict(resolved) if isinstance(resolved, dict) else {}
+                for key, value in node.items():
+                    if key != "$ref" and key not in merged:
+                        merged[key] = value
+                return merged
+        out: dict[str, Any] = {}
+        for key, value in node.items():
+            if key == "$defs":
+                continue
+            out[key] = _resolve_schema_refs(value, defs, depth + 1, resolving)
+        return out
+    if isinstance(node, list):
+        return [
+            _resolve_schema_refs(item, defs, depth + 1, resolving) for item in node
+        ]
+    return node
+
+
+def _preserve_referenced_defs(parameters: Dict[str, Any], source_defs: dict[str, Any]) -> None:
+    """Keep ``$defs`` entries still pointed at by ``$ref`` after partial inlining."""
+    needed = _collect_schema_refs(parameters)
+    while needed:
+        expanded = set(needed)
+        for name in list(needed):
+            def_schema = source_defs.get(name)
+            if isinstance(def_schema, dict):
+                expanded |= _collect_schema_refs(def_schema)
+        if expanded == needed:
+            break
+        needed = expanded
+    if needed:
+        parameters["$defs"] = {
+            name: copy.deepcopy(source_defs[name])
+            for name in sorted(needed)
+            if name in source_defs
+        }
+    elif "$defs" in parameters:
+        del parameters["$defs"]
+
+
+def _inline_parameter_schema_refs(parameters: Dict[str, Any]) -> None:
+    """Expand Pydantic/FastMCP ``$defs`` before property normalization."""
+    defs = parameters.get("$defs")
+    if not isinstance(defs, dict) or not defs:
+        return
+    source_defs = copy.deepcopy(defs)
+    resolved = _resolve_schema_refs(parameters, source_defs)
+    if isinstance(resolved, dict):
+        parameters.clear()
+        parameters.update(resolved)
+    _preserve_referenced_defs(parameters, source_defs)
+
+
 def _ensure_param_description(schema: Dict[str, Any], param_name: str) -> None:
     """
     Гарантировать наличие description у параметра.
@@ -58,6 +149,13 @@ def _ensure_param_description(schema: Dict[str, Any], param_name: str) -> None:
         schema["description"] = f"{param_name} parameter."
 
 
+def _bare_schema_ref(schema: dict[str, Any]) -> dict[str, str] | None:
+    ref = schema.get("$ref")
+    if isinstance(ref, str):
+        return {"$ref": ref}
+    return None
+
+
 def _normalize_schema_recursive(schema: Any, param_name: str = "") -> Any:
     """
     Рекурсивная нормализация фрагмента JSON Schema.
@@ -69,6 +167,20 @@ def _normalize_schema_recursive(schema: Any, param_name: str = "") -> Any:
             "description": f"{param_name} parameter. Raw schema value: {schema!r}",
         }
 
+    bare_ref = _bare_schema_ref(schema)
+    if bare_ref is not None:
+        return bare_ref
+
+    for comb_key in ("anyOf", "oneOf", "allOf"):
+        branches = schema.get(comb_key)
+        if isinstance(branches, list):
+            schema[comb_key] = [
+                _normalize_schema_recursive(branch, param_name=param_name)
+                if isinstance(branch, dict)
+                else branch
+                for branch in branches
+            ]
+
     # Schema-combinator constructs (anyOf / oneOf / allOf) define the type via
     # their branches; a top-level `type` is optional in JSON Schema and adding
     # one here breaks validation when it conflicts with the combinator.
@@ -76,8 +188,9 @@ def _normalize_schema_recursive(schema: Any, param_name: str = "") -> Any:
     # would otherwise gain `type: "string"` here, making any value invalid
     # (validator AND-s `type` with `anyOf`).
     has_combinator = any(k in schema for k in ("anyOf", "oneOf", "allOf"))
+    has_ref = isinstance(schema.get("$ref"), str)
 
-    if "type" not in schema and not has_combinator:
+    if "type" not in schema and not has_combinator and not has_ref:
         if "properties" in schema:
             schema["type"] = "object"
         elif "items" in schema:
@@ -108,8 +221,10 @@ def _normalize_schema_recursive(schema: Any, param_name: str = "") -> Any:
             _ensure_param_description(normalized_subschema, name)
             props[name] = normalized_subschema
 
-        if "additionalProperties" not in schema:
+        if schema.get("additionalProperties") is not False:
             schema["additionalProperties"] = False
+
+        apply_openai_strict_object(schema)
 
     elif schema_type == "array":
         items = schema.get("items")
@@ -172,6 +287,8 @@ def normalize_tool_spec_for_agent(tool_spec: Dict[str, Any]) -> Dict[str, Any]:
             "additionalProperties": False,
         }
 
+    _inline_parameter_schema_refs(parameters)
+
     props = parameters.get("properties")
     if not isinstance(props, dict):
         props = {}
@@ -194,6 +311,14 @@ def normalize_tool_spec_for_agent(tool_spec: Dict[str, Any]) -> Dict[str, Any]:
 
     if "additionalProperties" not in parameters:
         parameters["additionalProperties"] = False
+
+    apply_openai_strict_object(parameters)
+
+    defs = parameters.get("$defs")
+    if isinstance(defs, dict):
+        for def_name, def_schema in list(defs.items()):
+            if isinstance(def_schema, dict):
+                defs[def_name] = _normalize_schema_recursive(def_schema, param_name=def_name)
 
     spec["parameters"] = parameters
     spec.setdefault("strict", True)

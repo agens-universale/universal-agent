@@ -1,12 +1,8 @@
 import unittest
 
 from message_format.dialog_history import format_last_dialog_steps, group_into_turns, split_turns_into_char_batches
-from summarize.summary_validation import (
-    _section_marker_hit,
-    is_valid_summary_text,
-    validate_summary_text,
-)
-from tests.helpers.summary_sample import valid_summary_text_for_tests
+from summarize.summary_validation import is_valid_summary_text, validate_summary_text
+from tests.helpers.summary_sample import valid_summary_xml_for_tests
 from message_policy.user_message_policy import append_user_log_entries
 
 
@@ -24,55 +20,17 @@ class ThreadSummarizerTest(unittest.TestCase):
         self.assertEqual(log, ["Сделай рефакторинг parser слоя"])
 
     def test_is_valid_summary_text(self) -> None:
-        good_summary = valid_summary_text_for_tests()
-        self.assertTrue(is_valid_summary_text(good_summary))
-        human_headers = (
-            "# Task and context\n"
-            "- User wants a fact-check of acp2.md and acp3.md output.\n"
-            "- Goal: verify claims and produce corrected doc.\n"
-            "- Open question: minor site wording may change.\n\n"
-            "## Open tasks\n"
-            "- mode: planning-only\n"
-            "- [IN_PROGRESS] Review sources.\n"
-            "- [TODO] Draft acp3.md.\n\n"
-            "### Last verified facts\n"
-            "- [DONE] Read official docs.\n\n"
-            "### Do not redo\n"
-            "- n/a\n\n"
-            "### Active constraints\n"
-            "- Preserve full article structure.\n\n"
-            "### Recent artifacts\n"
-            "- prompts/chat_completions_summary_prompt.md\n"
-        )
-        self.assertTrue(
-            is_valid_summary_text(human_headers),
-            " spaced/markdown headings should satisfy soft section keywords",
-        )
-        self.assertFalse(
-            _section_marker_hit(
-                "Something and nothing and everything and more.",
-                "TASK_AND_CONTEXT",
-            ),
-            "conjunction 'and' must not count toward TASK_AND_CONTEXT",
-        )
-        self.assertFalse(
-            _section_marker_hit(
-                "We should not retry the failed patch blindly.",
-                "DO_NOT_REDO",
-            ),
-            "stopword 'not' must not alone count toward DO_NOT_REDO",
-        )
-        self.assertTrue(
-            _section_marker_hit(
-                "DO_NOT_REDO:\n- do not use sed on this repo",
-                "DO_NOT_REDO",
-            ),
-        )
+        self.assertTrue(is_valid_summary_text(valid_summary_xml_for_tests()))
         self.assertFalse(is_valid_summary_text(""))
+        ok, reason = validate_summary_text("[assistant] raw transcript")
         self.assertFalse(is_valid_summary_text("[assistant] raw transcript"))
-        ok, reason = validate_summary_text("TASK_AND_CONTEXT:\n- short")
+        self.assertEqual(reason, "missing_structure")
+        self.assertFalse(is_valid_summary_text("TASK_AND_CONTEXT:\n- short prose"))
+        preamble = "[assistant] preamble\n\n"
+        self.assertTrue(is_valid_summary_text(preamble + valid_summary_xml_for_tests()))
+        ok, reason = validate_summary_text("<summary><task_and_context>x</task_and_context></summary>")
         self.assertFalse(ok)
-        self.assertEqual(reason, "too_short")
+        self.assertEqual(reason, "missing_structure")
 
     def test_format_last_dialog_steps_applies_per_message_limit(self) -> None:
         long_text = "x" * 6000
@@ -92,7 +50,7 @@ class ThreadSummarizerTest(unittest.TestCase):
             max_steps=5,
             message_max_chars=5000,
         )
-        self.assertEqual(steps.count("<turn "), 1)
+        self.assertEqual(steps.count("<step "), 1)
         self.assertIn("[function_call] fs_read_file", steps)
         self.assertIn("[function_call_output]", steps)
 

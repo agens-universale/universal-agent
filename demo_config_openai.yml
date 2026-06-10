@@ -43,8 +43,8 @@ agent:
   max_steps: 1000
   no_tool_call_max_count: 5
   strict_turn_finish_validation: true
-  tool_output_inline_max_chars: 20000
-  stored_tool_outputs_max_entries: 10
+  tool_output_inline_max_chars: 10000
+  stored_tool_outputs_max_entries: 50
 
 logging:
   full_log_backend: false
@@ -74,6 +74,8 @@ tool_usage_notice:
 project_memory:
   enable_project_memory_notice: true
   check_interval_messages: 5
+  max_chars: 20000
+  max_append_chars: 5000
 
 summary:
   chat_completions_summary_trigger_chars: 200000
@@ -99,16 +101,26 @@ security:
 
 mcp:
   servers:
-    search:
-      transport: sse
-      url: http://127.0.0.1:10090/mcp
-      token: ""
-      server-name: DuckDuckGo search
-      description: Common web and News search
-      # command: python3
-      # args: ["server.py"]
-      # cwd: ""
-      # env: {}
+    # gc-mcp-install --config recommended_mcp/config.local.yml
+    # gc-cli -a … — автозапуск HTTP-daemon'ов (science); stdio MCP из recommended_mcp/venv
+    office:
+      transport: stdio
+      command: office-mcp
+      args: ["--transport", "stdio", "--allow-any"]
+      server-name: office
+      description: Read office documents (pdf, docx, xls, xlsx, pptx, csv, html, msg) as markdown
+    science:
+      transport: stream_http
+      url: http://127.0.0.1:8765/mcp
+      server-name: science
+      description: Unified scientific literature search across 10 public APIs
+    duckduckgo_search:
+      transport: stdio
+      command: ddgs-mcp
+      server-name: duckduckgo
+      description: Web and news search via DuckDuckGo (DDGS)
   meta:
     tools-cache-ttl: 3600
     request_timeout_sec: 600
+    # Манифест для gc-cli -a: не задан → config.local.yml (если есть), иначе config.yml
+    # recommended-mcp-manifest: recommended_mcp/config.yml

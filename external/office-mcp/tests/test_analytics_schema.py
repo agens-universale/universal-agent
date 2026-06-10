@@ -1,7 +1,14 @@
 import pytest
 from pydantic import ValidationError
 
-from office_mcp.analytics_schema import FilterClause, parse_filter
+from office_mcp.analytics_schema import (
+    AggColumnSpec,
+    FilterClause,
+    OrFilterGroup,
+    agg_columns_to_dict,
+    filter_nodes_to_raw,
+    parse_filter,
+)
 
 
 def test_simple_clause_accepted():
@@ -75,6 +82,32 @@ def test_parse_filter_empty_array():
     parsed = parse_filter([])
     assert parsed["kind"] == "and"
     assert parsed["children"] == []
+
+
+def test_filter_nodes_to_raw_or_group():
+    nodes = [
+        FilterClause(col="a", op="==", value=1),
+        OrFilterGroup.model_validate({
+            "or": [
+                {"col": "b", "op": "==", "value": 2},
+                {"col": "b", "op": "==", "value": 3},
+            ],
+        }),
+    ]
+    raw = filter_nodes_to_raw(nodes)
+    parsed = parse_filter(raw)
+    assert parsed["children"][1]["kind"] == "or"
+
+
+def test_agg_columns_to_dict():
+    specs = [
+        AggColumnSpec(col="hours", func="sum"),
+        AggColumnSpec(col="id", func=["count", "nunique"]),
+    ]
+    assert agg_columns_to_dict(specs) == {
+        "hours": "sum",
+        "id": ["count", "nunique"],
+    }
 
 
 from office_mcp.analytics_schema import (  # noqa: E402

@@ -17,7 +17,7 @@ from message_policy.user_message_policy import is_dialog_summary_user_message_te
 from run_summary_coordinator import RunSummaryCoordinator
 from states import State
 from summarize.compaction import apply_summary_state_patch
-from tests.helpers.summary_sample import valid_summary_text_for_tests
+from tests.helpers.summary_sample import valid_summary_xml_for_tests
 
 
 def _make_state(*, max_steps: int = 5) -> State:
@@ -359,7 +359,7 @@ def test_turn_end_working_memory_in_summary_message(monkeypatch):
         st = kwargs["state"]
         apply_summary_state_patch(
             state=st,
-            raw_summary=valid_summary_text_for_tests(seed="wm-test"),
+            raw_summary=valid_summary_xml_for_tests(seed="wm-test"),
             last_dialog_steps="step tail",
             memory_append_deltas={"knowledge": "note from patch"},
             summarized_messages_count=2,

@@ -335,8 +335,32 @@ def package_skill(skill_path, output_dir=None, source_layer=None):
         return None
 
 
-def main():
+def _resolve_invocation() -> tuple[str, str | None, str | None]:
+    """Return (skill_path, output_dir, source_layer) from stdin JSON or CLI."""
     import argparse
+    import json
+
+    if not sys.stdin.isatty():
+        raw = sys.stdin.read()
+        if raw.strip():
+            try:
+                payload = json.loads(raw)
+            except json.JSONDecodeError as exc:
+                print(f"Error: invalid stdin JSON: {exc}", file=sys.stderr)
+                sys.exit(2)
+            if not isinstance(payload, dict):
+                print("Error: stdin JSON must be an object", file=sys.stderr)
+                sys.exit(2)
+            skill_path = payload.get("skill_path")
+            if not skill_path:
+                print("Error: 'skill_path' is required in stdin JSON", file=sys.stderr)
+                sys.exit(2)
+            return (
+                str(skill_path),
+                payload.get("output_dir"),
+                payload.get("source_layer"),
+            )
+
     parser = argparse.ArgumentParser(
         description="Package a skill folder into skill-<id>.zip"
     )
@@ -359,20 +383,24 @@ def main():
         help="Output directory (preferred over positional)",
     )
     args = parser.parse_args()
-
     output_dir = args.output_dir or args.output_dir_pos
+    return args.skill_path, output_dir, args.source_layer
 
-    print(f"📦 Packaging skill: {args.skill_path}")
+
+def main():
+    skill_path, output_dir, source_layer = _resolve_invocation()
+
+    print(f"📦 Packaging skill: {skill_path}")
     if output_dir:
         print(f"   Output directory: {output_dir}")
-    if args.source_layer:
-        print(f"   Source layer (explicit): {args.source_layer}")
+    if source_layer:
+        print(f"   Source layer (explicit): {source_layer}")
     print()
 
     result = package_skill(
-        args.skill_path,
+        skill_path,
         output_dir=output_dir,
-        source_layer=args.source_layer,
+        source_layer=source_layer,
     )
 
     if result:

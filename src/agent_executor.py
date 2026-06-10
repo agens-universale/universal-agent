@@ -206,6 +206,8 @@ class AgentExecutor:
             pre_backend_trigger_reason="pre_backend",
             logger=logger,
         )
+        setattr(self._ctx, "on_summary_applied", summary.on_summary_applied)
+        setattr(self._ctx, "is_cli_mode", is_cli_mode)
 
         summary.pre_run_compact_if_needed(trigger_reason="pre_run")
 

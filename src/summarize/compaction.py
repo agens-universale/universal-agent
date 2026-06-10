@@ -18,12 +18,14 @@ from summarize.summary_logging import (
     log_compaction_started,
     log_summary_message_body,
     log_summary_raw_text,
+    log_summary_slice_fallback,
     logger_from_ctx,
 )
 from summarize.summary_message_body import (
     build_dialog_summary_content,
     resolve_intent_log_preview_chars,
 )
+from summarize.summary_spec import agent_summary_slice_mode, slice_summary
 from summarize.thread_summarizer import summarize_dialog_via_chat_completions
 from summarize.working_memory_gateway import (
     REGISTER_ORDER,
@@ -199,6 +201,26 @@ def run_summary_compaction(
         steps_offset=int(getattr(state, "dialog_steps_offset", 0) or 0),
     )
     raw_summary = str(summary_result.get("raw_summary") or "")
+    num_batches = int(summary_result.get("num_batches") or 0)
+    trace = summary_result.get("trace")
+    memory_patch = trace.get("memory_patch") if isinstance(trace, dict) else {}
+    patch_executed = (
+        bool(memory_patch.get("executed")) if isinstance(memory_patch, dict) else False
+    )
+    agent_slice = agent_summary_slice_mode(
+        num_batches=num_batches,
+        patch_executed=patch_executed,
+    )
+    try:
+        agent_summary_text = slice_summary(raw_summary, agent_slice)
+    except ValueError:
+        log_summary_slice_fallback(
+            logger,
+            log_ctx,
+            slice_mode=agent_slice,
+            raw_summary_chars=len(raw_summary),
+        )
+        agent_summary_text = raw_summary
     memory_append_deltas = coerce_working_memory_deltas(
         summary_result.get("memory_append_deltas")
     )
@@ -212,7 +234,7 @@ def run_summary_compaction(
 
     summary_message_content = apply_summary_state_patch(
         state=state,
-        raw_summary=raw_summary,
+        raw_summary=agent_summary_text,
         last_dialog_steps=str(summary_result.get("last_dialog_steps") or ""),
         memory_append_deltas=memory_append_deltas,
         memory_replace_deltas=memory_replace_deltas,
@@ -221,10 +243,12 @@ def run_summary_compaction(
         summarized_messages_count=len(full_messages),
         intent_log_preview_chars=preview_chars,
     )
-    trace = summary_result.get("trace")
     if isinstance(trace, dict):
         final_out = trace.get("final_output")
         if isinstance(final_out, dict):
+            final_out["raw_summary"] = raw_summary
+            final_out["agent_summary_slice"] = agent_slice
+            final_out["agent_summary_text"] = agent_summary_text
             final_out["summary_message_content"] = summary_message_content
     log_summary_message_body(logger, log_ctx, summary_message_content)
 

@@ -1,0 +1,9 @@
+id: default-coworker
+name: Default Coworker
+description: |
+  Default method layer for broad non-trivial delegated work: research,
+  personal assistance, background business operations, deliverable shaping,
+  and autonomy boundaries. Use when the user delegates an outcome or asks
+  the agent to take work on. Do not use for simple direct answers.
+version: 0.1.0
+bootstrap_skill: using-default-coworker

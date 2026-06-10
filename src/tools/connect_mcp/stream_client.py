@@ -15,6 +15,7 @@ from mcp.client.stdio import StdioServerParameters, stdio_client
 from mcp.shared.exceptions import McpError
 
 from utils.ssl_config import get_verify_ssl, get_client_cert
+from mcp_runtime.env import mcp_stdio_env
 from tools.connect_mcp.transport import _resolve_command
 
 
@@ -140,8 +141,32 @@ class _PersistentSessionManager:
 
 _SESSION_MANAGER = _PersistentSessionManager()
 
+_LOOPBACK_HOSTS = frozenset({"localhost", "::1", "0.0.0.0"})
 
-def _make_httpx_factory(verify: Union[bool, str], cert: Optional[Tuple[str, str]] = None):
+
+def _is_loopback_url(url: str) -> bool:
+    """True для локальных MCP-daemon'ов (127.0.0.1, localhost, ::1)."""
+    hostname = (urlsplit((url or "").strip()).hostname or "").lower()
+    if not hostname:
+        return False
+    if hostname in _LOOPBACK_HOSTS:
+        return True
+    if hostname.startswith("127."):
+        return True
+    return False
+
+
+def _trust_env_for_url(url: str) -> bool:
+    """Локальные MCP не должны ходить через HTTP_PROXY/socks5h из shell."""
+    return not _is_loopback_url(url)
+
+
+def _make_httpx_factory(
+    verify: Union[bool, str],
+    cert: Optional[Tuple[str, str]] = None,
+    *,
+    trust_env: bool = True,
+):
     """
     Фабрика httpx-клиентов с управляемой проверкой SSL и клиентским сертификатом.
     Совместима с сигнатурой httpx_client_factory из MCP SDK.
@@ -152,7 +177,8 @@ def _make_httpx_factory(verify: Union[bool, str], cert: Optional[Tuple[str, str]
             headers=headers,
             timeout=timeout,
             auth=auth,
-            verify=httpx.create_ssl_context(verify=verify)
+            verify=httpx.create_ssl_context(verify=verify),
+            trust_env=trust_env,
         )
         if cert is not None:
             kwargs["cert"] = cert
@@ -166,6 +192,8 @@ def _make_stream_http_client(
     timeout: float,
     verify: Union[bool, str],
     cert: Optional[Tuple[str, str]] = None,
+    *,
+    base_url: str = "",
 ) -> httpx.AsyncClient:
     """
     Создать httpx.AsyncClient для stream_http (MCP 1.26.0).
@@ -180,6 +208,7 @@ def _make_stream_http_client(
         headers=headers or None,
         timeout=timeout,
         verify=httpx.create_ssl_context(verify=verify),
+        trust_env=_trust_env_for_url(base_url),
     )
     if cert is not None:
         kwargs["cert"] = cert
@@ -239,7 +268,11 @@ async def _list_tools_stream_sse_async(
     if token:
         headers["Authorization"] = f"Bearer {token}"
 
-    httpx_factory = _make_httpx_factory(verify, cert=cert)
+    httpx_factory = _make_httpx_factory(
+        verify,
+        cert=cert,
+        trust_env=_trust_env_for_url(base_url),
+    )
 
     async with (
         sse_client(
@@ -316,7 +349,11 @@ async def _call_tool_stream_sse_async(
     if token:
         headers["Authorization"] = f"Bearer {token}"
 
-    httpx_factory = _make_httpx_factory(verify, cert=cert)
+    httpx_factory = _make_httpx_factory(
+        verify,
+        cert=cert,
+        trust_env=_trust_env_for_url(base_url),
+    )
 
     async with (
         sse_client(
@@ -368,7 +405,11 @@ async def _call_tool_stream_sse_persistent(
         headers: Dict[str, str] = {}
         if token:
             headers["Authorization"] = f"Bearer {token}"
-        httpx_factory = _make_httpx_factory(verify, cert=cert)
+        httpx_factory = _make_httpx_factory(
+            verify,
+            cert=cert,
+            trust_env=_trust_env_for_url(base_url),
+        )
         transport_cm = sse_client(
             endpoint,
             headers=headers or None,
@@ -474,6 +515,7 @@ async def _list_tools_stream_http_async(
                     timeout=timeout,
                     verify=verify,
                     cert=cert,
+                    base_url=base_url,
                 ) as http_client,
                 streamable_http_client(
                     endpoint,
@@ -558,6 +600,7 @@ async def _call_tool_stream_http_async(
                     timeout=timeout,
                     verify=verify,
                     cert=cert,
+                    base_url=base_url,
                 ) as http_client,
                 streamable_http_client(
                     endpoint,
@@ -612,7 +655,13 @@ async def _call_tool_stream_http_persistent(
     session: Optional[ClientSession] = _SESSION_MANAGER.get_session(server_key)
 
     async def _open_session(endpoint: str) -> ClientSession:
-        http_client = _make_stream_http_client(token=token, timeout=timeout, verify=verify, cert=cert)
+        http_client = _make_stream_http_client(
+            token=token,
+            timeout=timeout,
+            verify=verify,
+            cert=cert,
+            base_url=base_url,
+        )
         await http_client.__aenter__()
         transport = streamable_http_client(endpoint, http_client=http_client)
         read_stream, write_stream, _ = await transport.__aenter__()
@@ -739,7 +788,7 @@ async def _list_tools_stream_stdio_async(
     params = StdioServerParameters(
         command=_resolve_command(str(command)),
         args=[str(a) for a in args],
-        env=server_cfg.get("env") or None,
+        env=mcp_stdio_env(server_cfg.get("env") or None),
         cwd=server_cfg.get("cwd") or None,
     )
 
@@ -798,7 +847,7 @@ async def _call_tool_stream_stdio_async(
     params = StdioServerParameters(
         command=_resolve_command(str(command)),
         args=[str(a) for a in args],
-        env=server_cfg.get("env") or None,
+        env=mcp_stdio_env(server_cfg.get("env") or None),
         cwd=server_cfg.get("cwd") or None,
     )
 
@@ -846,7 +895,7 @@ async def _call_tool_stream_stdio_persistent(
         params = StdioServerParameters(
             command=_resolve_command(str(command)),
             args=[str(a) for a in args],
-            env=server_cfg.get("env") or None,
+            env=mcp_stdio_env(server_cfg.get("env") or None),
             cwd=server_cfg.get("cwd") or None,
         )
         transport_cm = stdio_client(params)

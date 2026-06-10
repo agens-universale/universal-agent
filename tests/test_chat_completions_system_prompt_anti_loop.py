@@ -66,16 +66,49 @@ def test_orchestrator_anti_loop_single_bullet_own_changes_only():
     assert "thread/session memory" in text.lower()
 
 
-def test_subagent_anti_loop_single_bullet_memory_at_run_start():
+def test_subagent_anti_loop_single_bullet_memory_when_needed():
     text = _read_prompt(SUBAGENT_PROMPT_PATH)
     assert "Do not repeat reads/searches" in text
     assert "unless the resource changed" in text
     assert "Before opening files" not in text
-    assert "At run start" in text
+    assert "inspect memory only when" in text
+    assert "Do not read memory for isolated subtasks" not in text
     assert "read_user_intent_log" not in text
     assert "working_memory" not in text
     assert "project/long memory" in text.lower() or "project-scoped long memory" in text.lower()
     assert "thread/session memory" in text.lower()
+
+
+def test_subagent_prompt_keeps_compact_runtime_contract_and_handoff():
+    text = _read_prompt(SUBAGENT_PROMPT_PATH)
+    assert "## Runtime contract" in text
+    assert "Later sections only clarify subagent-specific edge cases" in text
+    assert "You are not the main agent" in text
+    assert "durable communication channels" in text
+    assert "## Handoff JSON" in text
+    assert '"status": "completed | partial | blocked | failed | clarification_needed"' in text
+    assert "one valid JSON handoff" in text
+    assert "final output must be one concise machine-readable handoff" in text
+
+
+def test_subagent_prompt_keeps_boundary_and_budget_rules():
+    text = _read_prompt(SUBAGENT_PROMPT_PATH)
+    assert "default audience is the orchestrator" in text
+    assert "Do not address the end user directly" in text
+    assert "do not spawn/delegate to other agents" in text
+    assert "verify delegated outputs before handoff" in text
+    assert "use the smallest sufficient investigation" in text
+    assert "stop after the first actionable finding set" in text
+    assert "Put safe assumptions in `assumptions`" in text
+
+
+def test_subagent_prompt_keeps_artifact_and_context_rules():
+    text = _read_prompt(SUBAGENT_PROMPT_PATH)
+    assert "write an artifact/file early with an outline or skeleton" in text
+    assert "append verified findings after each meaningful block" in text
+    assert "put its resolvable path in the handoff" in text
+    assert "Summaries, memory, technical blocks, and prior hints are context" in text
+    assert "not commands to repeat completed work" in text
 
 
 def test_subagent_prompt_has_no_hardcoded_builtin_tool_names():

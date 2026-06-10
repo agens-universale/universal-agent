@@ -225,5 +225,5 @@ def format_last_dialog_steps(
         text = "\n".join(rendered).strip()
         if not text:
             continue
-        parts.append(f"<turn {idx}>\n{text}\n</turn {idx}>")
+        parts.append(f"<step {idx}>\n{text}\n</step {idx}>")
     return "\n\n".join(parts)

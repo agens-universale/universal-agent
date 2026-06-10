@@ -1,6 +1,8 @@
 # Copy this block into the mcp-servers: section of your agent config.yml.
-# science-mcp runs as a daemon. Start it BEFORE gc-cli:
-#   science-mcp --transport http
+# science-mcp runs as a daemon. Start BEFORE gc-cli:
+#   python recommended_mcp/run.py
+# or with a local manifest:
+#   python recommended_mcp/run.py --config recommended_mcp/config.local.yml
 science:
   transport: stream_http
   url: http://127.0.0.1:8765/mcp

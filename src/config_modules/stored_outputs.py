@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from typing import Any, Dict, Tuple
 
-DEFAULT_TOOL_OUTPUT_INLINE_MAX_CHARS = 20000
-DEFAULT_STORED_TOOL_OUTPUTS_MAX_ENTRIES = 10
+DEFAULT_TOOL_OUTPUT_INLINE_MAX_CHARS = 10000
+DEFAULT_STORED_TOOL_OUTPUTS_MAX_ENTRIES = 50
 
 
 def normalize_tool_output_limits(

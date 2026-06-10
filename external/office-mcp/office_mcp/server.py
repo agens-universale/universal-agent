@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
+from typing import Literal
 
 from mcp.server.fastmcp import FastMCP
 from pydantic import ValidationError
@@ -22,7 +23,17 @@ from .analytics import (
     load_table,
     summarize_dataframe,
 )
-from .analytics_schema import OutputSpec, SortSpec, parse_filter
+from .analytics_schema import (
+    AggColumnSpec,
+    FilterNode,
+    OutputFileInput,
+    OutputSpec,
+    SortSpec,
+    agg_columns_to_dict,
+    filter_nodes_to_raw,
+    parse_filter,
+    sort_specs_to_models,
+)
 from .errors import ErrorCategory, OfficeReaderError
 from .logging_config import mask_base64_in_args
 from .reader import (
@@ -37,7 +48,9 @@ from .writer_schema import WorkbookSpec
 log = logging.getLogger(__name__)
 
 
-def _validate_workbook(raw: dict) -> WorkbookSpec:
+def _validate_workbook(raw: WorkbookSpec | dict) -> WorkbookSpec:
+    if isinstance(raw, WorkbookSpec):
+        return raw
     try:
         return WorkbookSpec.model_validate(raw)
     except ValidationError as ve:
@@ -223,7 +236,7 @@ def build_server(cfg: ServerConfig) -> FastMCP:
 
     @mcp.tool(name="create_xlsx_file")
     def create_xlsx_file_tool(
-        path: str, workbook: dict, overwrite: bool = False
+        path: str, workbook: WorkbookSpec, overwrite: bool = False
     ) -> dict:
         """Generate an .xlsx file from a structured workbook spec and write it to disk.
         Use when the caller has filesystem access to the server (e.g. via a shared volume).
@@ -236,7 +249,7 @@ def build_server(cfg: ServerConfig) -> FastMCP:
         Writes only to paths under --output-allowed-dirs (default: same as --allowed-dirs).
         Fails with file_exists if the target already exists and overwrite=False.
         See README section "Создание документов" for the full schema."""
-        sheet_count = len(workbook.get("sheets", [])) if isinstance(workbook, dict) else 0
+        sheet_count = len(workbook.sheets)
         args = {
             "path": path,
             "overwrite": overwrite,
@@ -274,7 +287,7 @@ def build_server(cfg: ServerConfig) -> FastMCP:
             raise
 
     @mcp.tool(name="create_xlsx")
-    def create_xlsx_tool(filename: str, workbook: dict) -> dict:
+    def create_xlsx_tool(filename: str, workbook: WorkbookSpec) -> dict:
         """Generate an .xlsx file from a structured workbook spec and return its content as base64.
         Use when the caller does not have filesystem access to the server (e.g. agent
         chat attaching the result). Size-capped by --max-output-base64-size.
@@ -285,7 +298,7 @@ def build_server(cfg: ServerConfig) -> FastMCP:
         Ranges in `merges` and `cell_styles` use A1-notation anchored to the final grid:
         row 1 is the auto-generated bold header, data starts at row 2.
         See README section "Создание документов" for the full schema."""
-        sheet_count = len(workbook.get("sheets", [])) if isinstance(workbook, dict) else 0
+        sheet_count = len(workbook.sheets)
         args = {"filename": filename, "sheet_count": sheet_count}
         try:
             spec = _validate_workbook(workbook)
@@ -413,11 +426,11 @@ def build_server(cfg: ServerConfig) -> FastMCP:
     def query_xlsx_tool(
         path: str,
         sheet: str | None = None,
-        filter: list | None = None,
+        filter: list[FilterNode] | None = None,
         select: list[str] | None = None,
-        sort: list[dict] | None = None,
+        sort: list[SortSpec] | None = None,
         limit: int | None = None,
-        output=None,
+        output: Literal["data"] | OutputFileInput | None = None,
     ) -> dict:
         """Filter, select, sort, and limit rows from a tabular file (xlsx/xls/csv).
 
@@ -434,16 +447,16 @@ def build_server(cfg: ServerConfig) -> FastMCP:
         args = {
             "path": path, "sheet": sheet,
             "has_filter": bool(filter), "select": select,
-            "limit": limit, "output_kind": "file" if isinstance(output, dict) else "data",
+            "limit": limit,
+            "output_kind": "file" if isinstance(output, OutputFileInput) else "data",
         }
         try:
             real = validate_path(path, cfg.allowed_dirs, allow_any=cfg.allow_any)
             df = load_table(real, sheet=sheet)
-            df = apply_filter(df, parse_filter(filter or []))
+            df = apply_filter(df, parse_filter(filter_nodes_to_raw(filter)))
             n_total = len(df)
             df = apply_select(df, select)
-            sort_specs = [SortSpec.model_validate(s) for s in (sort or [])]
-            df = apply_sort(df, sort_specs)
+            df = apply_sort(df, sort_specs_to_models(sort))
             if limit is not None:
                 df = apply_limit(df, limit)
             out_spec = OutputSpec.parse(output)
@@ -467,15 +480,15 @@ def build_server(cfg: ServerConfig) -> FastMCP:
     def pivot_xlsx_tool(
         path: str,
         sheet: str | None = None,
-        filter: list | None = None,
-        index=None,
-        columns=None,
+        filter: list[FilterNode] | None = None,
+        index: str | list[str] | None = None,
+        columns: str | list[str] | None = None,
         values: str | None = None,
         aggfunc: str = "sum",
-        fill_value=None,
-        sort: list[dict] | None = None,
+        fill_value: int | float | str | bool | None = None,
+        sort: list[SortSpec] | None = None,
         limit: int | None = None,
-        output=None,
+        output: Literal["data"] | OutputFileInput | None = None,
     ) -> dict:
         """Cross-tab pivot.
 
@@ -496,14 +509,13 @@ def build_server(cfg: ServerConfig) -> FastMCP:
         try:
             real = validate_path(path, cfg.allowed_dirs, allow_any=cfg.allow_any)
             df = load_table(real, sheet=sheet)
-            df = apply_filter(df, parse_filter(filter or []))
+            df = apply_filter(df, parse_filter(filter_nodes_to_raw(filter)))
             df = apply_pivot(
                 df, index=index, columns=columns, values=values,
                 aggfunc=aggfunc, fill_value=fill_value,
             )
             n_total = len(df)
-            sort_specs = [SortSpec.model_validate(s) for s in (sort or [])]
-            df = apply_sort(df, sort_specs)
+            df = apply_sort(df, sort_specs_to_models(sort))
             if limit is not None:
                 df = apply_limit(df, limit)
             out_spec = OutputSpec.parse(output)
@@ -527,16 +539,17 @@ def build_server(cfg: ServerConfig) -> FastMCP:
     def aggregate_xlsx_tool(
         path: str,
         sheet: str | None = None,
-        filter: list | None = None,
+        filter: list[FilterNode] | None = None,
         groupby: list[str] | None = None,
-        agg: dict | None = None,
-        having: list | None = None,
-        sort: list[dict] | None = None,
+        agg: list[AggColumnSpec] | None = None,
+        having: list[FilterNode] | None = None,
+        sort: list[SortSpec] | None = None,
         limit: int | None = None,
-        output=None,
+        output: Literal["data"] | OutputFileInput | None = None,
     ) -> dict:
-        """Group + aggregate. agg is dict[col -> AggFunc | list[AggFunc]].
+        """Group + aggregate. agg is list of {col, func} entries.
 
+        func: AggFunc or list[AggFunc] per column.
         AggFuncs: sum, mean, count, min, max, median, std, first, last,
         nunique.
         groupby: list of columns; empty list = totals over whole dataset.
@@ -545,20 +558,20 @@ def build_server(cfg: ServerConfig) -> FastMCP:
         Other params same as query_xlsx."""
         if agg is None:
             raise OfficeReaderError(ErrorCategory.INVALID_INPUT, reason="agg is required")
+        agg_map = agg_columns_to_dict(agg)
         args = {
             "path": path, "sheet": sheet,
-            "groupby": groupby, "agg_keys": list(agg.keys()),
+            "groupby": groupby, "agg_keys": list(agg_map.keys()),
             "has_having": bool(having), "limit": limit,
         }
         try:
             real = validate_path(path, cfg.allowed_dirs, allow_any=cfg.allow_any)
             df = load_table(real, sheet=sheet)
-            df = apply_filter(df, parse_filter(filter or []))
-            df = apply_groupby_agg(df, groupby=groupby or [], agg=agg)
-            df = apply_filter(df, parse_filter(having or []))
+            df = apply_filter(df, parse_filter(filter_nodes_to_raw(filter)))
+            df = apply_groupby_agg(df, groupby=groupby or [], agg=agg_map)
+            df = apply_filter(df, parse_filter(filter_nodes_to_raw(having)))
             n_total = len(df)
-            sort_specs = [SortSpec.model_validate(s) for s in (sort or [])]
-            df = apply_sort(df, sort_specs)
+            df = apply_sort(df, sort_specs_to_models(sort))
             if limit is not None:
                 df = apply_limit(df, limit)
             out_spec = OutputSpec.parse(output)
