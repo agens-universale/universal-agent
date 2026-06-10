@@ -20,12 +20,19 @@ class InstallSpec:
     # Каждая запись — argv-список; вызывается как subprocess.run(cmd, check=True).
     commands: tuple[tuple[str, ...], ...] = tuple()
     source: Path | None = None
+    # Для type=pypi: pip-спецификация, например ddgs-mcp==0.1.0
+    package: str | None = None
 
 
 @dataclass(frozen=True)
 class RunSpec:
     type: str
     detach: bool = False
+    # Для type=command: argv daemon-команды (science-mcp --transport http и т.п.)
+    command: str | None = None
+    args: tuple[str, ...] = tuple()
+    env: tuple[tuple[str, str], ...] = tuple()
+    cwd: Path | None = None
 
 
 @dataclass(frozen=True)
@@ -34,6 +41,29 @@ class MCPEntry:
     path: Path
     install: InstallSpec
     run: RunSpec | None = None
+
+
+def default_manifest_path(root: Path) -> Path:
+    """Путь до дефолтного манифеста `recommended_mcp/config.yml`."""
+    return root / "config.yml"
+
+
+def resolve_manifest_path(root: Path, config: Path | str | None) -> Path:
+    """Разрешить путь до YAML-манифеста.
+
+    Если `config` не задан — `root/config.yml`.
+    Относительные пути считаются от текущей рабочей директории (cwd), не от `root`.
+    Пути внутри манифеста (`path:`, `install.source:`) по-прежнему относительны `root`.
+    """
+    if config is None:
+        return default_manifest_path(root)
+    path = Path(config).expanduser()
+    if not path.is_absolute():
+        path = Path.cwd() / path
+    path = path.resolve()
+    if not path.is_file():
+        raise ManifestError(f"manifest not found: {path}")
+    return path
 
 
 def load_manifest(path: Path) -> list[MCPEntry]:
@@ -82,17 +112,27 @@ def _parse_entry(raw: dict[str, Any], source: Path) -> MCPEntry:
         raise ManifestError(f"mcp '{name}' missing 'install' block in {source}")
     source_raw = install_raw.get("source")
     install_source = Path(source_raw) if source_raw else None
+    package_raw = install_raw.get("package")
+    install_package = str(package_raw).strip() if package_raw else None
+    raw_commands = install_raw.get("commands", ()) or ()
+    commands = tuple(tuple(str(arg) for arg in cmd) for cmd in raw_commands)
 
     install = InstallSpec(
         type=install_raw.get("type", ""),
         platforms=tuple(install_raw.get("platforms", ()) or ()),
+        commands=commands,
         source=install_source,
+        package=install_package,
     )
     if not install.type:
         raise ManifestError(f"mcp '{name}' missing 'install.type' in {source}")
     if install.type == "source" and install.source is None:
         raise ManifestError(
             f"mcp '{name}' install.type=source requires install.source in {source}"
+        )
+    if install.type == "pypi" and not install.package:
+        raise ManifestError(
+            f"mcp '{name}' install.type=pypi requires install.package in {source}"
         )
 
     run_raw = raw.get("run")
@@ -103,6 +143,27 @@ def _parse_entry(raw: dict[str, Any], source: Path) -> MCPEntry:
         run_type = run_raw.get("type")
         if not run_type:
             raise ManifestError(f"mcp '{name}' missing 'run.type' in {source}")
-        run = RunSpec(type=run_type, detach=bool(run_raw.get("detach", False)))
+        run_cwd_raw = run_raw.get("cwd")
+        run_cwd = Path(run_cwd_raw) if run_cwd_raw else None
+        raw_args = run_raw.get("args", ()) or ()
+        run_args = tuple(str(arg) for arg in raw_args)
+        raw_env = run_raw.get("env", {}) or {}
+        if not isinstance(raw_env, dict):
+            raise ManifestError(f"mcp '{name}' run.env must be a dict in {source}")
+        run_env = tuple((str(k), str(v)) for k, v in raw_env.items())
+        run_command = run_raw.get("command")
+        run_command_str = str(run_command).strip() if run_command else None
+        run = RunSpec(
+            type=run_type,
+            detach=bool(run_raw.get("detach", False)),
+            command=run_command_str,
+            args=run_args,
+            env=run_env,
+            cwd=run_cwd,
+        )
+        if run.type == "command" and not run.command:
+            raise ManifestError(
+                f"mcp '{name}' run.type=command requires run.command in {source}"
+            )
 
     return MCPEntry(name=name, path=Path(path_str), install=install, run=run)

@@ -4,7 +4,7 @@ import datetime as _dt
 import re
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from .writer_a1 import parse_a1_range
 
@@ -19,6 +19,8 @@ ColumnType = Literal[
 
 
 class ColumnSpec(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     name: str
     type: ColumnType
     format: str | None = None
@@ -40,6 +42,8 @@ class ColumnSpec(BaseModel):
 
 
 class CellStyle(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     range: str
     bg: str | None = None
     fg: str | None = None
@@ -82,6 +86,8 @@ CellValue = str | int | float | bool | None
 
 
 class SheetSpec(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     name: str
     columns: list[ColumnSpec]
     rows: list[list[CellValue]]
@@ -209,6 +215,8 @@ class SheetSpec(BaseModel):
 
 
 class WorkbookSpec(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     sheets: list[SheetSpec]
 
     @field_validator("sheets")

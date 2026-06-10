@@ -48,6 +48,10 @@ def _apply_openai_strict_tools_schema(spec: Dict[str, Any]) -> None:
         return
     params = spec.get("parameters")
     if isinstance(params, dict):
+        # OpenAI strict rejects bare property $ref; inline Pydantic $defs if present.
+        from tools.connect_mcp.agent_tools import _inline_parameter_schema_refs
+
+        _inline_parameter_schema_refs(params)
         apply_openai_strict_parameters(params)
 
 

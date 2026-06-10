@@ -35,11 +35,11 @@ across `gc-cli` calls. Default: HTTP on `127.0.0.1:8765`, endpoint path
 `/mcp`.
 
 ```bash
-# Foreground
-science-mcp --transport http
+# Recommended: supervised start (idempotent, Ctrl+C stops the daemon)
+python recommended_mcp/run.py
 
-# Background
-nohup science-mcp --transport http > /tmp/science-mcp.log 2>&1 &
+# Manual foreground
+science-mcp --transport http
 ```
 
 Stdio mode (one-off subprocess spawned by the agent):

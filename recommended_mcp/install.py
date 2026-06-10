@@ -1,13 +1,10 @@
-"""Ставит MCP из config.yml: pip install wheel / docker compose build."""
+"""Ставит MCP из config.yml: pip install wheel / pypi / docker compose build."""
 
 from __future__ import annotations
 
-import subprocess
-import sys
-from pathlib import Path
-
 import hashlib
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -16,15 +13,29 @@ import tempfile
 import urllib.request
 import zipfile
 from pathlib import Path
-
-from typing import Optional
+from typing import Optional, Tuple
 # Позволяет запускать файл напрямую: `python recommended_mcp/install.py`.
 # При `python -m recommended_mcp.install` и при import из тестов — no-op.
 if __package__ in (None, ""):
-    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    _repo_root = Path(__file__).resolve().parents[1]
+    sys.path.insert(0, str(_repo_root / "src"))
+    sys.path.insert(0, str(_repo_root))
     __package__ = "recommended_mcp"
 
-from recommended_mcp.manifest import MCPEntry, load_manifest, load_agent_dep_dir
+from mcp_runtime.manifest_resolve import recipe_root, resolve_install_manifest_path
+from mcp_runtime.state import save_runtime_state
+from mcp_runtime.venv import (
+    active_pip_python,
+    ensure_mcp_venv,
+    pip_install_argv,
+    pip_install_target,
+    query_installed_version,
+)
+from recommended_mcp.manifest import (
+    MCPEntry,
+    load_agent_dep_dir,
+    load_manifest,
+)
 
 NODE_VERSION = "18.0.0"
 _NODE_DIST_BASE = "https://nodejs.org/dist"
@@ -56,12 +67,40 @@ def install_entry(entry: MCPEntry, root: Path, agent_dep_dir: Optional[Path] = N
 
     elif itype == "source":
         _install_source(entry.name, entry.install.source, root, editable=False)
+    elif itype == "pypi":
+        _install_pypi(entry.name, entry.install.package)
     else:
         raise InstallError(
             f"mcp {entry.name!r} uses install.type={itype!r} which is not supported "
             f"by this install.py. Update install.py to handle {itype!r}, "
             f"or comment out the block in config.yml."
         )
+
+
+def _pypi_distribution_name(package_spec: str) -> str:
+    match = re.match(r"^([^[<>=!;\s]+)", package_spec.strip())
+    if not match:
+        raise InstallError(f"invalid PyPI package spec: {package_spec!r}")
+    return match.group(1).strip()
+
+
+def _pypi_pinned_version(package_spec: str) -> str | None:
+    if "==" not in package_spec:
+        return None
+    return package_spec.split("==", 1)[1].strip()
+
+
+def _install_pypi(name: str, package_spec: str | None) -> None:
+    if not package_spec:
+        raise InstallError(f"mcp {name!r}: install.type=pypi requires install.package")
+    dist_name = _pypi_distribution_name(package_spec)
+    expected = _pypi_pinned_version(package_spec)
+    current = query_installed_version(dist_name)
+    if expected is not None and current == expected:
+        print(f"[skip] {name}: {dist_name}=={expected} already installed")
+        return
+    print(f"[install] {name}: pip install {package_spec}")
+    subprocess.run(pip_install_argv(package_spec), check=True)
 
 
 def _install_wheel(name: str, pkg_path: Path) -> None:
@@ -76,10 +115,7 @@ def _install_wheel(name: str, pkg_path: Path) -> None:
         )
     wheel = wheels[0]
     print(f"[install] {name}: pip install {wheel.name}")
-    subprocess.run(
-        [sys.executable, "-m", "pip", "install", str(wheel)],
-        check=True,
-    )
+    subprocess.run(pip_install_argv(str(wheel)), check=True)
 
 
 def _install_docker(name: str, pkg_path: Path) -> None:
@@ -108,7 +144,7 @@ def _install_source(
             f"mcp {name!r}: pyproject.toml not found in {src_path} "
             f"(install.source must point to a Python package root)"
         )
-    cmd = [sys.executable, "-m", "pip", "install"]
+    cmd = [str(active_pip_python()), "-m", "pip", "install"]
     if editable:
         cmd.append("-e")
     cmd.append(str(src_path))
@@ -360,26 +396,42 @@ def main() -> int:
     )
     
     parser.add_argument(
+        "--config",
+        type=str,
+        default=None,
+        metavar="PATH",
+        help="Путь к кастомному конфигурационному файлу манифеста MCP "
+        "(по умолчанию recommended_mcp/config.yml).",
+    )
+    parser.add_argument(
         "-e",
         "--editable",
         action="store_true",
         help="Install source-type MCPs in editable mode (pip install -e). "
         "Применяется только к install.type=source. "
-        "Для wheel/docker/npx игнорируется.",
+        "Для wheel/pypi/docker/npx игнорируется.",
     )
     args = parser.parse_args()
 
-    root = Path(__file__).resolve().parent
-    agent_dep_dir = load_agent_dep_dir(root / "config.yml")
-    manifest = load_manifest(root / "config.yml")
+    mcp_py = ensure_mcp_venv()
+    print(f"[python] recommended_mcp/venv → {mcp_py}")
+
+    manifest_path = resolve_install_manifest_path(args.config)
+    root = recipe_root()
+    print(f"[config] {manifest_path}")
+    agent_dep_dir = load_agent_dep_dir(manifest_path)
+    manifest = load_manifest(manifest_path)
     if not manifest:
         print("[info] no mcps declared in config.yml — nothing to install")
         return 0
-    for entry in manifest:
-        if entry.install.type == "source" and args.editable:
-            install_source_entry(entry, root, editable=True)
-        else:
-            install_entry(entry, root, agent_dep_dir)
+    with pip_install_target(mcp_py):
+        for entry in manifest:
+            if entry.install.type == "source" and args.editable:
+                install_source_entry(entry, root, editable=True)
+            else:
+                install_entry(entry, root, agent_dep_dir)
+    state = save_runtime_state(manifest_path=manifest_path)
+    print(f"[state] {state.bin_dir}")
     paths = _node_install_paths(agent_dep_dir)
     if paths["npx"].exists():
         from config_modules.env_vars import gc_paths

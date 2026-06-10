@@ -130,3 +130,38 @@ def test_array_without_type_still_inferred() -> None:
     raw = {"items": {"type": "string"}}
     normalized = _normalize_schema_recursive(raw, param_name="a")
     assert normalized["type"] == "array"
+
+
+def test_inline_defs_ref_for_openai_strict_workbook() -> None:
+    """Bare ``$ref`` properties lack additionalProperties; inlining fixes OpenAI strict."""
+    tool_spec = {
+        "type": "function",
+        "name": "mcp_office_create_xlsx_file",
+        "description": "Generate xlsx.",
+        "parameters": {
+            "type": "object",
+            "$defs": {
+                "WorkbookSpec": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": {
+                        "sheets": {"type": "array", "items": {"type": "object"}},
+                    },
+                    "required": ["sheets"],
+                },
+            },
+            "properties": {
+                "path": {"type": "string", "title": "Path"},
+                "workbook": {"$ref": "#/$defs/WorkbookSpec"},
+                "overwrite": {"type": "boolean", "default": False, "title": "Overwrite"},
+            },
+            "required": ["path", "workbook"],
+        },
+    }
+    normalized = normalize_tool_spec_for_agent(tool_spec)
+    workbook = normalized["parameters"]["properties"]["workbook"]
+    assert workbook["type"] == "object"
+    assert workbook["additionalProperties"] is False
+    assert "sheets" in workbook["properties"]
+    assert "$ref" not in workbook
+    assert "$defs" not in normalized["parameters"]

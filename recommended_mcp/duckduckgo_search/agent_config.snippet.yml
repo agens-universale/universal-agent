@@ -1,0 +1,10 @@
+# Скопируй этот блок в секцию mcp-servers: твоего config.yml агента.
+# Перед включением: python recommended_mcp/install.py
+# Агент сам спавнит ddgs-mcp по stdio при первом вызове web_search / news_search.
+duckduckgo_search:
+  transport: stdio
+  command: ddgs-mcp
+  description: "Web and news search via DuckDuckGo (DDGS)"
+  server-name: duckduckgo
+  # env:
+  #   DDGS_PROXY: http://127.0.0.1:7890

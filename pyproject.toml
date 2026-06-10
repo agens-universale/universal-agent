@@ -16,7 +16,7 @@ dependencies = [
     "trafilatura",
     "readability-lxml",
     "jsonschema>=4.0.0",
-    "httpx>=0.27.0",
+    "httpx[socks]>=0.27.0",
     "httpx-sse>=0.4.0",
     "mcp==1.26.0",
     "pytest>=9.0.3",
@@ -24,9 +24,10 @@ dependencies = [
 
 [project.scripts]
 gc-cli = "cli:main"
+gc-mcp-install = "mcp_runtime.install_cli:main"
 
 [tool.setuptools]
-package-dir = {"" = "src"}  # Указываем, что код находится в src/
+package-dir = {"" = "src"}
 
 [dependency-groups]
 dev = [
@@ -34,5 +35,4 @@ dev = [
 ]
 
 [tool.pytest.ini_options]
-# Иначе pytest обходит весь репозиторий и падает на чужих conftest в agent-scratchpad/ и external/.
 testpaths = ["tests"]

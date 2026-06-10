@@ -43,6 +43,44 @@ class MCPToolWrapper:
         )
 
 
+def _resolve_schema_refs(node: Any, defs: dict[str, Any], depth: int = 0) -> Any:
+    """Inline ``#/$defs/...`` refs (OpenAI strict rejects bare ``$ref`` property schemas)."""
+    if depth > 64:
+        return node
+    if isinstance(node, dict):
+        ref = node.get("$ref")
+        if isinstance(ref, str) and ref.startswith("#/$defs/"):
+            name = ref.rsplit("/", 1)[-1]
+            target = defs.get(name)
+            if isinstance(target, dict):
+                resolved = _resolve_schema_refs(target, defs, depth + 1)
+                merged = dict(resolved) if isinstance(resolved, dict) else {}
+                for key, value in node.items():
+                    if key != "$ref" and key not in merged:
+                        merged[key] = value
+                return merged
+        out: dict[str, Any] = {}
+        for key, value in node.items():
+            if key == "$defs":
+                continue
+            out[key] = _resolve_schema_refs(value, defs, depth + 1)
+        return out
+    if isinstance(node, list):
+        return [_resolve_schema_refs(item, defs, depth + 1) for item in node]
+    return node
+
+
+def _inline_parameter_schema_refs(parameters: Dict[str, Any]) -> None:
+    """Expand Pydantic/FastMCP ``$defs`` before property normalization."""
+    defs = parameters.get("$defs")
+    if not isinstance(defs, dict) or not defs:
+        return
+    resolved = _resolve_schema_refs(parameters, defs)
+    if isinstance(resolved, dict):
+        parameters.clear()
+        parameters.update(resolved)
+
+
 def _ensure_param_description(schema: Dict[str, Any], param_name: str) -> None:
     """
     Гарантировать наличие description у параметра.
@@ -76,8 +114,9 @@ def _normalize_schema_recursive(schema: Any, param_name: str = "") -> Any:
     # would otherwise gain `type: "string"` here, making any value invalid
     # (validator AND-s `type` with `anyOf`).
     has_combinator = any(k in schema for k in ("anyOf", "oneOf", "allOf"))
+    has_ref = isinstance(schema.get("$ref"), str)
 
-    if "type" not in schema and not has_combinator:
+    if "type" not in schema and not has_combinator and not has_ref:
         if "properties" in schema:
             schema["type"] = "object"
         elif "items" in schema:
@@ -172,6 +211,8 @@ def normalize_tool_spec_for_agent(tool_spec: Dict[str, Any]) -> Dict[str, Any]:
             "additionalProperties": False,
         }
 
+    _inline_parameter_schema_refs(parameters)
+
     props = parameters.get("properties")
     if not isinstance(props, dict):
         props = {}
@@ -194,6 +235,8 @@ def normalize_tool_spec_for_agent(tool_spec: Dict[str, Any]) -> Dict[str, Any]:
 
     if "additionalProperties" not in parameters:
         parameters["additionalProperties"] = False
+
+    _inline_parameter_schema_refs(parameters)
 
     spec["parameters"] = parameters
     spec.setdefault("strict", True)

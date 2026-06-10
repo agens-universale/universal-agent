@@ -196,24 +196,15 @@ def _readline_with_timeout(stream: "Any", timeout: float) -> str | None:
 
 def _resolve_command(command: str) -> str:
     """
-    Раскрывает `~` в `command:` и на Windows резолвит PATHEXT.
+    Раскрывает `~`, ищет команду в mcp-env, на Windows резолвит PATHEXT.
 
     `subprocess.Popen` не делает tilde expansion (это работа шелла), и на
     Windows не учитывает PATHEXT (`npx` не найдёт `npx.cmd`/`.exe`). Делаем
     оба шага здесь — единственный чокпойнт перед спавном stdio MCP.
-
-    На Windows `shutil.which` нужен и для bare `npx`, и для абсолютного
-    пути без расширения (`C:\\...\\npx` → `C:\\...\\npx.cmd`). Раннее
-    return делаем только если расширение уже проставлено явно.
     """
-    command = os.path.expanduser(command)
-    if os.name != "nt":
-        return command
+    from mcp_runtime.env import resolve_mcp_command
 
-    if os.path.splitext(command)[1]:
-        return command
-    resolved = shutil.which(command)
-    return resolved if resolved else command
+    return resolve_mcp_command(command)
 
 
 def _spawn_stdio_process(server_cfg: Dict[str, Any]) -> subprocess.Popen:
@@ -230,7 +221,9 @@ def _spawn_stdio_process(server_cfg: Dict[str, Any]) -> subprocess.Popen:
     cmd = [command] + [str(a) for a in args]
     cwd = server_cfg.get("cwd")
     env_extra = server_cfg.get("env") or {}
-    env = os.environ.copy()
+    from mcp_runtime.env import augment_process_env
+
+    env = augment_process_env()
     for k, v in env_extra.items():
         env[str(k)] = str(v)
 

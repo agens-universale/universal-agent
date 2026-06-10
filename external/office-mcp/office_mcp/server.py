@@ -37,7 +37,9 @@ from .writer_schema import WorkbookSpec
 log = logging.getLogger(__name__)
 
 
-def _validate_workbook(raw: dict) -> WorkbookSpec:
+def _validate_workbook(raw: WorkbookSpec | dict) -> WorkbookSpec:
+    if isinstance(raw, WorkbookSpec):
+        return raw
     try:
         return WorkbookSpec.model_validate(raw)
     except ValidationError as ve:
@@ -223,7 +225,7 @@ def build_server(cfg: ServerConfig) -> FastMCP:
 
     @mcp.tool(name="create_xlsx_file")
     def create_xlsx_file_tool(
-        path: str, workbook: dict, overwrite: bool = False
+        path: str, workbook: WorkbookSpec, overwrite: bool = False
     ) -> dict:
         """Generate an .xlsx file from a structured workbook spec and write it to disk.
         Use when the caller has filesystem access to the server (e.g. via a shared volume).
@@ -236,7 +238,7 @@ def build_server(cfg: ServerConfig) -> FastMCP:
         Writes only to paths under --output-allowed-dirs (default: same as --allowed-dirs).
         Fails with file_exists if the target already exists and overwrite=False.
         See README section "Создание документов" for the full schema."""
-        sheet_count = len(workbook.get("sheets", [])) if isinstance(workbook, dict) else 0
+        sheet_count = len(workbook.sheets)
         args = {
             "path": path,
             "overwrite": overwrite,
@@ -274,7 +276,7 @@ def build_server(cfg: ServerConfig) -> FastMCP:
             raise
 
     @mcp.tool(name="create_xlsx")
-    def create_xlsx_tool(filename: str, workbook: dict) -> dict:
+    def create_xlsx_tool(filename: str, workbook: WorkbookSpec) -> dict:
         """Generate an .xlsx file from a structured workbook spec and return its content as base64.
         Use when the caller does not have filesystem access to the server (e.g. agent
         chat attaching the result). Size-capped by --max-output-base64-size.
@@ -285,7 +287,7 @@ def build_server(cfg: ServerConfig) -> FastMCP:
         Ranges in `merges` and `cell_styles` use A1-notation anchored to the final grid:
         row 1 is the auto-generated bold header, data starts at row 2.
         See README section "Создание документов" for the full schema."""
-        sheet_count = len(workbook.get("sheets", [])) if isinstance(workbook, dict) else 0
+        sheet_count = len(workbook.sheets)
         args = {"filename": filename, "sheet_count": sheet_count}
         try:
             spec = _validate_workbook(workbook)

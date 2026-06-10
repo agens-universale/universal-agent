@@ -357,28 +357,33 @@ security:
 
 mcp:
   servers:
-    search:
-      transport: sse
-      url: http://0.0.0.0:10090/mcp
-      token: ""
-      server-name: DuckDuckGo search
-      description: Common web and News search
-    
-    # Перед включением: python recommended_mcp/install.py
-    # command и --output-dir — из строк [paths] в выводе install.py.
-    # Linux/macOS command: ~/.local/share/gc/node/v18.0.0/bin/npx
-    # Windows command:     ~/.gc/node/v18.0.0/bin/npx
-    # browser_playwright:
+    # python recommended_mcp/install.py --config recommended_mcp/config.local.yml
+    # gc-cli -a … — автозапуск HTTP-daemon'ов (science); stdio MCP спавнит агент сам
+    office:
+      transport: stdio
+      command: office-mcp
+      args: ["--transport", "stdio", "--allow-any"]
+      server-name: office
+      description: Read office documents (pdf, docx, xls, xlsx, pptx, csv, html, msg) as markdown
+    science:
+      transport: stream_http
+      url: http://127.0.0.1:8765/mcp
+      server-name: science
+      description: Unified scientific literature search across 10 public APIs
+    duckduckgo_search:
+      transport: stdio
+      command: ddgs-mcp
+      server-name: duckduckgo
+      description: Web and news search via DuckDuckGo (DDGS)
+    # browser_playwright (опционально):
     #   transport: stream_stdio
-    #   command: <путь из install.py>
+    #   command: <путь npx из install.py>
     #   args: ["-y", "@playwright/mcp@0.0.70", "--output-dir", "<cache>/playwright-mcp"]
     #   persistent_session: true
-    #   description: Browser automation via Playwright.
     #   server-name: playwright-browser
-      # command: python3
-      # args: ["server.py"]
-      # cwd: ""
-      # env: {}
+    #   description: Browser automation via Playwright
   meta:
     tools-cache-ttl: 3600
     request_timeout_sec: 600
+    # Манифест для gc-cli -a: не задан → config.local.yml (если есть), иначе config.yml
+    # recommended-mcp-manifest: recommended_mcp/config.yml
