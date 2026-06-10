@@ -73,6 +73,12 @@ Lenses are a tool, not a mandatory step. If the request already names key terms,
 
 ## Output format
 
+**Delivery: return the list directly in your chat reply.** This skill produces a short
+annotated list of papers, not a document — do NOT call `write_to_file` / `save` / write
+anything to disk, and do not announce a saved report. The chat message itself is the
+deliverable. Keep it compact: the grouped list of papers + a short gaps note. No cover
+page, no separate review file.
+
 Russian Markdown with this skeleton:
 
 ```markdown
@@ -85,8 +91,13 @@ Russian Markdown with this skeleton:
 ## Найденные работы (N)
 
 ### Фундаментальные
-1. **<Title>** — Authors, Year. DOI:<…> | PMID:<…> | arXiv:<…>. Cited: <N>. Confidence: high.
+1. **<Title>** — Authors, Year. [https://doi.org/<doi>](https://doi.org/<doi>) · [arXiv:<id>](https://arxiv.org/abs/<id>). Cited: <N>. Confidence: high.
    <краткая аннотация 1–2 строки>
+
+Concrete worked example of ONE entry (copy this exact shape, substituting real values from MCP):
+
+> 1. **Telomere Biology and Human Phenotype** — Turner et al., 2019. [https://doi.org/10.3390/cells8010073](https://doi.org/10.3390/cells8010073) · Cited: 373. Confidence: high.
+>    Обзор роли теломер в старении человека.
 
 ### Методические / применённые / спорные
 ...
@@ -100,11 +111,29 @@ Russian Markdown with this skeleton:
 - arXiv: ...
 ```
 
+### Linking rule (MANDATORY)
+
+Every identifier in the output **must be a clickable Markdown link** whose link text is the full URL. Never output a bare id. This overrides any habit of writing `DOI: <number>`.
+
+For each paper, contrast:
+
+- ❌ WRONG (bare, not clickable): `DOI: 10.3390/cells8010073`
+- ✅ RIGHT (clickable, link text = URL): `[https://doi.org/10.3390/cells8010073](https://doi.org/10.3390/cells8010073)`
+
+URL patterns to build the link:
+
+- DOI → `https://doi.org/<doi>`
+- arXiv → `https://arxiv.org/abs/<id>`
+- PMID → `https://pubmed.ncbi.nlm.nih.gov/<pmid>`
+
+Build the link by substituting the real id from the MCP response into BOTH the brackets and the parentheses. Include only the identifiers a paper actually has. Use **only** identifiers returned by MCP (`work_lookup` / search responses); never fabricate one. If a record has no resolvable id, say so explicitly and lower its confidence rating.
+
 ## What NOT to do
 
 - Do not invent titles / DOIs / authors — every record must come from a real MCP response.
 - Do not substitute web search for MCP — this is an academic skill; the source of truth is science-mcp.
 - Do not write a full review or article in the output — return the annotated source list only. Article writing is the job of `scientific-article-creator`.
+- Do not save the result to a file. Never call `write_to_file` (or any disk-writing tool) for the output — the user did not ask for a file. Return the list inline in the chat response. A separate `*_literature_review.md` file is wrong here.
 
 ## Examples
 
