@@ -473,6 +473,33 @@ class SkillsRegistry:
             result.append(entry)
         return result
 
+    def _resolve_pack_bootstrap(self, pack_id: str) -> Optional[Skill]:
+        """Resolve a bare pack-id to that pack's bootstrap (entry) skill.
+
+        Mirrors the bootstrap resolution in ``list_skills``: try the canonical
+        ``<pack>:<bootstrap_skill>`` id, then fall back to an inner skill whose
+        folder name matches ``bootstrap_skill``. Returns ``None`` when the id is
+        not a known pack or the pack declares no resolvable bootstrap.
+        """
+        normalized = pack_id.replace("_", "-")
+        canonical_pid = (
+            pack_id if pack_id in self._packs_by_id
+            else normalized if normalized in self._packs_by_id
+            else None
+        )
+        if canonical_pid is None:
+            return None
+        bs = self._packs_by_id[canonical_pid].get("bootstrap_skill")
+        if not (isinstance(bs, str) and bs.strip()):
+            return None
+        direct = self._skills_by_id.get(f"{canonical_pid}:{bs}")
+        if direct is not None:
+            return direct
+        for skill in self._skills_by_id.values():
+            if skill.pack_id == canonical_pid and os.path.basename(skill.root_path) == bs:
+                return skill
+        return None
+
     def _get_skill(self, skill_id: str) -> Skill:
         self._ensure_loaded()
         if not isinstance(skill_id, str):
@@ -502,6 +529,13 @@ class SkillsRegistry:
                 candidates.append(s)
 
         if len(candidates) == 0:
+            # Bare pack-id (e.g. "science-article-creator") → resolve to the
+            # pack's bootstrap skill so an agent that loads a pack by its bare
+            # id gets the entry skill instead of "not found" (hop1). Last resort:
+            # only reached when no flat/inner skill matched the alias above.
+            bootstrap = self._resolve_pack_bootstrap(skill_id)
+            if bootstrap is not None:
+                return bootstrap
             raise KeyError(f"Skill '{skill_id}' not found")
         if len(candidates) > 1:
             raise AmbiguousSkillId(
