@@ -97,6 +97,8 @@ Desktop.ini
 .classpath
 .settings/
 mcp_media/
+recommended_mcp/config.local.yml
+
 # =============================================================
 # Docker
 # =============================================================
