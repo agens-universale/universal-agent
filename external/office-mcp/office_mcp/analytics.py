@@ -6,6 +6,7 @@ import pandas as pd
 
 from .analytics_schema import AGG_FUNCS
 from .errors import ErrorCategory, OfficeReaderError
+from .xlsx_read import load_xlsx_table
 
 _NUMERIC_AGGS = {"sum", "mean", "median", "std"}
 
@@ -28,6 +29,8 @@ def load_table(path: Path | str, sheet: str | None = None) -> pd.DataFrame:
     try:
         if ext == ".csv":
             return pd.read_csv(p)
+        if ext == ".xlsx":
+            return load_xlsx_table(p, sheet=sheet)
         return pd.read_excel(p, sheet_name=sheet if sheet else 0)
     except OfficeReaderError:
         raise

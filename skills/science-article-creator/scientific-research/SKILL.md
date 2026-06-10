@@ -73,11 +73,7 @@ Lenses are a tool, not a mandatory step. If the request already names key terms,
 
 ## Output format
 
-**Delivery: return the list directly in your chat reply.** This skill produces a short
-annotated list of papers, not a document — do NOT call `write_to_file` / `save` / write
-anything to disk, and do not announce a saved report. The chat message itself is the
-deliverable. Keep it compact: the grouped list of papers + a short gaps note. No cover
-page, no separate review file.
+**Delivery: always include the annotated list in your chat reply** — even when you also save an artifact to disk. The chat message must contain the compact grouped list (papers + gaps note), not only a path or "saved to file". You may optionally save the same content as a `*_literature_review.md` file when useful, but the inline chat list is mandatory. This skill produces a short annotated source list, not a full review or article. No cover page in the chat version.
 
 Russian Markdown with this skeleton:
 
@@ -133,7 +129,7 @@ Build the link by substituting the real id from the MCP response into BOTH the b
 - Do not invent titles / DOIs / authors — every record must come from a real MCP response.
 - Do not substitute web search for MCP — this is an academic skill; the source of truth is science-mcp.
 - Do not write a full review or article in the output — return the annotated source list only. Article writing is the job of `scientific-article-creator`.
-- Do not save the result to a file. Never call `write_to_file` (or any disk-writing tool) for the output — the user did not ask for a file. Return the list inline in the chat response. A separate `*_literature_review.md` file is wrong here.
+- Do not treat a saved file as sufficient delivery — always include the annotated list inline in the chat response too, even if you also wrote an artifact.
 
 ## Examples
 
