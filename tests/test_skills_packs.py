@@ -435,3 +435,51 @@ def test_bootstrap_direct_canonical_wins_over_folder_name_match(tmp_path):
     assert items["ambig:bar"]["is_pack_bootstrap"] is True
     # Skill B скрыт (не bootstrap, internal)
     assert "ambig:baz" not in items
+
+
+def test_bare_pack_id_resolves_to_bootstrap(tmp_path):
+    """A bare pack-id loads the pack's bootstrap (entry) skill instead of 404 (hop1)."""
+    _write_pack(
+        tmp_path / "system",
+        "superpowers",
+        inner_skills=["using-superpowers", "brainstorming"],
+        bootstrap_skill="using-superpowers",
+    )
+    reg, _ = _registry(tmp_path)
+    detail = reg.load_skill_detail("superpowers")
+    assert detail["id"] == "superpowers:using-superpowers"
+    assert detail["pack_id"] == "superpowers"
+
+
+def test_bare_pack_id_underscore_variant_resolves(tmp_path):
+    """Bare pack-id with underscores normalizes to the hyphen pack id."""
+    _write_pack(
+        tmp_path / "system",
+        "science-article-creator",
+        inner_skills=["using-science-article-creator", "scientific-research"],
+        bootstrap_skill="using-science-article-creator",
+    )
+    reg, _ = _registry(tmp_path)
+    detail = reg.load_skill_detail("science_article_creator")
+    assert detail["id"] == "science-article-creator:using-science-article-creator"
+
+
+def test_bare_pack_id_without_bootstrap_still_raises(tmp_path):
+    """A pack that declares no bootstrap_skill does not resolve by bare id."""
+    _write_pack(
+        tmp_path / "system",
+        "nobs",
+        inner_skills=["inner-a"],
+        bootstrap_skill=None,
+    )
+    reg, _ = _registry(tmp_path)
+    with pytest.raises(KeyError):
+        reg.load_skill_detail("nobs")
+
+
+def test_unknown_bare_id_still_raises(tmp_path):
+    """Non-pack, non-skill ids still raise KeyError (no regression)."""
+    _write_flat_skill(tmp_path / "system", "swe-task-solver")
+    reg, _ = _registry(tmp_path)
+    with pytest.raises(KeyError):
+        reg.load_skill_detail("totally-bogus-xyz")
