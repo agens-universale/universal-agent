@@ -1,0 +1,274 @@
+/* Палитра-токены TUI MVP — §2.4 спеки.
+ * Принцип: цвет — редкий сигнал, тело монохромно; смысл несут ASCII-глифы.
+ */
+
+/* Базовые цвета (hex как в спеке) */
+$bg:        #0E1119;
+$ink:       #ebe9e6;
+$bright:    #eef2f6;
+$dim:       #8b949e;
+$muted:     #6e7681;
+$deep-dim:  #7a8290;
+$accent:    #54B3A6;
+$code:      #afbdff;
+$tool-name: #BCC3CC;
+$code-block:#9aa4b2;
+$ok:        #5FAE7F;
+$run-color: #D4A574;
+$err:       #C75C54;
+$brand:     #9A6DD7;
+$band-bg:   #1f2128;
+
+Screen {
+    background: $bg;
+    color: $ink;
+}
+
+/* Шапка / подвал — тихие хром-полосы */
+#header { height: 2; background: #161A23; color: $deep-dim;
+          padding: 0 1; border-bottom: solid $deep-dim; }
+#header-left  { width: 1fr; color: $deep-dim; }
+#header-right { width: auto; color: $deep-dim; text-align: right; padding-right: 1; }
+#footer { height: 1; background: #161A23; color: $dim;
+          padding: 0 1; }
+#footer-left  { width: 1fr; color: $dim; }
+#footer-right { width: auto; color: $deep-dim; text-align: right; padding-right: 1; }
+
+/* Контентная зона трейса */
+#trace { height: 1fr; padding: 0 1; background: $bg; }
+
+/* Brand-блок — постоянная шапка трейса (Claude-style: стартовый экран = начало
+ * трейса; ниже flow'ом индикатор загрузки MCP и далее диалог; не скрывается). */
+#brand-block {
+    width: 100%;
+    height: auto;
+    margin-top: 1;
+}
+
+/* Поле ввода — Claude-style: две тонкие линии ─ над и под input.
+ * `>` flush-left на первой строке; ввод многострочный (TextArea),
+ * растёт по высоте, continuation-строки выровнены отступом prompt'а. */
+#input-row {
+    height: auto;                       /* растёт с контентом */
+    min-height: 3;                      /* 1 content + top + bottom border */
+    width: 1fr;
+    padding: 0;
+    background: $bg;
+    border-top: solid $deep-dim;
+    border-bottom: solid $deep-dim;
+}
+#input-prompt { width: 2; color: $accent; height: 1; background: $bg; content-align: left top; padding: 0; }
+#cmdinput {
+    height: auto;                       /* растёт со строками */
+    max-height: 10;                     /* потолок; дальше — скролл */
+    width: 1fr;
+    border: none;
+    padding: 0;
+    background: $bg;
+    color: $ink;
+    scrollbar-size: 0 0;
+}
+#cmdinput:focus { border: none; }
+#cmdinput > .text-area--cursor { background: $accent; color: $bg; }
+
+/* /sessions фильтр — стиль как у главного input */
+#sessions-filter-row {
+    height: 3;
+    width: 1fr;
+    padding: 0;
+    background: $bg;
+    border-top: solid $deep-dim;
+    border-bottom: solid $deep-dim;
+}
+#sessions-filter-prompt { width: 2; color: $accent; height: 1; background: $bg; content-align: left middle; padding: 0; }
+#sessions-filter { height: 1; width: 1fr; border: none; padding: 0; background: $bg; color: $ink; }
+#sessions-filter:focus { border: none; }
+
+/* FOCUS-2px — на НЕ-ввод (трейс/список/футер), когда Tab уведёт фокус туда */
+#trace:focus, .list-row:focus, #footer:focus { outline: solid $accent; }
+
+/* TraceRow — 2-колоночный layout (prefix фиксированной ширины + content width:1fr) */
+.trace-prefix  { width: auto; height: auto; padding: 0; }
+.trace-content { width: 1fr;  height: auto; padding: 0; }
+
+/* Типы строк трейса */
+.line-user      { color: $ink; }       /* текст реплики; маркер > отдельно */
+.line-user-mark { color: $accent; }    /* маркер > */
+.line-agent     { color: $ink; margin-top: 1; }  /* ● реплика агента; отступ — фазы хода */
+/* Continuation prose-виджеты внутри одной agent-реплики — без top-margin
+   (spec 2026-05-26 / code-block-highlight): первый prose-блок получает
+   margin-top:1, остальные — 0, чтобы избежать двойных отступов внутри реплики. */
+.line-agent-cont { margin-top: 0; }
+.table-block { width: 1fr; margin: 1 0; }
+.table-block.table-indent { margin-left: 2; }  /* трейс/превью: вровень с текстом реплики (как код-панели) */
+
+/* Fenced code-block panel (spec 2026-05-26 / code-block-highlight):
+   Claude-style панель с фоном $band-bg, подсветка через rich.syntax. */
+.code-block-panel {
+    background: $band-bg;
+    padding: 0 1;
+    margin-top: 1;
+    height: auto;
+    width: 1fr;
+}
+.code-block-panel.code-indent { margin-left: 2; }  /* трейс/превью: вровень с текстом реплики; баннер — без отступа */
+
+/* spec 2026-05-27 / tool-output-detail */
+.detail-section-header {
+    height: 1;
+    margin-top: 1;
+    width: 1fr;
+}
+.detail-section-rule {
+    color: $deep-dim;
+    width: 1fr;
+    height: 1;
+}
+.detail-section-label {
+    color: $deep-dim;
+    width: auto;
+    height: 1;
+    padding: 0 1;
+}
+
+.tool-result-preview {
+    color: $muted;
+    padding: 0 0 0 5;
+    border-left: outer $deep-dim;
+    height: auto;
+}
+.tool-result-preview.hidden {
+    display: none;
+}
+.line-tool      { color: $dim; }       /* |- механика тула */
+.line-think     { color: $muted; text-style: italic; margin-top: 1; }
+.line-intermediate { color: $ink; margin-top: 1; }  /* ·-реплика — фаза хода, как ● */
+.ask-human-question.hidden { display: none; }  /* вопрос скрыт, пока виден баннер */
+.line-error     { color: $err; }
+.line-code      { color: $code; }      /* inline-код/путь */
+.line-bold      { color: $accent; text-style: bold; }
+.line-heading-1 { color: $accent; text-style: bold; }
+.line-heading-2 { color: $accent; text-style: bold; }      /* вес легче — render-A */
+.line-block     { color: $code-block; }
+.line-ok        { color: $ok; }
+.line-run       { color: $run-color; }
+.line-meta      { color: $deep-dim; margin-top: 1; }
+.line-note      { color: #a5adb8; margin-top: 1; }  /* чуть светлее $dim; пустая строка сверху — отделяет ремарку; курсив — только на тексте ремарки (см. note_text), ярлык прямой */
+.summary-marker { color: $deep-dim; margin: 1 0; }  /* пустая строка сверху И снизу — маркер обособлен */
+.summary-body   { color: $dim; margin-bottom: 1; }
+.summary-body.hidden { display: none; }
+
+/* Подложка реплики пользователя (§2.6) */
+.user-band {
+    background: $band-bg;
+    border-left: outer $accent;
+    padding: 0 1 0 1;
+    margin: 1 0;       /* пустая строка сверху и снизу — визуально отделяет реплику */
+    height: auto;
+    width: 1fr;
+}
+
+/* Pending: приглушённая teal-кромка (spec 2026-05-26) */
+.user-band.user-reply-pending {
+    border-left: outer #3a7a72;
+}
+
+/* Failed: красная кромка + инлайн [!] (spec 2026-05-26) */
+.user-band.user-reply-failed {
+    border-left: outer #C75C54;
+}
+
+/* Бренд-блок пустого состояния (§2.8) */
+.brand-logo    { color: $brand; text-style: bold; text-align: left; width: 100%; }
+.brand-tagline-row { width: 100%; height: auto; margin-top: 1; }
+.brand-rule    { color: $accent; width: auto; height: auto; }
+.brand-tagline { color: $dim; width: auto; height: auto; }
+
+/* ThinkingIndicator — «думаю…» (spec 2026-05-26) */
+.thinking-indicator { color: $deep-dim; padding: 0 1; margin-top: 1; height: 1; }
+.thinking-indicator.hidden { display: none; }
+
+/* Палитра команд (overlay, Task 3.3) */
+.palette       { background: #161A23; border: solid $run-color; max-height: 80%; }
+.palette-row   { color: $ink; padding: 0 1; }
+.palette-row.selected { background: $band-bg; color: $bright; }
+.palette-hint  { color: $deep-dim; padding: 0 1; }
+
+/* Строки HelpScreen — реестр команд */
+.help-row      { height: auto; width: 1fr; color: $ink; }
+.help-row.help-row-alt { background: #181c26; }  /* зебра: чуть светлее фона для читаемости */
+.help-row-main { width: 1fr; padding-left: 1; }
+.help-row-key  { width: auto; color: $deep-dim; text-align: right; padding-right: 1; }
+
+/* Тело ViewerScreen — read-only payload/файл */
+.viewer-body   { color: $ink; padding: 0 1; }
+
+/* Строки списков (TasksScreen, SkillsScreen) */
+.list-row      { color: $ink; padding: 0 1; }
+
+/* ask_human banner (§3.4) — янтарный тон (как running), сигнал «жду тебя» */
+.ask-human-banner {
+    background: #161A23;
+    border: solid $run-color;
+    border-left: thick $run-color;
+    padding: 0 1;
+    margin: 0 1;
+    height: auto;
+    width: 1fr;
+}
+.ah-label { color: $bright; text-style: bold; }
+.ah-body  { color: $ink; }
+/* input в режиме ask_human — янтарная рамка (как баннер / running) */
+TextArea.ask-human-mode { border: solid $run-color; }
+
+/* SessionsScreen — picker недавних задач (Task 4.1) */
+#sessions-root { height: 100%; }
+#sessions-header { height: 2; background: #161A23; color: $deep-dim;
+                 border-bottom: solid $deep-dim; padding: 0 1; }
+#sessions-header-left  { width: 1fr; color: $deep-dim; }
+#sessions-header-right { width: auto; color: $deep-dim; text-align: right; padding-right: 1; }
+#sessions-footer { height: 1; padding: 0 1; }
+#sessions-list { height: 1fr; }
+#sessions-list Static { padding: 0 1; height: 1; }
+#sessions-list .card-meta { margin-bottom: 1; }
+#sessions-list .card-title.selected,
+#sessions-list .card-meta.selected { background: $band-bg; }
+#sessions-list .card-title.selected,
+#sessions-list .card-meta.selected { border-left: outer $accent; }
+
+/* PreviewScreen — read-only превью сессии (футер с линией-разделителем) */
+#preview-footer { height: 2; background: #161A23; color: $dim;
+                  border-top: solid $deep-dim; padding: 0 1; }
+
+/* SkillsScreen — picker, двустрочные карточки (2026-06-02) */
+#skills-root { height: 100%; }
+#skills-filter-row { height: 3; width: 1fr; padding: 0; background: $bg; border-top: solid $deep-dim; border-bottom: solid $deep-dim; }
+#skills-filter-prompt { width: 2; color: $accent; height: 1; background: $bg; content-align: left middle; padding: 0; }
+#skills-filter { height: 1; width: 1fr; border: none; padding: 0; background: $bg; color: $ink; }
+#skills-filter:focus { border: none; }
+#skills-list { height: 1fr; }
+#skills-list Static { padding: 0 1; height: 1; }
+#skills-list .card-meta { margin-bottom: 1; }
+#skills-list .card-title.selected,
+#skills-list .card-meta.selected { background: $band-bg; }
+#skills-list .card-title.selected,
+#skills-list .card-meta.selected { border-left: outer $accent; }
+
+/* McpScreen — карточки серверов (spec 2026-06-10) */
+.mcp-card { height: auto; padding: 0 1; margin-bottom: 1; }
+.mcp-card:focus { background: $band-bg; border-left: outer $accent; }
+.mcp-summary { padding: 0 1; }
+
+/* ConfigScreen — fieldset-панели (spec 2026-06-10) */
+.config-caption { color: $dim; padding: 0 1; margin: 0 0 1 0; }
+.config-panel {
+    height: auto;
+    border: solid $deep-dim;
+    border-title-color: $dim;
+    border-subtitle-color: $deep-dim;
+    padding: 0 1;
+    margin: 0 0 1 0;
+}
+/* read-only вьюверы: фокус-outline бессмыслен (фокусироваться больше не на чем)
+   и рисуется поверх контента */
+#trace.quiet-focus:focus { outline: none; }

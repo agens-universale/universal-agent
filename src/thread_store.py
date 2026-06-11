@@ -1,3 +1,4 @@
+import glob
 import json
 import os
 import re
@@ -148,6 +149,33 @@ def reset_thread_files(threads_dir: str, system_id: str, thread_id: str) -> List
     return deleted
 
 
+def _thread_archive_paths(threads_dir: str, system_id: str, thread_id: str) -> List[str]:
+    """Пути __pre_summary__-архивов треда (data+meta), созданных суммаризацией."""
+    sys_norm = sanitize_system_id(system_id)
+    tid = validate_thread_id(thread_id)
+    data_glob = os.path.join(threads_dir, f"data_{sys_norm}_{tid}__pre_summary__*.jsonl")
+    meta_glob = os.path.join(threads_dir, f"meta_{sys_norm}_{tid}__pre_summary__*.json")
+    return sorted(glob.glob(data_glob)) + sorted(glob.glob(meta_glob))
+
+
+def delete_thread(threads_dir: str, system_id: str, thread_id: str) -> List[str]:
+    """Полностью удалить тред: canonical + legacy + __pre_summary__-архивы.
+
+    Возвращает список удалённых путей. Отсутствие файла — no-op.
+    """
+    paths: List[str] = []
+    paths.extend(_thread_paths(threads_dir, system_id, thread_id))
+    paths.extend(_thread_paths_legacy(threads_dir, thread_id))
+    paths.extend(_thread_archive_paths(threads_dir, system_id, thread_id))
+
+    deleted: List[str] = []
+    for path in paths:
+        if os.path.exists(path):
+            os.remove(path)
+            deleted.append(path)
+    return deleted
+
+
 def load_thread_messages(
     threads_dir: str, system_id: str, thread_id: str
 ) -> Tuple[List[Dict[str, Any]], Set[str], int]:
@@ -228,6 +256,76 @@ def save_thread_meta(
     with open(tmp_path, "w", encoding="utf-8") as f:
         json.dump(to_save, f, ensure_ascii=False, indent=2)
     os.replace(tmp_path, meta_path)
+
+
+def update_tui_meta(
+    threads_dir: str, system_id: str, thread_id: str, patch: Dict[str, Any]
+) -> None:
+    """Слить patch в meta.tui (read-merge-write). Run-путь пишет снимки для TUI-экранов."""
+    sys_norm = sanitize_system_id(system_id)
+    meta = load_thread_meta(threads_dir, sys_norm, thread_id) or {}
+    tui_meta = meta.get("tui") or {}
+    tui_meta.update(patch)
+    meta["tui"] = tui_meta
+    save_thread_meta(threads_dir, sys_norm, thread_id, meta)
+
+
+def discard_message_by_id(
+    threads_dir: str, system_id: str, thread_id: str, message_id: str
+) -> bool:
+    """Удалить message-запись с указанным ``payload.id`` из data_*.jsonl.
+
+    Для отката осиротевшей user-реплики (быстрая отмена до вывода агента).
+    Вызывать только когда на тред нет активного run'а (нет конкурентной
+    дозаписи) — перезапись атомарна (tmp + os.replace). Декрементит
+    ``messages_count`` в meta. Возвращает True, если что-то удалено.
+    """
+    if not message_id:
+        return False
+    sys_norm = sanitize_system_id(system_id)
+    data_path, _ = _thread_paths(threads_dir, sys_norm, thread_id)
+    if not os.path.exists(data_path):
+        return False
+
+    kept: List[str] = []
+    removed = 0
+    with open(data_path, "r", encoding="utf-8") as f:
+        for line in f:
+            if not line.strip():
+                continue
+            try:
+                rec = json.loads(line)
+            except json.JSONDecodeError:
+                kept.append(line.rstrip("\n"))
+                continue
+            payload = rec.get("payload") if isinstance(rec, dict) else None
+            if (
+                isinstance(rec, dict)
+                and rec.get("type") == "message"
+                and isinstance(payload, dict)
+                and payload.get("id") == message_id
+            ):
+                removed += 1
+                continue
+            kept.append(line.rstrip("\n"))
+
+    if removed == 0:
+        return False
+
+    tmp_path = f"{data_path}.tmp"
+    with open(tmp_path, "w", encoding="utf-8") as f:
+        for row in kept:
+            f.write(row + "\n")
+    os.replace(tmp_path, data_path)
+
+    meta = load_thread_meta(threads_dir, sys_norm, thread_id)
+    if meta:
+        try:
+            meta["messages_count"] = max(0, int(meta.get("messages_count", 0)) - removed)
+            save_thread_meta(threads_dir, sys_norm, thread_id, meta)
+        except (TypeError, ValueError):
+            pass
+    return True
 
 
 def append_new_thread_messages(

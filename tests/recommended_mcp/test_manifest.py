@@ -332,3 +332,23 @@ def test_source_field_ignored_for_non_source_types(tmp_path: Path) -> None:
     entry = load_manifest(f)[0]
     assert entry.install.type == "wheel"
     assert entry.install.source == Path("../whatever")
+
+
+def test_npx_mcp_parses_install_commands(tmp_path: Path) -> None:
+    # Баг-регрессия: install.commands (warmup npx/npm) раньше терялись в парсере.
+    f = _write(tmp_path, """
+        mcps:
+          - name: browser_playwright
+            path: ./browser_playwright
+            install:
+              type: npx
+              commands:
+                - [npm, "install", "-g", "@playwright/mcp@0.0.70"]
+                - [npx, "-y", "playwright", "install", "chromium"]
+    """)
+    entry = load_manifest(f)[0]
+    assert entry.install.type == "npx"
+    assert entry.install.commands == (
+        ("npm", "install", "-g", "@playwright/mcp@0.0.70"),
+        ("npx", "-y", "playwright", "install", "chromium"),
+    )

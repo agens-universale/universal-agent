@@ -78,6 +78,7 @@ class State:
         self.max_steps = max_steps
         self.steps = 0
         self.stop_requested = False
+        self.discard_writes_after_stop = False  # TUI ставит True; пропускает persist
         self.user_intent_log: list[IntentRecord] = []
         self.current_user_intent: list[IntentRecord] = []
         self.user_turn_seq: int = 0

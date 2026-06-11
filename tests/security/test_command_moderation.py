@@ -152,6 +152,16 @@ def test_build_judge_payload_contains_runtime_context():
     assert "mode" not in payload
 
 
+def test_moderation_context_default_os_name_uses_sys_platform(monkeypatch):
+    """ModerationContext.os_name по умолчанию не должен звать platform.system()
+    (на Windows это WMI-запрос, способный зависнуть). Значение берётся из sys.platform."""
+    import sys
+
+    monkeypatch.setattr(sys, "platform", "darwin")
+    ctx = ModerationContext(tool_name="execute_command", launch_root="/repo")
+    assert ctx.os_name == "macOS"
+
+
 def test_command_judge_prompts_are_loaded_from_files():
     system_prompt = load_command_judge_prompt("system")
     user_prompt = load_command_judge_prompt("user")

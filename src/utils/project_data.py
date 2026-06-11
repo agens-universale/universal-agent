@@ -1,6 +1,6 @@
 import os
 import shutil
-import platform
+import sys
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
@@ -103,6 +103,23 @@ def _extra_write_roots(config_dict: Optional[Dict[str, Any]]) -> List[str]:
     return [str(x) for x in (extra or []) if x is not None and str(x).strip()]
 
 
+def os_label() -> str:
+    """Человекочитаемое имя ОС из ``sys.platform`` (константа интерпретатора).
+
+    Намеренно НЕ используем ``platform.system()``/``uname()``: на Windows+CPython
+    этот путь уходит в WMI-запрос (``platform._wmi_query`` → служба ``winmgmt``),
+    который при подвисшей службе блокируется намертво и замораживает старт агента.
+    ``sys.platform`` зашит при сборке интерпретатора — без службы и без syscall.
+    """
+    if sys.platform == "win32":
+        return "Windows"
+    if sys.platform == "darwin":
+        return "macOS"
+    if sys.platform.startswith("linux"):
+        return "Linux"
+    return sys.platform
+
+
 def get_project_data(workspace_config: Optional[Dict[str, Any]] = None) -> Dict[str, str]:
     """
     return project data like
@@ -123,19 +140,11 @@ def get_project_data(workspace_config: Optional[Dict[str, Any]] = None) -> Dict[
     ``allowed_write_paths`` lists only directories where a probe file can be created and removed
     (same meaning on Linux, macOS, and Windows); non-writable roots are omitted.
     """
-    os_name = platform.system()
-    if os_name == "Linux":
-        os_str = "Linux"
-    elif os_name == "Darwin":
-        os_str = "macOS"
-    elif os_name == "Windows":
-        os_str = "Windows"
-    else:
-        os_str = os_name
+    os_str = os_label()
 
     # Оболочка (shell)
     shell = os.environ.get("SHELL", "unknown")  # для Unix-систем
-    if not shell or shell == "unknown" and os_name == "Windows":
+    if not shell or shell == "unknown" and sys.platform == "win32":
         shell = os.environ.get("COMSPEC", "cmd.exe")
 
     project_dir = _resolve_workspace_dir(workspace_config)

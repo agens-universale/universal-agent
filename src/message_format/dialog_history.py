@@ -4,6 +4,7 @@ from typing import Any, Callable, Dict, List, TypeVar
 
 from message_policy.user_message_policy import (
     is_dialog_summary_user_message_text,
+    is_technical_user_message_text,
     user_content_to_text,
 )
 
@@ -102,6 +103,11 @@ def group_into_turns(messages: List[Dict[str, Any]]) -> List[List[Dict[str, Any]
     def _is_tool_call_output(msg: Dict[str, Any]) -> bool:
         return msg.get("type") in {"function_call_output", "tool_call_output"}
 
+    def _is_technical_user(m: Dict[str, Any]) -> bool:
+        if str(m.get("role", "")).strip().lower() != "user":
+            return False
+        return is_technical_user_message_text(user_content_to_text(m.get("content")))
+
     if not messages:
         return []
     turns: List[List[Dict[str, Any]]] = []
@@ -160,6 +166,11 @@ def group_into_turns(messages: List[Dict[str, Any]]) -> List[List[Dict[str, Any]
                     consumed.add(j)
                     j += 1
                     break
+                if nxt_role == "user" and _is_technical_user(nxt):
+                    turn.append(nxt)
+                    consumed.add(j)
+                    j += 1
+                    continue
                 if nxt_role == "user" or nxt_type in {
                     "function_call",
                     "tool_call",

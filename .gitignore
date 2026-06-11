@@ -63,6 +63,8 @@ ipython_config.py
 # =============================================================
 config.yml
 plan.md
+docs/plans/
+.superpowers/
 
 # Logs and dumps
 logs/
@@ -103,4 +105,10 @@ recommended_mcp/config.local.yml
 # Docker
 # =============================================================
 .docker/
-docs/plans/
+
+# auto-generated SVG copies of pytest-textual-snapshot .raw files (human viewing aid)
+tests/tui/__snapshots__/**/*.svg
+
+# superpowers-скиллы пишут сюда черновики спек/планов по дефолту — в git не попадают
+# (доки TUI живут в docs/tui/{specs,plans,visual})
+docs/superpowers/

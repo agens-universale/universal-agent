@@ -27,6 +27,7 @@ def render_system_prompt(
     tools_spec: List[Dict[str, Any]],
     project_info: Dict[str, Any],
     specific_role: Optional[str],
+    special_instructions: Optional[str] = None,
 ) -> str:
     """
     Local rendering of chat_completions system prompt.
@@ -72,6 +73,10 @@ def render_system_prompt(
         )
     elif "<specific_role>" in system_prompt:
         system_prompt = system_prompt.replace("<specific_role>", str(specific_role))
+
+    # --- special instructions (client-provided; e.g. TUI consumption rules) ---
+    if "</special_instructions>" in system_prompt:
+        system_prompt = _replace_tag_block(system_prompt, "special_instructions", special_instructions or "")
 
     return system_prompt
 

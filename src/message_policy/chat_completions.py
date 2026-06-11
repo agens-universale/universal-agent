@@ -173,6 +173,56 @@ def coalesce_consecutive_assistant_tool_calls(messages: List[Dict]) -> List[Dict
     return result
 
 
+_INTERRUPTED_ASSISTANT_PLACEHOLDER = (
+    "(previous turn was interrupted — continuing from the new request)"
+)
+
+
+def inject_assistant_after_orphan_tool_outputs(messages: List[Dict]) -> List[Dict]:
+    """
+    После tool-сообщений (role=tool) chat/completions API ожидает assistant
+    (текстовый ответ или следующий tool_calls). Если вместо assistant идёт
+    user/system — обычно это след прерванного агентского хода (стоп между
+    tool_outputs и финальным ответом LLM). В чистом payload backend такое
+    отвергает (400 invalid sequence).
+
+    Функция вставляет синтетический assistant-ack между tool-серией и
+    следующим non-assistant сообщением — payload снова валиден, история
+    остаётся информативной для модели («был прерванный ход, теперь новый
+    user-запрос»).
+
+    Инертна в здоровом потоке (tool → assistant). Триггерится только когда
+    user/system идёт сразу после tool (классический stop-corruption pattern).
+
+    user → user (несколько сообщений подряд без assistant между ними) НЕ
+    обрабатывается тут специально — это legitimate flow (например юзер
+    отправил несколько коротких реплик подряд до того как agent начал
+    отвечать), и существующий тест-контракт ожидает что такие
+    последовательности проходят без модификации.
+    """
+    if not isinstance(messages, list) or not messages:
+        return messages
+
+    result: List[Dict] = []
+    prev_was_tool = False
+    for msg in messages:
+        if not isinstance(msg, dict):
+            result.append(msg)
+            prev_was_tool = False
+            continue
+        role = msg.get("role")
+        if prev_was_tool and role in ("user", "system"):
+            result.append(
+                {
+                    "role": "assistant",
+                    "content": _INTERRUPTED_ASSISTANT_PLACEHOLDER,
+                }
+            )
+        result.append(msg)
+        prev_was_tool = role == "tool"
+    return result
+
+
 def prepare_chat_completion_messages_for_api(
     messages: List[Dict],
     *,
@@ -180,9 +230,19 @@ def prepare_chat_completion_messages_for_api(
 ) -> List[Dict]:
     """
     Нормализация истории перед отправкой в chat/completions API.
+
+    Три прохода (порядок важен):
+    1. coalesce_consecutive_assistant_tool_calls — схлопывает последовательные
+       assistant с tool_calls в один (канонический формат хранит каждый
+       function_call как отдельный assistant; OpenAI ждёт батч).
+    2. repair_tool_call_pairing — отбрасывает orphan assistant.tool_calls без
+       соответствующих tool-ответов.
+    3. inject_assistant_after_orphan_tool_outputs — вставляет ack-assistant
+       между tool-серией и следующим user/system (последствие прерванного хода).
     """
     coalesced = coalesce_consecutive_assistant_tool_calls(messages)
-    return repair_tool_call_pairing(
+    repaired = repair_tool_call_pairing(
         coalesced,
         keep_latest_unanswered=keep_latest_unanswered,
     )
+    return inject_assistant_after_orphan_tool_outputs(repaired)
