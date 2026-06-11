@@ -85,6 +85,8 @@ class TuiApp(App):
         from tui.services.mcp_progress import McpProgress
         cfg = dict(self._config) if self._config else {}
         cfg["console_trace"] = False
+        from tui.services.prompt_assets import tui_special_instructions_path
+        cfg["chat_completions_special_instructions_path"] = tui_special_instructions_path()
         auth = build_auth_connector(cfg)
         progress = McpProgress()
         progress.begin(list((cfg.get("mcp-servers") or {}).keys()))

@@ -12,24 +12,6 @@ def _read_prompt(name: str) -> str:
     return (_REPO_ROOT / "prompts" / name).read_text(encoding="utf-8")
 
 
-def test_main_prompt_has_output_formatting_section():
-    body = _read_prompt("chat_completions_system_prompt.md")
-    assert "### Output formatting" in body
-    assert "fenced markdown" in body
-    # Проверяем явное упоминание language-tag (агент должен помечать язык).
-    assert "language tag" in body
-    # Покрытие inline-кода тоже упомянуто.
-    assert "single backticks" in body
-
-
-def test_subagent_prompt_has_no_branch_output_formatting():
-    """Решение интеграции (merge master): сабагентный промпт берётся из master
-    целиком — он machine-facing (отдаёт JSON родителю), поэтому TUI-секция
-    Output formatting туда не добавляется."""
-    body = _read_prompt("chat_completions_subagent_system_prompt.md")
-    assert "### Output formatting" not in body
-
-
 def _section(body: str, header: str) -> str:
     """Текст секции от заголовка до следующего markdown-заголовка (## или ###)."""
     start = body.index(header)
@@ -38,35 +20,46 @@ def _section(body: str, header: str) -> str:
     return rest[: m.start()] if m else rest
 
 
-def test_output_formatting_section_is_tool_agnostic():
-    """Сама секция Output formatting обобщённая — не привязана к имени
-    финализирующего тула (внутри секции submit_solution не упоминается;
-    форматирование применяется ко всем ответам). Имя submit_solution в §6
-    (Asking vs finalizing) — намеренно, это другая часть промпта."""
+def test_tui_file_has_output_formatting_section():
+    body = _read_prompt("chat_completions_tui_special_instructions.md")
+    assert "### Output formatting" in body
+    assert "fenced markdown" in body
+    assert "language tag" in body
+    assert "single backticks" in body
+
+
+def test_base_prompt_has_no_output_formatting():
     body = _read_prompt("chat_completions_system_prompt.md")
+    assert "### Output formatting" not in body
+    assert "fenced markdown" not in body
+
+
+def test_subagent_prompt_has_no_branch_output_formatting():
+    body = _read_prompt("chat_completions_subagent_system_prompt.md")
+    assert "### Output formatting" not in body
+
+
+def test_tui_file_output_formatting_section_is_tool_agnostic():
+    body = _read_prompt("chat_completions_tui_special_instructions.md")
     section = _section(body, "### Output formatting")
     assert "submit_solution" not in section
 
 
-def test_main_prompt_steers_questions_to_asking_tool():
-    """Решение пользователя (option A после live-теста на MiniMax-M2.7): системный
-    промпт ПРОАКТИВНО направляет интерактивные вопросы в asking-тул. Без этого
-    слабые модели пишут вопрос прозой и зацикливаются в no-tool-call bounce. Имя
-    тула НЕ хардкодим (master-инвариант test_orchestrator_prompt_has_no_hardcoded_builtin_tool_names)
-    — проверяем обобщённую (tool-agnostic) формулировку."""
-    body = _read_prompt("chat_completions_system_prompt.md")
+def test_tui_file_steers_questions_to_asking_tool():
+    body = _read_prompt("chat_completions_tui_special_instructions.md")
     assert "asking the user" in body
     assert "designated channel" in body
 
 
-def test_main_prompt_asking_vs_finalizing_rule():
-    """Под правило лида: системный промпт различает направления — нужен ответ
-    ЧТОБЫ ПРОДОЛЖИТЬ ход → asking-тул; отдаёшь ход → финализация (final report
-    может предлагать дальнейшее). submit_solution НЕ хардкодим — есть master-
-    инвариант test_orchestrator_prompt_has_no_hardcoded_builtin_tool_names;
-    финал описан абстрактно ('finalize'/'final report')."""
-    body = _read_prompt("chat_completions_system_prompt.md")
-    assert "asking the user" in body  # asking-направление, tool-agnostic (без имени ask_human)
-    assert "submit_solution" not in body  # master-инвариант: builtin-тул не хардкодим
+def test_tui_file_asking_vs_finalizing_rule():
+    body = _read_prompt("chat_completions_tui_special_instructions.md")
+    assert "asking the user" in body
+    assert "submit_solution" not in body
     assert "finalize the turn" in body
     assert "propose" in body or "recommend" in body
+
+
+def test_base_prompt_has_no_asking_block():
+    body = _read_prompt("chat_completions_system_prompt.md")
+    assert "designated channel" not in body
+    assert "invisible to the user" not in body

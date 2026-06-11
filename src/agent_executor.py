@@ -133,6 +133,7 @@ class AgentExecutor:
 
         chat_completions_system_prompt: str | None = None
         rendered_system_prompt: str | None = None
+        special_instructions: str | None = None
         if backend_api_mode == "chat_completions":
             prompt_path = config_dict.get("chat_completions_system_prompt_path")
             if isinstance(prompt_path, str) and prompt_path.strip():
@@ -145,6 +146,16 @@ class AgentExecutor:
                             f"Не удалось прочитать chat_completions system prompt: {prompt_path}"
                         )
                     raise e
+
+            # Клиент-специфичные инструкции (напр. TUI) — отсутствие/нечитаемость
+            # файла деградирует тихо (None), не роняя run.
+            si_path = config_dict.get("chat_completions_special_instructions_path")
+            if isinstance(si_path, str) and si_path.strip():
+                try:
+                    with open(si_path.strip(), "r", encoding="utf-8") as fd:
+                        special_instructions = fd.read().strip() or None
+                except OSError:
+                    special_instructions = None
 
         state_data = {
             "limit_project_metadata": config_dict.get("limit_project_metadata", False),
@@ -192,6 +203,7 @@ class AgentExecutor:
                 tools_spec=state.tools,
                 project_info=state.initial_project_data,
                 specific_role=state.specific_role,
+                special_instructions=special_instructions,
             )
             state.messages = [
                 {

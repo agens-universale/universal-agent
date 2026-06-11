@@ -183,6 +183,7 @@ def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
         "logging_params": app_cfg.logging.model_dump(),
         "agent_md_path": app_cfg.paths.agent_md_path,
         "chat_completions_system_prompt_path": app_cfg.paths.chat_completions_system_prompt_path,
+        "chat_completions_special_instructions_path": app_cfg.paths.chat_completions_special_instructions_path,
         "threads_data_path": app_cfg.paths.threads_data_path,
         "skills_data_path": app_cfg.paths.skills_data_path,
         "logs_dump_dir": app_cfg.paths.logs_dump_dir,
