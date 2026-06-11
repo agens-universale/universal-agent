@@ -105,6 +105,11 @@ recommended_mcp/config.local.yml
 # Docker
 # =============================================================
 .docker/
+docs/plans/
+
+# Swarm runtime artifacts (M6 / шаг 3.4)
+swarm_threads/
+.swarm_sandboxes/
 
 # auto-generated SVG copies of pytest-textual-snapshot .raw files (human viewing aid)
 tests/tui/__snapshots__/**/*.svg

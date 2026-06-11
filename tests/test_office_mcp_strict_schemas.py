@@ -1,6 +1,13 @@
 """All office-mcp tool schemas must survive OpenAI strict normalization."""
 from __future__ import annotations
 
+import pytest
+
+# office_mcp — внешний MCP (external/office-mcp), ставится через
+# recommended_mcp/install.py. Если не установлен — скипаем модуль, а не
+# роняем сбор всего сьюта.
+pytest.importorskip("office_mcp")
+
 from mcp.server.fastmcp.utilities.func_metadata import func_metadata
 
 from office_mcp.server import ServerConfig, build_server

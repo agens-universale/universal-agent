@@ -1,5 +1,6 @@
 import json
 import os
+import threading
 from typing import Any, Dict, Optional
 import logging
 
@@ -30,7 +31,10 @@ from rest_api.utils import (  # type: ignore  # noqa: E402
     normalize_system,
     patch_asyncio_run_for_fastapi,
 )
-from server_cleanup_threads import register_cleanup_threads_on_startup  # type: ignore  # noqa: E402
+from server_cleanup_threads import (  # type: ignore  # noqa: E402
+    register_cleanup_threads_on_startup,
+    register_swarm_cleanup_on_startup,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +45,7 @@ _SWARM_MODULES_AVAILABLE = True
 try:
     from swarm.config import build_swarm_config  # type: ignore  # noqa: E402
     from swarm.monitor import SwarmMonitor  # type: ignore  # noqa: E402
+    from swarm import lifecycle as swarm_lifecycle  # type: ignore  # noqa: E402
     from swarm import runner as swarm_runner  # type: ignore  # noqa: E402
     from swarm import storage as swarm_storage  # type: ignore  # noqa: E402
 except (ModuleNotFoundError, ImportError) as e:
@@ -48,6 +53,7 @@ except (ModuleNotFoundError, ImportError) as e:
     logger.warning("swarm disabled due to import error: %r", e)
     build_swarm_config = None  # type: ignore[assignment]
     SwarmMonitor = None  # type: ignore[assignment]
+    swarm_lifecycle = None  # type: ignore[assignment]
     swarm_runner = None  # type: ignore[assignment]
     swarm_storage = None  # type: ignore[assignment]
 
@@ -69,6 +75,11 @@ else:
 
 _swarm_monitor: Optional[Any] = None
 
+# Глобальный lock для idempotent POST /swarm/run (шаг 1.8, AR-3).
+# Защищает: read meta → решение reject vs start → save meta + Popen.
+# Под нагрузкой можно перейти на Dict[swarm_id, Lock] — на MVP это overkill.
+_SWARM_RUN_LOCK = threading.Lock()
+
 
 app = FastAPI()
 
@@ -77,6 +88,14 @@ register_cleanup_threads_on_startup(
     app,
     server_config=SERVER_CONFIG,
     base_agent_config=BASE_AGENT_CONFIG,
+    project_root=PROJECT_ROOT,
+    logger=logger,
+)
+
+# Шаг 3.2 — TTL-janitor для swarm_threads/ + .swarm_sandboxes/.
+register_swarm_cleanup_on_startup(
+    app,
+    swarm_config=SWARM_CONFIG,
     project_root=PROJECT_ROOT,
     logger=logger,
 )
@@ -93,9 +112,101 @@ async def _startup_swarm_monitor() -> None:
         return
 
     threads_dir = str(SWARM_CONFIG["threads_dir"])
-    monitor = SwarmMonitor(threads_dir)
+    sandbox_root_dir = str(SWARM_CONFIG["sandbox_root_dir"])
+    monitor = SwarmMonitor(
+        threads_dir,
+        sandbox_root_dir,
+        swarm_logs_dir=str(SWARM_CONFIG.get("swarm_logs_dir", "")),
+    )
     monitor.start_in_background()
     _swarm_monitor = monitor
+
+
+@app.on_event("shutdown")
+async def _shutdown_swarm_processes() -> None:
+    """Graceful shutdown: убить все живые sworm-процессы (шаг 3.3).
+
+    Без этого хендлера живые sworm'ы становятся сиротами после остановки
+    сервера (Ctrl+C, systemd stop, k8s pod terminate).
+
+    Алгоритм:
+    1. Снимаем снапшот active_ids из monitor'а.
+    2. Каждому посылаем SIGTERM через os.killpg (PID == PGID благодаря
+       start_new_session=True в runner.py, шаг 1.6).
+    3. asyncio.sleep grace-period 3 секунды.
+    4. Кто остался жив — SIGKILL.
+    5. Обновляем meta: status=unknown_failed, error_type=server_shutdown.
+    """
+    import asyncio
+    import os
+    import signal
+
+    monitor = _swarm_monitor
+    if monitor is None or not SWARM_CONFIG.get("enabled"):
+        return
+
+    active_ids = list(monitor.get_active_ids_copy())
+    if not active_ids:
+        return
+
+    threads_dir = str(SWARM_CONFIG["threads_dir"])
+    logger.info("shutdown: terminating %d active sworm(s)", len(active_ids))
+
+    # 1. SIGTERM для всех.
+    pids_to_kill = []
+    for swarm_id in active_ids:
+        meta = swarm_storage.load_swarm_meta(threads_dir, swarm_id)
+        if not meta:
+            continue
+        sm = meta.get("swarm_meta") or {}
+        pid = sm.get("pid")
+        if isinstance(pid, int) and swarm_lifecycle._is_pid_alive(pid):
+            try:
+                os.killpg(pid, signal.SIGTERM)
+                pids_to_kill.append((swarm_id, pid))
+            except (ProcessLookupError, PermissionError, OSError):
+                pass
+
+    # 2. Grace period — CLI пытается дописать summary.
+    await asyncio.sleep(3.0)
+
+    # 3. Добиваем оставшихся + обновляем meta.
+    for swarm_id, pid in pids_to_kill:
+        if swarm_lifecycle._is_pid_alive(pid):
+            try:
+                os.killpg(pid, signal.SIGKILL)
+            except (ProcessLookupError, PermissionError, OSError):
+                pass
+
+        # Обновляем meta — даже если процесс уже умер, обновляем статус
+        # на server_shutdown для аудита.
+        try:
+            existing = swarm_storage.load_swarm_meta(threads_dir, swarm_id)
+            if existing:
+                sm = existing.get("swarm_meta") or {}
+                current_status = str(sm.get("status", "")).strip().lower()
+                if current_status not in swarm_lifecycle.FINAL_STATUSES:
+                    swarm_storage.save_swarm_meta(
+                        threads_dir, swarm_id,
+                        base_meta={
+                            "system": existing.get("system"),
+                            "task_id": existing.get("task_id"),
+                        },
+                        swarm_meta_patch={
+                            "status": "unknown_failed",
+                            "finished_at": swarm_storage._utc_now_iso(),  # noqa: SLF001
+                            "error_type": "server_shutdown",
+                            "error_message": "Killed during server shutdown",
+                            "sandbox_status": "completed",
+                        },
+                    )
+        except Exception:  # noqa: BLE001
+            logger.exception("shutdown: failed to update meta for %s", swarm_id)
+
+        monitor.unregister_active(swarm_id)
+
+    # Останавливаем фоновой loop.
+    monitor.stop()
 
 
 @app.middleware("http")
@@ -391,35 +502,89 @@ async def swarm_run(request: Request):
     default_system = str(defaults.get("system", "generic"))
     system = normalize_system(source_value, default_system=default_system)
     payload["system"] = system
+    swarm_id = f"swarm_{system}_{task_id}"
 
-    # Ограничение по количеству одновременных свормов.
+    # AR-3: reuse_strategy MVP — поддерживаем только "reject".
+    # "continue" и "fresh" — отдадим 501, чтобы клиент не зависел от непостроенной семантики.
+    reuse_strategy = str(payload.get("reuse_strategy") or "reject").strip().lower()
+    if reuse_strategy not in {"reject", ""}:
+        return JSONResponse(
+            status_code=501,
+            content={
+                "status": "not_implemented",
+                "reason": f"reuse_strategy_{reuse_strategy}_not_supported",
+                "supported_strategies": ["reject"],
+            },
+        )
+
+    threads_dir = str(SWARM_CONFIG["threads_dir"])
     max_concurrent = int(SWARM_CONFIG.get("max_concurrent", 10))
     monitor = _swarm_monitor
-    if monitor is not None:
-        active_count = monitor.get_active_count()
-        if active_count >= max_concurrent:
-            return JSONResponse(
-                status_code=503,
-                content={
-                    "status": "rejected",
-                    "reason": "too_many_concurrent_swarm_processes",
-                    "system": system,
-                    "task_id": task_id,
-                },
+
+    # Idempotency + concurrent-start защита под глобальным lock'ом (шаг 1.8).
+    # Под lock'ом делаем: чтение meta → решение reject vs start → запуск Popen + register.
+    # Это закрывает 3 проблемы:
+    #   1) обход max_concurrent через повторные POST с одним task_id;
+    #   2) race condition между параллельными POST с одним swarm_id;
+    #   3) перезапись meta живого прогона.
+    with _SWARM_RUN_LOCK:
+        existing = swarm_storage.load_swarm_meta(threads_dir, swarm_id)
+        if existing:
+            sm = existing.get("swarm_meta") or {}
+            if not isinstance(sm, dict):
+                sm = {}
+            current_status = str(sm.get("status", "")).strip().lower()
+            if current_status in {"queued", "running"}:
+                return JSONResponse(
+                    status_code=409,
+                    content={
+                        "status": "rejected",
+                        "reason": "swarm_id_already_active",
+                        "system": system,
+                        "task_id": task_id,
+                        "current_status": current_status,
+                    },
+                )
+            # Финальный статус → reject (AR-3).
+            if current_status in swarm_lifecycle.FINAL_STATUSES:
+                return JSONResponse(
+                    status_code=409,
+                    content={
+                        "status": "rejected",
+                        "reason": "swarm_id_already_finalized",
+                        "system": system,
+                        "task_id": task_id,
+                        "current_status": current_status,
+                    },
+                )
+            # Неизвестный/повреждённый статус — пропускаем как fresh start.
+
+        # Лимит на количество одновременно работающих свормов.
+        if monitor is not None:
+            active_count = monitor.get_active_count()
+            if active_count >= max_concurrent:
+                return JSONResponse(
+                    status_code=503,
+                    content={
+                        "status": "rejected",
+                        "reason": "too_many_concurrent_swarm_processes",
+                        "system": system,
+                        "task_id": task_id,
+                    },
+                )
+
+        try:
+            swarm_id, _pid = swarm_runner.start_swarm_process(
+                SWARM_CONFIG, system=system, task_id=task_id, payload=payload
+            )
+        except Exception as e:  # noqa: BLE001
+            raise HTTPException(
+                status_code=500,
+                detail={"status": "error", "reason": f"swarm_start_failed: {e!r}"},
             )
 
-    try:
-        swarm_id, _pid = swarm_runner.start_swarm_process(
-            SWARM_CONFIG, system=system, task_id=task_id, payload=payload
-        )
-    except Exception as e:  # noqa: BLE001
-        raise HTTPException(
-            status_code=500,
-            detail={"status": "error", "reason": f"swarm_start_failed: {e!r}"},
-        )
-
-    if monitor is not None:
-        monitor.register_active(swarm_id)
+        if monitor is not None:
+            monitor.register_active(swarm_id)
 
     return {
         "status": "started",
@@ -447,16 +612,34 @@ async def get_swarm_status(system: str, task_id: str):
             detail={"status": "error", "payload": "system and task_id are required"},
         )
 
-    swarm_id = f"{sys_norm}_{task_norm}"
+    swarm_id = f"swarm_{sys_norm}_{task_norm}"
     threads_dir = str(SWARM_CONFIG["threads_dir"])
-    meta = swarm_storage.load_swarm_meta(threads_dir, swarm_id)
-    if not meta:
+    sandbox_root_dir = str(SWARM_CONFIG["sandbox_root_dir"])
+
+    # Сначала проверяем, существует ли sworm. Если нет — 404 без финализации.
+    pre_meta = swarm_storage.load_swarm_meta(threads_dir, swarm_id)
+    if not pre_meta:
         raise HTTPException(status_code=404, detail={"status": "not_found"})
+
+    # Lazy-чек: даже если monitor ещё не успел финализировать, status-эндпоинт
+    # подтянет completion.json или проверит PID и обновит meta при необходимости.
+    # См. swarm_spec.md §5.2 и шаг M2/1.5.
+    meta = swarm_lifecycle.check_and_finalize(
+        threads_dir, sandbox_root_dir, swarm_id,
+        swarm_logs_dir=str(SWARM_CONFIG.get("swarm_logs_dir", "")),
+    )
+    if not meta:
+        # Защитный фоллбек — теоретически невозможно, т.к. pre_meta был.
+        meta = pre_meta
 
     swarm_meta = meta.get("swarm_meta") or {}
     if not isinstance(swarm_meta, dict):
         swarm_meta = {}
     status = str(swarm_meta.get("status", "")).strip().lower() or "unknown"
+
+    # Если после lazy-чека статус стал финальным — снять с monitor'а.
+    if status in swarm_lifecycle.FINAL_STATUSES and _swarm_monitor is not None:
+        _swarm_monitor.unregister_active(swarm_id)
 
     return {
         "status": status,
@@ -485,10 +668,14 @@ async def get_swarm_logs(system: str, task_id: str):
             detail={"status": "error", "payload": "system and task_id are required"},
         )
 
-    swarm_id = f"{sys_norm}_{task_norm}"
+    swarm_id = f"swarm_{sys_norm}_{task_norm}"
     threads_dir = str(SWARM_CONFIG["threads_dir"])
+    sandbox_root_dir = str(SWARM_CONFIG.get("sandbox_root_dir", ""))
     meta = swarm_storage.load_swarm_meta(threads_dir, swarm_id)
-    messages = swarm_storage.load_swarm_messages(threads_dir, swarm_id)
+    # Канал E (шаг 1.9): messages.jsonl лежит внутри sandbox-каталога.
+    messages = swarm_storage.load_swarm_messages(
+        threads_dir, swarm_id, sandbox_root_dir
+    )
     stdout_lines, stderr_lines = swarm_storage.load_swarm_stdout_stderr(
         threads_dir, swarm_id
     )
