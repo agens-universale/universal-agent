@@ -15,6 +15,13 @@ Background и CLI-клиент для работы с агентом GigaCode: �
 - Серверный режим: REST-обёртка на FastAPI.
 - Swarm-режим (только Linux): изолированные песочницы (bubblewrap).
 
+## Связь с разработчиками и поддержка
+
+Баги, пожелания, обратная связь - пишите сюда:
+- [В Телеграм](https://t.me/+2AwDQhHxaAdhNmUy)
+- [В Сберчат](https://sberchat.sberbank.ru/@gc-ua-support)
+
+
 ## Быстрый старт
 
 ```bash
