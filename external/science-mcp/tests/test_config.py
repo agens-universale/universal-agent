@@ -33,11 +33,13 @@ def test_overrides(monkeypatch):
 
 
 def test_keys_configured(monkeypatch):
+    monkeypatch.delenv("OPENALEX_API_KEY", raising=False)
     monkeypatch.delenv("CORE_API_KEY", raising=False)
     monkeypatch.delenv("SEMANTIC_SCHOLAR_API_KEY", raising=False)
     monkeypatch.setenv("NCBI_API_KEY", "x")
     cfg = load_config()
     assert cfg.keys_configured() == {
+        "openalex": False,
         "ncbi": True,
         "semantic_scholar": False,
         "core": False,

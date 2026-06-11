@@ -329,13 +329,17 @@ def normalize_tool_spec_for_agent(tool_spec: Dict[str, Any]) -> Dict[str, Any]:
 
 def get_mcp_tools_data_for_config(
     config_dict: Dict[str, Any],
-) -> Dict[str, Dict[str, Any]]:
+    on_progress=None,
+) -> tuple[Dict[str, Dict[str, Any]], Dict[str, Dict[str, Any]]]:
     """
     Собрать словарь MCP-инструментов в формате tools_data для заданного config_dict.
+
+    Возвращает `(tools_data, status_map)`, где `status_map` — per-server статус
+    дискавери из `ToolsCache.get_status()`.
     """
     servers_cfg = config_dict.get("mcp-servers") or {}
     if not servers_cfg:
-        return {}
+        return {}, {}
 
     cfg: Dict[str, Any] = {
         "mcp-servers": servers_cfg,
@@ -346,10 +350,11 @@ def get_mcp_tools_data_for_config(
     tools_cache = ToolsCache(cfg)
 
     try:
-        mcp_registry = tools_cache.get_tools()
+        mcp_registry = tools_cache.get_tools(on_progress=on_progress)
+        status_map = tools_cache.get_status()
     except Exception:
         logger.error("Failed to load MCP tools", exc_info=True)
-        return {}
+        return {}, {}
 
     timeout = (
         config_dict.get("mcp-meta", {}).get("request_timeout_sec")
@@ -387,7 +392,7 @@ def get_mcp_tools_data_for_config(
             "spec": normalized_spec,
             "description": normalized_spec.get("description", ""),
         }
-    return result
+    return result, status_map
 
 
 __all__ = [

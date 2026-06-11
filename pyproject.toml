@@ -24,7 +24,17 @@ dependencies = [
 
 [project.scripts]
 gc-cli = "cli:main"
+gc-ua = "tui:main"
 gc-mcp-install = "mcp_runtime.install_cli:main"
+
+[project.optional-dependencies]
+tui = ["textual>=0.55", "rich>=13", "pytest-asyncio>=0.23"]
+dev-tui = [
+    "textual>=0.85",
+    "rich>=13",
+    "pytest-textual-snapshot>=1.0",
+    "pytest-asyncio>=0.23",
+]
 
 [tool.setuptools]
 package-dir = {"" = "src"}
@@ -36,3 +46,4 @@ dev = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+asyncio_mode = "auto"

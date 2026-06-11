@@ -7,7 +7,7 @@ from intent_guard.feedback import (
     build_finish_gate_reject_technical_user_content,
 )
 from constants.tool_names import FINISH_TOOL_NAME, SESSION_COMPACT_TOOL_NAME
-from run_summary_coordinator import build_preserved_batch
+from run_summary_coordinator import build_preserved_batch, filter_messages_not_in_state
 from intent_guard.guard import FinishGateGuard
 from intent_guard.turn_finish_emit import (
     apply_finish_gate_to_turn_finish_output_in_state,
@@ -47,6 +47,26 @@ from message_policy.user_message_policy import (
 import logging
 
 _fallback_logger = logging.getLogger(__name__)
+
+
+def _maybe_persist(
+    callback,
+    messages: list,
+    state,
+) -> None:
+    """Вызвать persist callback, если не активирован discard-after-stop guard."""
+    if callback is None:
+        return
+    if state.discard_writes_after_stop and state.stop_requested:
+        return
+    try:
+        callback(messages)
+    except Exception as persist_exc:
+        _fallback_logger.warning(
+            "Thread messages persist warning: %s",
+            persist_exc,
+            exc_info=True,
+        )
 
 
 def _summarize_call_data_for_log(call_data: Dict[str, Any]) -> Dict[str, Any]:
@@ -459,16 +479,13 @@ def run_agent(
                         "\n<message_committed>\n%s\n</message_committed>\n",
                         json.dumps(m, ensure_ascii=False, indent=2, default=str),
                     )
-            state.messages += messages
-            if persist_messages_callback is not None:
-                try:
-                    persist_messages_callback(messages)
-                except Exception as persist_exc:
-                    run_logger.warning(
-                        "Thread messages persist warning: %s",
-                        persist_exc,
-                        exc_info=True,
-                    )
+            new_state_messages = filter_messages_not_in_state(
+                list(getattr(state, "messages", []) or []),
+                list(messages),
+            )
+            if new_state_messages:
+                state.messages += new_state_messages
+            _maybe_persist(persist_messages_callback, messages, state)
 
             if state.steps > state.max_steps:
                 return f'Agent executed {state.max_steps} steps and doesn\'t finish his work because of step limits.'
@@ -508,7 +525,12 @@ def run_agent(
                     )
                     notice_messages = messages[_messages_before_notice:]
                     if notice_messages:
-                        state.messages += notice_messages
+                        to_append = filter_messages_not_in_state(
+                            list(getattr(state, "messages", []) or []),
+                            list(notice_messages),
+                        )
+                        if to_append:
+                            state.messages += to_append
                         if persist_messages_callback is not None:
                             try:
                                 persist_messages_callback(notice_messages)
@@ -624,24 +646,19 @@ def run_agent(
                                     )
                                 ]
                                 continue
-                            elif decision.outcome in (
-                                "fail_open_error",
-                                "fail_open_limit",
-                            ):
-                                state.flush_current_user_intent()
-                                if turn_end_compaction_hook is not None:
-                                    turn_end_compaction_hook()
-                                return finish_arguments
-                            elif decision.outcome == "accept":
-                                state.flush_current_user_intent()
-                                if turn_end_compaction_hook is not None:
-                                    turn_end_compaction_hook()
-                                return finish_arguments
-                            else:
-                                state.flush_current_user_intent()
-                                if turn_end_compaction_hook is not None:
-                                    turn_end_compaction_hook()
-                                return finish_arguments
+                            # accept / fail_open_error / fail_open_limit / прочее —
+                            # все завершают ход одинаково.
+                            state.flush_current_user_intent()
+                            if turn_end_compaction_hook is not None:
+                                turn_end_compaction_hook()
+                            # Сообщение, пришедшее во время (блокирующей) компакции, не
+                            # теряем: продолжаем новым ходом на уже сжатом контексте.
+                            if get_pending_messages is not None:
+                                pending = get_pending_messages()
+                                if pending:
+                                    messages = pending
+                                    continue
+                            return finish_arguments
                         else:
                             state.current_user_intent = []
                         return finish_arguments

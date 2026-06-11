@@ -19,6 +19,22 @@ from mcp_runtime.env import mcp_stdio_env
 from tools.connect_mcp.transport import _resolve_command
 
 
+def _run_coro(coro):
+    """Run a coroutine to completion, safe even when an event loop is already
+    running on the current thread (e.g. inside the TUI's Textual loop).
+
+    Plain ``asyncio.run()`` raises ``RuntimeError: asyncio.run() cannot be
+    called from a running event loop``. When that happens we execute the
+    coroutine in a fresh worker thread (which has no running loop), so MCP
+    tool listing/calls work both from the CLI (no loop) and the TUI (loop)."""
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coro)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as _ex:
+        return _ex.submit(asyncio.run, coro).result()
+
+
 # ---------------------------------------------------------------------------
 # Persistent session manager
 # Keeps one MCP ClientSession alive per server key in a background event loop.
@@ -317,7 +333,7 @@ def list_tools_stream_sse(
     """
     verify = get_verify_ssl(server_cfg)
     cert = get_client_cert(server_cfg)
-    return asyncio.run(
+    return _run_coro(
         _list_tools_stream_sse_async(
             base_url=url,
             token=token,
@@ -481,7 +497,7 @@ def call_tool_stream_sse(
         except Exception:
             _SESSION_MANAGER.invalidate(f"stream_sse::{url}")
 
-    return asyncio.run(
+    return _run_coro(
         _call_tool_stream_sse_async(
             base_url=url,
             token=token,
@@ -566,7 +582,7 @@ def list_tools_stream_http(
     """
     verify = get_verify_ssl(server_cfg)
     cert = get_client_cert(server_cfg)
-    return asyncio.run(
+    return _run_coro(
         _list_tools_stream_http_async(
             base_url=url,
             token=token,
@@ -733,7 +749,7 @@ def call_tool_stream_http(
 
     persistent = bool(server_cfg.get("persistent_session"))
     if not persistent:
-        return asyncio.run(
+        return _run_coro(
             _call_tool_stream_http_async(
                 base_url=url,
                 token=token,
@@ -760,7 +776,7 @@ def call_tool_stream_http(
         )
     except Exception:
         # Fallback to stateless mode on any persistent session failure
-        return asyncio.run(
+        return _run_coro(
             _call_tool_stream_http_async(
                 base_url=url,
                 token=token,
@@ -822,7 +838,7 @@ def list_tools_stream_stdio(
     """
     Синхронная обёртка над _list_tools_stream_stdio_async.
     """
-    return asyncio.run(
+    return _run_coro(
         _list_tools_stream_stdio_async(
             server_cfg=server_cfg,
             timeout=timeout,
@@ -957,7 +973,7 @@ def call_tool_stream_stdio(
         except Exception:
             _SESSION_MANAGER.invalidate(server_key)
 
-    return asyncio.run(
+    return _run_coro(
         _call_tool_stream_stdio_async(
             server_cfg=server_cfg,
             timeout=timeout,

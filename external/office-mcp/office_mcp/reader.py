@@ -8,6 +8,7 @@ from pathlib import Path
 from markitdown import MarkItDown
 
 from .errors import ErrorCategory, OfficeReaderError
+from .xlsx_read import xlsx_to_markdown
 
 SUPPORTED_EXTENSIONS: tuple[str, ...] = (
     ".pdf", ".docx", ".xls", ".xlsx", ".pptx", ".csv", ".html", ".msg",
@@ -17,6 +18,8 @@ _md = MarkItDown()
 
 
 def _convert_with_markitdown(path: Path) -> str:
+    if path.suffix.lower() == ".xlsx":
+        return xlsx_to_markdown(path)
     result = _md.convert(str(path))
     return result.text_content
 

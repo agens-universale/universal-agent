@@ -63,6 +63,8 @@ ipython_config.py
 # =============================================================
 config.yml
 plan.md
+docs/plans/
+.superpowers/
 
 # Logs and dumps
 logs/
@@ -97,6 +99,8 @@ Desktop.ini
 .classpath
 .settings/
 mcp_media/
+recommended_mcp/config.local.yml
+
 # =============================================================
 # Docker
 # =============================================================
@@ -106,3 +110,10 @@ docs/plans/
 # Swarm runtime artifacts (M6 / шаг 3.4)
 swarm_threads/
 .swarm_sandboxes/
+
+# auto-generated SVG copies of pytest-textual-snapshot .raw files (human viewing aid)
+tests/tui/__snapshots__/**/*.svg
+
+# superpowers-скиллы пишут сюда черновики спек/планов по дефолту — в git не попадают
+# (доки TUI живут в docs/tui/{specs,plans,visual})
+docs/superpowers/

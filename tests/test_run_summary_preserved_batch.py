@@ -4,7 +4,11 @@ from __future__ import annotations
 
 from message_policy.chat_completions import repair_tool_call_pairing
 from message_policy.user_message_policy import TECHNICAL_TYPE_CURRENT_CONTEXT, wrap_technical_user_content
-from run_summary_coordinator import build_preserved_batch, remove_exact_suffix_if_matches
+from run_summary_coordinator import (
+    build_preserved_batch,
+    filter_messages_not_in_state,
+    remove_exact_suffix_if_matches,
+)
 from thread_store import make_message_key
 
 
@@ -197,3 +201,20 @@ def test_remove_exact_suffix_requires_full_tail_match_no_middle_change():
 
 def test_remove_exact_suffix_false_when_suffix_longer_than_full():
     assert remove_exact_suffix_if_matches([], [{"a": 1}]) is False
+
+
+def test_filter_messages_not_in_state_skips_known_thread_history():
+    history = [
+        {"role": "user", "content": "old", "id": "m_old"},
+        {"role": "assistant", "content": "ok", "id": "m_asst"},
+    ]
+    new_user = {"role": "user", "content": "new ask", "id": "m_new"}
+    state = [{"role": "system", "content": "sys", "id": "m_sys"}, *history]
+    batch = [*history, new_user]
+    assert filter_messages_not_in_state(state, batch) == [new_user]
+
+
+def test_filter_messages_not_in_state_empty_when_batch_already_in_state():
+    msg = {"role": "user", "content": "x", "id": "m1"}
+    state = [msg]
+    assert filter_messages_not_in_state(state, [msg]) == []

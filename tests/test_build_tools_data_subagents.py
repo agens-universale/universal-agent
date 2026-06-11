@@ -33,7 +33,7 @@ class TestSubagentsInBuildToolsData:
         from tools import build_tools_data
         from tools.subagents.registry import SUBAGENT_CLASSES
         cfg = _base_config(use_local_subagents=True, backend_api_mode="chat_completions")
-        tools_data, tools_spec, tools_descr = build_tools_data(cfg)
+        tools_data, tools_spec, tools_descr, _ = build_tools_data(cfg)
         subagent_names = {cls.agent_name for cls in SUBAGENT_CLASSES}
         for name in subagent_names:
             assert name in tools_data, f"{name} should be in tools_data"
@@ -42,7 +42,7 @@ class TestSubagentsInBuildToolsData:
         from tools import build_tools_data
         from tools.subagents.registry import SUBAGENT_CLASSES
         cfg = _base_config(use_local_subagents=False, backend_api_mode="chat_completions")
-        tools_data, _, _ = build_tools_data(cfg)
+        tools_data, _, _, _ = build_tools_data(cfg)
         subagent_names = {cls.agent_name for cls in SUBAGENT_CLASSES}
         for name in subagent_names:
             assert name not in tools_data, f"{name} should NOT be in tools_data"
@@ -51,7 +51,7 @@ class TestSubagentsInBuildToolsData:
         from tools import build_tools_data
         from tools.subagents.registry import SUBAGENT_CLASSES
         cfg = _base_config(use_local_subagents=True, backend_api_mode="responses")
-        tools_data, _, _ = build_tools_data(cfg)
+        tools_data, _, _, _ = build_tools_data(cfg)
         subagent_names = {cls.agent_name for cls in SUBAGENT_CLASSES}
         for name in subagent_names:
             assert name not in tools_data, f"{name} should NOT be in tools_data with responses mode"
@@ -61,7 +61,7 @@ class TestSubagentsInBuildToolsData:
         from tools.subagents.registry import SUBAGENT_CLASSES
         cfg = _base_config(backend_api_mode="chat_completions")
         del cfg["use_local_subagents"]
-        tools_data, _, _ = build_tools_data(cfg)
+        tools_data, _, _, _ = build_tools_data(cfg)
         subagent_names = {cls.agent_name for cls in SUBAGENT_CLASSES}
         for name in subagent_names:
             assert name not in tools_data
@@ -70,7 +70,7 @@ class TestSubagentsInBuildToolsData:
         from tools import build_tools_data
         from tools.subagents.registry import SUBAGENT_CLASSES
         cfg = _base_config(use_local_subagents=True, backend_api_mode="chat_completions")
-        tools_data, _, _ = build_tools_data(cfg)
+        tools_data, _, _, _ = build_tools_data(cfg)
         subagent_names = {cls.agent_name for cls in SUBAGENT_CLASSES}
         for name in subagent_names:
             spec = tools_data[name]["spec"]
@@ -83,7 +83,7 @@ class TestSubagentsInBuildToolsData:
         from tools import build_tools_data
         from tools.subagents.registry import SUBAGENT_CLASSES
         cfg = _base_config(use_local_subagents=True, backend_api_mode="chat_completions")
-        _, tools_spec, _ = build_tools_data(cfg)
+        _, tools_spec, _, _ = build_tools_data(cfg)
         spec_names = {s["name"] for s in tools_spec}
         subagent_names = {cls.agent_name for cls in SUBAGENT_CLASSES}
         assert subagent_names.issubset(spec_names)

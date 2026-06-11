@@ -43,6 +43,7 @@ class RunContext:
     tools_data: Dict[str, Dict[str, Any]]
     tools_spec: List[Dict[str, Any]]
     tools_description: List[str]
+    mcp_status: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     project_gc_dir: Path = field(default_factory=lambda: Path("."))
 
 
@@ -51,6 +52,7 @@ def create_run_context(
     *,
     auth_connector: Optional[AuthConnector] = None,
     run_id: Optional[str] = None,
+    on_progress=None,
 ) -> RunContext:
     """
     Создать RunContext для одного запуска агента.
@@ -61,7 +63,7 @@ def create_run_context(
     - Логгер создаётся заново для каждого запуска (своё имя файла логов).
     """
     effective_run_id = run_id or generate_run_id()
-    tools_data, tools_spec, tools_description = build_tools_data(config_dict)
+    tools_data, tools_spec, tools_description, mcp_status = build_tools_data(config_dict, on_progress=on_progress)
 
     run_logger, logging_path, summary_trace_path = create_run_logger(
         config_dict, run_id=effective_run_id, agent_kind="main"
@@ -86,6 +88,7 @@ def create_run_context(
         tools_data=tools_data,
         tools_spec=tools_spec,
         tools_description=tools_description,
+        mcp_status=mcp_status,
         project_gc_dir=_resolve_project_gc_dir(),
     )
 

@@ -1,0 +1,121 @@
+"""Палитра команд: фильтрация, ↑↓, Tab/Enter/Esc."""
+import pytest
+
+
+def test_palette_shows_all_commands_no_limit():
+    pytest.importorskip("textual")
+    from tui.commands import build_default_registry
+    from tui.widgets.command_palette import CommandPalette
+
+    reg = build_default_registry()
+    palette = CommandPalette(reg, initial_filter="")
+    rows = palette._visible_rows()
+    # All registry commands present — no truncation.
+    assert len(rows) == len(reg.list_commands())
+    assert len(rows) >= 9
+
+
+@pytest.mark.asyncio
+async def test_palette_opens_on_slash_and_filters():
+    pytest.importorskip("textual")
+    from tui.app import TuiApp
+
+    async with TuiApp().run_test() as pilot:
+        await pilot.press("/")
+        await pilot.press("s")
+        palette = pilot.app.query_one(".palette")
+        rows_text = "\n".join(
+            str(r.render()) for r in palette.query(".palette-row")
+        )
+        assert "/skills" in rows_text
+        assert "/stop" in rows_text
+        assert "/quit" not in rows_text  # filtered out
+
+
+@pytest.mark.asyncio
+async def test_palette_closes_on_esc():
+    pytest.importorskip("textual")
+    from tui.app import TuiApp
+
+    async with TuiApp().run_test() as pilot:
+        await pilot.press("/")
+        assert pilot.app.query(".palette")
+        await pilot.press("escape")
+        assert not pilot.app.query(".palette")
+
+
+@pytest.mark.asyncio
+async def test_palette_enter_executes_selected():
+    pytest.importorskip("textual")
+    from tui.app import TuiApp
+
+    async with TuiApp().run_test() as pilot:
+        await pilot.press("/")
+        await pilot.press("s")
+        await pilot.press("k")          # filter "sk" -> skill, skills (2 matches)
+        await pilot.press("down")       # index 1: skills
+        await pilot.press("enter")
+        # Palette closed
+        assert not pilot.app.query(".palette")
+        # Input cleared
+        assert pilot.app.query_one("#cmdinput").text == ""
+        # The selected command (skills) ran — pushed SkillsScreen
+        from tui.screens.skills import SkillsScreen
+        assert isinstance(pilot.app.screen, SkillsScreen)
+        # Typed prefix did NOT run as a literal command
+        assert not pilot.app.query(".palette")
+
+
+@pytest.mark.asyncio
+async def test_palette_closes_after_space_after_command_name(tmp_path):
+    """После '/export ' (с пробелом) палитра не должна быть видна."""
+    pytest.importorskip("textual")
+    from tui.app import TuiApp
+    from tui.widgets.command_palette import CommandPalette
+
+    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+
+    async with app.run_test() as pilot:
+        inp = pilot.app.query_one("#cmdinput")
+        inp.text = "/ex"
+        await pilot.pause(0.1)
+        assert len(pilot.app.query(CommandPalette)) == 1
+
+        inp.text = "/export"
+        await pilot.pause(0.1)
+        assert len(pilot.app.query(CommandPalette)) == 1
+
+        # Пробел после имени → палитра исчезает.
+        inp.text = "/export "
+        await pilot.pause(0.1)
+        assert len(pilot.app.query(CommandPalette)) == 0
+
+        # Снова без пробела → палитра возвращается.
+        inp.text = "/export"
+        await pilot.pause(0.1)
+        assert len(pilot.app.query(CommandPalette)) == 1
+
+
+@pytest.mark.asyncio
+async def test_palette_first_row_selected_on_open(tmp_path):
+    """При открытии палитры подсвечена первая строка (а не «никакая»)."""
+    pytest.importorskip("textual")
+    from tui.app import TuiApp
+    from tui.widgets.command_palette import CommandPalette
+
+    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    async with app.run_test() as pilot:
+        pilot.app.query_one("#cmdinput").text = "/"
+        await pilot.pause(0.1)
+        palette = pilot.app.query_one(CommandPalette)
+        rows = palette.query(".palette-row")
+        assert len(rows) >= 2
+        assert rows[0].has_class("selected")
+        assert not rows[1].has_class("selected")
+
+
+def test_registry_does_not_contain_main():
+    pytest.importorskip("textual")
+    from tui.commands import build_default_registry
+    reg = build_default_registry()
+    assert reg.lookup("main") is None

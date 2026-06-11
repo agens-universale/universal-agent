@@ -348,17 +348,21 @@ Important Usage Rules:
             merged_env = {**os.environ, **env_sanitized}
 
         try:
-            result = subprocess.run(
-                command,
-                shell=True,
-                capture_output=True,
-                text=True,
-                timeout=timeout_seconds,
-                cwd=cwd_used,
-                encoding="utf-8",
-                errors="replace",
-                env=merged_env,
-            )
+            # На Windows запуск subprocess гасит ENABLE_MOUSE_INPUT родительской
+            # консоли → TUI теряет мышь до перезапуска. Возвращаем режим после.
+            from utils.win_console import preserve_console_mode
+            with preserve_console_mode():
+                result = subprocess.run(
+                    command,
+                    shell=True,
+                    capture_output=True,
+                    text=True,
+                    timeout=timeout_seconds,
+                    cwd=cwd_used,
+                    encoding="utf-8",
+                    errors="replace",
+                    env=merged_env,
+                )
 
             stdout_raw = result.stdout or ""
             stderr_raw = result.stderr or ""

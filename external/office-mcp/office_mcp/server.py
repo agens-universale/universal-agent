@@ -249,14 +249,10 @@ def build_server(cfg: ServerConfig) -> FastMCP:
         Writes only to paths under --output-allowed-dirs (default: same as --allowed-dirs).
         Fails with file_exists if the target already exists and overwrite=False.
         See README section "Создание документов" for the full schema."""
-        sheet_count = len(workbook.sheets)
-        args = {
-            "path": path,
-            "overwrite": overwrite,
-            "sheet_count": sheet_count,
-        }
+        args = {"path": path, "overwrite": overwrite}
         try:
             spec = _validate_workbook(workbook)
+            args["sheet_count"] = len(spec.sheets)
             data = generate_xlsx(spec)
             n = write_bytes_checked(
                 path, data,
@@ -298,10 +294,10 @@ def build_server(cfg: ServerConfig) -> FastMCP:
         Ranges in `merges` and `cell_styles` use A1-notation anchored to the final grid:
         row 1 is the auto-generated bold header, data starts at row 2.
         See README section "Создание документов" for the full schema."""
-        sheet_count = len(workbook.sheets)
-        args = {"filename": filename, "sheet_count": sheet_count}
+        args = {"filename": filename}
         try:
             spec = _validate_workbook(workbook)
+            args["sheet_count"] = len(spec.sheets)
             data = generate_xlsx(spec)
             enc = encode_base64_checked(
                 data, max_base64_bytes=cfg.max_output_base64_size

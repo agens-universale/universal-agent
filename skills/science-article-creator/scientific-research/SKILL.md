@@ -32,7 +32,9 @@ Collects real, existing scientific works on a topic from six or more sources via
 
 ### Phase 1 — sharpen the query (skip if intent is already precise)
 
-Run the request through one to three of the lenses below to convert a fuzzy ask into two to four concrete search queries:
+Convert a fuzzy ask into a small set of strong search queries via **Diverge → Converge**. This step shapes which SEARCH QUERIES to run — it does NOT generate research ideas, hypotheses, or syntheses; the deliverable stays a paper list.
+
+**Step 1 — Diverge.** Run the request through several of the lenses below to generate **8–15 candidate queries**, deliberately phrased from different angles. Do not filter yet.
 
 1. **Problem-First vs Solution-First** — what hurts, or what tool are we looking for?
 2. **Abstraction Ladder** — survey of a field vs a specific technique?
@@ -44,8 +46,19 @@ Run the request through one to three of the lenses below to convert a fuzzy ask 
 8. **Stakeholder Rotation** — a clinician, an ML engineer, and a biologist would each phrase the query differently.
 9. **Composition / Decomposition** — split the topic into 2–3 sub-questions.
 10. **Explain-It-to-Someone** — restate as "explain it to a schoolkid".
+11. **Negation** — list 5–10 assumptions "everyone holds" in the subarea, invert each, classify as incoherent / already-explored / unexplored-but-coherent; turn each unexplored-but-coherent negation into a query. This finds where recent high-impact work sits: "labels not required" → self-supervised, "lots of data not required" → few-shot, "fine-tuning not required" → in-context.
 
-Lenses are a tool, not a mandatory step. If the request already names key terms, years, and a source — skip Phase 1.
+**Step 2 — Converge.** Score the candidate queries against the kill-criterion table and keep the best **3–5** to actually search:
+
+| Criterion | Filter question |
+|---|---|
+| Specificity | not too broad / not too narrow — will it return relevant hits, not noise? |
+| Coverage | does it hit a DISTINCT facet, not a duplicate of another candidate? |
+| Term quality | does it use terminology that actually appears in a paper's title / abstract? |
+| Intent fit | does it answer the user's real intent, not drift sideways? |
+| Angle | does it add a non-obvious angle, not just the default paraphrase? |
+
+Lenses and this loop are a tool, not a mandatory ritual. If the request already names key terms, years, and a source — skip Phase 1 and search directly.
 
 ### Phase 2 — search
 
@@ -73,11 +86,7 @@ Lenses are a tool, not a mandatory step. If the request already names key terms,
 
 ## Output format
 
-**Delivery: return the list directly in your chat reply.** This skill produces a short
-annotated list of papers, not a document — do NOT call `write_to_file` / `save` / write
-anything to disk, and do not announce a saved report. The chat message itself is the
-deliverable. Keep it compact: the grouped list of papers + a short gaps note. No cover
-page, no separate review file.
+**Delivery: always include the annotated list in your chat reply** — even when you also save an artifact to disk. The chat message must contain the compact grouped list (papers + gaps note), not only a path or "saved to file". You may optionally save the same content as a `*_literature_review.md` file when useful, but the inline chat list is mandatory. This skill produces a short annotated source list, not a full review or article. No cover page in the chat version.
 
 Russian Markdown with this skeleton:
 
@@ -133,7 +142,7 @@ Build the link by substituting the real id from the MCP response into BOTH the b
 - Do not invent titles / DOIs / authors — every record must come from a real MCP response.
 - Do not substitute web search for MCP — this is an academic skill; the source of truth is science-mcp.
 - Do not write a full review or article in the output — return the annotated source list only. Article writing is the job of `scientific-article-creator`.
-- Do not save the result to a file. Never call `write_to_file` (or any disk-writing tool) for the output — the user did not ask for a file. Return the list inline in the chat response. A separate `*_literature_review.md` file is wrong here.
+- Do not treat a saved file as sufficient delivery — always include the annotated list inline in the chat response too, even if you also wrote an artifact.
 
 ## Examples
 

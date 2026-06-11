@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import contextlib
 from copy import copy as shallow_copy
 from typing import TYPE_CHECKING, Any
 
@@ -21,7 +22,7 @@ from summarize.summary_logging import (
     log_pre_run_max_rounds,
 )
 from message_policy.user_message_policy import extract_real_user_message_text
-from thread_store import make_message_key
+from thread_store import make_message_key, save_thread_meta
 
 if TYPE_CHECKING:
     from run_context import RunContext
@@ -35,11 +36,79 @@ _FUNCTION_OUTPUT_TYPES = frozenset({"function_call_output", "tool_call_output"})
 _PRE_RUN_SUMMARY_MAX_ROUNDS = 20
 
 
+@contextlib.contextmanager
+def _summarizing_flag(thread_session):
+    """Помечает тред как «идёт суммаризация» для TUI-индикатора.
+
+    Флаг ``tui_summarizing`` пишется в meta + немедленный flush на диск (TUI поллит
+    meta каждые 250мс). Снимается строго в finally — иначе индикатор залипнет.
+    ``thread_session=None`` (CLI без треда) → no-op.
+    """
+    if thread_session is None:
+        yield
+        return
+    ts = thread_session
+    try:
+        ts.meta["tui_summarizing"] = True
+        save_thread_meta(ts.threads_dir, ts.system_id, ts.thread_id, ts.meta)
+        yield
+    finally:
+        ts.meta.pop("tui_summarizing", None)
+        save_thread_meta(ts.threads_dir, ts.system_id, ts.thread_id, ts.meta)
+
+
+def reset_stale_summarizing_flag(thread_session) -> None:
+    """Снять протухший ``tui_summarizing`` на старте run'а.
+
+    Флаг транзиентный (живёт только на время компакции внутри ``_summarizing_flag``),
+    но персистится в meta. Если прошлый run был прерван посреди компакции (закрытие
+    TUI/выход процесса убивает daemon-поток до finally, либо зависание summary-вызова
+    на нездоровом бэкенде), флаг остаётся ``True`` на диске навсегда — и TUI вечно
+    показывает «сжимаю контекст» вместо «думаю». На старте нового run'а компакция
+    точно не идёт, поэтому сбрасываем. ``thread_session=None`` → no-op.
+    """
+    if thread_session is None:
+        return
+    ts = thread_session
+    if ts.meta.get("tui_summarizing"):
+        ts.meta.pop("tui_summarizing", None)
+        save_thread_meta(ts.threads_dir, ts.system_id, ts.thread_id, ts.meta)
+
+
 def _messages_tail_matches(messages: list[dict], suffix: list[dict]) -> bool:
     """True, если ``messages`` заканчивается на ``suffix`` (поэлементное ``==``)."""
     if not suffix or len(messages) < len(suffix):
         return False
     return messages[-len(suffix) :] == suffix
+
+
+def filter_messages_not_in_state(
+    state_messages: list[dict],
+    batch: list[dict],
+) -> list[dict]:
+    """
+    Сообщения из ``batch``, которых ещё нет в ``state_messages`` (по ``make_message_key``).
+
+    Каноническая история живёт только в ``state.messages``: при продолжении треда
+    батч для backend может повторять уже загруженный хвост — в state дописываем лишь новое.
+    """
+    if not batch:
+        return []
+    known = {
+        make_message_key(m)
+        for m in state_messages
+        if isinstance(m, dict)
+    }
+    out: list[dict] = []
+    for msg in batch:
+        if not isinstance(msg, dict):
+            continue
+        key = make_message_key(msg)
+        if key in known:
+            continue
+        out.append(msg)
+        known.add(key)
+    return out
 
 
 def remove_exact_suffix_if_matches(messages: list[dict], suffix: list[dict]) -> bool:
@@ -210,14 +279,15 @@ class RunSummaryCoordinator:
                         max_rounds=_PRE_RUN_SUMMARY_MAX_ROUNDS,
                     )
                     break
-                run_summary_compaction(
-                    ctx=self._ctx,
-                    state=state,
-                    trigger_reason=trigger_reason,
-                    is_cli_mode=self._is_cli_mode,
-                    on_summary_applied=self.on_summary_applied,
-                    trigger_threshold_chars=self._summary_trigger_chars,
-                )
+                with _summarizing_flag(self._thread_session):
+                    run_summary_compaction(
+                        ctx=self._ctx,
+                        state=state,
+                        trigger_reason=trigger_reason,
+                        is_cli_mode=self._is_cli_mode,
+                        on_summary_applied=self.on_summary_applied,
+                        trigger_threshold_chars=self._summary_trigger_chars,
+                    )
         except Exception as summarize_exc:
             log_compaction_failed(
                 logger,
@@ -267,14 +337,15 @@ class RunSummaryCoordinator:
 
         # Суммаризуем полный ``state.messages`` (включая preserved_batch); суффикс не снимаем
         # до вызова. После компакции снова добавляем preserved_batch (сводка + сырой хвост).
-        run_summary_compaction(
-            ctx=self._ctx,
-            state=state,
-            trigger_reason=self._pre_backend_trigger_reason,
-            is_cli_mode=self._is_cli_mode,
-            on_summary_applied=self.on_summary_applied,
-            trigger_threshold_chars=self._summary_trigger_chars,
-        )
+        with _summarizing_flag(self._thread_session):
+            run_summary_compaction(
+                ctx=self._ctx,
+                state=state,
+                trigger_reason=self._pre_backend_trigger_reason,
+                is_cli_mode=self._is_cli_mode,
+                on_summary_applied=self.on_summary_applied,
+                trigger_threshold_chars=self._summary_trigger_chars,
+            )
         msgs = getattr(state, "messages", None)
         if isinstance(msgs, list):
             msgs.extend(preserved_batch)
@@ -303,14 +374,15 @@ class RunSummaryCoordinator:
 
         logger = self._logger
         try:
-            run_summary_compaction(
-                ctx=self._ctx,
-                state=state,
-                trigger_reason="turn_end",
-                is_cli_mode=self._is_cli_mode,
-                on_summary_applied=self.on_summary_applied,
-                trigger_threshold_chars=self._turn_end_trigger_chars,
-            )
+            with _summarizing_flag(self._thread_session):
+                run_summary_compaction(
+                    ctx=self._ctx,
+                    state=state,
+                    trigger_reason="turn_end",
+                    is_cli_mode=self._is_cli_mode,
+                    on_summary_applied=self.on_summary_applied,
+                    trigger_threshold_chars=self._turn_end_trigger_chars,
+                )
         except Exception as summarize_exc:
             log_compaction_failed(
                 logger,
