@@ -1,13 +1,15 @@
-# GigaCode CLI (gc-cli)
+# GigaCode Universal Agent
 
-Background и CLI-клиент для работы с агентом GigaCode: отправка запросов, вызов инструментов и MCP-серверов. Требуется запущенный бэкенд агента с API `v1/responses` или режимом `chat_completions` с доступом к модели (chat/completions — openrouter, vllm и др.).
+Background и CLI-клиент для работы с агентом GigaCode: отправка запросов, вызов инструментов и MCP-серверов. Требуется запущенный бэкенд агента 
+- с API `v1/responses` (deprecated) 
+- или режимом `chat_completions` (активно поддерживается) с доступом к модели (chat/completions — openrouter, vllm и др.).
 
 **Требования:** Python 3.10 или новее.
 
 ## Возможности
 
 - CLI-агент: запросы, инструменты, треды, скиллы.
-- Два режима бэкенда: `v1/responses` и `chat_completions` (+ суммаризация в chat_completions).
+- Два режима бэкенда: `chat_completions` и `v1/responses` (deprecated).
 - MCP: 6 транспортов, готовые рецепты в `recommended_mcp/`.
 - Скиллы и пакеты скиллов (встроенные паки `supercoder` / `codebase` / `articles`).
 - Серверный режим: REST-обёртка на FastAPI.
@@ -24,12 +26,18 @@ Headless-установка только `gc-cli` (без TUI): см. [docs/usag
 
 Подробнее про MCP: [`recommended_mcp/README.md`](recommended_mcp/README.md).
 
+Запуск без графического режима
 ```bash
 gc-cli -a --config demo_config_openai.yml -q "создай подпапку test_project. В ней напиши на Python модуль
 вычисления чисел Фибоначчи. В отдельном файле напиши тесты. Прогони тесты,
 посчитай первые 1000 чисел Фибоначчи и сохрани результат в JSON там же.
 Пиши быстрый код с кешированием. Скажи, чему равно 1000-е число Фибоначчи,
 умноженное на 3."
+```
+
+Запуск в текстовом графическом интерфейсе
+```bash
+gc-ua -a
 ```
 
 Ключ `-a` запускает все рекомендванные mcp в проекте.
