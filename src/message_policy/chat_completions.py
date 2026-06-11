@@ -174,7 +174,7 @@ def coalesce_consecutive_assistant_tool_calls(messages: List[Dict]) -> List[Dict
 
 
 _INTERRUPTED_ASSISTANT_PLACEHOLDER = (
-    "(прерванный ход — продолжаю с нового запроса)"
+    "(previous turn was interrupted — continuing from the new request)"
 )
 
 
