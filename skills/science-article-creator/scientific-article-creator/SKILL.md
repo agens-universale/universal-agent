@@ -44,10 +44,30 @@ If no sources list is provided on input:
 - Run every selected work through `work_lookup` to ensure a normalized `WorkRecord`.
 - Pick 8–15 key works for inclusion in the text.
 
+### Step 2.5 — read the full text of the core papers (MANDATORY)
+
+A review synthesizes methods and results, which live in the article BODY, not the
+abstract. For the 2–5 papers the review is actually built on (the central works — not
+all 8–15), read their full text before drafting — this is a standard step, not optional.
+**Read the body even when the topic feels familiar.** Grounding every claim in the actual
+paper is the whole point of a citation-verified review; "I already know this work" is NOT
+a reason to skip — training memory is often wrong on the specifics (exact numbers, which
+model/setting a result belongs to, what the authors actually claim vs what became folklore).
+Obtain the body from whatever open-access form the paper offers. For most arXiv / CORE
+papers the full text is a **PDF**: **download the paper's PDF, then read the saved
+document** to get its text. A bare link or a placeholder yields nothing, and an ad-hoc
+shell download lands where it cannot be read — so download it properly and read the real
+saved file, not a link; do not improvise shell commands for this. For an open-access HTML page (e.g.
+PMC for a PubMed record), read the page text directly. Read each core paper's body once.
+If the full text genuinely cannot be obtained (paywall, no open-access copy), fall back to
+its abstract and lower that work's confidence — never fabricate body content. For the
+peripheral works, the abstract and metadata are enough — do not read every paper.
+
 ### Step 3 — draft with inline citations
 
 - Write sections per the plan. Every claim that contains a number, name, year, specific mechanism, method, or conclusion MUST carry an inline citation `[N]` referencing an entry in the bibliography block.
 - "Common knowledge" claims (e.g. "DNA is made of four nucleotides") may stand without a citation.
+- **Grounding guard:** before writing a claim with a citation, confirm the source body you read at Step 2.5 actually supports it. If the body does not support it, do not write it — soften the wording or mark `[CITATION NEEDED]`. Never attribute causality ("causes", "enables") or superiority ("outperforms") to a source whose body only shows correlation / association. (Lightweight grounding check; the full claim-type audit is the job of `scientific-article-checker`.)
 - If no supporting paper can be found, write `[CITATION NEEDED]` with a short note "searched X, Y — not found".
 
 ### Step 4 — bibliography block

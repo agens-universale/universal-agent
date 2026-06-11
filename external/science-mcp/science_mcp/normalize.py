@@ -113,10 +113,13 @@ def pubmed_xml_to_works(xml_text: str) -> list[WorkRecord]:
             if name:
                 authors.append(Author(name=name))
         doi = None
+        pmcid = None
         for aid in art.findall(".//ArticleId"):
-            if aid.get("IdType") == "doi":
+            id_type = aid.get("IdType")
+            if id_type == "doi" and doi is None:
                 doi = aid.text
-                break
+            elif id_type == "pmc" and pmcid is None:
+                pmcid = aid.text
         out.append(WorkRecord(
             source="pubmed",
             id=pmid or "(no pmid)",
@@ -126,6 +129,7 @@ def pubmed_xml_to_works(xml_text: str) -> list[WorkRecord]:
             abstract=abstract_text,
             doi=doi,
             pmid=pmid,
+            pmcid=pmcid,
             url=f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/" if pmid else None,
         ))
     return out
