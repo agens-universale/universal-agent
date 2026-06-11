@@ -49,21 +49,11 @@ For each citation that resolved in Step 2 AND backs a substantive claim
 (a number, an effect size, a mechanism, a clinical outcome):
 
 1. **Locate the claim** the citation is attached to in the article text.
-2. **Fetch the source BODY** (not just the abstract — the type-aware design check below
-   needs the methods/results section), in priority order. Tools are named by **function**,
-   not by exact registry id (ids carry server prefixes / can be renamed): the
-   **file-download tool**, the **office-document reader** (PDF/DOCX → markdown — not the
-   plain-text file reader), the **URL-fetch tool**, the **stored-output pager**.
-   - arXiv / CORE / bioRxiv-medRxiv → download the PDF with the **file-download tool**,
-     then convert it with the **office-document reader** (give it only the file path — it
-     takes no `offset`/`limit`; page a large body with the **stored-output pager** by
-     `output_ref` + `offset`/`limit`);
-   - PubMed/PMC with a `pmcid` → fetch `https://www.ncbi.nlm.nih.gov/pmc/articles/<pmcid>/`
-     with the **URL-fetch tool** (HTML);
-   - fallback → `ncbi_fetch(pmid=..., mode="fetch")` (≤50 KB) or
-     `open_access_search(query="<title or DOI>")` (abstract-level only);
-   - if no body can be fetched → `unverifiable-no-fulltext` (NOT the same as
-     unsupported).
+2. **Read the source's full text** — not just the abstract; the type-aware design check
+   below needs the methods/results section. Obtain the open-access body (e.g. via
+   `ncbi_fetch` for PubMed/PMC, `open_access_search` for CORE, or by reading the paper's
+   full-text PDF / open-access HTML page). If no full text can be obtained (paywall, no
+   open-access copy) → mark `unverifiable-no-fulltext` (NOT the same as unsupported).
 3. **Judge support** — compare the article's claim against the fetched text:
    - **supported** — the source states the claim (or a stronger version).
    - **partial** — the source is related but weaker / narrower / a different
