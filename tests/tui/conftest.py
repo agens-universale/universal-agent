@@ -3,8 +3,25 @@ from __future__ import annotations
 
 import shutil
 from pathlib import Path
+from typing import Callable
 
 import pytest
+
+
+async def wait_until(
+    pilot,
+    cond: Callable[[], bool],
+    what: str,
+    *,
+    steps: int = 200,
+    step_s: float = 0.05,
+) -> None:
+    """Ждать наблюдаемое условие (до ~10 с при дефолтах), не слепой pause."""
+    for _ in range(steps):
+        if cond():
+            return
+        await pilot.pause(step_s)
+    raise AssertionError(f"timeout: {what}")
 
 
 @pytest.fixture(scope="session", autouse=True)

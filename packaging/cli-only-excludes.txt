@@ -1,0 +1,3 @@
+# TUI stack — omit for headless gc-cli tool install (see docs/usage.md).
+textual
+rich

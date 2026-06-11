@@ -1,9 +1,48 @@
 """ThinkingIndicator — мгновенное гашение по submit_solution + sticky sentinel."""
 import json
 import threading
+import time
 from pathlib import Path
 
 import pytest
+
+from tests.tui.conftest import wait_until
+
+
+def _screen(pilot):
+    return pilot.app.screen_stack[-1]
+
+
+async def wait_for_finalized(pilot) -> None:
+    """Дождаться sentinel _finalized, принудительно тикая _poll_active.
+
+    Под нагрузкой полного suite interval 250мс Textual может не успевать;
+    без ручного poll wait_until по _last_event_kind таймаутится."""
+    def cond() -> bool:
+        _screen(pilot)._poll_active()
+        return _screen(pilot)._last_event_kind == "_finalized"
+
+    await wait_until(pilot, cond, "submit_solution → sentinel _finalized")
+
+
+async def wait_for_event_kind(pilot, kind: str) -> None:
+    def cond() -> bool:
+        _screen(pilot)._poll_active()
+        return _screen(pilot)._last_event_kind == kind
+
+    await wait_until(pilot, cond, f"_last_event_kind == {kind!r}")
+
+
+async def wait_for_indicator_state(pilot, state: str) -> None:
+    """Дождаться state индикатора после смены _last_event_kind (лаг 1 тик poll)."""
+    from tui.widgets.thinking_indicator import ThinkingIndicator
+
+    def cond() -> bool:
+        _screen(pilot)._poll_active()
+        indicators = pilot.app.query(ThinkingIndicator)
+        return len(indicators) == 1 and indicators[0]._state == state
+
+    await wait_until(pilot, cond, f"ThinkingIndicator._state == {state!r}")
 
 
 def _submit_solution_record(
@@ -119,6 +158,8 @@ class _BlockingFake:
         self._evt = threading.Event()
 
     def run(self, messages, *, thread_id, **kw):
+        # auto-create: attach + pending mount на UI-потоке — до записи .jsonl.
+        time.sleep(0.4)
         data = self._threads_dir / f"data_cli_{thread_id}.jsonl"
         meta = self._threads_dir / f"meta_cli_{thread_id}.json"
         # user-сообщение пишется первым (для consistency с реальным flow)
@@ -135,7 +176,7 @@ class _BlockingFake:
             json.dumps({"thread_id": thread_id, "messages_count": len(lines)}),
             encoding="utf-8",
         )
-        self._evt.wait(timeout=5.0)
+        self._evt.wait(timeout=30.0)
 
     def stop_run(self) -> None:
         self._evt.set()
@@ -162,10 +203,9 @@ async def test_submit_solution_event_switches_indicator_to_validating(tmp_path):
         inp = pilot.app.query_one("#cmdinput")
         inp.text = "сделай что-нибудь"
         await pilot.press("enter")
-        # Polling tick = 250мс; даём 0.8с — submit_solution успевает отрисоваться.
-        await pilot.pause(0.8)
+        await wait_for_finalized(pilot)
 
-        screen = pilot.app.screen_stack[-1]
+        screen = _screen(pilot)
         # Индикатор НЕ удаляется — переключается в "validating" режим,
         # держится пока runner.is_running() (intent_guard / MCP cleanup).
         indicators = pilot.app.query(ThinkingIndicator)
@@ -192,9 +232,9 @@ async def test_poll_active_keeps_validating_state_until_runner_exits(tmp_path):
         inp = pilot.app.query_one("#cmdinput")
         inp.text = "test"
         await pilot.press("enter")
-        await pilot.pause(0.8)  # submit_solution отрисован → validating + sentinel.
+        await wait_for_finalized(pilot)
 
-        screen = pilot.app.screen_stack[-1]
+        screen = _screen(pilot)
         assert screen._last_event_kind == "_finalized"
         assert pilot.app.active_runner.is_running()
 
@@ -233,10 +273,9 @@ async def test_synthetic_submit_solution_output_does_not_reset_sentinel(tmp_path
         inp = pilot.app.query_one("#cmdinput")
         inp.text = "test"
         await pilot.press("enter")
-        # 1.0с — оба record'а гарантированно прочитаны TUI polling'ом.
-        await pilot.pause(1.0)
+        await wait_for_finalized(pilot)
 
-        screen = pilot.app.screen_stack[-1]
+        screen = _screen(pilot)
         # Sentinel должен пережить синтетический tool_output.
         assert screen._last_event_kind == "_finalized"
         indicators = pilot.app.query(ThinkingIndicator)
@@ -274,11 +313,12 @@ async def test_policy_event_after_finalized_switches_back_to_thinking(tmp_path):
         inp = pilot.app.query_one("#cmdinput")
         inp.text = "test"
         await pilot.press("enter")
-        await pilot.pause(1.0)
-        # Оба record'а прочитаны: submit_solution → validating + sentinel,
-        # затем policy → _last_event_kind = "system" → switch back to thinking.
+        # submit_solution и policy пишутся одним батчем → sentinel может не
+        # «пойматься» между тиками; финальное состояние — system.
+        await wait_for_event_kind(pilot, "system")
+        await wait_for_indicator_state(pilot, "thinking")
 
-        screen = pilot.app.screen_stack[-1]
+        screen = _screen(pilot)
         assert screen._last_event_kind == "system"
         indicators = pilot.app.query(ThinkingIndicator)
         assert len(indicators) == 1
@@ -303,9 +343,9 @@ async def test_new_user_send_clears_finalized(tmp_path):
         inp = pilot.app.query_one("#cmdinput")
         inp.text = "first"
         await pilot.press("enter")
-        await pilot.pause(0.8)
+        await wait_for_finalized(pilot)
 
-        screen = pilot.app.screen_stack[-1]
+        screen = _screen(pilot)
         assert screen._last_event_kind == "_finalized"
 
         # Прямой вызов _reset_thinking_timer (как в _on_command_text_area_submitted).
@@ -329,9 +369,9 @@ async def test_reset_render_state_clears_finalized(tmp_path):
         inp = pilot.app.query_one("#cmdinput")
         inp.text = "first"
         await pilot.press("enter")
-        await pilot.pause(0.8)
+        await wait_for_finalized(pilot)
 
-        screen = pilot.app.screen_stack[-1]
+        screen = _screen(pilot)
         assert screen._last_event_kind == "_finalized"
 
         screen._reset_render_state()
@@ -390,9 +430,9 @@ async def test_runner_not_running_destroys_regardless_of_finalized(tmp_path):
         inp = pilot.app.query_one("#cmdinput")
         inp.text = "test"
         await pilot.press("enter")
-        await pilot.pause(0.8)
+        await wait_for_finalized(pilot)
 
-        screen = pilot.app.screen_stack[-1]
+        screen = _screen(pilot)
         assert screen._last_event_kind == "_finalized"
 
         # Симулируем выход runner-треда.

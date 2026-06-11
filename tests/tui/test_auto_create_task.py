@@ -142,8 +142,11 @@ async def test_no_duplicate_user_reply(tmp_path):
 
     class _Fake:
         def run(self, messages, *, thread_id, **kw):
+            import time
             from pathlib import Path
             import json
+            # attach_active_task + pending mount на UI-потоке — до записи .jsonl.
+            time.sleep(0.4)
             (Path(tmp_path) / f"data_cli_{thread_id}.jsonl").write_text(
                 json.dumps({"type": "message", "seq": 1,
                             "ts_utc": "2026-05-21T12:00:00+00:00",
@@ -165,8 +168,12 @@ async def test_no_duplicate_user_reply(tmp_path):
         inp = pilot.app.query_one("#cmdinput")
         inp.text = "привет"
         await pilot.press("enter")
-        # Wait beyond polling tick (250 ms + buffer)
-        await pilot.pause(0.6)
+        from tests.tui.conftest import wait_until
+
+        def _one_reply():
+            return len(pilot.app.query(UserReplyContainer)) == 1
+
+        await wait_until(pilot, _one_reply, "ровно одна user-реплика после promote")
         replies = pilot.app.query(UserReplyContainer)
         assert len(replies) == 1
         assert "привет" in str(replies[0].render())

@@ -28,6 +28,18 @@ def ctx_stub():
     )
 
 
+def _patch_save_thread_meta(monkeypatch) -> None:
+    """pre_backend_compaction_hook вызывает _summarizing_flag → save_thread_meta;
+    в unit-тестах с MagicMock thread_session это не цель проверки."""
+    monkeypatch.setattr(rsc, "save_thread_meta", lambda *_a, **_k: None)
+
+
+def _thread_session_mock() -> MagicMock:
+    thread = MagicMock()
+    thread.meta = {}
+    return thread
+
+
 def test_pre_backend_passes_full_history_including_suffix(monkeypatch, ctx_stub):
     """Компакция читает весь несистемный хвост из state, включая preserved_batch (суффикс)."""
     sys_m = {"role": "system", "content": "s"}
@@ -184,8 +196,9 @@ def test_persist_batch_only_when_nonempty(monkeypatch, ctx_stub):
 
     monkeypatch.setattr(rsc, "run_summary_compaction", mock_compact)
     monkeypatch.setattr(rsc, "history_exceeds_summary_trigger", lambda **_k: True)
+    _patch_save_thread_meta(monkeypatch)
 
-    thread = MagicMock()
+    thread = _thread_session_mock()
     coord = RunSummaryCoordinator(
         ctx=ctx_stub,
         state=state,
@@ -204,9 +217,10 @@ def test_persist_batch_only_when_nonempty(monkeypatch, ctx_stub):
 def test_persist_skipped_when_preserved_batch_empty(monkeypatch, ctx_stub):
     monkeypatch.setattr(rsc, "run_summary_compaction", lambda **_k: None)
     monkeypatch.setattr(rsc, "history_exceeds_summary_trigger", lambda **_k: True)
+    _patch_save_thread_meta(monkeypatch)
 
     state = _minimal_state(messages=[{"role": "system", "content": "x"}])
-    thread = MagicMock()
+    thread = _thread_session_mock()
     coord = RunSummaryCoordinator(
         ctx=ctx_stub,
         state=state,

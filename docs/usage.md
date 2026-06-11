@@ -9,11 +9,24 @@
 В корне проекта выполните:
 
 ```bash
-uv sync          # установка зависимостей
-uv tool install -e .   # установка gc-cli как инструмента
+uv sync          # установка зависимостей (dev + test)
+uv tool install -e .   # gc-cli + gc-ua (TUI в зависимостях по умолчанию)
 ```
 
 После этого можно переходить к [запуску клиента](#запуск-клиента).
+
+### Минимальная установка gc-cli без TUI
+
+Для headless-серверов, где нужен только `gc-cli` (без `gc-ua` и без `textual`/`rich`):
+
+```bash
+uv tool install -e . --excludes packaging/cli-only-excludes.txt
+```
+
+MCP-серверы (office, science и др.) ставятся отдельно: `gc-mcp-install` — см.
+[`recommended_mcp/README.md`](../recommended_mcp/README.md).
+
+`pip install -e .` всегда тянет TUI-зависимости; для минимального runtime используйте `uv tool` с `--excludes`, как выше.
 
 Проверка после установки: `uv sync` и `uv run pytest` — см. [Тесты](testing.md).
 

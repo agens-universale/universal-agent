@@ -6,16 +6,19 @@
 
 ## Установка
 
+TUI (`textual`, `rich`) входит в зависимости по умолчанию — ставится вместе с `gc-cli`:
+
 ```bash
-uv tool install -e ".[tui]" --force
+uv tool install -e .
 # или
-pip install -e .[tui]
+pip install -e .
 ```
 
-TUI-зависимости вынесены в опциональный extra `[tui]`: `textual`, `rich`,
-`pytest-asyncio`. Если пакет установлен без `[tui]`, запуск `gc-ua` печатает в stderr
-`TUI mode requires 'textual'. Install: pip install gc-cli-pub[tui]` и завершается
-с кодом 1 — без трейсбэка.
+Минимальная headless-установка только `gc-cli` (без TUI) — см.
+[Установка и запуск](usage.md#минимальная-установка-gc-cli-без-tui).
+
+Если `textual` отсутствует (например, после cli-only install), `gc-ua` печатает в stderr
+короткую подсказку переустановить пакет и завершается с кодом 1 — без трейсбэка.
 
 ## Запуск
 

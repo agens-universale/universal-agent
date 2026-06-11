@@ -1,7 +1,10 @@
 """All office-mcp tool schemas must survive OpenAI strict normalization."""
 from __future__ import annotations
 
+import pytest
 from mcp.server.fastmcp.utilities.func_metadata import func_metadata
+
+pytest.importorskip("office_mcp")
 
 from office_mcp.server import ServerConfig, build_server
 from tools.connect_mcp.agent_tools import normalize_tool_spec_for_agent

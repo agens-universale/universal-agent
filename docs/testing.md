@@ -2,9 +2,9 @@
 
 # Тесты
 
-Один раз в корне репо: `uv sync`. Этого достаточно для pytest.
+Один раз в корне репо: `uv sync`. Подтягивает dev/test-зависимости (`textual`, `rich` — в основных deps; `office-mcp` из `external/office-mcp` — в test-группе).
 
-`uv tool install -e .` и `gc-mcp-install` — для **запуска агента**, к тестам не относятся. MCP в `~/.local/share/gc/...` и dev-окружение для тестов — разные venv, так и задумано.
+`uv tool install -e .` и `gc-mcp-install` — для **запуска агента** (`gc-cli` / `gc-ua`), не для pytest. Тесты гоняйте через `uv run pytest`, а не из venv `uv tool`.
 
 ```bash
 # gc-cli

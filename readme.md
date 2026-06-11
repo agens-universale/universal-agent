@@ -16,9 +16,11 @@ Background и CLI-клиент для работы с агентом GigaCode: �
 ## Быстрый старт
 
 ```bash
-uv tool install -e .
+uv tool install -e .   # gc-cli + gc-ua (TUI по умолчанию)
 gc-mcp-install --config recommended_mcp/config.local.yml   # MCP → ~/.local/share/gc/recommended_mcp/venv
 ```
+
+Headless-установка только `gc-cli` (без TUI): см. [docs/usage.md](docs/usage.md#минимальная-установка-gc-cli-без-tui).
 
 Подробнее про MCP: [`recommended_mcp/README.md`](recommended_mcp/README.md).
 

@@ -20,6 +20,9 @@ dependencies = [
     "httpx-sse>=0.4.0",
     "mcp==1.26.0",
     "pytest>=9.0.3",
+    "pytest-asyncio>=0.23",
+    "textual>=0.55",
+    "rich>=13",
 ]
 
 [project.scripts]
@@ -28,12 +31,10 @@ gc-ua = "tui:main"
 gc-mcp-install = "mcp_runtime.install_cli:main"
 
 [project.optional-dependencies]
-tui = ["textual>=0.55", "rich>=13", "pytest-asyncio>=0.23"]
 dev-tui = [
     "textual>=0.85",
     "rich>=13",
     "pytest-textual-snapshot>=1.0",
-    "pytest-asyncio>=0.23",
 ]
 
 [tool.setuptools]
@@ -42,7 +43,17 @@ package-dir = {"" = "src"}
 [dependency-groups]
 dev = [
     "httpie>=3.2.4",
+    { include-group = "test" },
 ]
+test = [
+    "office-mcp",
+]
+
+[tool.uv]
+default-groups = ["dev"]
+
+[tool.uv.sources]
+office-mcp = { path = "external/office-mcp", editable = true }
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

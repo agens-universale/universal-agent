@@ -12,7 +12,7 @@ from typing import Optional, Sequence
 
 
 _MISSING_TEXTUAL_MSG = (
-    "TUI mode requires 'textual'. Install: pip install gc-cli-pub[tui]"
+    "TUI mode requires 'textual'. Reinstall: uv tool install -e . --force"
 )
 
 
@@ -29,6 +29,16 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = argparse.ArgumentParser(prog="gc-ua", add_help=False)
     parser.add_argument("--config", default=None)
     parser.add_argument("--task-root", default=None)
+    parser.add_argument(
+        "-a",
+        "--auto-mcp",
+        action="store_true",
+        help=(
+            "Поднять HTTP/SSE MCP-daemon'ы из recommended_mcp/ перед запуском "
+            "(если каталог есть в cwd); по завершении gc-ua гасятся только "
+            "процессы, запущенные этим вызовом"
+        ),
+    )
     args, _unknown = parser.parse_known_args(
         list(argv) if argv is not None else sys.argv[1:]
     )
@@ -46,8 +56,18 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     from thread_store import resolve_threads_dir
     threads_dir = resolve_threads_dir(config_dict)
 
+    from mcp_daemon_autostart import ensure_mcp_daemons, shutdown_mcp_daemons
+
+    auto_mcp = args.auto_mcp
+    if auto_mcp:
+        ensure_mcp_daemons(config_dict)
+
     app = _app_mod.TuiApp(threads_dir=threads_dir, system="cli", config=config_dict)
     app._config_path = resolve_config_path(args.config)
     app._config_project_local = _project_local_config_path()  # str | None
-    app.run()
+    try:
+        app.run()
+    finally:
+        if auto_mcp:
+            shutdown_mcp_daemons()
     return 0

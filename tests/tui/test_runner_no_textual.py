@@ -27,5 +27,5 @@ def test_main_without_textual_returns_1_and_prints_to_stderr(monkeypatch, capsys
     err = capsys.readouterr().err
     assert rc == 1
     assert "textual" in err.lower()
-    assert "pip install" in err.lower()
+    assert "uv tool install" in err.lower()
     assert err.count("\n") <= 1

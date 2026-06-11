@@ -87,6 +87,8 @@ async def test_polling_user_event_promotes_pending(tmp_path):
     class _Fake:
         """Stub-executor, который реально пишет user-сообщение в .jsonl."""
         def run(self, messages, *, thread_id, **kw):
+            import time
+            time.sleep(0.4)  # pending mount до появления .jsonl (auto-create гонка)
             data_path = Path(tmp_path) / f"data_cli_{thread_id}.jsonl"
             meta_path = Path(tmp_path) / f"meta_cli_{thread_id}.json"
             data_path.write_text(
@@ -107,14 +109,27 @@ async def test_polling_user_event_promotes_pending(tmp_path):
         inp = pilot.app.query_one("#cmdinput")
         inp.text = "промо"
         await pilot.press("enter")
-        # Достаточно тиков polling'а 250мс, чтобы поллер увидел .jsonl
-        await pilot.pause(0.8)
+        from tests.tui.conftest import wait_until
+
+        def _promoted():
+            replies = pilot.app.query(UserReplyContainer)
+            return len(replies) == 1 and replies[0].state == "normal"
+
+        await wait_until(
+            pilot, _promoted, "pending промоутился в normal без дубликата"
+        )
 
         replies = pilot.app.query(UserReplyContainer)
         assert len(replies) == 1, "Не должно быть дубликата — pending промоутится in-place"
         assert replies[0].state == "normal"
 
         tid = app.tui_state.active_task_id
+
+        await wait_until(
+            pilot,
+            lambda: _read_pending(tmp_path, tid) == [],
+            "pending-запись удалена из meta",
+        )
         records = _read_pending(tmp_path, tid)
         assert records == [], "После promotion запись из meta удалена"
 
