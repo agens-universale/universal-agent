@@ -45,7 +45,9 @@ def sync_logging_flat_and_params(config_dict: Dict[str, Any]) -> None:
 
 def _default_config_path() -> str:
     base_dir = os.path.dirname(os.path.abspath(__file__))
-    return os.path.join(base_dir, "..", "config.yml")
+    # normpath: путь показывают пользователю (например, экран /config в TUI) —
+    # без сырого "src\..\config.yml".
+    return os.path.normpath(os.path.join(base_dir, "..", "config.yml"))
 
 
 def _project_local_config_path() -> Optional[str]:
@@ -103,8 +105,13 @@ def apply_cli_overrides(
     sync_logging_flat_and_params(config_dict)
 
 
+def resolve_config_path(config_path: Optional[str] = None) -> str:
+    """Путь config.yml, использованный сессией (та же цепочка, что в load_config)."""
+    return config_path or _xdg_config_path() or _default_config_path()
+
+
 def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
-    path = config_path or _xdg_config_path() or _default_config_path()
+    path = resolve_config_path(config_path)
     config_dir = os.path.dirname(os.path.abspath(path))
 
     with open(path, "r", encoding="utf-8") as file:
