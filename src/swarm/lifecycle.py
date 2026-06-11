@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import logging
 import os
+import shutil
 import signal
 import subprocess
 import time
@@ -154,6 +155,46 @@ def _get_dir_size_mb(dir_path: str) -> float | None:
     return total / (1024 * 1024)
 
 
+def _persist_agent_artifacts(
+    threads_dir: str,
+    swarm_id: str,
+    sandbox_path: str,
+    *,
+    swarm_logs_dir: str = "",
+) -> None:
+    """Сохранить агентские ``.gc/logs`` из песочницы на хост.
+
+    Назначение настраивается через ``swarm.swarm_logs_dir`` в config_server.yml:
+      - задан абсолютный/относительный путь → ``<swarm_logs_dir>/<swarm_id>/``;
+      - пусто → дефолт ``threads_dir/<swarm_id>/agent_logs/``.
+
+    Вызывается при ЛЮБОЙ финализации (completion / timeout / resource-violation /
+    crash), на хост-стороне. Поэтому логи агента сохраняются, даже если
+    bwrap-песочница уже снята / убита по таймауту / процесс упал — файлы под
+    ``/work`` физически лежат на диске хоста (bind), и мы их копируем независимо
+    от тест-оркестратора.
+
+    Best-effort: ошибки логируются, но финализацию не валят. Идемпотентно.
+    """
+    if not sandbox_path:
+        return
+    src = os.path.join(sandbox_path, ".gc", "logs")
+    if not os.path.isdir(src):
+        return
+    if swarm_logs_dir:
+        dst = os.path.join(swarm_logs_dir, swarm_id)
+    else:
+        dst = os.path.join(threads_dir, swarm_id, "agent_logs")
+    try:
+        os.makedirs(os.path.dirname(dst), exist_ok=True)
+        shutil.copytree(src, dst, dirs_exist_ok=True)
+    except OSError as e:  # noqa: BLE001
+        logger.warning(
+            "swarm %s: не удалось сохранить agent_logs из песочницы: %r",
+            swarm_id, e,
+        )
+
+
 def _determine_status_from_completion(
     completion: Dict[str, Any],
 ) -> str:
@@ -187,6 +228,7 @@ def _finalize_with_resource_violation(
     *,
     error_type: str,
     error_message: str,
+    swarm_logs_dir: str = "",
 ) -> Dict[str, Any]:
     """Зафиксировать violation (disk/memory/cpu) в meta + status=failed."""
     patch = {
@@ -200,6 +242,11 @@ def _finalize_with_resource_violation(
         "system": meta.get("system"),
         "task_id": meta.get("task_id"),
     }
+    _persist_agent_artifacts(
+        threads_dir, swarm_id,
+        str((meta.get("swarm_meta") or {}).get("sandbox_path") or ""),
+        swarm_logs_dir=swarm_logs_dir,
+    )
     storage.save_swarm_meta(
         threads_dir, swarm_id,
         base_meta=base_meta, swarm_meta_patch=patch,
@@ -213,6 +260,8 @@ def _enforce_resource_limits(
     swarm_id: str,
     meta: Dict[str, Any],
     swarm_meta: Dict[str, Any],
+    *,
+    swarm_logs_dir: str = "",
 ) -> Dict[str, Any] | None:
     """Проверить disk/memory/cpu лимиты. Если нарушены — kill + финализация.
 
@@ -241,6 +290,7 @@ def _enforce_resource_limits(
             )
             return _finalize_with_resource_violation(
                 threads_dir, swarm_id, meta,
+                swarm_logs_dir=swarm_logs_dir,
                 error_type="disk_limit",
                 error_message=(
                     f"Sandbox disk usage ({actual_mb:.1f}MB) exceeds "
@@ -314,6 +364,7 @@ def check_and_finalize(
     swarm_id: str,
     *,
     heavy_checks: bool = False,
+    swarm_logs_dir: str = "",
 ) -> Dict[str, Any]:
     """Проверить статус sworm'а и при необходимости финализировать meta.json.
 
@@ -371,6 +422,11 @@ def check_and_finalize(
                 "system": meta.get("system"),
                 "task_id": meta.get("task_id"),
             }
+            _persist_agent_artifacts(
+                threads_dir, swarm_id,
+                str(swarm_meta.get("sandbox_path") or ""),
+                swarm_logs_dir=swarm_logs_dir,
+            )
             storage.save_swarm_meta(
                 threads_dir,
                 swarm_id,
@@ -384,6 +440,7 @@ def check_and_finalize(
     if heavy_checks:
         violation = _enforce_resource_limits(
             threads_dir, sandbox_root_dir, swarm_id, meta, swarm_meta,
+            swarm_logs_dir=swarm_logs_dir,
         )
         if violation is not None:
             return violation
@@ -405,6 +462,11 @@ def check_and_finalize(
             "system": meta.get("system"),
             "task_id": meta.get("task_id"),
         }
+        _persist_agent_artifacts(
+            threads_dir, swarm_id,
+            str(swarm_meta.get("sandbox_path") or ""),
+            swarm_logs_dir=swarm_logs_dir,
+        )
         storage.save_swarm_meta(
             threads_dir,
             swarm_id,
@@ -431,6 +493,11 @@ def check_and_finalize(
         "system": meta.get("system"),
         "task_id": meta.get("task_id"),
     }
+    _persist_agent_artifacts(
+        threads_dir, swarm_id,
+        str(swarm_meta.get("sandbox_path") or ""),
+        swarm_logs_dir=swarm_logs_dir,
+    )
     storage.save_swarm_meta(
         threads_dir,
         swarm_id,

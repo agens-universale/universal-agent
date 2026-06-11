@@ -113,7 +113,11 @@ async def _startup_swarm_monitor() -> None:
 
     threads_dir = str(SWARM_CONFIG["threads_dir"])
     sandbox_root_dir = str(SWARM_CONFIG["sandbox_root_dir"])
-    monitor = SwarmMonitor(threads_dir, sandbox_root_dir)
+    monitor = SwarmMonitor(
+        threads_dir,
+        sandbox_root_dir,
+        swarm_logs_dir=str(SWARM_CONFIG.get("swarm_logs_dir", "")),
+    )
     monitor.start_in_background()
     _swarm_monitor = monitor
 
@@ -498,7 +502,7 @@ async def swarm_run(request: Request):
     default_system = str(defaults.get("system", "generic"))
     system = normalize_system(source_value, default_system=default_system)
     payload["system"] = system
-    swarm_id = f"{system}_{task_id}"
+    swarm_id = f"swarm_{system}_{task_id}"
 
     # AR-3: reuse_strategy MVP — поддерживаем только "reject".
     # "continue" и "fresh" — отдадим 501, чтобы клиент не зависел от непостроенной семантики.
@@ -608,7 +612,7 @@ async def get_swarm_status(system: str, task_id: str):
             detail={"status": "error", "payload": "system and task_id are required"},
         )
 
-    swarm_id = f"{sys_norm}_{task_norm}"
+    swarm_id = f"swarm_{sys_norm}_{task_norm}"
     threads_dir = str(SWARM_CONFIG["threads_dir"])
     sandbox_root_dir = str(SWARM_CONFIG["sandbox_root_dir"])
 
@@ -620,7 +624,10 @@ async def get_swarm_status(system: str, task_id: str):
     # Lazy-чек: даже если monitor ещё не успел финализировать, status-эндпоинт
     # подтянет completion.json или проверит PID и обновит meta при необходимости.
     # См. swarm_spec.md §5.2 и шаг M2/1.5.
-    meta = swarm_lifecycle.check_and_finalize(threads_dir, sandbox_root_dir, swarm_id)
+    meta = swarm_lifecycle.check_and_finalize(
+        threads_dir, sandbox_root_dir, swarm_id,
+        swarm_logs_dir=str(SWARM_CONFIG.get("swarm_logs_dir", "")),
+    )
     if not meta:
         # Защитный фоллбек — теоретически невозможно, т.к. pre_meta был.
         meta = pre_meta
@@ -661,7 +668,7 @@ async def get_swarm_logs(system: str, task_id: str):
             detail={"status": "error", "payload": "system and task_id are required"},
         )
 
-    swarm_id = f"{sys_norm}_{task_norm}"
+    swarm_id = f"swarm_{sys_norm}_{task_norm}"
     threads_dir = str(SWARM_CONFIG["threads_dir"])
     sandbox_root_dir = str(SWARM_CONFIG.get("sandbox_root_dir", ""))
     meta = swarm_storage.load_swarm_meta(threads_dir, swarm_id)

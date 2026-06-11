@@ -31,9 +31,11 @@ class SwarmMonitor:
         sandbox_root_dir: str = "",
         *,
         check_interval_seconds: int = 60,
+        swarm_logs_dir: str = "",
     ) -> None:
         self._threads_dir = threads_dir
         self._sandbox_root_dir = sandbox_root_dir
+        self._swarm_logs_dir = swarm_logs_dir
         self._check_interval_seconds = check_interval_seconds
         self._active_ids: Set[str] = set()
         self._lock = threading.Lock()
@@ -86,6 +88,7 @@ class SwarmMonitor:
                 self._sandbox_root_dir,
                 swarm_id,
                 heavy_checks=True,
+                swarm_logs_dir=self._swarm_logs_dir,
             )
         except Exception:
             logger.exception("swarm monitor: check_and_finalize failed for %s", swarm_id)

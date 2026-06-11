@@ -591,3 +591,46 @@ def test_resource_limits_not_checked_when_heavy_false(dirs, monkeypatch):
 
     r = lc.check_and_finalize(threads, sandbox, "g_h1")  # heavy_checks=False default
     assert r["swarm_meta"]["status"] == "running"
+
+
+# ---------------------------------------------------------------------------
+# _persist_agent_artifacts: сохранение agent logs/threads из песочницы на хост
+# ---------------------------------------------------------------------------
+
+def _make_fake_sandbox(tmp_path, swarm_id):
+    """Создать sandbox/<id>/.gc/{logs,threads} с файлами-маркерами."""
+    sb = tmp_path / "sandboxes" / swarm_id
+    (sb / ".gc" / "logs").mkdir(parents=True)
+    (sb / ".gc" / "threads" / swarm_id).mkdir(parents=True)
+    (sb / ".gc" / "logs" / "agent_main.log").write_text("LOGMARK")
+    (sb / ".gc" / "threads" / swarm_id / "messages.jsonl").write_text("MSGMARK")
+    return sb
+
+
+def test_persist_agent_artifacts_default_under_threads_dir(tmp_path):
+    """Без настроенного swarm_logs_dir — копирует .gc/logs в threads_dir/<id>/agent_logs."""
+    from swarm.lifecycle import _persist_agent_artifacts
+    swarm_id = "generic_t1"
+    sb = _make_fake_sandbox(tmp_path, swarm_id)
+    threads_dir = str(tmp_path / "threads")
+    _persist_agent_artifacts(threads_dir, swarm_id, str(sb))
+    assert (tmp_path / "threads" / swarm_id / "agent_logs" / "agent_main.log").read_text() == "LOGMARK"
+
+
+def test_persist_agent_artifacts_configured_dir(tmp_path):
+    """С настроенным swarm_logs_dir — копирует в <swarm_logs_dir>/<id>/."""
+    from swarm.lifecycle import _persist_agent_artifacts
+    swarm_id = "generic_t2"
+    sb = _make_fake_sandbox(tmp_path, swarm_id)
+    threads_dir = str(tmp_path / "threads")
+    logs_dir = str(tmp_path / "custom_logs")
+    _persist_agent_artifacts(threads_dir, swarm_id, str(sb), swarm_logs_dir=logs_dir)
+    assert (tmp_path / "custom_logs" / swarm_id / "agent_main.log").read_text() == "LOGMARK"
+    # В дефолтный threads_dir НЕ должно попасть.
+    assert not (tmp_path / "threads" / swarm_id / "agent_logs").exists()
+
+
+def test_persist_agent_artifacts_missing_sandbox_noop(tmp_path):
+    """Пустой sandbox_path — no-op, без ошибок."""
+    from swarm.lifecycle import _persist_agent_artifacts
+    _persist_agent_artifacts(str(tmp_path / "threads"), "x", "")  # не падает

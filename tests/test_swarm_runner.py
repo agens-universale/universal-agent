@@ -62,16 +62,16 @@ def mock_popen():
 
 
 def test_make_swarm_id_concatenates_system_task():
-    assert runner._make_swarm_id("ci", "build-42") == "ci_build-42"
+    assert runner._make_swarm_id("ci", "build-42") == "swarm_ci_build-42"
 
 
 def test_make_swarm_id_lowercases_system_strips_task():
-    assert runner._make_swarm_id("CI", "  build-42  ") == "ci_build-42"
+    assert runner._make_swarm_id("CI", "  build-42  ") == "swarm_ci_build-42"
 
 
 def test_make_swarm_id_empty_strings():
     """Поведение на edge — пустые значения дают вырожденный id, но не падают."""
-    assert runner._make_swarm_id("", "") == "_"
+    assert runner._make_swarm_id("", "") == "swarm__"
 
 
 # ---------------------------------------------------------------------------
@@ -106,7 +106,7 @@ def test_start_swarm_process_returns_id_and_pid(base_swarm_cfg, mock_popen):
         task_id="build-42",
         payload={"q": "hello"},
     )
-    assert sid == "ci_build-42"
+    assert sid == "swarm_ci_build-42"
     assert pid == 12345
 
 
@@ -114,7 +114,7 @@ def test_start_swarm_creates_sandbox_dir(base_swarm_cfg, mock_popen):
     runner.start_swarm_process(
         base_swarm_cfg, system="ci", task_id="t1", payload={},
     )
-    sandbox_path = os.path.join(base_swarm_cfg["sandbox_root_dir"], "ci_t1")
+    sandbox_path = os.path.join(base_swarm_cfg["sandbox_root_dir"], "swarm_ci_t1")
     assert os.path.isdir(sandbox_path)
 
 
@@ -122,7 +122,7 @@ def test_start_swarm_writes_meta_with_running_status(base_swarm_cfg, mock_popen)
     runner.start_swarm_process(
         base_swarm_cfg, system="g", task_id="t", payload={},
     )
-    meta = storage.load_swarm_meta(base_swarm_cfg["threads_dir"], "g_t")
+    meta = storage.load_swarm_meta(base_swarm_cfg["threads_dir"], "swarm_g_t")
     assert meta["system"] == "g"
     assert meta["task_id"] == "t"
     sm = meta["swarm_meta"]
@@ -133,7 +133,7 @@ def test_start_swarm_writes_meta_with_running_status(base_swarm_cfg, mock_popen)
     assert "deadline_at" in sm
     assert "created_at" in sm
     assert sm["limits"]["timeout_seconds"] == 1800
-    assert sm["sandbox_path"].endswith("/sandbox/g_t")
+    assert sm["sandbox_path"].endswith("/sandbox/swarm_g_t")
 
 
 def test_start_swarm_deadline_at_matches_timeout(base_swarm_cfg, mock_popen):
@@ -141,7 +141,7 @@ def test_start_swarm_deadline_at_matches_timeout(base_swarm_cfg, mock_popen):
     runner.start_swarm_process(
         base_swarm_cfg, system="g", task_id="t", payload={},
     )
-    meta = storage.load_swarm_meta(base_swarm_cfg["threads_dir"], "g_t")
+    meta = storage.load_swarm_meta(base_swarm_cfg["threads_dir"], "swarm_g_t")
     deadline = datetime.fromisoformat(meta["swarm_meta"]["deadline_at"])
     started = datetime.fromisoformat(meta["swarm_meta"]["started_at"])
     delta = (deadline - started).total_seconds()
@@ -174,12 +174,12 @@ def test_start_swarm_env_contains_required_swarm_vars(base_swarm_cfg, mock_popen
     env = kwargs.get("env")
     assert env is not None
     # Базовые обязательные
-    assert env["SWARM_ID"] == "ci_t1"
+    assert env["SWARM_ID"] == "swarm_ci_t1"
     assert env["SWARM_SYSTEM"] == "ci"
     assert env["SWARM_TASK_ID"] == "t1"
     assert env["SWARM_THREADS_DIR"] == base_swarm_cfg["threads_dir"]
     assert env["SWARM_SANDBOX_DIR"] == base_swarm_cfg["sandbox_root_dir"]
-    assert env["SWARM_SANDBOX_PATH"].endswith("/sandbox/ci_t1")
+    assert env["SWARM_SANDBOX_PATH"].endswith("/sandbox/swarm_ci_t1")
     assert env["SWARM_CLI_COMMAND"] == "gc-cli"
     assert env["SWARM_SANDBOX_TOOL"] == "bubblewrap"
     # Лимиты как строки
@@ -207,7 +207,7 @@ def test_start_swarm_meta_queued_persisted_before_popen(base_swarm_cfg, mock_pop
     state = {"queued_seen": False}
 
     def capture_popen_side(*args, **kwargs):
-        meta = storage.load_swarm_meta(base_swarm_cfg["threads_dir"], "g_t")
+        meta = storage.load_swarm_meta(base_swarm_cfg["threads_dir"], "swarm_g_t")
         sm = meta.get("swarm_meta", {})
         if sm.get("status") == "queued":
             state["queued_seen"] = True
@@ -222,7 +222,7 @@ def test_start_swarm_meta_queued_persisted_before_popen(base_swarm_cfg, mock_pop
     )
     assert state["queued_seen"], "meta status=queued должен существовать до Popen"
 
-    meta = storage.load_swarm_meta(base_swarm_cfg["threads_dir"], "g_t")
+    meta = storage.load_swarm_meta(base_swarm_cfg["threads_dir"], "swarm_g_t")
     assert meta["swarm_meta"]["status"] == "running"
     assert meta["swarm_meta"]["pid"] == 999
 
@@ -254,7 +254,7 @@ def test_start_swarm_default_timeout_when_limits_missing(tmp_path, mock_popen):
         "limits": {},  # без timeout_seconds
     }
     runner.start_swarm_process(cfg, system="g", task_id="t", payload={})
-    meta = storage.load_swarm_meta(cfg["threads_dir"], "g_t")
+    meta = storage.load_swarm_meta(cfg["threads_dir"], "swarm_g_t")
     deadline = datetime.fromisoformat(meta["swarm_meta"]["deadline_at"])
     started = datetime.fromisoformat(meta["swarm_meta"]["started_at"])
     delta = (deadline - started).total_seconds()
@@ -364,7 +364,7 @@ def test_start_swarm_creates_runtime_config_in_sandbox(base_swarm_cfg, mock_pope
     runner.start_swarm_process(
         base_swarm_cfg, system="g", task_id="t", payload={},
     )
-    sandbox_dir = os.path.join(base_swarm_cfg["sandbox_root_dir"], "g_t")
+    sandbox_dir = os.path.join(base_swarm_cfg["sandbox_root_dir"], "swarm_g_t")
     runtime_cfg = os.path.join(sandbox_dir, ".gc", "config.yml")
     assert os.path.exists(runtime_cfg)
 
@@ -383,7 +383,7 @@ def test_start_swarm_materialize_failure_does_not_block(
     sid, pid = runner.start_swarm_process(
         base_swarm_cfg, system="g", task_id="t", payload={},
     )
-    assert sid == "g_t"
+    assert sid == "swarm_g_t"
     assert pid == 12345
 
 

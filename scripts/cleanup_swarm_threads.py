@@ -77,9 +77,10 @@ def cleanup_threads(
     *,
     dry_run: bool = False,
 ) -> dict:
-    """Удалить каталоги старше TTL. Также удалить orphan sandbox-каталоги.
+    """Удалить каталоги старше TTL. threads/<id> чистится по timestamp из meta.json,
+    sandboxes/<id> — независимо, по своему mtime (расцеплено).
 
-    Возвращает {threads_removed, sandboxes_removed, orphan_sandboxes_removed, kept}.
+    Возвращает {threads_removed, sandboxes_removed, kept, errors}.
     """
     now = datetime.now(timezone.utc)
     cutoff = now - timedelta(hours=ttl_hours)
@@ -87,7 +88,6 @@ def cleanup_threads(
     stats = {
         "threads_removed": 0,
         "sandboxes_removed": 0,
-        "orphan_sandboxes_removed": 0,
         "kept": 0,
         "errors": 0,
     }
@@ -95,12 +95,10 @@ def cleanup_threads(
     if not os.path.isdir(threads_dir):
         return stats
 
-    seen_ids = set()
     for entry in sorted(os.listdir(threads_dir)):
         entry_path = os.path.join(threads_dir, entry)
         if not os.path.isdir(entry_path):
             continue
-        seen_ids.add(entry)
 
         meta_path = os.path.join(entry_path, "meta.json")
         ts = _meta_timestamp(meta_path) if os.path.isfile(meta_path) else None
@@ -126,27 +124,17 @@ def cleanup_threads(
                 stats["errors"] += 1
                 continue
         stats["threads_removed"] += 1
+        # Sandbox НЕ удаляем здесь — он чистится независимо, по своему mtime
+        # (ниже), как обычная чистка тредов по возрасту. Расцеплено намеренно:
+        # threads = запись о прогоне, sandbox = рабочий /work, у каждого свой TTL.
 
-        # И соответствующий sandbox.
-        sandbox_path = os.path.join(sandbox_root_dir, entry)
-        if os.path.isdir(sandbox_path):
-            if not dry_run:
-                try:
-                    shutil.rmtree(sandbox_path)
-                except OSError:
-                    stats["errors"] += 1
-                    continue
-            stats["sandboxes_removed"] += 1
-
-    # Orphan sandboxes (нет соответствующей threads/<id>/).
+    # Sandboxes — независимо, по СОБСТВЕННОМУ mtime (а не по мете threads).
     if os.path.isdir(sandbox_root_dir):
         for entry in sorted(os.listdir(sandbox_root_dir)):
             entry_path = os.path.join(sandbox_root_dir, entry)
             if not os.path.isdir(entry_path):
                 continue
-            if entry in seen_ids:
-                continue  # уже обработан выше
-            # Orphan — проверяем mtime.
+            # Чистим ВСЕ песочницы старше TTL по их mtime (не только orphan'ы).
             try:
                 mtime = datetime.fromtimestamp(
                     os.path.getmtime(entry_path), tz=timezone.utc,
@@ -155,14 +143,14 @@ def cleanup_threads(
                 stats["errors"] += 1
                 continue
             if mtime >= cutoff:
-                continue  # свежий orphan, оставим (вдруг скоро придёт meta)
+                continue  # свежая песочница — оставим
             if not dry_run:
                 try:
                     shutil.rmtree(entry_path)
                 except OSError:
                     stats["errors"] += 1
                     continue
-            stats["orphan_sandboxes_removed"] += 1
+            stats["sandboxes_removed"] += 1
 
     return stats
 

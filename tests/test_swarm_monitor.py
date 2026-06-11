@@ -150,6 +150,7 @@ def test_check_one_swarm_passes_correct_args(monkeypatch):
     m._check_one_swarm("xxx")
     mock_finalize.assert_called_once_with(
         "/threads", "/sandbox", "xxx", heavy_checks=True,
+        swarm_logs_dir="",
     )
 
 

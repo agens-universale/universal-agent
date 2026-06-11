@@ -44,12 +44,12 @@ STDOUT_LOG="${SWARM_LOG_DIR}/stdout.log"
 STDERR_LOG="${SWARM_LOG_DIR}/stderr.log"
 COMPLETION_FILE="${SWARM_LOG_DIR}/completion.json"
 
-# --- Payload.json в sandbox (канал C) ---
+# --- Sandbox root ---
+# Запрос пользователя доставляется в CLI напрямую через -q "${SWARM_PAYLOAD_JSON}"
+# (весь payload как JSON-строка, симметрично webhook-режиму). Файл payload.json
+# больше не пишем — gc-cli не умеет --payload-file, а -q это штатный вход.
 
 mkdir -p "${SWARM_SANDBOX_PATH}"
-if [[ -n "${SWARM_PAYLOAD_JSON:-}" ]]; then
-  printf '%s\n' "${SWARM_PAYLOAD_JSON}" > "${SWARM_SANDBOX_PATH}/payload.json"
-fi
 
 # --- Подкаталог .gc/ для runtime_config + thread store (каналы A + E) ---
 
@@ -133,6 +133,10 @@ if [[ "${SWARM_SANDBOX_TOOL}" == "bubblewrap" ]]; then
     --share-net
     --dev /dev
     --proc /proc
+    # Ephemeral writable /tmp внутри песочницы. Нужен любым тулзам, которые
+    # пишут во временные файлы (например playwright-mcp: mkdtemp /tmp/playwright-artifacts-*).
+    # tmpfs эфемерен — исчезает вместе с песочницей, изоляцию не ослабляет.
+    --tmpfs /tmp
     --ro-bind /usr /usr
     # HOME=/work делает /work «домашним» — npm пишет логи/кэш в /work/.npm
     # (writable канал A), а не в /root/.npm (read-only).
@@ -166,7 +170,7 @@ fi
 CLI_CMD=(
   "${CLI_BIN}"
   --config "/work/.gc/config.yml"
-  --payload-file "/work/payload.json"
+  -q "${SWARM_PAYLOAD_JSON:-}"
 )
 
 # --- Таймаут через GNU timeout (если есть) ---

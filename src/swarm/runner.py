@@ -220,9 +220,11 @@ def _resolve_host_config_path(swarm_cfg: Dict[str, Any]) -> Optional[str]:
 
 
 def _make_swarm_id(system: str, task_id: str) -> str:
+    # Префикс swarm_ — чтобы swarm-каталоги визуально отличались от обычных
+    # тредов вебхука (threads/<sys>_<task> vs threads/swarm_<sys>_<task>).
     system_norm = str(system or "").strip().lower()
     task_norm = str(task_id or "").strip()
-    return f"{system_norm}_{task_norm}"
+    return f"swarm_{system_norm}_{task_norm}"
 
 
 def start_swarm_process(

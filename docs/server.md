@@ -177,6 +177,11 @@ bubblewrap-песочницах (swarm). Каждая задача форкае�
 процесса; ручки — `POST /swarm/run`, `GET /swarm/status/{system}/{task_id}`,
 `GET /swarm/logs/{system}/{task_id}`.
 
+Доставка запроса симметрична webhook'у: в обоих режимах агенту передаётся
+**весь JSON-payload** из тела запроса. В webhook это user-сообщение
+(`json.dumps(payload)`), в swarm — аргумент `-q "<payload-json>"` запускаемого
+`gc-cli` внутри песочницы (отдельный файл `payload.json` не пишется).
+
 > ⚠️ **Swarm-режим работает только на Linux** (требует `bubblewrap` и `timeout`
 > из GNU coreutils).
 

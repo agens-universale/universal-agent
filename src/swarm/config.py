@@ -22,6 +22,15 @@ def _resolve_path(maybe_path: Any, default_rel: str) -> str:
     return os.path.join(PROJECT_ROOT, path)
 
 
+def _resolve_optional(maybe_path: Any) -> str:
+    """Опциональный путь: абсолютный → как есть; относительный → от PROJECT_ROOT;
+    пустой/не-строка → "" (пусто = «используй дефолт»)."""
+    if not isinstance(maybe_path, str) or not maybe_path.strip():
+        return ""
+    path = maybe_path.strip()
+    return path if os.path.isabs(path) else os.path.join(PROJECT_ROOT, path)
+
+
 def build_swarm_config(server_cfg: Dict[str, Any]) -> Dict[str, Any]:
     """
     Построить нормализованный конфиг для swarm-режима.
@@ -47,12 +56,20 @@ def build_swarm_config(server_cfg: Dict[str, Any]) -> Dict[str, Any]:
     paths = env_vars.gc_paths()
     slug = env_vars.project_slug()
     swarm_root = paths["state"] / "projects" / slug / "swarm"
+    # Процессный каталог sworm'а (meta/completion/stdout/stderr). Поле в конфиге —
+    # `swarm_threads_dir` (старое имя `threads_dir` ещё читается для совместимости).
     threads_dir = _resolve_path(
-        raw_swarm.get("threads_dir"), str(swarm_root / "threads")
+        raw_swarm.get("swarm_threads_dir", raw_swarm.get("threads_dir")),
+        str(swarm_root / "threads"),
     )
     sandbox_root_dir = _resolve_path(
         raw_swarm.get("sandbox_root_dir"), str(swarm_root / "sandboxes")
     )
+
+    # Куда на хосте lifecycle сохраняет агентские .gc/logs из песочницы при
+    # финализации. Абсолютный путь — как есть; относительный — от PROJECT_ROOT;
+    # пусто → дефолт `threads_dir/<swarm_id>/agent_logs/`.
+    swarm_logs_dir = _resolve_optional(raw_swarm.get("swarm_logs_dir"))
 
     max_concurrent = int(raw_swarm.get("max_concurrent", 10))
     ttl_seconds = int(raw_swarm.get("ttl_seconds", 86400))
@@ -70,7 +87,7 @@ def build_swarm_config(server_cfg: Dict[str, Any]) -> Dict[str, Any]:
         raw_swarm.get("wrapper_path"), "scripts/run-cli-in-sandbox.sh"
     )
     sandbox_tool = str(raw_swarm.get("sandbox_tool", "bubblewrap"))
-    agentmd_path = _resolve_path(raw_swarm.get("agentmd_path"), "swarm_agent.md")
+    agentmd_path = _resolve_path(raw_swarm.get("agentmd_path"), "prompts/server_agent.md")
     skills_dir = _resolve_path(raw_swarm.get("skills_dir"), "swarm_skills")
 
     # Шаг 1.11 (AR-6, AR-7): bind-mount пути для wrapper.sh.
@@ -99,6 +116,7 @@ def build_swarm_config(server_cfg: Dict[str, Any]) -> Dict[str, Any]:
         "enabled": enabled,
         "threads_dir": threads_dir,
         "sandbox_root_dir": sandbox_root_dir,
+        "swarm_logs_dir": swarm_logs_dir,
         "max_concurrent": max_concurrent,
         "ttl_seconds": ttl_seconds,
         "limits": limits,

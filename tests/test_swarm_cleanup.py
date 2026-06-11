@@ -49,6 +49,9 @@ def _setup_pair(tmp_path, sid: str, age_hours: float):
     meta = _make_meta(updated_at)
     (t_dir / "meta.json").write_text(json.dumps(meta))
     (s_dir / "scratch.txt").write_text("data")
+    # sandbox чистится по СВОЕМУ mtime (расцеплено с threads) — старим его тоже.
+    old_time = time.time() - age_hours * 3600
+    os.utime(s_dir, (old_time, old_time))
     return str(threads), str(sandbox)
 
 
@@ -94,7 +97,7 @@ def test_orphan_sandbox_removed(tmp_path):
     os.utime(orphan, (old_time, old_time))
 
     stats = cleanup_mod.cleanup_threads(str(threads), str(sandbox), ttl_hours=24)
-    assert stats["orphan_sandboxes_removed"] == 1
+    assert stats["sandboxes_removed"] == 1
     assert not os.path.exists(orphan)
 
 
@@ -104,7 +107,7 @@ def test_orphan_sandbox_kept_when_fresh(tmp_path):
     fresh_orphan = sandbox / "fresh_orphan"; fresh_orphan.mkdir()
 
     stats = cleanup_mod.cleanup_threads(str(threads), str(sandbox), ttl_hours=24)
-    assert stats["orphan_sandboxes_removed"] == 0
+    assert stats["sandboxes_removed"] == 0
     assert os.path.exists(fresh_orphan)
 
 
