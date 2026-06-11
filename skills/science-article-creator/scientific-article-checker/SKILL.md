@@ -21,7 +21,7 @@ version: 0.1.0
 
 ## What it does
 
-Runs a two-track check: (1) every citation actually exists and matches what the article claims about it; (2) the article's methodology holds up across six epistemic dimensions.
+Runs a two-track check: (1) every citation actually exists and matches what the article claims about it; (2) the article's methodology holds up across six epistemic dimensions. **The audited article is read-only** — this skill produces a review report and never edits the article itself (see the read-only contract under "What NOT to do").
 
 ## Inputs
 
@@ -49,11 +49,21 @@ For each citation that resolved in Step 2 AND backs a substantive claim
 (a number, an effect size, a mechanism, a clinical outcome):
 
 1. **Locate the claim** the citation is attached to in the article text.
-2. **Fetch source text**, in priority order:
-   - the abstract already returned by `work_lookup`;
-   - if a PMID/PMCID exists → `ncbi_fetch(pmid=..., mode="fetch")`
-     (full text, capped at 50 KB);
-   - else → `open_access_search(query="<title or DOI>")`.
+2. **Fetch the source BODY** (not just the abstract — the type-aware design check below
+   needs the methods/results section), in priority order. Tools are named by **function**,
+   not by exact registry id (ids carry server prefixes / can be renamed): the
+   **file-download tool**, the **office-document reader** (PDF/DOCX → markdown — not the
+   plain-text file reader), the **URL-fetch tool**, the **stored-output pager**.
+   - arXiv / CORE / bioRxiv-medRxiv → download the PDF with the **file-download tool**,
+     then convert it with the **office-document reader** (give it only the file path — it
+     takes no `offset`/`limit`; page a large body with the **stored-output pager** by
+     `output_ref` + `offset`/`limit`);
+   - PubMed/PMC with a `pmcid` → fetch `https://www.ncbi.nlm.nih.gov/pmc/articles/<pmcid>/`
+     with the **URL-fetch tool** (HTML);
+   - fallback → `ncbi_fetch(pmid=..., mode="fetch")` (≤50 KB) or
+     `open_access_search(query="<title or DOI>")` (abstract-level only);
+   - if no body can be fetched → `unverifiable-no-fulltext` (NOT the same as
+     unsupported).
 3. **Judge support** — compare the article's claim against the fetched text:
    - **supported** — the source states the claim (or a stronger version).
    - **partial** — the source is related but weaker / narrower / a different
@@ -61,7 +71,17 @@ For each citation that resolved in Step 2 AND backs a substantive claim
    - **unsupported** — the source does not contain the claim, or contradicts it.
    - **unverifiable-no-fulltext** — no text could be fetched (paywall, no PMID,
      >50 KB). This is NOT the same as unsupported — say so explicitly.
-4. **Emit findings:**
+4. **Type-aware design check** — classify the claim by its wording and verify the
+   fetched body contains evidence of the REQUIRED design:
+   - Causal ("causes", "leads to", "enables") → an isolating **ablation**;
+   - Improvement ("outperforms", "better", "−N%") → a **baseline** comparison;
+   - Generalization ("robust", "across", "generalizes") → **heterogeneous** test conditions;
+   - Descriptive ("accounts for", "distribution") → a **representative** sample;
+   - Scoping ("when", "under conditions") → explicitly **declared bounds**.
+   Mismatch (e.g. a causal claim with correlation-only evidence, or an improvement
+   claim with no baseline) → finding **"Claim/Evidence-design Mismatch"**, severity
+   **medium** (low for descriptive / scoping).
+5. **Emit findings:**
    - `unsupported` → severity **high** ("Claim Not Supported by Source").
    - `partial` → severity **medium** ("Claim Overstates Source").
    - `unverifiable-no-fulltext` → severity **low** ("Citation Not Audited").
@@ -76,7 +96,7 @@ the existing `## Limits` section — rely on them, do not restate.
 
 Score each dimension 1 (poor) to 5 (excellent) with concrete findings.
 
-1. **Evidence Relevance** — does the cited experiment actually support the claim, or is it merely "thematically close"?
+1. **Evidence Relevance** — does the cited experiment actually support the claim (not merely "thematically close"), and does its design match the claim TYPE (causal→ablation, improvement→baseline, generalization→heterogeneous conditions — see the type-aware check in Step 2.5)?
 2. **Falsifiability** — is the claim phrased so it could be refuted; are explicit criteria stated?
 3. **Scope Calibration** — does the strength of the claim match the strength of the evidence (no "improves by 30%" when p=0.05 in a single small cohort)?
 4. **Argument Coherence** — is there a logical arc observation → gap → insight → solution → evidence, or does the text fall apart?
@@ -87,9 +107,11 @@ Score each dimension 1 (poor) to 5 (excellent) with concrete findings.
 
 Consolidate every finding into one list ranked by severity (high / medium / low). High = blocks publication; medium = requires revision; low = nice-to-have.
 
+**Evidence-span rule (MANDATORY):** every finding about text that IS present in the article or a fetched source must quote the exact verbatim substring that triggered it (from the article and/or the source body). If you cannot quote it verbatim, do not emit the finding. Findings about something ABSENT (a missing baseline, no declared bounds) may omit the quote.
+
 ### Step 5 — recommendations
 
-For each high / medium finding, give a concrete action: "drop the claim", "replace source with …", "rephrase as…", "add a statistical test".
+For each high / medium finding, give a concrete action **as text in the report**: "drop the claim", "replace source with …", "rephrase as…", "add a statistical test". You only WRITE the recommendation into the review report — you do NOT apply it to the audited article. Fixing the article is a separate `scientific-article-creator` pass, run only if the user explicitly asks.
 
 ## MCP tools
 
@@ -145,7 +167,7 @@ A file `<input>.review.md` (or `level2_report.md`):
 
 ## What NOT to do
 
-- Do not rewrite the article — that is the job of `scientific-article-creator`.
+- **Read-only contract (HARD):** the audited article is read-only. NEVER modify it — no file-writing, search-and-replace, or apply-edits tool on the article path. Your only artifact is the review report file (`*.review.md`); rewriting the article or applying fixes is a separate `scientific-article-creator` pass, run only on explicit user request. Even if the SAME session just wrote the article, switch to report-only here — emit findings + textual recommendations, do not touch the file.
 - Do not invent replacement sources — only flag that the current source does not support the claim.
 - Do not treat human-readable URLs without a canonical identifier as a successful resolve — flag them as "no canonical ID, manual review needed".
 - Do not mark a claim `unsupported` when the full text simply could not be fetched — use `unverifiable-no-fulltext`.
