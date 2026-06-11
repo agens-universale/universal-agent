@@ -402,7 +402,9 @@ def test_get_dir_size_mb_returns_none_for_missing_dir():
 
 def test_get_dir_size_mb_returns_zero_for_empty_dir(tmp_path):
     d = tmp_path / "empty"; d.mkdir()
-    assert lc._get_dir_size_mb(str(d)) == 0.0
+    size_mb = lc._get_dir_size_mb(str(d))
+    # du -sb считает блок каталога (~4 KB); os.walk fallback — 0.
+    assert 0.0 <= size_mb < 0.01
 
 
 def test_get_dir_size_mb_counts_files(tmp_path):
