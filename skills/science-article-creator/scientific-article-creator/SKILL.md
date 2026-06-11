@@ -49,10 +49,18 @@ If no sources list is provided on input:
 A review synthesizes methods and results, which live in the article BODY, not the
 abstract. For the 2–5 papers the review is actually built on (the central works — not
 all 8–15), read their full text before drafting — this is a standard step, not optional.
-Obtain the body from whatever open-access form the paper offers (a full-text PDF, or an
-open-access HTML page such as PMC for a PubMed record); read each core paper's body once.
-If the full text genuinely cannot be obtained (paywall, no open-access copy), fall back
-to its abstract and lower that work's confidence — never fabricate body content. For the
+**Read the body even when the topic feels familiar.** Grounding every claim in the actual
+paper is the whole point of a citation-verified review; "I already know this work" is NOT
+a reason to skip — training memory is often wrong on the specifics (exact numbers, which
+model/setting a result belongs to, what the authors actually claim vs what became folklore).
+Obtain the body from whatever open-access form the paper offers. For most arXiv / CORE
+papers the full text is a **PDF**: **download the paper's PDF, then read the saved
+document** to get its text. A bare link or a placeholder yields nothing, and an ad-hoc
+shell download lands where it cannot be read — so download it properly and read the real
+saved file, not a link; do not improvise shell commands for this. For an open-access HTML page (e.g.
+PMC for a PubMed record), read the page text directly. Read each core paper's body once.
+If the full text genuinely cannot be obtained (paywall, no open-access copy), fall back to
+its abstract and lower that work's confidence — never fabricate body content. For the
 peripheral works, the abstract and metadata are enough — do not read every paper.
 
 ### Step 3 — draft with inline citations

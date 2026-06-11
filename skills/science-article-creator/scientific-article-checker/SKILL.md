@@ -50,10 +50,13 @@ For each citation that resolved in Step 2 AND backs a substantive claim
 
 1. **Locate the claim** the citation is attached to in the article text.
 2. **Read the source's full text** — not just the abstract; the type-aware design check
-   below needs the methods/results section. Obtain the open-access body (e.g. via
-   `ncbi_fetch` for PubMed/PMC, `open_access_search` for CORE, or by reading the paper's
-   full-text PDF / open-access HTML page). If no full text can be obtained (paywall, no
-   open-access copy) → mark `unverifiable-no-fulltext` (NOT the same as unsupported).
+   below needs the methods/results section. Obtain the open-access body however the record
+   allows: PubMed/PMC and CORE expose open-access full text; for an arXiv/CORE PDF,
+   **download it, then read the saved document**. A bare link or a placeholder, or an
+   ad-hoc shell download, won't be readable — download it properly and read the real saved
+   file, without improvising shell commands.
+   If no full text can be obtained (paywall, no open-access copy) → mark
+   `unverifiable-no-fulltext` (NOT the same as unsupported).
 3. **Judge support** — compare the article's claim against the fetched text:
    - **supported** — the source states the claim (or a stronger version).
    - **partial** — the source is related but weaker / narrower / a different
