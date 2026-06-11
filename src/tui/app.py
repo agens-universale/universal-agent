@@ -1,0 +1,155 @@
+"""TuiApp — Textual application."""
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Optional
+
+from textual.app import App
+from textual.binding import Binding
+from textual.screen import Screen
+
+from tui import branding
+from tui.screens.main import TraceScreen
+
+
+class TuiApp(App):
+    """GigaCode — основное приложение."""
+
+    CSS_PATH = str(Path(__file__).parent / "styles.tcss")
+    TITLE = branding.APP_NAME
+    # У продукта своя палитра команд (Ctrl+K / ввод «/»). Встроенную палитру
+    # Textual (Ctrl+P: Keys/Maximize/Quit/Screenshot/Theme) отключаем — она не
+    # часть UX и перехватывает Ctrl+P раньше обработчиков экранов (нужен под превью).
+    ENABLE_COMMAND_PALETTE = False
+
+    BINDINGS = [
+        Binding("escape", "back", "Назад", show=False),
+        Binding("f1", "help", "Help"),
+        Binding("f2", "config", "/config"),
+        Binding("f3", "mcp", "/mcp"),
+        Binding("ctrl+n", "new", "/new"),
+        Binding("ctrl+s", "sessions", "/sessions"),
+        # Ctrl+C: есть выделение → копировать; нет → отменить текущий run.
+        # priority — перебивает копирование TextArea и системный help_quit.
+        Binding("ctrl+c", "interrupt", "копировать/стоп", show=False, priority=True),
+    ]
+
+    def __init__(
+        self,
+        *,
+        threads_dir: Optional[str] = None,
+        system: str = "cli",
+        config: Optional[dict] = None,
+    ) -> None:
+        super().__init__()
+        self._threads_dir = threads_dir
+        self._system = system
+        self._config = config or {}
+        self._executor_factory = None  # callable returning an executor; for tests
+        self._mcp_progress = None
+        self._mcp_snapshot = None      # boot-дискавери для /mcp (сервер→статус/тулы)
+        self.active_runner = None      # AgentRunner | None
+        self.last_runner_error: Optional[str] = None
+        from tui.state import TuiState
+        self.tui_state = TuiState()
+
+    def get_default_screen(self) -> Screen:
+        return TraceScreen()
+
+    def get_runner(self):
+        """Lazy-build the AgentRunner (one per app instance for MVP).
+
+        Важно: executor (incl. MCP-дискавери с сетевыми вызовами) строится НЕ
+        здесь — get_runner зовётся из submit-хендлера на UI-потоке, и синхронная
+        сборка заморозила бы event-loop Textual. Передаём фабрику; AgentRunner
+        построит executor в своём worker-потоке при первом start().
+        """
+        if self.active_runner is not None:
+            return self.active_runner
+        from tui.services.agent_runner import AgentRunner
+        factory = self._executor_factory or self._build_real_executor
+
+        def _on_runner_error(exc: BaseException) -> None:
+            self.last_runner_error = str(exc) or exc.__class__.__name__
+
+        self.active_runner = AgentRunner(
+            executor_factory=factory, on_error=_on_runner_error,
+        )
+        return self.active_runner
+
+    def _build_real_executor(self):
+        """Build the real AgentExecutor from config. Called when no factory injected."""
+        from agent_executor import AgentExecutor
+        from config import build_auth_connector
+        from run_context import create_run_context
+        from tui.services.mcp_progress import McpProgress
+        cfg = dict(self._config) if self._config else {}
+        cfg["console_trace"] = False
+        auth = build_auth_connector(cfg)
+        progress = McpProgress()
+        progress.begin(list((cfg.get("mcp-servers") or {}).keys()))
+        self._mcp_progress = progress
+        ctx = create_run_context(cfg, auth_connector=auth, on_progress=progress.update)
+        # Снапшот MCP «сервер→статус/тулы» app-уровнево — чтобы /mcp показывал
+        # результат boot-дискавери сразу, не дожидаясь первого сообщения.
+        from tools.mcp_snapshot import build_mcp_tools_snapshot
+        self._mcp_snapshot = build_mcp_tools_snapshot(cfg, ctx.tools_data, ctx.mcp_status)
+        return AgentExecutor(ctx)
+
+    # --- actions ------------------------------------------------------
+
+    def action_back(self) -> None:
+        if len(self.screen_stack) > 1:
+            self.pop_screen()
+        else:
+            self.exit()
+
+    def action_help(self) -> None:
+        from tui.screens.help import HelpScreen
+        self.push_screen(HelpScreen())
+
+    def action_sessions(self) -> None:
+        if not self._threads_dir:
+            self.notify("threads_dir не задан", severity="warning")
+            return
+        from tui.screens.sessions import SessionsScreen
+        self.push_screen(SessionsScreen(
+            threads_dir=self._threads_dir, system=self._system,
+        ))
+
+    def action_config(self) -> None:
+        scr = self.screen
+        if hasattr(scr, "_cmd_config"):
+            scr._cmd_config()
+
+    def action_mcp(self) -> None:
+        scr = self.screen
+        if hasattr(scr, "_cmd_mcp"):
+            scr._cmd_mcp()
+
+    def action_new(self) -> None:
+        scr = self.screen
+        if hasattr(scr, "_cmd_new"):
+            scr._cmd_new()
+
+    def _current_selection(self) -> str:
+        """Текст текущего выделения: сначала клавиатурное в фокусном вводе,
+        затем мышиное по экрану (история вывода)."""
+        focused = self.focused
+        sel = getattr(focused, "selected_text", "") or ""
+        if sel:
+            return sel
+        try:
+            return self.screen.get_selected_text() or ""
+        except Exception:
+            return ""
+
+    def action_interrupt(self) -> None:
+        """Ctrl+C: есть выделение → копировать в буфер; иначе → остановить run."""
+        sel = self._current_selection()
+        if sel:
+            self.copy_to_clipboard(sel)
+            return
+        scr = self.screen
+        if hasattr(scr, "_cmd_stop"):
+            scr._cmd_stop()
