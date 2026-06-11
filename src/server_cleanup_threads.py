@@ -11,6 +11,7 @@ from fastapi import FastAPI
 from thread_store import resolve_threads_dir
 
 _cleanup_thread_started = False
+_swarm_cleanup_thread_started = False
 
 
 def _cleanup_threads_loop(
@@ -104,4 +105,88 @@ def register_cleanup_threads_on_startup(
             },
             daemon=True,
         ).start()
+
+
+def _swarm_cleanup_loop(
+    *,
+    interval_seconds: int,
+    ttl_hours: float,
+    script_path: str,
+    swarm_threads_dir: str,
+    sandbox_root_dir: str,
+    logger: logging.Logger,
+) -> None:
+    """Фоновая чистка swarm_threads/ + .swarm_sandboxes/ (M6, шаг 3.2)."""
+    while True:
+        try:
+            subprocess.run(
+                [
+                    sys.executable,
+                    script_path,
+                    "--threads-dir", swarm_threads_dir,
+                    "--sandbox-root-dir", sandbox_root_dir,
+                    "--ttl-hours", str(ttl_hours),
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.warning("swarm cleanup failed: %r", e)
+        time.sleep(interval_seconds)
+
+
+def register_swarm_cleanup_on_startup(
+    app: FastAPI,
+    *,
+    swarm_config: Dict[str, Any],
+    project_root: str,
+    logger: logging.Logger,
+) -> None:
+    """Подключает шуруджи для TTL-очистки swarm-каталогов (шаг 3.2)."""
+
+    if not swarm_config.get("enabled"):
+        return
+
+    ttl_seconds = swarm_config.get("ttl_seconds")
+    try:
+        ttl_seconds = int(ttl_seconds) if ttl_seconds is not None else 0
+    except (TypeError, ValueError):
+        ttl_seconds = 0
+    if ttl_seconds <= 0:
+        # TTL не задан → janitor отключен.
+        return
+
+    ttl_hours = ttl_seconds / 3600.0
+    # Чистим раз в час максимум — TTL обычно сутки, чаще не нужно.
+    interval_seconds = max(min(int(ttl_seconds / 10), 3600), 60)
+
+    @app.on_event("startup")
+    async def _startup_swarm_cleanup() -> None:
+        global _swarm_cleanup_thread_started  # noqa: PLW0603
+
+        if _swarm_cleanup_thread_started:
+            return
+        _swarm_cleanup_thread_started = True
+
+        script_path = os.path.join(project_root, "scripts", "cleanup_swarm_threads.py")
+        swarm_threads_dir = str(swarm_config["threads_dir"])
+        sandbox_root_dir = str(swarm_config["sandbox_root_dir"])
+
+        threading.Thread(
+            target=_swarm_cleanup_loop,
+            kwargs={
+                "interval_seconds": interval_seconds,
+                "ttl_hours": ttl_hours,
+                "script_path": script_path,
+                "swarm_threads_dir": swarm_threads_dir,
+                "sandbox_root_dir": sandbox_root_dir,
+                "logger": logger,
+            },
+            daemon=True,
+        ).start()
+        logger.info(
+            "swarm janitor registered: interval=%ds ttl=%.1fh",
+            interval_seconds, ttl_hours,
+        )
 

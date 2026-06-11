@@ -1,4 +1,6 @@
 fastapi>=0.115.0,<0.116.0
 uvicorn[standard]>=0.30.0,<0.31.0
 pyyaml>=6.0
-
+# psutil — optional, для swarm-режима (M5: memory/cpu enforcement).
+# Без него swarm работает с deg deg: только disk + timeout enforcement.
+psutil>=5.9,<7

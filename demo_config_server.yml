@@ -49,8 +49,14 @@ threads_cleanup:
 
 swarm:
   enabled: false
-  threads_dir: "swarm_threads"
+  # Процессный каталог sworm'а на хосте: meta/completion/stdout/stderr per swarm_id.
+  swarm_threads_dir: "swarm_threads"
   sandbox_root_dir: ".swarm_sandboxes"
+  # Куда на хосте сохранять агентские .gc/logs из песочницы при финализации
+  # (это делает сам swarm-код, lifecycle, а не тест-оркестратор). Абсолютный путь
+  # как есть / относительный от корня репо; пусто → дефолт
+  # swarm_threads_dir/<swarm_id>/agent_logs/. Сохраняются даже при timeout/kill.
+  # swarm_logs_dir: "/var/lib/gc-cli/swarm/agent_logs"
   max_concurrent: 10
   ttl_seconds: 86400
   limits:
@@ -61,5 +67,13 @@ swarm:
   cli_command: "gc-cli"
   wrapper_path: "scripts/run-cli-in-sandbox.sh"
   sandbox_tool: "bubblewrap"
-  agentmd_path: "./prompts/swarm_agent.md"
+  agentmd_path: "./prompts/server_agent.md"
   skills_dir: "./swarm_skills"
+  # Bind-mount пути для wrapper.sh (AR-6 / AR-7). ТОЛЬКО абсолютные пути —
+  # относительные/пустые молча игнорируются (см. swarm/config.py::_abs_or_empty),
+  # и тогда wrapper делает fallback на PATH lookup. Полная дока — docs/swarm.md.
+  # cli_venv_root: "/opt/gc-cli/.venv"      # ro-bind venv c gc-cli внутрь песочницы
+  # agent_dep_dir: "/opt/gc-cli/mcp-deps"   # зависимости MCP (node/npx и т.п.)
+  # extra_mounts:                           # доп. ro-bind (prompts, skills, статика)
+  #   - "/opt/gc-cli/prompts"
+  #   - "/opt/gc-cli/skills"

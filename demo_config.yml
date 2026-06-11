@@ -392,5 +392,3 @@ mcp:
   meta:
     tools-cache-ttl: 3600
     request_timeout_sec: 600
-    # Манифест для gc-cli -a: не задан → config.local.yml (если есть), иначе config.yml
-    # recommended-mcp-manifest: recommended_mcp/config.yml

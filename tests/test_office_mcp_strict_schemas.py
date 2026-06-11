@@ -2,6 +2,15 @@
 from __future__ import annotations
 
 import pytest
+<<<<<<< HEAD
+=======
+
+# office_mcp — внешний MCP (external/office-mcp), ставится через
+# recommended_mcp/install.py. Если не установлен — скипаем модуль, а не
+# роняем сбор всего сьюта.
+pytest.importorskip("office_mcp")
+
+>>>>>>> 3b3d4d1d512f984d3915db0c73d3d2a666329ee2
 from mcp.server.fastmcp.utilities.func_metadata import func_metadata
 
 pytest.importorskip("office_mcp")

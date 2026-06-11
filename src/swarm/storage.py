@@ -37,6 +37,26 @@ def load_swarm_meta(threads_dir: str, swarm_id: str) -> Dict[str, Any]:
     return data if isinstance(data, dict) else {}
 
 
+def load_completion_info(threads_dir: str, swarm_id: str) -> Dict[str, Any]:
+    """Прочитать completion.json из threads_dir/<swarm_id>/, если он есть.
+
+    Файл пишется wrapper'ом (scripts/run-cli-in-sandbox.sh) после завершения CLI.
+    Содержит exit_code, finished_at, error_type, error_message.
+
+    Возвращает {} если файл отсутствует или содержит невалидный JSON.
+    """
+    base_dir = os.path.join(threads_dir, swarm_id)
+    comp_path = os.path.join(base_dir, "completion.json")
+    if not os.path.exists(comp_path):
+        return {}
+    with open(comp_path, "r", encoding="utf-8") as f:
+        try:
+            data = json.load(f)
+        except json.JSONDecodeError:
+            return {}
+    return data if isinstance(data, dict) else {}
+
+
 def save_swarm_meta(
     threads_dir: str,
     swarm_id: str,
@@ -103,8 +123,42 @@ def append_swarm_message(
         f.write(json.dumps(record, ensure_ascii=False) + "\n")
 
 
-def load_swarm_messages(threads_dir: str, swarm_id: str) -> List[Dict[str, Any]]:
-    data_path, _, _, _ = _swarm_paths(threads_dir, swarm_id)
+def _resolve_messages_path(
+    threads_dir: str,
+    swarm_id: str,
+    sandbox_root_dir: str = "",
+) -> str:
+    """Найти путь к messages.jsonl с учётом канала E (AR-2, шаг 1.9).
+
+    Sworm-CLI пишет thread store в /work/.gc/threads/<id>/messages.jsonl
+    внутри sandbox'а; через bind-mount канал A на хосте это
+    ${sandbox_root_dir}/${swarm_id}/.gc/threads/${swarm_id}/messages.jsonl.
+
+    Если sandbox_root_dir не передан или файла там нет — fallback на
+    legacy путь ${threads_dir}/${swarm_id}/messages.jsonl (на случай если
+    кто-то пишет напрямую серверный side, или для совместимости со
+    старыми прогонами).
+    """
+    if sandbox_root_dir:
+        sandbox_messages = os.path.join(
+            sandbox_root_dir,
+            swarm_id,
+            ".gc",
+            "threads",
+            swarm_id,
+            "messages.jsonl",
+        )
+        if os.path.exists(sandbox_messages):
+            return sandbox_messages
+    return os.path.join(threads_dir, swarm_id, "messages.jsonl")
+
+
+def load_swarm_messages(
+    threads_dir: str,
+    swarm_id: str,
+    sandbox_root_dir: str = "",
+) -> List[Dict[str, Any]]:
+    data_path = _resolve_messages_path(threads_dir, swarm_id, sandbox_root_dir)
     if not os.path.exists(data_path):
         return []
 
@@ -143,6 +197,7 @@ def load_swarm_stdout_stderr(
 __all__ = [
     "load_swarm_meta",
     "save_swarm_meta",
+    "load_completion_info",
     "append_swarm_message",
     "load_swarm_messages",
     "load_swarm_stdout_stderr",
