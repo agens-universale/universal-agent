@@ -44,10 +44,24 @@ If no sources list is provided on input:
 - Run every selected work through `work_lookup` to ensure a normalized `WorkRecord`.
 - Pick 8–15 key works for inclusion in the text.
 
+### Step 2.5 — read the full text of the core papers (MANDATORY)
+
+A review synthesizes methods and results, which live in the article BODY, not the
+abstract. For the 2–5 papers the review is actually built on (the central works — not
+all 8–15), read their full text BEFORE drafting. This is a standard step, not optional.
+Use the chain in "Reading full text" below, ONE path per paper:
+- arXiv / CORE / bioRxiv-medRxiv → the PDF chain (download the PDF, then convert it to
+  text with the office-document reader). PDF is ~100% coverage and the proven path; do
+  not rely on arXiv HTML (only exists for some recent papers).
+- PubMed/PMC with a `pmcid` → fetch the PMC HTML page with the URL-fetch tool.
+Do NOT read the same paper through two paths. If a body cannot be fetched (paywall, no
+OA), use its abstract and lower that work's confidence — never fabricate body content.
+
 ### Step 3 — draft with inline citations
 
 - Write sections per the plan. Every claim that contains a number, name, year, specific mechanism, method, or conclusion MUST carry an inline citation `[N]` referencing an entry in the bibliography block.
 - "Common knowledge" claims (e.g. "DNA is made of four nucleotides") may stand without a citation.
+- **Grounding guard:** before writing a claim with a citation, confirm the source body you read at Step 2.5 actually supports it. If the body does not support it, do not write it — soften the wording or mark `[CITATION NEEDED]`. Never attribute causality ("causes", "enables") or superiority ("outperforms") to a source whose body only shows correlation / association. (Lightweight grounding check; the full claim-type audit is the job of `scientific-article-checker`.)
 - If no supporting paper can be found, write `[CITATION NEEDED]` with a short note "searched X, Y — not found".
 
 ### Step 4 — bibliography block
@@ -76,6 +90,56 @@ For critical claims (central hypothesis, headline numbers) call `citations_by_do
 - `work_lookup(identifier)` — normalization before adding to the bibliography.
 - `citations_by_doi(doi, count_only=true)` — citation-weight check.
 - `open_access_search` — when full text is needed for deeper extraction.
+
+## Reading full text
+
+science-mcp returns metadata + abstract + a link, **not the article body**. When a
+claim needs the actual full text (methods, results, exact numbers) and the source is
+arXiv / a CORE `downloadUrl` / a bioRxiv-medRxiv PDF, read the body with this two-tool
+chain (both tools are already in your registry):
+
+> Tools below are named by **function**, not by exact registry id (ids carry server
+> prefixes and can be renamed/absent). Match them by capability in your registry:
+> - **file-download tool** — HTTP GET of a document (PDF/DOCX) to the downloads dir;
+> - **office-document reader** — turns a PDF/DOCX on disk into markdown (the markitdown-
+>   based reader; NOT the plain-text file reader, which returns "binary data" for a PDF);
+> - **URL-fetch tool** — HTTP GET of a web page → readable text;
+> - **stored-output pager** — reads a large stored tool result by `output_ref` + `offset`/`limit`.
+
+1. Build the PDF URL.
+   - arXiv: `https://arxiv.org/pdf/<arxiv_id>` (e.g. `2210.11416` → `https://arxiv.org/pdf/2210.11416`).
+   - CORE: use the record's `downloadUrl` as-is.
+2. Pick a filename: the id with a `.pdf` extension. The filename may contain only
+   `A-Za-z0-9._-` — if an arXiv id contains a slash (old style, e.g. `math/0309136`),
+   replace the slash with `_` → `math_0309136.pdf`.
+3. Download it with the **file-download tool** (PDF URL + filename) → it returns an
+   absolute `path`.
+4. Convert it to text with the **office-document reader** — give it only the file path
+   (it takes no `offset`/`limit`). It returns the full text prefixed with
+   `[document: format=pdf, total_chars=…]`. When the body is large the runtime stores it
+   and hands back an `output_ref`; page through it with the **stored-output pager** (by
+   `output_ref` + `offset`/`limit`), not by passing `offset`/`limit` to the office-document
+   reader itself. You need not consume all of it.
+
+Rules:
+- Read full text for the CORE papers by default (Step 2.5). For the remaining peripheral
+  works, abstract + metadata are enough — do not download every paper (one PDF is
+  hundreds of KB and inflates context). Read exactly ONE path per paper; never fetch the
+  same body twice.
+- Never invent a PDF URL for a paper science-mcp did not return.
+- If the download fails (paywall, 403, non-PDF) or the office-document reader returns
+  `PATH_NOT_ALLOWED` / `parse_failed`, fall back to the abstract and lower the claim's
+  confidence — do not fabricate body content.
+- PubMed / CrossRef / DBLP records have no open PDF here; do not attempt the chain for them.
+
+### PMC full text (HTML, no download)
+
+If a PubMed/PMC record has a `pmcid` (e.g. `PMC13175772`), its open-access body is
+readable directly as HTML — no PDF download needed. Fetch it with the **URL-fetch tool**
+on `https://www.ncbi.nlm.nih.gov/pmc/articles/<pmcid>/` (the `pmcid` value already
+includes the `PMC` prefix); the URL-fetch tool pages with `offset`/`limit` if the page is
+long. If a record has no `pmcid`, there is no free full text on NCBI — use the abstract
+and lower the claim's confidence; do not attempt a PDF download for it.
 
 ## Output format
 
