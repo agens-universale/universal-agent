@@ -464,6 +464,7 @@ class SkillsRegistry:
                 "name": skill.name,
                 "description": skill.description,
                 "source": skill.source,
+                "root_path": skill.root_path,
                 "pack_id": skill.pack_id,
                 "is_pack_bootstrap": False,
             }
@@ -559,6 +560,7 @@ class SkillsRegistry:
             "references": skill.references_slugs,
             "assets": skill.assets_slugs,
             "source": skill.source,
+            "root_path": skill.root_path,
             "pack_id": skill.pack_id,
         }
 

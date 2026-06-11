@@ -4,7 +4,6 @@ import functools
 import inspect
 import json
 import os
-import platform
 import re
 import sys
 from dataclasses import dataclass, field
@@ -18,6 +17,7 @@ from security.path_policy import (
     audit_policy_decision,
     resolve_tool_context,
 )
+from utils.project_data import os_label
 
 SAFE_VERDICT = "safe"
 DANGEROUS_VERDICT = "potentially_dangerous"
@@ -63,7 +63,7 @@ class ModerationContext:
     extra_paths: list[str] = field(default_factory=list)
     mode: str = "deny"
     cwd: str = field(default_factory=os.getcwd)
-    os_name: str = field(default_factory=platform.system)
+    os_name: str = field(default_factory=os_label)
     shell: str = ""
     has_venv: bool = False
     allowed_command_examples: list[str] = field(default_factory=list)
@@ -392,7 +392,7 @@ def _build_context(
         extra_paths=context.write_guard.extra_paths,
         mode=context.command_moderation_mode,
         cwd=str(cwd_value),
-        os_name=platform.system(),
+        os_name=os_label(),
         shell=os.environ.get("SHELL") or os.environ.get("COMSPEC") or "",
         has_venv=bool(os.environ.get("VIRTUAL_ENV")),
         allowed_command_examples=context.allowed_command_examples,

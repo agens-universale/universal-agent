@@ -327,15 +327,19 @@ Return format (JSON string):
             env_map = parsed
 
         try:
-            result = subprocess.run(
-                [sys.executable, "-"],
-                capture_output=True,
-                text=True,
-                timeout=effective_timeout,
-                env=_sanitize_env(env_map),
-                cwd=cwd_used,
-                input=code,
-            )
+            # На Windows subprocess гасит ENABLE_MOUSE_INPUT родительской консоли
+            # → TUI теряет мышь до перезапуска. Возвращаем режим после команды.
+            from utils.win_console import preserve_console_mode
+            with preserve_console_mode():
+                result = subprocess.run(
+                    [sys.executable, "-"],
+                    capture_output=True,
+                    text=True,
+                    timeout=effective_timeout,
+                    env=_sanitize_env(env_map),
+                    cwd=cwd_used,
+                    input=code,
+                )
         except subprocess.TimeoutExpired:
             return self._result(
                 ok=False,

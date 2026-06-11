@@ -18,6 +18,14 @@ def isolated_env(monkeypatch, tmp_path):
     return fake
 
 
+def test_default_config_path_is_normalized():
+    """Дефолтный путь config.yml без '..' — путь показывается пользователю в /config."""
+    from config import _default_config_path
+    p = _default_config_path()
+    assert ".." not in p
+    assert p.endswith("config.yml")
+
+
 def test_resolve_paths_threads_default_under_state_projects_slug(
     isolated_env, tmp_path
 ):

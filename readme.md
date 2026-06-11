@@ -43,4 +43,5 @@ gc-cli -a --config demo_config_openai.yml -q "создай подпапку test
 - [Конфигурация](docs/configuration.md) — `config.yml`, приоритет и переопределение, security policy, MCP-серверы, runtime-пути, project-local config.
 - [Скиллы и пакеты скиллов](docs/skills.md) — трёхслойный поиск, манифест пакета, canonical IDs, встроенные паки.
 - [Серверный режим](docs/server.md) — REST-обёртка (FastAPI), конфиги сервера, эндпоинты, Swarm-режим (Linux).
+- [TUI режим (gc-ua)](docs/tui.md) — кроссплатформенный TUI поверх агента: установка, запуск, основные команды и экраны.
 - [RootBox режим](docs/rootbox.md) — Roox box режим, конфиги (command_moderation, read_guard, root_box (write_guard), url_policy)

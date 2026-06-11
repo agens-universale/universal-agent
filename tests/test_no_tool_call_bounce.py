@@ -89,11 +89,28 @@ def test_format_contains_copy_verbatim_instruction():
     assert "paraphrase" in msg.lower() or "summarize" in msg.lower()
 
 
-def test_format_contains_two_retry_paths():
+def test_format_frames_runtime_contract_with_both_paths():
     msg = format_no_tool_call_bounce("X")
-    assert "(1)" in msg and "(2)" in msg
-    assert "action" in msg.lower() or "ACTION" in msg
+    # Фрейминг — контракт рантайма (зеркалит §5 системного промпта), не «юзер не видит прозы».
+    assert "contract" in msg.lower()
+    assert "action" in msg.lower()
     assert "ask" in msg.lower() and "user" in msg.lower()
+    # Путь «работа сделана → завершить ход» (наш кейс: модель отвечает прозой).
+    assert "finaliz" in msg.lower()
+
+
+def test_finalize_path_present_in_static_and_inlined():
+    for msg in (NO_TOOL_CALL_BOUNCE_MESSAGE, format_no_tool_call_bounce("X")):
+        assert "contract" in msg.lower()
+        assert "finaliz" in msg.lower()
+
+
+def test_bounce_stays_tool_agnostic():
+    # Никаких хардкод-имён тулов — согласуется с tool-agnostic промптом master.
+    for msg in (NO_TOOL_CALL_BOUNCE_MESSAGE, format_no_tool_call_bounce("X")):
+        assert "turn_finish" not in msg
+        assert "turn_ask_human" not in msg
+        assert "submit_solution" not in msg
 
 
 # --- decoupled from ask_human-cram wording ---
@@ -122,7 +139,8 @@ def test_bounce_keeps_robustness_signal():
     static = NO_TOOL_CALL_BOUNCE_MESSAGE
     inlined = format_no_tool_call_bounce("X")
     for msg in (static, inlined):
-        assert "(1)" in msg and "(2)" in msg
+        assert "contract" in msg.lower()
         assert "ask" in msg.lower() and "user" in msg.lower()
+        assert "finaliz" in msg.lower()
     assert "<<<\nX\n>>>" in inlined
     assert "VERBATIM" in inlined

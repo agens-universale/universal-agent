@@ -8,13 +8,14 @@ from __future__ import annotations
 from typing import Any, Dict, List
 
 NO_TOOL_CALL_BOUNCE_MESSAGE = (
-    "There is no tool call in your response. The user does NOT see prose "
-    "written outside tool calls — only tool calls render to the user. "
-    "Retry with one of:\n"
-    "  (1) If you intended an ACTION (read files, explore, search, write, etc.), "
-    "call the appropriate tool NOW in this turn.\n"
-    "  (2) If you intended to ASK THE USER (present options, get a decision), "
-    "call the turn tool that asks the user (question=...) with a clear, self-contained question."
+    "There is no tool call in your response. This runtime's contract is that "
+    "every turn must contain at least one appropriate tool call — satisfy it now:\n"
+    "  - If the work for this turn is done or you are blocked, finalize the turn: "
+    "use the designated user-output/finalization tool (it delivers your reply to "
+    "the user).\n"
+    "  - If you are not finished, call the tool for your next step — the tool that "
+    "asks the user / waits for input (one precise question), or an action tool "
+    "(read, search, write, run, etc.)."
 )
 
 
@@ -58,16 +59,19 @@ def format_no_tool_call_bounce(assistant_text: str) -> str:
     if not text:
         return NO_TOOL_CALL_BOUNCE_MESSAGE
     return (
-        "There is no tool call in your response. Here is what you just "
-        "wrote, which the user did NOT see (prose outside a tool call is "
-        "invisible):\n\n"
+        "There is no tool call in your response. This runtime's contract is that "
+        "every turn must contain at least one appropriate tool call; the prose you "
+        "just wrote was not a tool call, so it did not reach the user:\n\n"
         "<<<\n"
         f"{text}\n"
         ">>>\n\n"
-        "Retry with one of:\n"
-        "  (1) If you intended an ACTION (read files, explore, search, "
-        "write, etc.), call the appropriate tool NOW in this turn.\n"
-        "  (2) If you intended to ASK THE USER, call the turn ask-user tool (question=...). "
+        "Satisfy the contract now:\n"
+        "  - If the work for this turn is done or you are blocked, finalize the "
+        "turn: use the designated user-output/finalization tool (it delivers your "
+        "reply to the user).\n"
+        "  - If you are not finished, call the tool for your next step — the tool "
+        "that asks the user / waits for input (one precise question), or an action "
+        "tool (read, search, write, run, etc.).\n"
         "Reuse the relevant part of the block above VERBATIM where it is the "
         "content the user must react to — do not paraphrase or summarize it."
     )

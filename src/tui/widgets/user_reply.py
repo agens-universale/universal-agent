@@ -1,0 +1,108 @@
+"""UserReplyContainer — реплика пользователя с band-фоном и 2px teal кромкой слева."""
+from __future__ import annotations
+
+from typing import Literal
+
+from rich.text import Text
+from textual import events
+from textual.widget import Widget
+
+from tui.palette import ERR as _ERR_RED
+
+
+_State = Literal["normal", "pending", "failed"]
+
+
+class UserReplyContainer(Widget):
+    """Контейнер реплики пользователя.
+
+    Визуал: фон `$band-bg`, 2px кромка `$accent` слева на всю высоту хода
+    (стили — `.user-band` в `src/tui/styles.tcss`, §2.6 спеки).
+
+    Состояния (spec 2026-05-26):
+    - `normal`  — обычная (зелёная) кромка, без маркеров.
+    - `pending` — приглушённая teal-кромка (`.user-reply-pending`), без маркеров.
+    - `failed`  — красная кромка (`.user-reply-failed`) + инлайн `[!] ` перед `> `.
+
+    Маркер `> ` — только на первой строке; продолжение многострочной реплики
+    выравнивается без повтора маркера (blockquote-стиль).
+    """
+
+    DEFAULT_CSS = ""  # стили — .user-band / .user-reply-pending / .user-reply-failed в styles.tcss
+    can_focus = True
+
+    def __init__(
+        self,
+        text: str,
+        *,
+        event_no: int = 0,
+        state: _State = "normal",
+        **kwargs,
+    ) -> None:
+        classes = kwargs.pop("classes", "")
+        merged = f"user-band {classes}".strip()
+        if state == "pending":
+            merged += " user-reply-pending"
+        elif state == "failed":
+            merged += " user-reply-failed"
+        super().__init__(classes=merged, **kwargs)
+        self._text = text
+        self._event_no = event_no
+        self._state: _State = state
+
+    @property
+    def state(self) -> _State:
+        return self._state
+
+    def set_state(self, new_state: _State) -> None:
+        """Переключить визуальное состояние реплики."""
+        self.remove_class("user-reply-pending")
+        self.remove_class("user-reply-failed")
+        if new_state == "pending":
+            self.add_class("user-reply-pending")
+        elif new_state == "failed":
+            self.add_class("user-reply-failed")
+        self._state = new_state
+        self.refresh()
+
+    def render(self) -> Text:
+        prefix = f"[{self._event_no}] " if self.has_focus and self._event_no else ""
+        pad = " " * len(prefix)
+        lines = self._text.split("\n")
+
+        text = Text()
+        for i, line in enumerate(lines):
+            if i > 0:
+                text.append("\n")
+            if i == 0:
+                if prefix:
+                    text.append(prefix)
+                if self._state == "failed":
+                    text.append("[!] ", style=_ERR_RED)
+                text.append(f"> {line}")
+            else:
+                text.append(f"{pad}  {line}")
+        return text
+
+    def _on_focus(self, event) -> None:  # noqa: ANN001
+        # super() ПЕРВЫМ: Widget._on_focus ставит self.has_focus = True.
+        # render() здесь работает корректно даже без super() (refresh откладывает
+        # вызов до конца обработки события), но явный контракт — для устойчивости
+        # к будущим compose-миграциям.
+        super()._on_focus(event)
+        self.refresh()
+
+    def _on_blur(self, event) -> None:  # noqa: ANN001
+        super()._on_blur(event)
+        self.refresh()
+
+    def on_click(self, event: events.Click) -> None:
+        if event.chain == 2 and self._event_no:
+            from tui.messages import OpenEventRequest
+            self.post_message(OpenEventRequest(self._event_no))
+
+    def on_key(self, event: events.Key) -> None:
+        if event.key == "enter" and self._event_no:
+            event.stop()
+            from tui.messages import OpenEventRequest
+            self.post_message(OpenEventRequest(self._event_no))

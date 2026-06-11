@@ -15,7 +15,7 @@ from processing_responses import run_agent
 from run_context import RunContext
 from config_modules.stored_outputs import get_stored_tool_outputs_max_entries
 from message_policy.chat_completions import repair_tool_call_pairing
-from run_summary_coordinator import RunSummaryCoordinator
+from run_summary_coordinator import RunSummaryCoordinator, reset_stale_summarizing_flag
 from summarize.config import (
     parse_summary_trigger_chars,
     parse_summary_turn_end_trigger_chars,
@@ -30,6 +30,7 @@ from thread_store import (
     make_message_key,
     reset_thread_files,
     resolve_threads_dir,
+    update_tui_meta,
 )
 from tools.connect_mcp.persistent_stdio import PersistentStdioRegistry
 from tools.connect_mcp.stream_client import _SESSION_MANAGER as _STREAM_SESSION_MANAGER
@@ -60,6 +61,9 @@ class AgentExecutor:
         self._lock = threading.Lock()
         self._pending_messages: list[dict] = []
         self._state: State | None = None
+        # stop_run() до создания state (run() ещё в setup-фазе): запоминаем, и
+        # run() применит флаг сразу при создании state, до первого persist.
+        self._stop_pending: bool = False
 
     def run(
         self,
@@ -69,6 +73,8 @@ class AgentExecutor:
         start_new_thread: bool = False,
         system: str | None = None,
         verbose: bool | None = None,
+        discard_writes_after_stop: bool = False,
+        message_ids: list[str] | None = None,
     ) -> Any:
         """Запускает агента. При каждом вызове state создаётся заново.
 
@@ -105,11 +111,29 @@ class AgentExecutor:
         else:
             system_id = system or "cli"
         is_cli_mode = system_id == "cli"
+
+        # Снять протухший флаг компакции от прерванного прошлого run'а: на старте
+        # компакция не идёт, иначе TUI вечно показывает «сжимаю контекст».
+        reset_stale_summarizing_flag(thread_session)
+
+        # Снимок MCP «сервер→тулы» для TUI-экрана /mcp (необязателен — не валим run).
+        if thread_id is not None and config_dict.get("mcp-servers"):
+            try:
+                from tools.mcp_snapshot import build_mcp_tools_snapshot
+                snap = build_mcp_tools_snapshot(config_dict, self._ctx.tools_data, self._ctx.mcp_status)
+                update_tui_meta(
+                    resolve_threads_dir(config_dict), system_id, thread_id,
+                    {"mcp_tools": snap},
+                )
+            except Exception:
+                pass
+
         summary_trigger_chars = parse_summary_trigger_chars(config_dict)
         turn_end_trigger_chars = parse_summary_turn_end_trigger_chars(config_dict)
 
         chat_completions_system_prompt: str | None = None
         rendered_system_prompt: str | None = None
+        special_instructions: str | None = None
         if backend_api_mode == "chat_completions":
             prompt_path = config_dict.get("chat_completions_system_prompt_path")
             if isinstance(prompt_path, str) and prompt_path.strip():
@@ -122,6 +146,16 @@ class AgentExecutor:
                             f"Не удалось прочитать chat_completions system prompt: {prompt_path}"
                         )
                     raise e
+
+            # Клиент-специфичные инструкции (напр. TUI) — отсутствие/нечитаемость
+            # файла деградирует тихо (None), не роняя run.
+            si_path = config_dict.get("chat_completions_special_instructions_path")
+            if isinstance(si_path, str) and si_path.strip():
+                try:
+                    with open(si_path.strip(), "r", encoding="utf-8") as fd:
+                        special_instructions = fd.read().strip() or None
+                except OSError:
+                    special_instructions = None
 
         state_data = {
             "limit_project_metadata": config_dict.get("limit_project_metadata", False),
@@ -169,6 +203,7 @@ class AgentExecutor:
                 tools_spec=state.tools,
                 project_info=state.initial_project_data,
                 specific_role=state.specific_role,
+                special_instructions=special_instructions,
             )
             state.messages = [
                 {
@@ -181,6 +216,12 @@ class AgentExecutor:
 
         with self._lock:
             self._state = state
+            self._state.discard_writes_after_stop = bool(discard_writes_after_stop)
+            # Применить stop, пришедший пока state ещё не существовал (setup-фаза),
+            # чтобы первый же check_stop вышел ДО persist user-сообщения.
+            if self._stop_pending:
+                self._state.stop_requested = True
+                self._stop_pending = False
             self._pending_messages = []
 
         if (
@@ -216,13 +257,19 @@ class AgentExecutor:
                 "Список пользовательских сообщений не должен быть пустым."
             )
         user_bodies = [str(x) for x in messages]
+        # id можно задать снаружи (TUI пробрасывает свой, чтобы потом точечно
+        # откатить осиротевшую реплику при быстрой отмене); иначе генерим.
         new_user_messages = [
             {
                 "role": "user",
                 "content": body,
-                "id": generate_message_id_func("m"),
+                "id": (
+                    message_ids[i]
+                    if message_ids and i < len(message_ids) and message_ids[i]
+                    else generate_message_id_func("m")
+                ),
             }
-            for body in user_bodies
+            for i, body in enumerate(user_bodies)
         ]
         # На старте user turn дописываем текущий CLI-запрос в current_user_intent
         # (только реальные user-сообщения, не technical). user_intent_log — только
@@ -262,6 +309,8 @@ class AgentExecutor:
                 messages = [*base_messages, *new_user_messages]
 
             def _persist_thread_batch(step_messages: list[dict]) -> None:
+                if state.discard_writes_after_stop and state.stop_requested:
+                    return
                 # Persist notes from in-memory state into thread meta.
                 # Tools mutate state, but ThreadSession writes self.meta to disk.
                 if (
@@ -308,6 +357,8 @@ class AgentExecutor:
             get_full_history_messages = thread_session.get_full_history_messages
         elif backend_api_mode == "chat_completions" and summary_trigger_chars > 0:
             def _persist_runtime_batch(step_messages: list[dict]) -> None:
+                if state.discard_writes_after_stop and state.stop_requested:
+                    return
                 state.current_user_intent = append_user_asks_from_messages(
                     state.current_user_intent,
                     step_messages,
@@ -342,7 +393,9 @@ class AgentExecutor:
                     else None
                 ),
             )
-            if thread_session is not None:
+            if thread_session is not None and not (
+                state.discard_writes_after_stop and state.stop_requested
+            ):
                 thread_session.meta = ThreadMetaMapper.merge_state_into_meta(
                     thread_session.meta, state
                 )
@@ -391,7 +444,12 @@ class AgentExecutor:
         return self._lock
 
     def stop_run(self) -> None:
-        """Выставляет флаг остановки; агент завершит текущую итерацию и выйдет."""
+        """Выставляет флаг остановки; агент завершит текущую итерацию и выйдет.
+
+        Если state ещё не создан (run() в setup-фазе, напр. сборка в worker-
+        потоке) — запоминаем в _stop_pending, run() применит при создании state."""
         with self._lock:
             if self._state is not None:
                 self._state.stop_requested = True
+            else:
+                self._stop_pending = True

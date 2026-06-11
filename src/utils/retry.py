@@ -44,6 +44,12 @@ def retry_with_backoff(
                 # Отфильтровываем kwargs по параметрам функции, чтобы не словить
                 # TypeError: got an unexpected keyword argument ...
                 kwargs = {k: v for k, v in kwargs.items() if k in param_names}
+            # Re-inject logger в kwargs если функция его принимает (pop выше
+            # был чтобы декоратор владел req_logger для своих retry-логов).
+            # Без этого вызываемая функция получает logger=None и не пишет
+            # детали тела ошибок в файл лога.
+            if "logger" in param_names:
+                kwargs["logger"] = req_logger
             if not use_retry or max_attempts <= 1:
                 return func(*args, **kwargs)
 

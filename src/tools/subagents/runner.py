@@ -231,7 +231,7 @@ class SubagentRunner:
     def _build_child_state(self, agent_role: str) -> State:
         """Создать дочерний State, наследуя общие данные от оркестратора."""
         child_config = {**self._config, "use_local_subagents": False}
-        child_tools_data, child_tools_spec, child_tools_descr = build_tools_data(child_config)
+        child_tools_data, child_tools_spec, child_tools_descr, _mcp_status = build_tools_data(child_config)
         child_system_prompt = self._resolve_subagent_system_prompt()
 
         parent = self._orchestrator_state
@@ -255,6 +255,7 @@ class SubagentRunner:
             get_stored_tool_outputs_max_entries(child_config)
         )
         child_state.backend_api_mode = "chat_completions"
+        child_state.discard_writes_after_stop = parent.discard_writes_after_stop
         return child_state
 
     def _resolve_subagent_system_prompt(self) -> Optional[str]:
@@ -332,7 +333,7 @@ class SubagentRunner:
         child_config = {**self._config, "use_local_subagents": False}
         child_run_id = generate_run_id()
         child_agent_kind = tool_name
-        child_tools_data, child_tools_spec, child_tools_descr = build_tools_data(
+        child_tools_data, child_tools_spec, child_tools_descr, _mcp_status = build_tools_data(
             child_config
         )
         child_logger, child_log_path, child_summary_trace_path = create_run_logger(

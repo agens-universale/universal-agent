@@ -120,3 +120,17 @@ def test_load_skill_detail_returns_source(three_layer_registry):
     detail = reg.load_skill_detail("alpha")
     assert detail["source"] == "user"
     assert "from user" in detail["instructions"] + detail["description"]
+
+
+def test_list_skills_includes_root_path(three_layer_registry):
+    reg, system, _, _ = three_layer_registry
+    _write_skill(system, "alpha", "from system")
+    items = reg.list_skills()
+    assert items[0]["root_path"] == str(system / "alpha")
+
+
+def test_load_skill_detail_includes_root_path(three_layer_registry):
+    reg, system, _, _ = three_layer_registry
+    _write_skill(system, "alpha", "from system")
+    detail = reg.load_skill_detail("alpha")
+    assert detail["root_path"] == str(system / "alpha")

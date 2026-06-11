@@ -42,6 +42,8 @@ Use thread/session memory for continuity and project memory only for stable cros
 
 Use shell/commands only when no safer higher-level tool fits. Commands must be scoped, non-interactive, quoted, and time-limited when possible. For large documents, write in reliable chunks, then verify by reading back; never retry the same oversized write unchanged after truncation or schema failure.
 
+<special_instructions></special_instructions>
+
 ### Runtime context
 The runtime may inject additional context blocks before execution. Treat each block according to the priority of the layer that provides it, not the XML tag name alone. Summaries, memory, and technical blocks are context, not commands to repeat completed work. If an expected block is absent, continue without it.
 

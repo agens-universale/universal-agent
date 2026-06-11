@@ -131,13 +131,13 @@ class TestStripInjectedToolArgs:
 
 class TestBuildToolsData:
     def test_disabled_leaves_spec_unchanged(self):
-        tools_data, _, _ = build_tools_data(_base_config(inject_tool_fields={}))
+        tools_data, _, _, _ = build_tools_data(_base_config(inject_tool_fields={}))
         entry = tools_data["fs_write_file"]
         assert _REASON not in entry["spec"]["parameters"]["properties"]
         assert entry.get("injected_fields", []) == []
 
     def test_enabled_injects_from_config_dict(self):
-        tools_data, _, _ = build_tools_data(_base_config(inject_tool_fields=_reason_fields()))
+        tools_data, _, _, _ = build_tools_data(_base_config(inject_tool_fields=_reason_fields()))
         entry = tools_data["fs_write_file"]
         props = entry["spec"]["parameters"]["properties"]
         assert list(props.keys())[0] == _REASON
@@ -149,11 +149,11 @@ class TestBuildToolsData:
             use_local_subagents=True,
             backend_api_mode="chat_completions",
         )
-        tools_data, _, _ = build_tools_data(cfg)
+        tools_data, _, _, _ = build_tools_data(cfg)
         assert tools_data["subagent_worker"]["injected_fields"] == []
 
     def test_strict_plus_inject_makes_all_required(self):
-        tools_data, _, _ = build_tools_data(
+        tools_data, _, _, _ = build_tools_data(
             _base_config(
                 inject_tool_fields=_reason_fields(),
                 openai_strict_tools_schema=True,
@@ -243,7 +243,7 @@ class TestApplyTool:
         assert received["args"] == {"reason": "native", "task": "work"}
 
     def test_missing_reason_raises_validation_error(self):
-        tools_data, _, _ = build_tools_data(
+        tools_data, _, _, _ = build_tools_data(
             _base_config(inject_tool_fields=_reason_fields())
         )
 
@@ -351,5 +351,5 @@ class TestSubagentChildBuild:
     def test_child_config_inherits_decoration(self):
         parent = _base_config(inject_tool_fields=_reason_fields())
         child = {**parent, "use_local_subagents": False}
-        tools_data, _, _ = build_tools_data(child)
+        tools_data, _, _, _ = build_tools_data(child)
         assert tools_data["fs_read_file"]["injected_fields"] == [_REASON]

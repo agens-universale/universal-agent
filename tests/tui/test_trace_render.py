@@ -1,0 +1,269 @@
+"""trace_render — общие строители виджетов трейса (Spec B / A+)."""
+import pytest
+
+
+def test_render_code_block_with_lang():
+    pytest.importorskip("textual")
+    from tui.services.trace_render import render_code_block
+    w = render_code_block("print(1)", "python", event_no=1)
+    assert w.has_class("code-block-panel")
+
+
+def test_render_code_block_unknown_lang_fallback():
+    pytest.importorskip("textual")
+    from tui.services.trace_render import render_code_block
+    w = render_code_block("x = 1", "no-such-lang-xyz", event_no=2)
+    assert w.has_class("code-block-panel")
+
+
+def test_render_code_block_no_lang_fallback():
+    pytest.importorskip("textual")
+    from tui.services.trace_render import render_code_block
+    w = render_code_block("plain text", None, event_no=3)
+    assert w.has_class("code-block-panel")
+
+
+def test_build_agent_widgets_prose():
+    pytest.importorskip("textual")
+    from tui.services.trace_render import build_agent_widgets
+    ws = build_agent_widgets("просто текст ответа", event_no=5)
+    assert len(ws) == 1
+    from tui.widgets.trace_row import TraceRow
+    assert isinstance(ws[0], TraceRow)
+
+
+def test_build_agent_widgets_code_and_prose_order_and_focus():
+    pytest.importorskip("textual")
+    from tui.services.trace_render import build_agent_widgets
+    md = "вступление\n\n```python\nprint(1)\n```\n\nитог"
+    ws = build_agent_widgets(md, event_no=7)
+    # 3 виджета: proza, code-block, proza — в порядке
+    assert len(ws) == 3
+    assert ws[0].has_class("code-block-panel") is False  # первый proza
+    assert ws[1].has_class("code-block-panel") is True    # code-block
+    # focusable только у первого (Tab-стоп события)
+    assert getattr(ws[0], "_focusable", None) in (True, None)  # см. AgentReplyLine/TraceRow API
+
+
+def _env(payload, ts="2026-05-30T10:00:00Z"):
+    return {"type": "message", "thread_id": "t", "system": "cli", "seq": 1,
+            "ts": ts, "payload": payload}
+
+
+@pytest.mark.asyncio
+async def test_render_thread_readonly_kinds():
+    pytest.importorskip("textual")
+    from textual.app import App
+    from textual.containers import VerticalScroll
+    from tui.services.trace_render import render_thread_readonly
+    from tui.widgets.user_reply import UserReplyContainer
+    from tui.widgets.tool_call_row import ToolCallRow
+
+    records = [
+        _env({"role": "user", "content": "привет", "id": "m1"}),
+        _env({"id": "a1", "type": "message", "role": "assistant", "status": "completed",
+              "content": [{"type": "output_text", "text": "ответ агента", "annotations": []}]}),
+        _env({"type": "function_call", "id": "fc1", "call_id": "c1", "name": "read_file",
+              "arguments": '{"path": "x.py"}', "status": "completed"}),
+        _env({"id": "fco1", "type": "function_call_output", "call_id": "c1",
+              "output": '{"ok": true, "total_lines": 10}'}),
+    ]
+
+    class _A(App):
+        def compose(self):
+            yield VerticalScroll(id="t")
+
+        def on_mount(self):
+            render_thread_readonly(self.query_one("#t", VerticalScroll), records)
+
+    async with _A().run_test() as pilot:
+        scr = pilot.app.screen
+        assert len(scr.query(UserReplyContainer)) == 1
+        # call→result спарены в одну ToolCallRow (output не отдельной строкой)
+        assert len(scr.query(ToolCallRow)) == 1
+        body = "\n".join(str(w.render()) for w in scr.query())
+        assert "ответ агента" in body
+
+
+def _seg(payloads, synthesis=None, n=0, index=0):
+    comp = None if synthesis is None else {
+        "ts": "t", "messages_in_segment": n, "synthesis": synthesis}
+    return {"index": index,
+            "messages": [_env(p) for p in payloads],
+            "compacted_by": comp}
+
+
+@pytest.mark.asyncio
+async def test_render_segments_readonly_parity():
+    """Превью из сегментов = паритет с основным трейсом: hidden(policy) скрыт,
+    маркер сжатия #K + синтез, intermediate_reply как ·, error_msg красным."""
+    pytest.importorskip("textual")
+    from textual.app import App
+    from textual.containers import VerticalScroll
+    from tui.services.trace_render import render_segments_readonly
+    from tui.widgets.trace_row import TraceRow
+
+    segments = [
+        _seg([
+            {"role": "user", "content": "вопрос", "id": "m1"},
+            {"type": "function_call", "id": "fc1", "call_id": "c1",
+             "name": "intermediate_reply",
+             "arguments": '{"answer": "промежуточный"}'},
+            {"role": "user", "id": "mp",
+             "content": '<technical type="technical">служебное</technical>'},
+        ], synthesis="СИНТЕЗ-X", n=3, index=0),
+        _seg([
+            {"id": "a1", "type": "message", "role": "assistant", "status": "completed",
+             "content": [{"type": "output_text", "text": "финал", "annotations": []}]},
+            {"role": "user", "id": "me",
+             "content": '<technical type="error_message">ошибка бэка</technical>'},
+        ], index=1),
+    ]
+
+    class _A(App):
+        def compose(self):
+            yield VerticalScroll(id="t")
+
+        def on_mount(self):
+            render_segments_readonly(self.query_one("#t", VerticalScroll), segments)
+
+    async with _A().run_test() as pilot:
+        scr = pilot.app.screen
+        body = "\n".join(str(w.render()) for w in scr.query())
+        # policy/technical — скрыто (hidden), как на основном экране
+        assert "служебное" not in body
+        assert "[policy]" not in body
+        # маркер сжатия #1 + синтез виден
+        markers = [w for w in scr.query(TraceRow) if w.has_class("summary-marker")]
+        assert len(markers) == 1
+        assert "контекст сжат #1" in body
+        assert "СИНТЕЗ-X" in body
+        # intermediate_reply — отдельная line-intermediate (·), не обычная реплика
+        assert "промежуточный" in body
+        assert len([w for w in scr.query(TraceRow) if w.has_class("line-intermediate")]) == 1
+        # error_message — красная строка
+        assert "ошибка бэка" in body
+        assert len([w for w in scr.query(TraceRow) if w.has_class("line-error")]) == 1
+        assert "финал" in body
+
+
+def test_build_agent_widgets_has_bullet_prefix():
+    pytest.importorskip("textual")
+    from tui.services.trace_render import build_agent_widgets
+    ws = build_agent_widgets("просто текст", event_no=1)
+    assert ws[0]._prefix == "● "
+
+
+def test_build_intermediate_widgets_renders_code_block():
+    """·-реплика проходит тот же markdown/код-пайплайн, что и проза: код-фенс
+    становится панелью, а не сырой строкой с литеральными ```. Маркер «· »
+    и класс line-intermediate сохранены."""
+    pytest.importorskip("textual")
+    from tui.services.trace_render import build_intermediate_widgets
+    md = "вступление\n\n```python\nprint(1)\n```"
+    ws = build_intermediate_widgets(md, event_no=9)
+    assert ws[0]._prefix == "· "
+    assert ws[0].has_class("line-intermediate")
+    assert any(w.has_class("code-block-panel") for w in ws)
+
+
+def test_build_intermediate_widgets_plain_text_single_row():
+    """Простой текст (без markdown) — по-прежнему одна line-intermediate строка
+    (паритет со старым поведением, инвариант превью)."""
+    pytest.importorskip("textual")
+    from tui.services.trace_render import build_intermediate_widgets
+    from tui.widgets.trace_row import TraceRow
+    ws = build_intermediate_widgets("промежуточный ответ", event_no=1)
+    assert len(ws) == 1 and isinstance(ws[0], TraceRow)
+    assert ws[0]._prefix == "· " and ws[0].has_class("line-intermediate")
+
+
+def test_build_block_widgets_no_bullet_prefix():
+    pytest.importorskip("textual")
+    from tui.services.trace_render import build_block_widgets
+    from tui.widgets.trace_row import TraceRow
+    ws = build_block_widgets("просто текст", prose_bullet=False, event_no=1)
+    assert len(ws) == 1 and isinstance(ws[0], TraceRow)
+    assert ws[0]._prefix == ""
+
+
+def test_build_block_widgets_table_widget():
+    pytest.importorskip("textual")
+    from tui.services.trace_render import build_block_widgets
+    ws = build_block_widgets("| A | B |\n|---|---|\n| 1 | 2 |",
+                             prose_bullet=True, event_no=1)
+    assert len(ws) == 1
+    assert ws[0].has_class("table-block")
+
+
+def test_build_block_widgets_table_indent_only_with_bullet():
+    """Трейс/превью (prose_bullet=True): таблица с отступом под текст (.table-indent).
+    Баннер (prose_bullet=False): без отступа — вровень с прозой на колонке 0."""
+    pytest.importorskip("textual")
+    from tui.services.trace_render import build_block_widgets
+    md = "| A | B |\n|---|---|\n| 1 | 2 |"
+    trace = build_block_widgets(md, prose_bullet=True, event_no=1)
+    banner = build_block_widgets(md, prose_bullet=False, event_no=1)
+    assert trace[0].has_class("table-indent")
+    assert not banner[0].has_class("table-indent")
+    assert trace[0].has_class("table-block") and banner[0].has_class("table-block")
+
+
+def test_build_block_widgets_code_indent_only_with_bullet():
+    """Код-панель: отступ под текст в трейсе/превью (.code-indent), без отступа в баннере
+    (как таблицы) — чтобы код в ask_human был вровень с прозой на колонке 0."""
+    pytest.importorskip("textual")
+    from tui.services.trace_render import build_block_widgets
+    md = "```python\nprint(1)\n```"
+    trace = build_block_widgets(md, prose_bullet=True, event_no=1)
+    banner = build_block_widgets(md, prose_bullet=False, event_no=1)
+    assert trace[0].has_class("code-indent")
+    assert not banner[0].has_class("code-indent")
+    assert trace[0].has_class("code-block-panel") and banner[0].has_class("code-block-panel")
+
+
+@pytest.mark.asyncio
+async def test_readonly_submit_note_label():
+    """submit_solution.comment в превью → строка line-note «на заметку: …»."""
+    pytest.importorskip("textual")
+    import json as _json
+    from textual.app import App
+    from textual.containers import VerticalScroll
+    from tui.services.trace_render import render_segments_readonly
+    from tui.widgets.trace_row import TraceRow
+
+    segments = [{"index": 0, "compacted_by": None, "messages": [_env({
+        "type": "function_call", "id": "fc", "call_id": "c", "name": "submit_solution",
+        "arguments": _json.dumps({"task_report": "готово", "comment": "проверь X"}),
+    })]}]
+
+    class _A(App):
+        def compose(self):
+            yield VerticalScroll(id="t")
+
+        def on_mount(self):
+            render_segments_readonly(self.query_one("#t", VerticalScroll), segments)
+
+    async with _A().run_test() as pilot:
+        notes = [w for w in pilot.app.screen.query(TraceRow) if w.has_class("line-note")]
+        assert len(notes) == 1
+        assert notes[0]._content.plain == "заметка: проверь X"
+
+
+@pytest.mark.asyncio
+async def test_intermediate_reply_row_has_top_margin(tmp_path):
+    """`·`-реплика (intermediate_reply) — фаза хода, как ●-проза:
+    пустая строка сверху (margin-top: 1), не прилипает к предыдущей строке."""
+    pytest.importorskip("textual")
+    from textual.containers import VerticalScroll
+    from tui.app import TuiApp
+    from tui.widgets.trace_row import TraceRow
+
+    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    async with app.run_test() as pilot:
+        scr = pilot.app.screen
+        row = TraceRow(prefix="· ", content="промежуточный ответ",
+                       kind_class="line-intermediate")
+        scr.query_one("#trace", VerticalScroll).mount(row)
+        await pilot.pause()
+        assert row.styles.margin.top == 1
