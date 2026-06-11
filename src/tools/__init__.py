@@ -57,7 +57,8 @@ def _apply_openai_strict_tools_schema(spec: Dict[str, Any]) -> None:
 
 def build_tools_data(
     config_dict: Dict[str, Any],
-) -> Tuple[Dict[str, Dict[str, Any]], list, list]:
+    on_progress=None,
+) -> Tuple[Dict[str, Dict[str, Any]], list, list, dict]:
     """
     Собрать единый словарь tools_data и производные списки spec/description
     на основе config_dict.
@@ -73,7 +74,7 @@ def build_tools_data(
     for k, v in skills_tools_data.items():
         tools_data[k] = v
 
-    mcp_tools_data = get_mcp_tools_data(config_dict)
+    mcp_tools_data, mcp_status = get_mcp_tools_data(config_dict, on_progress=on_progress)
     for k, v in mcp_tools_data.items():
         tools_data[k] = v
 
@@ -108,7 +109,7 @@ def build_tools_data(
     tools_spec = [v["spec"] for v in tools_data.values()]
     tools_description = [v["description"] for v in tools_data.values()]
 
-    return tools_data, tools_spec, tools_description
+    return tools_data, tools_spec, tools_description, mcp_status
 
 
 def apply_tool(
