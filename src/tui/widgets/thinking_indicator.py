@@ -88,6 +88,12 @@ _STATE_VALIDATING = "validating"
 _STATE_COMPRESSING = "compressing"
 
 
+def _fmt_units(n: int) -> str:
+    if n >= 1000:
+        return f"{n / 1000:.1f}k"
+    return str(n)
+
+
 class ThinkingIndicator(Static):
     """Индикатор активности агента (thinking / validating / compressing).
 
@@ -104,9 +110,13 @@ class ThinkingIndicator(Static):
         *,
         started_at: float | None = None,
         state: str = _STATE_THINKING,
+        clock=time.monotonic,
+        sink=None,
     ) -> None:
+        self._clock = clock
+        self._sink = sink
         self._started_at: float = (
-            started_at if started_at is not None else time.monotonic()
+            started_at if started_at is not None else clock()
         )
         self._frame: int = 0
         self._state: str = state
@@ -159,7 +169,18 @@ class ThinkingIndicator(Static):
             text.append(glyph, style=color)
             text.append(" ")
             text.append(f"{self._rotator.current()}…", style=_ACCENT)
-        elapsed = int(time.monotonic() - self._started_at)
+        elapsed = int(self._clock() - self._started_at)
         # Elapsed — наследует deep-dim из .thinking-indicator (CSS).
-        text.append(f" ({elapsed}s)")
+        parens = f" ({elapsed}с"
+        if self._state == _STATE_THINKING and self._sink is not None:
+            units = self._sink.progress_units()
+            if units > 0:
+                parens += f" · ↓ {_fmt_units(units)} токенов"
+            r_state, dur = self._sink.reasoning_state()
+            if r_state == "thinking":
+                parens += " · размышление"
+            elif r_state == "done":
+                parens += f" · обдумал за {round(dur)}с"
+        parens += ")"
+        text.append(parens)
         return text

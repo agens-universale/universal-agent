@@ -516,6 +516,7 @@ class TraceScreen(Screen):
         from tui.widgets.thinking_indicator import ThinkingIndicator
         indicator = ThinkingIndicator(
             started_at=self._thinking_started_at, state=state,
+            sink=getattr(self.app, "_stream_sink", None),
         )
         self._thinking = indicator
         trace = self.query_one("#trace", VerticalScroll)

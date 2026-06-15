@@ -26,7 +26,7 @@ def test_render_includes_elapsed_seconds_marker():
     # Сдвинем started_at в прошлое — чтобы elapsed был ≥ 2 секунд.
     w._started_at = time.monotonic() - 2.5
     rendered = str(w.render())
-    assert "(2s)" in rendered or "(3s)" in rendered  # допускаем оба округления
+    assert "(2с)" in rendered or "(3с)" in rendered  # допускаем оба округления
 
 
 def test_tick_advances_frame_index():
