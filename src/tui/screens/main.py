@@ -1162,8 +1162,8 @@ class TraceScreen(Screen):
             if sink is not None and sink.has_content():
                 from tui.services.stream_sink import format_stream_block
                 from tui.widgets.stream_block import StreamBlock
-                think, answer = sink.snapshot()
-                text = format_stream_block(think=think, answer=answer)
+                _think, answer = sink.snapshot()
+                text = format_stream_block(answer=answer)
                 if self._stream_block is None:
                     self._stream_block = StreamBlock()
                     self._trace_mount(self._stream_block, scroll=True)

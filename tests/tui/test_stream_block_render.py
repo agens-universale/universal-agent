@@ -16,18 +16,16 @@ def test_block_text_from_sink():
     s = StreamSink()
     s.push("think", "читаю README")
     s.push("answer", "Это проект.")
-    think, answer = s.snapshot()
-    assert format_stream_block(think=think, answer=answer) == (
-        "⠿ думаю… читаю README\nЭто проект."
-    )
+    _think, answer = s.snapshot()
+    assert format_stream_block(answer=answer) == "Это проект."
 
 
 def test_sink_reset_clears_block():
     s = StreamSink()
     s.push("answer", "partial")
     s.reset()
-    think, answer = s.snapshot()
-    assert format_stream_block(think=think, answer=answer) == ""
+    _think, answer = s.snapshot()
+    assert format_stream_block(answer=answer) == ""
 
 
 def _write_task(tmp_path, tid):
@@ -66,7 +64,7 @@ async def test_stream_block_mounts_then_clears_on_canonical_row(tmp_path):
 
         blocks = pilot.app.query(StreamBlock)
         assert len(blocks) == 1
-        assert str(blocks[0].render()) == "⠿ думаю… читаю README\nЭто проект."
+        assert str(blocks[0].render()) == "Это проект."
 
         # Каноничная assistant-строка пришла из thread store — блок снимается,
         # sink сбрасывается. Рендерим запись напрямую (live-путь _render_record).

@@ -15,23 +15,22 @@ def test_sink_accumulates_and_resets():
     assert s.has_content() is False
 
 
-def test_format_strips_inline_think_to_tail():
+def test_format_shows_answer_only():
+    # Reasoning now goes to the indicator; the block shows ONLY the answer.
+    assert format_stream_block(answer="Это проект.") == "Это проект."
+
+
+def test_format_strips_inline_think_from_answer():
     block = format_stream_block(
-        think="", answer="<think>анализирую структуру\nсмотрю agents/</think>Это проект."
+        answer="<think>анализирую\nсмотрю agents/</think>Это проект."
     )
-    assert "Это проект." in block
-    assert "анализирую структуру" not in block  # full think not dumped
-    assert "смотрю agents/" in block             # only the last think line (tail)
-
-
-def test_format_reasoning_channel_as_think_tail():
-    block = format_stream_block(think="строю план\nчитаю README", answer="")
-    assert "читаю README" in block      # tail of reasoning
-    assert "строю план" not in block
+    assert block == "Это проект."
+    assert "<think>" not in block
+    assert "анализирую" not in block
 
 
 def test_format_empty_returns_empty():
-    assert format_stream_block(think="", answer="") == ""
+    assert format_stream_block(answer="") == ""
 
 
 def test_push_reset_clears_buffers():
@@ -46,11 +45,9 @@ def test_push_reset_clears_buffers():
     assert s.snapshot() == ("", "новый")
 
 
-def test_format_unclosed_think_still_streaming():
-    # answer arrives mid-stream: <think> opened but </think> not yet received
-    block = format_stream_block(think="", answer="<think>анализирую\nсмотрю agents/")
-    assert "смотрю agents/" in block      # tail of open think is surfaced
-    assert "<think>" not in block         # raw tag opener must not appear in output
+def test_format_unclosed_think_stripped():
+    # Unclosed <think> still streaming → stripped, empty answer remainder.
+    assert format_stream_block(answer="<think>анализирую\nсмотрю agents/") == ""
 
 
 def test_sink_progress_units_counts_all_chars():

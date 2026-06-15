@@ -79,21 +79,8 @@ class StreamSink:
             self._reasoning_ended_at = None
 
 
-def _tail_line(s: str) -> str:
-    lines = [ln for ln in s.splitlines() if ln.strip()]
-    return lines[-1].strip() if lines else ""
-
-
-def format_stream_block(*, think: str, answer: str) -> str:
-    """Compact in-progress view. Inline <think> spans in `answer` are stripped
-    out (their tail shown as reasoning), leaving only the real answer text."""
-    inline_think = " ".join(m.group(1) for m in _THINK_RE.finditer(answer))
-    answer_clean = _THINK_RE.sub("", answer).strip()
-    think_tail = _tail_line(inline_think) or _tail_line(think)
-
-    lines = []
-    if think_tail:
-        lines.append(f"⠿ думаю… {think_tail}")
-    if answer_clean:
-        lines.append(answer_clean)
-    return "\n".join(lines)
+def format_stream_block(*, answer: str) -> str:
+    """In-progress view for the StreamBlock: ONLY the answer text.
+    Reasoning is surfaced via the ThinkingIndicator, not here. Inline
+    <think>...</think> spans (incl. an unclosed one mid-stream) are stripped."""
+    return _THINK_RE.sub("", answer).strip()
