@@ -192,9 +192,6 @@ def _dispatch_readonly(mount_target, ev, calls: dict) -> None:
     elif ev.kind == "error_msg":
         mount_target.mount(TraceRow(prefix="[!] ", content=ev.summary,
                                     kind_class="line-error", event_no=ev.no))
-    elif ev.kind == "system" and ev.title == "think":
-        mount_target.mount(TraceRow(prefix="  ? ", content=f"think: {ev.summary}",
-                                    kind_class="line-think", event_no=ev.no))
     elif ev.kind == "ask_human":
         mount_target.mount(TraceRow(prefix="  ? ", content=f"ask_human: {ev.summary}",
                                     kind_class="line-meta", event_no=ev.no))

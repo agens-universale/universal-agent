@@ -142,15 +142,10 @@ def map_message(msg: dict, *, no: int, ts: str) -> Optional[TraceEvent]:
             )
         return None
 
-    # THINK (reasoning) — kind="system" sentinel + title="think" (renders as .line-think)
+    # THINK (reasoning) — suppressed: reasoning is shown via the ThinkingIndicator
+    # tail (docs/tui/specs/2026-06-16-reasoning-indicator-design.md), not as a
+    # trace row. Export keeps reasoning (services/export.py).
     if typ in ("reasoning", "think"):
-        text = msg.get("summary") or msg.get("content") or ""
-        if isinstance(text, str) and text.strip():
-            return TraceEvent(
-                no=no, event_ts_utc_iso=ts, kind="system",
-                title="think", summary=text.strip(),
-                full_payload=msg, message_id=mid,
-            )
         return None
 
     # Special tool-event handling (must precede generic function_call mapping).

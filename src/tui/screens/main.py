@@ -739,15 +739,6 @@ class TraceScreen(Screen):
             )
             return
 
-        if ev.kind == "system" and ev.title == "think":
-            self._mount_trace_row(
-                prefix="  ? ",
-                content=f"think: {ev.summary}",
-                kind_class="line-think",
-                event_no=ev.no,
-            )
-            return
-
         if ev.kind == "summary":
             from tui.widgets.trace_row import SummaryMarker
             marker_label = ev.summary or "контекст сжат"

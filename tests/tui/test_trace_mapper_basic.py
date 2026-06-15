@@ -25,9 +25,7 @@ def test_think_message():
         {"type": "reasoning", "summary": "размышляю"},
         no=3, ts="2026-05-20T10:00:02+00:00"
     )
-    assert ev.kind == "system"
-    assert ev.title == "think"
-    assert "размышляю" in ev.summary
+    assert ev is None
 
 
 def test_unknown_returns_none():
