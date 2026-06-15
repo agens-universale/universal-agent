@@ -316,12 +316,7 @@ class TraceScreen(Screen):
             except Exception:
                 pass
             self._thinking = None
-        if self._stream_block is not None:
-            try:
-                self._stream_block.remove()
-            except Exception:
-                pass
-            self._stream_block = None
+        self._clear_stream_block()
         self._thinking_started_at = None
         # Сброс эвристики «последнее событие — agent»: на смене задачи / stream_reset
         # история событий обнуляется, индикатор должен начать с чистого состояния.

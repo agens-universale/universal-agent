@@ -81,6 +81,38 @@ async def test_stream_block_mounts_then_clears_on_canonical_row(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_reset_render_state_clears_stream_block_and_sink(tmp_path):
+    """Task-switch path: _reset_render_state must remove the StreamBlock AND reset the sink."""
+    pytest.importorskip("textual")
+    from tui.app import TuiApp
+    from tui.widgets.stream_block import StreamBlock
+
+    class _FakeRunner:
+        def is_running(self) -> bool: return True
+        def stop(self) -> None: pass
+
+    tid = "stream3"
+    _write_task(tmp_path, tid)
+    app = TuiApp(threads_dir=str(tmp_path), system="cli",
+                 config={"model": "M", "backend_api_mode": "chat_completions"})
+    async with app.run_test() as pilot:
+        scr = pilot.app.screen
+        scr.attach_active_task(tid)
+        pilot.app.active_runner = _FakeRunner()
+        # Push content so sink is non-empty and a StreamBlock is mounted.
+        pilot.app._stream_sink.push("answer", "partial answer")
+        await pilot.pause(0.7)
+        assert len(pilot.app.query(StreamBlock)) == 1
+
+        # Simulate task-switch by calling _reset_render_state directly.
+        scr._reset_render_state()
+        await pilot.pause()
+
+        assert len(pilot.app.query(StreamBlock)) == 0
+        assert pilot.app._stream_sink.snapshot() == ("", "")
+
+
+@pytest.mark.asyncio
 async def test_stream_block_cleared_when_run_not_running(tmp_path):
     pytest.importorskip("textual")
     from tui.app import TuiApp
