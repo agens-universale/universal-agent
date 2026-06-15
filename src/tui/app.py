@@ -10,6 +10,7 @@ from textual.screen import Screen
 
 from tui import branding
 from tui.screens.main import TraceScreen
+from tui.services.stream_sink import StreamSink
 
 
 class TuiApp(App):
@@ -46,6 +47,7 @@ class TuiApp(App):
         self._system = system
         self._config = config or {}
         self._executor_factory = None  # callable returning an executor; for tests
+        self._stream_sink = StreamSink()
         self._mcp_progress = None
         self._mcp_snapshot = None      # boot-дискавери для /mcp (сервер→статус/тулы)
         self.active_runner = None      # AgentRunner | None
@@ -91,7 +93,10 @@ class TuiApp(App):
         progress = McpProgress()
         progress.begin(list((cfg.get("mcp-servers") or {}).keys()))
         self._mcp_progress = progress
-        ctx = create_run_context(cfg, auth_connector=auth, on_progress=progress.update)
+        ctx = create_run_context(
+            cfg, auth_connector=auth, on_progress=progress.update,
+            on_stream_delta=self._stream_sink.push,
+        )
         # Снапшот MCP «сервер→статус/тулы» app-уровнево — чтобы /mcp показывал
         # результат boot-дискавери сразу, не дожидаясь первого сообщения.
         from tools.mcp_snapshot import build_mcp_tools_snapshot
