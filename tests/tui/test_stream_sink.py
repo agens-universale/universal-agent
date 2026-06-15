@@ -28,3 +28,14 @@ def test_format_reasoning_channel_as_think_tail():
     block = format_stream_block(think="строю план\nчитаю README", answer="")
     assert "читаю README" in block      # tail of reasoning
     assert "строю план" not in block
+
+
+def test_format_empty_returns_empty():
+    assert format_stream_block(think="", answer="") == ""
+
+
+def test_format_unclosed_think_still_streaming():
+    # answer arrives mid-stream: <think> opened but </think> not yet received
+    block = format_stream_block(think="", answer="<think>анализирую\nсмотрю agents/")
+    assert "смотрю agents/" in block      # tail of open think is surfaced
+    assert "<think>" not in block         # raw tag opener must not appear in output
