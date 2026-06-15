@@ -148,6 +148,7 @@ def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
         "openai_strict_tools_schema": app_cfg.backend.openai_strict_tools_schema,
         "use_ssl": app_cfg.backend.use_ssl,
         "use_retry": app_cfg.backend.use_retry,
+        "stream": app_cfg.backend.stream,
         "command_moderation": {
             "enabled": app_cfg.security.command_moderation.enabled,
             "mode": app_cfg.security.command_moderation.mode,
