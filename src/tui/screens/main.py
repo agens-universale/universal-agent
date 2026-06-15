@@ -103,6 +103,9 @@ class TraceScreen(Screen):
         self._suppress_picker_reopen: bool = False
         # Spec 2026-05-26: ThinkingIndicator state.
         self._thinking = None  # type: Optional["ThinkingIndicator"]
+        # Эфемерный StreamBlock — live-вывод текущего chat_completions-шага;
+        # снимается, когда приходит каноничная assistant-строка / run завершён.
+        self._stream_block = None  # type: Optional["StreamBlock"]
         # Кумулятивный таймер «думаю…» — стартует на каждом user-send,
         # передаётся в виджет, чтобы elapsed не сбрасывался при show/hide циклах.
         self._thinking_started_at: Optional[float] = None
@@ -313,6 +316,12 @@ class TraceScreen(Screen):
             except Exception:
                 pass
             self._thinking = None
+        if self._stream_block is not None:
+            try:
+                self._stream_block.remove()
+            except Exception:
+                pass
+            self._stream_block = None
         self._thinking_started_at = None
         # Сброс эвристики «последнее событие — agent»: на смене задачи / stream_reset
         # история событий обнуляется, индикатор должен начать с чистого состояния.
@@ -533,6 +542,16 @@ class TraceScreen(Screen):
         self._thinking.remove()
         self._thinking = None
 
+    def _clear_stream_block(self) -> None:
+        """Снять эфемерный StreamBlock и сбросить sink. Вызывается при приходе
+        каноничной assistant-строки (иначе двойной рендер) и по завершении run'а."""
+        if self._stream_block is not None:
+            self._stream_block.remove()
+            self._stream_block = None
+        sink = getattr(self.app, "_stream_sink", None)
+        if sink is not None:
+            sink.reset()
+
     def _trace_is_at_bottom(self) -> bool:
         """True, если трейс прокручен в самый низ (с допуском). Используется для
         «прилипания к низу»: авто-скролл на новые события — только когда юзер уже
@@ -625,6 +644,10 @@ class TraceScreen(Screen):
             return
 
         if ev.kind == "agent":
+            # Каноничная assistant-строка пришла из thread store — снимаем
+            # эфемерный StreamBlock текущего шага, иначе двойной рендер
+            # (live-блок + реальная строка).
+            self._clear_stream_block()
             if ev.tool_name == "intermediate_reply":
                 from tui.services.trace_render import build_intermediate_widgets
                 # «Прилипание к низу»: фиксируем ДО монтирования (как у прозы).
@@ -1137,10 +1160,24 @@ class TraceScreen(Screen):
                 self._hide_thinking_indicator()
             else:
                 self._show_thinking_indicator(state="thinking")
+            # Эфемерный StreamBlock — live-вывод текущего шага. Источник —
+            # app._stream_sink (кормится из worker-потока через on_stream_delta);
+            # монтаж/обновление строго здесь, на UI-потоке (set_interval-колбэк).
+            sink = getattr(self.app, "_stream_sink", None)
+            if sink is not None and sink.has_content():
+                from tui.services.stream_sink import format_stream_block
+                from tui.widgets.stream_block import StreamBlock
+                think, answer = sink.snapshot()
+                text = format_stream_block(think=think, answer=answer)
+                if self._stream_block is None:
+                    self._stream_block = StreamBlock()
+                    self._trace_mount(self._stream_block, scroll=True)
+                self._stream_block.set_text(text)
         elif ask_human_active:
             self._hide_thinking_indicator()
         else:
             self._destroy_thinking_indicator()
+            self._clear_stream_block()
         # Footer-left зависит от is_running — обновляем каждый тик, чтобы
         # /stop появлялся/исчезал без отдельных вызовов из start/stop путей.
         self._refresh_footer()

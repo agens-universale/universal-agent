@@ -188,6 +188,9 @@ Screen {
 .thinking-indicator { color: $deep-dim; padding: 0 1; margin-top: 1; height: 1; }
 .thinking-indicator.hidden { display: none; }
 
+/* StreamBlock — эфемерный in-progress поток текущего шага (chat_completions) */
+.stream-block { color: $deep-dim; padding: 0 1; margin-top: 1; }
+
 /* Палитра команд (overlay, Task 3.3) */
 .palette       { background: #161A23; border: solid $run-color; max-height: 80%; }
 .palette-row   { color: $ink; padding: 0 1; }
