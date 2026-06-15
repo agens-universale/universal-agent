@@ -43,6 +43,7 @@ def request_chat_completions_with_policy(
     verify: bool,
     use_retry: bool,
     logger: logging.Logger | None = None,
+    on_delta=None,
 ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     """
     Execute chat/completions request with the minimal adaptive max_tokens policy.
@@ -64,6 +65,7 @@ def request_chat_completions_with_policy(
             verify=verify,
             use_retry=transport_use_retry,
             logger=logger,
+            on_delta=on_delta,
         )
         return response, payload
 
