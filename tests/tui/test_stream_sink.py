@@ -51,3 +51,37 @@ def test_format_unclosed_think_still_streaming():
     block = format_stream_block(think="", answer="<think>анализирую\nсмотрю agents/")
     assert "смотрю agents/" in block      # tail of open think is surfaced
     assert "<think>" not in block         # raw tag opener must not appear in output
+
+
+def test_sink_progress_units_counts_all_chars():
+    s = StreamSink()
+    s.push("think", "abcd")     # 4 chars
+    s.push("answer", "efgh")    # +4 chars = 8
+    assert s.progress_units() == 2          # 8 // 4
+
+
+def test_reasoning_state_none_when_no_think():
+    s = StreamSink()
+    s.push("answer", "hi")
+    assert s.reasoning_state() == (None, None)
+
+
+def test_reasoning_state_thinking_then_done():
+    clk = {"t": 100.0}
+    s = StreamSink(clock=lambda: clk["t"])
+    s.push("think", "план")
+    assert s.reasoning_state() == ("thinking", None)
+    clk["t"] = 106.0
+    s.push("answer", "ответ")
+    state, dur = s.reasoning_state()
+    assert state == "done"
+    assert round(dur) == 6
+
+
+def test_reset_clears_progress_and_reasoning():
+    clk = {"t": 0.0}
+    s = StreamSink(clock=lambda: clk["t"])
+    s.push("think", "xxxx")
+    s.push("reset", "")
+    assert s.progress_units() == 0
+    assert s.reasoning_state() == (None, None)
