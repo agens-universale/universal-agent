@@ -34,6 +34,18 @@ def test_format_empty_returns_empty():
     assert format_stream_block(think="", answer="") == ""
 
 
+def test_push_reset_clears_buffers():
+    s = StreamSink()
+    s.push("think", "думаю")
+    s.push("answer", "привет")
+    s.push("reset", "")
+    assert s.snapshot() == ("", "")
+    assert s.has_content() is False
+    # fresh accumulation after reset
+    s.push("answer", "новый")
+    assert s.snapshot() == ("", "новый")
+
+
 def test_format_unclosed_think_still_streaming():
     # answer arrives mid-stream: <think> opened but </think> not yet received
     block = format_stream_block(think="", answer="<think>анализирую\nсмотрю agents/")

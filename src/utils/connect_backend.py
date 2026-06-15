@@ -185,6 +185,7 @@ def request_backend_chat_completions(
                     f"response_body={(err_text or '')[:4000]}\n"
                 )
                 raise
+            on_delta("reset", "")
             return assemble_streamed_completion(
                 iter_sse_data_lines(r.iter_lines()), on_delta=on_delta
             )

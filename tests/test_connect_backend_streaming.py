@@ -55,6 +55,28 @@ def test_blocking_path_when_no_on_delta(monkeypatch):
     assert res["choices"][0]["message"]["content"] == "blk"
 
 
+def test_streaming_emits_reset_before_content(monkeypatch):
+    """on_delta("reset", "") must be the very first call before any content delta."""
+    lines = [
+        'data: {"id":"x","choices":[{"index":0,"delta":{"content":"hi"}}]}',
+        'data: {"id":"x","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"completion_tokens":1}}',
+        'data: [DONE]',
+    ]
+
+    def fake_post(url, json=None, headers=None, stream=False, verify=True, **kw):
+        return _FakeStreamResponse(lines)
+
+    monkeypatch.setattr(connect_backend.requests, "post", fake_post)
+
+    deltas = []
+    connect_backend.request_backend_chat_completions(
+        {"model": "m", "messages": []}, {}, url="http://x", verify=True,
+        on_delta=lambda k, t: deltas.append((k, t)),
+    )
+    assert deltas[0] == ("reset", ""), f"Expected reset first, got: {deltas[0]}"
+    assert ("answer", "hi") in deltas
+
+
 def test_streaming_http_error_reraises(monkeypatch):
     """Streaming branch: HTTP error is re-raised without crashing in the logging/print block."""
     class _ErrorResponse:

@@ -21,7 +21,10 @@ class StreamSink:
 
     def push(self, kind: str, text: str) -> None:
         with self._lock:
-            if kind == "think":
+            if kind == "reset":
+                self._think = ""
+                self._answer = ""
+            elif kind == "think":
                 self._think += text
             else:
                 self._answer += text
