@@ -1,8 +1,9 @@
 """StreamSink — thread-safe buffer for live chat/completions deltas (TUI-only).
 
 Fed by RunContext.on_stream_delta from the agent worker thread; drained by the
-TUI poll tick. `format_stream_block` renders a compact in-progress view: the
-answer text plus a single tail line of reasoning (full <think> is never dumped).
+TUI poll tick. `format_stream_block` renders the answer text only (inline <think>
+stripped); reasoning is surfaced via the ThinkingIndicator. The sink also tracks
+a self-counted progress counter and reasoning start/end timing for that indicator.
 Presentation layer — no business logic, not a substitute for the thread store.
 """
 from __future__ import annotations
