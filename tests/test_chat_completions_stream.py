@@ -44,3 +44,15 @@ def test_assemble_reassembles_message_content_and_tool_calls():
     assert ("think", "ана") in deltas
     assert ("answer", "Это ") in deltas
     assert [t for k, t in deltas if k == "answer"] == ["Это ", "проект."]
+
+
+def test_assemble_without_on_delta():
+    """assemble_streamed_completion works when on_delta is omitted (default None)."""
+    payloads = iter_sse_data_lines([
+        'data: {"id":"x","model":"m","choices":[{"index":0,"delta":{"role":"assistant","content":"hello"}}]}',
+        'data: {"id":"x","model":"m","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}',
+        'data: [DONE]',
+    ])
+    result = assemble_streamed_completion(payloads)
+    assert result["choices"][0]["message"]["content"] == "hello"
+    assert result["choices"][0]["finish_reason"] == "stop"

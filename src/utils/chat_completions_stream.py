@@ -34,7 +34,10 @@ def assemble_streamed_completion(
 
     Emits on_delta("think"|"answer", text) per chunk: reasoning_content -> think,
     content -> answer. Inline <think> handling is left to the display layer (the
-    content is preserved verbatim here).
+    content is preserved verbatim here). `finish_reason` may be `None` if the
+    stream ends without one (e.g. a truncated/interrupted stream); this is
+    intentional and surfaces downstream as an error rather than being masked by a
+    fake default.
     """
     content_parts: List[str] = []
     reasoning_parts: List[str] = []
@@ -88,7 +91,7 @@ def assemble_streamed_completion(
         for tc in (delta.get("tool_calls") or []):
             if not isinstance(tc, dict):
                 continue
-            idx = tc.get("index", 0)
+            idx = tc.get("index", 0)  # OpenAI-compatible providers always send index; fallback 0 collapses all tool calls into one slot for non-compliant providers (accepted for OpenAI-compatible transport)
             slot = tool_calls.setdefault(
                 idx,
                 {"id": None, "type": "function",
