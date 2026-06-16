@@ -33,6 +33,8 @@ gc-mcp-install --config recommended_mcp/config.local.yml   # MCP → ~/.local/sh
 # установка без клонирования репо gc-cli + gc-ua (TUI по умолчанию)
 uv tool install git+ssh://git@gitverse.ru/gigacode-ai/background-agent
 gc-mcp-install   # MCP → ~/.local/share/gc/recommended_mcp/venv (bundled manifest; --config <путь> для своего)
+# Примечание: в методе 2 (без клонирования) gc-mcp-install устанавливает только duckduckgo_search и browser_playwright;
+# MCP office/science/computer требуют клонированного репо (метод 1), так как их источники находятся в external/.
 ```
 
 После установки `gc-ua` / `gc-cli` работают **без `--config`**: при первом запуске конфиг автоматически создаётся в `~/.gc/config.yml`. Перед первым запросом укажите в нём свой токен (`Authorization`).

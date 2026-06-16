@@ -77,6 +77,20 @@ def _prompt_default(config_dir: str, name: str) -> str:
     return str(bundled_root() / "prompts" / name)
 
 
+def _asset_default(config_dir: str, rel_path: str) -> str:
+    """config_dir/<rel_path> если файл существует; иначе bundled_root()/<rel_path>
+    (для относительных asset-путей вроде agent_md_path). Абсолютные/пустые — как есть."""
+    if not rel_path or os.path.isabs(rel_path):
+        return rel_path
+    local = os.path.abspath(os.path.join(config_dir, rel_path))
+    if os.path.isfile(local):
+        return local
+    bundled = str(bundled_root() / rel_path)
+    if os.path.isfile(bundled):
+        return bundled
+    return local
+
+
 def resolve_paths(cfg: AppConfig, config_dir: str) -> None:
     def to_abs(path_value: str | None) -> str | None:
         if path_value is None or not str(path_value).strip():
@@ -90,7 +104,7 @@ def resolve_paths(cfg: AppConfig, config_dir: str) -> None:
     slug = env_vars.project_slug()
     project_state = paths["state"] / "projects" / slug
 
-    cfg.paths.agent_md_path = to_abs(cfg.paths.agent_md_path) or cfg.paths.agent_md_path
+    cfg.paths.agent_md_path = _asset_default(config_dir, cfg.paths.agent_md_path)
     cfg.paths.chat_completions_system_prompt_path = to_abs(
         cfg.paths.chat_completions_system_prompt_path
     ) or _prompt_default(config_dir, "chat_completions_system_prompt.md")
