@@ -543,7 +543,7 @@ class TraceScreen(Screen):
 
         reset_sink=False: виджет убирается, но sink не трогается — счётчик и
         reasoning-состояние индикатора продолжают жить (нужно для
-        stream_answer_preview=False: дейтвие в drain без сброса буфера)."""
+        stream_answer_preview=False: действие в drain без сброса буфера)."""
         if self._stream_block is not None:
             self._stream_block.remove()
             self._stream_block = None
