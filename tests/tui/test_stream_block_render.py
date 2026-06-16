@@ -33,7 +33,7 @@ def test_block_text_from_sink_reasoning_only():
     assert ans == ""  # no answer → empty
     # Drain logic: ans falsy → reasoning line
     line = format_reasoning_line(think=think)
-    assert line == "⋮ анализирую структуру проекта"
+    assert line == "⠇ анализирую структуру проекта"
 
 
 def test_sink_reset_clears_block():
