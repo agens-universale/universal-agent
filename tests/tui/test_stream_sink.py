@@ -82,3 +82,25 @@ def test_reset_clears_progress_and_reasoning():
     s.push("reset", "")
     assert s.progress_units() == 0
     assert s.reasoning_state() == (None, None)
+
+
+def test_reasoning_line_short_unchanged():
+    from tui.services.stream_sink import format_reasoning_line
+    assert format_reasoning_line(think="смотрю agents/") == "⋮ смотрю agents/"
+
+
+def test_reasoning_line_collapses_newlines():
+    from tui.services.stream_sink import format_reasoning_line
+    assert format_reasoning_line(think="строю план\nчитаю README") == "⋮ строю план читаю README"
+
+
+def test_reasoning_line_truncates_with_ellipsis():
+    from tui.services.stream_sink import format_reasoning_line
+    out = format_reasoning_line(think="a" * 100, tail_len=10)
+    assert out == "⋮ …" + "a" * 10
+
+
+def test_reasoning_line_empty():
+    from tui.services.stream_sink import format_reasoning_line
+    assert format_reasoning_line(think="") == ""
+    assert format_reasoning_line(think="   ") == ""

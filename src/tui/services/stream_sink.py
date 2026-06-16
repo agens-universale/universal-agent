@@ -85,3 +85,21 @@ def format_stream_block(*, answer: str) -> str:
     Reasoning is surfaced via the ThinkingIndicator, not here. Inline
     <think>...</think> spans (incl. an unclosed one mid-stream) are stripped."""
     return _THINK_RE.sub("", answer).strip()
+
+
+def _reasoning_tail(think: str, maxlen: int) -> str:
+    """Reasoning as a single line: collapse whitespace; '…'-prefixed last
+    `maxlen` chars if longer."""
+    one_line = " ".join(think.split())
+    if not one_line:
+        return ""
+    if len(one_line) <= maxlen:
+        return one_line
+    return "…" + one_line[-maxlen:]
+
+
+def format_reasoning_line(*, think: str, tail_len: int = 64) -> str:
+    """Compact one-line reasoning glimpse for the StreamBlock during the
+    thinking phase: `⋮ <tail>` (empty string if no reasoning)."""
+    tail = _reasoning_tail(think, tail_len)
+    return f"⋮ {tail}" if tail else ""
