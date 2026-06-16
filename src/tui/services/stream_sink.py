@@ -81,9 +81,10 @@ class StreamSink:
 
 
 def format_stream_block(*, answer: str) -> str:
-    """In-progress view for the StreamBlock: ONLY the answer text.
-    Reasoning is surfaced via the ThinkingIndicator, not here. Inline
-    <think>...</think> spans (incl. an unclosed one mid-stream) are stripped."""
+    """In-progress answer text for the StreamBlock (answer phase). Reasoning is
+    surfaced separately — `format_reasoning_line` (the StreamBlock's thinking-phase
+    line) and the ThinkingIndicator counter — not here. Inline <think>...</think>
+    spans (incl. an unclosed one mid-stream) are stripped."""
     return _THINK_RE.sub("", answer).strip()
 
 
