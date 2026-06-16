@@ -10,6 +10,10 @@ from tui.services.tool_identity import tool_id
 
 
 _TECHNICAL_TAG_RE = re.compile(r"<technical[^>]*>(.*?)</technical>", re.DOTALL)
+# Greedy: strips first <think> → LAST </think> (one span). Robust к тому, что
+# модель цитирует/обсуждает think-теги внутри рассуждения (рассогласованные/
+# вложенные теги). Tradeoff: реальный ответ МЕЖДУ двумя think-блоками будет
+# срезан — патологический редкий случай vs частая утечка рассуждения наружу.
 _THINK_BLOCK_RE = re.compile(r"<think>.*</think>", re.DOTALL | re.IGNORECASE)
 _SUMMARY_TAG_RE = re.compile(r"<summary[^>]*>(.*?)</summary>", re.DOTALL)
 _SUMMARIZED_PREFIX_RE = re.compile(
