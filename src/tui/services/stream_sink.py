@@ -89,18 +89,23 @@ def format_stream_block(*, answer: str) -> str:
 
 
 def _reasoning_tail(think: str, maxlen: int) -> str:
-    """Reasoning as a single line: collapse whitespace; '…'-prefixed last
-    `maxlen` chars if longer."""
+    """Reasoning as a single line: collapse whitespace; if longer than `maxlen`,
+    keep the last `maxlen` chars trimmed to a word boundary (no mid-word cut),
+    '…'-prefixed."""
     one_line = " ".join(think.split())
     if not one_line:
         return ""
     if len(one_line) <= maxlen:
         return one_line
-    return "…" + one_line[-maxlen:]
+    tail = one_line[-maxlen:]
+    sp = tail.find(" ")
+    if sp != -1:  # drop the leading partial word → start at a word boundary
+        tail = tail[sp + 1:]
+    return "…" + tail
 
 
 def format_reasoning_line(*, think: str, tail_len: int = 64) -> str:
     """Compact one-line reasoning glimpse for the StreamBlock during the
-    thinking phase: `⋮ <tail>` (empty string if no reasoning)."""
+    thinking phase: `⠇ <tail>` (empty string if no reasoning)."""
     tail = _reasoning_tail(think, tail_len)
-    return f"⋮ {tail}" if tail else ""
+    return f"⠇ {tail}" if tail else ""
