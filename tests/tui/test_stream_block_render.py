@@ -66,7 +66,8 @@ async def test_stream_block_mounts_then_clears_on_canonical_row(tmp_path):
     tid = "stream1"
     _write_task(tmp_path, tid)
     app = TuiApp(threads_dir=str(tmp_path), system="cli",
-                 config={"model": "M", "backend_api_mode": "chat_completions"})
+                 config={"model": "M", "backend_api_mode": "chat_completions",
+                         "stream_answer_preview": True})
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr.attach_active_task(tid)
@@ -108,7 +109,8 @@ async def test_reset_render_state_clears_stream_block_and_sink(tmp_path):
     tid = "stream3"
     _write_task(tmp_path, tid)
     app = TuiApp(threads_dir=str(tmp_path), system="cli",
-                 config={"model": "M", "backend_api_mode": "chat_completions"})
+                 config={"model": "M", "backend_api_mode": "chat_completions",
+                         "stream_answer_preview": True})
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr.attach_active_task(tid)
@@ -141,7 +143,8 @@ async def test_stream_block_cleared_when_run_not_running(tmp_path):
     tid = "stream2"
     _write_task(tmp_path, tid)
     app = TuiApp(threads_dir=str(tmp_path), system="cli",
-                 config={"model": "M", "backend_api_mode": "chat_completions"})
+                 config={"model": "M", "backend_api_mode": "chat_completions",
+                         "stream_answer_preview": True})
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr.attach_active_task(tid)

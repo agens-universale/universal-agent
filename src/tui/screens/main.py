@@ -1168,7 +1168,7 @@ class TraceScreen(Screen):
                 think, answer = sink.snapshot()
                 ans = format_stream_block(answer=answer)
                 _cfg = getattr(self.app, "_config", None) or {}
-                _show_answer = bool(_cfg.get("stream_answer_preview", True))
+                _show_answer = bool(_cfg.get("stream_answer_preview", False))
                 if ans and not _show_answer:
                     # Live answer preview disabled: drop the preview widget but
                     # keep the sink (counter + reasoning state feed the indicator;
