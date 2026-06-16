@@ -67,7 +67,7 @@ async def test_stream_block_mounts_then_clears_on_canonical_row(tmp_path):
     _write_task(tmp_path, tid)
     app = TuiApp(threads_dir=str(tmp_path), system="cli",
                  config={"model": "M", "backend_api_mode": "chat_completions",
-                         "stream_answer_preview": True})
+                         "tui_show_stream_answer": True})
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr.attach_active_task(tid)
@@ -110,7 +110,7 @@ async def test_reset_render_state_clears_stream_block_and_sink(tmp_path):
     _write_task(tmp_path, tid)
     app = TuiApp(threads_dir=str(tmp_path), system="cli",
                  config={"model": "M", "backend_api_mode": "chat_completions",
-                         "stream_answer_preview": True})
+                         "tui_show_stream_answer": True})
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr.attach_active_task(tid)
@@ -144,7 +144,7 @@ async def test_stream_block_cleared_when_run_not_running(tmp_path):
     _write_task(tmp_path, tid)
     app = TuiApp(threads_dir=str(tmp_path), system="cli",
                  config={"model": "M", "backend_api_mode": "chat_completions",
-                         "stream_answer_preview": True})
+                         "tui_show_stream_answer": True})
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr.attach_active_task(tid)
@@ -296,7 +296,7 @@ async def test_no_reasoning_block_in_validating_phase(tmp_path):
 
 @pytest.mark.asyncio
 async def test_stream_answer_preview_false_hides_answer_block(tmp_path):
-    """stream_answer_preview=False: answer delta → NO StreamBlock shown,
+    """tui_show_stream_answer=False: answer delta → NO StreamBlock shown,
     but sink is NOT reset (counter preserved)."""
     pytest.importorskip("textual")
     from tui.app import TuiApp
@@ -311,7 +311,7 @@ async def test_stream_answer_preview_false_hides_answer_block(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path), system="cli",
         config={"model": "M", "backend_api_mode": "chat_completions",
-                "stream_answer_preview": False},
+                "tui_show_stream_answer": False},
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -323,7 +323,7 @@ async def test_stream_answer_preview_false_hides_answer_block(tmp_path):
 
         # No StreamBlock visible.
         assert not pilot.app.query(StreamBlock), (
-            "StreamBlock не должен отображаться при stream_answer_preview=False"
+            "StreamBlock не должен отображаться при tui_show_stream_answer=False"
         )
         # Sink NOT reset — counter keeps growing (indicator still alive).
         assert pilot.app._stream_sink.progress_units() > 0, (
@@ -333,7 +333,7 @@ async def test_stream_answer_preview_false_hides_answer_block(tmp_path):
 
 @pytest.mark.asyncio
 async def test_stream_answer_preview_false_shows_reasoning_line(tmp_path):
-    """stream_answer_preview=False: think-only delta → reasoning StreamBlock
+    """tui_show_stream_answer=False: think-only delta → reasoning StreamBlock
     IS shown (flag only gates the answer-mode block)."""
     pytest.importorskip("textual")
     from tui.app import TuiApp
@@ -348,7 +348,7 @@ async def test_stream_answer_preview_false_shows_reasoning_line(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path), system="cli",
         config={"model": "M", "backend_api_mode": "chat_completions",
-                "stream_answer_preview": False},
+                "tui_show_stream_answer": False},
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -363,4 +363,42 @@ async def test_stream_answer_preview_false_shows_reasoning_line(tmp_path):
         assert blocks, "StreamBlock с reasoning-строкой должен быть показан"
         assert "⠇" in str(blocks[0].render()), (
             "Reasoning-строка должна содержать ⠇"
+        )
+
+
+@pytest.mark.asyncio
+async def test_show_reasoning_line_false_hides_reasoning_block(tmp_path):
+    """tui_show_reasoning_line=False: think delta → NO StreamBlock shown,
+    but sink is NOT reset (counter/indicator unaffected)."""
+    pytest.importorskip("textual")
+    from tui.app import TuiApp
+    from tui.widgets.stream_block import StreamBlock
+
+    class _FakeRunner:
+        def is_running(self) -> bool: return True
+        def stop(self) -> None: pass
+
+    tid = "stream9"
+    _write_task(tmp_path, tid)
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli",
+        config={"model": "M", "backend_api_mode": "chat_completions",
+                "tui_show_reasoning_line": False},
+    )
+    async with app.run_test() as pilot:
+        scr = pilot.app.screen
+        scr.attach_active_task(tid)
+        pilot.app.active_runner = _FakeRunner()
+        # Push think delta — reasoning line should be suppressed.
+        pilot.app._stream_sink.push("think", "скрытое рассуждение")
+        await pilot.pause(0.7)
+
+        # No StreamBlock visible.
+        assert not pilot.app.query(StreamBlock), (
+            "StreamBlock не должен отображаться при tui_show_reasoning_line=False"
+        )
+        # Sink NOT reset — snapshot still has the think text.
+        think, _answer = pilot.app._stream_sink.snapshot()
+        assert "скрытое рассуждение" in think, (
+            "Sink должен быть жив (reset_sink=False)"
         )

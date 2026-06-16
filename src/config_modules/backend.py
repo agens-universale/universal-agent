@@ -44,7 +44,6 @@ class BackendConfig(BaseModel):
     use_ssl: bool = True
     use_retry: bool = False
     stream: bool = True
-    stream_answer_preview: bool = False
 
     @field_validator("api_mode")
     @classmethod

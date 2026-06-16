@@ -543,7 +543,7 @@ class TraceScreen(Screen):
 
         reset_sink=False: виджет убирается, но sink не трогается — счётчик и
         reasoning-состояние индикатора продолжают жить (нужно для
-        stream_answer_preview=False: действие в drain без сброса буфера)."""
+        tui.show_*=False: действие в drain без сброса буфера)."""
         if self._stream_block is not None:
             self._stream_block.remove()
             self._stream_block = None
@@ -1168,18 +1168,21 @@ class TraceScreen(Screen):
                 think, answer = sink.snapshot()
                 ans = format_stream_block(answer=answer)
                 _cfg = getattr(self.app, "_config", None) or {}
-                _show_answer = bool(_cfg.get("stream_answer_preview", False))
-                if ans and not _show_answer:
-                    # Live answer preview disabled: drop the preview widget but
-                    # keep the sink (counter + reasoning state feed the indicator;
-                    # the final ● answer still appears on completion).
-                    self._clear_stream_block(reset_sink=False)
+                if ans:
+                    show = bool(_cfg.get("tui_show_stream_answer", False))
+                    text, thinking = ans, False
                 else:
-                    text, thinking = (ans, False) if ans else (format_reasoning_line(think=think), True)
+                    show = bool(_cfg.get("tui_show_reasoning_line", True))
+                    text, thinking = format_reasoning_line(think=think), True
+                if show and text:
                     if self._stream_block is None:
                         self._stream_block = StreamBlock()
                         self._trace_mount(self._stream_block, scroll=True)
                     self._stream_block.set_text(text, thinking=thinking)
+                else:
+                    # render disabled by config (or nothing to show) — drop the
+                    # widget but KEEP the sink (counter/indicator unaffected).
+                    self._clear_stream_block(reset_sink=False)
             elif not _thinking_phase:
                 self._clear_stream_block()
         elif ask_human_active:
