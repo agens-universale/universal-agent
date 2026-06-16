@@ -117,19 +117,22 @@ def test_thinking_phrases_pool_starts_with_dumayu():
 def test_morph_frames_constant_shape():
     pytest.importorskip("textual")
     from tui.widgets.thinking_indicator import MORPH_FRAMES
-    assert MORPH_FRAMES[0] == "⠋"
+    assert MORPH_FRAMES[0] == "·"
     assert len(MORPH_FRAMES) >= 4
-    # Все кадры — braille (одинаковая ширина, без дёрганья строки).
-    assert all(0x2800 <= ord(c) <= 0x28FF for c in MORPH_FRAMES)
+    # Компас × искра: курируемый набор глифов (narrow-искра + ambiguous-width
+    # треугольники). Внутри цикла ширина консистентна — строка не дёргается.
+    assert all(c in {"·", "+", "✧", "✦", "✶", "▴", "▸", "▾", "◂"} for c in MORPH_FRAMES)
 
 
 def test_thinking_render_uses_morph_glyph_for_frame():
     pytest.importorskip("textual")
-    from tui.widgets.thinking_indicator import ThinkingIndicator, MORPH_FRAMES
+    from tui.widgets.thinking_indicator import ThinkingIndicator, MORPH_FRAMES, FRAME_HOLD
     w = ThinkingIndicator()
     w._frame = 4
     rendered = str(w.render())
-    assert MORPH_FRAMES[4] in rendered           # глиф соответствует кадру
+    # Глиф держится FRAME_HOLD тиков — индекс кадра считаем с учётом hold.
+    expected = MORPH_FRAMES[(4 // FRAME_HOLD) % len(MORPH_FRAMES)]
+    assert expected in rendered
     assert "думаю…" in rendered                  # фраза (старт пула)
 
 

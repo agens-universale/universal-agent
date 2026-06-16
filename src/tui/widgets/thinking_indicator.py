@@ -75,15 +75,28 @@ class PhraseRotator:
         return self._current
 
 
-# Классический braille-spin: крутящийся «сегмент». Все кадры — braille
-# (narrow, одинаковая ширина) → строка не дёргается. Плавное вращение.
-MORPH_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+# Компас → искра: уголёк (·) → вращение треугольника против часовой 1,5 оборота
+# (▴◂▾▸ + ▴◂: вверх→влево→вниз→вправо…, «обрабатываю») → искра вспыхивает (✦),
+# гаснет в полую (✧) и оседает крестом (+). Оживляем фирменную искру ✦ (та же,
+# что в заголовке). Треугольники — ambiguous-width: в большинстве терминалов
+# 1 ячейка, внутри цикла ширина консистентна; на стыке с narrow-глифами в
+# CJK-режиме возможен сдвиг на 1 клетку (статичный, не дёрганье между кадрами).
+MORPH_FRAMES = ["·", "▴", "◂", "▾", "▸", "▴", "◂", "✦", "✧", "+"]
+
+# Каждый кадр держится FRAME_HOLD тиков (тик = 0.1с) → 10 кадров × 0.2с ≈ 2.0с на
+# полный цикл. Цвет (GLOW_SHADES) при этом меняется каждый тик — глиф и свечение
+# раскадрованы независимо (списки разной длины), см. _anim().
+FRAME_HOLD = 2
 
 # Рампа «дыхания» цветом (ping-pong уже зашит в список): gold тускло→ярко→тускло.
 GLOW_SHADES = [
     "#9c7a4a", "#b8915c", "#d4a574", "#e0b585", "#ecc596",
     "#f0c896", "#ecc596", "#e0b585", "#d4a574", "#b8915c",
 ]
+
+# Период счётчика кадров: общий кратный темпа глифа и рампы цвета — счётчик
+# остаётся ограниченным, а обе под-анимации выходят на старт синхронно.
+_ANIM_PERIOD = FRAME_HOLD * len(MORPH_FRAMES) * len(GLOW_SHADES)
 
 _STATE_THINKING = "thinking"
 _STATE_VALIDATING = "validating"
@@ -138,15 +151,23 @@ class ThinkingIndicator(Static):
             self.refresh()
 
     def on_mount(self) -> None:
-        # Перерисовка 10 раз/сек — braille-spin из 10 кадров (1.0с на оборот).
+        # Перерисовка 10 раз/сек: глиф держится FRAME_HOLD тиков (≈1.2с цикл),
+        # свечение «дышит» каждый тик (1.0с на ping-pong рампы).
         self.set_interval(0.1, self._tick)
 
     def _tick(self) -> None:
-        self._frame = (self._frame + 1) % len(MORPH_FRAMES)
+        self._frame = (self._frame + 1) % _ANIM_PERIOD
         # render() читает _frame динамически — достаточно запросить refresh.
         # Guard `is_mounted` — в юнит-тестах _tick дёргается без app-контекста.
         if self.is_mounted:
             self.refresh()
+
+    def _anim(self) -> tuple[str, str]:
+        """(глиф, цвет) текущего кадра. Глиф держится FRAME_HOLD тиков, цвет
+        меняется каждый тик — раскадрованы независимо (списки разной длины)."""
+        glyph = MORPH_FRAMES[(self._frame // FRAME_HOLD) % len(MORPH_FRAMES)]
+        color = GLOW_SHADES[self._frame % len(GLOW_SHADES)]
+        return glyph, color
 
     def render(self) -> Text:
         return self._render_text()
@@ -162,14 +183,12 @@ class ThinkingIndicator(Static):
         elif self._state == _STATE_COMPRESSING:
             # Идёт суммаризация истории: анимированный глиф + фикс-текст (не из
             # rotator — это конкретная операция, не «общее размышление»).
-            glyph = MORPH_FRAMES[self._frame % len(MORPH_FRAMES)]
-            color = GLOW_SHADES[self._frame % len(GLOW_SHADES)]
+            glyph, color = self._anim()
             text.append(glyph, style=color)
             text.append(" ")
             text.append("сжимаю контекст…", style=_ACCENT)
         else:
-            glyph = MORPH_FRAMES[self._frame % len(MORPH_FRAMES)]
-            color = GLOW_SHADES[self._frame % len(GLOW_SHADES)]
+            glyph, color = self._anim()
             text.append(glyph, style=color)
             text.append(" ")
             text.append(f"{self._rotator.current()}…", style=_ACCENT)
