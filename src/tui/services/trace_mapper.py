@@ -10,7 +10,7 @@ from tui.services.tool_identity import tool_id
 
 
 _TECHNICAL_TAG_RE = re.compile(r"<technical[^>]*>(.*?)</technical>", re.DOTALL)
-_THINK_BLOCK_RE = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
+_THINK_BLOCK_RE = re.compile(r"<think>.*</think>", re.DOTALL | re.IGNORECASE)
 _SUMMARY_TAG_RE = re.compile(r"<summary[^>]*>(.*?)</summary>", re.DOTALL)
 _SUMMARIZED_PREFIX_RE = re.compile(
     r"^Summarized context from previous dialogue\.\s*", re.IGNORECASE
