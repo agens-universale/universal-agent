@@ -15,6 +15,11 @@ from utils.retry import retry_with_backoff
 
 logger = logging.getLogger(__name__)
 
+# Session без чтения ~/.netrc: requests при trust_env=True читает ~/.netrc,
+# и Basic-auth оттуда перетирает явный Authorization-заголовок → 401.
+_NO_NETRC_SESSION = requests.Session()
+_NO_NETRC_SESSION.trust_env = False
+
 
 def normalize_chat_completions_tools(
     tools: Optional[List],
@@ -104,7 +109,7 @@ def request_backend_responses(
 
     data['stream'] = True
 
-    with requests.post(url, json=data, headers=headers, stream=True, verify=verify) as r:
+    with _NO_NETRC_SESSION.post(url, json=data, headers=headers, stream=True, verify=verify) as r:
         r.raise_for_status()
         r_headers = r.headers
         for line in r.iter_lines():
@@ -157,7 +162,7 @@ def request_backend_chat_completions(
             # Не роняем процесс из-за проблем с сериализацией payload.
             logger.debug("Send request to backend chat/completions url=%s", url)
 
-    r = requests.post(url, json=data, headers=headers, verify=verify)
+    r = _NO_NETRC_SESSION.post(url, json=data, headers=headers, verify=verify)
     try:
         r.raise_for_status()
     except requests.exceptions.HTTPError:
