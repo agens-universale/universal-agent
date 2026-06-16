@@ -5,6 +5,7 @@ import os
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from bundled_assets import bundled_root
 from config_modules import env_vars
 from config_modules.agent import (
     AgentConfig,
@@ -68,6 +69,14 @@ class AppConfig(BaseModel):
     agent_auth: AgentAuthConfig | None = None
 
 
+def _prompt_default(config_dir: str, name: str) -> str:
+    """config_dir/prompts/<name> если существует, иначе bundled_root()/prompts/<name>."""
+    local = os.path.join(config_dir, "prompts", name)
+    if os.path.isfile(local):
+        return local
+    return str(bundled_root() / "prompts" / name)
+
+
 def resolve_paths(cfg: AppConfig, config_dir: str) -> None:
     def to_abs(path_value: str | None) -> str | None:
         if path_value is None or not str(path_value).strip():
@@ -84,7 +93,7 @@ def resolve_paths(cfg: AppConfig, config_dir: str) -> None:
     cfg.paths.agent_md_path = to_abs(cfg.paths.agent_md_path) or cfg.paths.agent_md_path
     cfg.paths.chat_completions_system_prompt_path = to_abs(
         cfg.paths.chat_completions_system_prompt_path
-    ) or os.path.join(config_dir, "prompts", "chat_completions_system_prompt.md")
+    ) or _prompt_default(config_dir, "chat_completions_system_prompt.md")
     cfg.paths.threads_data_path = (
         to_abs(cfg.paths.threads_data_path) or str(project_state / "threads")
     )
@@ -94,17 +103,13 @@ def resolve_paths(cfg: AppConfig, config_dir: str) -> None:
     )
     cfg.summary.chat_completions_summary_prompt_path = to_abs(
         cfg.summary.chat_completions_summary_prompt_path
-    ) or os.path.join(config_dir, "prompts", "chat_completions_summary_prompt.md")
+    ) or _prompt_default(config_dir, "chat_completions_summary_prompt.md")
     cfg.summary.chat_completions_memory_patch_append_prompt_path = to_abs(
         cfg.summary.chat_completions_memory_patch_append_prompt_path
-    ) or os.path.join(
-        config_dir, "prompts", "chat_completions_memory_patch_append.md"
-    )
+    ) or _prompt_default(config_dir, "chat_completions_memory_patch_append.md")
     cfg.summary.chat_completions_memory_patch_replace_prompt_path = to_abs(
         cfg.summary.chat_completions_memory_patch_replace_prompt_path
-    ) or os.path.join(
-        config_dir, "prompts", "chat_completions_memory_patch_replace.md"
-    )
+    ) or _prompt_default(config_dir, "chat_completions_memory_patch_replace.md")
     if cfg.summary.intent_log_preview_chars <= 0:
         cfg.summary.intent_log_preview_chars = DEFAULT_INTENT_LOG_PREVIEW_CHARS
     if cfg.summary.chat_completions_summary_trigger_chars < 0:
@@ -143,7 +148,7 @@ def resolve_paths(cfg: AppConfig, config_dir: str) -> None:
     normalize_intent_scope_config(cfg.intent_scope)
     cfg.intent_scope.intent_scope_tool_summary_prompt_path = to_abs(
         cfg.intent_scope.intent_scope_tool_summary_prompt_path
-    ) or os.path.join(config_dir, "prompts", "intent_scope_tool_summary_prompt.md")
+    ) or _prompt_default(config_dir, "intent_scope_tool_summary_prompt.md")
     if cfg.agent.finish_gate_max_iterations < 1:
         logging.getLogger(__name__).warning(
             "finish_gate_reject_limit_invalid finish_gate_max_iterations=%s; using %s",
