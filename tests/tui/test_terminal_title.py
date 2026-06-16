@@ -27,6 +27,17 @@ def test_set_terminal_title_writes_osc():
     assert buf.getvalue() == "\033]0;✦ GigaCode · x\007"
 
 
+def test_set_terminal_title_uses_utf8_buffer_when_present():
+    # Stream with a binary .buffer (like a real console stdout) → emblem written
+    # as UTF-8 bytes, bypassing any legacy text encoding (Windows cp1251).
+    class _Stream:
+        def __init__(self):
+            self.buffer = io.BytesIO()
+    s = _Stream()
+    set_terminal_title("✦ GigaCode · x", out=s)
+    assert s.buffer.getvalue() == "\033]0;✦ GigaCode · x\007".encode("utf-8")
+
+
 def test_set_terminal_title_none_out_is_safe():
     # must not raise when out is None
     set_terminal_title("x", out=None)

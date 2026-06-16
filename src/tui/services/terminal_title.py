@@ -23,12 +23,23 @@ def format_terminal_title(task: Optional[str] = None, *, max_len: int = 50) -> s
 def set_terminal_title(text: str, *, out=None) -> None:
     """Write the OSC-0 window-title escape. `out` defaults to the real stdout
     (sys.__stdout__) so it works inside Textual's managed screen. No-op / safe
-    if the stream is missing or write fails (OSC doesn't touch the screen grid)."""
+    if the stream is missing or write fails (OSC doesn't touch the screen grid).
+
+    Prefer the binary `buffer` with explicit UTF-8: on Windows the text stream's
+    encoding may be a legacy code page (cp1251), where writing the emblem `✦`
+    raises UnicodeEncodeError — writing UTF-8 bytes bypasses that so the emblem
+    actually reaches the terminal. Falls back to text write (e.g. StringIO)."""
     stream = out if out is not None else sys.__stdout__
     if stream is None:
         return
+    data = f"\033]0;{text}\007"
     try:
-        stream.write(f"\033]0;{text}\007")
-        stream.flush()
+        buffer = getattr(stream, "buffer", None)
+        if buffer is not None:
+            buffer.write(data.encode("utf-8"))
+            buffer.flush()
+        else:
+            stream.write(data)
+            stream.flush()
     except Exception:
         pass
