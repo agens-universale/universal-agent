@@ -114,9 +114,11 @@ class ThinkingIndicator(Static):
         state: str = _STATE_THINKING,
         clock=time.monotonic,
         sink=None,
+        reasoning_tag: bool = False,
     ) -> None:
         self._clock = clock
         self._sink = sink
+        self._reasoning_tag = reasoning_tag
         self._started_at: float = (
             started_at if started_at is not None else clock()
         )
@@ -179,7 +181,9 @@ class ThinkingIndicator(Static):
             if units > 0:
                 parens += f" · ↓ {_fmt_units(units)} токенов"
             _r_state, dur = self._sink.reasoning_state()
-            if _r_state == "done":
+            if _r_state == "thinking" and self._reasoning_tag:
+                parens += " · размышление"
+            elif _r_state == "done":
                 parens += f" · обдумал за {round(dur)}с"
         parens += ")"
         text.append(parens)

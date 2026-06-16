@@ -513,10 +513,12 @@ class TraceScreen(Screen):
             if following:
                 self.query_one("#trace", VerticalScroll).scroll_end(animate=False)
             return
+        _cfg = getattr(self.app, "_config", None) or {}
         from tui.widgets.thinking_indicator import ThinkingIndicator
         indicator = ThinkingIndicator(
             started_at=self._thinking_started_at, state=state,
             sink=getattr(self.app, "_stream_sink", None),
+            reasoning_tag=not bool(_cfg.get("tui_show_reasoning_line", True)),
         )
         self._thinking = indicator
         trace = self.query_one("#trace", VerticalScroll)
