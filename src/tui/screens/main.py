@@ -585,6 +585,8 @@ class TraceScreen(Screen):
         """Обработка отправки user query: обнулить счётчик событий с последнего
         user-send и запомнить текст для cancel-with-undo (Tasks 9-10).
         Дополнительно: append текста в input-history и выход из history-навигации."""
+        from tui.services.terminal_title import format_terminal_title, set_terminal_title
+        set_terminal_title(format_terminal_title(text))
         self._events_since_last_user_send = 0
         self._last_user_send_text = text
         if self._history is not None:

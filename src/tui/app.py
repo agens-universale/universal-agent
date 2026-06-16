@@ -55,6 +55,10 @@ class TuiApp(App):
         from tui.state import TuiState
         self.tui_state = TuiState()
 
+    def on_mount(self) -> None:
+        from tui.services.terminal_title import format_terminal_title, set_terminal_title
+        set_terminal_title(format_terminal_title())
+
     def get_default_screen(self) -> Screen:
         return TraceScreen()
 
