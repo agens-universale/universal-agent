@@ -216,3 +216,76 @@ async def test_reasoning_line_below_committed_rows(tmp_path):
             "StreamBlock must be below committed rows, "
             f"but sb_idx={sb_idx} <= last committed={max(committed_indices)}"
         )
+
+
+@pytest.mark.asyncio
+async def test_reasoning_block_cleared_when_tool_row_renders(tmp_path):
+    """Fix A: StreamBlock снимается когда рендерится canonical tool-call строка,
+    чтобы не дрейфовать выше неё."""
+    pytest.importorskip("textual")
+    from tui.app import TuiApp
+    from tui.widgets.stream_block import StreamBlock
+
+    class _FakeRunner:
+        def is_running(self) -> bool: return True
+        def stop(self) -> None: pass
+
+    tid = "stream5"
+    _write_task(tmp_path, tid)
+    app = TuiApp(threads_dir=str(tmp_path), system="cli",
+                 config={"model": "M", "backend_api_mode": "chat_completions"})
+    async with app.run_test() as pilot:
+        scr = pilot.app.screen
+        scr.attach_active_task(tid)
+        pilot.app.active_runner = _FakeRunner()
+
+        # Подаём reasoning — poll-тик монтирует StreamBlock.
+        pilot.app._stream_sink.push("think", "анализирую")
+        await pilot.pause(0.7)
+        assert pilot.app.query(StreamBlock), "StreamBlock должен быть смонтирован"
+
+        # Canonical tool-call строка рендерится → StreamBlock должен быть снят.
+        scr._render_record({
+            "payload": {
+                "type": "function_call",
+                "name": "fs_read_file",
+                "call_id": "c1",
+                "arguments": "{}",
+            }
+        })
+        await pilot.pause()
+        assert not pilot.app.query(StreamBlock), (
+            "StreamBlock должен быть снят при рендере canonical tool-call строки"
+        )
+
+
+@pytest.mark.asyncio
+async def test_no_reasoning_block_in_validating_phase(tmp_path):
+    """Fix B: StreamBlock не показывается в фазе validating
+    (после финального ответа, пока идёт intent_guard)."""
+    pytest.importorskip("textual")
+    from tui.app import TuiApp
+    from tui.widgets.stream_block import StreamBlock
+
+    class _FakeRunner:
+        def is_running(self) -> bool: return True
+        def stop(self) -> None: pass
+
+    tid = "stream6"
+    _write_task(tmp_path, tid)
+    app = TuiApp(threads_dir=str(tmp_path), system="cli",
+                 config={"model": "M", "backend_api_mode": "chat_completions"})
+    async with app.run_test() as pilot:
+        scr = pilot.app.screen
+        scr.attach_active_task(tid)
+        pilot.app.active_runner = _FakeRunner()
+
+        # Переводим в фазу validating (финальный ответ уже виден).
+        scr._last_event_kind = "_finalized"
+
+        # Подаём reasoning от intent_guard — StreamBlock НЕ должен появиться.
+        pilot.app._stream_sink.push("think", "пост-валидация рассуждение")
+        await pilot.pause(0.7)
+        assert not pilot.app.query(StreamBlock), (
+            "StreamBlock не должен отображаться в фазе validating"
+        )

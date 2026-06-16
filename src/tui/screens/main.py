@@ -604,6 +604,11 @@ class TraceScreen(Screen):
         if ev.kind != "user":
             self._events_since_last_user_send += 1
 
+        # Any committed canonical row supersedes the ephemeral reasoning/answer
+        # preview for the current step — clear it so it can't drift above new rows.
+        # (It re-mounts at the bottom on the next poll tick if streaming continues.)
+        self._clear_stream_block()
+
         # ask_human-output banner cleanup — Фикс B-2.
         # Mapper эмитит для function_call_output name=ask_human либо kind='user'
         # (непустой response), либо kind='system' (пустой/cancel/broken). В обоих
@@ -640,10 +645,6 @@ class TraceScreen(Screen):
             return
 
         if ev.kind == "agent":
-            # Каноничная assistant-строка пришла из thread store — снимаем
-            # эфемерный StreamBlock текущего шага, иначе двойной рендер
-            # (live-блок + реальная строка).
-            self._clear_stream_block()
             if ev.tool_name == "intermediate_reply":
                 from tui.services.trace_render import build_intermediate_widgets
                 # «Прилипание к низу»: фиксируем ДО монтирования (как у прозы).
@@ -1150,8 +1151,12 @@ class TraceScreen(Screen):
             # Эфемерный StreamBlock — live-вывод текущего шага. Источник —
             # app._stream_sink (кормится из worker-потока через on_stream_delta);
             # монтаж/обновление строго здесь, на UI-потоке (set_interval-колбэк).
+            # StreamBlock — только в активной фазе «thinking». В validating
+            # (финальный ответ виден, идёт finish-gate) и compressing reasoning
+            # не показываем — иначе строка-мысль висит после финального ответа (баг B).
+            _thinking_phase = (not summarizing) and (self._last_event_kind != "_finalized")
             sink = getattr(self.app, "_stream_sink", None)
-            if sink is not None and sink.has_content():
+            if _thinking_phase and sink is not None and sink.has_content():
                 from tui.services.stream_sink import (
                     format_stream_block, format_reasoning_line,
                 )
@@ -1166,6 +1171,8 @@ class TraceScreen(Screen):
                     self._stream_block = StreamBlock()
                     self._trace_mount(self._stream_block, scroll=True)
                 self._stream_block.set_text(text, thinking=thinking)
+            elif not _thinking_phase:
+                self._clear_stream_block()
         elif ask_human_active:
             self._hide_thinking_indicator()
         else:
