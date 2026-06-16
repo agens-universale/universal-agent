@@ -79,9 +79,10 @@ def assemble_streamed_completion(
 ) -> Dict[str, Any]:
     """Reassemble a chat.completion object from SSE chunk JSON payloads.
 
-    Emits on_delta("think"|"answer", text) per chunk: reasoning_content -> think,
-    content -> answer. Inline <think> handling is left to the display layer (the
-    content is preserved verbatim here). `finish_reason` may be `None` if the
+    Emits on_delta("think"|"answer", text): reasoning_content and content inside
+    inline `<think>...</think>` -> think; content outside -> answer.
+    `message.content` is preserved verbatim (raw `<think>` included; downstream
+    strips it). `finish_reason` may be `None` if the
     stream ends without one (e.g. a truncated/interrupted stream); this is
     intentional and surfaces downstream as an error rather than being masked by a
     fake default.

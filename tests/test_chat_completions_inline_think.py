@@ -57,3 +57,13 @@ def test_reasoning_content_still_think_and_message_content_verbatim():
     assert ("think", "x") in out
     assert ("answer", "Y") in out
     assert res["choices"][0]["message"]["content"] == "<think>x</think>Y"
+
+
+def test_plain_content_no_think_all_answer():
+    lines = [
+        'data: {"choices":[{"index":0,"delta":{"content":"Просто "}}]}',
+        'data: {"choices":[{"index":0,"delta":{"content":"ответ."}}]}',
+        'data: [DONE]',
+    ]
+    d = _deltas(lines)
+    assert [(k, t) for k, t in d] == [("answer", "Просто "), ("answer", "ответ.")]
