@@ -33,8 +33,8 @@ mcps:
   - name: duckduckgo_search
     path: ./duckduckgo_search
     install:
-      type: pypi
-      package: ddgs-mcp==0.1.0
+      type: source
+      source: ../external/ddgs-mcp
     # run-блок отсутствует: агент спавнит ddgs-mcp по stdio.
 
   - name: browser_playwright

@@ -36,3 +36,5 @@ def test_wheel_bundles_root_assets(tmp_path):
     # core src modules must map to top-level
     assert "config.py" in names, "src/config.py not mapped to top-level config.py"
     assert any(n.startswith("tui/") and n.endswith(".py") for n in names), "tui package .py missing"
+    assert "external/ddgs-mcp/pyproject.toml" in names, "external/ddgs-mcp not shipped"
+    assert any(n == "external/ddgs-mcp/src/ddgs_mcp/server.py" for n in names), "ddgs_mcp server not shipped"

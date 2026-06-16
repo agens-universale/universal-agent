@@ -46,6 +46,7 @@ only-include = ["src", "recommended_mcp"]
 "skills" = "skills"
 "config.default.yml" = "config.default.yml"
 "recommended_mcp/config.yml" = "recommended_mcp/config.yml"
+"external/ddgs-mcp" = "external/ddgs-mcp"
 
 [dependency-groups]
 dev = [
