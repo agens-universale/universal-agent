@@ -45,9 +45,40 @@ class InstallError(RuntimeError):
     """Невозможно выполнить установку MCP."""
 
 
+def _platform_supported(entry: MCPEntry) -> bool:
+    return not entry.install.platforms or sys.platform in entry.install.platforms
+
+
+def _short_reason(exc: Exception) -> str:
+    if isinstance(exc, subprocess.CalledProcessError):
+        return f"pip завершился с кодом {exc.returncode}"
+    return str(exc) or exc.__class__.__name__
+
+
+def run_install_entries(manifest, root: Path, agent_dep_dir, *, editable: bool):
+    """Установить все рецепты с изоляцией падений. Возвращает список
+    (name, status, detail), status ∈ {installed, skipped, failed}."""
+    results: list[tuple[str, str, str]] = []
+    for entry in manifest:
+        if not _platform_supported(entry):
+            results.append((entry.name, "skipped", f"platform {sys.platform}"))
+            continue
+        try:
+            if entry.install.type == "source" and editable:
+                install_source_entry(entry, root, editable=True)
+            else:
+                install_entry(entry, root, agent_dep_dir)
+            results.append((entry.name, "installed", ""))
+        except (subprocess.CalledProcessError, InstallError, OSError) as exc:
+            reason = _short_reason(exc)
+            results.append((entry.name, "failed", reason))
+            print(f"[warn] {entry.name}: пропущен — {reason}")
+    return results
+
+
 def install_entry(entry: MCPEntry, root: Path, agent_dep_dir: Optional[Path] = None) -> None:
     """Установить один MCP. root — каталог, относительно которого резолвится entry.path."""
-    if entry.install.platforms and sys.platform not in entry.install.platforms:
+    if not _platform_supported(entry):
         print(
             f"[skip] {entry.name}: platform {sys.platform!r} not in "
             f"{list(entry.install.platforms)}"
@@ -425,11 +456,18 @@ def main() -> int:
         print("[info] no mcps declared in config.yml — nothing to install")
         return 0
     with pip_install_target(mcp_py):
-        for entry in manifest:
-            if entry.install.type == "source" and args.editable:
-                install_source_entry(entry, root, editable=True)
-            else:
-                install_entry(entry, root, agent_dep_dir)
+        results = run_install_entries(manifest, root, agent_dep_dir, editable=args.editable)
+    installed = [n for n, s, _ in results if s == "installed"]
+    skipped = [(n, d) for n, s, d in results if s == "skipped"]
+    failed = [(n, d) for n, s, d in results if s == "failed"]
+    print(f"[summary] установлено: {', '.join(installed) or '—'}")
+    for n, d in skipped:
+        print(f"[summary] пропущено ({d}): {n}")
+    for n, d in failed:
+        print(f"[summary] НЕ установлено: {n} — {d}")
+    if failed:
+        print(f"[summary] {len(failed)} MCP пропущено — агент будет работать; "
+              f"поставь вручную или используй совместимый Python")
     state = save_runtime_state(manifest_path=manifest_path)
     print(f"[state] {state.bin_dir}")
     paths = _node_install_paths(agent_dep_dir)
