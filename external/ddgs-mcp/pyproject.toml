@@ -4,7 +4,9 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ddgs-mcp"
-version = "0.1.0"
+# 0.2.0+: отличается от upstream PyPI ddgs-mcp==0.1.0, иначе pip пропустит
+# установку source-обёртки у тех, у кого уже стоит PyPI-0.1.0 (несовместимый с 3.14).
+version = "0.2.0"
 description = "MCP server for web/news search via DuckDuckGo (DDGS)"
 requires-python = ">=3.10"
 dependencies = [
