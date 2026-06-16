@@ -58,6 +58,9 @@ backend:
   # «· размышление», «обдумал за Nс» и живой текст ответа. Флаги
   # tui.show_reasoning_line и tui.show_stream_answer (ниже) имеют эффект ТОЛЬКО
   # при stream: true (они лишь выбирают, что из живого вывода рендерить).
+  #
+  # NB: сейчас стрим задействован ТОЛЬКО в TUI (дельты потребляет лишь оно);
+  # в CLI/server/swarm ответ всегда читается блокирующе — там флаг no-op.
   stream: true
 
 # Вспомогательные LLM (summary, finish gate, intent scope) — без thinking.
