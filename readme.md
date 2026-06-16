@@ -32,8 +32,12 @@ gc-mcp-install --config recommended_mcp/config.local.yml   # MCP → ~/.local/sh
 ```bash
 # установка без клонирования репо gc-cli + gc-ua (TUI по умолчанию)
 uv tool install git+ssh://git@gitverse.ru/gigacode-ai/background-agent
-gc-mcp-install --config recommended_mcp/config.local.yml   # MCP → ~/.local/share/gc/recommended_mcp/venv
+gc-mcp-install --config ~/.gc/recommended_mcp/config.local.yml   # MCP → ~/.local/share/gc/recommended_mcp/venv
 ```
+
+После установки `gc-ua` / `gc-cli` работают **без `--config`**: при первом запуске конфиг автоматически создаётся в `~/.gc/config.yml`. Перед первым запросом укажите в нём свой токен (`Authorization`).
+
+> **Миграция с gc-cli-pub:** если ранее была установлена старая версия дистрибутива, сначала удалите её: `uv tool uninstall gc-cli-pub`, затем выполните установку выше.
 
 Headless-установка только `gc-cli` (без TUI): см. [docs/usage.md](docs/usage.md#минимальная-установка-gc-cli-без-tui).
 
@@ -57,7 +61,7 @@ gc-ua -a
 Ключ `-q` определяет входной запрос к агенту.
 Клюс `--config` переопределяет конфиг агента на кастомный.
 
-Конфиг по умолчанию — `config.yml` рядом с установленным пакетом; свой путь — `--config ./config.yml`. Подробнее см. документацию ниже.
+Конфиг по умолчанию — `~/.gc/config.yml` (создаётся автоматически при первом запуске); свой путь — `--config ./config.yml`. Подробнее см. документацию ниже.
 
 ## Документация
 
