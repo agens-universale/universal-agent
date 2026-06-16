@@ -3,12 +3,16 @@
 # Авто-копируется в ~/.gc/config.yml при первом запуске.
 # Полный документированный пример со всеми опциями — demo_config.yml.
 #
-# ПЕРЕД ПЕРВЫМ ЗАПРОСОМ: впиши свой токен в backend.chat_completion_headers.Authorization.
+# ПЕРЕД ПЕРВЫМ ЗАПРОСОМ впиши под себя:
+#   1) backend.completions_url — endpoint твоего OpenAI-совместимого провайдера;
+#   2) backend.chat_completion_headers.Authorization — твой токен.
 # =============================================================================
 
 backend:
   api_mode: chat_completions
-  completions_url: "http://46.243.227.147:15000/v1/chat/completions"
+  # ВПИШИ свой endpoint (OpenAI-совместимый chat/completions), напр.:
+  #   https://routerai.ru/api/v1/chat/completions  (тогда use_ssl: true)
+  completions_url: "http://your-backend:PORT/v1/chat/completions"
   chat_completions_max_tokens: 8096
   use_ssl: false
   use_max_tokens_param: true
