@@ -9,15 +9,31 @@ from pathlib import Path
 
 import pytest
 
-from tui.services.stream_sink import StreamSink, format_stream_block
+from tui.services.stream_sink import StreamSink, format_stream_block, format_reasoning_line
 
 
-def test_block_text_from_sink():
+def test_block_text_from_sink_answer_wins():
+    """Answer present: drain shows answer text, thinking=False."""
     s = StreamSink()
     s.push("think", "читаю README")
     s.push("answer", "Это проект.")
-    _think, answer = s.snapshot()
-    assert format_stream_block(answer=answer) == "Это проект."
+    think, answer = s.snapshot()
+    ans = format_stream_block(answer=answer)
+    assert ans == "Это проект."
+    # Drain logic: answer present → use answer, not reasoning line
+    assert ans  # truthy → thinking=False path
+
+
+def test_block_text_from_sink_reasoning_only():
+    """No answer yet: drain shows reasoning line (thinking=True)."""
+    s = StreamSink()
+    s.push("think", "анализирую структуру проекта")
+    think, answer = s.snapshot()
+    ans = format_stream_block(answer=answer)
+    assert ans == ""  # no answer → empty
+    # Drain logic: ans falsy → reasoning line
+    line = format_reasoning_line(think=think)
+    assert line == "⋮ анализирую структуру проекта"
 
 
 def test_sink_reset_clears_block():

@@ -1152,14 +1152,20 @@ class TraceScreen(Screen):
             # монтаж/обновление строго здесь, на UI-потоке (set_interval-колбэк).
             sink = getattr(self.app, "_stream_sink", None)
             if sink is not None and sink.has_content():
-                from tui.services.stream_sink import format_stream_block
+                from tui.services.stream_sink import (
+                    format_stream_block, format_reasoning_line,
+                )
                 from tui.widgets.stream_block import StreamBlock
-                _think, answer = sink.snapshot()
-                text = format_stream_block(answer=answer)
+                think, answer = sink.snapshot()
+                ans = format_stream_block(answer=answer)
+                if ans:
+                    text, thinking = ans, False
+                else:
+                    text, thinking = format_reasoning_line(think=think), True
                 if self._stream_block is None:
                     self._stream_block = StreamBlock()
                     self._trace_mount(self._stream_block, scroll=True)
-                self._stream_block.set_text(text)
+                self._stream_block.set_text(text, thinking=thinking)
         elif ask_human_active:
             self._hide_thinking_indicator()
         else:
