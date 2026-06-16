@@ -1,4 +1,7 @@
 import os
+import shutil
+import sys
+from pathlib import Path
 from typing import Any, Dict, Optional
 
 import urllib3
@@ -17,6 +20,7 @@ from config_modules.security import (
 )
 from config_modules.summary import DEFAULT_LAST_DIALOG_STEP_MESSAGE_MAX_CHARS
 from config_modules import env_vars
+from bundled_assets import bundled_root
 
 # Backward compatibility for existing imports.
 _DEFAULT_LAST_DIALOG_STEP_MESSAGE_MAX_CHARS = (
@@ -44,10 +48,8 @@ def sync_logging_flat_and_params(config_dict: Dict[str, Any]) -> None:
 
 
 def _default_config_path() -> str:
-    base_dir = os.path.dirname(os.path.abspath(__file__))
-    # normpath: путь показывают пользователю (например, экран /config в TUI) —
-    # без сырого "src\..\config.yml".
-    return os.path.normpath(os.path.join(base_dir, "..", "config.yml"))
+    # Floor: bundled дефолт-конфиг (едет в wheel через force-include).
+    return str(bundled_root() / "config.default.yml")
 
 
 def _project_local_config_path() -> Optional[str]:
@@ -78,6 +80,22 @@ def _xdg_config_path() -> Optional[str]:
     if os.path.isfile(candidate):
         return candidate
     return None
+
+
+def _bootstrap_user_config() -> None:
+    """Первый запуск без --config и без ~/.gc/config.yml: скопировать floor
+    в ~/.gc/config.yml, чтобы у пользователя был редактируемый конфиг."""
+    dest_dir = Path(env_vars.gc_paths()["config"])
+    dest = dest_dir / "config.yml"
+    if dest.is_file():
+        return
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(_default_config_path(), dest)
+    print(
+        f"[gc] создан {dest} — впиши свой токен (Authorization) "
+        f"перед первым запросом",
+        file=sys.stderr,
+    )
 
 
 def resolve_base_config_path(config_path: Optional[str] = None) -> str:
@@ -121,6 +139,8 @@ def resolve_config_path(config_path: Optional[str] = None) -> str:
 
 
 def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
+    if config_path is None and _xdg_config_path() is None:
+        _bootstrap_user_config()
     path = resolve_config_path(config_path)
     config_dir = os.path.dirname(os.path.abspath(path))
 
