@@ -156,3 +156,63 @@ async def test_stream_block_cleared_when_run_not_running(tmp_path):
         await pilot.pause(0.7)
         assert len(pilot.app.query(StreamBlock)) == 0
         assert pilot.app._stream_sink.snapshot() == ("", "")
+
+
+@pytest.mark.asyncio
+async def test_reasoning_line_below_committed_rows(tmp_path):
+    """StreamBlock (эфемерная reasoning-строка) монтируется НИЖЕ уже
+    зафиксированных canonical-виджетов, а не поверх них."""
+    pytest.importorskip("textual")
+    from textual.containers import VerticalScroll
+    from tui.app import TuiApp
+    from tui.widgets.stream_block import StreamBlock
+    from tui.widgets.thinking_indicator import ThinkingIndicator
+
+    class _FakeRunner:
+        def is_running(self) -> bool: return True
+        def stop(self) -> None: pass
+
+    tid = "stream4"
+    _write_task(tmp_path, tid)
+    app = TuiApp(threads_dir=str(tmp_path), system="cli",
+                 config={"model": "M", "backend_api_mode": "chat_completions"})
+    async with app.run_test() as pilot:
+        scr = pilot.app.screen
+        scr.attach_active_task(tid)
+        pilot.app.active_runner = _FakeRunner()
+
+        # Зафиксировать canonical tool-call строку (ToolCallRow) в #trace.
+        scr._render_record({
+            "payload": {
+                "type": "function_call",
+                "name": "read_file",
+                "arguments": "{}",
+                "call_id": "c1",
+            }
+        })
+        await pilot.pause()
+
+        # Подать reasoning-дельту — poll-тик смонтирует StreamBlock ниже.
+        pilot.app._stream_sink.push("think", "новый шаг рассуждения")
+        await pilot.pause(0.7)  # ≥2 тика по 250ms
+
+        trace = pilot.app.query_one("#trace", VerticalScroll)
+        kids = list(trace.children)
+
+        # Должен быть ровно один StreamBlock.
+        sb_indices = [i for i, w in enumerate(kids) if isinstance(w, StreamBlock)]
+        assert sb_indices, "StreamBlock not mounted"
+        sb_idx = sb_indices[0]
+
+        # Зафиксированные строки — всё кроме StreamBlock и ThinkingIndicator.
+        committed_indices = [
+            i for i, w in enumerate(kids)
+            if not isinstance(w, (StreamBlock, ThinkingIndicator))
+        ]
+        assert committed_indices, "no committed row found in #trace"
+
+        # Reasoning-строка должна быть ниже последней canonical-строки.
+        assert sb_idx > max(committed_indices), (
+            "StreamBlock must be below committed rows, "
+            f"but sb_idx={sb_idx} <= last committed={max(committed_indices)}"
+        )
