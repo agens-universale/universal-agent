@@ -11,6 +11,53 @@ from typing import Any, Callable, Dict, Iterable, List, Optional
 
 OnDelta = Callable[[str, str], None]
 
+_THINK_OPEN = "<think>"
+_THINK_CLOSE = "</think>"
+
+
+def _partial_prefix_len(buf: str, tag: str) -> int:
+    """Longest suffix of `buf` that is a proper prefix of `tag` (a tag possibly
+    split across chunk boundaries — hold it back until the next chunk)."""
+    for k in range(min(len(buf), len(tag) - 1), 0, -1):
+        if tag.startswith(buf[-k:]):
+            return k
+    return 0
+
+
+class _InlineThinkSplitter:
+    """Route streamed `content` into think/answer segments, tracking
+    `<think>...</think>` across chunk boundaries. Tags split between chunks are
+    buffered until resolved. Tag characters themselves are consumed (not emitted)."""
+
+    def __init__(self) -> None:
+        self._in_think = False
+        self._buf = ""
+
+    def feed(self, text: str, emit: OnDelta) -> None:
+        self._buf += text
+        while self._buf:
+            tag = _THINK_CLOSE if self._in_think else _THINK_OPEN
+            idx = self._buf.find(tag)
+            if idx != -1:
+                before = self._buf[:idx]
+                if before:
+                    emit("think" if self._in_think else "answer", before)
+                self._buf = self._buf[idx + len(tag):]
+                self._in_think = not self._in_think
+                continue
+            keep = _partial_prefix_len(self._buf, tag)
+            cut = len(self._buf) - keep
+            flush_now = self._buf[:cut]
+            if flush_now:
+                emit("think" if self._in_think else "answer", flush_now)
+            self._buf = self._buf[cut:]
+            break
+
+    def flush(self, emit: OnDelta) -> None:
+        if self._buf:
+            emit("think" if self._in_think else "answer", self._buf)
+            self._buf = ""
+
 
 def iter_sse_data_lines(raw_lines: Iterable) -> Iterable[str]:
     """Yield JSON payload strings from SSE `data:` lines; stop at `[DONE]`."""
@@ -47,6 +94,7 @@ def assemble_streamed_completion(
     usage: Optional[Dict[str, Any]] = None
     model: Optional[str] = None
     resp_id: Optional[str] = None
+    splitter = _InlineThinkSplitter() if on_delta is not None else None
 
     for payload in data_payloads:
         try:
@@ -85,8 +133,8 @@ def assemble_streamed_completion(
         c = delta.get("content")
         if isinstance(c, str) and c:
             content_parts.append(c)
-            if on_delta is not None:
-                on_delta("answer", c)
+            if splitter is not None:
+                splitter.feed(c, on_delta)
 
         for tc in (delta.get("tool_calls") or []):
             if not isinstance(tc, dict):
@@ -106,6 +154,9 @@ def assemble_streamed_completion(
                 slot["function"]["name"] = fn["name"]
             if fn.get("arguments"):
                 slot["function"]["arguments"] += fn["arguments"]
+
+    if splitter is not None:
+        splitter.flush(on_delta)
 
     message: Dict[str, Any] = {"role": role, "content": "".join(content_parts)}
     if reasoning_parts:
