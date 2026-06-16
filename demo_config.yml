@@ -49,6 +49,10 @@ backend:
   #   X-Custom-Header: "value"
   use_ssl: false
   use_retry: true
+  # Стриминг ответа (chat_completions): true — читать ответ по SSE по мере
+  # генерации (виден прогресс, нет таймаутов на длинных ответах); off — старый
+  # блокирующий путь. Транспортный kill-switch. Default on.
+  stream: true
 
 # Вспомогательные LLM (summary, finish gate, intent scope) — без thinking.
 chat_completions:
@@ -58,6 +62,15 @@ chat_completions:
       separate_reasoning: false
       chat_template_kwargs:
         enable_thinking: false
+
+# TUI: что показывать во время стриминга. На подсчёт токенов и индикатор
+# (спиннер, «↓ N токенов», «обдумал за Nс») НЕ влияет — только рендер контента.
+tui:
+  # Живая строка-мысль «⠇ …» (хвост рассуждения). true — показывать строку;
+  # false — строку не рисуем, а в индикаторе появляется «· размышление». Default on.
+  show_reasoning_line: true
+  # Живой текст ответа (серый стрим до финальной «●»-строки). Default off.
+  show_stream_answer: false
 
 agent:
   model: MiniMax-M2.7
