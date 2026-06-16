@@ -13,3 +13,12 @@ def test_bundled_root_has_config_default():
     # тест проверяет инвариант расположения).
     from bundled_assets import bundled_root
     assert (bundled_root() / "config.default.yml").is_file()
+
+
+def test_tui_special_instructions_path_resolves():
+    from tui.services.prompt_assets import tui_special_instructions_path
+    from bundled_assets import bundled_root
+    p = tui_special_instructions_path()
+    assert p == str(bundled_root() / "prompts" / "chat_completions_tui_special_instructions.md")
+    import os
+    assert os.path.isfile(p)
