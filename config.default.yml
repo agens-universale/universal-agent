@@ -1,0 +1,67 @@
+# =============================================================================
+# Дефолт-конфиг GigaCode Universal Agent (gc-ua).
+# Авто-копируется в ~/.gc/config.yml при первом запуске.
+# Полный документированный пример со всеми опциями — demo_config.yml.
+#
+# ПЕРЕД ПЕРВЫМ ЗАПРОСОМ: впиши свой токен в backend.chat_completion_headers.Authorization.
+# =============================================================================
+
+backend:
+  api_mode: chat_completions
+  completions_url: "http://46.243.227.147:15000/v1/chat/completions"
+  chat_completions_max_tokens: 8096
+  use_ssl: false
+  use_max_tokens_param: true
+  openai_strict_tools_schema: false
+  use_retry: true
+  chat_completion_headers:
+    Authorization: "Bearer <ВПИШИ_ТОКЕН>"
+
+agent:
+  model: "gigacode_agent_v1_rc"
+  system_prompt_id: v1
+  use_server_subagents: true
+  use_local_subagents: true
+  subagent_max_steps: 500
+  client_name: gc_ua_agent
+  x_cl_id: "12345"
+  verbose: true
+  stop_tools: []
+  server_tool_prefix: system
+  max_steps: 1000
+  no_tool_call_max_count: 3
+  strict_turn_finish_validation: true
+
+logging:
+  full_log_backend: false
+  console_trace: true
+  dump_storage: false
+  save_logs: true
+
+paths:
+  agent_md_path: "prompts/demo_cli_agent.md"
+
+summary:
+  chat_completions_summary_trigger_chars: 120000
+  max_message_chars: 50000
+  max_dialogue_chars: 1000000
+  max_accumulated_summary_chars: 20000
+  last_dialog_steps_count: 5
+  last_dialog_step_message_max_chars: 1500
+
+security:
+  command_moderation:
+    enabled: true
+    mode: deny
+    allowed_command_examples: []
+  write_guard:
+    enabled: true
+    mode: deny
+    extra_paths: []
+  url_policy:
+    enabled: true
+    mode: deny
+    allowed_schemes: ["http", "https"]
+    url_blacklist: []
+  read_guard:
+    enabled: false

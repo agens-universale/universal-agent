@@ -8,7 +8,7 @@ def test_bundled_root_contains_prompts():
     assert (root / "prompts" / "chat_completions_system_prompt.md").is_file()
 
 
-def test_bundled_root_has_config_default(tmp_path):
+def test_bundled_root_has_config_default():
     # config.default.yml лежит рядом с prompts/ (создаётся в Task 2;
     # тест проверяет инвариант расположения).
     from bundled_assets import bundled_root
