@@ -17,6 +17,9 @@ logger = logging.getLogger(__name__)
 
 # Session без чтения ~/.netrc: requests при trust_env=True читает ~/.netrc,
 # и Basic-auth оттуда перетирает явный Authorization-заголовок → 401.
+# trust_env=False также отключает env-прокси и REQUESTS_CA_BUNDLE — CA передаём
+# явно через verify=. Без cookies/auth — общую сессию безопасно звать из разных
+# потоков (server-режим спавнит поток на запуск).
 _NO_NETRC_SESSION = requests.Session()
 _NO_NETRC_SESSION.trust_env = False
 
