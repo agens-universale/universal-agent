@@ -11,6 +11,11 @@ class StreamBlock(Static):
     def __init__(self) -> None:
         super().__init__("", classes="stream-block", markup=False)
 
-    def set_text(self, text: str) -> None:
-        if self.is_mounted:
-            self.update(text)
+    def set_text(self, text: str, *, thinking: bool = False) -> None:
+        if not self.is_mounted:
+            return
+        if thinking:
+            self.add_class("stream-block-think")
+        else:
+            self.remove_class("stream-block-think")
+        self.update(text)
