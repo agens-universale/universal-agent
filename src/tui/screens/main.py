@@ -538,15 +538,19 @@ class TraceScreen(Screen):
         self._thinking.remove()
         self._thinking = None
 
-    def _clear_stream_block(self) -> None:
-        """Снять эфемерный StreamBlock и сбросить sink. Вызывается при приходе
-        каноничной assistant-строки (иначе двойной рендер) и по завершении run'а."""
+    def _clear_stream_block(self, *, reset_sink: bool = True) -> None:
+        """Снять эфемерный StreamBlock и (по умолчанию) сбросить sink.
+
+        reset_sink=False: виджет убирается, но sink не трогается — счётчик и
+        reasoning-состояние индикатора продолжают жить (нужно для
+        stream_answer_preview=False: дейтвие в drain без сброса буфера)."""
         if self._stream_block is not None:
             self._stream_block.remove()
             self._stream_block = None
-        sink = getattr(self.app, "_stream_sink", None)
-        if sink is not None:
-            sink.reset()
+        if reset_sink:
+            sink = getattr(self.app, "_stream_sink", None)
+            if sink is not None:
+                sink.reset()
 
     def _trace_is_at_bottom(self) -> bool:
         """True, если трейс прокручен в самый низ (с допуском). Используется для
@@ -1163,14 +1167,19 @@ class TraceScreen(Screen):
                 from tui.widgets.stream_block import StreamBlock
                 think, answer = sink.snapshot()
                 ans = format_stream_block(answer=answer)
-                if ans:
-                    text, thinking = ans, False
+                _cfg = getattr(self.app, "_config", None) or {}
+                _show_answer = bool(_cfg.get("stream_answer_preview", True))
+                if ans and not _show_answer:
+                    # Live answer preview disabled: drop the preview widget but
+                    # keep the sink (counter + reasoning state feed the indicator;
+                    # the final ● answer still appears on completion).
+                    self._clear_stream_block(reset_sink=False)
                 else:
-                    text, thinking = format_reasoning_line(think=think), True
-                if self._stream_block is None:
-                    self._stream_block = StreamBlock()
-                    self._trace_mount(self._stream_block, scroll=True)
-                self._stream_block.set_text(text, thinking=thinking)
+                    text, thinking = (ans, False) if ans else (format_reasoning_line(think=think), True)
+                    if self._stream_block is None:
+                        self._stream_block = StreamBlock()
+                        self._trace_mount(self._stream_block, scroll=True)
+                    self._stream_block.set_text(text, thinking=thinking)
             elif not _thinking_phase:
                 self._clear_stream_block()
         elif ask_human_active:

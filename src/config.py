@@ -149,6 +149,7 @@ def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
         "use_ssl": app_cfg.backend.use_ssl,
         "use_retry": app_cfg.backend.use_retry,
         "stream": app_cfg.backend.stream,
+        "stream_answer_preview": app_cfg.backend.stream_answer_preview,
         "command_moderation": {
             "enabled": app_cfg.security.command_moderation.enabled,
             "mode": app_cfg.security.command_moderation.mode,

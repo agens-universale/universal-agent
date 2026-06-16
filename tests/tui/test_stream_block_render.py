@@ -289,3 +289,75 @@ async def test_no_reasoning_block_in_validating_phase(tmp_path):
         assert not pilot.app.query(StreamBlock), (
             "StreamBlock не должен отображаться в фазе validating"
         )
+
+
+@pytest.mark.asyncio
+async def test_stream_answer_preview_false_hides_answer_block(tmp_path):
+    """stream_answer_preview=False: answer delta → NO StreamBlock shown,
+    but sink is NOT reset (counter preserved)."""
+    pytest.importorskip("textual")
+    from tui.app import TuiApp
+    from tui.widgets.stream_block import StreamBlock
+
+    class _FakeRunner:
+        def is_running(self) -> bool: return True
+        def stop(self) -> None: pass
+
+    tid = "stream7"
+    _write_task(tmp_path, tid)
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli",
+        config={"model": "M", "backend_api_mode": "chat_completions",
+                "stream_answer_preview": False},
+    )
+    async with app.run_test() as pilot:
+        scr = pilot.app.screen
+        scr.attach_active_task(tid)
+        pilot.app.active_runner = _FakeRunner()
+        # Push answer delta — with preview disabled the block must NOT appear.
+        pilot.app._stream_sink.push("answer", "секретный ответ")
+        await pilot.pause(0.7)
+
+        # No StreamBlock visible.
+        assert not pilot.app.query(StreamBlock), (
+            "StreamBlock не должен отображаться при stream_answer_preview=False"
+        )
+        # Sink NOT reset — counter keeps growing (indicator still alive).
+        assert pilot.app._stream_sink.progress_units() > 0, (
+            "Sink должен быть жив (reset_sink=False)"
+        )
+
+
+@pytest.mark.asyncio
+async def test_stream_answer_preview_false_shows_reasoning_line(tmp_path):
+    """stream_answer_preview=False: think-only delta → reasoning StreamBlock
+    IS shown (flag only gates the answer-mode block)."""
+    pytest.importorskip("textual")
+    from tui.app import TuiApp
+    from tui.widgets.stream_block import StreamBlock
+
+    class _FakeRunner:
+        def is_running(self) -> bool: return True
+        def stop(self) -> None: pass
+
+    tid = "stream8"
+    _write_task(tmp_path, tid)
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli",
+        config={"model": "M", "backend_api_mode": "chat_completions",
+                "stream_answer_preview": False},
+    )
+    async with app.run_test() as pilot:
+        scr = pilot.app.screen
+        scr.attach_active_task(tid)
+        pilot.app.active_runner = _FakeRunner()
+        # Push reasoning delta only (no answer).
+        pilot.app._stream_sink.push("think", "обдумываю задачу")
+        await pilot.pause(0.7)
+
+        # Reasoning StreamBlock IS shown.
+        blocks = pilot.app.query(StreamBlock)
+        assert blocks, "StreamBlock с reasoning-строкой должен быть показан"
+        assert "⠇" in str(blocks[0].render()), (
+            "Reasoning-строка должна содержать ⠇"
+        )
