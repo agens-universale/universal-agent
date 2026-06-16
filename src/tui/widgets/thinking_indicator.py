@@ -178,10 +178,8 @@ class ThinkingIndicator(Static):
             units = self._sink.progress_units()
             if units > 0:
                 parens += f" · ↓ {_fmt_units(units)} токенов"
-            r_state, dur = self._sink.reasoning_state()
-            if r_state == "thinking":
-                parens += " · размышление"
-            elif r_state == "done":
+            _r_state, dur = self._sink.reasoning_state()
+            if _r_state == "done":
                 parens += f" · обдумал за {round(dur)}с"
         parens += ")"
         text.append(parens)

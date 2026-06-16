@@ -21,14 +21,14 @@ def test_elapsed_uses_cyrillic_s():
     assert "(8s" not in _plain(ind)
 
 
-def test_tail_thinking_with_counter():
+def test_tail_thinking_no_word_but_counter():
     ind = ThinkingIndicator(
         started_at=0.0, state="thinking", clock=lambda: 8.0,
         sink=_FakeSink(1200, ("thinking", None)),
     )
     p = _plain(ind)
     assert "↓ 1.2k токенов" in p
-    assert "размышление" in p
+    assert "размышление" not in p   # word dropped; reasoning shown via the StreamBlock line
 
 
 def test_tail_done_shows_obdumal():
