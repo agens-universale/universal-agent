@@ -23,7 +23,7 @@ def test_default_config_path_is_normalized():
     from config import _default_config_path
     p = _default_config_path()
     assert ".." not in p
-    assert p.endswith(".yml")
+    assert p.endswith("config.default.yml")
 
 
 def test_resolve_paths_threads_default_under_state_projects_slug(

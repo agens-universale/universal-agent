@@ -32,7 +32,7 @@ gc-mcp-install --config recommended_mcp/config.local.yml   # MCP → ~/.local/sh
 ```bash
 # установка без клонирования репо gc-cli + gc-ua (TUI по умолчанию)
 uv tool install git+ssh://git@gitverse.ru/gigacode-ai/background-agent
-gc-mcp-install --config ~/.gc/recommended_mcp/config.local.yml   # MCP → ~/.local/share/gc/recommended_mcp/venv
+gc-mcp-install   # MCP → ~/.local/share/gc/recommended_mcp/venv (bundled manifest; --config <путь> для своего)
 ```
 
 После установки `gc-ua` / `gc-cli` работают **без `--config`**: при первом запуске конфиг автоматически создаётся в `~/.gc/config.yml`. Перед первым запросом укажите в нём свой токен (`Authorization`).
