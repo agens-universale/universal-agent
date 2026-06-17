@@ -147,6 +147,15 @@ def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
     with open(path, "r", encoding="utf-8") as file:
         raw_config = yaml.safe_load(file) or {}
 
+    # Machine-managed overlay (gc-mcp install/remove): ~/.gc/config.local.yml.
+    # Мёржится поверх base, под project-local. mcp.servers аккумулируются.
+    from mcp_runtime.paths import managed_config_path
+    managed_path = managed_config_path()
+    if managed_path.is_file() and os.path.abspath(str(managed_path)) != os.path.abspath(path):
+        with open(managed_path, "r", encoding="utf-8") as file:
+            managed_raw = yaml.safe_load(file) or {}
+        raw_config = deep_merge(raw_config, managed_raw)
+
     # Layered loading: project <cwd>/.gc/config.yml поверх глобального.
     project_path = _project_local_config_path()
     if project_path is not None and os.path.abspath(project_path) != os.path.abspath(path):
