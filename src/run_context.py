@@ -45,6 +45,8 @@ class RunContext:
     tools_description: List[str]
     mcp_status: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     project_gc_dir: Path = field(default_factory=lambda: Path("."))
+    environment: Optional[Any] = None
+    harbor_backend: Optional[Any] = None
 
 
 def create_run_context(
@@ -53,6 +55,7 @@ def create_run_context(
     auth_connector: Optional[AuthConnector] = None,
     run_id: Optional[str] = None,
     on_progress=None,
+    environment: Optional[Any] = None,
 ) -> RunContext:
     """
     Создать RunContext для одного запуска агента.
@@ -90,6 +93,8 @@ def create_run_context(
         tools_description=tools_description,
         mcp_status=mcp_status,
         project_gc_dir=_resolve_project_gc_dir(),
+        environment=environment,
+        harbor_backend=None,
     )
 
     run_logger.debug(

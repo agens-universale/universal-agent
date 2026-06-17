@@ -86,6 +86,13 @@ def build_tools_data(
         for k, v in subagent_tools.items():
             tools_data[k] = v
 
+    if config_dict.get("use_harbor_tools", False):
+        from tools.harbor import harbor_registry
+        for k, v in harbor_registry().items():
+            tools_data[k] = v  # same keys ⇒ overwrite the OS builtins
+        # download_file writes a file; host-side it would land off-container.
+        tools_data.pop("download_file", None)
+
     # Логирование оставляем модульным, так как build_tools_data вызывается
     # при создании RunContext, когда logger ещё не привязан к контексту.
     _fallback_logger.debug("Collected tools_data: %s", tools_data)
