@@ -10,6 +10,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import tomllib
 import urllib.request
 import zipfile
 from pathlib import Path
@@ -27,6 +28,7 @@ from mcp_runtime.state import save_runtime_state
 from mcp_runtime.venv import (
     active_pip_python,
     ensure_mcp_venv,
+    pip_argv,
     pip_install_argv,
     pip_install_target,
     query_installed_version,
@@ -82,6 +84,52 @@ def find_entry(manifest, name: str):
         if entry.name == name:
             return entry
     return None
+
+
+def _dist_name(entry: MCPEntry, root: Path = Path(".")) -> str | None:
+    """Имя дистрибутива для `pip uninstall`. pypi → из package-спеки;
+    source → [project].name из pyproject; wheel → из имени .whl."""
+    itype = entry.install.type
+    if itype == "pypi" and entry.install.package:
+        return _pypi_distribution_name(entry.install.package)
+    if itype == "source" and entry.install.source is not None:
+        pyproject = (root / entry.install.source).resolve() / "pyproject.toml"
+        if pyproject.is_file():
+            data = tomllib.loads(pyproject.read_text(encoding="utf-8"))
+            name = (data.get("project") or {}).get("name")
+            return str(name) if name else None
+        return None
+    if itype == "wheel":
+        pkg_path = (root / entry.path).resolve() / "dist"
+        wheels = sorted(pkg_path.glob("*.whl"))
+        if wheels:
+            return wheels[0].name.split("-")[0]
+    return None
+
+
+def uninstall_entry(entry: MCPEntry, root: Path) -> None:
+    """Деинсталл MCP из venv. pip-типы → pip uninstall <dist>; npx → npm uninstall -g.
+    Сносит ТОЛЬКО сам пакет (зависимости не трогает). Best-effort: ошибки → warn."""
+    itype = entry.install.type
+    if itype in ("pypi", "source", "wheel"):
+        dist = _dist_name(entry, root)
+        if not dist:
+            print(f"[warn] {entry.name}: не удалось определить имя пакета — деинсталл пропущен")
+            return
+        print(f"[uninstall] {entry.name}: pip uninstall {dist}")
+        subprocess.run(pip_argv("uninstall", "-y", dist), check=False)
+    elif itype == "npx":
+        pkg = entry.install.npm_package
+        if not pkg:
+            print(f"[warn] {entry.name}: npm_package не задан — деинсталл пропущен")
+            return
+        from config_modules.env_vars import gc_paths
+        agent_dep_dir = gc_paths()["data"]
+        npm = _node_install_paths(agent_dep_dir)["npm"]
+        print(f"[uninstall] {entry.name}: npm uninstall -g {pkg}")
+        subprocess.run([str(npm), "uninstall", "-g", pkg], check=False)
+    else:
+        print(f"[warn] {entry.name}: деинсталл для type={itype!r} не поддержан (вне scope)")
 
 
 def install_entry(entry: MCPEntry, root: Path, agent_dep_dir: Optional[Path] = None) -> None:

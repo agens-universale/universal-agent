@@ -59,6 +59,11 @@ def pip_install_argv(*install_args: str) -> list[str]:
     return [str(active_pip_python()), "-m", "pip", "install", *install_args]
 
 
+def pip_argv(*args: str) -> list[str]:
+    """Произвольная pip-команда в активном MCP-интерпретаторе (install/uninstall/...)."""
+    return [str(active_pip_python()), "-m", "pip", *args]
+
+
 def query_installed_version(distribution_name: str) -> str | None:
     script = (
         "import importlib.metadata as m; "
