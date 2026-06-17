@@ -25,3 +25,14 @@ def test_one_failure_does_not_abort_others(monkeypatch):
     assert calls == ["good1", "bad", "good2"]            # цикл не прервался
     statuses = {n: s for n, s, _ in results}
     assert statuses == {"good1": "installed", "bad": "failed", "good2": "installed"}
+
+
+def test_find_entry_by_name():
+    from pathlib import Path
+    from recommended_mcp import install as inst
+    from recommended_mcp.manifest import MCPEntry, InstallSpec
+
+    a = MCPEntry(name="office", path=Path("."), install=InstallSpec(type="source"))
+    b = MCPEntry(name="science", path=Path("."), install=InstallSpec(type="source"))
+    assert inst.find_entry([a, b], "science") is b
+    assert inst.find_entry([a, b], "nope") is None

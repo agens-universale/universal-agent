@@ -76,6 +76,14 @@ def run_install_entries(manifest, root: Path, agent_dep_dir, *, editable: bool):
     return results
 
 
+def find_entry(manifest, name: str):
+    """Найти запись манифеста по имени; None если нет."""
+    for entry in manifest:
+        if entry.name == name:
+            return entry
+    return None
+
+
 def install_entry(entry: MCPEntry, root: Path, agent_dep_dir: Optional[Path] = None) -> None:
     """Установить один MCP. root — каталог, относительно которого резолвится entry.path."""
     if not _platform_supported(entry):
