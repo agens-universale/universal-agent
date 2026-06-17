@@ -130,19 +130,34 @@ def _remove_one(name: str, entries, root: Path, keep_package: bool) -> None:
 
 def _cmd_remove(name: Optional[str], keep_package: bool, remove_all: bool = False) -> int:
     from mcp_runtime import wiring
-    entries, root = _load_manifest_entries()
     if remove_all:
         names = list(wiring.wired_servers().keys())
-        if not names:
-            print("[info] нет подключённых MCP")
-            return 0
         for n in names:
-            _remove_one(n, entries, root, keep_package)
-        print(f"[done] удалено: {', '.join(names)}")
+            wiring.unwire(n)
+        print(f"[unwired] {', '.join(names)}" if names else "[info] нет подключённых MCP")
+        if keep_package:
+            print("[done] все MCP отключены (пакеты оставлены)")
+            return 0
+        import shutil
+        from config_modules.env_vars import gc_paths
+        data = Path(gc_paths()["data"])
+        for sub in ("recommended_mcp", "node"):
+            d = data / sub
+            if d.exists():
+                try:
+                    shutil.rmtree(d)
+                    print(f"[wiped] {d}")
+                except OSError as exc:
+                    print(f"[warn] не удалось удалить {d}: {exc} "
+                          f"(закрой gc-ua -a, если daemon держит файлы, и повтори)")
+        print("[note] Chromium (общий кэш ms-playwright, вне ~/.gc) не трогаем — "
+              "убрать вручную: playwright uninstall")
+        print("[done] все MCP удалены, артефакты под ~/.gc вычищены")
         return 0
     if not name:
         print("[error] укажи имя MCP или --all", file=sys.stderr)
         return 2
+    entries, root = _load_manifest_entries()
     _remove_one(name, entries, root, keep_package)
     return 0
 
