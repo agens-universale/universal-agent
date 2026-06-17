@@ -13,7 +13,7 @@
 | `computer` | `external/computer-mcp/` (git-подкаталог monorepo) | `pip install` из git-подкаталога (`repo_url`) | **только Windows** (`platforms: [win32]`) |
 | `office` | `external/office-mcp/` (git-подкаталог monorepo) | `pip install` из git-подкаталога (`repo_url`) | Linux, macOS, Windows |
 | `science` | `external/science-mcp/` (git-подкаталог monorepo) | `pip install` из git-подкаталога (`repo_url`) + HTTP-daemon | Linux, macOS, Windows |
-| `duckduckgo_search` | [ddgs-mcp](https://pypi.org/project/ddgs-mcp/) (PyPI) | `pip install` из PyPI | Linux, macOS, Windows |
+| `duckduckgo_search` | `external/ddgs-mcp/` (своя обёртка над `ddgs`, git-подкаталог monorepo + бандлится в wheel) | `pip install` из source (локально / из бандла в method-2) | Linux, macOS, Windows |
 | `browser_playwright` | [@playwright/mcp](https://www.npmjs.com/package/@playwright/mcp) | **Docker** (`docker compose build` + `run.py`) или npx (Node в `gc_data`) | Linux, macOS, Windows |
 
 По умолчанию в `config.yml` для `browser_playwright` включён **npx** (stdio, без Docker).
@@ -96,7 +96,7 @@ python3 recommended_mcp/install.py --config recommended_mcp/config.local.yml
 
 | `install.type` | Что делает |
 |---|---|
-| `source` | `pip install "git+<repo_url>#subdirectory=external/<name>"` (из git-подкаталога monorepo; требует `git` на PATH + сеть). При наличии локального клона и `external/<name>/` — фолбэк на `pip install <path>` из исходников. |
+| `source` | при наличии локальных исходников `external/<name>/` (клон) — `pip install <path>`; иначе (method-2, без клона) — `pip install "git+<repo_url>[@repo_ref]#subdirectory=external/<name>"` из git-подкаталога репо (нужен `git` в PATH + сеть). |
 | `wheel` | `pip install` локального wheel из `<name>/dist/*.whl` |
 | `pypi` | `pip install <package>` из PyPI (пин версии в `install.package`) |
 | `docker` | `docker compose -f <name>/docker-compose.yml build` (локальный билд образа) |
