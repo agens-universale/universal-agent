@@ -34,8 +34,9 @@ gc-mcp install duckduckgo_search   # поставить один MCP + авто-
 # установка без клонирования репо gc-cli + gc-ua (TUI по умолчанию)
 uv tool install git+ssh://git@gitverse.ru/gigacode-ai/background-agent
 gc-mcp install   # MCP → ~/.local/share/gc/recommended_mcp/venv + авто-wire в ~/.gc/config.local.yml
-# Примечание: в методе 2 (без клонирования) gc-mcp install устанавливает только duckduckgo_search и browser_playwright;
-# MCP office/science/computer требуют клонированного репо (метод 1), так как их источники находятся в external/.
+# Примечание: source-MCP (office/science/computer) устанавливаются напрямую из git-подкаталога репо
+# (pip install "git+...#subdirectory=external/<name>") — клонировать репо не нужно.
+# Требуется: git на PATH + доступ к сети.
 ```
 
 После установки `gc-ua` / `gc-cli` работают **без `--config`**: при первом запуске конфиг автоматически создаётся в `~/.gc/config.yml`. Перед первым запросом укажите в нём свой токен (`Authorization`).

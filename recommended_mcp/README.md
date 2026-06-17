@@ -10,9 +10,9 @@
 
 | MCP | Источник | Установка | Платформа |
 |---|---|---|---|
-| `computer` | `external/computer-mcp/` (исходники в monorepo) | `pip install` из source | **только Windows** (`platforms: [win32]`) |
-| `office` | `external/office-mcp/` (исходники в monorepo) | `pip install` из source | Linux, macOS, Windows |
-| `science` | `external/science-mcp/` (исходники в monorepo) | `pip install` из source + HTTP-daemon | Linux, macOS, Windows |
+| `computer` | `external/computer-mcp/` (git-подкаталог monorepo) | `pip install` из git-подкаталога (`repo_url`) | **только Windows** (`platforms: [win32]`) |
+| `office` | `external/office-mcp/` (git-подкаталог monorepo) | `pip install` из git-подкаталога (`repo_url`) | Linux, macOS, Windows |
+| `science` | `external/science-mcp/` (git-подкаталог monorepo) | `pip install` из git-подкаталога (`repo_url`) + HTTP-daemon | Linux, macOS, Windows |
 | `duckduckgo_search` | [ddgs-mcp](https://pypi.org/project/ddgs-mcp/) (PyPI) | `pip install` из PyPI | Linux, macOS, Windows |
 | `browser_playwright` | [@playwright/mcp](https://www.npmjs.com/package/@playwright/mcp) | **Docker** (`docker compose build` + `run.py`) или npx (Node в `gc_data`) | Linux, macOS, Windows |
 
@@ -96,13 +96,13 @@ python3 recommended_mcp/install.py --config recommended_mcp/config.local.yml
 
 | `install.type` | Что делает |
 |---|---|
-| `source` | `pip install <path>` из `external/<name>/` (PEP 517 build из исходников) |
+| `source` | `pip install "git+<repo_url>#subdirectory=external/<name>"` (из git-подкаталога monorepo; требует `git` на PATH + сеть). При наличии локального клона и `external/<name>/` — фолбэк на `pip install <path>` из исходников. |
 | `wheel` | `pip install` локального wheel из `<name>/dist/*.whl` |
 | `pypi` | `pip install <package>` из PyPI (пин версии в `install.package`) |
 | `docker` | `docker compose -f <name>/docker-compose.yml build` (локальный билд образа) |
 | `npx` | bootstrap Node.js (если нет) + прогрев `npm install -g` / `npx` команд |
 
-Для итеративной разработки наших MCP (`source`-тип):
+Для итеративной разработки наших MCP (`source`-тип) при наличии локального клона:
 
 ```bash
 python recommended_mcp/install.py --editable
