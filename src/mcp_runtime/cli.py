@@ -66,22 +66,30 @@ def _cmd_install(name: Optional[str]) -> int:
         else:
             print(f"[warn] {name} не установлен — не подключаю", file=sys.stderr)
         return 0
+    installed_names: list[str] = []
+    failed_names: list[str] = []
     for entry in entries:
         if _install_one(entry, root, dep):
             _wire_one(entry, root, dep)
+            installed_names.append(entry.name)
+        else:
+            failed_names.append(entry.name)
+    print(f"[summary] установлено+подключено: {', '.join(installed_names) or '—'}")
+    if failed_names:
+        print(f"[summary] не установлено: {', '.join(failed_names)}")
     print("[done] install complete")
     return 0
 
 
 def _cmd_list() -> int:
-    entries, _ = _load_manifest_entries()
+    entries, root = _load_manifest_entries()
     from mcp_runtime import wiring
     from mcp_runtime.venv import query_installed_version
     from recommended_mcp.install import _dist_name
     wired = wiring.wired_servers()
     print(f"{'NAME':22} {'TRANSPORT':14} {'INSTALLED':10} WIRED")
     for e in entries:
-        dist = _dist_name(e) if e.install.type in ("pypi", "source", "wheel") else None
+        dist = _dist_name(e, root) if e.install.type in ("pypi", "source", "wheel") else None
         installed = "yes" if (dist and query_installed_version(dist)) else "—"
         srv = wired.get(e.name) or {}
         transport = srv.get("transport", "—")

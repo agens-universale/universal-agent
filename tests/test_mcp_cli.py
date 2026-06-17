@@ -36,6 +36,21 @@ def test_install_unknown_name_errors(fake_env, monkeypatch):
     assert rc != 0
 
 
+def test_install_all_wires_only_installed(fake_env, monkeypatch):
+    from mcp_runtime import cli
+    from recommended_mcp.manifest import MCPEntry, InstallSpec
+    from pathlib import Path
+    good = MCPEntry(name="good", path=Path("."), install=InstallSpec(type="source"))
+    bad = MCPEntry(name="bad", path=Path("."), install=InstallSpec(type="source"))
+    monkeypatch.setattr(cli, "_load_manifest_entries", lambda: ([good, bad], Path(".")))
+    monkeypatch.setattr(cli, "_install_one", lambda e, root, dep: e.name == "good")
+    wired = []
+    monkeypatch.setattr(cli, "_wire_one", lambda e, root, dep: wired.append(e.name))
+    rc = cli.main(["install"])   # no name → all
+    assert rc == 0
+    assert wired == ["good"]      # bad failed install → not wired
+
+
 def test_remove_unwires(fake_env, monkeypatch):
     from mcp_runtime import cli, wiring
     from recommended_mcp.manifest import MCPEntry, InstallSpec
