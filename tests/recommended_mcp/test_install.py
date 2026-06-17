@@ -189,7 +189,7 @@ def test_source_missing_pyproject_raises(tmp_path: Path) -> None:
     (tmp_path / "external" / "x").mkdir(parents=True)
     # pyproject.toml не создаём
     entry = _source_entry(source="external/x")
-    with pytest.raises(install_mod.InstallError, match="pyproject.toml not found"):
+    with pytest.raises(install_mod.InstallError, match="pyproject.toml не найден"):
         install_mod.install_entry(entry, root=tmp_path)
 
 
