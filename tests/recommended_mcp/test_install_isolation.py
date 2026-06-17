@@ -13,7 +13,7 @@ def _entry(name: str) -> MCPEntry:
 def test_one_failure_does_not_abort_others(monkeypatch):
     calls = []
 
-    def fake_install_entry(entry, root, agent_dep_dir=None):
+    def fake_install_entry(entry, root, agent_dep_dir=None, **_kwargs):
         calls.append(entry.name)
         if entry.name == "bad":
             raise subprocess.CalledProcessError(1, ["pip", "install", "bad"])

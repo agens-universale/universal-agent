@@ -58,7 +58,15 @@ def _short_reason(exc: Exception) -> str:
     return str(exc) or exc.__class__.__name__
 
 
-def run_install_entries(manifest, root: Path, agent_dep_dir, *, editable: bool):
+def run_install_entries(
+    manifest,
+    root: Path,
+    agent_dep_dir,
+    *,
+    editable: bool,
+    repo_url: str | None = None,
+    repo_ref: str | None = None,
+):
     """Установить все рецепты с изоляцией падений. Возвращает список
     (name, status, detail), status ∈ {installed, skipped, failed}."""
     results: list[tuple[str, str, str]] = []
@@ -70,7 +78,7 @@ def run_install_entries(manifest, root: Path, agent_dep_dir, *, editable: bool):
             if entry.install.type == "source" and editable:
                 install_source_entry(entry, root, editable=True)
             else:
-                install_entry(entry, root, agent_dep_dir)
+                install_entry(entry, root, agent_dep_dir, repo_url=repo_url, repo_ref=repo_ref)
             results.append((entry.name, "installed", ""))
         except (subprocess.CalledProcessError, InstallError, OSError) as exc:
             reason = _short_reason(exc)
@@ -134,7 +142,13 @@ def uninstall_entry(entry: MCPEntry, root: Path) -> None:
         print(f"[warn] {entry.name}: деинсталл для type={itype!r} не поддержан (вне scope)")
 
 
-def install_entry(entry: MCPEntry, root: Path, agent_dep_dir: Optional[Path] = None) -> None:
+def install_entry(
+    entry: MCPEntry,
+    root: Path,
+    agent_dep_dir: Optional[Path] = None,
+    repo_url: str | None = None,
+    repo_ref: str | None = None,
+) -> None:
     """Установить один MCP. root — каталог, относительно которого резолвится entry.path."""
     if not _platform_supported(entry):
         print(
@@ -155,7 +169,8 @@ def install_entry(entry: MCPEntry, root: Path, agent_dep_dir: Optional[Path] = N
         _install_npx(entry.name, entry.install.commands, agent_dep_dir)
 
     elif itype == "source":
-        _install_source(entry.name, entry.install.source, root, editable=False)
+        _install_source(entry.name, entry.install.source, root, editable=False,
+                        repo_url=repo_url, repo_ref=repo_ref)
     elif itype == "pypi":
         _install_pypi(entry.name, entry.install.package)
     else:
@@ -218,28 +233,45 @@ def _install_docker(name: str, pkg_path: Path) -> None:
     )
 
 
+def _repo_subdir(source: Path) -> str:
+    """`../external/office-mcp` → `external/office-mcp` (путь внутри репо для git)."""
+    return "/".join(p for p in source.parts if p not in ("..", "."))
+
+
 def _install_source(
     name: str,
     source: Path | None,
     root: Path,
     *,
     editable: bool,
+    repo_url: str | None = None,
+    repo_ref: str | None = None,
 ) -> None:
     if source is None:
         raise InstallError(f"mcp {name!r}: install.type=source requires install.source")
     src_path = (root / source).resolve()
-    if not (src_path / "pyproject.toml").exists():
-        raise InstallError(
-            f"mcp {name!r}: pyproject.toml not found in {src_path} "
-            f"(install.source must point to a Python package root)"
-        )
-    cmd = [str(active_pip_python()), "-m", "pip", "install"]
-    if editable:
-        cmd.append("-e")
-    cmd.append(str(src_path))
-    mode = "pip install -e " if editable else "pip install "
-    print(f"[install] {name}: {mode}{src_path}")
-    subprocess.run(cmd, check=True)
+    if (src_path / "pyproject.toml").exists():
+        # method-1: локальные исходники из клона
+        cmd = [str(active_pip_python()), "-m", "pip", "install"]
+        if editable:
+            cmd.append("-e")
+        cmd.append(str(src_path))
+        mode = "pip install -e " if editable else "pip install "
+        print(f"[install] {name}: {mode}{src_path}")
+        subprocess.run(cmd, check=True)
+        return
+    # method-2: локальных исходников нет → ставим из git-подкаталога репо
+    if repo_url:
+        subdir = _repo_subdir(source)
+        ref = f"@{repo_ref}" if repo_ref else ""
+        spec = f"git+{repo_url}{ref}#subdirectory={subdir}"
+        print(f"[install] {name}: pip install {spec}")
+        subprocess.run(pip_argv("install", spec), check=True)
+        return
+    raise InstallError(
+        f"mcp {name!r}: pyproject.toml не найден в {src_path} и repo_url не задан "
+        f"(нужен клон репо или repo_url в манифесте для git-установки)"
+    )
 
 
 def install_source_entry(entry: MCPEntry, root: Path, *, editable: bool) -> None:
