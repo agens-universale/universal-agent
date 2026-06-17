@@ -13,6 +13,7 @@ import tempfile
 import tomllib
 import urllib.request
 import zipfile
+from itertools import takewhile
 from pathlib import Path
 from typing import Optional, Tuple
 # Позволяет запускать файл напрямую: `python recommended_mcp/install.py`.
@@ -103,7 +104,8 @@ def _dist_name(entry: MCPEntry, root: Path = Path(".")) -> str | None:
         pkg_path = (root / entry.path).resolve() / "dist"
         wheels = sorted(pkg_path.glob("*.whl"))
         if wheels:
-            return wheels[0].name.split("-")[0]
+            parts = wheels[0].stem.split("-")
+            return "-".join(takewhile(lambda p: not (p and p[0].isdigit()), parts)) or None
     return None
 
 

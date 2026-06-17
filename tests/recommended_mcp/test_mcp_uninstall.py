@@ -41,3 +41,11 @@ def test_uninstall_entry_npx_calls_npm(monkeypatch):
                  install=InstallSpec(type="npx", npm_package="@playwright/mcp"))
     inst.uninstall_entry(e, Path("."))
     assert calls and "uninstall" in calls[0] and "@playwright/mcp" in calls[0]
+
+
+def test_dist_name_wheel(tmp_path):
+    dist = tmp_path / "rec" / "dist"
+    dist.mkdir(parents=True)
+    (dist / "office-mcp-1.0-py3-none-any.whl").write_text("", encoding="utf-8")
+    e = MCPEntry(name="office", path=Path("rec"), install=InstallSpec(type="wheel"))
+    assert inst._dist_name(e, root=tmp_path) == "office-mcp"
