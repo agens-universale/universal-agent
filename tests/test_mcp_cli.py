@@ -112,3 +112,44 @@ def test_install_threads_repo_url(fake_env, monkeypatch):
     monkeypatch.setattr(cli, "_wire_one", lambda e, root, dep: None)
     rc = cli.main(["install", "office"])
     assert rc == 0 and seen == {"repo_url": "https://x/repo", "repo_ref": "main"}
+
+
+def test_remove_all_unwires_and_uninstalls_each(fake_env, monkeypatch):
+    from mcp_runtime import cli, wiring
+    from recommended_mcp.manifest import MCPEntry, InstallSpec
+    from pathlib import Path
+    office = MCPEntry(name="office", path=Path("."), install=InstallSpec(type="source"))
+    ddg = MCPEntry(name="duckduckgo_search", path=Path("."), install=InstallSpec(type="source"))
+    monkeypatch.setattr(cli, "_load_manifest_entries", lambda config=None: ([office, ddg], Path(".")))
+    uninstalled = []
+    monkeypatch.setattr(cli, "_uninstall_one", lambda e, root: uninstalled.append(e.name))
+    (fake_env / "cfg").mkdir(parents=True, exist_ok=True)
+    (fake_env / "cfg" / "config.local.yml").write_text(
+        "mcp:\n  servers:\n    office:\n      transport: stdio\n"
+        "    duckduckgo_search:\n      transport: stdio\n", encoding="utf-8")
+
+    rc = cli.main(["remove", "--all"])
+    assert rc == 0
+    assert wiring.wired_servers() == {}              # все отключены
+    assert sorted(uninstalled) == ["duckduckgo_search", "office"]   # каждый деинсталлен
+
+
+def test_remove_all_keep_package(fake_env, monkeypatch):
+    from mcp_runtime import cli, wiring
+    monkeypatch.setattr(cli, "_load_manifest_entries", lambda config=None: ([], __import__("pathlib").Path(".")))
+    called = []
+    monkeypatch.setattr(cli, "_uninstall_one", lambda e, root: called.append(e.name))
+    (fake_env / "cfg").mkdir(parents=True, exist_ok=True)
+    (fake_env / "cfg" / "config.local.yml").write_text(
+        "mcp:\n  servers:\n    office:\n      transport: stdio\n", encoding="utf-8")
+    rc = cli.main(["remove", "--all", "--keep-package"])
+    assert rc == 0
+    assert wiring.wired_servers() == {}    # отключены
+    assert called == []                    # но НЕ деинсталлены
+
+
+def test_remove_no_name_no_all_errors(fake_env, monkeypatch):
+    from mcp_runtime import cli
+    monkeypatch.setattr(cli, "_load_manifest_entries", lambda config=None: ([], __import__("pathlib").Path(".")))
+    rc = cli.main(["remove"])
+    assert rc != 0

@@ -113,9 +113,8 @@ def _cmd_list() -> int:
     return 0
 
 
-def _cmd_remove(name: str, keep_package: bool) -> int:
+def _remove_one(name: str, entries, root: Path, keep_package: bool) -> None:
     from mcp_runtime import wiring
-    entries, root = _load_manifest_entries()
     from recommended_mcp.install import find_entry
     if wiring.unwire(name):
         print(f"[unwired] {name}")
@@ -127,6 +126,24 @@ def _cmd_remove(name: str, keep_package: bool) -> int:
             _uninstall_one(entry, root)
         else:
             print(f"[warn] {name} нет в манифесте — деинсталл пропущен")
+
+
+def _cmd_remove(name: Optional[str], keep_package: bool, remove_all: bool = False) -> int:
+    from mcp_runtime import wiring
+    entries, root = _load_manifest_entries()
+    if remove_all:
+        names = list(wiring.wired_servers().keys())
+        if not names:
+            print("[info] нет подключённых MCP")
+            return 0
+        for n in names:
+            _remove_one(n, entries, root, keep_package)
+        print(f"[done] удалено: {', '.join(names)}")
+        return 0
+    if not name:
+        print("[error] укажи имя MCP или --all", file=sys.stderr)
+        return 2
+    _remove_one(name, entries, root, keep_package)
     return 0
 
 
@@ -141,7 +158,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                         help="source-MCP в editable-режиме (pip install -e)")
     sub.add_parser("list", help="доступные / установленные / подключённые MCP")
     p_rm = sub.add_parser("remove", help="отключить + деинсталл MCP")
-    p_rm.add_argument("name")
+    p_rm.add_argument("name", nargs="?", default=None)
+    p_rm.add_argument("--all", action="store_true", dest="remove_all",
+                      help="снести ВСЕ подключённые MCP")
     p_rm.add_argument("--keep-package", action="store_true",
                       help="только un-wire, пакет в venv оставить")
     args = parser.parse_args(list(argv) if argv is not None else sys.argv[1:])
@@ -151,7 +170,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if args.cmd == "list":
         return _cmd_list()
     if args.cmd == "remove":
-        return _cmd_remove(args.name, args.keep_package)
+        return _cmd_remove(args.name, args.keep_package, args.remove_all)
     return 1
 
 
