@@ -41,6 +41,7 @@ mcps:
     path: ./browser_playwright
     install:
       type: npx
+      npm_package: "@playwright/mcp"
       commands:
         # Прогреваем npm-кэш (иначе первый запуск агента тянет пакет по сети).
         - [npm, "install", "-g", "@playwright/mcp@0.0.70"]

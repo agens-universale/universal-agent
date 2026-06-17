@@ -47,3 +47,16 @@ def test_wire_snippet_rejects_multi_key(tmp_path, monkeypatch):
     import pytest
     with pytest.raises(ValueError):
         wiring.wire_snippet("bad", recipe, npx="/n", cache="/c")
+
+
+def test_wire_playwright_resolves_real_paths(tmp_path, monkeypatch):
+    from config_modules import env_vars
+    monkeypatch.setattr(env_vars, "gc_paths", lambda: {"config": tmp_path / "cfg",
+        "data": tmp_path / "d", "cache": tmp_path / "cache", "state": tmp_path / "s"})
+    from mcp_runtime import wiring
+    recipe = __import__("pathlib").Path("recommended_mcp/browser_playwright")
+    leftover = wiring.wire_snippet("browser_playwright", recipe, npx="/N/npx", cache="/C")
+    srv = wiring.wired_servers()["browser_playwright"]
+    assert srv["command"] == "/N/npx"
+    assert "/C/playwright-mcp" in " ".join(srv["args"])
+    assert leftover == []   # без хардкода и оставшихся {…}
