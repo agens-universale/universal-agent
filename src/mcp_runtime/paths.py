@@ -41,6 +41,14 @@ def runtime_state_path() -> Path:
     return recommended_mcp_data_dir() / "runtime.json"
 
 
+def managed_config_path() -> Path:
+    """Machine-managed overlay для mcp.servers (пишет gc-mcp install/remove).
+    Мёржится в конфиг агента; config.yml пользователя не трогается."""
+    from config_modules.env_vars import gc_paths
+
+    return gc_paths()["config"] / "config.local.yml"
+
+
 def recipe_root() -> Path:
     """Каталог рецептов recommended_mcp (сниппеты, external-пути в манифесте)."""
     from mcp_runtime.repo_path import ensure_repo_on_sys_path

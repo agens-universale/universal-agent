@@ -50,3 +50,13 @@ def test_augment_process_env_prepends_bin(tmp_path: Path, monkeypatch) -> None:
     save_runtime_state(manifest_path=None)
     env = augment_process_env({"PATH": "/usr/bin"})
     assert str(bin_dir) in env["PATH"].split(__import__("os").pathsep)
+
+
+def test_managed_config_path(monkeypatch, tmp_path):
+    from config_modules import env_vars
+    monkeypatch.setattr(env_vars, "gc_paths", lambda: {"config": tmp_path / "cfg",
+                                                       "data": tmp_path / "d",
+                                                       "cache": tmp_path / "c",
+                                                       "state": tmp_path / "s"})
+    from mcp_runtime.paths import managed_config_path
+    assert managed_config_path() == (tmp_path / "cfg" / "config.local.yml")
