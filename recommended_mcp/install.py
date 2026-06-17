@@ -233,9 +233,16 @@ def _install_docker(name: str, pkg_path: Path) -> None:
     )
 
 
-def _repo_subdir(source: Path) -> str:
-    """`../external/office-mcp` → `external/office-mcp` (путь внутри репо для git)."""
-    return "/".join(p for p in source.parts if p not in ("..", "."))
+def _repo_subdir(source: Path, root: Path) -> str:
+    """Путь source внутри репо для git `#subdirectory`. source относителен
+    recipe_root (recommended_mcp/), напр. ../external/office-mcp → external/office-mcp.
+    Ведёт за пределы репо (ведущий ..) или абсолютный → ошибка."""
+    rel = os.path.normpath(os.path.join(root.name, str(source))).replace(os.sep, "/")
+    if rel.startswith("../") or rel == ".." or os.path.isabs(rel):
+        raise InstallError(
+            f"install.source {source!r} ведёт за пределы репо — git-установка невозможна"
+        )
+    return rel
 
 
 def _install_source(
@@ -262,7 +269,7 @@ def _install_source(
         return
     # method-2: локальных исходников нет → ставим из git-подкаталога репо
     if repo_url:
-        subdir = _repo_subdir(source)
+        subdir = _repo_subdir(source, root)
         ref = f"@{repo_ref}" if repo_ref else ""
         spec = f"git+{repo_url}{ref}#subdirectory={subdir}"
         print(f"[install] {name}: pip install {spec}")

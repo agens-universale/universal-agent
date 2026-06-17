@@ -4,8 +4,12 @@ from recommended_mcp import install as inst
 
 
 def test_repo_subdir():
-    assert inst._repo_subdir(Path("../external/office-mcp")) == "external/office-mcp"
-    assert inst._repo_subdir(Path("../external/science-mcp")) == "external/science-mcp"
+    import pytest
+    root = Path("recommended_mcp")
+    assert inst._repo_subdir(Path("../external/office-mcp"), root) == "external/office-mcp"
+    assert inst._repo_subdir(Path("../external/science-mcp"), root) == "external/science-mcp"
+    with pytest.raises(inst.InstallError):
+        inst._repo_subdir(Path("../../sibling/pkg"), root)   # за пределы репо → ошибка
 
 
 def test_install_source_local_preferred(tmp_path, monkeypatch):
