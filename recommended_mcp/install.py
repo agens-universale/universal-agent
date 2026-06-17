@@ -38,6 +38,7 @@ from recommended_mcp.manifest import (
     MCPEntry,
     load_agent_dep_dir,
     load_manifest,
+    load_repo_url,
 )
 
 NODE_VERSION = "18.0.0"
@@ -552,8 +553,10 @@ def main() -> int:
     if not manifest:
         print("[info] no mcps declared in config.yml — nothing to install")
         return 0
+    repo_url, repo_ref = load_repo_url(manifest_path)
     with pip_install_target(mcp_py):
-        results = run_install_entries(manifest, root, agent_dep_dir, editable=args.editable)
+        results = run_install_entries(manifest, root, agent_dep_dir, editable=args.editable,
+                                      repo_url=repo_url, repo_ref=repo_ref)
     installed = [n for n, s, _ in results if s == "installed"]
     skipped = [(n, d) for n, s, d in results if s == "skipped"]
     failed = [(n, d) for n, s, d in results if s == "failed"]

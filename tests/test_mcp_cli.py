@@ -20,7 +20,7 @@ def test_install_by_name_installs_and_wires(fake_env, monkeypatch):
                      install=InstallSpec(type="source", source=Path("../external/office-mcp")))
     monkeypatch.setattr(cli, "_load_manifest_entries", lambda config=None: ([office], Path(".")))
     installed = []
-    monkeypatch.setattr(cli, "_install_one", lambda e, root, dep, editable=False: installed.append(e.name) or True)
+    monkeypatch.setattr(cli, "_install_one", lambda e, root, dep, editable=False, repo_url=None, repo_ref=None: installed.append(e.name) or True)
     wired = []
     monkeypatch.setattr(cli, "_wire_one", lambda e, root, dep: wired.append(e.name))
 
@@ -43,7 +43,7 @@ def test_install_all_wires_only_installed(fake_env, monkeypatch):
     good = MCPEntry(name="good", path=Path("."), install=InstallSpec(type="source"))
     bad = MCPEntry(name="bad", path=Path("."), install=InstallSpec(type="source"))
     monkeypatch.setattr(cli, "_load_manifest_entries", lambda config=None: ([good, bad], Path(".")))
-    monkeypatch.setattr(cli, "_install_one", lambda e, root, dep, editable=False: e.name == "good")
+    monkeypatch.setattr(cli, "_install_one", lambda e, root, dep, editable=False, repo_url=None, repo_ref=None: e.name == "good")
     wired = []
     monkeypatch.setattr(cli, "_wire_one", lambda e, root, dep: wired.append(e.name))
     rc = cli.main(["install"])   # no name → all
@@ -88,10 +88,27 @@ def test_install_threads_config_and_editable(fake_env, monkeypatch):
         return ([MCPEntry(name="x", path=Path("."), install=InstallSpec(type="source"))], Path("."))
 
     monkeypatch.setattr(cli, "_load_manifest_entries", fake_load)
+    monkeypatch.setattr(cli, "_load_repo_url", lambda config=None: (None, None))
     monkeypatch.setattr(cli, "_install_one",
-                        lambda e, root, dep, editable=False: seen.setdefault("editable", editable) or True)
+                        lambda e, root, dep, editable=False, repo_url=None, repo_ref=None: seen.setdefault("editable", editable) or True)
     monkeypatch.setattr(cli, "_wire_one", lambda e, root, dep: None)
 
     rc = cli.main(["install", "x", "--config", "my.yml", "--editable"])
     assert rc == 0
     assert seen["config"] == "my.yml" and seen["editable"] is True
+
+
+def test_install_threads_repo_url(fake_env, monkeypatch):
+    from mcp_runtime import cli
+    from recommended_mcp.manifest import MCPEntry, InstallSpec
+    from pathlib import Path
+    e = MCPEntry(name="office", path=Path("."), install=InstallSpec(type="source"))
+    monkeypatch.setattr(cli, "_load_manifest_entries", lambda config=None: ([e], Path(".")))
+    monkeypatch.setattr(cli, "_load_repo_url", lambda config=None: ("https://x/repo", "main"))
+    seen = {}
+    monkeypatch.setattr(cli, "_install_one",
+        lambda e, root, dep, editable=False, repo_url=None, repo_ref=None:
+            seen.update(repo_url=repo_url, repo_ref=repo_ref) or True)
+    monkeypatch.setattr(cli, "_wire_one", lambda e, root, dep: None)
+    rc = cli.main(["install", "office"])
+    assert rc == 0 and seen == {"repo_url": "https://x/repo", "repo_ref": "main"}

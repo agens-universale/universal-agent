@@ -22,13 +22,23 @@ def _agent_dep_dir():
     return gc_paths()["data"]
 
 
-def _install_one(entry, root: Path, agent_dep_dir, editable: bool = False) -> bool:
+def _load_repo_url(config: Optional[str] = None):
+    from mcp_runtime.repo_path import ensure_repo_on_sys_path
+    ensure_repo_on_sys_path()
+    from mcp_runtime.manifest_resolve import resolve_install_manifest_path
+    from recommended_mcp.manifest import load_repo_url
+    return load_repo_url(resolve_install_manifest_path(config))
+
+
+def _install_one(entry, root: Path, agent_dep_dir, editable: bool = False,
+                 repo_url=None, repo_ref=None) -> bool:
     """Поставить один рецепт в MCP-venv. True если успех."""
     from recommended_mcp.install import run_install_entries
     from mcp_runtime.venv import ensure_mcp_venv, pip_install_target
     ensure_mcp_venv()
     with pip_install_target():
-        results = run_install_entries([entry], root, agent_dep_dir, editable=editable)
+        results = run_install_entries([entry], root, agent_dep_dir, editable=editable,
+                                      repo_url=repo_url, repo_ref=repo_ref)
     return any(s == "installed" for _, s, _ in results)
 
 
@@ -57,6 +67,7 @@ def _uninstall_one(entry, root: Path) -> None:
 def _cmd_install(name: Optional[str], config: Optional[str] = None, editable: bool = False) -> int:
     entries, root = _load_manifest_entries(config)
     dep = _agent_dep_dir()
+    repo_url, repo_ref = _load_repo_url(config)
     from recommended_mcp.install import find_entry
     if name:
         entry = find_entry(entries, name)
@@ -64,7 +75,7 @@ def _cmd_install(name: Optional[str], config: Optional[str] = None, editable: bo
             print(f"[error] MCP '{name}' не найден в манифесте. Доступны: "
                   f"{', '.join(e.name for e in entries)}", file=sys.stderr)
             return 2
-        if _install_one(entry, root, dep, editable):
+        if _install_one(entry, root, dep, editable, repo_url, repo_ref):
             _wire_one(entry, root, dep)
             print(f"[done] {name} установлен и подключён")
         else:
@@ -73,7 +84,7 @@ def _cmd_install(name: Optional[str], config: Optional[str] = None, editable: bo
     installed_names: list[str] = []
     failed_names: list[str] = []
     for entry in entries:
-        if _install_one(entry, root, dep, editable):
+        if _install_one(entry, root, dep, editable, repo_url, repo_ref):
             _wire_one(entry, root, dep)
             installed_names.append(entry.name)
         else:
