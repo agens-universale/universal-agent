@@ -29,6 +29,7 @@ dependencies = [
 gc-cli = "cli:main"
 gc-ua = "tui:main"
 gc-mcp-install = "mcp_runtime.install_cli:main"
+gc-mcp = "mcp_runtime.cli:main"
 
 [project.optional-dependencies]
 dev-tui = [
