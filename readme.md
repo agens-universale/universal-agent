@@ -26,14 +26,15 @@ Background и CLI-клиент для работы с агентом GigaCode: �
 
 ```bash
 uv tool install -e .   # gc-cli + gc-ua (TUI по умолчанию)
-gc-mcp-install --config recommended_mcp/config.local.yml   # MCP → ~/.local/share/gc/recommended_mcp/venv
+gc-mcp install duckduckgo_search   # поставить один MCP + авто-подключить в ~/.gc/config.local.yml
+# gc-mcp install   # поставить все MCP из манифеста
 ```
 
 ```bash
 # установка без клонирования репо gc-cli + gc-ua (TUI по умолчанию)
 uv tool install git+ssh://git@gitverse.ru/gigacode-ai/background-agent
-gc-mcp-install   # MCP → ~/.local/share/gc/recommended_mcp/venv (bundled manifest; --config <путь> для своего)
-# Примечание: в методе 2 (без клонирования) gc-mcp-install устанавливает только duckduckgo_search и browser_playwright;
+gc-mcp install   # MCP → ~/.local/share/gc/recommended_mcp/venv + авто-wire в ~/.gc/config.local.yml
+# Примечание: в методе 2 (без клонирования) gc-mcp install устанавливает только duckduckgo_search и browser_playwright;
 # MCP office/science/computer требуют клонированного репо (метод 1), так как их источники находятся в external/.
 ```
 
