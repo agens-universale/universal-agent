@@ -103,6 +103,17 @@ def load_agent_dep_dir(path: Path) -> Path:
     return Path(raw).expanduser().resolve()
 
 
+def load_repo_url(path: Path) -> tuple[str | None, str | None]:
+    """Прочитать top-level repo_url / repo_ref из манифеста (для git-установки
+    source-MCP в method-2). Отсутствуют → (None, None)."""
+    data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    raw_url = data.get("repo_url")
+    raw_ref = data.get("repo_ref")
+    url = str(raw_url).strip() if raw_url and str(raw_url).strip() else None
+    ref = str(raw_ref).strip() if raw_ref and str(raw_ref).strip() else None
+    return url, ref
+
+
 def _parse_entry(raw: dict[str, Any], source: Path) -> MCPEntry:
     name = raw.get("name")
     if not name:

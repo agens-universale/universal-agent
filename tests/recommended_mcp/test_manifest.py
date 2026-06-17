@@ -370,3 +370,13 @@ def test_npx_mcp_parses_install_commands(tmp_path: Path) -> None:
         ("npm", "install", "-g", "@playwright/mcp@0.0.70"),
         ("npx", "-y", "playwright", "install", "chromium"),
     )
+
+
+def test_load_repo_url(tmp_path):
+    from recommended_mcp.manifest import load_repo_url
+    cfg = tmp_path / "config.yml"
+    cfg.write_text("repo_url: https://example.org/repo\nrepo_ref: v1\nmcps: []\n", encoding="utf-8")
+    assert load_repo_url(cfg) == ("https://example.org/repo", "v1")
+    cfg2 = tmp_path / "c2.yml"
+    cfg2.write_text("mcps: []\n", encoding="utf-8")
+    assert load_repo_url(cfg2) == (None, None)
