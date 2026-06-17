@@ -7,13 +7,13 @@ from pathlib import Path
 from typing import Optional, Sequence
 
 
-def _load_manifest_entries():
-    """(entries, recipe_root). Резолвит дефолтный манифест."""
+def _load_manifest_entries(config: str | None = None):
+    """(entries, recipe_root). Резолвит манифест (config=None → дефолтная цепочка)."""
     from mcp_runtime.repo_path import ensure_repo_on_sys_path
     ensure_repo_on_sys_path()
     from mcp_runtime.manifest_resolve import resolve_install_manifest_path, recipe_root
     from recommended_mcp.manifest import load_manifest
-    path = resolve_install_manifest_path(None)
+    path = resolve_install_manifest_path(config)
     return load_manifest(path), recipe_root()
 
 
@@ -22,13 +22,13 @@ def _agent_dep_dir():
     return gc_paths()["data"]
 
 
-def _install_one(entry, root: Path, agent_dep_dir) -> bool:
+def _install_one(entry, root: Path, agent_dep_dir, editable: bool = False) -> bool:
     """Поставить один рецепт в MCP-venv. True если успех."""
     from recommended_mcp.install import run_install_entries
     from mcp_runtime.venv import ensure_mcp_venv, pip_install_target
     ensure_mcp_venv()
     with pip_install_target():
-        results = run_install_entries([entry], root, agent_dep_dir, editable=False)
+        results = run_install_entries([entry], root, agent_dep_dir, editable=editable)
     return any(s == "installed" for _, s, _ in results)
 
 
@@ -50,8 +50,8 @@ def _uninstall_one(entry, root: Path) -> None:
     uninstall_entry(entry, root)
 
 
-def _cmd_install(name: Optional[str]) -> int:
-    entries, root = _load_manifest_entries()
+def _cmd_install(name: Optional[str], config: Optional[str] = None, editable: bool = False) -> int:
+    entries, root = _load_manifest_entries(config)
     dep = _agent_dep_dir()
     from recommended_mcp.install import find_entry
     if name:
@@ -60,7 +60,7 @@ def _cmd_install(name: Optional[str]) -> int:
             print(f"[error] MCP '{name}' не найден в манифесте. Доступны: "
                   f"{', '.join(e.name for e in entries)}", file=sys.stderr)
             return 2
-        if _install_one(entry, root, dep):
+        if _install_one(entry, root, dep, editable):
             _wire_one(entry, root, dep)
             print(f"[done] {name} установлен и подключён")
         else:
@@ -69,7 +69,7 @@ def _cmd_install(name: Optional[str]) -> int:
     installed_names: list[str] = []
     failed_names: list[str] = []
     for entry in entries:
-        if _install_one(entry, root, dep):
+        if _install_one(entry, root, dep, editable):
             _wire_one(entry, root, dep)
             installed_names.append(entry.name)
         else:
@@ -120,6 +120,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     sub = parser.add_subparsers(dest="cmd", required=True)
     p_inst = sub.add_parser("install", help="поставить MCP по имени (или все) + авто-wire")
     p_inst.add_argument("name", nargs="?", default=None)
+    p_inst.add_argument("--config", default=None, metavar="PATH",
+                        help="кастомный манифест MCP (по умолчанию — дефолтная цепочка)")
+    p_inst.add_argument("-e", "--editable", action="store_true",
+                        help="source-MCP в editable-режиме (pip install -e)")
     sub.add_parser("list", help="доступные / установленные / подключённые MCP")
     p_rm = sub.add_parser("remove", help="отключить + деинсталл MCP")
     p_rm.add_argument("name")
@@ -128,7 +132,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     args = parser.parse_args(list(argv) if argv is not None else sys.argv[1:])
 
     if args.cmd == "install":
-        return _cmd_install(args.name)
+        return _cmd_install(args.name, args.config, args.editable)
     if args.cmd == "list":
         return _cmd_list()
     if args.cmd == "remove":
