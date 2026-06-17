@@ -77,18 +77,19 @@ gc-mcp remove science --keep-package
 
 #### Ручной путь (фолбэк / для кастомных манифестов)
 
-Если нужен кастомный манифест или установка без авто-wire:
+Если нужен кастомный манифест — передай его через `--config`:
 
 ```bash
-# вариант A: через gc-mcp-install с явным --config
+# gc-mcp-install — алиас gc-mcp install; ДЕЛАЕТ авто-wire в config.local.yml
 gc-mcp-install --config recommended_mcp/config.local.yml
 
-# вариант B: скрипт напрямую (авто-wire не делает)
+# скрипт напрямую — авто-wire НЕ делает (только установка пакетов)
 cp recommended_mcp/config.local.example.yml recommended_mcp/config.local.yml   # первый раз
 python3 recommended_mcp/install.py --config recommended_mcp/config.local.yml
 ```
 
-При ручном пути **нужно вручную** скопировать `<mcp>/agent_config.snippet.yml`
+При запуске `python3 recommended_mcp/install.py` (скрипт напрямую) авто-wire не выполняется —
+нужно вручную скопировать `<mcp>/agent_config.snippet.yml`
 в секцию `mcp-servers:` своего `config.yml` — см. раздел «4. Подключить MCP к агенту» ниже.
 
 Для каждого `install.type` — свой шаг:
@@ -170,10 +171,11 @@ MCP без блока `run:` пропускаются — агент спавн�
 > При использовании `gc-mcp install` этот шаг **не нужен** — авто-wire делает его автоматически
 > через `~/.gc/config.local.yml`.
 
-Если ты использовал ручной путь (`install.py` или `gc-mcp-install --config …`):
+Если ты использовал скрипт напрямую (`python3 recommended_mcp/install.py`):
 скопируй содержимое `<mcp>/agent_config.snippet.yml` в секцию `mcp-servers:`
 своего `config.yml` агента. `install.py` **не редактирует** `config.yml` агента
 автоматически — чтобы не повредить твои кастомные правки.
+(`gc-mcp-install` и `gc-mcp install` авто-wire делают — этот шаг не нужен.)
 
 ## Как пропустить MCP
 

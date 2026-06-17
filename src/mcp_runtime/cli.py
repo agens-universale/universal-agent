@@ -39,7 +39,11 @@ def _wire_one(entry, root: Path, agent_dep_dir) -> None:
     npx = str(_node_install_paths(agent_dep_dir)["npx"])
     cache = str(gc_paths()["cache"])
     recipe_dir = (root / entry.path).resolve()
-    leftover = wiring.wire_snippet(entry.name, recipe_dir, npx=npx, cache=cache)
+    try:
+        leftover = wiring.wire_snippet(entry.name, recipe_dir, npx=npx, cache=cache)
+    except (FileNotFoundError, ValueError) as exc:
+        print(f"[warn] {entry.name}: wire пропущен — {exc}")
+        return
     if leftover:
         print(f"[warn] {entry.name}: незаполненные плейсхолдеры {leftover}")
     print(f"[wired] {entry.name} → config.local.yml")

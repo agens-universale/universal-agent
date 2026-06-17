@@ -66,6 +66,17 @@ def test_remove_unwires(fake_env, monkeypatch):
     assert wiring.wired_servers() == {}
 
 
+def test_wire_one_missing_snippet_does_not_raise(fake_env, monkeypatch):
+    from mcp_runtime import cli
+    from recommended_mcp.manifest import MCPEntry, InstallSpec
+    from pathlib import Path
+    monkeypatch.setattr("recommended_mcp.install._node_install_paths", lambda dep: {"npx": "/n"})
+    e = MCPEntry(name="x", path=Path("nope-dir"), install=InstallSpec(type="source"))
+    # recipe dir has no agent_config.snippet.yml → wire_snippet raises FileNotFoundError;
+    # _wire_one must catch it (warn + return), NOT propagate.
+    cli._wire_one(e, fake_env, fake_env / "d")   # must not raise
+
+
 def test_install_threads_config_and_editable(fake_env, monkeypatch):
     from mcp_runtime import cli
     from recommended_mcp.manifest import MCPEntry, InstallSpec
