@@ -35,3 +35,15 @@ def test_wire_and_unwire(tmp_path, monkeypatch):
     assert wiring.unwire("office") is True
     assert wiring.wired_servers() == {}
     assert wiring.unwire("office") is False   # уже нет — no-op
+
+
+def test_wire_snippet_rejects_multi_key(tmp_path, monkeypatch):
+    monkeypatch.setattr(env_vars, "gc_paths", lambda: _gc(tmp_path))
+    recipe = tmp_path / "rec" / "bad"
+    recipe.mkdir(parents=True)
+    (recipe / "agent_config.snippet.yml").write_text(
+        "a:\n  transport: stdio\nb:\n  transport: stdio\n", encoding="utf-8")
+    from mcp_runtime import wiring
+    import pytest
+    with pytest.raises(ValueError):
+        wiring.wire_snippet("bad", recipe, npx="/n", cache="/c")

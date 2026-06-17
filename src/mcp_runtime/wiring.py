@@ -61,6 +61,10 @@ def wire_snippet(name: str, recipe_dir: Path, *, npx: str, cache: str) -> list[s
     """Upsert mcp.servers.<name> из сниппета в managed-файл. Возвращает список
     оставшихся неизвестных плейсхолдеров (для warn)."""
     snippet = read_snippet(recipe_dir)
+    if len(snippet) != 1:
+        raise ValueError(
+            f"snippet должен иметь ровно одну запись, найдено {len(snippet)}: {list(snippet)}"
+        )
     # сниппет — {server_key: config}; берём единственный config-блок
     config_block = next(iter(snippet.values()))
     resolved = resolve_placeholders(config_block, npx=npx, cache=cache)
