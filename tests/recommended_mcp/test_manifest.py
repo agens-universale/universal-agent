@@ -334,6 +334,24 @@ def test_source_field_ignored_for_non_source_types(tmp_path: Path) -> None:
     assert entry.install.source == Path("../whatever")
 
 
+def test_install_spec_parses_npm_package(tmp_path):
+    from recommended_mcp.manifest import load_manifest
+    root = tmp_path / "recommended_mcp"
+    root.mkdir()
+    (root / "config.yml").write_text(
+        "mcps:\n"
+        "  - name: pw\n"
+        "    path: ./pw\n"
+        "    install:\n"
+        "      type: npx\n"
+        "      npm_package: '@playwright/mcp'\n"
+        "      commands: [[npm, install, -g, '@playwright/mcp@1.0.0']]\n",
+        encoding="utf-8",
+    )
+    entries = load_manifest(root / "config.yml")
+    assert entries[0].install.npm_package == "@playwright/mcp"
+
+
 def test_npx_mcp_parses_install_commands(tmp_path: Path) -> None:
     # Баг-регрессия: install.commands (warmup npx/npm) раньше терялись в парсере.
     f = _write(tmp_path, """
