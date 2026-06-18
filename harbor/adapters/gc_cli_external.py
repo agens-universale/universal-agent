@@ -33,6 +33,14 @@ DEFAULT_MODEL = "MiniMaxAI/MiniMax-M2.7"
 class GcCliExternal(BaseAgent):
     SUPPORTS_ATIF: bool = False
 
+    def __init__(self, *args, api_base: str | None = None, session_id: str | None = None, **kwargs):
+        # Mirror Terminus2: the fleet runner injects api_base (Polar gateway URL) and
+        # session_id as constructor kwargs. We accept them so the agent talks to the
+        # cluster LLM proxy (Polar) instead of a hardcoded backend.
+        super().__init__(*args, **kwargs)
+        self._api_base = api_base
+        self._session_id = session_id
+
     @staticmethod
     def name() -> str:
         return "gc-cli-external"
@@ -52,10 +60,20 @@ class GcCliExternal(BaseAgent):
             m = m[len("openai/"):]
         return m
 
+    @property
+    def _backend_url(self) -> str:
+        # Priority: Polar api_base (from the runner) → env override → local default.
+        # gc-cli needs a FULL completions URL; Polar gives the /v1 base (LiteLLM would
+        # append the path itself for Terminus, so we append it here for gc-cli).
+        if self._api_base:
+            base = self._api_base.rstrip("/")
+            return base if base.endswith("/chat/completions") else base + "/chat/completions"
+        return os.environ.get("GC_CLI_BACKEND_URL", DEFAULT_BACKEND_URL)
+
     def _build_config(self) -> dict:
         return {
             "backend_api_mode": "chat_completions",
-            "completions_url": os.environ.get("GC_CLI_BACKEND_URL", DEFAULT_BACKEND_URL),
+            "completions_url": self._backend_url,
             "model": self._model,
             "chat_completions_max_tokens": 32768,
             "use_ssl": False,
