@@ -170,7 +170,7 @@ def request_backend_chat_completions(
                 logger.debug(
                     "Send request to backend chat/completions (stream=True) url=%s", url
                 )
-        with requests.post(
+        with _NO_NETRC_SESSION.post(
             url, json=stream_data, headers=headers, stream=True, verify=verify
         ) as r:
             try:

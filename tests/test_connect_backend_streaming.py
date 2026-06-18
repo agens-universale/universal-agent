@@ -28,7 +28,7 @@ def test_streaming_path_used_when_on_delta_given(monkeypatch):
     def fake_post(url, json=None, headers=None, stream=False, verify=True, **kw):
         captured["stream"] = stream
         return _FakeStreamResponse(lines)
-    monkeypatch.setattr(connect_backend.requests, "post", fake_post)
+    monkeypatch.setattr(connect_backend._NO_NETRC_SESSION, "post", fake_post)
 
     deltas = []
     res = connect_backend.request_backend_chat_completions(
@@ -48,7 +48,7 @@ def test_blocking_path_when_no_on_delta(monkeypatch):
         r.raise_for_status = lambda: None
         r.json = lambda: {"choices": [{"message": {"content": "blk"}}]}
         return r
-    monkeypatch.setattr(connect_backend.requests, "post", fake_post)
+    monkeypatch.setattr(connect_backend._NO_NETRC_SESSION, "post", fake_post)
     res = connect_backend.request_backend_chat_completions(
         {"model": "m", "messages": []}, {}, url="http://x", verify=True,
     )
@@ -66,7 +66,7 @@ def test_streaming_emits_reset_before_content(monkeypatch):
     def fake_post(url, json=None, headers=None, stream=False, verify=True, **kw):
         return _FakeStreamResponse(lines)
 
-    monkeypatch.setattr(connect_backend.requests, "post", fake_post)
+    monkeypatch.setattr(connect_backend._NO_NETRC_SESSION, "post", fake_post)
 
     deltas = []
     connect_backend.request_backend_chat_completions(
@@ -94,7 +94,7 @@ def test_streaming_http_error_reraises(monkeypatch):
     def fake_post(url, json=None, headers=None, stream=False, verify=True, **kw):
         return _ErrorResponse()
 
-    monkeypatch.setattr(connect_backend.requests, "post", fake_post)
+    monkeypatch.setattr(connect_backend._NO_NETRC_SESSION, "post", fake_post)
 
     with pytest.raises(requests.exceptions.HTTPError):
         connect_backend.request_backend_chat_completions(
