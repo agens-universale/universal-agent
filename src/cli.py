@@ -3,11 +3,14 @@ import sys
 from typing import Any
 
 import arg_parser
+import onboarding
 from agent_executor import AgentExecutor
 from config import (
     apply_cli_overrides,
     build_auth_connector,
     load_config,
+    user_config_path,
+    _bootstrap_user_config,
 )
 from config_modules.env_vars import project_gc_dir
 from message_policy.user_message_policy import (
@@ -112,6 +115,19 @@ def _resolve_forced_skill(skill_name: str, config_dict: dict) -> str | None:
     return res.canonical_id
 
 
+def _run_init() -> int:
+    """`gc-cli --init`: создать ~/.gc/config.yml из шаблона и выйти, агент не
+    запускается. Существующий конфиг не перетираем."""
+    path = user_config_path()
+    created = _bootstrap_user_config()
+    if created:
+        config_dict = load_config(None)
+        print(onboarding.setup_guide(str(path), config_dict), file=sys.stderr)
+    else:
+        print(f"[gc] конфиг уже есть: {path} — не меняю", file=sys.stderr)
+    return 0
+
+
 def main() -> int:
     """
     Входная точка CLI: парсинг аргументов, загрузка конфига,
@@ -122,6 +138,9 @@ def main() -> int:
     """
     _ensure_project_gc_dir()
     _ensure_user_skills_dir()
+
+    if getattr(arg_parser.run_args, "init", False):
+        return _run_init()
 
     config_dict = load_config(arg_parser.run_args.config)
 
@@ -136,6 +155,15 @@ def main() -> int:
         no_read_guard=getattr(arg_parser.run_args, "no_read_guard", False),
         read_guard_mode=getattr(arg_parser.run_args, "read_guard_mode", None),
     )
+
+    # Онбординг: дефолтный путь (без --config) и конфиг ещё не настроен
+    # (остался плейсхолдер) → показать гайд и выйти, бэкенд не дёргаем.
+    if arg_parser.run_args.config is None and onboarding.is_unconfigured(config_dict):
+        print(
+            onboarding.setup_guide(str(user_config_path()), config_dict),
+            file=sys.stderr,
+        )
+        return 0
     forced_skill_id = _resolve_forced_skill(
         arg_parser.run_args.skill, config_dict
     )

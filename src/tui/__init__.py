@@ -30,6 +30,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument("--config", default=None)
     parser.add_argument("--task-root", default=None)
     parser.add_argument(
+        "--init",
+        action="store_true",
+        help="Создать ~/.gc/config.yml из шаблона и выйти (TUI не запускается)",
+    )
+    parser.add_argument(
         "-a",
         "--auto-mcp",
         action="store_true",
@@ -48,9 +53,31 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         apply_cli_overrides,
         resolve_config_path,
         _project_local_config_path,
+        user_config_path,
+        _bootstrap_user_config,
     )
+    import onboarding
+
+    if getattr(args, "init", False):
+        path = user_config_path()
+        if _bootstrap_user_config():
+            print(onboarding.setup_guide(str(path), load_config(None)), file=sys.stderr)
+        else:
+            print(f"[gc] конфиг уже есть: {path} — не меняю", file=sys.stderr)
+        return 0
+
     config_dict = load_config(args.config)
     apply_cli_overrides(config_dict)
+
+    # Онбординг: дефолтный путь и конфиг ещё не настроен → гайд ДО входа в
+    # alt-screen (иначе TUI проглотит stderr) и выходим, бэкенд не дёргаем.
+    if args.config is None and onboarding.is_unconfigured(config_dict):
+        print(
+            onboarding.setup_guide(str(user_config_path()), config_dict),
+            file=sys.stderr,
+        )
+        return 0
+
     config_dict["console_trace"] = False  # TUI owns alt-screen output.
 
     from thread_store import resolve_threads_dir

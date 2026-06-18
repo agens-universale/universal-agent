@@ -83,8 +83,14 @@ parser.add_argument(
     "-q",
     "--query",
     type=str,
-    required=True,
-    help="Запрос к агенту (обязательный параметр)",
+    required=False,
+    help="Запрос к агенту (обязателен, кроме --init)",
+)
+
+parser.add_argument(
+    "--init",
+    action="store_true",
+    help="Создать ~/.gc/config.yml из шаблона и выйти (агент не запускается)",
 )
 
 parser.add_argument(
@@ -204,6 +210,8 @@ parser.add_argument(
 
 
 parsed_args, unknown_args = parser.parse_known_args()
+if not parsed_args.init and not parsed_args.query:
+    parser.error("Нужен -q/--query (или --init для создания конфига).")
 if parsed_args.new and not parsed_args.thread_id:
     parser.error("Аргумент -n/--new можно использовать только вместе с -t/--thread-id.")
 run_args = parsed_args

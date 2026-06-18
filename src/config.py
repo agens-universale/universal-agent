@@ -82,20 +82,23 @@ def _xdg_config_path() -> Optional[str]:
     return None
 
 
-def _bootstrap_user_config() -> None:
+def user_config_path() -> Path:
+    """Путь дефолтного пользовательского конфига: <gc config>/config.yml."""
+    return Path(env_vars.gc_paths()["config"]) / "config.yml"
+
+
+def _bootstrap_user_config() -> bool:
     """Первый запуск без --config и без ~/.gc/config.yml: скопировать floor
-    в ~/.gc/config.yml, чтобы у пользователя был редактируемый конфиг."""
-    dest_dir = Path(env_vars.gc_paths()["config"])
-    dest = dest_dir / "config.yml"
+    в ~/.gc/config.yml, чтобы у пользователя был редактируемый конфиг.
+
+    Возвращает True, если файл создан сейчас (иначе уже существовал). Презентация
+    (онбординг-гайд) — на стороне контроллеров (cli/tui), не здесь."""
+    dest = user_config_path()
     if dest.is_file():
-        return
-    dest_dir.mkdir(parents=True, exist_ok=True)
+        return False
+    dest.parent.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(_default_config_path(), dest)
-    print(
-        f"[gc] создан {dest} — впиши свой токен (Authorization) "
-        f"перед первым запросом",
-        file=sys.stderr,
-    )
+    return True
 
 
 def resolve_base_config_path(config_path: Optional[str] = None) -> str:
