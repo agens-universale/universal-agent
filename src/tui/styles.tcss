@@ -185,11 +185,14 @@ Screen {
 .brand-tagline { color: $dim; width: auto; height: auto; }
 
 /* ThinkingIndicator — «думаю…» (spec 2026-05-26) */
-.thinking-indicator { color: $deep-dim; padding: 0 1; margin-top: 1; height: 1; }
+/* padding слева = 0: глиф встаёт по колонке буллетов ●/> строк трейса
+   (.trace-prefix padding:0); правый отступ 1 сохраняем. */
+.thinking-indicator { color: $deep-dim; padding: 0 1 0 0; margin-top: 1; height: 1; }
 .thinking-indicator.hidden { display: none; }
 
 /* StreamBlock — эфемерный in-progress поток текущего шага (chat_completions) */
-.stream-block { color: $deep-dim; padding: 0 1; margin-top: 1; }
+/* левый padding 0 — выравнивание с индикатором и колонкой буллетов трейса. */
+.stream-block { color: $deep-dim; padding: 0 1 0 0; margin-top: 1; }
 .stream-block-think { color: $muted; text-style: italic; }
 
 /* Палитра команд (overlay, Task 3.3) */
