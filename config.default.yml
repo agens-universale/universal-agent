@@ -57,7 +57,9 @@ paths:
   agent_md_path: "prompts/demo_cli_agent.md"
 
 summary:
-  chat_completions_summary_trigger_chars: 120000
+  # ~60–72k токенов истории — рассчитано на контекст моделей ~131k (под меньшие
+  # модели снижай). batch (×1.4) и turn-end-trigger (×0.6) выводятся отсюда.
+  chat_completions_summary_trigger_chars: 180000
   max_message_chars: 50000
   max_dialogue_chars: 1000000
   max_accumulated_summary_chars: 20000
