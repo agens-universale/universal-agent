@@ -18,6 +18,7 @@ $run-color: #D4A574;
 $err:       #C75C54;
 $brand:     #9A6DD7;
 $band-bg:   #1f2128;
+$focus-bg:  #2a2d36;   /* подсветка строки трассы в фокусе (сдвиг-безопасная) */
 
 Screen {
     background: $bg;
@@ -86,6 +87,12 @@ Screen {
 
 /* FOCUS-2px — на НЕ-ввод (трейс/список/футер), когда Tab уведёт фокус туда */
 #trace:focus, .list-row:focus, #footer:focus { outline: solid $accent; }
+
+/* Фокус строки события — сдвиг-безопасная подсветка фона (заменила [N]-префикс:
+   background не рефлоунит контент, в отличие от prefix/border). */
+ToolCallRow:focus, TraceRow:focus, UserReplyContainer:focus, AgentReplyLine:focus {
+    background: $focus-bg;
+}
 
 /* TraceRow — 2-колоночный layout (prefix фиксированной ширины + content width:1fr) */
 .trace-prefix  { width: auto; height: auto; padding: 0; }

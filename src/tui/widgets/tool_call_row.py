@@ -115,9 +115,6 @@ class ToolCallRow(Widget):
     def _render_content(self) -> Text:
         """Вернуть rich.Text для content-колонки (без prefix '  |- ')."""
         text = Text()
-        if self.has_focus and self._event_no:
-            text.append(f"[{self._event_no}] ", style=_DIM)
-
         if self._result is None:
             if self._interrupted:
                 # `[x] name(args) прервано` — весь ряд dim, без цвета-сигнала.
@@ -163,16 +160,12 @@ class ToolCallRow(Widget):
         super()._on_focus(event)
         from tui.messages import ToolCallFocusChanged
         self.post_message(ToolCallFocusChanged(self.call_id, focused=True))
-        if self._content_static is not None:
-            self._content_static.update(self._render_content())
 
     def _on_blur(self, event) -> None:  # noqa: ANN001
         # super() ПЕРВЫМ: см. _on_focus.
         super()._on_blur(event)
         from tui.messages import ToolCallFocusChanged
         self.post_message(ToolCallFocusChanged(self.call_id, focused=False))
-        if self._content_static is not None:
-            self._content_static.update(self._render_content())
 
     def on_click(self, event: events.Click) -> None:
         # Двойной клик → открыть детальный экран call + output.

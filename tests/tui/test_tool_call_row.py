@@ -278,23 +278,16 @@ async def test_focus_change_posts_tool_call_focus_changed():
 
 
 @pytest.mark.asyncio
-async def test_focus_renders_event_number_prefix():
-    """Regression: f750f3f (ToolCallRow compose-рефактор) инвертировал `[N]`-on-focus.
-
-    compose-based widget читал has_focus синхронно в _on_focus ДО того, как
-    Widget._on_focus (parent в MRO) ставил has_focus=True → `[N]` не появлялся
-    при фокусе и оставался после blur. Этот тест ловит обе ветки симптома.
-    """
+async def test_focus_does_not_render_event_number_prefix():
+    """`[N]`-префикс на фокусе убран: он дёргал строку по горизонтали и мешал
+    выделению/копированию. Фокус теперь показывается фоном (:focus background).
+    Регрессия: на фокусе `[N]` не должен появляться ни до, ни после."""
     pytest.importorskip("textual")
     from textual.app import App, ComposeResult
     from textual.widgets import Static
     from tui.widgets.tool_call_row import ToolCallRow
 
     class _App(App):
-        # AUTO_FOCUS=None — обходим Screen._update_auto_focus, который ставит
-        # has_focus=True напрямую (textual/screen.py:1498) и маскирует баг
-        # инверсии. Фокус идёт ТОЛЬКО через post_message(Focus) → dispatcher,
-        # то есть тот самый buggy путь, на котором живёт production-симптом.
         AUTO_FOCUS = None
 
         def compose(self) -> ComposeResult:
@@ -306,18 +299,11 @@ async def test_focus_renders_event_number_prefix():
         row = pilot.app.query_one(ToolCallRow)
         content = row.query_one(".trace-content")
 
-        # До фокуса — [42] нет.
         assert "[42]" not in str(content.render())
-
         row.focus()
         await pilot.pause(0.05)
         assert row.has_focus
-        # На фокусе — [42] есть.
-        assert "[42]" in str(content.render())
-
-        pilot.app.set_focus(None)
-        await pilot.pause(0.05)
-        # После blur — [42] нет.
+        # На фокусе [N] больше НЕ появляется.
         assert "[42]" not in str(content.render())
 
 
