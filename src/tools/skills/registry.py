@@ -9,6 +9,8 @@ from typing import Any, Dict, List, Optional
 
 import yaml
 
+from bundled_assets import bundled_root
+
 logger = logging.getLogger(__name__)
 
 
@@ -27,22 +29,15 @@ class AmbiguousSkillId(Exception):
         )
 
 
-def _project_root() -> str:
-    """
-    Определяет корень проекта относительно текущего файла.
-    Ожидается структура: project_root/src/tools/skills/registry.py
-    """
-    here = os.path.dirname(os.path.abspath(__file__))
-    return os.path.abspath(os.path.join(here, "..", "..", ".."))
-
-
 def _system_skills_root() -> str:
     """
     Корень System-слоя — встроенные скиллы пакета.
 
-    По умолчанию: <project_root>/skills.
+    Через bundled_root() (тот же резолвер, что для prompts/ и config.default.yml):
+    editable → <repo>/skills, wheel → site-packages/skills. Завязка на ../../..
+    ломалась в wheel, где src/ схлопнут и уровень тот же промахивался мимо skills/.
     """
-    return os.path.join(_project_root(), "skills")
+    return str(bundled_root() / "skills")
 
 
 def _user_skills_root() -> str:
