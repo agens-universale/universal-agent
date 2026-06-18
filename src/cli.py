@@ -23,17 +23,10 @@ from utils.json_text import format_json_for_display
 
 
 def _ensure_project_gc_dir() -> None:
-    """
-    Создаёт <cwd>/.gc/ при старте gc-cli (идемпотентно через exist_ok=True).
-    Подпапка skills/ НЕ создаётся — её добавляет пользователь по необходимости
-    (project-скиллы опциональны, не каждый проект их использует).
-    На PermissionError/OSError тихо пропускает — не блокируем запуск
-    из-за отсутствия прав на запись в cwd.
-    """
-    try:
-        os.makedirs(project_gc_dir(), exist_ok=True)
-    except (PermissionError, OSError):
-        pass
+    """Создаёт <cwd>/.gc/ при старте gc-cli. Делегирует общему хелперу
+    (тот же вызывает gc-ua) — см. env_vars.ensure_project_gc_dir."""
+    from config_modules.env_vars import ensure_project_gc_dir
+    ensure_project_gc_dir()
 
 
 def _ensure_user_skills_dir() -> None:

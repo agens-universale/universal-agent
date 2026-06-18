@@ -176,3 +176,16 @@ def project_gc_dir(cwd: str | None = None) -> Path:
     с инлайн `os.path.join(os.getcwd(), '.gc', ...)`, который этот хелпер заменяет.
     """
     return Path(cwd or os.getcwd()) / ".gc"
+
+
+def ensure_project_gc_dir(cwd: str | None = None) -> None:
+    """Создать <cwd>/.gc/ (идемпотентно, exist_ok=True). Подпапку skills/ НЕ
+    создаёт — её добавляет пользователь по необходимости. На PermissionError/
+    OSError тихо пропускает: не блокируем запуск из-за прав на запись в cwd.
+
+    Общий стартовый хелпер для gc-cli и gc-ua (project-local слой: config overlay,
+    project skills, long memory)."""
+    try:
+        os.makedirs(project_gc_dir(cwd), exist_ok=True)
+    except (PermissionError, OSError):
+        pass

@@ -48,6 +48,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         list(argv) if argv is not None else sys.argv[1:]
     )
 
+    # Паритет с gc-cli: создать <cwd>/.gc/ (project-local слой: config overlay,
+    # project skills). Тихо игнорит отсутствие прав на запись в cwd.
+    from config_modules.env_vars import ensure_project_gc_dir
+    ensure_project_gc_dir()
+
     from config import (
         load_config,
         apply_cli_overrides,
