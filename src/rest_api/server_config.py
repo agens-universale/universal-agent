@@ -4,10 +4,11 @@ from typing import Any, Dict
 import yaml
 
 from config import load_config, sync_logging_flat_and_params  # type: ignore
+from bundled_assets import bundled_root
 
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-PROJECT_ROOT = os.path.abspath(os.path.join(BASE_DIR, "..", ".."))
+# bundled_root() — единый резолвер ассетов (editable → repo, wheel → site-packages).
+PROJECT_ROOT = str(bundled_root())
 
 
 def load_server_config() -> Dict[str, Any]:

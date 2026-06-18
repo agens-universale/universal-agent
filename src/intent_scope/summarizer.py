@@ -13,11 +13,12 @@ from intent_log.serialize import deserialize_list, records_to_jsonl_lines
 from message_format.dialog_history import truncate_text
 from summarize.llm import request_summary_text
 from utils.llm_chat_client import log_llm_prompt_and_result
+from bundled_assets import bundled_root
 
 _logger = logging.getLogger(__name__)
 
-_BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-_PROJECT_ROOT = os.path.abspath(os.path.join(_BASE_DIR, "..", ".."))
+# bundled_root() — единый резолвер ассетов (editable → repo, wheel → site-packages).
+_PROJECT_ROOT = str(bundled_root())
 _DEFAULT_PROMPT_PATH = os.path.join(
     _PROJECT_ROOT, "prompts", "intent_scope_tool_summary_prompt.md"
 )

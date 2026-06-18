@@ -18,6 +18,7 @@ from security.path_policy import (
     resolve_tool_context,
 )
 from utils.project_data import os_label
+from bundled_assets import bundled_root
 
 SAFE_VERDICT = "safe"
 DANGEROUS_VERDICT = "potentially_dangerous"
@@ -30,7 +31,8 @@ _VERDICT_DANGEROUS_RE = re.compile(
     r'"verdict"\s*:\s*"(?:potentially_dangerous|dangerous|unsafe)"\s*[,}]',
     re.IGNORECASE,
 )
-_PROJECT_ROOT = Path(__file__).resolve().parents[2]
+# bundled_root() — единый резолвер ассетов (editable → repo, wheel → site-packages).
+_PROJECT_ROOT = bundled_root()
 
 
 def effective_command_cwd(
