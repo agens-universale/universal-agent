@@ -593,7 +593,11 @@ class SkillsRegistry:
         skill = self._get_skill(skill_id)
         path = skill.references.get(slug)
         if not path:
-            raise KeyError(f"Reference '{slug}' not found for skill '{skill_id}'")
+            available = ", ".join(sorted(skill.references)) or "(нет references)"
+            raise KeyError(
+                f"Reference '{slug}' not found for skill '{skill_id}'. "
+                f"Available references: {available}"
+            )
 
         with open(path, "r", encoding="utf-8") as f:
             content = f.read()
@@ -617,7 +621,11 @@ class SkillsRegistry:
         skill = self._get_skill(skill_id)
         path = skill.assets.get(slug)
         if not path:
-            raise KeyError(f"Asset '{slug}' not found for skill '{skill_id}'")
+            available = ", ".join(sorted(skill.assets)) or "(нет assets)"
+            raise KeyError(
+                f"Asset '{slug}' not found for skill '{skill_id}'. "
+                f"Available assets: {available}"
+            )
 
         with open(path, "r", encoding="utf-8") as f:
             content = f.read()
