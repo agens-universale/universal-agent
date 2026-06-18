@@ -49,6 +49,19 @@ backend:
   #   X-Custom-Header: "value"
   use_ssl: false
   use_retry: true
+  # Транспортный стриминг ответа (chat_completions): true — читать ответ по SSE
+  # по мере генерации (виден прогресс, нет таймаутов на длинных ответах);
+  # false — блокирующий путь (ждём ответ целиком). Default on.
+  #
+  # ВАЖНО: это мастер-переключатель всего живого вывода. При stream: false дельт
+  # нет — НЕ работают счётчик «↓ N токенов», строка-мысль «⠇ …» / тег
+  # «· размышление», «обдумал за Nс» и живой текст ответа. Флаги
+  # tui.show_reasoning_line и tui.show_stream_answer (ниже) имеют эффект ТОЛЬКО
+  # при stream: true (они лишь выбирают, что из живого вывода рендерить).
+  #
+  # NB: сейчас стрим задействован ТОЛЬКО в TUI (дельты потребляет лишь оно);
+  # в CLI/server/swarm ответ всегда читается блокирующе — там флаг no-op.
+  stream: true
 
 # Вспомогательные LLM (summary, finish gate, intent scope) — без thinking.
 chat_completions:
@@ -58,6 +71,16 @@ chat_completions:
       separate_reasoning: false
       chat_template_kwargs:
         enable_thinking: false
+
+# TUI: что показывать во время стриминга. На подсчёт токенов и индикатор
+# (спиннер, «↓ N токенов», «обдумал за Nс») НЕ влияет — только рендер контента.
+# Действуют ТОЛЬКО при backend.stream: true (иначе живого вывода нет вовсе).
+tui:
+  # Живая строка-мысль «⠇ …» (хвост рассуждения). true — показывать строку;
+  # false — строку не рисуем, а в индикаторе появляется «· размышление». Default on.
+  show_reasoning_line: true
+  # Живой текст ответа (серый стрим до финальной «●»-строки). Default off.
+  show_stream_answer: false
 
 agent:
   model: MiniMax-M2.7

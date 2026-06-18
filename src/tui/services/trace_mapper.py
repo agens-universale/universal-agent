@@ -10,7 +10,11 @@ from tui.services.tool_identity import tool_id
 
 
 _TECHNICAL_TAG_RE = re.compile(r"<technical[^>]*>(.*?)</technical>", re.DOTALL)
-_THINK_BLOCK_RE = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
+# Greedy: strips first <think> → LAST </think> (one span). Robust к тому, что
+# модель цитирует/обсуждает think-теги внутри рассуждения (рассогласованные/
+# вложенные теги). Tradeoff: реальный ответ МЕЖДУ двумя think-блоками будет
+# срезан — патологический редкий случай vs частая утечка рассуждения наружу.
+_THINK_BLOCK_RE = re.compile(r"<think>.*</think>", re.DOTALL | re.IGNORECASE)
 _SUMMARY_TAG_RE = re.compile(r"<summary[^>]*>(.*?)</summary>", re.DOTALL)
 _SUMMARIZED_PREFIX_RE = re.compile(
     r"^Summarized context from previous dialogue\.\s*", re.IGNORECASE
@@ -142,15 +146,10 @@ def map_message(msg: dict, *, no: int, ts: str) -> Optional[TraceEvent]:
             )
         return None
 
-    # THINK (reasoning) — kind="system" sentinel + title="think" (renders as .line-think)
+    # THINK (reasoning) — suppressed: reasoning is shown via the ThinkingIndicator
+    # tail (docs/tui/specs/2026-06-16-reasoning-indicator-design.md), not as a
+    # trace row. Export keeps reasoning (services/export.py).
     if typ in ("reasoning", "think"):
-        text = msg.get("summary") or msg.get("content") or ""
-        if isinstance(text, str) and text.strip():
-            return TraceEvent(
-                no=no, event_ts_utc_iso=ts, kind="system",
-                title="think", summary=text.strip(),
-                full_payload=msg, message_id=mid,
-            )
         return None
 
     # Special tool-event handling (must precede generic function_call mapping).

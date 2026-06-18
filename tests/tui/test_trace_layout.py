@@ -3,8 +3,8 @@ import pytest
 
 
 @pytest.mark.asyncio
-async def test_think_renders_via_trace_row():
-    """? think event монтируется как TraceRow с prefix='  ? '."""
+async def test_think_not_rendered_via_trace_row():
+    """Reasoning suppressed: kind=system/title=think does not mount any .line-think row."""
     pytest.importorskip("textual")
     from tui.app import TuiApp
     from tui.models import TraceEvent
@@ -22,9 +22,7 @@ async def test_think_renders_via_trace_row():
         await pilot.pause()
         rows = scr.query(TraceRow)
         think_rows = [r for r in rows if r.has_class("line-think")]
-        assert len(think_rows) == 1
-        assert think_rows[0]._prefix == "  ? "
-        assert "think: рассуждаю" in think_rows[0]._content
+        assert len(think_rows) == 0
 
 
 @pytest.mark.asyncio

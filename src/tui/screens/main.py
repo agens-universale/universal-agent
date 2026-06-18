@@ -103,6 +103,9 @@ class TraceScreen(Screen):
         self._suppress_picker_reopen: bool = False
         # Spec 2026-05-26: ThinkingIndicator state.
         self._thinking = None  # type: Optional["ThinkingIndicator"]
+        # Эфемерный StreamBlock — live-вывод текущего chat_completions-шага;
+        # снимается, когда приходит каноничная assistant-строка / run завершён.
+        self._stream_block = None  # type: Optional["StreamBlock"]
         # Кумулятивный таймер «думаю…» — стартует на каждом user-send,
         # передаётся в виджет, чтобы elapsed не сбрасывался при show/hide циклах.
         self._thinking_started_at: Optional[float] = None
@@ -313,6 +316,7 @@ class TraceScreen(Screen):
             except Exception:
                 pass
             self._thinking = None
+        self._clear_stream_block()
         self._thinking_started_at = None
         # Сброс эвристики «последнее событие — agent»: на смене задачи / stream_reset
         # история событий обнуляется, индикатор должен начать с чистого состояния.
@@ -509,9 +513,12 @@ class TraceScreen(Screen):
             if following:
                 self.query_one("#trace", VerticalScroll).scroll_end(animate=False)
             return
+        _cfg = getattr(self.app, "_config", None) or {}
         from tui.widgets.thinking_indicator import ThinkingIndicator
         indicator = ThinkingIndicator(
             started_at=self._thinking_started_at, state=state,
+            sink=getattr(self.app, "_stream_sink", None),
+            reasoning_tag=not bool(_cfg.get("tui_show_reasoning_line", True)),
         )
         self._thinking = indicator
         trace = self.query_one("#trace", VerticalScroll)
@@ -532,6 +539,20 @@ class TraceScreen(Screen):
             return
         self._thinking.remove()
         self._thinking = None
+
+    def _clear_stream_block(self, *, reset_sink: bool = True) -> None:
+        """Снять эфемерный StreamBlock и (по умолчанию) сбросить sink.
+
+        reset_sink=False: виджет убирается, но sink не трогается — счётчик и
+        reasoning-состояние индикатора продолжают жить (нужно для
+        tui.show_*=False: действие в drain без сброса буфера)."""
+        if self._stream_block is not None:
+            self._stream_block.remove()
+            self._stream_block = None
+        if reset_sink:
+            sink = getattr(self.app, "_stream_sink", None)
+            if sink is not None:
+                sink.reset()
 
     def _trace_is_at_bottom(self) -> bool:
         """True, если трейс прокручен в самый низ (с допуском). Используется для
@@ -564,6 +585,8 @@ class TraceScreen(Screen):
         """Обработка отправки user query: обнулить счётчик событий с последнего
         user-send и запомнить текст для cancel-with-undo (Tasks 9-10).
         Дополнительно: append текста в input-history и выход из history-навигации."""
+        from tui.services.terminal_title import format_terminal_title, set_terminal_title
+        set_terminal_title(format_terminal_title(text))
         self._events_since_last_user_send = 0
         self._last_user_send_text = text
         if self._history is not None:
@@ -588,6 +611,11 @@ class TraceScreen(Screen):
             return
         if ev.kind != "user":
             self._events_since_last_user_send += 1
+
+        # Any committed canonical row supersedes the ephemeral reasoning/answer
+        # preview for the current step — clear it so it can't drift above new rows.
+        # (It re-mounts at the bottom on the next poll tick if streaming continues.)
+        self._clear_stream_block()
 
         # ask_human-output banner cleanup — Фикс B-2.
         # Mapper эмитит для function_call_output name=ask_human либо kind='user'
@@ -717,15 +745,6 @@ class TraceScreen(Screen):
             cls = "line-ok" if ev.kind == "result" else "line-error"
             self._mount_trace_row(
                 prefix=prefix, content=ev.summary, kind_class=cls,
-                event_no=ev.no,
-            )
-            return
-
-        if ev.kind == "system" and ev.title == "think":
-            self._mount_trace_row(
-                prefix="  ? ",
-                content=f"think: {ev.summary}",
-                kind_class="line-think",
                 event_no=ev.no,
             )
             return
@@ -1137,10 +1156,44 @@ class TraceScreen(Screen):
                 self._hide_thinking_indicator()
             else:
                 self._show_thinking_indicator(state="thinking")
+            # Эфемерный StreamBlock — live-вывод текущего шага. Источник —
+            # app._stream_sink (кормится из worker-потока через on_stream_delta);
+            # монтаж/обновление строго здесь, на UI-потоке (set_interval-колбэк).
+            # StreamBlock — только в активной фазе «thinking». В validating
+            # (финальный ответ виден, идёт finish-gate) и compressing reasoning
+            # не показываем — иначе строка-мысль висит после финального ответа (баг B).
+            _thinking_phase = (not summarizing) and (self._last_event_kind != "_finalized")
+            sink = getattr(self.app, "_stream_sink", None)
+            if _thinking_phase and sink is not None and sink.has_content():
+                from tui.services.stream_sink import (
+                    format_stream_block, format_reasoning_line,
+                )
+                from tui.widgets.stream_block import StreamBlock
+                think, answer = sink.snapshot()
+                ans = format_stream_block(answer=answer)
+                _cfg = getattr(self.app, "_config", None) or {}
+                if ans:
+                    show = bool(_cfg.get("tui_show_stream_answer", False))
+                    text, thinking = ans, False
+                else:
+                    show = bool(_cfg.get("tui_show_reasoning_line", True))
+                    text, thinking = format_reasoning_line(think=think), True
+                if show and text:
+                    if self._stream_block is None:
+                        self._stream_block = StreamBlock()
+                        self._trace_mount(self._stream_block, scroll=True)
+                    self._stream_block.set_text(text, thinking=thinking)
+                else:
+                    # render disabled by config (or nothing to show) — drop the
+                    # widget but KEEP the sink (counter/indicator unaffected).
+                    self._clear_stream_block(reset_sink=False)
+            elif not _thinking_phase:
+                self._clear_stream_block()
         elif ask_human_active:
             self._hide_thinking_indicator()
         else:
             self._destroy_thinking_indicator()
+            self._clear_stream_block()
         # Footer-left зависит от is_running — обновляем каждый тик, чтобы
         # /stop появлялся/исчезал без отдельных вызовов из start/stop путей.
         self._refresh_footer()

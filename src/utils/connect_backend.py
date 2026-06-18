@@ -11,6 +11,7 @@ from message_policy.chat_completions import prepare_chat_completion_messages_for
 from utils.convertations import output_chat_completion_to_response
 from utils.format_messages import format_message_chat_completions_to_send_backend
 from utils.retry import retry_with_backoff
+from utils.chat_completions_stream import iter_sse_data_lines, assemble_streamed_completion, OnDelta
 
 
 logger = logging.getLogger(__name__)
@@ -148,12 +149,55 @@ def request_backend_chat_completions(
     verify: bool = True,
     use_retry: bool = True,
     logger: Optional[logging.Logger] = None,
+    on_delta: Optional[OnDelta] = None,
 ):
     """
     Отправить запрос в backend chat completions API.
 
     url передаётся явно вызывающим кодом (как правило, из ctx.config_dict).
     """
+    if on_delta is not None:
+        stream_data = dict(data)
+        stream_data["stream"] = True
+        if logger is not None:
+            try:
+                logger.debug(
+                    "Send request to backend chat/completions (stream=True) url=%s payload=%s",
+                    url,
+                    json.dumps(stream_data, ensure_ascii=False),
+                )
+            except Exception:
+                logger.debug(
+                    "Send request to backend chat/completions (stream=True) url=%s", url
+                )
+        with requests.post(
+            url, json=stream_data, headers=headers, stream=True, verify=verify
+        ) as r:
+            try:
+                r.raise_for_status()
+            except requests.exceptions.HTTPError:
+                # Preserve error-body diagnostics (parity with blocking path).
+                err_text = None
+                try:
+                    err_text = r.text
+                except Exception:
+                    err_text = None
+                if logger is not None:
+                    logger.error(
+                        "Backend chat/completions (stream) HTTP error status=%s url=%s body=%s",
+                        getattr(r, "status_code", None), url, err_text,
+                    )
+                print(
+                    "=== backend chat/completions (stream) error ===\n"
+                    f"url={url}\nstatus={getattr(r, 'status_code', None)}\n"
+                    f"response_body={(err_text or '')[:4000]}\n"
+                )
+                raise
+            on_delta("reset", "")
+            return assemble_streamed_completion(
+                iter_sse_data_lines(r.iter_lines()), on_delta=on_delta
+            )
+
     if logger is not None:
         try:
             logger.debug(

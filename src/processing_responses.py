@@ -210,6 +210,9 @@ def _request_backend_canonical(
             max_tokens=max_tokens,
         )
 
+    _stream_on = bool(cfg.get("stream", True))
+    _on_delta = getattr(ctx, "on_stream_delta", None) if _stream_on else None
+
     res, call_data = request_chat_completions_with_policy(
         payload_factory=_create_payload,
         initial_max_tokens=completions_max_tokens,
@@ -219,6 +222,7 @@ def _request_backend_canonical(
         verify=verify,
         use_retry=use_retry,
         logger=getattr(ctx, "logger", None),
+        on_delta=_on_delta,
     )
     if not isinstance(res, dict):
         raise ValueError("chat/completions backend response must be an object")
