@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import argparse
 import importlib
+import os
 import sys
 from typing import Optional, Sequence
 
@@ -16,8 +17,23 @@ _MISSING_TEXTUAL_MSG = (
 )
 
 
+def _force_truecolor_if_supported() -> None:
+    """Подсказать Textual использовать 24-bit на терминалах, где truecolor точно
+    есть (Windows Terminal / VS Code / COLORTERM). Иначе авто-детект может выбрать
+    256 цветов, и поколоночный градиент логотипа квантуется в видимые «ступеньки»
+    (наблюдалось на Windows; на macOS truecolor определяется сам). `setdefault` не
+    перетирает явный пользовательский TEXTUAL_COLOR_SYSTEM."""
+    if (
+        os.environ.get("WT_SESSION")
+        or os.environ.get("TERM_PROGRAM") == "vscode"
+        or os.environ.get("COLORTERM") in ("truecolor", "24bit")
+    ):
+        os.environ.setdefault("TEXTUAL_COLOR_SYSTEM", "truecolor")
+
+
 def main(argv: Optional[Sequence[str]] = None) -> int:
     """Entrypoint для `gc-ua = "tui:main"`."""
+    _force_truecolor_if_supported()
     try:
         # importlib.import_module goes through sys.modules, not the package
         # attribute cache, so evicting tui.app in tests forces a real re-import.
