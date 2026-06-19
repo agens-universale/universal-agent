@@ -6,7 +6,7 @@ from intent_guard.feedback import (
     build_finish_gate_feedback,
     build_finish_gate_reject_technical_user_content,
 )
-from constants.tool_names import FINISH_TOOL_NAME, SESSION_COMPACT_TOOL_NAME
+from constants.tool_names import FINISH_TOOL_NAME, SESSION_COMPACT_TOOL_NAME, TURN_FINALIZING_TOOLS
 from run_summary_coordinator import build_preserved_batch, filter_messages_not_in_state
 from intent_guard.guard import FinishGateGuard
 from intent_guard.turn_finish_emit import (
@@ -323,6 +323,16 @@ def process_user_ask(messages, state: State, ctx: Any):
     return resp_messages, response_id
 
 
+def split_at_first_finalizer(tool_calls: List[Dict]) -> tuple[List[Dict], List[Dict]]:
+    """Разбивает tool_calls на (executed, skipped): всё до и включая первый
+    turn-финализирующий тул исполняется; остальное в этом ответе — пропускается
+    (ход уже завершён). intermediate_reply финализатором не считается."""
+    for i, m in enumerate(tool_calls):
+        if str(m.get("name") or "") in TURN_FINALIZING_TOOLS:
+            return tool_calls[: i + 1], tool_calls[i + 1:]
+    return tool_calls, []
+
+
 def process_tool_calls(
     messages: List[Dict],
     state: State,
@@ -338,7 +348,8 @@ def process_tool_calls(
     state.session_compact_applied = False
 
     tools_outputs = []
-    for m in grouped_messages["tool_calls"]:
+    executed, skipped = split_at_first_finalizer(grouped_messages["tool_calls"])
+    for m in executed:
         tool_name = str(m.get("name") or "")
         tool_arguments = str(m.get("arguments", ""))
         tool_res_raw = apply_tool(
@@ -372,6 +383,20 @@ def process_tool_calls(
         }
 
         tools_outputs.append(new_message)
+
+    if skipped:
+        finalizer = str(executed[-1].get("name") or "the finalizing tool")
+        for m in skipped:
+            tools_outputs.append({
+                "id": generate_message_id_func("fco"),
+                "type": "function_call_output",
+                "call_id": m["call_id"],
+                "output": (
+                    f'{{"ok": false, "skipped": true, "message": '
+                    f'"Skipped: turn already finalized by {finalizer}; '
+                    f'one finalizer per turn."}}'
+                ),
+            })
 
     if getattr(state, "session_compact_applied", False):
         state.session_compact_applied = False
