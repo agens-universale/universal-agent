@@ -12,7 +12,7 @@ from typing import Any, Callable, Dict, List, NamedTuple
 
 # Сентинелы из config.default.yml (страж совпадения — tests/test_onboarding.py).
 URL_SENTINEL = "http://your-backend:PORT/v1/chat/completions"
-TOKEN_SENTINEL = "Bearer <ВПИШИ_ТОКЕН>"
+TOKEN_SENTINEL = "Bearer <ВПИШИТЕ_ТОКЕН>"
 
 
 class _Field(NamedTuple):
@@ -59,6 +59,6 @@ def setup_guide(config_path: str, config: Dict[str, Any]) -> str:
     lines = "\n".join(f"  • {f.yaml_path} — {f.hint}" for f in pending)
     return (
         f"[gc] Конфиг ещё не настроен: {config_path}\n"
-        f"     Впиши перед запуском:\n{lines}\n"
-        f"     (проверь также agent.model), затем запусти снова."
+        f"     Впишите перед запуском:\n{lines}\n"
+        f"     (проверьте также agent.model), затем запустите снова."
     )

@@ -3,14 +3,14 @@
 # Авто-копируется в ~/.gc/config.yml при первом запуске.
 # Полный документированный пример со всеми опциями — demo_config.yml.
 #
-# ПЕРЕД ПЕРВЫМ ЗАПРОСОМ впиши под себя:
-#   1) backend.completions_url — endpoint твоего OpenAI-совместимого провайдера;
-#   2) backend.chat_completion_headers.Authorization — твой токен.
+# ПЕРЕД ПЕРВЫМ ЗАПРОСОМ впишите:
+#   1) backend.completions_url — endpoint OpenAI-совместимого провайдера;
+#   2) backend.chat_completion_headers.Authorization — токен доступа.
 # =============================================================================
 
 backend:
   api_mode: chat_completions
-  # ВПИШИ свой endpoint (OpenAI-совместимый chat/completions), напр.:
+  # Впишите endpoint (OpenAI-совместимый chat/completions), напр.:
   #   https://routerai.ru/api/v1/chat/completions  (тогда use_ssl: true)
   completions_url: "http://your-backend:PORT/v1/chat/completions"
   chat_completions_max_tokens: 8096
@@ -24,7 +24,7 @@ backend:
   # Сейчас стрим задействован только в TUI. Default on.
   stream: true
   chat_completion_headers:
-    Authorization: "Bearer <ВПИШИ_ТОКЕН>"
+    Authorization: "Bearer <ВПИШИТЕ_ТОКЕН>"
 
 agent:
   model: "gigacode_agent_v1_rc"
