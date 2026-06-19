@@ -61,6 +61,7 @@ class TraceScreen(Screen):
         self._palette: CommandPalette | None = None
         self._brand: Vertical | None = None
         self._task_events: list = []  # list[TraceEvent]; пополняется в _render_record/_render_segments
+        self._last_agent_summary: Optional[str] = None  # A1: дедуп равных user-facing рядов
         self._store: Optional[FileTaskStore] = None
         self._cursor: Optional[TaskCursor] = None
         self._next_no: int = 1
@@ -290,6 +291,7 @@ class TraceScreen(Screen):
     def _reset_render_state(self) -> None:
         """Clear all per-task rendering state. Called on task switch and stream_reset."""
         self._task_events.clear()
+        self._last_agent_summary = None
         self._next_no = 1
         self._active_calls.clear()
         self._submit_solution_call_ids.clear()
@@ -653,6 +655,14 @@ class TraceScreen(Screen):
             return
 
         if ev.kind == "agent":
+            # A1: дубль контента (проза → тот же финализатор / повтор) — не показываем
+            # второй раз; ставим компактную метку завершения. Exact-match (strip).
+            norm = (ev.summary or "").strip()
+            if norm and norm == self._last_agent_summary:
+                self._mount_trace_row(prefix="  ", content="✓ готово",
+                                      kind_class="line-meta", event_no=ev.no)
+                return
+            self._last_agent_summary = norm
             if ev.tool_name == "intermediate_reply":
                 from tui.services.trace_render import build_intermediate_widgets
                 # «Прилипание к низу»: фиксируем ДО монтирования (как у прозы).
