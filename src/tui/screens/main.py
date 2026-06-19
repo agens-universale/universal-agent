@@ -42,10 +42,10 @@ _HEADER_EMPTY = branding.HEADER_LEFT_EMPTY
 _HEADER_RIGHT = branding.HEADER_RIGHT
 _PLACEHOLDER_READY = "опишите задачу или /команда"
 _HINT_TEXT = {
-    "clear": "Esc ещё раз — очистить",
-    "stop":  "Esc ещё раз — остановить",
+    "clear": "Esc ещё раз, чтобы очистить",
+    "stop":  "Esc ещё раз, чтобы остановить",
 }
-_PASTE_HINT_TEXT = "вставьте ещё раз — развернуть"
+_PASTE_HINT_TEXT = "вставьте ещё раз, чтобы развернуть"
 # Префикс preview-строк под ToolCallRow (5 пробелов + `| ` чтобы выровняться
 # под `  |- ` префиксом самой row'и и визуально продолжить её column).
 _PREVIEW_PREFIX = "     | "
@@ -244,13 +244,13 @@ class TraceScreen(Screen):
             cwd = "…" + cwd[-47:]
         return cwd
 
-    def _show_footer_hint(self, text: str) -> None:
-        """Короткая подсказка в footer-left на 2с (esc-confirm и paste-hint)."""
+    def _show_footer_hint(self, text: str, seconds: float = 2.0) -> None:
+        """Короткая подсказка в footer-left (esc-confirm — 2с, paste-hint — 5с)."""
         self._footer_hint_active = True
         self.query_one("#footer-left").update(text)
         if self._footer_hint_timer is not None:
             self._footer_hint_timer.stop()
-        self._footer_hint_timer = self.set_timer(2.0, self._clear_footer_hint)
+        self._footer_hint_timer = self.set_timer(seconds, self._clear_footer_hint)
 
     def _show_esc_hint(self, kind: str) -> None:
         """Esc-confirm hint: запоминает kind (для 2-го Esc) + показывает подсказку."""
@@ -1853,7 +1853,7 @@ class TraceScreen(Screen):
     def on_command_text_area_paste_collapsed(
         self, event: CommandTextArea.PasteCollapsed
     ) -> None:
-        self._show_footer_hint(_PASTE_HINT_TEXT)
+        self._show_footer_hint(_PASTE_HINT_TEXT, seconds=5.0)
 
     def _consume_pending_prefix(self, text: str) -> tuple[str, dict]:
         """Встроить отложенный skill в сообщение; вернуть (query, meta-patch).

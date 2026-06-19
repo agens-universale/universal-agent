@@ -6,7 +6,7 @@ from textual.message import Message
 from textual.widgets import TextArea
 
 from tui.services.paste_chips import (
-    ChipStore, should_collapse, token_spans, expand, EXPAND_WINDOW_SECONDS,
+    ChipStore, should_collapse, token_spans, expand,
 )
 
 
@@ -36,8 +36,7 @@ class CommandTextArea(TextArea):
         super().__init__(*args, **kwargs)
         # Состояние «плашек» объёмной вставки (когезивно с буфером ввода).
         self._chips = ChipStore()
-        self._expand_chip_id: int | None = None   # последняя свёрнутая плашка
-        self._expand_timer = None                 # textual.Timer окна «развернуть»
+        self._expand_chip_id: int | None = None   # последняя свёрнутая плашка (без таймера)
 
     async def _on_key(self, event: events.Key) -> None:
         if event.key in self._NEWLINE_KEYS:
@@ -70,18 +69,13 @@ class CommandTextArea(TextArea):
         self.move_cursor(result.end_location)
 
     def _open_expand_window(self, chip_id: int) -> None:
+        # Запомнить последнюю свёрнутую плашку — повторная вставка её текста
+        # развернёт инлайн в любой момент (без таймера). Сбрасывается при самом
+        # развороте, вставке чего-то другого или отправке.
         self._expand_chip_id = chip_id
-        if self._expand_timer is not None:
-            self._expand_timer.stop()
-        self._expand_timer = self.set_timer(
-            EXPAND_WINDOW_SECONDS, self._close_expand_window
-        )
 
     def _close_expand_window(self) -> None:
         self._expand_chip_id = None
-        if self._expand_timer is not None:
-            self._expand_timer.stop()
-            self._expand_timer = None
 
     def _expand_chip_inline(self, chip_id: int) -> None:
         full = self._chips.get(chip_id)
@@ -96,6 +90,10 @@ class CommandTextArea(TextArea):
 
     def _handle_paste(self, text: str) -> None:
         """Единая точка сведения трёх путей вставки."""
+        # Нормализуем концы строк: bracketed-paste (Ctrl+V в Windows Terminal и пр.)
+        # шлёт \r как разделитель, а should_collapse/chip_label считают \n —
+        # иначе многострочная \r-вставка не сворачивается (уходит инлайн).
+        text = text.replace("\r\n", "\n").replace("\r", "\n")
         # 1. та же паста в окне «развернуть» → развернуть последнюю плашку инлайн
         if self._expand_chip_id is not None \
                 and text == self._chips.get(self._expand_chip_id):
