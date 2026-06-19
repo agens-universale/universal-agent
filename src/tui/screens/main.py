@@ -1226,10 +1226,6 @@ class TraceScreen(Screen):
             return
         self._cursor = tail.next_cursor
         self._render_records(tail.new_records, live=True)
-        # Перекрытый/пропущенный ask_human (за ним output) не должен висеть баннером
-        # в live-потоке (reconcile уже зовётся в attach/компакции — здесь тоже).
-        # Активный (живой агент ждёт, продолжения нет) — reconcile сохраняет.
-        self._reconcile_ask_human_after_render(allow_remnant=False)
         self._refresh_header()
 
     def _show_brand(self) -> None:
