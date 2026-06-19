@@ -159,7 +159,9 @@ class TuiApp(App):
         """Ctrl+C: есть выделение → копировать в буфер; иначе → остановить run."""
         sel = self._current_selection()
         if sel:
-            self.copy_to_clipboard(sel)
+            self.copy_to_clipboard(sel)  # OSC 52 + внутренний app.clipboard (SSH/удалённые)
+            from tui.services.os_ops import write_clipboard
+            write_clipboard(sel)         # нативный ОС-буфер (локальные терминалы без OSC 52)
             return
         scr = self.screen
         if hasattr(scr, "_cmd_stop"):
