@@ -655,12 +655,11 @@ class TraceScreen(Screen):
             return
 
         if ev.kind == "agent":
-            # A1: дубль контента (проза → тот же финализатор / повтор) — не показываем
-            # второй раз; ставим компактную метку завершения. Exact-match (strip).
+            # A1: дубль контента (проза → тот же финализатор / повтор) — молча
+            # опускаем второй ряд (контент уже показан первым). Exact-match (strip),
+            # без маркера: завершение хода и так видно по готовому инпуту.
             norm = (ev.summary or "").strip()
             if norm and norm == self._last_agent_summary:
-                self._mount_trace_row(prefix="  ", content="✓ готово",
-                                      kind_class="line-meta", event_no=ev.no)
                 return
             self._last_agent_summary = norm
             if ev.tool_name == "intermediate_reply":

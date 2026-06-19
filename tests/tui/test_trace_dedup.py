@@ -22,8 +22,7 @@ async def test_duplicate_agent_row_collapsed(tmp_path):
         await pilot.pause()
         rows = " ".join(f"{getattr(r, '_prefix', '')}{getattr(r, '_content', '')}"
                         for r in scr.query(TraceRow))
-        assert rows.count("Готово: всё сделано.") == 1   # контент один раз
-        assert "✓" in rows                                # метка-схлоп
+        assert rows.count("Готово: всё сделано.") == 1   # контент один раз (дубль молча опущен)
 
 
 @pytest.mark.asyncio
