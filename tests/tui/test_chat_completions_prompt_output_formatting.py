@@ -47,16 +47,16 @@ def test_tui_file_output_formatting_section_is_tool_agnostic():
 
 def test_tui_file_steers_questions_to_asking_tool():
     body = _read_prompt("chat_completions_tui_special_instructions.md")
-    assert "ask tool" in body
-    assert "wait for human input" in body
+    assert "asking the user" in body
+    assert "designated channel" in body
 
 
 def test_tui_file_asking_vs_finalizing_rule():
     body = _read_prompt("chat_completions_tui_special_instructions.md")
-    assert "ask tool" in body
+    assert "asking the user" in body
     assert "submit_solution" not in body
-    assert "turn-finish tool" in body
-    assert "forward-looking, non-blocking" in body
+    assert "finalize the turn" in body
+    assert "propose" in body or "recommend" in body
 
 
 def test_base_prompt_has_no_asking_block():
