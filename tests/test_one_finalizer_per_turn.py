@@ -56,3 +56,43 @@ def test_process_tool_calls_skips_second_finalizer(monkeypatch):
     assert calls == ["turn_ask_human"]                 # apply_tool — только для 1-го
     assert len(outs) == 2
     assert "skipped" in outs[1]["output"] and outs[1]["call_id"] == "c2"
+
+
+def test_flush_non_blocking_outputs_before_ask_human(monkeypatch):
+    """Не-блокирующие output'ы (session_memory) персистятся ДО запуска блокирующего
+    turn_ask_human — иначе висят 'running', пока ждём ответ юзера."""
+    import processing_responses as pr
+
+    persisted = []
+    order = []
+
+    def fake_apply(**kw):
+        order.append(kw["tool_name"])
+        if kw["tool_name"] == "turn_ask_human":
+            flushed = [m for batch in persisted for m in batch]
+            assert any(m.get("call_id") == "c1" for m in flushed), \
+                "session_memory output должен быть сфлашен ДО turn_ask_human"
+        return '{"ok": true}'
+
+    monkeypatch.setattr(pr, "apply_tool", fake_apply)
+    monkeypatch.setattr(pr, "maybe_store_and_wrap_tool_output", lambda res, **kw: res)
+    monkeypatch.setattr(pr, "maybe_update_intent_scope_from_tool", lambda **kw: None)
+    monkeypatch.setattr(pr, "generate_message_id_func", lambda p: f"{p}_x")
+
+    class _State:
+        messages = []
+        discard_writes_after_stop = False
+        stop_requested = False
+        def __init__(self): self.session_compact_applied = False
+
+    messages = [
+        {"type": "function_call", "name": "session_memory", "call_id": "c1", "arguments": "{}"},
+        {"type": "function_call", "name": "turn_ask_human", "call_id": "c2", "arguments": "{}"},
+    ]
+    ctx = type("C", (), {"config_dict": {}, "logger": None})()
+    outs = pr.process_tool_calls(
+        messages, _State(), ctx, run_agent_func=None,
+        persist_messages_callback=lambda msgs: persisted.append(list(msgs)),
+    )
+    assert order == ["session_memory", "turn_ask_human"]
+    assert any(m.get("call_id") == "c1" for m in outs)   # output не потерян в возврате

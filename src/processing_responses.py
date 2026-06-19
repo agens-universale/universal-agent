@@ -6,7 +6,12 @@ from intent_guard.feedback import (
     build_finish_gate_feedback,
     build_finish_gate_reject_technical_user_content,
 )
-from constants.tool_names import FINISH_TOOL_NAME, SESSION_COMPACT_TOOL_NAME, TURN_FINALIZING_TOOLS
+from constants.tool_names import (
+    ASK_HUMAN_TOOL_NAME,
+    FINISH_TOOL_NAME,
+    SESSION_COMPACT_TOOL_NAME,
+    TURN_FINALIZING_TOOLS,
+)
 from run_summary_coordinator import build_preserved_batch, filter_messages_not_in_state
 from intent_guard.guard import FinishGateGuard
 from intent_guard.turn_finish_emit import (
@@ -338,6 +343,7 @@ def process_tool_calls(
     state: State,
     ctx: Any,
     run_agent_func,
+    persist_messages_callback: Optional[Callable[[List[Dict]], None]] = None,
 ):
     grouped_messages = group_messages(messages)
     if len(grouped_messages['tool_outputs']) > 0:
@@ -349,7 +355,15 @@ def process_tool_calls(
 
     tools_outputs = []
     executed, skipped = split_at_first_finalizer(grouped_messages["tool_calls"])
-    for m in executed:
+    # turn_ask_human блокируется на input() до ответа юзера. Если он последний в
+    # батче, output'ы предыдущих (не-блокирующих) тулов иначе висят "running",
+    # пока ждём ответ (персист всего батча — только когда функция вернётся).
+    blocks_at_end = bool(executed) and str(executed[-1].get("name") or "") == ASK_HUMAN_TOOL_NAME
+    for i, m in enumerate(executed):
+        if blocks_at_end and i == len(executed) - 1 and tools_outputs:
+            # Сфлашить уже посчитанные output'ы ДО блокировки. Тред дедупит по
+            # make_message_key → повторный персист на выходе из run_agent — no-op.
+            _maybe_persist(persist_messages_callback, list(tools_outputs), state)
         tool_name = str(m.get("name") or "")
         tool_arguments = str(m.get("arguments", ""))
         tool_res_raw = apply_tool(
@@ -691,7 +705,10 @@ def run_agent(
                         else:
                             state.current_user_intent = []
                         return finish_arguments
-                    messages = process_tool_calls(messages, state, ctx, run_agent_func=run_agent)
+                    messages = process_tool_calls(
+                        messages, state, ctx, run_agent_func=run_agent,
+                        persist_messages_callback=persist_messages_callback,
+                    )
                     tool_error_cnt = 0
                 elif mode == "function_call_output":
                     messages, response_id = process_tool_outputs(messages, state, ctx)
