@@ -387,3 +387,44 @@ async def test_enter_in_zombie_continues_thread_as_new_user_message(tmp_path):
         assert started[0]["thread_id"] == thread_id
         from tui.widgets.user_reply import UserReplyContainer
         assert list(screen.query(UserReplyContainer))
+
+
+@pytest.mark.asyncio
+async def test_reconcile_keeps_active_ask_human_banner(tmp_path):
+    """Гвард к Task 5: reconcile в live-потоке НЕ снимает активный баннер
+    (живой раннер ждёт, продолжения нет) — иначе юзер не смог бы ответить."""
+    pytest.importorskip("textual")
+    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    async with app.run_test() as pilot:
+        scr = app.screen
+
+        class _Live:
+            def is_running(self): return True
+
+        app.active_runner = _Live()
+        _mount_zombie_banner(scr)
+        await pilot.pause()
+        assert scr._ask_human_banner is not None
+        scr._reconcile_ask_human_after_render(allow_remnant=False)
+        assert scr._ask_human_banner is not None      # активный сохранён
+
+
+@pytest.mark.asyncio
+async def test_reconcile_unmounts_superseded_ask_human_banner(tmp_path):
+    """Перекрытый ask_human (после вопроса есть событие = продолжение диалога) →
+    reconcile снимает баннер (наш skip-output из Task 1 = kind=result)."""
+    pytest.importorskip("textual")
+    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    async with app.run_test() as pilot:
+        scr = app.screen
+        _mount_zombie_banner(scr)
+        await pilot.pause()
+        scr._task_events.append(TraceEvent(
+            no=1, event_ts_utc_iso="2026-06-20T00:00:00+00:00", kind="ask_human",
+            title="ask_human", summary="Готовы?", full_payload={},
+            message_id="ah", call_id="call_zombie_1", tool_name="ask_human"))
+        scr._task_events.append(TraceEvent(
+            no=2, event_ts_utc_iso="2026-06-20T00:00:00+00:00", kind="result",
+            title="", summary="ok", full_payload={}, message_id="r"))
+        scr._reconcile_ask_human_after_render(allow_remnant=False)
+        assert scr._ask_human_banner is None          # перекрытый снят
