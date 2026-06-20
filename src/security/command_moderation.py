@@ -12,6 +12,7 @@ from typing import Any, Callable
 
 from config_modules.security import validate_command_moderation_mode
 from constants.tool_names import EXEC_PYTHON_NAME
+from security.confirm_port import confirm_available, request_confirm
 from security.path_policy import (
     ToolSecurityContext,
     audit_policy_decision,
@@ -94,11 +95,23 @@ class JudgeUnavailable(RuntimeError):
     pass
 
 
+def _get_protected_paths(cwd: str | None):
+    from security.protected_paths import protected_paths
+    return protected_paths(cwd=cwd)
+
+
 def build_judge_payload(
     tool_name: str,
     payload: str,
     context: ModerationContext,
 ) -> dict[str, Any]:
+    try:
+        ps = _get_protected_paths(context.cwd)
+        never_touch = sorted(
+            str(p) for p in ps.instructions | ps.operational
+        )
+    except Exception:
+        never_touch = []
     return {
         "tool_name": tool_name,
         "payload": payload,
@@ -114,6 +127,7 @@ def build_judge_payload(
             "has_venv": context.has_venv,
         },
         "allowed_command_examples": context.allowed_command_examples,
+        "never_touch_paths": never_touch,
     }
 
 
@@ -170,6 +184,8 @@ def decide_command_execution(
     judge_result: JudgeResult | None,
     judge_available: bool,
     user_confirmation: bool | None,
+    *,
+    ctx: Any = None,
 ) -> ExecutionDecision:
     normalized_mode = validate_command_moderation_mode(mode)
     if normalized_mode == "allow":
@@ -203,7 +219,22 @@ def decide_command_execution(
                 reason="Judge is unavailable; user confirmation is required.",
                 requires_confirmation=True,
             )
-        # Fail-closed: при недоступности судьи в deny — блокируем.
+        # C1 Часть 2: при недоступности судьи в deny — пробуем confirm-порт.
+        if confirm_available(ctx):
+            confirmed = request_confirm(
+                title="Command moderation",
+                question="Судья недоступен. Выполнить команду?",
+                fields=[("mode", normalized_mode)],
+                ctx=ctx,
+            )
+            if confirmed:
+                return ExecutionDecision(
+                    allowed=True,
+                    decision="executed",
+                    reason_code="judge_unavailable_user_confirmed",
+                    reason="User confirmed execution after judge was unavailable.",
+                )
+        # Fail-closed: confirm недоступен или пользователь отказал — блокируем.
         return ExecutionDecision(
             allowed=False,
             decision="blocked",
