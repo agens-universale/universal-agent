@@ -42,11 +42,14 @@ def judge_text_answer(ctx: Any, state: Any, assistant_text: str) -> bool:
 def should_return_text_answer(ctx: Any, state: Any, assistant_text: str) -> bool:
     """Принять ли текст-ответ как ответ хода — по режиму ``text_answer_mode`` из cfg.
 
+    Пустой текст — не ответ хода: всегда нет (bounce), в любом режиме. Иначе:
     ``always`` → да (без судьи); ``judge`` → решает судья, но только если включён
     сам finish-gate (``chat_completions`` + ``strict_turn_finish_validation``) — иначе
     судью не на чём построить (в т.ч. responses-режим), ведём себя как ``strict``;
-    ``strict`` или ключа нет (автономка CLI/server/swarm) → нет. Ключ ставит только
-    TUI (см. ``tui/app.py``)."""
+    ``strict`` или ключа нет → нет. Ключ по умолчанию ставит только TUI
+    (CLI/server/swarm — нет; явный override допустим как opt-in, см. ``tui/app.py``)."""
+    if not (assistant_text or "").strip():
+        return False  # пустой текст — не ответ хода: bounce в любом режиме
     cfg = getattr(ctx, "config_dict", {}) or {}
     mode = cfg.get("text_answer_mode") if isinstance(cfg, dict) else None
     if mode == "always":

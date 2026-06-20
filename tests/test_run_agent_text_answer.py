@@ -81,6 +81,17 @@ def test_judge_with_strict_validation_off_is_strict(monkeypatch):
     assert judged["n"] == 0
 
 
+def test_empty_text_bounces_in_all_modes(monkeypatch):
+    """Пустой/пробельный текст — не ответ хода: bounce даже в always; судья не зван."""
+    import intent_guard.text_answer_judge as taj
+    judged = {"n": 0}
+    monkeypatch.setattr(taj, "judge_text_answer",
+                        lambda ctx, state, text: judged.__setitem__("n", judged["n"] + 1) or True)
+    assert should_return_text_answer(_ctx("always"), _S(), "   ") is False
+    assert should_return_text_answer(_ctx("judge"), _S(), "") is False
+    assert judged["n"] == 0
+
+
 # --- интеграция в run_agent ---------------------------------------------------
 
 def _state():
