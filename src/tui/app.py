@@ -125,7 +125,7 @@ class TuiApp(App):
         def _show() -> None:
             fn = getattr(self.screen, "show_confirm_banner", None)
             if fn is not None:
-                fn(title, question)
+                fn(title, question, fields)
         self.call_from_thread(_show)
 
     # --- actions ------------------------------------------------------

@@ -21,8 +21,13 @@ def test_confirm_banner_snapshot(snap_compare, tmp_path, monkeypatch):
     async def setup(pilot):
         await pilot.pause()
         pilot.app.screen.show_confirm_banner(
-            "Запись инструкций",
-            "Разрешить запись в AGENTS.md?",
+            "Command moderation",
+            "Разрешить выполнение команды?",
+            [
+                ("Tool", "execute_command"),
+                ("Команда", "rm -rf /tmp/build-cache"),
+                ("Риск", "destructive_fs"),
+            ],
         )
         await pilot.pause()
 

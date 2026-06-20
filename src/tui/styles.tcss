@@ -248,6 +248,7 @@ TextArea.ask-human-mode { border: solid $run-color; }
 }
 .cb-label    { color: $bright; text-style: bold; }
 .cb-question { color: $ink; }
+.cb-field    { color: $dim; }
 .cb-options  { color: $accent; }
 
 /* скрытый input-row при confirm (одиночные клавиши y/N без TextArea) */

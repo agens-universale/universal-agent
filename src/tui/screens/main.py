@@ -904,16 +904,19 @@ class TraceScreen(Screen):
 
     # ──────────────────────── confirm banner (T2) ───────────────────────────
 
-    def show_confirm_banner(self, title: str, question: str) -> None:
+    def show_confirm_banner(
+        self, title: str, question: str, fields: list | None = None
+    ) -> None:
         """Смонтировать ConfirmBanner и переключить в режим одиночной клавиши.
 
         Вызывается на UI-потоке (напр. через App.call_from_thread из T3).
         Скрывает #input-row, убирает фокус с TextArea — «y»/«n» доходят до
-        Screen.on_key и не поглощаются TextArea."""
+        Screen.on_key и не поглощаются TextArea. fields — структурированные
+        детали решения (Tool/Path/Command/Reason/Risk) из confirm-порта."""
         from tui.widgets.confirm_banner import ConfirmBanner
         if self._confirm_active:
             self._hide_confirm_banner()
-        banner = ConfirmBanner(banner_title=title, question=question)
+        banner = ConfirmBanner(banner_title=title, question=question, fields=fields)
         self._confirm_banner = banner
         self._confirm_active = True
         inp_row = self.query_one("#input-row", Horizontal)
