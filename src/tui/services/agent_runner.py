@@ -35,6 +35,8 @@ class AgentRunner:
         self._stdin_queue: "queue.Queue[str]" = queue.Queue()
         self._prebuild_messages: list[dict] = []
         self._stop_requested = False
+        self._confirm_event = threading.Event()
+        self._confirm_result: bool = False
 
     def _ensure_executor(self) -> Any:
         with self._build_lock:
@@ -131,11 +133,13 @@ class AgentRunner:
         """Кооперативная остановка — флаг на executor; run сам выйдет.
 
         Если executor ещё строится (фабрика не отработала) — ставим флаг, и
-        worker-поток не запустит run после сборки."""
+        worker-поток не запустит run после сборки.
+        Также разблокирует агент-поток, зависший в confirm (fail-closed → False)."""
         self._stop_requested = True
         ex = self._executor
         if ex is not None:
             ex.stop_run()
+        self.cancel_confirm()
 
     def add_message(self, message: dict) -> None:
         # executor может ещё строиться — тогда буферизуем; worker-поток дольёт
@@ -151,6 +155,40 @@ class AgentRunner:
         поэтому шлём ответ + завершающую пустую строку (иначе read-loop виснет)."""
         self._stdin_queue.put(text + "\n")
         self._stdin_queue.put("\n")  # терминатор read-loop в ask_human
+
+    def make_tui_confirm(
+        self,
+        present: Callable[[str, str, list], None],
+    ) -> Callable[..., bool]:
+        """Вернуть замыкание tui_confirm для передачи в ctx.
+
+        Замыкание вызывается на агент-потоке и блокирует его до ответа юзера.
+        present(title, question, fields) — инжектированный UI-presenter; он
+        отвечает за маршаллинг в UI-поток и показ баннера (реализуется в T3).
+        """
+
+        def _tui_confirm(*, title: str, question: str, fields: list) -> bool:
+            self._confirm_event.clear()
+            self._confirm_result = False
+            present(title, question, fields)
+            self._confirm_event.wait()
+            return bool(self._confirm_result)
+
+        return _tui_confirm
+
+    def submit_confirm_reply(self, ok: bool) -> None:
+        """UI кладёт ответ юзера (y/Enter → True, n/Esc → False).
+
+        Разблокирует агент-поток, ожидающий в _tui_confirm."""
+        self._confirm_result = ok
+        self._confirm_event.set()
+
+    def cancel_confirm(self) -> None:
+        """Fail-closed разблокировка confirm (результат False).
+
+        Используется в stop() и в тестах; симметрично cancel_ask_human."""
+        self._confirm_result = False
+        self._confirm_event.set()
 
     def cancel_ask_human(self) -> None:
         """Положить пустую строку в stdin-queue — разблокирует agent-thread,
