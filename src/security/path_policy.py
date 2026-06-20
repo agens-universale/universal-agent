@@ -204,6 +204,46 @@ def enforce_write_guard(
                 )
             except ValueError:
                 return func(*args, **kwargs)
+            # Floor carve-out: consult protected_decision before perimeter check.
+            from security.protected_paths import protected_decision, protection_enabled
+            from security.confirm_port import request_confirm
+            _cfg = getattr(context.ctx, "config_dict", None) or {}
+            if protection_enabled(_cfg):
+                _decision = protected_decision(candidate_path, cwd=context.launch_root)
+                if _decision == "deny":
+                    _err = {
+                        "type": "protected_path_denied",
+                        "path": candidate_path,
+                        "message": "Path is protected (operational .gc / config).",
+                    }
+                    audit_policy_decision(
+                        context,
+                        tool_name=_tool_name(func, args),
+                        decision="blocked",
+                        reason_code="protected_deny",
+                    )
+                    return _blocked_result(
+                        func, _err, args, kwargs,
+                        blocked_result_factory=blocked_result_factory,
+                    )
+                if _decision == "ask":
+                    _ok = request_confirm(
+                        title="Write guard",
+                        question=f"Allow write to {candidate_path}?",
+                        fields=[("path", candidate_path)],
+                        ctx=context.ctx,
+                    )
+                    if not _ok:
+                        _err = {
+                            "type": "protected_path_denied",
+                            "path": candidate_path,
+                            "message": "Write to instruction file not confirmed.",
+                        }
+                        return _blocked_result(
+                            func, _err, args, kwargs,
+                            blocked_result_factory=blocked_result_factory,
+                        )
+                    # confirmed → fall through to existing perimeter check
             try:
                 check_write_path_allowed(
                     candidate_path,
