@@ -315,6 +315,18 @@ class TraceScreen(Screen):
                 self.app.tui_state.ask_human_state = None
         self._ask_human_question_row = None  # виджет ушёл вместе с trace-очисткой
         self._ask_human_owner_runner = None
+        # Backstop: clear confirm banner on task switch / stream_reset
+        if self._confirm_active:
+            _reset_runner = getattr(self.app, "active_runner", None)
+            if _reset_runner is not None and hasattr(_reset_runner, "cancel_confirm"):
+                try:
+                    _reset_runner.cancel_confirm()
+                except Exception:
+                    pass
+            try:
+                self._hide_confirm_banner()
+            except Exception:
+                pass
         if self._thinking is not None:
             try:
                 self._thinking.remove()
@@ -2001,6 +2013,22 @@ class TraceScreen(Screen):
         )
 
     def _cmd_stop(self) -> None:
+        if self._confirm_active:
+            runner = self.app.active_runner
+            if runner is not None and hasattr(runner, "cancel_confirm"):
+                runner.cancel_confirm()   # unblock parked thread (fail-closed False)
+            self._hide_confirm_banner()
+            if runner is not None and runner.is_running():
+                # live agent-run confirm → also stop the run (Ctrl+C = abort)
+                self._mount_trace_row(prefix="[stopped]", content="", kind_class="line-meta")
+                self._destroy_thinking_indicator()
+                self._stop_and_replace_runner()
+            else:
+                # /init (or no live runner): parked worker now unblocked → cancel/deny
+                self._mount_trace_row(prefix="[stopped] ", content="confirm отменён",
+                                      kind_class="line-meta")
+            return
+
         runner = self.app.active_runner
         if runner is None or not runner.is_running():
             self._mount_trace_row(
