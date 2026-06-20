@@ -13,24 +13,12 @@ import threading
 from dataclasses import dataclass
 from pathlib import Path
 
-from config_modules.env_vars import gc_paths, project_slug
 from config_modules.project_memory import DEFAULT_PROJECT_MEMORY_MAX_CHARS
 
 DEFAULT_MAX_CHARS: int = DEFAULT_PROJECT_MEMORY_MAX_CHARS
 MAX_CHARS: int = DEFAULT_MAX_CHARS
 
 _lock = threading.Lock()
-
-_BACKUP_FILE_NAME = "GIGACODE_memory_backup.md"
-
-
-def backup_path(*, cwd: str | None = None) -> Path:
-    """Return the backup path for long memory: <gc_state>/projects/<slug>/GIGACODE_memory_backup.md.
-
-    The backup lives outside the project tree so it survives `rm -rf .gc`.
-    """
-    slug = project_slug(cwd)
-    return gc_paths()["state"] / "projects" / slug / _BACKUP_FILE_NAME
 
 
 @dataclass(frozen=True)

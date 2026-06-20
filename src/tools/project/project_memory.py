@@ -10,13 +10,25 @@ import json
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+from config_modules.env_vars import gc_paths, project_slug
 from config_modules.project_memory import project_memory_limits_from_config_dict
 from project_memory import compaction, storage
 from project_memory.status import fill_percent
-from project_memory.storage import ProjectMemoryError, backup_path
+from project_memory.storage import ProjectMemoryError
 from message_policy.project_memory_notice.policy import touch_project_memory_baseline
 from constants.tool_names import PROJECT_MEMORY_TOOL_NAME
 from tools.simple_tool_base import AbstractSimpleTool
+
+_BACKUP_FILE_NAME = "GIGACODE_memory_backup.md"
+
+
+def backup_path(*, cwd: str | None = None) -> Path:
+    """Return the backup path for long memory: <gc_state>/projects/<slug>/GIGACODE_memory_backup.md.
+
+    The backup lives outside the project tree so it survives `rm -rf .gc`.
+    """
+    slug = project_slug(cwd)
+    return gc_paths()["state"] / "projects" / slug / _BACKUP_FILE_NAME
 
 _FILE_NAME = "project_memory.md"
 
