@@ -28,6 +28,17 @@ def test_operational_gc_write_denied(tmp_path, monkeypatch):
     assert json.loads(res)["ok"] is False  # заблокировано floor-ом
 
 
+def test_operational_gc_write_denied_even_when_guard_disabled(tmp_path, monkeypatch):
+    from config_modules import env_vars
+    monkeypatch.setattr(env_vars.env, "gc_home", tmp_path / "gc")
+    ctx = types.SimpleNamespace(
+        config_dict={"launch_root": str(tmp_path), "write_guard": {"enabled": False}},
+        is_tui=False, tui_confirm=None, logger=None,
+    )
+    res = _Tool(ctx).write(path=str(tmp_path / ".gc" / "config.yml"), content="x")
+    assert json.loads(res)["ok"] is False  # floor blocks even when write_guard disabled
+
+
 def test_skills_write_allowed(tmp_path, monkeypatch):
     from config_modules import env_vars
     monkeypatch.setattr(env_vars.env, "gc_home", tmp_path / "gc")

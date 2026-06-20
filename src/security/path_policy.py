@@ -185,14 +185,8 @@ def enforce_write_guard(
         @functools.wraps(func)
         def wrapper(*args: Any, **kwargs: Any) -> str:
             context = resolve_tool_context(*args, **kwargs)
-            if not context.write_guard.enabled:
-                audit_policy_decision(
-                    context,
-                    tool_name=_tool_name(func, args),
-                    decision="executed",
-                    reason_code="policy_disabled",
-                )
-                return func(*args, **kwargs)
+            # Floor carve-out: runs BEFORE the write_guard.enabled gate so it
+            # applies unconditionally (Spec B §6).
             try:
                 candidate_path = _extract_named_value(
                     func,
@@ -203,47 +197,67 @@ def enforce_write_guard(
                     "path",
                 )
             except ValueError:
-                return func(*args, **kwargs)
-            # Floor carve-out: consult protected_decision before perimeter check.
-            from security.protected_paths import protected_decision, protection_enabled
-            from security.confirm_port import request_confirm
-            _cfg = getattr(context.ctx, "config_dict", None) or {}
-            if protection_enabled(_cfg):
-                _decision = protected_decision(candidate_path, cwd=context.launch_root)
-                if _decision == "deny":
-                    _err = {
-                        "type": "protected_path_denied",
-                        "path": candidate_path,
-                        "message": "Path is protected (operational .gc / config).",
-                    }
-                    audit_policy_decision(
-                        context,
-                        tool_name=_tool_name(func, args),
-                        decision="blocked",
-                        reason_code="protected_deny",
-                    )
-                    return _blocked_result(
-                        func, _err, args, kwargs,
-                        blocked_result_factory=blocked_result_factory,
-                    )
-                if _decision == "ask":
-                    _ok = request_confirm(
-                        title="Write guard",
-                        question=f"Allow write to {candidate_path}?",
-                        fields=[("path", candidate_path)],
-                        ctx=context.ctx,
-                    )
-                    if not _ok:
+                candidate_path = None
+            if candidate_path is not None:
+                from security.protected_paths import protected_decision, protection_enabled
+                from security.confirm_port import request_confirm
+                _cfg = getattr(context.ctx, "config_dict", None) or {}
+                if protection_enabled(_cfg):
+                    _decision = protected_decision(candidate_path, cwd=context.launch_root)
+                    if _decision == "deny":
                         _err = {
                             "type": "protected_path_denied",
                             "path": candidate_path,
-                            "message": "Write to instruction file not confirmed.",
+                            "message": "Path is protected (operational .gc / config).",
                         }
+                        audit_policy_decision(
+                            context,
+                            tool_name=_tool_name(func, args),
+                            decision="blocked",
+                            reason_code="protected_deny",
+                        )
                         return _blocked_result(
                             func, _err, args, kwargs,
                             blocked_result_factory=blocked_result_factory,
                         )
-                    # confirmed → fall through to existing perimeter check
+                    if _decision == "ask":
+                        _ok = request_confirm(
+                            title="Write guard",
+                            question=f"Allow write to {candidate_path}?",
+                            fields=[("path", candidate_path)],
+                            ctx=context.ctx,
+                        )
+                        if not _ok:
+                            _err = {
+                                "type": "protected_path_denied",
+                                "path": candidate_path,
+                                "message": "Write to instruction file not confirmed.",
+                            }
+                            return _blocked_result(
+                                func, _err, args, kwargs,
+                                blocked_result_factory=blocked_result_factory,
+                            )
+                        # confirmed → fall through
+            if not context.write_guard.enabled:
+                audit_policy_decision(
+                    context,
+                    tool_name=_tool_name(func, args),
+                    decision="executed",
+                    reason_code="policy_disabled",
+                )
+                return func(*args, **kwargs)
+            if candidate_path is None:
+                try:
+                    candidate_path = _extract_named_value(
+                        func,
+                        args,
+                        kwargs,
+                        path_arg,
+                        path_extractor,
+                        "path",
+                    )
+                except ValueError:
+                    return func(*args, **kwargs)
             try:
                 check_write_path_allowed(
                     candidate_path,
