@@ -108,7 +108,20 @@ class TuiApp(App):
         # результат boot-дискавери сразу, не дожидаясь первого сообщения.
         from tools.mcp_snapshot import build_mcp_tools_snapshot
         self._mcp_snapshot = build_mcp_tools_snapshot(cfg, ctx.tools_data, ctx.mcp_status)
+        # Проводка confirm-канала: TUI-раннер умеет показывать баннер; CLI/server — нет.
+        runner = self.active_runner
+        if runner is not None and hasattr(runner, "make_tui_confirm"):
+            ctx.is_tui = True
+            ctx.tui_confirm = runner.make_tui_confirm(self._present_confirm)
         return AgentExecutor(ctx)
+
+    def _present_confirm(self, title: str, question: str, fields: list) -> None:
+        """Вызывается на агент-потоке; маршаллит показ баннера в UI-поток."""
+        def _show() -> None:
+            fn = getattr(self.screen, "show_confirm_banner", None)
+            if fn is not None:
+                fn(title, question)
+        self.call_from_thread(_show)
 
     # --- actions ------------------------------------------------------
 
