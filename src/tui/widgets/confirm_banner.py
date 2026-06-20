@@ -13,14 +13,14 @@ from textual.widgets import Static
 class ConfirmBanner(Vertical):
     DEFAULT_CSS = ""  # стили в styles.tcss (.confirm-banner)
 
-    def __init__(self, *, title: str, question: str, **kwargs) -> None:
+    def __init__(self, *, banner_title: str, question: str, **kwargs) -> None:
         kwargs.setdefault("classes", "")
         kwargs["classes"] = ("confirm-banner " + kwargs["classes"]).strip()
         super().__init__(**kwargs)
-        self.title = title
+        self.banner_title = banner_title
         self.question = question
 
     def compose(self) -> ComposeResult:
-        yield Static(f"? {self.title}", classes="cb-label", markup=False)
+        yield Static(f"? {self.banner_title}", classes="cb-label", markup=False)
         yield Static(self.question, classes="cb-question", markup=False)
         yield Static("[Y] да   [N] нет", classes="cb-options", markup=False)
