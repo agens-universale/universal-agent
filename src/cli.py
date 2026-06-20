@@ -132,7 +132,7 @@ def main() -> int:
     _ensure_project_gc_dir()
     _ensure_user_skills_dir()
 
-    if getattr(arg_parser.run_args, "init", False):
+    if getattr(arg_parser.run_args, "init_config", False):
         return _run_init()
 
     config_dict = load_config(arg_parser.run_args.config)
