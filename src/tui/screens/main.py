@@ -85,6 +85,9 @@ class TraceScreen(Screen):
         # Phase 5: ask_human banner state
         self._ask_human_banner = None  # type: Optional[AskHumanBanner]
         self._ask_human_call_id: Optional[str] = None
+        # confirm banner state (T2)
+        self._confirm_banner = None   # type: Optional["ConfirmBanner"]
+        self._confirm_active: bool = False
         # Скрытая трейс-строка вопроса; раскрывается при схлопывании баннера.
         self._ask_human_question_row = None  # type: Optional[TraceRow]
         # Раннер, задавший текущий ask_human (владелец вопроса). None, если плашка
@@ -885,6 +888,56 @@ class TraceScreen(Screen):
         self._refresh_header()
         self._refresh_footer()
 
+    # ──────────────────────── confirm banner (T2) ───────────────────────────
+
+    def show_confirm_banner(self, title: str, question: str) -> None:
+        """Смонтировать ConfirmBanner и переключить в режим одиночной клавиши.
+
+        Вызывается на UI-потоке (напр. через App.call_from_thread из T3).
+        Скрывает #input-row, убирает фокус с TextArea — «y»/«n» доходят до
+        Screen.on_key и не поглощаются TextArea."""
+        from tui.widgets.confirm_banner import ConfirmBanner
+        if self._confirm_active:
+            self._hide_confirm_banner()
+        banner = ConfirmBanner(banner_title=title, question=question)
+        self._confirm_banner = banner
+        self._confirm_active = True
+        inp_row = self.query_one("#input-row", Horizontal)
+        self.query_one("#root", Vertical).mount(banner, before=inp_row)
+        inp_row.add_class("hidden")
+        # Убираем фокус с TextArea — без этого она потребляет printable-клавиши
+        # и «y»/«n» не достигают Screen.on_key.
+        self.set_focus(None)
+        if self._trace_is_at_bottom():
+            self.query_one("#trace", VerticalScroll).scroll_end(animate=False)
+
+    def _hide_confirm_banner(self) -> None:
+        """Снять ConfirmBanner и восстановить поле ввода."""
+        self._confirm_active = False
+        if self._confirm_banner is not None:
+            try:
+                self._confirm_banner.remove()
+            except Exception:
+                pass
+            self._confirm_banner = None
+        try:
+            self.query_one("#input-row", Horizontal).remove_class("hidden")
+        except Exception:
+            pass
+        try:
+            self.query_one("#cmdinput", CommandTextArea).focus()
+        except Exception:
+            pass
+
+    def _answer_confirm(self, ok: bool) -> None:
+        """Отправить ответ в confirm-канал раннера и скрыть баннер."""
+        runner = getattr(self.app, "active_runner", None)
+        if runner is not None and hasattr(runner, "submit_confirm_reply"):
+            runner.submit_confirm_reply(ok)
+        self._hide_confirm_banner()
+
+    # ──────────────────────────────────────────────────────────────────────────
+
     def _ask_human_target_runner(self):
         """Раннер-владелец текущего ask_human, если он жив и совпадает с активным
         (значит реально висит в input() на этом вопросе) — иначе None (ответ
@@ -1280,6 +1333,20 @@ class TraceScreen(Screen):
         ))
 
     def on_key(self, event: events.Key) -> None:
+        # Confirm-баннер имеет наивысший приоритет: одиночный y/N перехватываем
+        # до истории, Esc-лестницы и любых пикеров. TextArea скрыта, клавиши
+        # не потребляются ею и доходят сюда.
+        if self._confirm_active:
+            key = event.key
+            if key in ("y", "Y", "enter"):
+                self._answer_confirm(True)
+            elif key in ("n", "N", "escape"):
+                self._answer_confirm(False)
+            # иначе — проглотить без действия (нет случайного ввода)
+            event.stop()
+            event.prevent_default()
+            return
+
         # Любая не-Esc клавиша сбрасывает pending hint (без прерывания обработки).
         if event.key != "escape" and self._esc_confirm_kind is not None:
             self._clear_footer_hint()

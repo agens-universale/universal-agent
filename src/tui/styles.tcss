@@ -236,6 +236,23 @@ ToolCallRow:focus, TraceRow:focus, UserReplyContainer:focus, AgentReplyLine:focu
 /* input в режиме ask_human — янтарная рамка (как баннер / running) */
 TextArea.ask-human-mode { border: solid $run-color; }
 
+/* confirm banner — служебный/security, бирюзовый (accent) вместо янтарного */
+.confirm-banner {
+    background: #161A23;
+    border: solid $accent;
+    border-left: thick $accent;
+    padding: 0 1;
+    margin: 0 1;
+    height: auto;
+    width: 1fr;
+}
+.cb-label    { color: $bright; text-style: bold; }
+.cb-question { color: $ink; }
+.cb-options  { color: $accent; }
+
+/* скрытый input-row при confirm (одиночные клавиши y/N без TextArea) */
+#input-row.hidden { display: none; }
+
 /* SessionsScreen — picker недавних задач (Task 4.1) */
 #sessions-root { height: 100%; }
 #sessions-header { height: 2; background: #161A23; color: $deep-dim;
