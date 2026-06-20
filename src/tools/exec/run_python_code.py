@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from constants.tool_names import EXEC_PYTHON_NAME
+from security.command_guard import enforce_command_guard
 from security.command_moderation import effective_command_cwd, moderate_command_execution
 from security.path_policy import resolve_tool_context
 from tools.simple_tool_base import AbstractSimpleTool
@@ -167,6 +168,7 @@ Return format (JSON string):
             error=error,
         )
 
+    @enforce_command_guard(payload_arg="code", tool_name=EXEC_PYTHON_NAME)
     @moderate_command_execution(payload_arg="code", tool_name=EXEC_PYTHON_NAME)
     def __call__(
         self,

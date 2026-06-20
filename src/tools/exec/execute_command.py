@@ -4,6 +4,7 @@ import os
 import json
 
 from constants.tool_names import EXEC_COMMAND_NAME
+from security.command_guard import enforce_command_guard
 from security.command_moderation import moderate_command_execution
 
 
@@ -180,6 +181,7 @@ Important Usage Rules:
             error=error,
         )
 
+    @enforce_command_guard(payload_arg="command", tool_name=EXEC_COMMAND_NAME)
     @moderate_command_execution(payload_arg="command", tool_name=EXEC_COMMAND_NAME)
     def __call__(
         self,
