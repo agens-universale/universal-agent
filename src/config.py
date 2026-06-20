@@ -183,6 +183,7 @@ def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
         "stream": app_cfg.backend.stream,
         "tui_show_reasoning_line": app_cfg.tui.show_reasoning_line,
         "tui_show_stream_answer": app_cfg.tui.show_stream_answer,
+        "tui_text_answer_mode": app_cfg.tui.text_answer_mode,
         "command_moderation": {
             "enabled": app_cfg.security.command_moderation.enabled,
             "mode": app_cfg.security.command_moderation.mode,

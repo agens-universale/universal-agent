@@ -46,6 +46,11 @@ agent:
 tui:
   show_reasoning_line: true    # живая строка-мысль «⠇ …» (хвост рассуждения)
   show_stream_answer: false    # живой серый текст ответа до финальной строки
+  # adaptive bounce (только TUI): как поступать с текст-ответом без тула.
+  #   strict — всегда требовать tool-call (как CLI/server/swarm);
+  #   judge  — судья решает, полный ли это ответ (привет/объяснение → принять);
+  #   always — всегда принимать текст (ни bounce, ни судьи).
+  text_answer_mode: judge
 
 logging:
   full_log_backend: false

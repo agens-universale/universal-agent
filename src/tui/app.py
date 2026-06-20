@@ -93,6 +93,9 @@ class TuiApp(App):
         cfg["console_trace"] = False
         from tui.services.prompt_assets import tui_special_instructions_path
         cfg["chat_completions_special_instructions_path"] = tui_special_instructions_path()
+        # TUI adaptive bounce: сигнал в общий run_agent (только TUI ставит его).
+        # CLI/server/swarm не ставят → строгий контракт. Управляется tui.text_answer_mode.
+        cfg["text_answer_mode"] = cfg.get("tui_text_answer_mode", "judge")
         auth = build_auth_connector(cfg)
         progress = McpProgress()
         progress.begin(list((cfg.get("mcp-servers") or {}).keys()))
