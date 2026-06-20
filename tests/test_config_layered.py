@@ -318,3 +318,21 @@ def test_empty_project_config_falls_back_to_global(global_config_file, isolated_
     cfg = load_config(str(global_config_file))
     # max_steps из global, никаких ошибок.
     assert cfg["max_steps"] == 50
+
+
+def test_apply_cli_overrides_sets_instructions_overwrite():
+    """apply_cli_overrides(instructions_overwrite=True) sets config_dict key to True."""
+    from config import apply_cli_overrides
+
+    cfg: dict = {"instructions_overwrite": False}
+    apply_cli_overrides(cfg, instructions_overwrite=True)
+    assert cfg["instructions_overwrite"] is True
+
+
+def test_apply_cli_overrides_leaves_instructions_overwrite_false_by_default():
+    """apply_cli_overrides() without flag does NOT override instructions_overwrite."""
+    from config import apply_cli_overrides
+
+    cfg: dict = {"instructions_overwrite": False}
+    apply_cli_overrides(cfg)
+    assert cfg["instructions_overwrite"] is False

@@ -170,6 +170,7 @@ class AgentExecutor:
             "chat_completions_system_prompt": chat_completions_system_prompt,
             "use_server_subagents": config_dict.get("use_server_subagents", False),
             "agent_md_path": config_dict.get("agent_md_path"),
+            "instructions_overwrite": bool(config_dict.get("instructions_overwrite", False)),
             "thread_id": thread_id,
             "shared": thread_shared,
             "workspace_config": config_dict,

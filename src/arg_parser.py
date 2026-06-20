@@ -214,6 +214,15 @@ parser.add_argument(
     ),
 )
 
+parser.add_argument(
+    "--instructions-overwrite",
+    action="store_true",
+    help=(
+        "Загружать только project-слой инструкций (AGENTS.md / .gc/AGENTS.md), "
+        "отбрасывая глобальный и shipped-слои"
+    ),
+)
+
 
 parsed_args, unknown_args = parser.parse_known_args()
 if not parsed_args.init_config and not getattr(parsed_args, "init", False) and not parsed_args.query:

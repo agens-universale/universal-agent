@@ -121,6 +121,7 @@ def apply_cli_overrides(
     read_guard_enabled: Optional[bool] = None,
     no_read_guard: bool = False,
     read_guard_mode: Optional[str] = None,
+    instructions_overwrite: bool = False,
 ) -> None:
     if extra_overrides:
         config_dict.update(extra_overrides)
@@ -133,6 +134,8 @@ def apply_cli_overrides(
         read_guard_enabled=effective_read_guard_override,
         read_guard_mode=read_guard_mode,
     )
+    if instructions_overwrite:
+        config_dict["instructions_overwrite"] = True
     sync_logging_flat_and_params(config_dict)
 
 
@@ -233,6 +236,7 @@ def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
         "threads_data_path": app_cfg.paths.threads_data_path,
         "skills_data_path": app_cfg.paths.skills_data_path,
         "logs_dump_dir": app_cfg.paths.logs_dump_dir,
+        "instructions_overwrite": app_cfg.paths.instructions_overwrite,
         "model": app_cfg.agent.model,
         "system_prompt_id": app_cfg.agent.system_prompt_id,
         "use_server_subagents": app_cfg.agent.use_server_subagents,

@@ -37,3 +37,38 @@ def test_userInstructions_contains_merged_layers(tmp_path, monkeypatch):
     assert "<user_defined_instructions>" in ui
     assert "L0BODY" in ui and "PROJECTBODY" in ui
     assert "## Project instructions (AGENTS.md)" in ui
+
+
+def test_states_overwrite_mode_project_only(tmp_path, monkeypatch):
+    """State(instructions_overwrite=True) merges ONLY project layer (AGENTS.md),
+    dropping the base agent_md_path layer."""
+    from config_modules import env_vars
+    monkeypatch.setattr(env_vars.env, "gc_home", tmp_path / "gc")
+    monkeypatch.chdir(tmp_path)
+    l0 = tmp_path / "demo.md"
+    _write(l0, "BASEBODY")
+    _write(tmp_path / "AGENTS.md", "PROJECTBODY")
+
+    state = _make_state(agent_md_path=str(l0), instructions_overwrite=True)
+    meta = state.set_call_metadata()
+
+    ui = meta["promptVariables"]["userInstructions"]
+    assert "PROJECTBODY" in ui
+    assert "BASEBODY" not in ui
+
+
+def test_states_overwrite_false_includes_base(tmp_path, monkeypatch):
+    """State(instructions_overwrite=False) (default) includes both layers."""
+    from config_modules import env_vars
+    monkeypatch.setattr(env_vars.env, "gc_home", tmp_path / "gc")
+    monkeypatch.chdir(tmp_path)
+    l0 = tmp_path / "demo.md"
+    _write(l0, "BASEBODY")
+    _write(tmp_path / "AGENTS.md", "PROJECTBODY")
+
+    state = _make_state(agent_md_path=str(l0), instructions_overwrite=False)
+    meta = state.set_call_metadata()
+
+    ui = meta["promptVariables"]["userInstructions"]
+    assert "BASEBODY" in ui
+    assert "PROJECTBODY" in ui

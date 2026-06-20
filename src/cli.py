@@ -189,6 +189,7 @@ def main() -> int:
         read_guard_enabled=getattr(arg_parser.run_args, "read_guard", None),
         no_read_guard=getattr(arg_parser.run_args, "no_read_guard", False),
         read_guard_mode=getattr(arg_parser.run_args, "read_guard_mode", None),
+        instructions_overwrite=getattr(arg_parser.run_args, "instructions_overwrite", False),
     )
 
     # Онбординг: дефолтный путь (без --config) и конфиг ещё не настроен

@@ -41,6 +41,7 @@ class State:
         thread_id: Optional[str] = None,
         shared: Optional["SharedStateData"] = None,
         workspace_config: Optional[Dict[str, Any]] = None,
+        instructions_overwrite: bool = False,
     ):
         self.parent_state_id = parent_state_id
         self.x_target = None
@@ -66,6 +67,7 @@ class State:
         else:
             self.chat_completions_system_prompt = None
         self.agent_md_path = agent_md_path
+        self.instructions_overwrite = instructions_overwrite
         self.thread_id = thread_id
         self.shared: SharedStateData = shared if isinstance(shared, SharedStateData) else SharedStateData()
         self.call_metadata = self.set_call_metadata()

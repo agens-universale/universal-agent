@@ -9,3 +9,4 @@ class PathsConfig(BaseModel):
     threads_data_path: str | None = None
     skills_data_path: str | None = None
     logs_dump_dir: str | None = None
+    instructions_overwrite: bool = False

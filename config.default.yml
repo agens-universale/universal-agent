@@ -60,6 +60,7 @@ logging:
 
 paths:
   agent_md_path: "prompts/demo_cli_agent.md"
+  # instructions_overwrite: false  # загружать только project-слой (AGENTS.md), отбрасывая глобальный и shipped
 
 summary:
   # ~60–72k токенов истории — рассчитано на контекст моделей ~131k (под меньшие
