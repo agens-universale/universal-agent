@@ -5,3 +5,5 @@ lint); Architecture (structure, key modules, entry points); Conventions (style,
 naming, patterns); Important paths.
 
 {existing_block}
+
+Return the complete AGENTS.md markdown as your final answer — nothing else.

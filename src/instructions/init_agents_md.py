@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Callable
 
-from security.confirm_port import request_confirm
+from security.confirm_port import confirm_available, request_confirm
 from bundled_assets import bundled_root
 
 
@@ -14,9 +14,11 @@ def _prompt_template() -> str:
 def resolve_init_mode(*, exists: bool, ctx: Any) -> str:
     if not exists:
         return "fresh"
+    if not confirm_available(ctx):
+        return "cancel"  # headless — не трогаем существующий файл
     ok = request_confirm(
         title="/init",
-        question="AGENTS.md уже есть. Перезаписать? (No = обновить, Esc = отмена)",
+        question="AGENTS.md exists. Overwrite from scratch? (No = update/augment)",
         fields=[("file", "AGENTS.md")],
         ctx=ctx,
     )
@@ -40,5 +42,7 @@ def run_init_agents_md(*, cwd: str, ctx: Any, generate_fn: Callable[[str], str])
 
     prompt = _prompt_template().replace("{existing_block}", existing_block)
     content = generate_fn(prompt)
+    if not content or not content.strip():
+        return {"status": "empty", "path": str(target), "mode": mode}
     target.write_text(content, encoding="utf-8")  # привилегированный writer (в обход guard)
     return {"status": "written", "path": str(target), "mode": mode}
