@@ -434,25 +434,24 @@ class TraceScreen(Screen):
             )
 
     def _render_segments(self, segments: list[dict]) -> None:
-        """Рендер из сегментов: сырьём только 2 последних, старшие — маркеры #K.
-        Маркер сжатия сегмента i = его compacted_by (разворот → synthesis).
+        """Рендер ВСЕХ сегментов сырьём — полный трейс, без схлопывания старых
+        сегментов в маркер. Маркер сжатия сегмента i = его compacted_by (ставится
+        между сегментами, чтобы было видно, где прошла компакция).
 
         Дедуп по id: последнее user-сообщение переносится в новый компакт-файл
         (build_preserved_batch), поэтому лежит и в архивном сегменте, и в live —
-        в соседних сырьём-сегментах это дало бы дубль реплики вокруг маркера."""
+        в соседних сегментах это дало бы дубль реплики вокруг маркера."""
         from tui.models import TraceEvent
-        total = len(segments)
         seen_ids: set[str] = set()
         for i, seg in enumerate(segments):
-            if i >= total - 2:
-                for rec in seg["messages"]:
-                    payload = rec.get("payload")
-                    mid = payload.get("id") if isinstance(payload, dict) else None
-                    if mid is not None:
-                        if mid in seen_ids:
-                            continue
-                        seen_ids.add(mid)
-                    self._render_record(rec)
+            for rec in seg["messages"]:
+                payload = rec.get("payload")
+                mid = payload.get("id") if isinstance(payload, dict) else None
+                if mid is not None:
+                    if mid in seen_ids:
+                        continue
+                    seen_ids.add(mid)
+                self._render_record(rec)
             comp = seg["compacted_by"]
             if comp is not None:
                 ev = TraceEvent(
