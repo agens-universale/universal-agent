@@ -10,9 +10,15 @@ fields — структурированные детали решения (Tool/
 здесь — тоже)."""
 from __future__ import annotations
 
+from rich.text import Text
 from textual.app import ComposeResult
 from textual.containers import Vertical
 from textual.widgets import Static
+
+from tui.palette import ACCENT, BG, DIM
+
+# Варианты: (keycap, label). Индекс 0 — affirmative (Y/да), 1 — negative (N/нет).
+_OPTIONS = [("[Y]", "да"), ("[N]", "нет")]
 
 
 def _fmt_field_value(value: object, *, limit: int = 200) -> str:
@@ -24,6 +30,21 @@ def _fmt_field_value(value: object, *, limit: int = 200) -> str:
         text = str(value)
     text = " ".join(text.split())
     return text if len(text) <= limit else text[: limit - 1] + "…"
+
+
+def _render_options(selected: int) -> Text:
+    """Рендер вариантов; подсвеченный — teal-«кнопка», прочие — keycap accent + текст dim.
+    Зеркало ConfirmScreen._render_hint."""
+    t = Text()
+    for idx, (key, label) in enumerate(_OPTIONS):
+        if idx > 0:
+            t.append("   ")
+        if idx == selected:
+            t.append(f" {key} {label} ", style=f"bold {BG} on {ACCENT}")
+        else:
+            t.append(f" {key}", style=ACCENT)
+            t.append(f" {label} ", style=DIM)
+    return t
 
 
 class ConfirmBanner(Vertical):
@@ -43,6 +64,8 @@ class ConfirmBanner(Vertical):
         self.banner_title = banner_title
         self.question = question
         self.fields = list(fields or [])
+        self.selected: int = 0  # 0 = Y/affirmative по умолчанию
+        self._options_static: Static | None = None
 
     def compose(self) -> ComposeResult:
         yield Static(f"? {self.banner_title}", classes="cb-label", markup=False)
@@ -52,4 +75,12 @@ class ConfirmBanner(Vertical):
             if not text:
                 continue  # пустые поля (напр. Reason="") не засоряют баннер
             yield Static(f"  {label}: {text}", classes="cb-field", markup=False)
-        yield Static("[Y] да   [N] нет", classes="cb-options", markup=False)
+        opts = Static(_render_options(self.selected), classes="cb-options")
+        self._options_static = opts
+        yield opts
+
+    def move_selection(self, delta: int) -> None:
+        """Сдвинуть выделение на delta (-1 = влево, +1 = вправо)."""
+        self.selected = max(0, min(len(_OPTIONS) - 1, self.selected + delta))
+        if self._options_static is not None and self._options_static.is_mounted:
+            self._options_static.update(_render_options(self.selected))

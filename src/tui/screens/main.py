@@ -1218,7 +1218,7 @@ class TraceScreen(Screen):
             except Exception:
                 summarizing = False
 
-        if is_running and not ask_human_active:
+        if is_running and not ask_human_active and not self._confirm_active:
             import time as _time
             since_last = _time.monotonic() - self._last_event_at
             if summarizing:
@@ -1267,7 +1267,9 @@ class TraceScreen(Screen):
                     self._clear_stream_block(reset_sink=False)
             elif not _thinking_phase:
                 self._clear_stream_block()
-        elif ask_human_active:
+        elif ask_human_active or self._confirm_active:
+            # Агент заблокирован — ждёт ответа пользователя. Скрываем (не destroy),
+            # анимация вернётся когда агент продолжит.
             self._hide_thinking_indicator()
         else:
             self._destroy_thinking_indicator()
@@ -1355,7 +1357,14 @@ class TraceScreen(Screen):
         # не потребляются ею и доходят сюда.
         if self._confirm_active:
             key = event.key
-            if key in ("y", "Y", "enter"):
+            banner = self._confirm_banner
+            if key == "left" and banner is not None:
+                banner.move_selection(-1)
+            elif key == "right" and banner is not None:
+                banner.move_selection(1)
+            elif key == "enter":
+                self._answer_confirm(banner is not None and banner.selected == 0)
+            elif key in ("y", "Y"):
                 self._answer_confirm(True)
             elif key in ("n", "N", "escape"):
                 self._answer_confirm(False)
