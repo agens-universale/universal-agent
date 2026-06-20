@@ -32,3 +32,16 @@ def judge_text_answer(ctx: Any, state: Any, assistant_text: str) -> bool:
         return getattr(result, "action", "") == "accept"
     except Exception:
         return False
+
+
+def should_return_text_answer(cfg: Any, ctx: Any, state: Any, assistant_text: str) -> bool:
+    """Принять ли текст-ответ как ответ хода — по режиму ``cfg['text_answer_mode']``.
+
+    ``always`` → да (без судьи); ``judge`` → решает судья; ``strict`` или ключа нет
+    (автономка CLI/server/swarm) → нет. Ключ ставит только TUI (см. ``tui/app.py``)."""
+    mode = (cfg or {}).get("text_answer_mode")
+    if mode == "always":
+        return True
+    if mode == "judge":
+        return judge_text_answer(ctx, state, assistant_text)
+    return False

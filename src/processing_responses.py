@@ -14,6 +14,7 @@ from constants.tool_names import (
 )
 from run_summary_coordinator import build_preserved_batch, filter_messages_not_in_state
 from intent_guard.guard import FinishGateGuard
+from intent_guard.text_answer_judge import should_return_text_answer
 from intent_guard.turn_finish_emit import (
     apply_finish_gate_to_turn_finish_output_in_state,
     get_function_call_output_text,
@@ -724,6 +725,11 @@ def run_agent(
                     state.last_backend_response_id = response_id
                 elif mode == "text_response":
                     assistant_text = extract_last_assistant_text(messages)
+                    # TUI adaptive bounce: режим ставит только TUI (CLI/server/swarm →
+                    # ключа нет → строго). always → принять текст; judge → судья решает
+                    # (accept → текст и есть ответ хода, без bounce/turn_finish/finish-gate).
+                    if should_return_text_answer(cfg, ctx, state, assistant_text):
+                        return assistant_text
                     run_logger.warning(
                         "Agent returned text response without tool call, requesting tool call"
                     )
