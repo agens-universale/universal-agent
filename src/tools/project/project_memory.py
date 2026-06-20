@@ -13,7 +13,7 @@ from typing import Any, Dict, Optional
 from config_modules.project_memory import project_memory_limits_from_config_dict
 from project_memory import compaction, storage
 from project_memory.status import fill_percent
-from project_memory.storage import ProjectMemoryError
+from project_memory.storage import ProjectMemoryError, backup_path
 from message_policy.project_memory_notice.policy import touch_project_memory_baseline
 from constants.tool_names import PROJECT_MEMORY_TOOL_NAME
 from tools.simple_tool_base import AbstractSimpleTool
@@ -46,6 +46,13 @@ class ProjectMemory(AbstractSimpleTool):
         self._state = state
         gc_dir: Optional[Path] = getattr(ctx, "project_gc_dir", None)
         self._path: Optional[Path] = (Path(gc_dir) / _FILE_NAME) if gc_dir else None
+        # Backup path: mirrors primary outside the project tree so it survives rm -rf .gc.
+        # cwd is the parent of .gc (project root).
+        if gc_dir is not None:
+            cwd = str(Path(gc_dir).parent)
+            self._backup: Optional[Path] = backup_path(cwd=cwd)
+        else:
+            self._backup = None
         limits = project_memory_limits_from_config_dict(
             getattr(ctx, "config_dict", None) if ctx is not None else None
         )
@@ -136,7 +143,7 @@ Return format (JSON string):
     def _current_length(self) -> int:
         if self._path is None:
             return 0
-        info = storage.stat(self._path)
+        info = storage.stat(self._path, backup=self._backup)
         return info.chars if info.exists else 0
 
     def _high_fill_hint(self, length: int) -> Optional[str]:
@@ -214,8 +221,8 @@ Return format (JSON string):
             touch_project_memory_baseline(self._state, self._ctx)
 
     def _handle_read(self) -> str:
-        info = storage.stat(self._path)
-        text = storage.read(self._path)
+        info = storage.stat(self._path, backup=self._backup)
+        text = storage.read(self._path, backup=self._backup)
         is_empty = (not info.exists) or (not text.strip())
         self._sync_baseline_after_mutation()
         return self._ok(
@@ -245,7 +252,7 @@ Return format (JSON string):
                     "Rewrite more concisely (store facts, not raw text) and retry."
                 ),
             )
-        existing = storage.read(self._path)
+        existing = storage.read(self._path, backup=self._backup)
         existing_stripped = existing.strip()
         combined = (
             f"{existing_stripped}\n\n{delta_stripped}"
@@ -255,7 +262,7 @@ Return format (JSON string):
         if len(combined) <= self._max_chars:
             try:
                 info = storage.append(
-                    self._path, delta_stripped, max_chars=self._max_chars
+                    self._path, delta_stripped, max_chars=self._max_chars, backup=self._backup
                 )
             except ProjectMemoryError as e:
                 return self._err(action="append", error_type=e.code, message=e.message)
@@ -276,7 +283,7 @@ Return format (JSON string):
                 message="content too large even after compaction.",
             )
         try:
-            info = storage.write(self._path, result.text, max_chars=self._max_chars)
+            info = storage.write(self._path, result.text, max_chars=self._max_chars, backup=self._backup)
         except ProjectMemoryError as e:
             return self._err(action="append", error_type=e.code, message=e.message)
         self._sync_baseline_after_mutation()
@@ -311,7 +318,7 @@ Return format (JSON string):
                 ),
             )
         try:
-            info = storage.write(self._path, text_stripped, max_chars=self._max_chars)
+            info = storage.write(self._path, text_stripped, max_chars=self._max_chars, backup=self._backup)
         except ProjectMemoryError as e:
             return self._err(action="write", error_type=e.code, message=e.message)
         self._sync_baseline_after_mutation()
