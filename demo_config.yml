@@ -394,6 +394,16 @@ security:
     max_bytes: 52428800             # 50 MiB; превышение → file_too_large, файл не создаётся
     # download_dir: /tmp/agent-scratch/downloads
 
+  protected_paths:
+    # Floor-защита системных путей (ssh-ключи, токены, конфиги — «нельзя трогать»).
+    # enabled: true — активна по умолчанию; false — отключить защиту (не рекомендуется).
+    # extra — дополнительные пути, которые нельзя читать/писать агенту.
+    enabled: true
+    extra: []
+    # extra:
+    #   - "/etc/secrets"
+    #   - "~/.corporate/tokens"
+
 mcp:
   servers:
     # python recommended_mcp/install.py --config recommended_mcp/config.local.yml

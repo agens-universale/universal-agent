@@ -87,3 +87,6 @@ security:
     url_blacklist: []
   read_guard:
     enabled: false
+  protected_paths:
+    enabled: true
+    extra: []

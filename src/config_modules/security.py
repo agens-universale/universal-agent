@@ -162,9 +162,19 @@ class CommandModerationConfig(BaseModel):
             ) from exc
 
 
+class ProtectedPathsConfig(BaseModel):
+    """
+    Floor-защита системных путей (enabled по умолчанию).
+    extra — дополнительные пути, которые нельзя трогать.
+    """
+    model_config = ConfigDict(extra="forbid")
+    enabled: bool = True
+    extra: list[str] = Field(default_factory=list)
+
+
 class SecurityConfig(BaseModel):
     """
-    Четыре независимых слоя безопасности. Все safe-by-default-OFF.
+    Независимые слои безопасности. Все safe-by-default-OFF кроме protected_paths.
     Структура (clean break c прежней вложенностью под command_moderation):
         security:
           command_moderation: {mode, allowed_command_examples}
@@ -172,6 +182,7 @@ class SecurityConfig(BaseModel):
           read_guard:         {enabled, mode, denied_*, allowed_*}
           url_policy:         {enabled, allowed_schemes, url_blacklist}
           download:           {download_dir, max_bytes}
+          protected_paths:    {enabled, extra}
     """
     model_config = ConfigDict(extra="forbid")
     command_moderation: CommandModerationConfig = Field(
@@ -181,6 +192,7 @@ class SecurityConfig(BaseModel):
     read_guard: ReadGuardConfig = Field(default_factory=ReadGuardConfig)
     url_policy: UrlPolicyConfig = Field(default_factory=UrlPolicyConfig)
     download: DownloadConfig = Field(default_factory=DownloadConfig)
+    protected_paths: ProtectedPathsConfig = Field(default_factory=ProtectedPathsConfig)
 
 
 def apply_cli_command_moderation_overrides(
