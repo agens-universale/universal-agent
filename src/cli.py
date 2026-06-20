@@ -109,7 +109,7 @@ def _resolve_forced_skill(skill_name: str, config_dict: dict) -> str | None:
 
 
 def _run_init() -> int:
-    """`gc-cli --init`: создать ~/.gc/config.yml из шаблона и выйти, агент не
+    """`gc-cli --init-config`: создать ~/.gc/config.yml из шаблона и выйти, агент не
     запускается. Существующий конфиг не перетираем."""
     path = user_config_path()
     created = _bootstrap_user_config()
@@ -118,6 +118,45 @@ def _run_init() -> int:
         print(onboarding.setup_guide(str(path), config_dict), file=sys.stderr)
     else:
         print(f"[gc] конфиг уже есть: {path} — не меняю", file=sys.stderr)
+    return 0
+
+
+def _run_init_agents_md() -> int:
+    """`gc-cli --init`: сгенерировать AGENTS.md сканом репозитория через агента."""
+    import json
+    from instructions.init_agents_md import run_init_agents_md
+    import types
+
+    config_dict = load_config(arg_parser.run_args.config)
+    auth_connector = build_auth_connector(config_dict)
+    ctx = create_run_context(config_dict, auth_connector=auth_connector)
+
+    # ctx для confirm_port (CLI, не TUI)
+    confirm_ctx = types.SimpleNamespace(
+        is_tui=False,
+        config_dict=config_dict,
+        tui_confirm=None,
+    )
+
+    def generate_fn(prompt: str) -> str:
+        """Запускает агента с промптом как единственным запросом; извлекает task_report."""
+        executor = AgentExecutor(ctx)
+        response = executor.run([prompt])
+        # response — finish_arguments (JSON-строка) или None/строка ошибки
+        if isinstance(response, str):
+            try:
+                parsed = json.loads(response)
+                if isinstance(parsed, dict):
+                    return parsed.get("task_report") or parsed.get("handoff") or response
+            except (json.JSONDecodeError, TypeError):
+                pass
+        return str(response or "")
+
+    result = run_init_agents_md(cwd=os.getcwd(), ctx=confirm_ctx, generate_fn=generate_fn)
+    if result["status"] == "cancelled":
+        print("[gc] --init отменён", file=sys.stderr)
+    else:
+        print(f"[gc] AGENTS.md записан: {result['path']} (режим: {result['mode']})", file=sys.stderr)
     return 0
 
 
@@ -134,6 +173,9 @@ def main() -> int:
 
     if getattr(arg_parser.run_args, "init_config", False):
         return _run_init()
+
+    if getattr(arg_parser.run_args, "init", False):
+        return _run_init_agents_md()
 
     config_dict = load_config(arg_parser.run_args.config)
 

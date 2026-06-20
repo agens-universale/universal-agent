@@ -28,10 +28,7 @@ def test_init_config_false_when_absent(monkeypatch):
     assert getattr(run_args, "init_config", None) is False
 
 
-def test_old_init_flag_rejected(monkeypatch):
-    """Старый --init больше не является известным флагом (уходит в unknown_args,
-    парсер не падает — parse_known_args; но атрибута .init нет в namespace)."""
-    run_args = _parse(["gc-cli", "--init-config"], monkeypatch)
-    assert not hasattr(run_args, "init"), (
-        "--init не должен быть зарегистрированным флагом после ренейма"
-    )
+def test_init_flag_registered(monkeypatch):
+    """--init зарегистрирован как флаг генерации AGENTS.md (Task 8)."""
+    run_args = _parse(["gc-cli", "--init"], monkeypatch)
+    assert getattr(run_args, "init", False) is True

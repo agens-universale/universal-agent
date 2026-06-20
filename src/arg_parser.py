@@ -94,6 +94,12 @@ parser.add_argument(
 )
 
 parser.add_argument(
+    "--init",
+    action="store_true",
+    help="Сгенерировать AGENTS.md сканом репозитория и выйти (агент не запускается)",
+)
+
+parser.add_argument(
     "-v",
     "--verbose",
     action="store_true",
