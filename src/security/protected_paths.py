@@ -6,6 +6,7 @@ from pathlib import Path
 
 from config_modules.env_vars import gc_paths, project_gc_dir
 from instructions.layers import instruction_file_paths
+from security.path_policy import is_within_root
 
 
 @dataclass(frozen=True)
@@ -33,3 +34,29 @@ def protected_paths(*, cwd: str | None = None, extra: list[str] | None = None) -
         operational=frozenset(operational),
         skills_exceptions=frozenset(skills),
     )
+
+
+def classify_path(path, ps: ProtectedSet) -> str:
+    p = os.path.abspath(os.fspath(path))
+    ci = os.name == "nt"
+    if any(is_within_root(p, r, case_insensitive=ci) for r in ps.skills_exceptions):
+        return "skills"
+    if any(is_within_root(p, r, case_insensitive=ci) for r in ps.instructions):
+        return "instructions"
+    if any(is_within_root(p, r, case_insensitive=ci) for r in ps.operational):
+        return "operational"
+    return "none"
+
+
+def protected_decision(path, *, cwd=None, extra=None) -> str:
+    cls = classify_path(path, protected_paths(cwd=cwd, extra=extra))
+    if cls == "instructions":
+        return "ask"
+    if cls == "operational":
+        return "deny"
+    return "allow"
+
+
+def protection_enabled(config_dict: dict) -> bool:
+    block = (config_dict or {}).get("protected_paths") or {}
+    return bool(block.get("enabled", True))
