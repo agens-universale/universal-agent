@@ -96,3 +96,40 @@ def test_flush_non_blocking_outputs_before_ask_human(monkeypatch):
     )
     assert order == ["session_memory", "turn_ask_human"]
     assert any(m.get("call_id") == "c1" for m in outs)   # output не потерян в возврате
+
+
+def test_flush_skipped_outputs_before_ask_human(monkeypatch):
+    """Skip-output'ы пропущенных (после 1-го финализатора) тулов тоже флашатся до
+    блокирующего turn_ask_human — иначе пропущенный тул висит 'running' до ответа."""
+    import processing_responses as pr
+
+    persisted = []
+
+    def fake_apply(**kw):
+        if kw["tool_name"] == "turn_ask_human":
+            flushed = [m for batch in persisted for m in batch]
+            assert any(m.get("call_id") == "c3" for m in flushed), \
+                "skip-output пропущенного тула должен быть сфлашен ДО turn_ask_human"
+        return '{"ok": true}'
+
+    monkeypatch.setattr(pr, "apply_tool", fake_apply)
+    monkeypatch.setattr(pr, "maybe_store_and_wrap_tool_output", lambda res, **kw: res)
+    monkeypatch.setattr(pr, "maybe_update_intent_scope_from_tool", lambda **kw: None)
+    monkeypatch.setattr(pr, "generate_message_id_func", lambda p: f"{p}_x")
+
+    class _State:
+        messages = []
+        discard_writes_after_stop = False
+        stop_requested = False
+        def __init__(self): self.session_compact_applied = False
+
+    messages = [
+        {"type": "function_call", "name": "turn_ask_human", "call_id": "c1", "arguments": "{}"},
+        {"type": "function_call", "name": "session_memory", "call_id": "c3", "arguments": "{}"},  # skipped
+    ]
+    ctx = type("C", (), {"config_dict": {}, "logger": None})()
+    outs = pr.process_tool_calls(
+        messages, _State(), ctx, run_agent_func=None,
+        persist_messages_callback=lambda msgs: persisted.append(list(msgs)),
+    )
+    assert any(m.get("call_id") == "c3" and "skipped" in m["output"] for m in outs)

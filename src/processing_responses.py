@@ -355,15 +355,32 @@ def process_tool_calls(
 
     tools_outputs = []
     executed, skipped = split_at_first_finalizer(grouped_messages["tool_calls"])
+    # Skip-output'ы синтетические — считаем заранее, чтобы сфлашить ВМЕСТЕ с
+    # executed-output'ами до блокирующего turn_ask_human (иначе пропущенный тул
+    # тоже висит "running" до ответа юзера).
+    skip_outputs = []
+    if skipped:
+        finalizer = str(executed[-1].get("name") or "the finalizing tool")
+        for m in skipped:
+            skip_outputs.append({
+                "id": generate_message_id_func("fco"),
+                "type": "function_call_output",
+                "call_id": m["call_id"],
+                "output": (
+                    f'{{"ok": false, "skipped": true, "message": '
+                    f'"Skipped: turn already finalized by {finalizer}; '
+                    f'one finalizer per turn."}}'
+                ),
+            })
     # turn_ask_human блокируется на input() до ответа юзера. Если он последний в
-    # батче, output'ы предыдущих (не-блокирующих) тулов иначе висят "running",
-    # пока ждём ответ (персист всего батча — только когда функция вернётся).
+    # батче, output'ы предыдущих (не-блокирующих) тулов + skip'ов иначе висят
+    # "running", пока ждём ответ (персист всего батча — только когда функция вернётся).
     blocks_at_end = bool(executed) and str(executed[-1].get("name") or "") == ASK_HUMAN_TOOL_NAME
     for i, m in enumerate(executed):
-        if blocks_at_end and i == len(executed) - 1 and tools_outputs:
-            # Сфлашить уже посчитанные output'ы ДО блокировки. Тред дедупит по
-            # make_message_key → повторный персист на выходе из run_agent — no-op.
-            _maybe_persist(persist_messages_callback, list(tools_outputs), state)
+        if blocks_at_end and i == len(executed) - 1 and (tools_outputs or skip_outputs):
+            # Сфлашить уже посчитанные output'ы + skip'ы ДО блокировки. Тред дедупит
+            # по make_message_key → повторный персист на выходе из run_agent — no-op.
+            _maybe_persist(persist_messages_callback, list(tools_outputs) + skip_outputs, state)
         tool_name = str(m.get("name") or "")
         tool_arguments = str(m.get("arguments", ""))
         tool_res_raw = apply_tool(
@@ -398,19 +415,9 @@ def process_tool_calls(
 
         tools_outputs.append(new_message)
 
-    if skipped:
-        finalizer = str(executed[-1].get("name") or "the finalizing tool")
-        for m in skipped:
-            tools_outputs.append({
-                "id": generate_message_id_func("fco"),
-                "type": "function_call_output",
-                "call_id": m["call_id"],
-                "output": (
-                    f'{{"ok": false, "skipped": true, "message": '
-                    f'"Skipped: turn already finalized by {finalizer}; '
-                    f'one finalizer per turn."}}'
-                ),
-            })
+    # Skip-output'ы уже посчитаны выше и сфлашены перед блокировкой — добавляем в
+    # возврат (тред/state дедупят повторный персист по make_message_key).
+    tools_outputs.extend(skip_outputs)
 
     if getattr(state, "session_compact_applied", False):
         state.session_compact_applied = False
