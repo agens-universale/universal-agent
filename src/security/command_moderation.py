@@ -365,11 +365,13 @@ def moderate_command_execution(
                     exc=exc,
                 )
 
+            tool_ctx = getattr(context, "ctx", None)
             decision = decide_command_execution(
                 moderation_context.mode,
                 judge_result,
                 judge_available,
                 None,
+                ctx=tool_ctx,
             )
             if decision.requires_confirmation:
                 audit_policy_decision(
@@ -390,6 +392,7 @@ def moderate_command_execution(
                     judge_result,
                     judge_available,
                     user_confirmation,
+                    ctx=tool_ctx,
                 )
             if decision.allowed:
                 audit_policy_decision(

@@ -7,6 +7,8 @@ C1 Часть 2: при недоступности судьи и mode != allow �
 Protected paths injection: build_judge_payload добавляет поле never_touch_paths
 с объединённым списком instruction + operational защищённых путей.
 """
+import json
+
 import pytest
 
 import security.command_moderation as cm
@@ -14,6 +16,7 @@ from security.command_moderation import (
     ModerationContext,
     build_judge_payload,
     decide_command_execution,
+    moderate_command_execution,
 )
 
 
@@ -115,3 +118,47 @@ def test_build_judge_payload_never_touch_paths_empty_on_error(monkeypatch, tmp_p
     )
     payload = build_judge_payload("exec_command", "echo ok", context)
     assert payload.get("never_touch_paths") == []
+
+
+# ---------------------------------------------------------------------------
+# I-2: wrapper threads ctx → C1 Часть 2 доступна live через декоратор
+# ---------------------------------------------------------------------------
+
+
+def test_wrapper_threads_ctx_to_confirm_port(monkeypatch, tmp_path):
+    """Обёртка moderate_command_execution передаёт ctx в decide_command_execution.
+
+    Сценарий: судья недоступен, mode=deny, confirm-порт доступен и пользователь
+    подтверждает → команда должна быть выполнена (allowed).
+    Ctx передаётся в wrapper через kwarg ctx; resolve_tool_context пробрасывает
+    его в ToolSecurityContext.ctx, откуда wrapper берёт его для decide_command_execution.
+    """
+    from types import SimpleNamespace
+
+    received_ctx: list = []
+
+    def fake_confirm_available(ctx):
+        received_ctx.append(ctx)
+        return True
+
+    monkeypatch.setattr(cm, "confirm_available", fake_confirm_available)
+    monkeypatch.setattr(cm, "request_confirm", lambda **k: True)
+    # Судья всегда недоступен — кидаем исключение.
+    monkeypatch.setattr(cm, "run_command_judge_with_retry", lambda *a, **k: (_ for _ in ()).throw(cm.JudgeUnavailable("test")))
+
+    fake_ctx = SimpleNamespace(
+        config_dict={
+            "launch_root": str(tmp_path),
+            "command_moderation": {"enabled": True, "mode": "deny"},
+        },
+        logger=None,
+    )
+
+    @moderate_command_execution(payload_arg="command", tool_name="exec_command")
+    def run(command: str, ctx=None) -> str:
+        return json.dumps({"ok": True})
+
+    result = json.loads(run("echo hello", ctx=fake_ctx))
+
+    assert result["ok"] is True, "confirm-порт должен разрешить выполнение"
+    assert received_ctx and received_ctx[0] is fake_ctx, "ctx должен быть проброшен в confirm_available"
