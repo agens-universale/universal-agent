@@ -385,7 +385,7 @@ def moderate_command_execution(
                 user_confirmation = (
                     user_confirmation_extractor(*args, **kwargs)
                     if user_confirmation_extractor is not None
-                    else _ask_user_confirmation(payload, moderation_context, decision)
+                    else _ask_user_confirmation(payload, moderation_context, decision, ctx=tool_ctx)
                 )
                 decision = decide_command_execution(
                     moderation_context.mode,
@@ -694,17 +694,18 @@ def _ask_user_confirmation(
     payload: str,
     context: ModerationContext,
     decision: ExecutionDecision,
+    ctx: Any = None,
 ) -> bool:
-    from security.path_policy import prompt_user_confirmation
-    return prompt_user_confirmation(
+    return request_confirm(
         title="Command moderation",
+        question=f"Разрешить выполнение команды? ({context.tool_name})",
         fields=[
             ("Tool", context.tool_name),
             ("Reason", decision.reason),
             ("Risk flags", ", ".join(decision.risk_flags) or "-"),
             ("Preview", _payload_preview(payload)),
         ],
-        question="Allow execution?",
+        ctx=ctx,
     )
 
 

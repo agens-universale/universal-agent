@@ -154,16 +154,17 @@ def enforce_url_policy(
                 )
                 return func(*args, **kwargs)
             if mode == "ask":
-                from security.path_policy import prompt_user_confirmation
-                confirmed = prompt_user_confirmation(
+                from security.confirm_port import request_confirm
+                confirmed = request_confirm(
                     title="URL policy",
+                    question=f"Разрешить запрос вне политики URL: {decision.url}?",
                     fields=[
                         ("Tool", _tool_name(func, args)),
                         ("URL", decision.url),
                         ("Reason", decision.reason or ""),
                         ("Matched rule", decision.matched_rule or "-"),
                     ],
-                    question="Allow URL request outside policy?",
+                    ctx=context.ctx,
                 )
                 if confirmed:
                     audit_policy_decision(

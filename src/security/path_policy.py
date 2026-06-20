@@ -285,6 +285,7 @@ def enforce_write_guard(
                         path=candidate_path,
                         operation=operation,
                         error=exc.error,
+                        ctx=context.ctx,
                     )
                     if confirmed:
                         audit_policy_decision(
@@ -441,16 +442,19 @@ def _ask_user_confirmation_for_write(
     path: str,
     operation: str,
     error: dict[str, Any],
+    ctx: Any = None,
 ) -> bool:
-    return prompt_user_confirmation(
+    from security.confirm_port import request_confirm
+    return request_confirm(
         title="Write guard",
+        question=f"Разрешить запись вне периметра проекта в {path}?",
         fields=[
             ("Tool", tool_name),
             ("Operation", operation),
             ("Path", path),
             ("Allowed roots", error.get("allowed_write_roots") or []),
         ],
-        question="Allow write outside perimeter?",
+        ctx=ctx,
     )
 
 

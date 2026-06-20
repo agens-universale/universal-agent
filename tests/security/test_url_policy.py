@@ -123,8 +123,9 @@ def test_enforce_url_policy_mode_allow_passes_with_audit():
 
 def test_enforce_url_policy_mode_ask_confirmed_passes(monkeypatch):
     """mode=ask + confirm → URL пропускается + audit policy_ask_confirmed."""
-    import security.path_policy as pp
-    monkeypatch.setattr(pp, "prompt_user_confirmation", lambda **_: True)
+    import security.confirm_port as _cp
+    monkeypatch.setattr(_cp, "confirm_available", lambda ctx: True)
+    monkeypatch.setattr(_cp, "request_confirm", lambda **_: True)
 
     logger = _Logger()
     ctx = SimpleNamespace(
@@ -150,8 +151,9 @@ def test_enforce_url_policy_mode_ask_confirmed_passes(monkeypatch):
 
 def test_enforce_url_policy_mode_ask_declined_blocks(monkeypatch):
     """mode=ask + decline → блок, error.type = url_blocked_by_policy_cancelled_by_user."""
-    import security.path_policy as pp
-    monkeypatch.setattr(pp, "prompt_user_confirmation", lambda **_: False)
+    import security.confirm_port as _cp
+    monkeypatch.setattr(_cp, "confirm_available", lambda ctx: True)
+    monkeypatch.setattr(_cp, "request_confirm", lambda **_: False)
 
     logger = _Logger()
     ctx = SimpleNamespace(

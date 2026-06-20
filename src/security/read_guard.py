@@ -407,16 +407,18 @@ def enforce_read_guard(
                     )
                     return func(*args, **kwargs)
                 if mode == "ask":
-                    from security.path_policy import prompt_user_confirmation
-                    confirmed = prompt_user_confirmation(
+                    from security.confirm_port import request_confirm
+                    _rg_path = exc.error.get("path", candidate_path)
+                    confirmed = request_confirm(
                         title="Read guard",
+                        question=f"Разрешить чтение вне периметра проекта: {_rg_path}?",
                         fields=[
                             ("Tool", _tool_name(func, args)),
                             ("Operation", "read"),
-                            ("Path", exc.error.get("path", candidate_path)),
+                            ("Path", _rg_path),
                             ("Reason", exc.error.get("reason", "")),
                         ],
-                        question="Allow read outside perimeter?",
+                        ctx=context.ctx,
                     )
                     if confirmed:
                         audit_policy_decision(

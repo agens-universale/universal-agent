@@ -13,7 +13,6 @@ from security.path_policy import (
     audit_policy_decision,
     check_write_path_allowed,
     normalize_path_for_policy,
-    prompt_user_confirmation,
     resolve_tool_context,
 )
 from security.url_policy import UrlPolicyDecision, enforce_url_policy, validate_url_policy
@@ -205,15 +204,17 @@ class DownloadFile(AbstractSimpleTool):
                 )
                 return None
             if wg_mode == "ask":
-                confirmed = prompt_user_confirmation(
+                from security.confirm_port import request_confirm
+                confirmed = request_confirm(
                     title="Write guard",
+                    question=f"Разрешить запись вне периметра проекта в {dest}?",
                     fields=[
                         ("Tool", self.registered_tool_name()),
                         ("Operation", "write"),
                         ("Path", dest),
                         ("Allowed roots", exc.error.get("allowed_write_roots") or []),
                     ],
-                    question="Allow write outside perimeter?",
+                    ctx=context.ctx,
                 )
                 if confirmed:
                     audit_policy_decision(
