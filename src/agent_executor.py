@@ -65,6 +65,11 @@ class AgentExecutor:
         # run() применит флаг сразу при создании state, до первого persist.
         self._stop_pending: bool = False
 
+    @property
+    def ctx(self) -> RunContext:
+        """RunContext этого запуска (read-only) — публичный шов вместо ._ctx."""
+        return self._ctx
+
     def run(
         self,
         messages: list[str],

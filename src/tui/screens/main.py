@@ -2,6 +2,8 @@
 пикерами (skill/arg/file), ask_human-баннер, pending-реплики и polling треда."""
 from __future__ import annotations
 
+import os
+import threading
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -2599,8 +2601,6 @@ class TraceScreen(Screen):
         self._mount_trace_row(
             prefix="", content="/init: генерирую AGENTS.md…", kind_class="line-meta",
         )
-        import os
-        import threading
 
         def _work() -> None:
             try:

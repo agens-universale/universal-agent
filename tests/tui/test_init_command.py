@@ -18,8 +18,8 @@ class _FakeRunner:
     def is_running(self) -> bool:
         return self._running
 
-    def _ensure_executor(self):
-        raise RuntimeError("_ensure_executor не должен вызываться в этом тесте")
+    def ensure_executor(self):
+        raise RuntimeError("ensure_executor не должен вызываться в этом тесте")
 
 
 # ---------------------------------------------------------------------------
@@ -161,3 +161,37 @@ async def test_show_init_result_error(tmp_path):
         text = _trace_text(scr)
         assert "ошибка" in text
         assert "connection refused" in text
+
+
+# ---------------------------------------------------------------------------
+# Test 4: _work exception-path — падение в worker-потоке → error-строка
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_cmd_init_worker_exception_shows_error(tmp_path):
+    """Исключение в _work (ensure_wired_ctx падает) маршаллится в error-строку трейса."""
+    pytest.importorskip("textual")
+    from tui.app import TuiApp
+
+    class _BoomRunner:
+        def is_running(self) -> bool:
+            return False
+
+        def ensure_executor(self):
+            raise RuntimeError("boom-ctx")
+
+    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app.active_runner = _BoomRunner()
+
+    async with app.run_test() as pilot:
+        scr = pilot.app.screen
+        scr._cmd_init()
+        # Дождаться worker-поток gc-ua-init, затем дать UI применить call_from_thread.
+        for t in threading.enumerate():
+            if t.name == "gc-ua-init":
+                t.join(timeout=3.0)
+        await pilot.pause(0.2)
+
+        text = _trace_text(scr)
+        assert "/init: ошибка" in text
+        assert "boom-ctx" in text

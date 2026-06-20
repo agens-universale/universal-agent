@@ -48,6 +48,11 @@ class AgentRunner:
                 self._executor = self._executor_factory()
             return self._executor
 
+    def ensure_executor(self) -> Any:
+        """Публичный шов: построить (если нужно) и вернуть executor. Блокирует на
+        сборке (incl. MCP-дискавери) — звать с worker-потока, не с UI."""
+        return self._ensure_executor()
+
     def warm(self) -> None:
         """Собрать executor в фоне (off-UI), без запуска run. Идемпотентно.
 

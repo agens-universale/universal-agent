@@ -118,8 +118,7 @@ class TuiApp(App):
     def ensure_wired_ctx(self):
         """Build (if needed) the runner's executor and return its wired RunContext
         (is_tui + tui_confirm). Call from a worker thread — building blocks on MCP."""
-        ex = self.get_runner()._ensure_executor()
-        return ex._ctx
+        return self.get_runner().ensure_executor().ctx
 
     def _present_confirm(self, title: str, question: str, fields: list) -> None:
         """Вызывается на агент-потоке; маршаллит показ баннера в UI-поток."""
