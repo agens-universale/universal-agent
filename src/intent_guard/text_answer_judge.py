@@ -11,10 +11,15 @@ from typing import Any
 
 from intent_log import deserialize_list, records_to_jsonl_lines
 from intent_guard.final_report_consistency import validate_final_report_vs_user_intent
+from intent_guard.guard import FinishGateGuard
 
 
 def judge_text_answer(ctx: Any, state: Any, assistant_text: str) -> bool:
-    """True → принять текст как ответ хода; False → bounce (вкл. сбой судьи)."""
+    """True → принять текст как ответ хода; False → bounce.
+
+    Исключение валидатора → False (bounce). Замечание: при неразборчивом ответе
+    LLM нижележащий валидатор fail-open'ит в ``accept`` (как finish-gate) → текст
+    будет принят; это редкий путь и согласован с поведением finish-gate."""
     try:
         current = records_to_jsonl_lines(
             deserialize_list(getattr(state, "current_user_intent", []) or [])
@@ -34,14 +39,22 @@ def judge_text_answer(ctx: Any, state: Any, assistant_text: str) -> bool:
         return False
 
 
-def should_return_text_answer(cfg: Any, ctx: Any, state: Any, assistant_text: str) -> bool:
-    """Принять ли текст-ответ как ответ хода — по режиму ``cfg['text_answer_mode']``.
+def should_return_text_answer(ctx: Any, state: Any, assistant_text: str) -> bool:
+    """Принять ли текст-ответ как ответ хода — по режиму ``text_answer_mode`` из cfg.
 
-    ``always`` → да (без судьи); ``judge`` → решает судья; ``strict`` или ключа нет
-    (автономка CLI/server/swarm) → нет. Ключ ставит только TUI (см. ``tui/app.py``)."""
-    mode = (cfg or {}).get("text_answer_mode")
+    ``always`` → да (без судьи); ``judge`` → решает судья, но только если включён
+    сам finish-gate (``chat_completions`` + ``strict_turn_finish_validation``) — иначе
+    судью не на чём построить (в т.ч. responses-режим), ведём себя как ``strict``;
+    ``strict`` или ключа нет (автономка CLI/server/swarm) → нет. Ключ ставит только
+    TUI (см. ``tui/app.py``)."""
+    cfg = getattr(ctx, "config_dict", {}) or {}
+    mode = cfg.get("text_answer_mode") if isinstance(cfg, dict) else None
     if mode == "always":
         return True
     if mode == "judge":
+        # Судья переиспользует finish-gate → активен только там, где включён сам
+        # finish-gate. Нет гейта (responses / strict-off) → строго (bounce).
+        if not FinishGateGuard(ctx=ctx, state=state).enabled:
+            return False
         return judge_text_answer(ctx, state, assistant_text)
     return False

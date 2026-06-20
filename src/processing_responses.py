@@ -728,7 +728,17 @@ def run_agent(
                     # TUI adaptive bounce: режим ставит только TUI (CLI/server/swarm →
                     # ключа нет → строго). always → принять текст; judge → судья решает
                     # (accept → текст и есть ответ хода, без bounce/turn_finish/finish-gate).
-                    if should_return_text_answer(cfg, ctx, state, assistant_text):
+                    # Завершаем ход как finish-accept: флашим интент, прогоняем compaction-
+                    # hook, сливаем сообщения, пришедшие во время хода.
+                    if should_return_text_answer(ctx, state, assistant_text):
+                        state.flush_current_user_intent()
+                        if turn_end_compaction_hook is not None:
+                            turn_end_compaction_hook()
+                        if get_pending_messages is not None:
+                            pending = get_pending_messages()
+                            if pending:
+                                messages = pending
+                                continue
                         return assistant_text
                     run_logger.warning(
                         "Agent returned text response without tool call, requesting tool call"
