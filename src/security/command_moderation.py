@@ -126,10 +126,30 @@ def run_command_judge(judge_client: Any, judge_payload: dict[str, Any]) -> Judge
     return validate_judge_result(raw_result)
 
 
+def run_command_judge_with_retry(
+    judge_client: Any, judge_payload: dict[str, Any], *, retries: int = 1
+) -> JudgeResult:
+    """Судья с ретраями: слабая модель часто отдаёт мусорный вердикт разово —
+    один повтор перед тем как признать судью недоступным. Если все попытки
+    исчерпаны — пробрасываем последнее исключение (декоратор переведёт это в
+    judge_unavailable → fail-closed, security не ослаблен)."""
+    last_exc: Exception | None = None
+    for _ in range(retries + 1):
+        try:
+            return run_command_judge(judge_client, judge_payload)
+        except Exception as exc:
+            last_exc = exc
+    assert last_exc is not None
+    raise last_exc
+
+
 def validate_judge_result(raw: dict[str, Any]) -> JudgeResult:
     if not isinstance(raw, dict):
         raise ValueError("judge result must be an object")
-    verdict = str(raw.get("verdict", "")).strip().lower()
+    # Нормализуем ФОРМАТ (пробел/дефис/регистр): слабая модель часто пишет
+    # «potentially dangerous» через пробел/в другом регистре. Синонимы НЕ маппим —
+    # неузнанный вердикт по-прежнему отвергается (security не ослаблен).
+    verdict = re.sub(r"[\s\-]+", "_", str(raw.get("verdict", "")).strip().lower())
     if verdict not in ALLOWED_VERDICTS:
         raise ValueError("judge result verdict must be 'safe' or 'potentially_dangerous'")
     reasons = _string_list(raw.get("reasons"), field_name="reasons")
@@ -301,9 +321,10 @@ def moderate_command_execution(
                     if judge_client_extractor is not None
                     else _default_judge_client(args, kwargs)
                 )
-                judge_result = run_command_judge(
+                judge_result = run_command_judge_with_retry(
                     judge_client,
                     build_judge_payload(moderation_context.tool_name, payload, moderation_context),
+                    retries=1,
                 )
             except Exception as exc:
                 judge_available = False
