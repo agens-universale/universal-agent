@@ -338,6 +338,34 @@ def enforce_read_guard(
             config_dict = _config_from_context(context)
             cfg = parse_read_guard_config(config_dict)
 
+            # Floor carve-out (Spec B §6): runs BEFORE cfg.enabled check so
+            # operational .gc reads are denied even when read_guard is off.
+            # skills/instructions/none fall through to the normal flow.
+            from security.protected_paths import classify_path, protected_paths, protection_enabled
+            if protection_enabled(config_dict):
+                try:
+                    cand = _extract_named_value(func, args, kwargs, path_arg, path_extractor, "path")
+                    ps = protected_paths(cwd=context.launch_root)
+                    if classify_path(cand, ps) == "operational":
+                        err = {
+                            "type": "protected_path_denied",
+                            "path": cand,
+                            "operation": "read",
+                            "message": "Operational .gc is read-protected.",
+                        }
+                        audit_policy_decision(
+                            context,
+                            tool_name=_tool_name(func, args),
+                            decision="blocked",
+                            reason_code="protected_read_deny",
+                        )
+                        return _read_guard_blocked_result(
+                            func, err, args, kwargs,
+                            blocked_result_factory=blocked_result_factory,
+                        )
+                except ValueError:
+                    pass
+
             if not cfg.enabled:
                 audit_policy_decision(
                     context,
