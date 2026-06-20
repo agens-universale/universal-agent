@@ -2416,6 +2416,9 @@ class TraceScreen(Screen):
         if name == "status":
             self._cmd_status(arg)
             return
+        if name == "init":
+            self._cmd_init()
+            return
 
     def _open_event_by_no(self, no: int) -> None:
         """Открыть полный payload события №no в Viewer.
@@ -2554,6 +2557,59 @@ class TraceScreen(Screen):
             title=f"status · {title_id}",
             content=json.dumps(payload, ensure_ascii=False, indent=2),
         ))
+
+    def _cmd_init(self) -> None:
+        """Запуск генерации AGENTS.md в daemon-потоке (блокирует на баннере и агенте)."""
+        runner = self.app.get_runner()
+        if runner.is_running():
+            self._mount_trace_row(
+                prefix="[!] ",
+                content="/init: дождитесь завершения текущей задачи",
+                kind_class="line-error",
+            )
+            return
+        self._mount_trace_row(
+            prefix="", content="/init: генерирую AGENTS.md…", kind_class="line-meta",
+        )
+        import os
+        import threading
+
+        def _work() -> None:
+            try:
+                ctx = self.app.ensure_wired_ctx()
+                from agent_executor import AgentExecutor
+                from instructions.agent_markdown import extract_markdown
+                from instructions.init_agents_md import run_init_agents_md
+
+                def generate_fn(prompt: str) -> str:
+                    return extract_markdown(AgentExecutor(ctx).run([prompt]))
+
+                result = run_init_agents_md(cwd=os.getcwd(), ctx=ctx, generate_fn=generate_fn)
+            except Exception as exc:
+                self.app.call_from_thread(
+                    self._show_init_result, {"status": "error", "error": str(exc)}
+                )
+                return
+            self.app.call_from_thread(self._show_init_result, result)
+
+        threading.Thread(target=_work, name="gc-ua-init", daemon=True).start()
+
+    def _show_init_result(self, result: dict) -> None:
+        """Отображение результата /init (вызывается на UI-потоке через call_from_thread)."""
+        status = result.get("status", "error")
+        if status == "written":
+            content = f"AGENTS.md записан: {result['path']} (режим: {result['mode']})"
+            kind = "line-meta"
+        elif status == "empty":
+            content = "/init: агент вернул пусто — AGENTS.md не записан"
+            kind = "line-error"
+        elif status == "cancelled":
+            content = "/init: отменено"
+            kind = "line-meta"
+        else:
+            content = f"/init: ошибка — {result.get('error', status)}"
+            kind = "line-error"
+        self._mount_trace_row(prefix="", content=content, kind_class=kind)
 
     def _render_command_error(self, name: str, suggestion: str | None) -> None:
         """Команда-ошибка по единому правилу (§3.3). Одна строка одним Static;
