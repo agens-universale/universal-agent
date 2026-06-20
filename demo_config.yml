@@ -81,6 +81,15 @@ tui:
   show_reasoning_line: true
   # Живой текст ответа (серый стрим до финальной «●»-строки). Default off.
   show_stream_answer: false
+  # adaptive bounce (ТОЛЬКО TUI): как поступать с текст-ответом без вызова тула —
+  # убирает дубль финального ответа и латентность «завершаю» для простых сообщений.
+  #   strict — всегда требовать tool-call (как CLI/server/swarm);
+  #   judge  — судья (intent_guard) решает, полный ли это ответ: простой ответ
+  #            принять текстом, на комплексной задаче — bounce. Активен при
+  #            backend.api_mode: chat_completions (+ strict_turn_finish_validation);
+  #   always — всегда принимать текст (ни bounce, ни судьи).
+  # Default: judge. Не зависит от backend.stream.
+  text_answer_mode: judge
 
 agent:
   model: MiniMax-M2.7
