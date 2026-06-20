@@ -428,3 +428,47 @@ async def test_reconcile_unmounts_superseded_ask_human_banner(tmp_path):
             title="", summary="ok", full_payload={}, message_id="r"))
         scr._reconcile_ask_human_after_render(allow_remnant=False)
         assert scr._ask_human_banner is None          # перекрытый снят
+
+
+@pytest.mark.asyncio
+async def test_live_poll_keeps_active_banner_despite_flush_output(tmp_path):
+    """Регресс-гвард к 4a9d9e8 (убран live-reconcile): в живом потоке приход
+    флаш-output'а не-блокирующего тула ПОСЛЕ ask_human (тот же ход, агент ещё ждёт)
+    НЕ должен снимать активный баннер. До фикса live-reconcile видел событие после
+    вопроса → считал диалог продолженным → сносил ЖИВОЙ баннер → агент висел зомби."""
+    tid = "ahliveflush00000000000000000000a"
+    (tmp_path / f"data_cli_{tid}.jsonl").write_text(
+        _ah_envelope_lines(tid, [
+            {"id": "u1", "role": "user", "content": "запусти"},
+            _ah_call_payload("Подтверждаете?", "call_ah_x"),
+        ]), encoding="utf-8")
+    (tmp_path / f"meta_cli_{tid}.json").write_text(json.dumps({
+        "thread_id": tid, "updated_at": "t0", "messages_count": 2,
+    }), encoding="utf-8")
+
+    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    app.active_runner = _LiveRunner()             # живой агент ждёт ответа на ask_human
+    async with app.run_test() as pilot:
+        scr = app.screen
+        scr.attach_active_task(tid)
+        await pilot.pause(0.05)
+        assert scr._ask_human_banner is not None  # живой вопрос — баннер есть
+
+        # Через poll прилетает output не-блокирующего тула (session_memory) ПОСЛЕ
+        # ask_human — ровно то, что флаш кладёт в поток. Агент всё ещё ждёт.
+        (tmp_path / f"data_cli_{tid}.jsonl").write_text(
+            _ah_envelope_lines(tid, [
+                {"id": "u1", "role": "user", "content": "запусти"},
+                _ah_call_payload("Подтверждаете?", "call_ah_x"),
+                {"id": "fco_sm", "type": "function_call_output", "call_id": "call_sm",
+                 "output": json.dumps({"tool": "session_memory", "ok": True})},
+            ]), encoding="utf-8")
+        (tmp_path / f"meta_cli_{tid}.json").write_text(json.dumps({
+            "thread_id": tid, "updated_at": "t1", "messages_count": 3,
+        }), encoding="utf-8")
+        await pilot.pause(0.4)                     # poll → live-render (путь без reconcile)
+
+        assert scr._ask_human_banner is not None, (
+            "активный баннер НЕ должен сниматься в live при флаш-output'е после ask_human"
+        )
+        assert app.tui_state.ask_human_state is not None  # состояние диалога цело
