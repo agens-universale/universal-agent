@@ -74,7 +74,7 @@ def test_write_guard_ask_tui_confirmed(tmp_path, monkeypatch):
     launch_root = tmp_path / "project"
     launch_root.mkdir()
     recorded = []
-    tui_confirm = lambda **kw: recorded.append(kw) or True
+    tui_confirm = lambda **kw: recorded.append(kw) or "once"  # 3-значный контракт: once=разрешить
     ctx = _ctx_ask_tui(launch_root, tui_confirm)
 
     out_path = str(tmp_path / "outside.txt")
@@ -92,7 +92,7 @@ def test_write_guard_ask_tui_declined(tmp_path, monkeypatch):
     # launch_root — подкаталог; файл снаружи него → WriteGuardViolation
     launch_root = tmp_path / "project"
     launch_root.mkdir()
-    tui_confirm = lambda **kw: False
+    tui_confirm = lambda **kw: "deny"  # 3-значный контракт: deny=отклонить
     ctx = _ctx_ask_tui(launch_root, tui_confirm)
 
     out_path = str(tmp_path / "outside.txt")
