@@ -922,8 +922,14 @@ class TraceScreen(Screen):
         inp_row = self.query_one("#input-row", Horizontal)
         self.query_one("#root", Vertical).mount(banner, before=inp_row)
         inp_row.add_class("hidden")
-        # Убираем фокус с TextArea — без этого она потребляет printable-клавиши
-        # и «y»/«n» не достигают Screen.on_key.
+        # Инпут на время confirm: blur + СИНХРОННО disabled. Одного set_focus(None)
+        # мало — он применяется асинхронно (след. цикл pump), и под нагрузкой первый
+        # «y» успевает уйти в ещё-сфокусированную TextArea ДО blur (плавающий баг).
+        # disabled=True снимает виджет с обработки клавиш немедленно — гонки нет.
+        try:
+            self.query_one("#cmdinput", CommandTextArea).disabled = True
+        except Exception:
+            pass
         self.set_focus(None)
         if self._trace_is_at_bottom():
             self.query_one("#trace", VerticalScroll).scroll_end(animate=False)
@@ -942,7 +948,9 @@ class TraceScreen(Screen):
         except Exception:
             pass
         try:
-            self.query_one("#cmdinput", CommandTextArea).focus()
+            inp = self.query_one("#cmdinput", CommandTextArea)
+            inp.disabled = False  # снять disable ДО focus (фокус не идёт на disabled)
+            inp.focus()
         except Exception:
             pass
 
