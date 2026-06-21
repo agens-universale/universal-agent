@@ -66,6 +66,35 @@ def _ctx_ask_tui(launch_root, tui_confirm):
     )
 
 
+def test_instruction_file_confirm_cached_by_decision_key(tmp_path, monkeypatch):
+    """Повторная запись инструкц-файла (AGENTS.md) в одном прогоне НЕ переспрашивает:
+    первый ответ кэшируется по decision_key, остальные правки авто-проходят."""
+    from config_modules import env_vars
+    monkeypatch.setattr(env_vars.env, "gc_home", tmp_path / "gc")
+    from security.permission_store import PermissionStore
+
+    calls = []
+
+    def tui_confirm(*, title, question, fields):
+        calls.append(question)
+        return "once"
+
+    ctx = _types.SimpleNamespace(
+        config_dict={"launch_root": str(tmp_path), "write_guard": {"enabled": True, "mode": "deny"}},
+        is_tui=True, tui_confirm=tui_confirm, logger=None,
+        permission_store=PermissionStore(),
+    )
+    agents_md = str(tmp_path / "AGENTS.md")
+
+    r1 = _Tool(ctx).write(path=agents_md, content="a")
+    assert json.loads(r1)["ok"] is True
+    assert len(calls) == 1, "первая запись — один confirm"
+
+    r2 = _Tool(ctx).write(path=agents_md, content="b")
+    assert json.loads(r2)["ok"] is True
+    assert len(calls) == 1, f"повторная запись того же файла не должна переспрашивать, calls={calls}"
+
+
 def test_write_guard_ask_tui_confirmed(tmp_path, monkeypatch):
     """TUI + mode=ask + banner подтверждает → запись проходит."""
     from config_modules import env_vars

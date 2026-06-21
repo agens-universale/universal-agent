@@ -226,6 +226,7 @@ def enforce_write_guard(
                             question=f"Разрешить запись в {candidate_path}?",
                             fields=[("path", candidate_path)],
                             ctx=context.ctx,
+                            decision_key=f"write:{candidate_path}",
                         )
                         if not _ok:
                             _err = {
