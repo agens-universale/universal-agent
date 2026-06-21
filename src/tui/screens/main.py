@@ -1164,8 +1164,16 @@ class TraceScreen(Screen):
         равный содержимому, пришедшему из polling-rendered .jsonl записи.
 
         Источник истины — in-memory кэш `_pending_wire_cache`, т.к. meta-файл
-        может быть перезаписан executor'ом между submit'ом и polling-тиком."""
-        return self._pending_wire_cache.get(client_id) == polled_content
+        может быть перезаписан executor'ом между submit'ом и polling-тиком.
+
+        Сравнение по .strip(): polled-контент приходит из map_message уже
+        обрезанным, а wire может иметь хвостовой whitespace (многострочный
+        init-промпт из файла-шаблона кончается на \\n) — иначе оптимистичный
+        маркер «/init» не схлопнулся бы и полный промпт тёк бы в трейс."""
+        cached = self._pending_wire_cache.get(client_id)
+        if cached is None:
+            return False
+        return cached.strip() == polled_content.strip()
 
     def _poll_active(self) -> None:
         # Отложенное удаление осиротевших реплик (cancel-with-undo), когда idle.
