@@ -36,7 +36,7 @@ class AgentRunner:
         self._prebuild_messages: list[dict] = []
         self._stop_requested = False
         self._confirm_event = threading.Event()
-        self._confirm_result: bool = False
+        self._confirm_choice: str = "deny"
 
     def _ensure_executor(self) -> Any:
         with self._build_lock:
@@ -164,35 +164,40 @@ class AgentRunner:
     def make_tui_confirm(
         self,
         present: Callable[[str, str, list], None],
-    ) -> Callable[..., bool]:
+    ) -> Callable[..., str]:
         """Вернуть замыкание tui_confirm для передачи в ctx.
 
         Замыкание вызывается на агент-потоке и блокирует его до ответа юзера.
         present(title, question, fields) — инжектированный UI-presenter; он
         отвечает за маршаллинг в UI-поток и показ баннера (реализуется в T3).
+        Возвращает ConfirmChoice: 'once'|'session'|'deny'.
         """
 
-        def _tui_confirm(*, title: str, question: str, fields: list) -> bool:
+        def _tui_confirm(*, title: str, question: str, fields: list) -> str:
             self._confirm_event.clear()
-            self._confirm_result = False
+            self._confirm_choice = "deny"
             present(title, question, fields)
             self._confirm_event.wait()
-            return bool(self._confirm_result)
+            return self._confirm_choice
 
         return _tui_confirm
 
-    def submit_confirm_reply(self, ok: bool) -> None:
-        """UI кладёт ответ юзера (y/Enter → True, n/Esc → False).
+    def submit_confirm_reply(self, choice: "str | bool") -> None:
+        """UI кладёт выбор: once|session|deny. Разблокирует агент-поток.
 
-        Разблокирует агент-поток, ожидающий в _tui_confirm."""
-        self._confirm_result = ok
+        Принимает также bool для обратной совместимости (True→'once', False→'deny')
+        до полного обновления вызывающих сторон (Task 6)."""
+        if isinstance(choice, bool):
+            self._confirm_choice = "once" if choice else "deny"
+        else:
+            self._confirm_choice = choice
         self._confirm_event.set()
 
     def cancel_confirm(self) -> None:
-        """Fail-closed разблокировка confirm (результат False).
+        """Fail-closed разблокировка confirm (выбор 'deny').
 
         Используется в stop() и в тестах; симметрично cancel_ask_human."""
-        self._confirm_result = False
+        self._confirm_choice = "deny"
         self._confirm_event.set()
 
     def cancel_ask_human(self) -> None:

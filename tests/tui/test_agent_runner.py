@@ -289,7 +289,7 @@ def test_warm_idempotent():
 
 
 # ---------------------------------------------------------------------------
-# confirm-канал (T1)
+# confirm-канал (T1) — ConfirmChoice: once|session|deny
 # ---------------------------------------------------------------------------
 
 class _SimpleStub:
@@ -299,54 +299,65 @@ class _SimpleStub:
     def add_message(self, m): pass
 
 
-def test_confirm_submit_true_unblocks_with_true():
-    """submit_confirm_reply(True) → make_tui_confirm-замыкание возвращает True."""
-    runner = AgentRunner(executor=_SimpleStub())
-
-    def present(title, question, fields):
-        # Из соседнего потока с задержкой подтверждаем
-        def _reply():
-            time.sleep(0.05)
-            runner.submit_confirm_reply(True)
-        threading.Thread(target=_reply, daemon=True).start()
-
-    confirm = runner.make_tui_confirm(present)
-    result = confirm(title="t", question="q", fields=[])
-    assert result is True
-
-
-def test_confirm_submit_false_returns_false():
-    """submit_confirm_reply(False) → make_tui_confirm-замыкание возвращает False."""
+def test_confirm_submit_session_returns_session():
+    """submit_confirm_reply('session') → make_tui_confirm-замыкание возвращает 'session'."""
     runner = AgentRunner(executor=_SimpleStub())
 
     def present(title, question, fields):
         def _reply():
             time.sleep(0.05)
-            runner.submit_confirm_reply(False)
+            runner.submit_confirm_reply("session")
         threading.Thread(target=_reply, daemon=True).start()
 
     confirm = runner.make_tui_confirm(present)
     result = confirm(title="t", question="q", fields=[])
-    assert result is False
+    assert result == "session"
 
 
-def test_confirm_cancel_returns_false():
-    """cancel_confirm() → make_tui_confirm-замыкание возвращает False."""
+def test_confirm_submit_once_returns_once():
+    """submit_confirm_reply('once') → make_tui_confirm-замыкание возвращает 'once'."""
     runner = AgentRunner(executor=_SimpleStub())
 
     def present(title, question, fields):
-        def _cancel():
+        def _reply():
             time.sleep(0.05)
-            runner.cancel_confirm()
-        threading.Thread(target=_cancel, daemon=True).start()
+            runner.submit_confirm_reply("once")
+        threading.Thread(target=_reply, daemon=True).start()
 
     confirm = runner.make_tui_confirm(present)
     result = confirm(title="t", question="q", fields=[])
-    assert result is False
+    assert result == "once"
+
+
+def test_confirm_submit_deny_returns_deny():
+    """submit_confirm_reply('deny') → make_tui_confirm-замыкание возвращает 'deny'."""
+    runner = AgentRunner(executor=_SimpleStub())
+
+    def present(title, question, fields):
+        def _reply():
+            time.sleep(0.05)
+            runner.submit_confirm_reply("deny")
+        threading.Thread(target=_reply, daemon=True).start()
+
+    confirm = runner.make_tui_confirm(present)
+    result = confirm(title="t", question="q", fields=[])
+    assert result == "deny"
+
+
+def test_confirm_cancel_returns_deny():
+    """cancel_confirm() → make_tui_confirm-замыкание возвращает 'deny'."""
+    runner = AgentRunner(executor=_SimpleStub())
+
+    def present(title, question, fields):
+        threading.Thread(target=runner.cancel_confirm, daemon=True).start()
+
+    confirm = runner.make_tui_confirm(present)
+    result = confirm(title="t", question="q", fields=[])
+    assert result == "deny"
 
 
 def test_confirm_stop_unblocks_blocked_confirm():
-    """stop() разблокирует агент-поток, зависший в confirm (возвращает False)."""
+    """stop() разблокирует агент-поток, зависший в confirm (возвращает 'deny')."""
     runner = AgentRunner(executor=_SimpleStub())
 
     # present ничего не делает — confirm будет ждать вечно, пока не придёт stop()
@@ -354,7 +365,7 @@ def test_confirm_stop_unblocks_blocked_confirm():
         pass
 
     confirm = runner.make_tui_confirm(present)
-    result_holder: list[bool] = []
+    result_holder: list[str] = []
 
     def _run_confirm():
         result_holder.append(confirm(title="t", question="q", fields=[]))
@@ -365,4 +376,4 @@ def test_confirm_stop_unblocks_blocked_confirm():
     runner.stop()
     t.join(timeout=2.0)
     assert not t.is_alive(), "confirm-поток не разблокировался за 2 с"
-    assert result_holder == [False]
+    assert result_holder == ["deny"]

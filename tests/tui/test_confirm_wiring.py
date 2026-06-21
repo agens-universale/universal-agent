@@ -98,7 +98,7 @@ async def test_confirm_full_chain_via_run_test():
         banners = list(pilot.app.query(ConfirmBanner))
         assert len(banners) == 1, f"ожидали 1 ConfirmBanner, получили {len(banners)}"
 
-        # Пользователь нажимает «y» → TraceScreen._answer_confirm(True) → runner.submit_confirm_reply(True).
+        # Пользователь нажимает «y» → TraceScreen._answer_confirm → runner.submit_confirm_reply("once").
         await pilot.press("y")
         await pilot.pause(0.2)
 
@@ -109,7 +109,7 @@ async def test_confirm_full_chain_via_run_test():
         val = result[0]
         if isinstance(val, BaseException):
             raise val
-        assert val is True
+        assert val == "once"
 
         # Баннер снят.
         banners_after = list(pilot.app.query(ConfirmBanner))
@@ -160,7 +160,7 @@ async def test_confirm_reentrant_decline_then_approve():
         t1.join(timeout=3.0)
         assert not t1.is_alive(), "worker1 не завершился"
         assert len(results) == 1
-        assert results[0] is False, f"confirm #1 должен вернуть False, вернул {results[0]}"
+        assert results[0] == "deny", f"confirm #1 должен вернуть 'deny', вернул {results[0]}"
 
         banners = list(pilot.app.query(ConfirmBanner))
         assert len(banners) == 0, "баннер должен быть снят после confirm #1"
@@ -186,7 +186,7 @@ async def test_confirm_reentrant_decline_then_approve():
         t2.join(timeout=3.0)
         assert not t2.is_alive(), "worker2 не завершился"
         assert len(results) == 2
-        assert results[1] is True, f"confirm #2 должен вернуть True, вернул {results[1]}"
+        assert results[1] == "once", f"confirm #2 должен вернуть 'once', вернул {results[1]}"
 
         banners = list(pilot.app.query(ConfirmBanner))
         assert len(banners) == 0, "баннер должен быть снят после confirm #2"
@@ -239,7 +239,7 @@ async def test_confirm_arrow_right_then_enter_selects_n():
 
         t.join(timeout=3.0)
         assert not t.is_alive()
-        assert result and result[0] is False, f"ожидали False, получили {result}"
+        assert result and result[0] == "deny", f"ожидали 'deny', получили {result}"
 
 
 @pytest.mark.asyncio
@@ -282,4 +282,4 @@ async def test_confirm_enter_default_selects_y():
 
         t.join(timeout=3.0)
         assert not t.is_alive()
-        assert result and result[0] is True, f"ожидали True, получили {result}"
+        assert result and result[0] == "once", f"ожидали 'once', получили {result}"
