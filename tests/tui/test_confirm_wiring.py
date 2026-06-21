@@ -5,12 +5,12 @@
 
 Тест 2 (integration, run_test): полная цепочка
   confirm(…) → call_from_thread → show_confirm_banner → [y] → submit_confirm_reply
-              → confirm() возвращает True.
+              → confirm() возвращает "once".
 
 Тест 3 (re-entrancy): два последовательных confirm в одном раннере:
   decline → approve; канал должен быть re-entrant.
 
-Тест 4 (arrow nav): ←/→ + Enter выбирает выделенный вариант.
+Тест 4 (arrow nav): ↑/↓ + Enter выбирает выделенный вариант.
 """
 from __future__ import annotations
 
@@ -192,11 +192,11 @@ async def test_confirm_reentrant_decline_then_approve():
         assert len(banners) == 0, "баннер должен быть снят после confirm #2"
 
 
-# ── arrow navigation: ←/→ + Enter ────────────────────────────────────────────
+# ── arrow navigation: ↑/↓ + Enter ────────────────────────────────────────────
 
 @pytest.mark.asyncio
 async def test_confirm_arrow_right_then_enter_selects_n():
-    """→ сдвигает выделение с Y на N; Enter выбирает выделенный (N) → False."""
+    """↓ сдвигает выделение с Y ([Y]) на [S] (session); Enter выбирает выделенный → "session"."""
     pytest.importorskip("textual")
     from tui.app import TuiApp
     from tui.services.agent_runner import AgentRunner
@@ -227,19 +227,19 @@ async def test_confirm_arrow_right_then_enter_selects_n():
         banners = list(pilot.app.query(ConfirmBanner))
         assert len(banners) == 1
 
-        # Стрелка вправо — переключает на N (selected=1).
-        await pilot.press("right")
+        # Стрелка вниз — переключает на [S] (selected=1).
+        await pilot.press("down")
         await pilot.pause(0.05)
         banner = banners[0]
         assert banner.selected == 1, f"ожидали selected=1, получили {banner.selected}"
 
-        # Enter — подтверждает выделенный (N → False).
+        # Enter — подтверждает выделенный ([S] → "session").
         await pilot.press("enter")
         await pilot.pause(0.2)
 
         t.join(timeout=3.0)
         assert not t.is_alive()
-        assert result and result[0] == "deny", f"ожидали 'deny', получили {result}"
+        assert result and result[0] == "session", f"ожидали 'session', получили {result}"
 
 
 @pytest.mark.asyncio

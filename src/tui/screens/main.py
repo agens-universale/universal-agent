@@ -946,11 +946,11 @@ class TraceScreen(Screen):
         except Exception:
             pass
 
-    def _answer_confirm(self, ok: bool) -> None:
+    def _answer_confirm(self, choice: str) -> None:
         """Отправить ответ в confirm-канал раннера и скрыть баннер."""
         runner = getattr(self.app, "active_runner", None)
         if runner is not None and hasattr(runner, "submit_confirm_reply"):
-            runner.submit_confirm_reply(ok)
+            runner.submit_confirm_reply(choice)
         self._hide_confirm_banner()
 
     # ──────────────────────────────────────────────────────────────────────────
@@ -1358,16 +1358,19 @@ class TraceScreen(Screen):
         if self._confirm_active:
             key = event.key
             banner = self._confirm_banner
-            if key == "left" and banner is not None:
+            if key == "up" and banner is not None:
                 banner.move_selection(-1)
-            elif key == "right" and banner is not None:
+            elif key == "down" and banner is not None:
                 banner.move_selection(1)
             elif key == "enter":
-                self._answer_confirm(banner is not None and banner.selected == 0)
+                from tui.widgets.confirm_banner import choice_for
+                self._answer_confirm(choice_for(banner.selected) if banner is not None else "deny")
             elif key in ("y", "Y"):
-                self._answer_confirm(True)
+                self._answer_confirm("once")
+            elif key in ("s", "S"):
+                self._answer_confirm("session")
             elif key in ("n", "N", "escape"):
-                self._answer_confirm(False)
+                self._answer_confirm("deny")
             # иначе — проглотить без действия (нет случайного ввода)
             event.stop()
             event.prevent_default()

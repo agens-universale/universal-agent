@@ -182,15 +182,9 @@ class AgentRunner:
 
         return _tui_confirm
 
-    def submit_confirm_reply(self, choice: "str | bool") -> None:
-        """UI кладёт выбор: once|session|deny. Разблокирует агент-поток.
-
-        Принимает также bool для обратной совместимости (True→'once', False→'deny')
-        до полного обновления вызывающих сторон (Task 6)."""
-        if isinstance(choice, bool):
-            self._confirm_choice = "once" if choice else "deny"
-        else:
-            self._confirm_choice = choice
+    def submit_confirm_reply(self, choice: str) -> None:
+        """UI кладёт выбор: once|session|deny. Разблокирует агент-поток."""
+        self._confirm_choice = choice
         self._confirm_event.set()
 
     def cancel_confirm(self) -> None:

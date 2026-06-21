@@ -17,8 +17,12 @@ from textual.widgets import Static
 
 from tui.palette import ACCENT, BG, DIM
 
-# Варианты: (keycap, label). Индекс 0 — affirmative (Y/да), 1 — negative (N/нет).
-_OPTIONS = [("[Y]", "да"), ("[N]", "нет")]
+# Варианты: (keycap, label). 0 — once, 1 — session, 2 — deny.
+_OPTIONS = [
+    ("[Y]", "Разрешить"),
+    ("[S]", "Разрешить в этой сессии — не спрашивать снова"),
+    ("[N]", "Нет — отклонить"),
+]
 
 
 def _fmt_field_value(value: object, *, limit: int = 200) -> str:
@@ -33,18 +37,24 @@ def _fmt_field_value(value: object, *, limit: int = 200) -> str:
 
 
 def _render_options(selected: int) -> Text:
-    """Рендер вариантов; подсвеченный — teal-«кнопка», прочие — keycap accent + текст dim.
-    Зеркало ConfirmScreen._render_hint."""
+    """Вертикальный рендер вариантов; выбранный — teal-«кнопка», прочие — keycap accent + текст dim."""
     t = Text()
     for idx, (key, label) in enumerate(_OPTIONS):
         if idx > 0:
-            t.append("   ")
+            t.append("\n")
+        prefix = "▸ " if idx == selected else "  "
         if idx == selected:
-            t.append(f" {key} {label} ", style=f"bold {BG} on {ACCENT}")
+            t.append(f"{prefix}{key} {label} ", style=f"bold {BG} on {ACCENT}")
         else:
-            t.append(f" {key}", style=ACCENT)
-            t.append(f" {label} ", style=DIM)
+            t.append(prefix)
+            t.append(f"{key}", style=ACCENT)
+            t.append(f" {label}", style=DIM)
     return t
+
+
+def choice_for(selected: int) -> str:
+    """Маппинг индекса выделенного варианта → строка выбора."""
+    return ("once", "session", "deny")[selected] if 0 <= selected < 3 else "deny"
 
 
 class ConfirmBanner(Vertical):

@@ -1,6 +1,10 @@
 import pytest
 
-from tui.widgets.confirm_banner import ConfirmBanner, _fmt_field_value
+from tui.widgets.confirm_banner import ConfirmBanner, _fmt_field_value, _OPTIONS
+
+
+def test_banner_has_three_options():
+    assert [k for k, _ in _OPTIONS] == ["[Y]", "[S]", "[N]"]
 
 
 def test_banner_holds_question_and_options():

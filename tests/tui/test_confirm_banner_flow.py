@@ -1,4 +1,4 @@
-"""confirm banner: показ/скрытие + перехват y/N/Esc → submit_confirm_reply."""
+"""confirm banner: показ/скрытие + перехват y/s/N/Esc/↑↓/Enter → submit_confirm_reply."""
 import pytest
 
 
@@ -6,7 +6,7 @@ class _StubRunner:
     """Минимальный runner-stub: фиксирует вызовы submit_confirm_reply."""
 
     def __init__(self, running: bool = True) -> None:
-        self.replies: list[bool] = []
+        self.replies: list[str] = []
         self._running = running
         self.cancel_confirm_calls: int = 0
         self.stopped: bool = False
@@ -14,8 +14,8 @@ class _StubRunner:
     def is_running(self) -> bool:
         return self._running
 
-    def submit_confirm_reply(self, ok: bool) -> None:
-        self.replies.append(ok)
+    def submit_confirm_reply(self, choice: str) -> None:
+        self.replies.append(choice)
 
     def cancel_confirm(self) -> None:
         self.cancel_confirm_calls += 1
@@ -25,8 +25,8 @@ class _StubRunner:
 
 
 @pytest.mark.asyncio
-async def test_confirm_banner_y_answers_true(tmp_path):
-    """«y» при активном баннере: submit_confirm_reply(True), баннер снят."""
+async def test_confirm_banner_y_answers_once(tmp_path):
+    """«y» при активном баннере: submit_confirm_reply("once"), баннер снят."""
     pytest.importorskip("textual")
     from textual.containers import Horizontal
     from tui.app import TuiApp
@@ -50,7 +50,7 @@ async def test_confirm_banner_y_answers_true(tmp_path):
         await pilot.press("y")
         await pilot.pause(0.1)
 
-        assert runner.replies == [True]
+        assert runner.replies == ["once"]
         assert not scr._confirm_active
         assert scr._confirm_banner is None
         assert len(pilot.app.query(ConfirmBanner)) == 0
@@ -59,8 +59,33 @@ async def test_confirm_banner_y_answers_true(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_confirm_banner_n_answers_false(tmp_path):
-    """«n» при активном баннере: submit_confirm_reply(False)."""
+async def test_confirm_banner_s_answers_session(tmp_path):
+    """«s» при активном баннере: submit_confirm_reply("session")."""
+    pytest.importorskip("textual")
+    from tui.app import TuiApp
+    from tui.widgets.confirm_banner import ConfirmBanner
+
+    runner = _StubRunner()
+    app = TuiApp(threads_dir=str(tmp_path), system="cli",
+                 config={"model": "M", "backend_api_mode": "chat_completions"})
+    app.active_runner = runner
+
+    async with app.run_test() as pilot:
+        scr = pilot.app.screen
+        scr.show_confirm_banner("Тест", "Разрешить?")
+        await pilot.pause(0.1)
+
+        await pilot.press("s")
+        await pilot.pause(0.1)
+
+        assert runner.replies == ["session"]
+        assert not scr._confirm_active
+        assert len(pilot.app.query(ConfirmBanner)) == 0
+
+
+@pytest.mark.asyncio
+async def test_confirm_banner_n_answers_deny(tmp_path):
+    """«n» при активном баннере: submit_confirm_reply("deny")."""
     pytest.importorskip("textual")
     from tui.app import TuiApp
     from tui.widgets.confirm_banner import ConfirmBanner
@@ -78,14 +103,14 @@ async def test_confirm_banner_n_answers_false(tmp_path):
         await pilot.press("n")
         await pilot.pause(0.1)
 
-        assert runner.replies == [False]
+        assert runner.replies == ["deny"]
         assert not scr._confirm_active
         assert len(pilot.app.query(ConfirmBanner)) == 0
 
 
 @pytest.mark.asyncio
-async def test_confirm_banner_escape_answers_false(tmp_path):
-    """Esc при активном баннере: submit_confirm_reply(False), не проваливается
+async def test_confirm_banner_escape_answers_deny(tmp_path):
+    """Esc при активном баннере: submit_confirm_reply("deny"), не проваливается
     в глобальную Esc-лестницу (нет exit-модалки)."""
     pytest.importorskip("textual")
     from tui.app import TuiApp
@@ -104,11 +129,63 @@ async def test_confirm_banner_escape_answers_false(tmp_path):
         await pilot.press("escape")
         await pilot.pause(0.1)
 
-        assert runner.replies == [False]
+        assert runner.replies == ["deny"]
         assert not scr._confirm_active
         assert len(pilot.app.query(ConfirmBanner)) == 0
         # Не открылась exit-модалка (screen_stack == 1)
         assert len(pilot.app.screen_stack) == 1
+
+
+@pytest.mark.asyncio
+async def test_confirm_banner_enter_default_answers_once(tmp_path):
+    """Enter без навигации (selected==0): submit_confirm_reply("once")."""
+    pytest.importorskip("textual")
+    from tui.app import TuiApp
+    from tui.widgets.confirm_banner import ConfirmBanner
+
+    runner = _StubRunner()
+    app = TuiApp(threads_dir=str(tmp_path), system="cli",
+                 config={"model": "M", "backend_api_mode": "chat_completions"})
+    app.active_runner = runner
+
+    async with app.run_test() as pilot:
+        scr = pilot.app.screen
+        scr.show_confirm_banner("Тест", "Разрешить?")
+        await pilot.pause(0.1)
+
+        await pilot.press("enter")
+        await pilot.pause(0.1)
+
+        assert runner.replies == ["once"]
+        assert not scr._confirm_active
+        assert len(pilot.app.query(ConfirmBanner)) == 0
+
+
+@pytest.mark.asyncio
+async def test_confirm_banner_down_then_enter_answers_session(tmp_path):
+    """↓ + Enter (selected==1): submit_confirm_reply("session")."""
+    pytest.importorskip("textual")
+    from tui.app import TuiApp
+    from tui.widgets.confirm_banner import ConfirmBanner
+
+    runner = _StubRunner()
+    app = TuiApp(threads_dir=str(tmp_path), system="cli",
+                 config={"model": "M", "backend_api_mode": "chat_completions"})
+    app.active_runner = runner
+
+    async with app.run_test() as pilot:
+        scr = pilot.app.screen
+        scr.show_confirm_banner("Тест", "Разрешить?")
+        await pilot.pause(0.1)
+
+        await pilot.press("down")
+        await pilot.pause(0.05)
+        await pilot.press("enter")
+        await pilot.pause(0.1)
+
+        assert runner.replies == ["session"]
+        assert not scr._confirm_active
+        assert len(pilot.app.query(ConfirmBanner)) == 0
 
 
 # ── Tests for Ctrl+C / _reset_render_state confirm handling ──────────────────
