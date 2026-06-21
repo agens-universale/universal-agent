@@ -286,6 +286,7 @@ def enforce_write_guard(
                         operation=operation,
                         error=exc.error,
                         ctx=context.ctx,
+                        decision_key=f"write:{candidate_path}",
                     )
                     if confirmed:
                         audit_policy_decision(
@@ -299,7 +300,11 @@ def enforce_write_guard(
                     # cancelled — продолжаем в стандартный blocked-flow ниже,
                     # но помечаем error.type для отличимости в логах.
                     exc.error["type"] = "write_guard_cancelled_by_user"
-                    exc.error["message"] = "User declined out-of-perimeter write."
+                    exc.error["message"] = (
+                        f"User declined the write to '{candidate_path}'. Do NOT retry the same "
+                        "write, and do NOT silently write somewhere else — ask the user how to "
+                        "proceed, or stop and report that it was declined."
+                    )
                 audit_policy_decision(
                     context,
                     tool_name=_tool_name(func, args),
@@ -470,6 +475,7 @@ def _ask_user_confirmation_for_write(
     operation: str,
     error: dict[str, Any],
     ctx: Any = None,
+    decision_key: str | None = None,
 ) -> bool:
     from security.confirm_port import request_confirm
     return request_confirm(
@@ -482,6 +488,7 @@ def _ask_user_confirmation_for_write(
             ("Allowed roots", error.get("allowed_write_roots") or []),
         ],
         ctx=ctx,
+        decision_key=decision_key,
     )
 
 

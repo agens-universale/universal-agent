@@ -209,7 +209,10 @@ def decide_command_execution(
                     allowed=False,
                     decision="cancelled",
                     reason_code="user_confirmation",
-                    reason="User cancelled execution after judge was unavailable.",
+                    reason=(
+                        "User declined the command. Do NOT retry the same command, "
+                        "and do NOT silently run a modified command — ask the user or stop."
+                    ),
                     error_type="unsafe_command_cancelled_by_user",
                 )
             return ExecutionDecision(
@@ -272,7 +275,10 @@ def decide_command_execution(
             allowed=False,
             decision="cancelled",
             reason_code="user_confirmation",
-            reason="User cancelled potentially dangerous execution.",
+            reason=(
+                "User declined the command. Do NOT retry the same command, "
+                "and do NOT silently run a modified command — ask the user or stop."
+            ),
             risk_flags=judge_result.risk_flags,
             error_type="unsafe_command_cancelled_by_user",
         )
@@ -706,6 +712,7 @@ def _ask_user_confirmation(
             ("Preview", _payload_preview(payload)),
         ],
         ctx=ctx,
+        decision_key=f"command:{payload}",
     )
 
 

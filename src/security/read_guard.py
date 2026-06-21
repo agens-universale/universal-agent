@@ -419,6 +419,7 @@ def enforce_read_guard(
                             ("Reason", exc.error.get("reason", "")),
                         ],
                         ctx=context.ctx,
+                        decision_key=f"read:{_rg_path}",
                     )
                     if confirmed:
                         audit_policy_decision(
@@ -430,6 +431,10 @@ def enforce_read_guard(
                         )
                         return func(*args, **kwargs)
                     exc.error["type"] = "read_guard_cancelled_by_user"
+                    exc.error["message"] = (
+                        f"User declined the read of '{_rg_path}'. Do NOT retry the same "
+                        "read, and do NOT silently read a different file — ask the user or stop."
+                    )
                 audit_policy_decision(
                     context,
                     tool_name=_tool_name(func, args),

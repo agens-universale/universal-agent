@@ -102,6 +102,7 @@ def enforce_command_guard(
                     question="Команда затрагивает защищённый путь. Выполнить?",
                     fields=[("command", payload)],
                     ctx=ctx_obj,
+                    decision_key=f"command:{payload}",
                 )
                 if confirmed:
                     return func(*args, **kwargs)

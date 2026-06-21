@@ -215,6 +215,7 @@ class DownloadFile(AbstractSimpleTool):
                         ("Allowed roots", exc.error.get("allowed_write_roots") or []),
                     ],
                     ctx=context.ctx,
+                    decision_key=f"write:{dest}",
                 )
                 if confirmed:
                     audit_policy_decision(
@@ -226,7 +227,11 @@ class DownloadFile(AbstractSimpleTool):
                     )
                     return None
                 exc.error["type"] = "write_guard_cancelled_by_user"
-                exc.error["message"] = "User declined out-of-perimeter write."
+                exc.error["message"] = (
+                    f"User declined the write to '{dest}'. Do NOT retry the same "
+                    "write, and do NOT silently write somewhere else — ask the user how to "
+                    "proceed, or stop and report that it was declined."
+                )
             audit_policy_decision(
                 context,
                 tool_name=self.registered_tool_name(),
