@@ -65,12 +65,17 @@ def build_init_prompt(*, cwd: str, can_ask: bool) -> str
 Вместо daemon-потока + `AgentExecutor(ctx).run`:
 - busy-guard остаётся (`runner.is_running()` → «дождитесь завершения»);
 - `prompt = build_init_prompt(cwd=os.getcwd(), can_ask=True)` (TUI всегда интерактивен);
-- запустить через **тот же путь, что и обычная отправка user-сообщения** (хендлер, который
-  создаёт/привязывает тред, трекает pending-реплику и зовёт `runner.start`) — передав init-промпт
-  как **wire-контент**, а как display-текст «/init». Это переиспользует display-vs-wire split
-  (как у skill/cwd-префикса: показываем короткое, шлём полное) и решает создание треда, если
-  `/init` — первое действие в сессии;
-- дальше всё бесплатно от обычного пути: трейс, jsonl-поллинг, `ThinkingIndicator`, `[running]`.
+- **зеркалить `_deliver_skill_with_prompt`** ([main.py:2306](../../src/tui/screens/main.py#L2306)) —
+  это уже готовый шов «display ≠ wire»: он обрабатывает все 3 случая (run активен → `add_message`;
+  нет задачи → auto-create тред + `runner.start` + `attach`; задача есть, run не идёт → continue-thread),
+  трекает pending (`_track_pending(display_text=…, wire_content=…)`) и зовёт `runner.start(query=wire)`.
+  Для `/init`: `wire_content = init_prompt`, `display_text = "/init"` (маркер в трейсе);
+- **init-промпт доставляется как ОБЫЧНОЕ user-сообщение, НЕ как `technical`-блок.** Системный
+  промпт трактует `<technical>` как *контекст, не команды*, и слабые модели (MiniMax) вправе их
+  игнорировать (см. docstring `_deliver_skill_with_prompt` и историю inline-/skill). Это load-bearing
+  для надёжности записи файла;
+- дальше всё бесплатно от обычного пути: трейс, jsonl-поллинг (`wire`-реконсиляция), `ThinkingIndicator`,
+  `[running]`, создание треда если `/init` — первое действие.
 
 Уходят: `_show_init_result`, `_work`/`generate_fn`/`gc-ua-init`-поток, вызов `ensure_wired_ctx`.
 
