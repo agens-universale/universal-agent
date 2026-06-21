@@ -1,38 +1,37 @@
 [Назад к README](../readme.md)
 
-# Установка и запуск gc-cli
+# Установка и запуск
 
-## Установка в режиме разработки
+После установки доступны две команды: **`gc-ua`** — основной режим с текстовым интерфейсом (TUI), **`gc-cli`** — разовые запросы одной строкой. Требуется Python ≥ 3.10 (`uv` подберёт сам).
+
+> **Простой путь без клонирования** (в т.ч. для не-разработчика): пошаговая страница [docs/install.html](install.html) и [быстрый старт](install-quickstart-ru.md) — установка одной командой, корпоративный флаг `--system-certs`, заполнение конфига. Ниже — установка для разработки и справка по ключам.
+
+## Установка в режиме разработки (из клона)
 
 ### uv (рекомендуется)
 
 В корне проекта выполните:
 
 ```bash
-uv sync          # установка зависимостей (dev + test)
+uv sync                # зависимости (dev + test)
 uv tool install -e .   # gc-cli + gc-ua (TUI в зависимостях по умолчанию)
 ```
 
-После этого можно переходить к [запуску клиента](#запуск-клиента).
+> В корпоративной сети Сбера к командам `uv tool install` добавляйте `--system-certs` — иначе TLS-перехват ломает установку.
 
 ### Минимальная установка gc-cli без TUI
 
-Для headless-серверов, где нужен только `gc-cli` (без `gc-ua` и без `textual`/`rich`):
+Для headless-серверов, где нужен только `gc-cli` (без `gc-ua` и `textual`/`rich`):
 
 ```bash
 uv tool install -e . --excludes packaging/cli-only-excludes.txt
 ```
-
-MCP-серверы (office, science и др.) ставятся отдельно: `gc-mcp-install` — см.
-[`recommended_mcp/README.md`](../recommended_mcp/README.md).
 
 `pip install -e .` всегда тянет TUI-зависимости; для минимального runtime используйте `uv tool` с `--excludes`, как выше.
 
 Проверка после установки: `uv sync` и `uv run pytest` — см. [Тесты](testing.md).
 
 ### Классический путь через pip
-
-В корне проекта выполните:
 
 ```bash
 pip install -e .
@@ -50,9 +49,33 @@ python3.12 -m pip install -e .
 python3.12 -m ensurepip --upgrade
 ```
 
-## Запуск клиента
+## Конфиг при первом запуске
 
-После установки команду `gc-cli` можно вызывать из любой папки, например:
+При первом запуске `gc-ua`/`gc-cli` без `--config` создаётся `~/.gc/config.yml`, и агент **останавливается с подсказкой**: впишите `backend.completions_url`, токен (`backend.chat_completion_headers.Authorization`), при необходимости `agent.model`, затем запустите снова. Подробнее — [Конфигурация](configuration.md).
+
+## MCP-серверы
+
+Устанавливаются и **подключаются** одной командой (авто-wiring в `~/.gc/config.local.yml`, конфиг пользователя не трогается):
+
+```bash
+gc-mcp install                     # все рекомендованные
+gc-mcp install duckduckgo_search   # один по имени
+gc-mcp list                        # доступные / установленные
+gc-mcp remove duckduckgo_search    # удалить по имени
+gc-mcp remove --all                # снести все подключённые
+```
+
+`gc-mcp remove` с флагом `--keep-package` только отключает сервер (un-wire), оставляя пакет в venv для быстрой повторной активации. Запуск агента сразу со всеми установленными — флаг `-a` (`gc-ua -a`). Подробнее — [`recommended_mcp/README.md`](../recommended_mcp/README.md).
+
+## Запуск
+
+```bash
+gc-ua                 # текстовый интерфейс (основной режим)
+gc-ua -a              # TUI со всеми установленными MCP
+gc-cli -q "запрос"    # разовый запрос без интерфейса
+```
+
+Пример разового запроса:
 
 ```commandline
 gc-cli -q "создай подпапку test_project. В ней напиши на Python модуль
