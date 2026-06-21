@@ -230,6 +230,14 @@ class AgentExecutor:
                 self._stop_pending = False
             self._pending_messages = []
 
+        # Permission memory: store оборачивает state.shared.confirm_rules ПО ССЫЛКЕ —
+        # session-правила пишутся прямо в shared и сохраняются обычной персистентностью.
+        from security.permission_store import PermissionStore
+        setattr(
+            self._ctx, "permission_store",
+            PermissionStore(session_rules=state.shared.confirm_rules),
+        )
+
         if (
             thread_session is not None
             and backend_api_mode == "chat_completions"

@@ -18,6 +18,7 @@ class SharedStateData:
     working_memory: Dict[str, str] = field(default_factory=dict)
     notes_md: str = ""
     fetch_url_cache: Dict[str, str] = field(default_factory=dict)
+    confirm_rules: Dict[str, bool] = field(default_factory=dict)
 
 
 class State:
