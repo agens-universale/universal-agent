@@ -106,8 +106,24 @@ def enforce_command_guard(
                 )
                 if confirmed:
                     return func(*args, **kwargs)
+                # ask not confirmed → instructive blocked result
+                err = {
+                    "type": "protected_path_denied",
+                    "message": (
+                        "User declined the command. Do NOT retry the same command, "
+                        "and do NOT silently run a modified command — ask the user or stop."
+                    ),
+                    "command_preview": payload[:200],
+                }
+                blocked_method = getattr(self_obj, "_command_moderation_blocked_result", None)
+                if callable(blocked_method):
+                    return blocked_method(err, *args[1:], **kwargs)
+                return json.dumps(
+                    {"tool": effective_tool_name, "ok": False, "error": err},
+                    ensure_ascii=False,
+                )
 
-            # deny, or ask not confirmed → blocked result
+            # deny → static blocked result
             err = {
                 "type": "protected_path_denied",
                 "message": "Command targets a protected path (.gc / config).",

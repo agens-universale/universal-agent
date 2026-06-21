@@ -134,6 +134,10 @@ def test_url_policy_decline_caches_and_instructs(monkeypatch, tmp_path):
     err = captured.get("err", {})
     # error type must reflect user cancellation
     assert err.get("type") == "url_blocked_by_policy_cancelled_by_user"
+    # Instructive message check
+    err_msg = err.get("message", "")
+    assert "Do NOT retry" in err_msg, f"Expected 'Do NOT retry' in: {err_msg!r}"
+    assert "ask the user" in err_msg, f"Expected 'ask the user' in: {err_msg!r}"
 
 
 # ---------------------------------------------------------------------------
@@ -245,6 +249,11 @@ def test_command_moderation_decline_caches_and_instructs(monkeypatch, tmp_path):
     res2 = tool.run(command=cmd)
     assert json.loads(res2)["ok"] is False
     assert calls["n"] == n_after_first, "Second identical command must use cache"
+
+    # Instructive message check: command_moderation carries it in "reason" (via make_block_error)
+    err = captured.get("err", {})
+    reason = err.get("reason", "")
+    assert "Do NOT retry" in reason, f"Expected 'Do NOT retry' in reason: {reason!r}"
 
 
 # ---------------------------------------------------------------------------
