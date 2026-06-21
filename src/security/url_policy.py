@@ -156,7 +156,7 @@ def enforce_url_policy(
             if mode == "ask":
                 from security.confirm_port import request_confirm
                 confirmed = request_confirm(
-                    title="URL policy",
+                    title="Политика URL",
                     question=f"Разрешить запрос вне политики URL: {decision.url}?",
                     fields=[
                         ("Tool", _tool_name(func, args)),

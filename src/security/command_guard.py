@@ -98,7 +98,7 @@ def enforce_command_guard(
             if decision == "ask":
                 from security.confirm_port import request_confirm
                 confirmed = request_confirm(
-                    title="Command guard",
+                    title="Защищённый путь",
                     question="Команда затрагивает защищённый путь. Выполнить?",
                     fields=[("command", payload)],
                     ctx=ctx_obj,

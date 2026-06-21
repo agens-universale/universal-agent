@@ -410,7 +410,7 @@ def enforce_read_guard(
                     from security.confirm_port import request_confirm
                     _rg_path = exc.error.get("path", candidate_path)
                     confirmed = request_confirm(
-                        title="Read guard",
+                        title="Защита чтения",
                         question=f"Разрешить чтение вне периметра проекта: {_rg_path}?",
                         fields=[
                             ("Tool", _tool_name(func, args)),

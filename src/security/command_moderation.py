@@ -225,7 +225,7 @@ def decide_command_execution(
         # C1 Часть 2: при недоступности судьи в deny — пробуем confirm-порт.
         if confirm_available(ctx):
             confirmed = request_confirm(
-                title="Command moderation",
+                title="Проверка команды",
                 question="Судья недоступен. Выполнить команду?",
                 fields=[("mode", normalized_mode)],
                 ctx=ctx,
@@ -703,7 +703,7 @@ def _ask_user_confirmation(
     ctx: Any = None,
 ) -> bool:
     return request_confirm(
-        title="Command moderation",
+        title="Проверка команды",
         question=f"Разрешить выполнение команды? ({context.tool_name})",
         fields=[
             ("Tool", context.tool_name),

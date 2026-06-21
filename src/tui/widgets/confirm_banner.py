@@ -85,6 +85,7 @@ class ConfirmBanner(Vertical):
             if not text:
                 continue  # пустые поля (напр. Reason="") не засоряют баннер
             yield Static(f"  {label}: {text}", classes="cb-field", markup=False)
+        yield Static("", classes="cb-spacer")  # пустая строка отделяет инфо от вариантов
         opts = Static(_render_options(self.selected), classes="cb-options")
         self._options_static = opts
         yield opts

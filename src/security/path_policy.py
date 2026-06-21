@@ -222,8 +222,8 @@ def enforce_write_guard(
                         )
                     if _decision == "ask":
                         _ok = request_confirm(
-                            title="Write guard",
-                            question=f"Allow write to {candidate_path}?",
+                            title="Защита записи",
+                            question=f"Разрешить запись в {candidate_path}?",
                             fields=[("path", candidate_path)],
                             ctx=context.ctx,
                         )
@@ -479,7 +479,7 @@ def _ask_user_confirmation_for_write(
 ) -> bool:
     from security.confirm_port import request_confirm
     return request_confirm(
-        title="Write guard",
+        title="Защита записи",
         question=f"Разрешить запись вне периметра проекта в {path}?",
         fields=[
             ("Tool", tool_name),

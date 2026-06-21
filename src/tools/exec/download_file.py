@@ -206,7 +206,7 @@ class DownloadFile(AbstractSimpleTool):
             if wg_mode == "ask":
                 from security.confirm_port import request_confirm
                 confirmed = request_confirm(
-                    title="Write guard",
+                    title="Защита записи",
                     question=f"Разрешить запись вне периметра проекта в {dest}?",
                     fields=[
                         ("Tool", self.registered_tool_name()),
