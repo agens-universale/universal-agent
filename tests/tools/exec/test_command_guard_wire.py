@@ -151,8 +151,7 @@ def test_execute_command_ask_path_confirmed_executes(tmp_path, monkeypatch):
 
     # Patch scan to return "ask" for any command.
     monkeypatch.setattr(cg, "scan_command_for_protected", lambda cmd, cwd, extra=None: "ask")
-    monkeypatch.setattr("security.confirm_port.confirm_available", lambda ctx: True)
-    monkeypatch.setattr("security.confirm_port.prompt_user_confirmation", lambda **k: True)
+    monkeypatch.setattr("security.confirm_port.request_confirm", lambda **k: True)
 
     tool = ExecuteCommand()
     result = json.loads(
@@ -167,8 +166,7 @@ def test_execute_command_ask_path_not_confirmed_blocks(tmp_path, monkeypatch):
     monkeypatch.setattr(env_vars.env, "gc_home", tmp_path / "gc")
 
     monkeypatch.setattr(cg, "scan_command_for_protected", lambda cmd, cwd, extra=None: "ask")
-    monkeypatch.setattr("security.confirm_port.confirm_available", lambda ctx: True)
-    monkeypatch.setattr("security.confirm_port.prompt_user_confirmation", lambda **k: False)
+    monkeypatch.setattr("security.confirm_port.request_confirm", lambda **k: False)
 
     tool = ExecuteCommand()
     result = json.loads(

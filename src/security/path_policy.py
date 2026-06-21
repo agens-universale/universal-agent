@@ -401,6 +401,33 @@ def _tool_name(func: Callable[..., Any], args: tuple[Any, ...]) -> str:
     return getattr(func, "__name__", "unknown")
 
 
+def prompt_user_confirmation_choice(
+    *,
+    title: str,
+    fields: list[tuple[str, Any]],
+    question: str,
+) -> str:
+    """CLI-подтверждение с 3 вариантами: y=once, s=session, n/прочее=deny.
+    Auto-deny если stdin не tty (фоновый/CI запуск)."""
+    if not sys.stdin or not sys.stdin.isatty():
+        return "deny"
+    lines = [f"\n{title}: confirmation required."]
+    for label, value in fields:
+        lines.append(f"{label}: {value}")
+    lines.append(f"{question} [y=раз / s=сессия / N=нет]: ")
+    try:
+        print("\n".join(lines), file=sys.stderr, end="")
+        sys.stderr.flush()
+        answer = input().strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        return "deny"
+    if answer in {"y", "yes"}:
+        return "once"
+    if answer in {"s", "session"}:
+        return "session"
+    return "deny"
+
+
 def prompt_user_confirmation(
     *,
     title: str,
