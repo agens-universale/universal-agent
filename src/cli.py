@@ -121,35 +121,18 @@ def _run_init() -> int:
     return 0
 
 
-from instructions.agent_markdown import extract_markdown as _extract_markdown
-
-
 def _run_init_agents_md() -> int:
-    """`gc-cli --init`: сгенерировать AGENTS.md сканом репозитория через агента."""
-    from instructions.init_agents_md import run_init_agents_md
-    import types
+    """`gc-cli --init`: агент сам сканирует репозиторий и пишет AGENTS.md."""
+    from instructions.init_agents_md import build_init_prompt
+    from security.confirm_port import confirm_available
 
     config_dict = load_config(arg_parser.run_args.config)
     auth_connector = build_auth_connector(config_dict)
     ctx = create_run_context(config_dict, auth_connector=auth_connector)
 
-    # ctx для confirm_port (CLI, не TUI)
-    confirm_ctx = types.SimpleNamespace(
-        is_tui=False,
-        config_dict=config_dict,
-        tui_confirm=None,
-    )
-
-    def generate_fn(prompt: str) -> str:
-        executor = AgentExecutor(ctx)
-        response = executor.run([prompt])
-        return _extract_markdown(response)
-
-    result = run_init_agents_md(cwd=os.getcwd(), ctx=confirm_ctx, generate_fn=generate_fn)
-    if result["status"] == "cancelled":
-        print("[gc] --init отменён", file=sys.stderr)
-    else:
-        print(f"[gc] AGENTS.md записан: {result['path']} (режим: {result['mode']})", file=sys.stderr)
+    prompt = build_init_prompt(cwd=os.getcwd(), can_ask=confirm_available(ctx))
+    AgentExecutor(ctx).run([prompt])  # агент пишет AGENTS.md сам (write_to_file)
+    print("[gc] --init: генерация AGENTS.md завершена", file=sys.stderr)
     return 0
 
 

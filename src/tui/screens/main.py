@@ -2604,55 +2604,53 @@ class TraceScreen(Screen):
         ))
 
     def _cmd_init(self) -> None:
-        """Запуск генерации AGENTS.md в daemon-потоке (блокирует на баннере и агенте)."""
+        """/init: видимый prompt-driven прогон — агент сам пишет AGENTS.md.
+
+        Зеркалит _deliver_skill_with_prompt: init-промпт идёт как ОБЫЧНОЕ user-сообщение
+        (wire), в трейсе — маркер "/init" (display). busy-guard отбивает активный прогон,
+        поэтому здесь только два случая: auto-create треда и continue-thread."""
         runner = self.app.get_runner()
         if runner.is_running():
             self._mount_trace_row(
-                prefix="[!] ",
-                content="/init: дождитесь завершения текущей задачи",
+                prefix="[!] ", content="/init: дождитесь завершения текущей задачи",
                 kind_class="line-error",
             )
             return
-        self._mount_trace_row(
-            prefix="", content="/init: генерирую AGENTS.md…", kind_class="line-meta",
-        )
 
-        def _work() -> None:
-            try:
-                ctx = self.app.ensure_wired_ctx()
-                from agent_executor import AgentExecutor
-                from instructions.agent_markdown import extract_markdown
-                from instructions.init_agents_md import run_init_agents_md
+        import os
+        from instructions.init_agents_md import build_init_prompt
+        wire = build_init_prompt(cwd=os.getcwd(), can_ask=True)
+        display = "/init"
+        msg_id = "m_" + uuid.uuid4().hex
+        self._last_user_message_id = msg_id
 
-                def generate_fn(prompt: str) -> str:
-                    return extract_markdown(AgentExecutor(ctx).run([prompt]))
+        if self.app.tui_state.active_task_id is None:
+            tid = uuid.uuid4().hex
+            self.app.tui_state.active_task_id = tid
+            self._active_task_id = tid
+            self._store = FileTaskStore(
+                threads_dir=self.app._threads_dir or "", system=self.app._system,
+            )
+            runner = self.app.get_runner()
+            self._prepare_for_new_run()
+            self._reset_thinking_timer()
+            self._on_user_text_submitted(display)
+            runner.start(query=wire, thread_id=tid, system=self.app._system, message_id=msg_id)
+            self.attach_active_task(tid)
+            client_id = self._track_pending(display_text=display, wire_content=wire)
+            self._mount_user_reply(display, state="pending", client_id=client_id)
+            self._mount_trace_row(prefix="", content="/init: запускаю агента", kind_class="line-meta")
+            return
 
-                result = run_init_agents_md(cwd=os.getcwd(), ctx=ctx, generate_fn=generate_fn)
-            except Exception as exc:
-                self.app.call_from_thread(
-                    self._show_init_result, {"status": "error", "error": str(exc)}
-                )
-                return
-            self.app.call_from_thread(self._show_init_result, result)
-
-        threading.Thread(target=_work, name="gc-ua-init", daemon=True).start()
-
-    def _show_init_result(self, result: dict) -> None:
-        """Отображение результата /init (вызывается на UI-потоке через call_from_thread)."""
-        status = result.get("status", "error")
-        if status == "written":
-            content = f"AGENTS.md записан: {result['path']} (режим: {result['mode']})"
-            kind = "line-meta"
-        elif status == "empty":
-            content = "/init: агент вернул пусто — AGENTS.md не записан"
-            kind = "line-error"
-        elif status == "cancelled":
-            content = "/init: отменено"
-            kind = "line-meta"
-        else:
-            content = f"/init: ошибка — {result.get('error', status)}"
-            kind = "line-error"
-        self._mount_trace_row(prefix="", content=content, kind_class=kind)
+        runner = self.app.get_runner()
+        client_id = self._track_pending(display_text=display, wire_content=wire)
+        self._mount_user_reply(display, state="pending", client_id=client_id)
+        self._mount_trace_row(prefix="", content="/init: запускаю агента", kind_class="line-meta")
+        self._prepare_for_new_run()
+        self._reset_thinking_timer()
+        self._on_user_text_submitted(display)
+        runner.start(query=wire, thread_id=self.app.tui_state.active_task_id,
+                     system=self.app._system, message_id=msg_id)
 
     def _render_command_error(self, name: str, suggestion: str | None) -> None:
         """Команда-ошибка по единому правилу (§3.3). Одна строка одним Static;
