@@ -2617,7 +2617,6 @@ class TraceScreen(Screen):
             )
             return
 
-        import os
         from instructions.init_agents_md import build_init_prompt
         wire = build_init_prompt(cwd=os.getcwd(), can_ask=True)
         display = "/init"

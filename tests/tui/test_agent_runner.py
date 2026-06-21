@@ -232,7 +232,6 @@ def test_ensure_executor_build_once():
     assert calls["n"] == 1
 
 
-
 def test_warm_builds_executor_in_background():
     import time
     from tui.services.agent_runner import AgentRunner
