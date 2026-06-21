@@ -86,3 +86,11 @@ def test_headless_fail_closed_without_tty(monkeypatch):
     monkeypatch.setattr(cp.sys, "stdin", types.SimpleNamespace(isatty=lambda: False))
     ctx = types.SimpleNamespace(config_dict={}, permission_store=PermissionStore())
     assert cp.request_confirm(title="t", question="q", fields=[], ctx=ctx, decision_key="write:/x") is False
+
+
+def test_invalid_tui_confirm_return_maps_to_deny():
+    # tui_confirm, возвращающий невалидное значение, должен приводить к deny (не allow).
+    for bad_choice in ("yes", None, "", "ok", 1):
+        ctx, _ = _tui_ctx(bad_choice)
+        result = cp.request_confirm(title="t", question="q", fields=[], ctx=ctx, decision_key="write:/x")
+        assert result is False, f"bad choice {bad_choice!r} должен давать deny, но вернул {result}"

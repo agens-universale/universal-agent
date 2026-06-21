@@ -10,7 +10,7 @@
 Тест 3 (re-entrancy): два последовательных confirm в одном раннере:
   decline → approve; канал должен быть re-entrant.
 
-Тест 4 (arrow nav): ↑/↓ + Enter выбирает выделенный вариант.
+Тест 4 (arrow nav): ↓ + Enter выбирает выделенный вариант (session).
 """
 from __future__ import annotations
 
@@ -195,7 +195,7 @@ async def test_confirm_reentrant_decline_then_approve():
 # ── arrow navigation: ↑/↓ + Enter ────────────────────────────────────────────
 
 @pytest.mark.asyncio
-async def test_confirm_arrow_right_then_enter_selects_n():
+async def test_confirm_arrow_down_then_enter_selects_session():
     """↓ сдвигает выделение с Y ([Y]) на [S] (session); Enter выбирает выделенный → "session"."""
     pytest.importorskip("textual")
     from tui.app import TuiApp

@@ -90,7 +90,7 @@ class ConfirmBanner(Vertical):
         yield opts
 
     def move_selection(self, delta: int) -> None:
-        """Сдвинуть выделение на delta (-1 = влево, +1 = вправо)."""
+        """Сдвинуть выделение на delta (-1 = вверх, +1 = вниз)."""
         self.selected = max(0, min(len(_OPTIONS) - 1, self.selected + delta))
         if self._options_static is not None and self._options_static.is_mounted:
             self._options_static.update(_render_options(self.selected))
