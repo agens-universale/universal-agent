@@ -232,24 +232,6 @@ def test_ensure_executor_build_once():
     assert calls["n"] == 1
 
 
-def test_public_ensure_executor_returns_built_once():
-    """Публичный ensure_executor() возвращает executor и строит ровно один раз."""
-    from tui.services.agent_runner import AgentRunner
-    calls = {"n": 0}
-
-    class _Ex:
-        def stop_run(self): pass
-
-    def factory():
-        calls["n"] += 1
-        return _Ex()
-
-    r = AgentRunner(executor_factory=factory)
-    ex = r.ensure_executor()
-    assert isinstance(ex, _Ex)
-    assert r.ensure_executor() is ex
-    assert calls["n"] == 1
-
 
 def test_warm_builds_executor_in_background():
     import time
