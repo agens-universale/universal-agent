@@ -403,3 +403,31 @@ def test_install_dist_defaults_none(tmp_path):
             install: {type: source, source: ../external/science-mcp}
     """)
     assert load_manifest(f)[0].install.dist is None
+
+
+def test_every_source_entry_declares_dist():
+    """Каждая source-запись бандл-манифеста обязана нести install.dist."""
+    from recommended_mcp.manifest import default_manifest_path, load_manifest
+    from mcp_runtime.paths import recipe_root
+    entries = load_manifest(default_manifest_path(recipe_root()))
+    for e in entries:
+        if e.install.type == "source":
+            assert e.install.dist, f"{e.name}: source-запись обязана иметь install.dist"
+
+
+def test_manifest_dist_matches_pyproject_when_source_present():
+    """Где source-папка на диске есть — install.dist == [project].name из pyproject."""
+    import dataclasses
+    from recommended_mcp import install as inst
+    from recommended_mcp.manifest import default_manifest_path, load_manifest
+    from mcp_runtime.paths import recipe_root
+    root = recipe_root()
+    for e in load_manifest(default_manifest_path(root)):
+        if e.install.type == "source" and e.install.dist and e.install.source:
+            pp = (root / e.install.source).resolve() / "pyproject.toml"
+            if not pp.is_file():
+                continue
+            no_dist = dataclasses.replace(
+                e, install=dataclasses.replace(e.install, dist=None))
+            assert e.install.dist == inst._dist_name(no_dist, root), \
+                f"{e.name}: install.dist={e.install.dist} != имя из pyproject"

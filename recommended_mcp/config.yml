@@ -16,6 +16,7 @@ mcps:
     install:
       type: source
       source: ../external/computer-mcp
+      dist: computer-mcp
       platforms: [win32]
     # run-блок отсутствует: MCP спавнится агентом через stdio.
 
@@ -24,12 +25,14 @@ mcps:
     install:
       type: source
       source: ../external/office-mcp
+      dist: office-mcp
 
   - name: science
     path: ./science
     install:
       type: source
       source: ../external/science-mcp
+      dist: science-mcp
     run:
       type: command
       command: science-mcp
@@ -40,6 +43,7 @@ mcps:
     install:
       type: source
       source: ../external/ddgs-mcp
+      dist: ddgs-mcp
     # run-блок отсутствует: агент спавнит ddgs-mcp по stdio.
 
   - name: browser_playwright
