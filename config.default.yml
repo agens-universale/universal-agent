@@ -80,7 +80,7 @@ security:
     allowed_command_examples: []
   write_guard:
     enabled: true
-    mode: deny
+    mode: ask
     extra_paths: []
   url_policy:
     enabled: true
