@@ -24,9 +24,14 @@ from intent_log.record import ACTION_USER_ASK
 from intent_log.serialize import deserialize_list
 from tui.commands import build_default_registry, closest_command
 from tui.models import TaskCursor
+from rich.text import Text
 from tui.palette import DEEP_DIM as _ERR_HINT
+from tui.palette import DIM as _DIM
 from tui.palette import ERR as _ERR_RED
+from tui.services.context_meter import render_context_meter
 from tui.services.export import export_thread
+from tui.services.status_badge import status_badge_color
+from message_format import calc_history_chars_for_trigger
 from tui.services.git_info import current_branch
 from tui.services.stores.file_store import FileTaskStore
 from tui.services.trace_mapper import map_message
@@ -166,16 +171,16 @@ class TraceScreen(Screen):
                     self._cwd_chip_text(), id="footer-right", markup=False,
                 )
 
-    def _compose_header_segments(self) -> tuple[str, str]:
+    def _compose_header_segments(self) -> tuple:
         """Return (left_text, right_text) for header.
 
         Empty state:
-          left = "GigaCode   модель: <model> · <backend>"
-          right = "F1 help · gc-ua"
+          left = str "GigaCode   модель: <model> · <backend>"
+          right = str "F1 help · gc-ua"
 
         Active task:
-          left = "Сессия: <8ch>  [status]  модель: <model> · <backend>"
-          right = "F1 help · gc-ua"
+          left = rich.Text (colored badge + optional context meter)
+          right = str "F1 help · gc-ua"
         """
         cfg = getattr(self.app, "_config", None) or {}
         backend = (
@@ -187,22 +192,48 @@ class TraceScreen(Screen):
             return f"{_HEADER_EMPTY}   {model_chip}", _HEADER_RIGHT
         short_id = self._active_task_id[:8]
         status = self._task_status_badge()
-        left = f"Сессия: {short_id}  {status}  {model_chip}"
+        left = Text()
+        left.append(f"Сессия: {short_id}  ", style=_DIM)
+        left.append(status, style=status_badge_color(status))
+        left.append(f"  {model_chip}", style=_DIM)
+        meter = self._context_meter()
+        if meter is not None:
+            text, color = meter
+            left.append("  ·  ", style=_DIM)
+            left.append(text, style=color)
         return left, _HEADER_RIGHT
 
+    def _context_meter(self) -> tuple[str, str] | None:
+        """(text, color) индикатора контекста или None (скрыт)."""
+        cfg = getattr(self.app, "_config", None) or {}
+        if str(cfg.get("backend_api_mode")) != "chat_completions":
+            return None
+        threshold = int(cfg.get("chat_completions_summary_trigger_chars", 0) or 0)
+        if threshold <= 0 or self._store is None or self._active_task_id is None:
+            return None
+        msgs = self._store.read_live_messages(self._active_task_id)
+        return render_context_meter(calc_history_chars_for_trigger(msgs), threshold)
+
     def _task_status_badge(self) -> str:
-        # ask_human pending — агент ждёт ответа пользователя (приоритет над running/stopped).
+        # ask_human pending — агент ждёт ответа пользователя (приоритет).
         tui_state = getattr(self.app, "tui_state", None)
         if tui_state is not None and tui_state.ask_human_state is not None:
             return "[asking]"
         runner = getattr(self.app, "active_runner", None)
         if runner is not None and runner.is_running():
             return "[running]"
-        # Нет активного runner — смотрим meta.status треда.
+        # Нет активного runner — терминальный статус.
         if self._store is not None and self._active_task_id is not None:
             meta = self._store.get_task_meta(self._active_task_id)
+            tui_status = (meta.get("tui") or {}).get("status")
+            if tui_status in ("completed", "stopped", "failed"):
+                return f"[{tui_status}]"
             if meta.get("status") == "running":
                 return "[running]"
+            if meta.get("status") == "completed":
+                return "[completed]"
+            if meta.get("status") in ("failed", "unknown_failed"):
+                return "[failed]"
         return "[stopped]"
 
     def _refresh_header(self) -> None:
@@ -1205,7 +1236,7 @@ class TraceScreen(Screen):
         # runner / ask_human / внешний writer с meta.status=running). Стоп,
         # обрыв runner'а или resume брошенного треда → осиротевшие вызовы
         # финализируются «прервано».
-        if self._active_calls and self._task_status_badge() == "[stopped]":
+        if self._active_calls and self._task_status_badge() in ("[stopped]", "[completed]", "[failed]"):
             for row in self._active_calls.values():
                 row.mark_interrupted()
             self._active_calls.clear()
