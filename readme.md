@@ -41,7 +41,7 @@ gc-mcp install   # MCP → ~/.local/share/gc/recommended_mcp/venv + авто-wir
 # Требуется: git на PATH + доступ к сети.
 ```
 
-После установки `gc-ua` / `gc-cli` работают **без `--config`**: при первом запуске конфиг создаётся в `~/.gc/config.yml`, и агент **останавливается с подсказкой** — впишите `backend.completions_url` и токен (`backend.chat_completion_headers.Authorization`), при необходимости `agent.model`, затем запустите снова. Подготовить конфиг заранее, не запуская агента: `gc-cli --init` (или `gc-ua --init`).
+После установки `gc-ua` / `gc-cli` работают **без `--config`**: при первом запуске конфиг создаётся (Windows — `~/.gc/config.yml`, macOS/Linux — `~/.config/gc/config.yml`), и агент **останавливается с подсказкой** — впишите `backend.completions_url` и токен (`backend.chat_completion_headers.Authorization`), при необходимости `agent.model`, затем запустите снова. Подготовить конфиг заранее, не запуская агента: `gc-cli --init` (или `gc-ua --init`).
 
 > **Миграция с gc-cli-pub:** если ранее была установлена старая версия дистрибутива, сначала удалите её: `uv tool uninstall gc-cli-pub`, затем выполните установку выше.
 
@@ -67,7 +67,7 @@ gc-ua -a
 Ключ `-q` определяет входной запрос к агенту.
 Клюс `--config` переопределяет конфиг агента на кастомный.
 
-Конфиг по умолчанию — `~/.gc/config.yml` (создаётся автоматически при первом запуске); свой путь — `--config ./config.yml`. Подробнее см. документацию ниже.
+Конфиг по умолчанию: Windows — `~/.gc/config.yml`, macOS/Linux — `~/.config/gc/config.yml` (создаётся автоматически при первом запуске); свой путь — `--config ./config.yml`. Подробнее см. документацию ниже.
 
 ## Документация
 
