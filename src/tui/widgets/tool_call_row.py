@@ -73,6 +73,10 @@ class ToolCallRow(Widget):
         self.add_class("line-tool")
         # Момент создания строки — для тикающего elapsed в running-состоянии.
         self._start_monotonic = time.monotonic()
+        # Пауза тикера на время человеко-ожидания (confirm / ask_human): агент
+        # заблокирован на решении юзера — это не работа тула, простой исключаем.
+        self._paused_at: Optional[float] = None
+        self._paused_total: float = 0.0
 
     def compose(self) -> ComposeResult:
         with Horizontal():
@@ -109,9 +113,23 @@ class ToolCallRow(Widget):
                 and self._content_static is not None:
             self._content_static.update(self._render_content())
 
+    def pause(self) -> None:
+        """Заморозить тикер elapsed (человеко-ожидание confirm/ask_human).
+        Идемпотентно; после завершения/прерывания — no-op."""
+        if self._paused_at is None and self._result is None and not self._interrupted:
+            self._paused_at = time.monotonic()
+
+    def resume(self) -> None:
+        """Снять паузу: накопить простой в _paused_total. Без паузы — no-op."""
+        if self._paused_at is not None:
+            self._paused_total += time.monotonic() - self._paused_at
+            self._paused_at = None
+
     def _elapsed_s(self) -> int:
-        """Целые секунды с момента создания строки (для running-рендера)."""
-        return int(time.monotonic() - self._start_monotonic)
+        """Целые секунды работы тула (за вычетом простоя на человеко-ожидание).
+        Во время паузы — заморожено на момент паузы."""
+        now = self._paused_at if self._paused_at is not None else time.monotonic()
+        return int(now - self._start_monotonic - self._paused_total)
 
     def _render_content(self) -> Text:
         """Вернуть rich.Text для content-колонки (без prefix '  |- ')."""

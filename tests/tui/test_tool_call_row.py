@@ -363,6 +363,39 @@ def test_running_row_elapsed_minutes_format():
     assert "running · 2м 5с" in str(row._render_content())
 
 
+def test_elapsed_excludes_paused_interval(monkeypatch):
+    """confirm/ask_human: время ожидания решения юзера не входит в elapsed тула."""
+    import tui.widgets.tool_call_row as tcr
+    from tui.widgets.tool_call_row import ToolCallRow
+    clock = {"t": 100.0}
+    monkeypatch.setattr(tcr.time, "monotonic", lambda: clock["t"])
+    row = ToolCallRow(call_id="c1", tool_name="t", args_summary="")  # _start=100
+    clock["t"] = 105.0
+    assert row._elapsed_s() == 5
+    row.pause()                 # заморозка на 105
+    clock["t"] = 130.0          # 25с раздумья юзера над баннером
+    assert row._elapsed_s() == 5, "во время паузы elapsed заморожен"
+    row.resume()
+    clock["t"] = 132.0
+    assert row._elapsed_s() == 7, "25с ожидания исключены (105..132 минус 25 = 7)"
+
+
+def test_pause_resume_idempotent(monkeypatch):
+    import tui.widgets.tool_call_row as tcr
+    from tui.widgets.tool_call_row import ToolCallRow
+    clock = {"t": 100.0}
+    monkeypatch.setattr(tcr.time, "monotonic", lambda: clock["t"])
+    row = ToolCallRow(call_id="c1", tool_name="t", args_summary="")
+    row.resume()                # resume без pause — no-op
+    clock["t"] = 110.0
+    assert row._elapsed_s() == 10
+    row.pause()                 # заморозка на 110
+    clock["t"] = 120.0
+    row.pause()                 # повторный pause не двигает точку заморозки
+    clock["t"] = 130.0
+    assert row._elapsed_s() == 10
+
+
 def test_completed_ok_row_has_no_elapsed():
     from tui.widgets.tool_call_row import ToolCallRow
     row = ToolCallRow(call_id="c3", tool_name="subagent_planner", args_summary="x")

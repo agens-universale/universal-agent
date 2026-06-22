@@ -1206,9 +1206,6 @@ class TraceScreen(Screen):
             for row in self._active_calls.values():
                 row.mark_interrupted()
             self._active_calls.clear()
-        # Тикающий elapsed на running tool-строках (running · Nс).
-        for row in self._active_calls.values():
-            row.refresh_running_elapsed()
         # ThinkingIndicator — пока runner работает, обычно виден внизу trace.
         # Эвристика «видимый ответ дан»: если последнее event это agent-текст
         # ИЛИ system-событие (think/policy — агент работает с текстом, не с
@@ -1226,6 +1223,13 @@ class TraceScreen(Screen):
             getattr(self.app, "tui_state", None) is not None
             and self.app.tui_state.ask_human_state is not None
         )
+        # Тикающий elapsed на running tool-строках (running · Nс). Во время
+        # человеко-ожидания (confirm / ask_human) агент заблокирован на решении
+        # юзера — это не работа тула: замораживаем тикер и исключаем простой.
+        human_wait = self._confirm_active or ask_human_active
+        for row in self._active_calls.values():
+            row.pause() if human_wait else row.resume()
+            row.refresh_running_elapsed()
         summarizing = False
         if self._store is not None and self._active_task_id is not None:
             try:
