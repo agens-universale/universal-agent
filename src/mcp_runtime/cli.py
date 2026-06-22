@@ -96,16 +96,33 @@ def _cmd_install(name: Optional[str], config: Optional[str] = None, editable: bo
     return 0
 
 
+def _installed_status(entry, root: Path, agent_dep_dir: Path) -> str:
+    """yes = установлен; — = проверили, не установлен; ? = проверить не удалось."""
+    from recommended_mcp.install import _dist_name, npm_global_has
+    from mcp_runtime.venv import query_installed_version
+    itype = entry.install.type
+    if itype in ("pypi", "source", "wheel"):
+        name = _dist_name(entry, root)
+        if name is None:
+            return "?"
+        return "yes" if query_installed_version(name) else "—"
+    if itype == "npx":
+        pkg = entry.install.npm_package
+        if not pkg:
+            return "?"
+        res = npm_global_has(pkg, agent_dep_dir)
+        return "?" if res is None else ("yes" if res else "—")
+    return "?"
+
+
 def _cmd_list() -> int:
     entries, root = _load_manifest_entries()
     from mcp_runtime import wiring
-    from mcp_runtime.venv import query_installed_version
-    from recommended_mcp.install import _dist_name
+    dep = _agent_dep_dir()
     wired = wiring.wired_servers()
     print(f"{'NAME':22} {'TRANSPORT':14} {'INSTALLED':10} WIRED")
     for e in entries:
-        dist = _dist_name(e, root) if e.install.type in ("pypi", "source", "wheel") else None
-        installed = "yes" if (dist and query_installed_version(dist)) else "—"
+        installed = _installed_status(e, root, dep)
         srv = wired.get(e.name) or {}
         transport = srv.get("transport", "—")
         print(f"{e.name:22} {transport:14} {installed:10} "
