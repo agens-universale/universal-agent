@@ -72,7 +72,7 @@ def build_default_registry() -> CommandRegistry:
                 arg_options=(("txt", "вся сессия в читаемом виде"),
                              ("json", "структурированные данные сессии"))),
         Command("help", (), "", "справка по командам", hotkey="F1"),
-        Command("init", (), "", "сгенерировать AGENTS.md по коду"),
+        Command("init", (), "", "анализ проекта и генерация AGENTS.md"),
         Command("quit", (), "", "выход", hotkey="Esc"),
     ]
     for c in cmds:

@@ -56,6 +56,11 @@ def test_skill_descriptions_use_navyk_not_skill_word():
     assert reg.lookup("skills").description == "обзор навыков"
 
 
+def test_init_description_is_analysis_and_generation():
+    reg = build_default_registry()
+    assert reg.lookup("init").description == "анализ проекта и генерация AGENTS.md"
+
+
 def test_sessions_command_has_no_aliases():
     reg = build_default_registry()
     assert reg.lookup("sessions") is not None
