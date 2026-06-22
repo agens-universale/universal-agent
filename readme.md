@@ -24,7 +24,7 @@ Background и CLI-клиент для работы с агентом GigaCode: �
 
 ## Быстрый старт
 
-> 📄 **Наглядная инструкция по установке (HTML):** [docs/install.html](docs/install.html) — пошаговая страница, откройте локально в браузере.
+> 📄 **Наглядная инструкция по установке (HTML):** [docs/gc-ua-install.html](docs/gc-ua-install.html) — пошаговая страница, откройте локально в браузере.
 
 ```bash
 uv tool install -e .   # gc-cli + gc-ua (TUI по умолчанию)
