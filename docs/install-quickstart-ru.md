@@ -42,7 +42,7 @@ uv tool install "git+https://gitverse.ru/gigacode-ai/background-agent@feat/agent
 gc-ua
 ```
 Первый запуск создаёт файл настроек и **останавливается с подсказкой** — это нормально. Файл настроек:
-Windows — `~/.gc/config.yml` (`C:\Users\<вы>\.gc\config.yml`); macOS/Linux — `~/.config/gc/config.yml`.
+Windows — `~/.gc/config.yml` (`C:\Users\$USER\.gc\config.yml`); macOS/Linux — `~/.config/gc/config.yml`.
 
 ## Шаг 4. Вписать адрес и токен
 
