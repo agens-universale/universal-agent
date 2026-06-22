@@ -77,8 +77,8 @@ chat_completions:
 # Действуют ТОЛЬКО при backend.stream: true (иначе живого вывода нет вовсе).
 tui:
   # Живая строка-мысль «⠇ …» (хвост рассуждения). true — показывать строку;
-  # false — строку не рисуем, а в индикаторе появляется «· размышление». Default on.
-  show_reasoning_line: true
+  # false — строку не рисуем, а в индикаторе появляется «· размышление». Default off.
+  show_reasoning_line: false
   # Живой текст ответа (серый стрим до финальной «●»-строки). Default off.
   show_stream_answer: false
   # adaptive bounce (ТОЛЬКО TUI): как поступать с текст-ответом без вызова тула —

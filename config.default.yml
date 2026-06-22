@@ -45,7 +45,7 @@ agent:
 # TUI: что рендерить во время стриминга (действует только при backend.stream: true;
 # на счётчик токенов и индикатор не влияет — только контент).
 tui:
-  show_reasoning_line: true    # живая строка-мысль «⠇ …» (хвост рассуждения)
+  show_reasoning_line: false   # живая строка-мысль «⠇ …» (хвост рассуждения); default off
   show_stream_answer: false    # живой серый текст ответа до финальной строки
   # adaptive bounce (только TUI): как поступать с текст-ответом без тула.
   #   strict — всегда требовать tool-call (как CLI/server/swarm);

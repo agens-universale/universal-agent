@@ -537,7 +537,7 @@ class TraceScreen(Screen):
         indicator = ThinkingIndicator(
             started_at=self._thinking_started_at, state=state,
             sink=getattr(self.app, "_stream_sink", None),
-            reasoning_tag=not bool(_cfg.get("tui_show_reasoning_line", True)),
+            reasoning_tag=not bool(_cfg.get("tui_show_reasoning_line", False)),
         )
         self._thinking = indicator
         trace = self.query_one("#trace", VerticalScroll)
@@ -1271,7 +1271,7 @@ class TraceScreen(Screen):
                     show = bool(_cfg.get("tui_show_stream_answer", False))
                     text, thinking = ans, False
                 else:
-                    show = bool(_cfg.get("tui_show_reasoning_line", True))
+                    show = bool(_cfg.get("tui_show_reasoning_line", False))
                     text, thinking = format_reasoning_line(think=think), True
                 if show and text:
                     if self._stream_block is None:
