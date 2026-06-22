@@ -88,9 +88,11 @@ async def test_meter_visible_in_chat_mode(tmp_path):
            "ts": "t", "payload": {"role": "user", "content": "привет " * 50}}
     (tmp_path / f"data_cli_{tid}.jsonl").write_text(
         json.dumps(rec) + "\n", encoding="utf-8")
+    # РЕАЛЬНЫЙ формат: порог лежит вложенно в summary_params (как после load_config),
+    # а не плоско на верхнем уровне.
     app = TuiApp(threads_dir=str(tmp_path), system="cli",
                  config={"model": "M", "backend_api_mode": "chat_completions",
-                         "chat_completions_summary_trigger_chars": 1000})
+                         "summary_params": {"chat_completions_summary_trigger_chars": 1000}})
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr.attach_active_task(tid)

@@ -52,6 +52,7 @@ class TuiApp(App):
         self._mcp_snapshot = None      # boot-дискавери для /mcp (сервер→статус/тулы)
         self.active_runner = None      # AgentRunner | None
         self.last_runner_error: Optional[str] = None
+        self.last_stop_requested: bool = False   # юзер /stop по живому прогону → терминал «stopped»
         from tui.state import TuiState
         self.tui_state = TuiState()
 

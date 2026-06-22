@@ -210,7 +210,10 @@ class TraceScreen(Screen):
         cfg = getattr(self.app, "_config", None) or {}
         if str(cfg.get("backend_api_mode")) != "chat_completions":
             return None
-        threshold = int(cfg.get("chat_completions_summary_trigger_chars", 0) or 0)
+        # Порог лежит вложенно в summary_params — берём каноничным парсером
+        # (тот же, что у executor), а не плоским cfg.get с верхнего уровня.
+        from summarize.config import parse_summary_trigger_chars
+        threshold = parse_summary_trigger_chars(cfg)
         if threshold <= 0 or self._store is None or self._active_task_id is None:
             return None
         # Источник — live data-файл (не in-memory state.messages executor'а):
@@ -1156,6 +1159,7 @@ class TraceScreen(Screen):
         self._error_shown = False
         self._mcp_status_done = False
         self.app.last_runner_error = None
+        self.app.last_stop_requested = False
 
     def _update_mcp_indicator(self) -> None:
         if self._mcp_status_done:
@@ -1260,11 +1264,12 @@ class TraceScreen(Screen):
                 and self._active_task_id is not None:
             if getattr(self.app, "last_runner_error", None):
                 outcome = "failed"
-            elif runner is not None and getattr(runner, "stop_requested", False):
+            elif getattr(self.app, "last_stop_requested", False):
                 outcome = "stopped"
             else:
                 outcome = "completed"
             self._store.update_tui_meta(self._active_task_id, {"status": outcome})
+            self.app.last_stop_requested = False
         self._was_running = is_running
         # Активный ask_human — агент НЕ работает, он ждёт ответ юзера.
         # Индикатор активности здесь обманывает; банер ask_human уже
@@ -2150,6 +2155,11 @@ class TraceScreen(Screen):
         """
         runner = self.app.active_runner
         if runner is not None:
+            # Стоп ЖИВОГО прогона → терминальный статус «stopped». Флаг app-уровня
+            # (не runner.stop_requested): ниже active_runner обнуляется, и
+            # спадающий фронт в _poll_active уже не увидит этот runner.
+            if runner.is_running():
+                self.app.last_stop_requested = True
             runner.stop()
             runner._marked_stopped = True
         self.app.active_runner = None
