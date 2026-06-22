@@ -22,8 +22,8 @@
 - **Размещение:** хвост левого сегмента шапки, после чипа модели:
   `Сессия: 25d6c08e  [running]  модель: M · chat  ·  контекст ▓▓▓▓▓▓░░░░ 58%`
 - **Формат:** слово `контекст` + бар (8 ячеек, `▓` заполнено / `░` пусто) + процент. Без абсолютного счётчика.
-- **Цвет порогами:** `<60%` зелёный (`OK`), `60–90%` золотистый (`RUN_COLOR` — тот же amber, что у `[running]` и плашки «думаю»), `>90%` красный (`ERR`).
-- **Смысл:** `fill = round(100 * context_chars / context_threshold)`, где `context_threshold = chat_completions_summary_trigger_chars`, `context_chars = calc_history_chars_for_trigger(state.messages)`. При `fill ≥ 100` показываем `100%` красным (сам акт сжатия отражает нижняя плашка «сжимаю контекст…»).
+- **Цвет порогами:** `<60%` зелёный (`OK`), `60–90%` золотистый (`RUN_COLOR` — тот же amber, что у `[running]` и плашки «думаю»), `>90%` оранжевый `#f0883e` (предупреждение «скоро сожму» — НЕ error-red `ERR`, т.к. суммаризация рутинна, не ошибка). Вводим новую палитра-константу (напр. `WARN`/`CTX_FULL`), `ERR` остаётся за ошибками.
+- **Смысл:** `fill = round(100 * context_chars / context_threshold)`, где `context_threshold = chat_completions_summary_trigger_chars`, `context_chars = calc_history_chars_for_trigger(state.messages)`. При `fill ≥ 100` показываем `100%` оранжевым (сам акт сжатия отражает нижняя плашка «сжимаю контекст…»).
 - **Скрыт**, когда: `backend_api_mode != chat_completions`, либо `context_threshold <= 0`, либо метрик нет в `meta` (старый тред / ещё не было шага).
 
 ### Данные (single source of truth)
@@ -86,7 +86,7 @@ Executor пишет в `meta` две метрики при персисте тр
 
 ## Тестирование (pytest; TUI — `uv run pytest`)
 
-1. **Индикатор:** `fill→(проценты, цвет)` табличный (0/59 зелёный · 60/90 золотистый · 91/100/над-порогом красный); видимость (`responses`/threshold=0/нет метрик → скрыт; chat+метрики → показан); рендер сегмента шапки содержит `контекст` + `NN%`.
+1. **Индикатор:** `fill→(проценты, цвет)` табличный (0/59 зелёный · 60/90 золотистый · 91/100/над-порогом оранжевый `#f0883e`); видимость (`responses`/threshold=0/нет метрик → скрыт; chat+метрики → показан); рендер сегмента шапки содержит `контекст` + `NN%`.
 2. **Статусы:** маппинг `meta.status`+живое-состояние → бейдж (running/asking/completed/stopped/failed); `status_badge_style` → правильный цвет; AgentRunner-исход (`stop_requested→stopped`, исключение→failed, норм→completed) персистится в `meta`.
 3. **`/compact`:** реестр содержит `compact` (+алиас); guard режима (responses→отказ); guard простоя (running→отказ); content-guard (объём <20% порога → отказ с NN%, ≥20% → запуск); `compact_now` спавнит сжатие и взводит `tui_summarizing`.
 4. Где трогаем суммаризацию — прогон `test_summary_*`, `test_thread_summarizer*`.
