@@ -227,6 +227,22 @@ class FileTaskStore:
             segments.append({"index": i, "messages": seg, "compacted_by": compacted_by})
         return segments
 
+    def read_live_messages(self, task_id: str, system: Optional[str] = None) -> list[dict]:
+        """payload-словари сообщений ТОЛЬКО из live data-файла (без архивов).
+        Для лёгкого подсчёта объёма контекста (индикатор). Нет файла → []."""
+        sys_ = system or self._system
+        live = self._data_path(task_id, sys_)
+        if not live.exists():
+            return []
+        out: list[dict] = []
+        with open(live, "r", encoding="utf-8") as f:
+            for line in f:
+                rec = self._parse_line(line.rstrip("\n"))
+                payload = rec.get("payload") if isinstance(rec, dict) else None
+                if isinstance(payload, dict):
+                    out.append(payload)
+        return out
+
     def tail_events(
         self, task_id: str, cursor: TaskCursor, system: Optional[str] = None
     ) -> TailResult:
