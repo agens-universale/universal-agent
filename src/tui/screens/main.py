@@ -30,6 +30,7 @@ from tui.services.export import export_thread
 from tui.services.git_info import current_branch
 from tui.services.stores.file_store import FileTaskStore
 from tui.services.trace_mapper import map_message
+from tui.services.trace_render import build_compaction_label
 from tui.widgets.command_input import CommandTextArea
 from tui.widgets.command_palette import CommandPalette
 from tui.widgets.tool_call_row import ToolCallRow
@@ -474,7 +475,7 @@ class TraceScreen(Screen):
                 ev = TraceEvent(
                     no=self._next_no, event_ts_utc_iso=comp.get("ts", ""),
                     kind="summary", title="summary",
-                    summary=f"контекст сжат #{i + 1} · {comp['messages_in_segment']}→1",
+                    summary=build_compaction_label(i + 1, comp),
                     summary_content=comp["synthesis"], full_payload={},
                 )
                 self._next_no += 1

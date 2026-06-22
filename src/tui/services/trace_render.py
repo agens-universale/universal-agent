@@ -10,9 +10,25 @@ from typing import Optional
 
 from tui.palette import BAND_BG, CODE_BLOCK
 from tui.widgets.agent_reply_line import AgentReplyLine
+from tui.services.duration_format import format_compact_int
 
 # Парсер `[tag] rest` для default meta-кейса (трейс и read-only превью).
 TAG_RE = re.compile(r"^\[(?P<tag>[^\]]+)\]\s*(?P<rest>.*)$")
+
+
+def build_compaction_label(num: int, comp: dict) -> str:
+    """Метка маркера сжатия: «контекст сжат #N · M→1 · 12.3k→3.1k симв».
+
+    Суффикс символов опускается, если chars_before/after отсутствуют (legacy).
+    """
+    label = f"контекст сжат #{num}"
+    msgs = comp.get("messages_in_segment")
+    if msgs:
+        label += f" · {msgs}→1"
+    cb, ca = comp.get("chars_before"), comp.get("chars_after")
+    if cb and ca:
+        label += f" · {format_compact_int(cb)}→{format_compact_int(ca)} симв"
+    return label
 
 
 def render_code_block(content: str, lang: Optional[str], *,
@@ -254,10 +270,7 @@ def render_segments_readonly(mount_target, segments: list) -> None:
             no = _render_record_readonly(mount_target, rec, no, calls)
         comp = seg.get("compacted_by")
         if comp:
-            label = f"контекст сжат #{seg.get('index', 0) + 1}"
-            msgs = comp.get("messages_in_segment")
-            if msgs:
-                label += f" · {msgs}→1"
+            label = build_compaction_label(seg.get("index", 0) + 1, comp)
             _mount_summary_widgets(
                 mount_target, label, (comp.get("synthesis") or "").strip(), no)
             no += 1
