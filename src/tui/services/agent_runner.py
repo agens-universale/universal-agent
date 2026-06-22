@@ -74,6 +74,11 @@ class AgentRunner:
             t = self._thread
         return t is not None and t.is_alive()
 
+    @property
+    def stop_requested(self) -> bool:
+        """Был ли запрошен стоп текущего/последнего прогона (для терминального статуса)."""
+        return self._stop_requested
+
     def start(
         self,
         *,

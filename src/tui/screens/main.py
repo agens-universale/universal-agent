@@ -140,6 +140,8 @@ class TraceScreen(Screen):
         # Заявки на отложенное удаление осиротевших реплик: список
         # (runner, task_id, message_id). Исполняются в poll, когда тред idle.
         self._pending_orphan_cleanups: list[tuple] = []
+        # Флаг состояния runner на предыдущем тике — для детекта спадающего фронта.
+        self._was_running: bool = False
         # Транзиентная подсказка в footer-left (esc-confirm и paste-hint делят слот).
         self._esc_confirm_kind: Optional[str] = None  # "clear" | "stop" | None
         self._footer_hint_timer = None                # textual.Timer
@@ -1249,6 +1251,18 @@ class TraceScreen(Screen):
         _SOFT_HIDE_KINDS = {"agent", "system"}
         runner = getattr(self.app, "active_runner", None)
         is_running = runner is not None and runner.is_running()
+        # Спадающий фронт прогона True→False → зафиксировать терминальный статус
+        # в meta.tui.status (TUI-owned), чтобы бейдж пережил переоткрытие сессии.
+        if self._was_running and not is_running and self._store is not None \
+                and self._active_task_id is not None:
+            if getattr(self.app, "last_runner_error", None):
+                outcome = "failed"
+            elif runner is not None and getattr(runner, "stop_requested", False):
+                outcome = "stopped"
+            else:
+                outcome = "completed"
+            self._store.update_tui_meta(self._active_task_id, {"status": outcome})
+        self._was_running = is_running
         # Активный ask_human — агент НЕ работает, он ждёт ответ юзера.
         # Индикатор активности здесь обманывает; банер ask_human уже
         # говорит «нужен ответ». Скрываем (не destroy — анимация
