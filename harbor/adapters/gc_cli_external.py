@@ -16,10 +16,20 @@ Usage:
 """
 import asyncio
 import os
+from typing import Any
 
 from harbor.agents.base import BaseAgent
 from harbor.environments.base import BaseEnvironment
 from harbor.models.agent.context import AgentContext
+from harbor.models.trajectories import (
+    Agent,
+    FinalMetrics,
+    Observation,
+    ObservationResult,
+    Step,
+    Trajectory,
+)
+from harbor.utils.trajectory_utils import format_trajectory_json
 
 # gc-cli is installed as a package into the harbor runner env
 # (`uv pip install gc-cli-pub`), so it imports directly — no source-dir / PYTHONPATH.
@@ -28,6 +38,82 @@ from harbor.models.agent.context import AgentContext
 # 127.0.0.1 directly (NOT host.docker.internal, which only resolves inside a container).
 DEFAULT_BACKEND_URL = "http://127.0.0.1:8014/v1/chat/completions"
 DEFAULT_MODEL = "MiniMaxAI/MiniMax-M2.7"
+
+# gc-cli chat roles → ATIF step sources. ATIF has no "tool" source: tool results are
+# folded into the preceding agent step's `observation` (see _messages_to_steps).
+_ROLE_TO_SOURCE = {"system": "system", "user": "user", "assistant": "agent"}
+
+
+def _stringify_content(content: Any) -> str:
+    """Flatten an OpenAI chat `content` (str | list[part] | None) to plain text."""
+    if content is None:
+        return ""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for p in content:
+            if isinstance(p, dict):
+                parts.append(p.get("text") or p.get("content") or "")
+            else:
+                parts.append(str(p))
+        return "\n".join(x for x in parts if x)
+    return str(content)
+
+
+def _messages_to_steps(messages: list) -> list:
+    """Map gc-cli `state.messages` to ATIF `Step`s.
+
+    gc-cli keeps the `v1/responses` shape in `state.messages` regardless of backend
+    mode (see processing_responses.py): tool calls are ``{"type": "function_call",
+    name, arguments}`` and outputs ``{"type": "function_call_output", output}`` — both
+    with ``role: None`` — while plain turns carry ``role`` system/user/assistant. We
+    also accept the OpenAI chat ``role: "tool"`` shape defensively.
+
+    Tool outputs fold into the most recent agent step's `observation` (ATIF models
+    tool feedback as `observation`, not a standalone step). A `function_call` becomes
+    an agent step so its result has somewhere to attach. `source_call_id` is left None
+    so no same-step tool_call linkage is required.
+    """
+    steps: list = []
+    last_agent: Step | None = None
+
+    def _attach_observation(text: str) -> bool:
+        if last_agent is None:
+            return False
+        result = ObservationResult(content=text or "", source_call_id=None)
+        if last_agent.observation is None:
+            last_agent.observation = Observation(results=[result])
+        else:
+            last_agent.observation.results.append(result)
+        return True
+
+    for m in messages:
+        if not isinstance(m, dict):
+            continue
+        role = m.get("role")
+        mtype = m.get("type")
+
+        # Tool result → observation on the last agent step.
+        if mtype == "function_call_output" or role == "tool":
+            text = _stringify_content(m.get("output") if "output" in m else m.get("content"))
+            if _attach_observation(text):
+                continue
+            source, text = "user", text or "(tool result)"  # orphan → user step
+        # Tool call → agent step describing the action.
+        elif mtype == "function_call":
+            name, args = m.get("name") or "tool", m.get("arguments")
+            source = "agent"
+            text = f"{name}({args})" if args else f"{name}()"
+        else:
+            source = _ROLE_TO_SOURCE.get(role, "user")
+            text = _stringify_content(m.get("content"))
+
+        step = Step(step_id=len(steps) + 1, source=source, message=text)
+        steps.append(step)
+        if source == "agent":
+            last_agent = step
+    return steps
 
 
 class GcCliExternal(BaseAgent):
@@ -87,6 +173,37 @@ class GcCliExternal(BaseAgent):
             "max_steps": 200,
         }
 
+    def _write_trajectory(self, state: Any) -> int:
+        """Dump the gc-cli run as ATIF `trajectory.json`, mirroring Terminus2.
+
+        Writes to ``self.logs_dir`` (harbor's agent_dir), which the trial syncs back
+        to the results `agent/` folder. Best-effort: a failure here never fails the run.
+        Returns the number of steps written (0 if nothing was dumped).
+        """
+        try:
+            messages = list(getattr(state, "messages", None) or []) if state is not None else []
+            steps = _messages_to_steps(messages)
+            if not steps:
+                return 0
+            trajectory = Trajectory(
+                session_id=self._session_id,
+                agent=Agent(
+                    name=self.name(),
+                    version=self.version() or "unknown",
+                    model_name=self._model,
+                ),
+                steps=steps,
+                final_metrics=FinalMetrics(total_steps=len(steps)),
+            )
+            path = self.logs_dir / "trajectory.json"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(format_trajectory_json(trajectory.to_json_dict()))
+            self.logger.debug(f"ATIF trajectory dumped to {path}")
+            return len(steps)
+        except Exception:
+            self.logger.error("Failed to write ATIF trajectory.json", exc_info=True)
+            return 0
+
     async def run(
         self, instruction: str, environment: BaseEnvironment, context: AgentContext
     ) -> None:
@@ -101,7 +218,21 @@ class GcCliExternal(BaseAgent):
         def _run_loop():
             ctx = create_run_context(config_dict, environment=environment)
             ctx.harbor_backend = backend
-            return AgentExecutor(ctx).run([instruction])
+            executor = AgentExecutor(ctx)
+            executor.run([instruction])
+            return executor.get_state()
 
-        # Run the synchronous gc-cli loop off the event loop so backend bridging works.
-        await asyncio.to_thread(_run_loop)
+        # Run the synchronous gc-cli loop off the event loop so backend bridging works,
+        # then dump the final message history as ATIF trajectory.json.
+        state = await asyncio.to_thread(_run_loop)
+        n_steps = self._write_trajectory(state)
+
+        # Populate AgentContext so the run isn't a black box. gc-cli does not track
+        # token usage in `state`, so token/cost counters stay None (would need core
+        # accounting); metadata at least records the run shape for log triage.
+        if context is not None and context.metadata is None:
+            context.metadata = {
+                "agent": self.name(),
+                "session_id": self._session_id,
+                "total_steps": n_steps,
+            }
