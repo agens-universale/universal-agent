@@ -39,3 +39,10 @@ def test_status_npx_undetermined(monkeypatch):
     e = MCPEntry(name="pw", path=Path("."),
                  install=InstallSpec(type="npx", npm_package="@playwright/mcp"))
     assert cli._installed_status(e, Path("."), Path(".")) == "?"
+
+
+def test_status_npx_not_installed(monkeypatch):
+    monkeypatch.setattr("recommended_mcp.install.npm_global_has", lambda pkg, dep: False)
+    e = MCPEntry(name="pw", path=Path("."),
+                 install=InstallSpec(type="npx", npm_package="@playwright/mcp"))
+    assert cli._installed_status(e, Path("."), Path(".")) == "—"
