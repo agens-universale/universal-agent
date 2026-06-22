@@ -213,10 +213,16 @@ class FileTaskStore:
                 if next_leading is not None:
                     payload = next_leading.get("payload") or {}
                     synthesis = _clean_summary(user_content_to_text(payload.get("content")))
+                    chars_before = sum(
+                        len(user_content_to_text((r.get("payload") or {}).get("content")))
+                        for r in seg
+                    )
                     compacted_by = {
                         "ts": next_leading.get("ts", ""),
                         "messages_in_segment": len(seg),
                         "synthesis": synthesis,
+                        "chars_before": chars_before,
+                        "chars_after": len(synthesis),
                     }
             segments.append({"index": i, "messages": seg, "compacted_by": compacted_by})
         return segments
