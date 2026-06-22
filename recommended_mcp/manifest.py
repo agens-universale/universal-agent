@@ -25,6 +25,9 @@ class InstallSpec:
     # Для type=npx: имя npm-пакета для `npm uninstall -g` (деинсталл). Деривировать
     # из install-команд ненадёжно (scoped-имена + версия), поэтому объявляется явно.
     npm_package: str | None = None
+    # Имя python-дистрибутива (для проверки установки/деинсталла), source-dir-независимо.
+    # Для pypi имя берётся из package; для source — объявляется здесь явно.
+    dist: str | None = None
 
 
 @dataclass(frozen=True)
@@ -130,6 +133,8 @@ def _parse_entry(raw: dict[str, Any], source: Path) -> MCPEntry:
     install_package = str(package_raw).strip() if package_raw else None
     npm_package_raw = install_raw.get("npm_package")
     install_npm_package = str(npm_package_raw).strip() if npm_package_raw else None
+    dist_raw = install_raw.get("dist")
+    install_dist = str(dist_raw).strip() if dist_raw else None
     raw_commands = install_raw.get("commands", ()) or ()
     commands = tuple(tuple(str(arg) for arg in cmd) for cmd in raw_commands)
 
@@ -140,6 +145,7 @@ def _parse_entry(raw: dict[str, Any], source: Path) -> MCPEntry:
         source=install_source,
         package=install_package,
         npm_package=install_npm_package,
+        dist=install_dist,
     )
     if not install.type:
         raise ManifestError(f"mcp '{name}' missing 'install.type' in {source}")

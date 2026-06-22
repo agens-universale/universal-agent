@@ -380,3 +380,26 @@ def test_load_repo_url(tmp_path):
     cfg2 = tmp_path / "c2.yml"
     cfg2.write_text("mcps: []\n", encoding="utf-8")
     assert load_repo_url(cfg2) == (None, None)
+
+
+def test_source_mcp_with_dist(tmp_path):
+    f = _write(tmp_path, """
+        mcps:
+          - name: office
+            path: ./office
+            install:
+              type: source
+              source: ../external/office-mcp
+              dist: office-mcp
+    """)
+    assert load_manifest(f)[0].install.dist == "office-mcp"
+
+
+def test_install_dist_defaults_none(tmp_path):
+    f = _write(tmp_path, """
+        mcps:
+          - name: science
+            path: ./science
+            install: {type: source, source: ../external/science-mcp}
+    """)
+    assert load_manifest(f)[0].install.dist is None
