@@ -352,6 +352,22 @@ def _node_install_paths(agent_dep_dir: Path) -> dict[str, Path]:
     return {"root": root, "bin": bin_dir, "node": node, "npm": npm, "npx": npx}
 
 
+def npm_global_has(npm_package: str, agent_dep_dir: Path) -> bool | None:
+    """Есть ли npm-пакет в node-окружении агента (`npm ls -g`).
+    True/False — проверили; None — проверить не удалось (npm недоступен / ошибка)."""
+    npm = _node_install_paths(agent_dep_dir)["npm"]
+    if not Path(npm).exists():
+        return None
+    try:
+        result = subprocess.run(
+            [str(npm), "ls", "-g", npm_package, "--depth=0"],
+            capture_output=True, text=True, check=False,
+        )
+    except OSError:
+        return None
+    return result.returncode == 0
+
+
 def _verify_existing_node(paths: dict[str, Path]) -> bool:
     """True, если все три бинаря на месте и `node --version` совпадает с NODE_VERSION."""
     if not (paths["node"].exists() and paths["npm"].exists() and paths["npx"].exists()):
