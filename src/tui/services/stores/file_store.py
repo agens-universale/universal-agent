@@ -178,7 +178,7 @@ class FileTaskStore:
         """Тред → сегменты (части между сжатиями). Read-only реконструкция.
 
         Каждый сегмент: {"index", "messages": [envelope-records], "compacted_by":
-        {"ts", "messages_in_segment", "synthesis"} | None}.
+        {"ts", "messages_in_segment", "synthesis", "chars_before", "chars_after"} | None}.
         Сегмент i = файл i минус лидирующая dialog_summary; его synthesis =
         лидирующая dialog_summary СЛЕДУЮЩЕГО файла; у последнего (live) — None.
         """
