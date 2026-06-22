@@ -2498,9 +2498,14 @@ class TraceScreen(Screen):
                 # ViewerScreen сам делает render_payload — pretty-print JSON
                 # с solarized-dark подсветкой для dict/list или plain Static
                 # для остального. Передаём raw payload без предварительного dumps.
+                # summary: в segments-пути full_payload пуст ({}); показываем
+                # синтез сводки (summary_content заполнен в обоих путях).
+                content = (
+                    ev.summary_content if ev.kind == "summary" else ev.full_payload
+                )
                 self.app.push_screen(ViewerScreen(
                     title=f"event {no} · {ev.tool_name or ev.kind}",
-                    content=ev.full_payload,
+                    content=content,
                 ))
                 return
         self._mount_trace_row(
