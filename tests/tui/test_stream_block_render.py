@@ -178,7 +178,8 @@ async def test_reasoning_line_below_committed_rows(tmp_path):
     tid = "stream4"
     _write_task(tmp_path, tid)
     app = TuiApp(threads_dir=str(tmp_path), system="cli",
-                 config={"model": "M", "backend_api_mode": "chat_completions"})
+                 config={"model": "M", "backend_api_mode": "chat_completions",
+                         "tui_show_reasoning_line": True})
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr.attach_active_task(tid)
@@ -236,7 +237,8 @@ async def test_reasoning_block_cleared_when_tool_row_renders(tmp_path):
     tid = "stream5"
     _write_task(tmp_path, tid)
     app = TuiApp(threads_dir=str(tmp_path), system="cli",
-                 config={"model": "M", "backend_api_mode": "chat_completions"})
+                 config={"model": "M", "backend_api_mode": "chat_completions",
+                         "tui_show_reasoning_line": True})
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr.attach_active_task(tid)
@@ -348,7 +350,7 @@ async def test_stream_answer_preview_false_shows_reasoning_line(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path), system="cli",
         config={"model": "M", "backend_api_mode": "chat_completions",
-                "tui_show_stream_answer": False},
+                "tui_show_stream_answer": False, "tui_show_reasoning_line": True},
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
