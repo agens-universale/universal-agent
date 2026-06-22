@@ -44,6 +44,17 @@ DEFAULT_MODEL = "MiniMaxAI/MiniMax-M2.7"
 _ROLE_TO_SOURCE = {"system": "system", "user": "user", "assistant": "agent"}
 
 
+def _deep_merge(base: dict, over: dict) -> dict:
+    """Recursively overlay `over` onto `base` (nested dicts merge, scalars replace)."""
+    out = dict(base)
+    for key, value in over.items():
+        if isinstance(value, dict) and isinstance(out.get(key), dict):
+            out[key] = _deep_merge(out[key], value)
+        else:
+            out[key] = value
+    return out
+
+
 def _stringify_content(content: Any) -> str:
     """Flatten an OpenAI chat `content` (str | list[part] | None) to plain text."""
     if content is None:
@@ -119,13 +130,26 @@ def _messages_to_steps(messages: list) -> list:
 class GcCliExternal(BaseAgent):
     SUPPORTS_ATIF: bool = False
 
-    def __init__(self, *args, api_base: str | None = None, session_id: str | None = None, **kwargs):
+    def __init__(
+        self,
+        *args,
+        api_base: str | None = None,
+        session_id: str | None = None,
+        gc_cli_config: dict | None = None,
+        **kwargs,
+    ):
         # Mirror Terminus2: the fleet runner injects api_base (Polar gateway URL) and
         # session_id as constructor kwargs. We accept them so the agent talks to the
         # cluster LLM proxy (Polar) instead of a hardcoded backend.
+        #
+        # gc_cli_config is a per-experiment override bag for the gc-cli config_dict,
+        # passed straight from the harbor agent profile's `agent_kwargs.gc_cli_config`
+        # (→ AgentConfig.kwargs → here). It deep-merges over _build_config defaults, so
+        # tuning no_tool_call_max_count / sampling / max_steps needs no code or rebuild.
         super().__init__(*args, **kwargs)
         self._api_base = api_base
         self._session_id = session_id
+        self._overrides = dict(gc_cli_config or {})
 
     @staticmethod
     def name() -> str:
@@ -157,21 +181,38 @@ class GcCliExternal(BaseAgent):
         return os.environ.get("GC_CLI_BACKEND_URL", DEFAULT_BACKEND_URL)
 
     def _build_config(self) -> dict:
-        return {
+        # Sensible MiniMax/fleet-parity defaults; the harbor profile may override any
+        # key via agent_kwargs.gc_cli_config (deep-merged below).
+        defaults = {
             "backend_api_mode": "chat_completions",
             "completions_url": self._backend_url,
             "model": self._model,
             "chat_completions_max_tokens": 32768,
+            "use_max_tokens_param": True,
+            "chat_completion_kwargs": {
+                "temperature": 1.0,
+                "top_p": 0.95,
+                "top_k": 40,
+                "chat_template_kwargs": {"enable_thinking": False},
+                "tool_choice": "auto",
+            },
             "use_ssl": False,
             "use_retry": True,
             "use_local_subagents": False,
             "use_harbor_tools": True,
             "system_prompt_id": "v1",
+            "no_tool_call_max_count": 3,
+            "max_steps": 200,
             "save_logs": False,
             "dump_storage": False,
             "console_trace": False,
-            "max_steps": 200,
         }
+        # completions_url/model are derived from runtime (api_base/model_name) — keep
+        # them authoritative over any stale profile value.
+        merged = _deep_merge(defaults, self._overrides)
+        merged["completions_url"] = self._backend_url
+        merged["model"] = self._model
+        return merged
 
     def _write_trajectory(self, state: Any) -> int:
         """Dump the gc-cli run as ATIF `trajectory.json`, mirroring Terminus2.

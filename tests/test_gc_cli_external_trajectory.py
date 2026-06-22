@@ -14,7 +14,12 @@ pytest.importorskip("harbor")
 _ADAPTERS = Path(__file__).resolve().parent.parent / "harbor" / "adapters"
 sys.path.insert(0, str(_ADAPTERS))
 
-from gc_cli_external import _messages_to_steps, _stringify_content  # noqa: E402
+from gc_cli_external import (  # noqa: E402
+    GcCliExternal,
+    _deep_merge,
+    _messages_to_steps,
+    _stringify_content,
+)
 
 
 def test_roles_map_to_atif_sources_with_sequential_ids():
@@ -58,3 +63,42 @@ def test_stringify_handles_none_str_and_parts():
         _stringify_content([{"type": "text", "text": "a"}, {"type": "text", "text": "b"}])
         == "a\nb"
     )
+
+
+def test_deep_merge_overlays_nested_dicts():
+    base = {"a": 1, "nested": {"x": 1, "y": 2}}
+    over = {"a": 9, "nested": {"y": 20, "z": 3}}
+    assert _deep_merge(base, over) == {"a": 9, "nested": {"x": 1, "y": 20, "z": 3}}
+
+
+def test_gc_cli_config_overrides_merge_into_build_config():
+    from pathlib import Path
+
+    agent = GcCliExternal(
+        logs_dir=Path("/tmp"),
+        model_name="openai/m",
+        session_id="s",
+        gc_cli_config={
+            "no_tool_call_max_count": 5,
+            "chat_completion_kwargs": {"temperature": 0.7},
+        },
+    )
+    cfg = agent._build_config()
+    # scalar override wins
+    assert cfg["no_tool_call_max_count"] == 5
+    # nested override merges (temperature replaced, top_p kept from defaults)
+    assert cfg["chat_completion_kwargs"]["temperature"] == 0.7
+    assert cfg["chat_completion_kwargs"]["top_p"] == 0.95
+
+
+def test_runtime_url_and_model_beat_profile_overrides():
+    from pathlib import Path
+
+    agent = GcCliExternal(
+        logs_dir=Path("/tmp"),
+        model_name="openai/real-model",
+        gc_cli_config={"completions_url": "http://stale", "model": "stale"},
+    )
+    cfg = agent._build_config()
+    assert cfg["model"] == "real-model"  # openai/ stripped, profile value ignored
+    assert cfg["completions_url"] != "http://stale"

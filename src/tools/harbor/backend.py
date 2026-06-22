@@ -48,10 +48,66 @@ class HarborBackend:
         res = self._await(self._env.exec(f"ls -la {shlex.quote(path)}"))
         return res.stdout or ""
 
+    # --- stat primitives (shell) — let shims mirror the base tools' os.path checks ---
+    def exists(self, path: str) -> bool:
+        return self.exec(f"test -e {shlex.quote(path)}").return_code == 0
+
+    def is_file(self, path: str) -> bool:
+        return self.exec(f"test -f {shlex.quote(path)}").return_code == 0
+
+    def is_dir(self, path: str) -> bool:
+        return self.exec(f"test -d {shlex.quote(path)}").return_code == 0
+
+    def getsize(self, path: str) -> int:
+        res = self.exec(f"stat -c %s {shlex.quote(path)}")
+        if res.return_code != 0:
+            raise OSError(res.stderr.strip() or f"stat failed: {path}")
+        return int(res.stdout.strip())
+
+    def sha256(self, path: str) -> str:
+        res = self.exec(f"sha256sum {shlex.quote(path)}")
+        if res.return_code != 0:
+            raise OSError(res.stderr.strip() or f"sha256sum failed: {path}")
+        return res.stdout.split()[0]
+
+    def stat(self, path: str) -> dict:
+        res = self.exec(f"stat -c '%s|%Y|%a|%F' {shlex.quote(path)}")
+        if res.return_code != 0:
+            raise FileNotFoundError(path)
+        size, mtime, mode, kind = res.stdout.strip().split("|", 3)
+        return {
+            "size": int(size), "mtime": int(mtime), "mode": mode,
+            "is_file": kind == "regular file", "is_dir": kind == "directory",
+            "is_symlink": "symbolic link" in kind,
+        }
+
+    def walk(self, path: str) -> list:
+        """Recursive listing under `path` as [(relpath, is_dir)] (relpath excludes path)."""
+        res = self.exec(f"find {shlex.quote(path)} -mindepth 1 -printf '%P\\t%y\\n'")
+        if res.return_code != 0:
+            raise FileNotFoundError(path)
+        out = []
+        for line in (res.stdout or "").splitlines():
+            if not line.strip():
+                continue
+            rel, _, kind = line.partition("\t")
+            out.append((rel, kind == "d"))
+        return out
+
     # --- file write/edit (native transfer) ---
     def write(self, path: str, content: str) -> None:
         with tempfile.NamedTemporaryFile("w", delete=False, encoding="utf-8") as tmp:
             tmp.write(content)
+            tmp_path = Path(tmp.name)
+        try:
+            self._await(self._env.exec(f"mkdir -p $(dirname {shlex.quote(path)})"))
+            self._await(self._env.upload_file(tmp_path, path))
+        finally:
+            tmp_path.unlink(missing_ok=True)
+
+    def write_bytes(self, path: str, data: bytes) -> None:
+        with tempfile.NamedTemporaryFile("wb", delete=False) as tmp:
+            tmp.write(data)
             tmp_path = Path(tmp.name)
         try:
             self._await(self._env.exec(f"mkdir -p $(dirname {shlex.quote(path)})"))
