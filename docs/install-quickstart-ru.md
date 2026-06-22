@@ -92,7 +92,7 @@ gc-ua -a                           # запустить агента со все
 | Симптом | Решение |
 |---|---|
 | `git`/`uv` не найдены | Повторите шаг 1 и перезапустите терминал. |
-| uv/gc-ua не найдены после установки | На сессию: `source ~/.local/bin/env`; навсегда: `uv tool update-shell` → перезапустить терминал |
+| uv/gc-ua не найдены после установки | `uv tool update-shell` + перезапустить терминал (все ОС). Сразу: macOS/Linux `source ~/.local/bin/env`, Windows `$env:Path="$env:USERPROFILE\.local\bin;$env:Path"` |
 | Падает на сертификатах | Добавьте `--system-certs` (шаг 2). |
 | Ошибка 401 / нет ответа | Проверьте адрес и токен в `config.yml`. |
 | Обновить / удалить | `uv tool install … --reinstall` / `uv tool uninstall gc-ua` |
