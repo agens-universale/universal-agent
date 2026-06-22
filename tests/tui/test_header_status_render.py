@@ -58,3 +58,42 @@ async def test_meter_hidden_in_responses_mode(tmp_path):
         scr.attach_active_task(tid)
         left, _ = scr._compose_header_segments()
         assert "контекст" not in left.plain  # индикатор скрыт вне chat_completions
+
+
+@pytest.mark.asyncio
+async def test_badge_failed_is_err_colored(tmp_path):
+    pytest.importorskip("textual")
+    from tui.app import TuiApp
+    from tui.palette import ERR
+    tid = "hdr00000000000000000000000000004a"
+    _write_task(tmp_path, tid, status_tui="failed")
+    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    async with app.run_test() as pilot:
+        scr = pilot.app.screen
+        scr.attach_active_task(tid)
+        assert scr._task_status_badge() == "[failed]"
+        left, _ = scr._compose_header_segments()
+        styles = " ".join(str(s.style) for s in left.spans)
+        assert ERR.lower() in styles.lower()
+
+
+@pytest.mark.asyncio
+async def test_meter_visible_in_chat_mode(tmp_path):
+    pytest.importorskip("textual")
+    from tui.app import TuiApp
+    tid = "hdr00000000000000000000000000005a"
+    _write_task(tmp_path, tid, status_tui="completed")
+    # непустой live-файл → объём > 0 → индикатор виден
+    rec = {"type": "message", "thread_id": tid, "system": "cli", "seq": 1,
+           "ts": "t", "payload": {"role": "user", "content": "привет " * 50}}
+    (tmp_path / f"data_cli_{tid}.jsonl").write_text(
+        json.dumps(rec) + "\n", encoding="utf-8")
+    app = TuiApp(threads_dir=str(tmp_path), system="cli",
+                 config={"model": "M", "backend_api_mode": "chat_completions",
+                         "chat_completions_summary_trigger_chars": 1000})
+    async with app.run_test() as pilot:
+        scr = pilot.app.screen
+        scr.attach_active_task(tid)
+        left, _ = scr._compose_header_segments()
+        assert "контекст" in left.plain
+        assert "%" in left.plain

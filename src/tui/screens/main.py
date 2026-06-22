@@ -173,7 +173,7 @@ class TraceScreen(Screen):
                     self._cwd_chip_text(), id="footer-right", markup=False,
                 )
 
-    def _compose_header_segments(self) -> tuple:
+    def _compose_header_segments(self) -> "tuple[Text | str, str]":
         """Return (left_text, right_text) for header.
 
         Empty state:
@@ -213,6 +213,9 @@ class TraceScreen(Screen):
         threshold = int(cfg.get("chat_completions_summary_trigger_chars", 0) or 0)
         if threshold <= 0 or self._store is None or self._active_task_id is None:
             return None
+        # Источник — live data-файл (не in-memory state.messages executor'а):
+        # держит TUI-only слой. Во время прогона файл слегка отстаёт от state,
+        # гейдж самокорректируется на каждом тике — НЕ переводить на executor-state.
         msgs = self._store.read_live_messages(self._active_task_id)
         return render_context_meter(calc_history_chars_for_trigger(msgs), threshold)
 
