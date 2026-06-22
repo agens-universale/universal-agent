@@ -27,6 +27,12 @@ class FakeEnv:
         Path(dst).write_bytes(b"old-content")
         self.downloaded.append((src, str(dst)))
 
+    async def is_file(self, path, user=None):
+        return path.endswith(".txt")
+
+    async def is_dir(self, path, user=None):
+        return path.endswith("/")
+
 
 @pytest.fixture
 def loop_in_thread():
@@ -60,3 +66,15 @@ def test_edit_download_modify_upload(loop_in_thread):
     count = backend.edit("/work/f.txt", "old-content", "new-content")
     assert count == 1
     assert env.downloaded and env.uploaded
+
+
+def test_is_file_is_dir_use_native_env_handles(loop_in_thread):
+    # is_file/is_dir must delegate to Harbor's BaseEnvironment, not shell `test`.
+    env = FakeEnv()
+    backend = HarborBackend(env, loop_in_thread)
+    assert backend.is_file("/work/a.txt") is True
+    assert backend.is_file("/work/dir") is False
+    assert backend.is_dir("/work/dir/") is True
+    assert backend.is_dir("/work/a.txt") is False
+    # delegation goes through env.is_file/is_dir, NOT exec → no shell `test` calls
+    assert not any("test -" in c for c in env.calls)

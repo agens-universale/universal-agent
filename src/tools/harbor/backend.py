@@ -48,15 +48,17 @@ class HarborBackend:
         res = self._await(self._env.exec(f"ls -la {shlex.quote(path)}"))
         return res.stdout or ""
 
-    # --- stat primitives (shell) — let shims mirror the base tools' os.path checks ---
+    # --- stat primitives — let shims mirror the base tools' os.path checks ---
+    # is_file/is_dir use Harbor's native BaseEnvironment handles (environment-agnostic
+    # across docker/gke/modal/e2b…); exists has no native handle, so it stays shell.
     def exists(self, path: str) -> bool:
         return self.exec(f"test -e {shlex.quote(path)}").return_code == 0
 
     def is_file(self, path: str) -> bool:
-        return self.exec(f"test -f {shlex.quote(path)}").return_code == 0
+        return self._await(self._env.is_file(path))
 
     def is_dir(self, path: str) -> bool:
-        return self.exec(f"test -d {shlex.quote(path)}").return_code == 0
+        return self._await(self._env.is_dir(path))
 
     def getsize(self, path: str) -> int:
         res = self.exec(f"stat -c %s {shlex.quote(path)}")
