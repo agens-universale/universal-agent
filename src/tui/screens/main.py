@@ -85,6 +85,7 @@ class TraceScreen(Screen):
         self._tool_call_preview_widgets: dict[str, Static] = {}
         # Mapping event_no → summary-body TraceRow (скрыт; раскрывается при фокусе маркера).
         self._summary_body_widgets: dict[int, "TraceRow"] = {}
+        self._summary_marker_widgets: dict[int, "TraceRow"] = {}
         # Phase 5: ask_human banner state
         self._ask_human_banner = None  # type: Optional[AskHumanBanner]
         self._ask_human_call_id: Optional[str] = None
@@ -304,6 +305,7 @@ class TraceScreen(Screen):
         self._submit_solution_widgets.clear()
         self._tool_call_preview_widgets.clear()
         self._summary_body_widgets.clear()
+        self._summary_marker_widgets.clear()
         self._pending_user_widgets.clear()  # spec 2026-05-26
         self._pending_wire_cache.clear()
         # clear ask_human state (banner lives in #root, not #trace)
@@ -783,6 +785,7 @@ class TraceScreen(Screen):
                 kind_class="summary-marker", event_no=ev.no, focusable=True,
             )
             self._trace_mount(marker)
+            self._summary_marker_widgets[ev.no] = marker
             body_text = (ev.summary_content or "").strip()
             if body_text:
                 # Свёрнут по умолчанию (.hidden); toggle по клику маркера ИЛИ тела.
@@ -2524,10 +2527,17 @@ class TraceScreen(Screen):
         body = self._summary_body_widgets.get(message.event_no)
         if body is None:
             return
+        marker = self._summary_marker_widgets.get(message.event_no)
         if body.has_class("hidden"):
             body.remove_class("hidden")
+            if marker is not None:
+                marker.set_prefix("▾ ")
+            # Раскрыли — подвести тело в зону видимости после reflow.
+            self.call_after_refresh(body.scroll_visible, animate=False)
         else:
             body.add_class("hidden")
+            if marker is not None:
+                marker.set_prefix("▸ ")
 
     def on_open_tool_call_detail_request(self, message) -> None:
         """Двойной клик / Enter по row → детальный экран call + output."""

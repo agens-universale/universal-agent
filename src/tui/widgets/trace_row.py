@@ -82,6 +82,14 @@ class TraceRow(Widget):
         # code-block-панели после первой — focusable=False.
         self.can_focus = focusable
 
+    def set_prefix(self, prefix: str) -> None:
+        """Обновить prefix-колонку после монтирования (напр. стрелка ▸/▾)."""
+        self._prefix = prefix
+        try:
+            self.query_one(".trace-prefix", Static).update(prefix)
+        except Exception:
+            pass
+
     def compose(self) -> ComposeResult:
         with Horizontal():
             yield Static(
