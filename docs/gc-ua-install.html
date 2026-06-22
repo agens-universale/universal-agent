@@ -42,9 +42,10 @@
   .os-radio{display:none}
   .toggle{display:inline-flex;gap:4px;background:var(--panel);border:1px solid var(--bd);border-radius:24px;padding:4px;margin:26px 0 4px}
   .toggle label{color:var(--mut);font-size:13px;font-weight:600;padding:7px 16px;border-radius:20px;cursor:pointer}
-  #os-win:checked ~ .toggle label[for=os-win], #os-nix:checked ~ .toggle label[for=os-nix]{background:rgba(63,208,201,.14);color:var(--acc);box-shadow:inset 0 0 0 1px rgba(63,208,201,.4)}
-  #os-win:checked ~ .steps [data-os=nix]{display:none}
-  #os-nix:checked ~ .steps [data-os=win]{display:none}
+  #os-win:checked ~ .toggle label[for=os-win], #os-mac:checked ~ .toggle label[for=os-mac], #os-linux:checked ~ .toggle label[for=os-linux]{background:rgba(63,208,201,.14);color:var(--acc);box-shadow:inset 0 0 0 1px rgba(63,208,201,.4)}
+  #os-win:checked ~ .steps [data-os=mac], #os-win:checked ~ .steps [data-os=linux], #os-win:checked ~ .steps [data-os=nix]{display:none}
+  #os-mac:checked ~ .steps [data-os=win], #os-mac:checked ~ .steps [data-os=linux]{display:none}
+  #os-linux:checked ~ .steps [data-os=win], #os-linux:checked ~ .steps [data-os=mac]{display:none}
   ol.steps{list-style:none;margin:14px 0 0;padding:0}
   .step{padding:24px 0;border-top:1px solid var(--bd)}
   .step-h{display:flex;align-items:center;gap:13px;margin-bottom:10px}
@@ -96,10 +97,12 @@
   <p class="lead">Агент для выполнения задач в терминале. Установка одной командой, без клонирования репозитория. Перед началом получите у команды GigaCode <b style="color:#cfd6e2">адрес сервера</b> и <b style="color:#cfd6e2">токен доступа</b> — понадобятся на шаге&nbsp;4.</p>
 
   <input type="radio" name="os" id="os-win" class="os-radio" checked>
-  <input type="radio" name="os" id="os-nix" class="os-radio">
+  <input type="radio" name="os" id="os-mac" class="os-radio">
+  <input type="radio" name="os" id="os-linux" class="os-radio">
   <div class="toggle">
     <label for="os-win">Windows</label>
-    <label for="os-nix">macOS&nbsp;/&nbsp;Linux</label>
+    <label for="os-mac">macOS</label>
+    <label for="os-linux">Linux</label>
   </div>
 
   <ol class="steps">
@@ -109,8 +112,10 @@
       <p>Одноразовый шаг. Откройте терминал и выполните команды для своей системы.</p>
       <div class="code" data-os="win"><button class="cp" onclick="cp(this)">⧉</button><span class="tok-cmd">winget</span> install Git.Git
 <span class="tok-cmd">powershell</span> -c "irm https://astral.sh/uv/install.ps1 | iex"</div>
-      <div class="code" data-os="nix"><button class="cp" onclick="cp(this)">⧉</button><span class="tok-cmt"># Git: macOS → xcode-select --install · Linux → sudo apt install -y git</span>
-<span class="tok-cmd">curl</span> -LsSf https://astral.sh/uv/install.sh | sh</div>
+      <div class="code" data-os="mac"><button class="cp" onclick="cp(this)">⧉</button><span class="tok-cmd">xcode-select</span> --install                       <span class="tok-cmt"># Git</span>
+<span class="tok-cmd">curl</span> -LsSf https://astral.sh/uv/install.sh | sh   <span class="tok-cmt"># uv</span></div>
+      <div class="code" data-os="linux"><button class="cp" onclick="cp(this)">⧉</button><span class="tok-cmd">sudo</span> apt install -y git                        <span class="tok-cmt"># Git (Debian/Ubuntu)</span>
+<span class="tok-cmd">curl</span> -LsSf https://astral.sh/uv/install.sh | sh   <span class="tok-cmt"># uv</span></div>
       <p>После установки <b style="color:#cfd6e2">перезапустите терминал</b>.</p>
     </li>
 
@@ -171,7 +176,7 @@
 
   </ol>
 
-  <div class="note info"><span class="ic">i</span><div><b>Если не работает.</b> <span class="inl">git</span>/<span class="inl">uv</span> не найдены → повторите шаг&nbsp;1 и перезапустите терминал. Падает на сертификатах → флаг <span class="inl">--system-certs</span>. Ошибка&nbsp;401 → проверьте адрес и токен в конфиге.</div></div>
+  <div class="note info"><span class="ic">i</span><div><b>Если не работает.</b> <span class="inl">git</span>/<span class="inl">uv</span> не найдены → повторите шаг&nbsp;1 и перезапустите терминал. uv поставился, но не виден → добавьте в PATH: <span class="inl">source ~/.local/bin/env</span>. Падает на сертификатах → флаг <span class="inl">--system-certs</span>. Ошибка&nbsp;401 → проверьте адрес и токен в конфиге.</div></div>
 
   <footer><span>© 2026 GigaCode Universal Agent</span><span class="support">Поддержка: <a href="https://t.me/+2AwDQhHxaAdhNmUy" target="_blank" rel="noopener">Телеграм</a> · <a href="https://sberchat.sberbank.ru/@gc-ua-support" target="_blank" rel="noopener">Сберчат</a></span></footer>
 
