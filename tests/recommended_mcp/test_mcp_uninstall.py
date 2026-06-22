@@ -49,3 +49,21 @@ def test_dist_name_wheel(tmp_path):
     (dist / "office-mcp-1.0-py3-none-any.whl").write_text("", encoding="utf-8")
     e = MCPEntry(name="office", path=Path("rec"), install=InstallSpec(type="wheel"))
     assert inst._dist_name(e, root=tmp_path) == "office-mcp"
+
+
+def test_dist_name_prefers_explicit_dist(tmp_path):
+    # source-папки на диске НЕТ — _dist_name всё равно отдаёт install.dist
+    e = MCPEntry(name="office", path=Path("."),
+                 install=InstallSpec(type="source", source=Path("../external/office-mcp"),
+                                     dist="office-mcp"))
+    assert inst._dist_name(e, root=tmp_path) == "office-mcp"
+
+
+def test_dist_name_fallback_pyproject_when_no_dist(tmp_path):
+    src = tmp_path / "science-mcp"
+    src.mkdir()
+    (src / "pyproject.toml").write_text(
+        '[project]\nname = "science-mcp"\nversion = "1"\n', encoding="utf-8")
+    e = MCPEntry(name="science", path=Path("."),
+                 install=InstallSpec(type="source", source=Path("science-mcp")))
+    assert inst._dist_name(e, root=tmp_path) == "science-mcp"

@@ -97,8 +97,10 @@ def find_entry(manifest, name: str):
 
 
 def _dist_name(entry: MCPEntry, root: Path = Path(".")) -> str | None:
-    """Имя дистрибутива для `pip uninstall`. pypi → из package-спеки;
-    source → [project].name из pyproject; wheel → из имени .whl."""
+    """Имя дистрибутива для `pip uninstall`. Приоритет: явное install.dist (source-dir-независимо) → тип-специфичный фолбэк
+    (pypi → package; source → [project].name из pyproject; wheel → имя .whl)."""
+    if entry.install.dist:
+        return entry.install.dist
     itype = entry.install.type
     if itype == "pypi" and entry.install.package:
         return _pypi_distribution_name(entry.install.package)
