@@ -25,7 +25,7 @@ from rich.text import Text
 from textual.widgets import Static
 
 from tui.palette import DEEP_DIM as _DIM, RUN_COLOR as _ACCENT
-from tui.services.duration_format import format_duration
+from tui.services.duration_format import format_compact_int, format_duration
 
 
 THINKING_PHRASES = [
@@ -102,12 +102,6 @@ _ANIM_PERIOD = FRAME_HOLD * len(MORPH_FRAMES) * len(GLOW_SHADES)
 _STATE_THINKING = "thinking"
 _STATE_VALIDATING = "validating"
 _STATE_COMPRESSING = "compressing"
-
-
-def _fmt_units(n: int) -> str:
-    if n >= 1000:
-        return f"{n / 1000:.1f}k"
-    return str(n)
 
 
 class ThinkingIndicator(Static):
@@ -199,7 +193,7 @@ class ThinkingIndicator(Static):
         if self._state == _STATE_THINKING and self._sink is not None:
             units = self._sink.progress_units()
             if units > 0:
-                parens += f" · ↓ {_fmt_units(units)} токенов"
+                parens += f" · ↓ {format_compact_int(units)} токенов"
             _r_state, dur = self._sink.reasoning_state()
             if _r_state == "thinking" and self._reasoning_tag:
                 parens += " · размышление"

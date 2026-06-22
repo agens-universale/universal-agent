@@ -20,3 +20,10 @@ def format_duration(seconds: float) -> str:
     if total < 3600:
         return f"{total // 60}м {total % 60}с"
     return f"{total // 3600}ч {(total % 3600) // 60}м"
+
+
+def format_compact_int(n: int) -> str:
+    """Компактное целое: 999 → "999", 1000 → "1.0k", 12345 → "12.3k"."""
+    if n >= 1000:
+        return f"{n / 1000:.1f}k"
+    return str(n)
