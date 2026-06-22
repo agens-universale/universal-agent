@@ -39,7 +39,7 @@
 |---|---|---|---|---|---|
 | Фича | Слои L0–L3, merge broad→narrow | shipped → глоб. `~/.gc/GIGACODE.md` → `AGENTS.md` → личн. `.gc/GIGACODE.md`; склейка с английским scaffold + преамбула приоритета | глобальные + проектные инструкции вместе (аналог CLAUDE.md); выбрана модель слияния, не override. Два имени: `AGENTS.md` — открытый кросс-тул стандарт для **командного** слоя (коммитится, читают и другие агент-инструменты); `GIGACODE.md` — собственный бренд для **личных** слоёв (глоб. `~/.gc/` и проектный `.gc/`, не коммитятся) | L0 = `paths.agent_md_path` (`prompts/demo_cli_agent.md`); слои — если файлы есть | все |
 | Фича | `build_instructions` в `states.set_call_metadata` | мёрж слоёв в промпт вместо одного `agent_md` | единая точка сборки инструкций | — | все |
-| Фича | Только project-слой | отбросить глобальный/shipped | иногда нужен лишь проектный контракт | `paths.instructions_overwrite` / `--instructions-overwrite` · **`false`** | все |
+| Фича | Только проектные слои | оставить `AGENTS.md` + `.gc/GIGACODE.md`, отбросить глобальный/shipped | иногда нужен лишь проектный контракт | `paths.instructions_overwrite` / `--instructions-overwrite` · **`false`** | все |
 | Фича | Генерация `AGENTS.md` (видимый prompt-driven `/init`) | агент сам сканирует каталог и пишет `AGENTS.md`; универсальный промпт (код / любая папка) + анти-вода; режимы fresh/update/overwrite + confirm (помнится на сессию) | завести доку проекта для агента (как `/init` у Claude Code) | команда `gc-cli --init` / TUI `/init` | CLI+TUI |
 | Улучшение | `--init` → `--init-config` | `--init-config` готовит конфиг | освободить `--init` под генерацию AGENTS.md | CLI-команды | CLI |
 
