@@ -20,6 +20,7 @@ from tui.palette import ERR as _ERR
 from tui.palette import OK as _OK
 from tui.palette import RUN_COLOR as _RUN
 from tui.palette import TOOL_NAME as _TOOL_NAME
+from tui.services.duration_format import format_duration
 
 
 class ToolCallRow(Widget):
@@ -131,7 +132,7 @@ class ToolCallRow(Widget):
             text.append("(", style=_DIM)
             text.append(self._args, style=_DIM)
             text.append(") ", style=_DIM)
-            text.append(f"running · {self._elapsed_s()}с", style=_RUN)
+            text.append(f"running · {format_duration(self._elapsed_s())}", style=_RUN)
             return text
 
         if self._is_error:

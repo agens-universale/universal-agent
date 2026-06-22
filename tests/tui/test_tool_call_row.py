@@ -355,6 +355,14 @@ def test_running_row_elapsed_same_for_any_tool():
     assert "running · 3с" in str(row._render_content())
 
 
+def test_running_row_elapsed_minutes_format():
+    import time
+    from tui.widgets.tool_call_row import ToolCallRow
+    row = ToolCallRow(call_id="c1", tool_name="t", args_summary="")
+    row._start_monotonic = time.monotonic() - 125  # 2м 5с
+    assert "running · 2м 5с" in str(row._render_content())
+
+
 def test_completed_ok_row_has_no_elapsed():
     from tui.widgets.tool_call_row import ToolCallRow
     row = ToolCallRow(call_id="c3", tool_name="subagent_planner", args_summary="x")

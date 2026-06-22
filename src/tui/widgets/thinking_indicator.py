@@ -25,6 +25,7 @@ from rich.text import Text
 from textual.widgets import Static
 
 from tui.palette import DEEP_DIM as _DIM, RUN_COLOR as _ACCENT
+from tui.services.duration_format import format_duration
 
 
 THINKING_PHRASES = [
@@ -194,7 +195,7 @@ class ThinkingIndicator(Static):
             text.append(f"{self._rotator.current()}…", style=_ACCENT)
         elapsed = int(self._clock() - self._started_at)
         # Elapsed — наследует deep-dim из .thinking-indicator (CSS).
-        parens = f" ({elapsed}с"
+        parens = f" ({format_duration(elapsed)}"
         if self._state == _STATE_THINKING and self._sink is not None:
             units = self._sink.progress_units()
             if units > 0:
@@ -203,7 +204,7 @@ class ThinkingIndicator(Static):
             if _r_state == "thinking" and self._reasoning_tag:
                 parens += " · размышление"
             elif _r_state == "done":
-                parens += f" · обдумал за {round(dur)}с"
+                parens += f" · обдумал за {format_duration(round(dur))}"
         parens += ")"
         text.append(parens)
         return text
