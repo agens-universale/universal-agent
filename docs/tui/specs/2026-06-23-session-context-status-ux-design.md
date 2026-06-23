@@ -26,10 +26,12 @@
 - **Смысл:** `fill = round(100 * context_chars / context_threshold)`, где `context_threshold = chat_completions_summary_trigger_chars`, `context_chars = calc_history_chars_for_trigger(state.messages)`. При `fill ≥ 100` показываем `100%` оранжевым (сам акт сжатия отражает нижняя плашка «сжимаю контекст…»).
 - **Скрыт**, когда: `backend_api_mode != chat_completions`, либо `context_threshold <= 0`, либо метрик нет в `meta` (старый тред / ещё не было шага).
 
-### Данные (single source of truth)
-Executor пишет в `meta` две метрики при персисте треда (точка, где уже формируется meta-payload — `persistence/thread_meta_mapper` → `state_repository`): `context_chars`, `context_threshold`. TUI читает их в `_poll_active` (тик 250 мс) через `file_store.get_task_meta` и перерисовывает шапку. TUI **не** дублирует расчёт объёма — берёт готовое из `meta`.
+### Данные (всё в TUI-слое — без правок executor/persistence)
+Индикатор TUI считает сам в `_poll_active` (тик 250 мс):
+- **порог** = `config.chat_completions_summary_trigger_chars` (TUI уже держит config);
+- **объём** = `calc_history_chars_for_trigger(messages)` над сообщениями **текущего (live, после последнего сжатия) сегмента** треда — `store.read_segments(task_id)[-1]["messages"]`, payloads.
 
-> Почему meta, а не пересчёт в TUI: TUI видит тред через jsonl-поллинг, а не `state.messages`; единственный, кто знает каноничный trigger-volume, — executor (он же считает его для порога). Дублировать `calc_history_chars_for_trigger` на стороне TUI = второй источник истины и расхождения.
+Это вызов **той же** каноничной функции (`message_format.calc_history_chars_for_trigger`), что и в executor'е, — не дубль-логика, второй источник истины не возникает. Персистить нечего: это live-гейдж (на переоткрытии пересчитывается из тех же jsonl). Executor/persistence/`thread_meta_mapper` не трогаем (порог там не живёт — он в config; инверсия слоёв не нужна).
 
 ---
 
@@ -44,7 +46,7 @@ Executor пишет в `meta` две метрики при персисте тр
 ### Гарды (проверяются в `_cmd_compact` до запуска)
 1. **Режим:** только `chat_completions`. Иначе сообщение в трейс: «/compact недоступен в режиме responses (суммаризацию ведёт бэкенд)».
 2. **Простой:** только когда нет активного прогона. Если статус `[running]`/`[asking]` → «/compact: дождитесь паузы или остановите (/stop)».
-3. **Антиспам по контенту:** отказ, если `context_chars < 0.20 * context_threshold`. Сообщение: «/compact: контекст ещё небольшой (NN% порога) — сжимать нечего». Объективно и без таймера: после сжатия объём падает до preserved-batch (сводка + последние шаги) → повторный `/compact` сразу естественно отклоняется тем же правилом. Метрики берутся из тех же `meta`-полей, что и индикатор.
+3. **Антиспам по контенту (count-vs-baseline):** отказ, если с момента последнего сжатия не добавилось НИ ОДНОЙ новой записи. Реализация: `_poll_active` на завершении сжатия (спадающий фронт `tui_summarizing`) пишет `meta.tui.last_compact_msg_count` = число всех сообщений live-файла; `/compact` разрешён, если текущее число > baseline (появилось новое любого типа — user/assistant/tool-call/output), нет baseline (тред не сжимали) → тоже разрешён. Сообщение при отказе: «/compact: после последнего сжатия ничего не добавилось — сжимать нечего». Без символьного порога и без таймера; метрика — число записей (любая активность растит контекст). _(Прежний вариант «<20% порога» отклонён: блокировал бы легитимное сжатие небольшого-но-раздутого контекста.)_
 
 Нет активной задачи / нет runner'а → «/compact: нет активной сессии».
 
@@ -73,7 +75,11 @@ Executor пишет в `meta` две метрики при персисте тр
 
 ### Деривация и персист
 - **Живые** — как сейчас: `ask_human_state → [asking]`; `runner.is_running() → [running]`.
-- **Терминальные** — исход прогона фиксируется в worker-потоке по завершении `_target`: `_stop_requested → "stopped"`; пойманное исключение → `"failed"`; иначе → `"completed"`. Исход персистится в `meta.status` (через `file_store.write_task_meta` / executor-персист — точную точку определяет план), чтобы при переоткрытии сессии бейдж был корректным. Конкретно: `completed`/`stopped` знает executor (нормальное завершение vs `stop_run`), `failed` — ловит AgentRunner (`_on_error`).
+- **Терминальные** — стампятся из TUI-слоя (без правок executor). На **спадающем фронте** `runner.is_running()` (True→False), детектируемом в `_poll_active`, TUI пишет исход в `meta.tui.status` через `file_store.update_tui_meta`:
+  - `app.last_runner_error` взведён за этот прогон → `"failed"`;
+  - иначе раннер был остановлен (`runner.stop_requested`) → `"stopped"`;
+  - иначе → `"completed"`.
+  Бейдж читает `meta.tui.status` приоритетно, иначе top-level `meta.status` (server/swarm), иначе `"stopped"`. Так статус переживает переоткрытие сессии, а домен/persistence не трогаются.
 - **Бейдж** (`_task_status_badge`): живые приоритетнее; иначе — из `meta.status` (маппинг `running→[running]`, `completed→[completed]`, `failed`/`unknown_failed→[failed]`, прочее/пусто→`[stopped]`).
 
 ### Цвет бейджа
@@ -88,18 +94,19 @@ Executor пишет в `meta` две метрики при персисте тр
 
 1. **Индикатор:** `fill→(проценты, цвет)` табличный (0/59 зелёный · 60/90 золотистый · 91/100/над-порогом оранжевый `#f0883e`); видимость (`responses`/threshold=0/нет метрик → скрыт; chat+метрики → показан); рендер сегмента шапки содержит `контекст` + `NN%`.
 2. **Статусы:** маппинг `meta.status`+живое-состояние → бейдж (running/asking/completed/stopped/failed); `status_badge_style` → правильный цвет; AgentRunner-исход (`stop_requested→stopped`, исключение→failed, норм→completed) персистится в `meta`.
-3. **`/compact`:** реестр содержит `compact` (+алиас); guard режима (responses→отказ); guard простоя (running→отказ); content-guard (объём <20% порога → отказ с NN%, ≥20% → запуск); `compact_now` спавнит сжатие и взводит `tui_summarizing`.
+3. **`/compact`:** реестр содержит `compact` (+алиас); guard режима (responses→отказ); guard простоя (running→отказ); content-guard count-vs-baseline (нет нового с момента сжатия → отказ; выросло/нет baseline → запуск); `compact_now` спавнит сжатие и взводит `tui_summarizing`; baseline пишется на спадающем фронте `tui_summarizing`.
 4. Где трогаем суммаризацию — прогон `test_summary_*`, `test_thread_summarizer*`.
 
 ## Слои и ответственность
 - Форматирование индикатора, маппинг/цвет статусов — `src/tui/services/` (чистая презентация).
 - Чтение метрик/статуса — `_poll_active`/`_task_status_badge`/шапка в `src/tui/screens/main.py`.
 - `compact_now` — `src/tui/services/agent_runner.py`; вызывает существующий `run_summary_compaction` (домен суммаризации не дублируем).
-- Персист `context_chars`/`context_threshold`/терминального `meta.status` — в executor/координаторе, в точке, где `meta` уже пишется.
+- Терминальный статус — стамп из `_poll_active` через `file_store.update_tui_meta` (TUI-слой); executor/persistence не трогаем.
 - `/compact` оркестрация — `_cmd_compact` в `main.py` (контроллерный слой TUI).
 
 ## Вне scope
 - Изменение порогов/логики самой суммаризации (`run_summary_coordinator`) — только читаем метрики и зовём существующий compaction.
 - Статусы server/swarm — не трогаем.
 - Индикатор в `responses`-режиме (скрыт) — отдельная идея «оценки размера без порога» отклонена (вводила бы в заблуждение).
-- Таймерный кулдаун на `/compact` — отклонён в пользу content-guard.
+- Таймерный кулдаун на `/compact` — отклонён в пользу content-guard (count-vs-baseline).
+- Прежний `/compact` content-guard «<20% порога» — заменён на count-vs-baseline (см. Компонент 2): абсолютный % блокировал бы легитимное сжатие небольшого-но-раздутого контекста.
