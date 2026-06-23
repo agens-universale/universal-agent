@@ -34,18 +34,38 @@ agent:
   model: "gigacode_agent_v1_rc"
 ```
 
-Корп (vLLM/DeepSeek в контуре — из памяти проекта; хост и JWT берёшь из провижининга):
+Корп (vLLM/DeepSeek в контуре — модель/путь из памяти проекта; хост, токен/auth-endpoint берёшь из провижининга):
 ```yaml
 backend:
   completions_url: "https://<КОРП-ХОСТ>/api/v2/chat/completions"   # ВНИМАНИЕ: /api/v2 (не v1)
   use_ssl: true                                                    # https
   use_max_tokens_param: true                                       # vLLM ждёт стандартный max_tokens (проверь)
-  chat_completion_headers:
-    Authorization: "Bearer <agent_auth JWT>"                       # не статический sk-ключ, а agent_auth-токен
 agent:
   model: "vllm/DeepSeek-V4-Flash-262k"                             # или -131k (отличие — окно контекста)
 ```
 Грабли: `CodeAgent` — НЕ chat-модель, на `chat/completions` отдаёт 404. Брать именно `DeepSeek-V4-Flash-*`.
+
+**Авторизация к модели — два варианта (выбрать один):**
+
+Вариант 1 — статический токен (если контур выдаёт токен строкой):
+```yaml
+backend:
+  chat_completion_headers:
+    Authorization: "Bearer <ТОКЕН>"
+```
+
+Вариант 2 (рекомендуется для контура) — `agent_auth`: агент сам выпускает JWT, токен в конфиге не хранится:
+```yaml
+agent_auth:
+  auth_endpoint: "https://<КОРП-AUTH-ENDPOINT>"   # ОБЯЗАТЕЛЬНОЕ
+  login: "<логин>"                 # опц. (дефолт "login")
+  env_name: "surface_cli"          # опц. (дефолты)
+  env_version: "0.0.1"
+  plugin_name: "surf-cli-plugin"
+  plugin_version: "0.0.1"
+  # device_code / device_code_hex — опц.
+```
+При `agent_auth` поле `backend.chat_completion_headers.Authorization` задавать НЕ нужно — `AuthConnector` на каждый запрос получает свежий JWT с `auth_endpoint` и сам ставит `Authorization: Bearer <jwt>` (`verify` = `use_ssl`). Это и есть «подключение без хранения токена». Прод-модель в контуре идёт именно через **agent_auth JWT** → для контура это предпочтительный вариант.
 
 ### 2. `recommended_mcp/config.yml` — `repo_url`
 
@@ -106,7 +126,7 @@ git push corp corp
 
 - [ ] `git push` зеркала в корп source control.
 - [ ] Ветка `corp` создана.
-- [ ] `config.default.yml`: `completions_url` (`/api/v2`!), `use_ssl: true`, `model: vllm/DeepSeek-V4-Flash-262k`, `Authorization` (agent_auth).
+- [ ] `config.default.yml`: `completions_url` (`/api/v2`!), `use_ssl: true`, `model: vllm/DeepSeek-V4-Flash-262k`, авторизация — статический `Authorization` ЛИБО блок `agent_auth` (auto-JWT, реком.).
 - [ ] `recommended_mcp/config.yml`: `repo_url` → корп-репо.
 - [ ] `docs/gc-ua-install.html` + `docs/install-quickstart-ru.md`: install-URL → корп-репо, `@ветку` убрать (если из main).
 - [ ] (опц.) корп-MCP mTLS пред-засеяны в `config.default.yml`.
