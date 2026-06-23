@@ -88,9 +88,13 @@ def test_gc_cli_config_overrides_merge_into_build_config():
     cfg = agent._build_config()
     # scalar override wins
     assert cfg["no_tool_call_max_count"] == 5
-    # nested override merges (temperature replaced, top_p kept from defaults)
+    # nested override merges into the structural defaults: temperature is added,
+    # tool_choice is kept; no hardcoded sampling default is shadowing it.
     assert cfg["chat_completion_kwargs"]["temperature"] == 0.7
-    assert cfg["chat_completion_kwargs"]["top_p"] == 0.95
+    assert cfg["chat_completion_kwargs"]["tool_choice"] == "auto"
+    # adapter ships NO sampling defaults (generation_config governs by default)
+    assert "top_p" not in cfg["chat_completion_kwargs"]
+    assert "top_k" not in cfg["chat_completion_kwargs"]
 
 
 def test_partial_trajectory_written_when_run_aborts(tmp_path, monkeypatch):

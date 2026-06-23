@@ -181,8 +181,15 @@ class GcCliExternal(BaseAgent):
         return os.environ.get("GC_CLI_BACKEND_URL", DEFAULT_BACKEND_URL)
 
     def _build_config(self) -> dict:
-        # Sensible MiniMax/fleet-parity defaults; the harbor profile may override any
-        # key via agent_kwargs.gc_cli_config (deep-merged below).
+        # Structural/fleet-parity defaults; the harbor profile may override any key via
+        # agent_kwargs.gc_cli_config (deep-merged below).
+        #
+        # NO sampling defaults (temperature/top_p/top_k): open models ship their
+        # recommended values in generation_config.json, which the backend applies when
+        # the client sends none. Hardcoding sampling here would override every model's
+        # own recommended params (e.g. force MiniMax's 1.0/0.95/40 onto Qwen-Coder,
+        # whose card recommends 0.7/0.8/20/1.05). Pin per-model only via the profile's
+        # gc_cli_config.chat_completion_kwargs when generation_config is unavailable.
         defaults = {
             "backend_api_mode": "chat_completions",
             "completions_url": self._backend_url,
@@ -190,9 +197,6 @@ class GcCliExternal(BaseAgent):
             "chat_completions_max_tokens": 32768,
             "use_max_tokens_param": True,
             "chat_completion_kwargs": {
-                "temperature": 1.0,
-                "top_p": 0.95,
-                "top_k": 40,
                 "chat_template_kwargs": {"enable_thinking": False},
                 "tool_choice": "auto",
             },
