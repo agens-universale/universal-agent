@@ -30,15 +30,15 @@ def test_processing_state_label():
     assert "думаю" not in p
 
 
-def test_processing_uses_main_morph_glyph():
-    """«обрабатываю…» использует тот же основной морф-спиннер, что и «думаю…»
-    (отличие — только слово)."""
-    proc = ThinkingIndicator(started_at=0.0, state="processing", clock=lambda: 1.0)
-    think = ThinkingIndicator(started_at=0.0, state="thinking", clock=lambda: 1.0)
+def test_processing_uses_pulse_glyph_not_morph():
+    """«обрабатываю…» дышит точкой ·∙•∙, а не ярким морф-спиннером «думаю…»."""
+    ind = ThinkingIndicator(started_at=0.0, state="processing", clock=lambda: 1.0)
+    seen = set()
     for f in range(40):
-        proc._frame = think._frame = f
-        assert _plain(proc)[0] == _plain(think)[0]   # глиф совпадает с морфом
-    assert "обрабатываю…" in _plain(proc)
+        ind._frame = f
+        seen.add(_plain(ind)[0])          # первый символ строки = глиф
+    assert seen <= set("·∙•")             # только кадры дыхания
+    assert not (seen & set("▴◂▾▸✦✧+"))    # морф-кадры не появляются
 
 
 def test_processing_word_is_dim_not_accent():

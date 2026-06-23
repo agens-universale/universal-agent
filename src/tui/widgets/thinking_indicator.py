@@ -99,6 +99,12 @@ GLOW_SHADES = [
 # остаётся ограниченным, а обе под-анимации выходят на старт синхронно.
 _ANIM_PERIOD = FRAME_HOLD * len(MORPH_FRAMES) * len(GLOW_SHADES)
 
+# Дыхание «обрабатываю…» (фоновая доделка): одна точка плавно растёт и опадает
+# ·→∙→•→∙, без яркого морфа и без цвета — отличает фоновую доделку от активной
+# генерации «думаю…».
+PULSE_FRAMES = ["·", "∙", "•", "∙"]
+PULSE_HOLD = 3   # кадр держится 3 тика (0.3с) → полный цикл ≈ 1.2с
+
 _STATE_THINKING = "thinking"
 _STATE_VALIDATING = "validating"
 _STATE_COMPRESSING = "compressing"
@@ -165,6 +171,10 @@ class ThinkingIndicator(Static):
         color = GLOW_SHADES[self._frame % len(GLOW_SHADES)]
         return glyph, color
 
+    def _pulse_glyph(self) -> str:
+        """Глиф дыхания «обрабатываю…»: ·∙•∙, кадр держится PULSE_HOLD тиков."""
+        return PULSE_FRAMES[(self._frame // PULSE_HOLD) % len(PULSE_FRAMES)]
+
     def render(self) -> Text:
         return self._render_text()
 
@@ -185,11 +195,9 @@ class ThinkingIndicator(Static):
             text.append("сжимаю контекст…", style=_ACCENT)
         elif self._state == _STATE_PROCESSING:
             # Ответ показан, прогон ещё доделывает (finish-gate / баунс / доделка
-            # без финалайзера): тот же основной морф-спиннер, что и «думаю…»,
-            # но слово — серым (dim), чтобы фоновая доделка отличалась от
-            # активной генерации.
-            glyph, color = self._anim()
-            text.append(glyph, style=color)
+            # без финалайзера): тихое дыхание точкой ·∙•∙ + слово серым — фоновая
+            # доделка, не активная генерация «думаю…». Всё dim, без цвета.
+            text.append(self._pulse_glyph(), style=_DIM)
             text.append(" ")
             text.append("обрабатываю…", style=_DIM)
         else:
