@@ -2546,6 +2546,9 @@ class TraceScreen(Screen):
         if name == "init":
             self._cmd_init()
             return
+        if name == "compact":
+            self._cmd_compact()
+            return
 
     def _open_event_by_no(self, no: int) -> None:
         """Открыть полный payload события №no в Viewer.
@@ -2696,6 +2699,40 @@ class TraceScreen(Screen):
             title=f"status · {title_id}",
             content=json.dumps(payload, ensure_ascii=False, indent=2),
         ))
+
+    def _cmd_compact(self) -> None:
+        """/compact — принудительно сжать сессию (гарды: режим/простой/контент)."""
+        cfg = getattr(self.app, "_config", None) or {}
+        if str(cfg.get("backend_api_mode")) != "chat_completions":
+            self._mount_trace_row(prefix="[stopped] ",
+                                  content="/compact недоступен в режиме responses",
+                                  kind_class="line-meta")
+            return
+        tid = self._active_task_id
+        runner = getattr(self.app, "active_runner", None)
+        if tid is None or self._store is None:
+            self._mount_trace_row(prefix="[stopped] ", content="/compact: нет активной сессии",
+                                  kind_class="line-meta")
+            return
+        if (runner is not None and runner.is_running()) \
+                or self._task_status_badge() in ("[running]", "[asking]"):
+            self._mount_trace_row(prefix="[stopped] ",
+                                  content="/compact: дождитесь паузы или /stop",
+                                  kind_class="line-meta")
+            return
+        from summarize.config import parse_summary_trigger_chars
+        threshold = parse_summary_trigger_chars(cfg)
+        chars = calc_history_chars_for_trigger(self._store.read_live_messages(tid))
+        if threshold > 0 and chars < 0.20 * threshold:
+            pct = round(100 * chars / threshold)
+            self._mount_trace_row(
+                prefix="[stopped] ",
+                content=f"/compact: контекст ещё небольшой ({pct}% порога) — сжимать нечего",
+                kind_class="line-meta")
+            return
+        if runner is None:
+            runner = self.app.get_runner()
+        runner.compact_now(tid, self.app._system)
 
     def _cmd_init(self) -> None:
         """/init: видимый prompt-driven прогон — агент сам пишет AGENTS.md.
