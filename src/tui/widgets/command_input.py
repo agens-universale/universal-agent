@@ -183,6 +183,22 @@ class CommandTextArea(TextArea):
                 self.move_cursor((r, c0 if (col - c0) <= (c1 - col) else c1))
                 return
 
+    # --- визуальная геометрия курсора (для ↑/↓ history-навигации экрана) ----
+
+    def cursor_on_first_visual_line(self) -> bool:
+        """Курсор на самой верхней ВИЗУАЛЬНОЙ строке (с учётом soft-wrap).
+
+        Логический ``cursor_location[0] == 0`` недостаточен: длинная строка
+        переносится на несколько визуальных — курсор может быть в row 0, но
+        визуально ниже. Экран спрашивает это, решая «↑ → история или вверх».
+        """
+        return self.wrapped_document.location_to_offset(self.cursor_location).y == 0
+
+    def cursor_on_last_visual_line(self) -> bool:
+        """Курсор на самой нижней ВИЗУАЛЬНОЙ строке (с учётом soft-wrap)."""
+        wd = self.wrapped_document
+        return wd.location_to_offset(self.cursor_location).y == wd.height - 1
+
     def _paste_from_os_clipboard(self) -> bool:
         """Вставить текст системного буфера. True — если что-то вставили."""
         from tui.services.os_ops import read_clipboard

@@ -1478,15 +1478,17 @@ class TraceScreen(Screen):
             self._clear_footer_hint()
 
         # Input history: ↑/↓ для навигации (smart line-position check).
-        # ↑ → history prev только если курсор на 1-й строке.
-        # ↓ → history next только если курсор на последней строке.
-        # Иначе пропускаем — multi-line cursor-навигация работает как обычно.
+        # ↑ → history prev только если курсор на верхней ВИЗУАЛЬНОЙ строке.
+        # ↓ → history next только если курсор на нижней ВИЗУАЛЬНОЙ строке.
+        # Визуальной, а не логической: длинная строка переносится (soft-wrap), и
+        # логич. row 0/last не значит «курсор наверху/внизу экранно» — иначе ↑/↓
+        # на середине переноса ложно уходит в историю вместо сдвига курсора.
         # Palette/picker имеют свои ↑/↓ ветки ниже, поэтому отключаем history-mode,
         # когда они открыты.
         if event.key == "up" and not self._any_picker_open:
             try:
-                input_field = self.query_one("#cmdinput")
-                if input_field.cursor_location[0] == 0:
+                input_field = self.query_one("#cmdinput", CommandTextArea)
+                if input_field.cursor_on_first_visual_line():
                     self._history_prev()
                     event.stop()
                     event.prevent_default()
@@ -1496,9 +1498,8 @@ class TraceScreen(Screen):
 
         if event.key == "down" and not self._any_picker_open:
             try:
-                input_field = self.query_one("#cmdinput")
-                last_row = input_field.document.line_count - 1
-                if input_field.cursor_location[0] == last_row:
+                input_field = self.query_one("#cmdinput", CommandTextArea)
+                if input_field.cursor_on_last_visual_line():
                     self._history_next()
                     event.stop()
                     event.prevent_default()
