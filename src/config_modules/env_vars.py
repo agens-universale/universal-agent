@@ -125,16 +125,19 @@ def _xdg_or(env_name: str, fallback: Path) -> Path:
 
 
 def _config_dir_usable(p: Path) -> bool:
-    """True, если config-каталог можно создать и в него писать.
+    """True, если в config-каталог можно писать (без создания каталога — чтобы не плодить
+    побочные эффекты на каждом вызове).
 
-    Корп-Mac/Linux иногда лочат ~/.config (mkdir → Permission denied, либо каталог
-    root-owned). Тогда → False, и gc_paths уводит config в ~/.gc.
+    Корп-Mac/Linux иногда лочат ~/.config (Permission denied, либо каталог root-owned).
+    Идём вверх до первого существующего предка и проверяем его на запись. Если ни один
+    не writable → False, и effective_config_dir уводит config в ~/.gc.
     """
-    try:
-        p.mkdir(parents=True, exist_ok=True)
-    except OSError:
-        return False
-    return os.access(p, os.W_OK)
+    probe = p
+    while not probe.exists():
+        if probe.parent == probe:   # дошли до корня — дальше некуда
+            return False
+        probe = probe.parent
+    return os.access(probe, os.W_OK)
 
 
 def gc_paths() -> dict[str, Path]:

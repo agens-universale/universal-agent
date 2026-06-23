@@ -4,7 +4,7 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
-from config_modules.env_vars import gc_paths, project_gc_dir
+from config_modules.env_vars import effective_config_dir, project_gc_dir
 
 _BRAND = "GIGACODE.md"
 
@@ -18,7 +18,7 @@ class LayerSpec:
 
 
 def _global_instruction_path() -> Path:
-    return gc_paths()["config"] / _BRAND
+    return effective_config_dir() / _BRAND
 
 
 def instruction_file_paths(*, cwd: str | None = None) -> dict[str, Path]:
