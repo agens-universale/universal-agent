@@ -44,9 +44,9 @@ def runtime_state_path() -> Path:
 def managed_config_path() -> Path:
     """Machine-managed overlay для mcp.servers (пишет gc-mcp install/remove).
     Мёржится в конфиг агента; config.yml пользователя не трогается."""
-    from config_modules.env_vars import gc_paths
+    from config_modules.env_vars import effective_config_dir
 
-    return gc_paths()["config"] / "config.local.yml"
+    return effective_config_dir() / "config.local.yml"
 
 
 def recipe_root() -> Path:

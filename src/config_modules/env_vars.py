@@ -124,6 +124,19 @@ def _xdg_or(env_name: str, fallback: Path) -> Path:
     return Path(raw) if raw else fallback
 
 
+def _config_dir_usable(p: Path) -> bool:
+    """True, если config-каталог можно создать и в него писать.
+
+    Корп-Mac/Linux иногда лочат ~/.config (mkdir → Permission denied, либо каталог
+    root-owned). Тогда → False, и gc_paths уводит config в ~/.gc.
+    """
+    try:
+        p.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        return False
+    return os.access(p, os.W_OK)
+
+
 def gc_paths() -> dict[str, Path]:
     """Вернуть {'state': ..., 'config': ..., 'cache': ..., 'data': ...} с per-OS логикой.
 
@@ -166,6 +179,20 @@ def gc_paths() -> dict[str, Path]:
         "cache": env.gc_cache_dir or defaults["cache"],
         "data": env.gc_data_dir or defaults["data"],
     }
+
+
+def effective_config_dir() -> Path:
+    """Writable config-каталог для пользовательского config.yml и managed config.local.yml.
+
+    Обычно = gc_paths()['config']. Но корп-Mac/Linux иногда лочат ~/.config
+    (mkdir → Permission denied). Тогда, если нет явного override (GC_HOME/GC_CONFIG_DIR),
+    уводим config в ~/.gc (домашняя папка writable). Единый источник для bootstrap и
+    MCP-wiring → оба согласованно уезжают в ~/.gc при залоченном ~/.config.
+    """
+    config_dir = gc_paths()["config"]
+    if env.gc_config_dir is None and env.gc_home is None and not _config_dir_usable(config_dir):
+        return Path.home() / ".gc"
+    return config_dir
 
 
 def project_gc_dir(cwd: str | None = None) -> Path:

@@ -76,15 +76,16 @@ def _xdg_config_path() -> Optional[str]:
     пакетные дефолты (project-local <cwd>/.gc/config.yml по-прежнему
     мерджится поверх выбранной базы).
     """
-    candidate = os.path.abspath(str(env_vars.gc_paths()["config"] / "config.yml"))
+    candidate = os.path.abspath(str(env_vars.effective_config_dir() / "config.yml"))
     if os.path.isfile(candidate):
         return candidate
     return None
 
 
 def user_config_path() -> Path:
-    """Путь дефолтного пользовательского конфига: <gc config>/config.yml."""
-    return Path(env_vars.gc_paths()["config"]) / "config.yml"
+    """Путь дефолтного пользовательского конфига: <gc config>/config.yml.
+    На залоченном ~/.config (корп-Mac/Linux) автоматически уезжает в ~/.gc."""
+    return env_vars.effective_config_dir() / "config.yml"
 
 
 def _bootstrap_user_config() -> bool:
@@ -96,8 +97,16 @@ def _bootstrap_user_config() -> bool:
     dest = user_config_path()
     if dest.is_file():
         return False
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copyfile(_default_config_path(), dest)
+    try:
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(_default_config_path(), dest)
+    except OSError as exc:
+        print(
+            f"[gc] не удалось создать пользовательский конфиг {dest} ({exc}); "
+            f"работаю на дефолте. Задайте GC_HOME на доступную папку или используйте --config.",
+            file=sys.stderr,
+        )
+        return False
     return True
 
 

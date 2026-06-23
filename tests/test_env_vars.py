@@ -233,3 +233,35 @@ def test_gc_paths_pointed_state_dir_overrides_gc_home(
     # config/cache/data — от GC_HOME
     assert paths["config"] == tmp_path / "home"
     assert paths["cache"] == tmp_path / "home" / "cache"
+
+
+from config_modules.env_vars import effective_config_dir
+
+
+def test_effective_config_dir_default_when_usable(clear_gc_env, monkeypatch, tmp_path):
+    monkeypatch.setattr("sys.platform", "linux")
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    _isolate_env(monkeypatch)
+    # ~/.config писабельна (tmp) → config остаётся под XDG
+    assert effective_config_dir() == tmp_path / ".config" / "gc"
+
+
+def test_effective_config_dir_falls_back_to_dot_gc_when_config_locked(
+    clear_gc_env, monkeypatch, tmp_path
+):
+    monkeypatch.setattr("sys.platform", "linux")
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    _isolate_env(monkeypatch)
+    # имитируем залоченный ~/.config: каталог нельзя создать
+    monkeypatch.setattr(env_vars_module, "_config_dir_usable", lambda p: False)
+    assert effective_config_dir() == tmp_path / ".gc"
+
+
+def test_effective_config_dir_respects_gc_home_no_fallback(
+    clear_gc_env, monkeypatch, tmp_path
+):
+    monkeypatch.setattr("sys.platform", "linux")
+    _isolate_env(monkeypatch, gc_home=tmp_path / "home")
+    # явный GC_HOME — фоллбэка нет, даже если каталог «нельзя создать»
+    monkeypatch.setattr(env_vars_module, "_config_dir_usable", lambda p: False)
+    assert effective_config_dir() == tmp_path / "home"
