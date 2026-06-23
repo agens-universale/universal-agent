@@ -1325,8 +1325,8 @@ class TraceScreen(Screen):
                 # _reset_render_state, после чего возвращается «думаю…».
                 self._show_thinking_indicator(state="validating")
             elif self._last_event_kind in _SOFT_HIDE_KINDS and since_last >= 1.5:
-                # Ответ показан, прогон ещё жив (доделка/finish-gate/баунс без
-                # финалайзера) → «обрабатываю…» вместо пустоты, чтобы объяснить
+                # Ответ показан, прогон ещё жив (finish-gate сверяет ответ / баунс
+                # / доделка) → «сверяюсь…» вместо пустоты, чтобы объяснить
                 # статус [running] (не прячем, как раньше).
                 self._show_thinking_indicator(state="processing")
             else:

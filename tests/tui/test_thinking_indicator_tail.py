@@ -22,16 +22,16 @@ def test_elapsed_uses_cyrillic_s():
 
 
 def test_processing_state_label():
-    """state=processing → «обрабатываю…» (ответ дан, прогон ещё доделывает)."""
+    """state=processing → «сверяюсь…» (ответ дан, судья сверяет его перед закрытием)."""
     ind = ThinkingIndicator(started_at=0.0, state="processing", clock=lambda: 5.0)
     p = _plain(ind)
-    assert "обрабатываю…" in p
+    assert "сверяюсь…" in p
     assert "(5с" in p
     assert "думаю" not in p
 
 
 def test_processing_uses_pulse_glyph_not_morph():
-    """«обрабатываю…» дышит точкой ·∙•∙, а не ярким морф-спиннером «думаю…»."""
+    """«сверяюсь…» дышит точкой ·∙•∙, а не ярким морф-спиннером «думаю…»."""
     ind = ThinkingIndicator(started_at=0.0, state="processing", clock=lambda: 1.0)
     seen = set()
     for f in range(40):
@@ -42,10 +42,10 @@ def test_processing_uses_pulse_glyph_not_morph():
 
 
 def test_processing_word_is_dim_not_accent():
-    """Слово «обрабатываю…» — серым (dim), чтобы отличаться от accent-«думаю…»."""
+    """Слово «сверяюсь…» — серым (dim), чтобы отличаться от accent-«думаю…»."""
     from tui.widgets.thinking_indicator import _DIM, _ACCENT
     t = ThinkingIndicator(started_at=0.0, state="processing", clock=lambda: 1.0)._render_text()
-    word_at = t.plain.index("обрабатываю")
+    word_at = t.plain.index("сверяюсь")
     styles = [s.style for s in t.spans if s.start <= word_at < s.end]
     assert _DIM in styles
     assert _ACCENT not in styles

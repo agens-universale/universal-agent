@@ -1,5 +1,5 @@
 """Окно «ответ дан, прогон ещё жив» (soft-hide-while-running) показывает
-«обрабатываю…» вместо пустоты — объясняет статус [running]."""
+«сверяюсь…» вместо пустоты — объясняет статус [running]."""
 import time
 import pytest
 
@@ -37,4 +37,4 @@ async def test_running_after_answer_shows_processing(tmp_path):
         scr._poll_active()
         await pilot.pause()
         ind = scr.query_one(ThinkingIndicator)
-        assert "обрабатываю…" in str(ind._render_text().plain)
+        assert "сверяюсь…" in str(ind._render_text().plain)

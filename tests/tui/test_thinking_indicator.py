@@ -207,7 +207,7 @@ async def test_indicator_shows_when_running_and_hides_on_stop(tmp_path):
 async def test_indicator_shows_processing_after_agent_event_with_pause(tmp_path):
     """После event kind=agent и паузы ≥1.5с, пока runner ещё работает
     (intent_guard/policy продолжает), индикатор НЕ прячется, а показывает
-    «обрабатываю…» — объясняет статус [running] (опция A)."""
+    «сверяюсь…» — объясняет статус [running] (опция A)."""
     pytest.importorskip("textual")
     from tui.app import TuiApp
     from tui.widgets.thinking_indicator import ThinkingIndicator
@@ -256,7 +256,7 @@ async def test_indicator_shows_processing_after_agent_event_with_pause(tmp_path)
         ind = scr._thinking
         assert ind is not None
         assert not ind.has_class("hidden")
-        assert "обрабатываю…" in str(ind._render_text().plain)
+        assert "сверяюсь…" in str(ind._render_text().plain)
 
 
 @pytest.mark.asyncio

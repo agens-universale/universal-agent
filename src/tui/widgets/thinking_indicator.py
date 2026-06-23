@@ -99,9 +99,9 @@ GLOW_SHADES = [
 # остаётся ограниченным, а обе под-анимации выходят на старт синхронно.
 _ANIM_PERIOD = FRAME_HOLD * len(MORPH_FRAMES) * len(GLOW_SHADES)
 
-# Дыхание «обрабатываю…» (фоновая доделка): одна точка плавно растёт и опадает
-# ·→∙→•→∙, без яркого морфа и без цвета — отличает фоновую доделку от активной
-# генерации «думаю…».
+# Дыхание «сверяюсь…» (судья сверяет ответ перед закрытием хода): одна точка
+# плавно растёт и опадает ·→∙→•→∙, без яркого морфа и без цвета — отличает
+# фоновую сверку от активной генерации «думаю…».
 PULSE_FRAMES = ["·", "∙", "•", "∙"]
 PULSE_HOLD = 3   # кадр держится 3 тика (0.3с) → полный цикл ≈ 1.2с
 
@@ -172,7 +172,7 @@ class ThinkingIndicator(Static):
         return glyph, color
 
     def _pulse_glyph(self) -> str:
-        """Глиф дыхания «обрабатываю…»: ·∙•∙, кадр держится PULSE_HOLD тиков."""
+        """Глиф дыхания «сверяюсь…»: ·∙•∙, кадр держится PULSE_HOLD тиков."""
         return PULSE_FRAMES[(self._frame // PULSE_HOLD) % len(PULSE_FRAMES)]
 
     def render(self) -> Text:
@@ -199,7 +199,7 @@ class ThinkingIndicator(Static):
             # доделка, не активная генерация «думаю…». Всё dim, без цвета.
             text.append(self._pulse_glyph(), style=_DIM)
             text.append(" ")
-            text.append("обрабатываю…", style=_DIM)
+            text.append("сверяюсь…", style=_DIM)
         else:
             glyph, color = self._anim()
             text.append(glyph, style=color)
