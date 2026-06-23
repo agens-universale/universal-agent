@@ -20,6 +20,12 @@ Optional: **`agent_kind`** — if `"subagent"`, validate **only** against `curre
 - Axis B: honesty of **`finish_handoff_arguments`** vs visible trace (+ intent).
 - Work beyond intent (extra files/tools) is **not** an Axis A gap if intent is already structurally met — handle on Axis B (`fix_report`), not `continue_work`.
 
+## Interactive turn-handoff (Axis A clarification)
+
+Some open turns are **conversational**: their correct completion is a message that hands the turn back to the user, awaiting input the task genuinely needs next (an answer, choice, or clarification only the user can give). For these, that responsive message **is** the turn's required work — on **Axis A** treat the requirement as met by the message itself and set `trace_ok=true`, without demanding a separate tool/action. **Axis B is unchanged:** any claim of an action the visible trace does not show is still a `report_mismatches[]` contradiction.
+
+Keep it **narrow** — a normal Axis A gap (not a hand-off) when the agent could proceed on its own, the question is vacuous or a near-repeat of an earlier one (stalling), or intent required concrete actions (write / run / fetch / …) absent or failed in the trace.
+
 ## Trace digest — how to read it
 
 **Structural checks (strict):** For each user-facing requirement in `current_user_requests`, look for visible evidence in the digest:

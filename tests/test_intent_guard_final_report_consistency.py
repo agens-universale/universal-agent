@@ -153,5 +153,17 @@ class ValidateFinalReportConsistencyTest(unittest.TestCase):
         mock_digest.assert_called_once()
 
 
+def test_guard_prompt_contains_turn_handoff_rule():
+    """Промпт судьи содержит правило turn-handoff (доставка ассета + резолв
+    bundled_root для editable и wheel)."""
+    from intent_guard.final_report_consistency import _load_guard_prompt
+
+    prompt = _load_guard_prompt()
+    assert "## Interactive turn-handoff (Axis A clarification)" in prompt
+    assert "hands the turn back to the user" in prompt
+    assert "set `trace_ok=true`" in prompt
+    assert "near-repeat of an earlier one" in prompt
+
+
 if __name__ == "__main__":
     unittest.main()
