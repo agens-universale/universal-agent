@@ -85,6 +85,27 @@ async def test_compact_runs_when_never_compacted(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_compact_resets_thinking_timer(tmp_path):
+    """Якорь «сжимаю…» сбрасывается на старте /compact, иначе секунды идут от
+    прошлого хода (баг: показывало (40с) вместо (0с))."""
+    pytest.importorskip("textual")
+    import time
+    from tui.app import TuiApp
+    tid = "cmp00000000000000000000000000006a"
+    _write_task(tmp_path, tid, n_messages=3, last_compact=1)
+    app = TuiApp(threads_dir=str(tmp_path), system="cli", config=_chat_cfg())
+    async with app.run_test() as pilot:
+        scr = pilot.app.screen
+        scr.attach_active_task(tid)
+        runner = _Runner(running=False)
+        pilot.app.active_runner = runner
+        scr._thinking_started_at = time.monotonic() - 100   # устаревший якорь
+        scr._cmd_compact()
+        assert runner.compacted is True
+        assert scr._thinking_started_at > time.monotonic() - 5   # сброшен на ~сейчас
+
+
+@pytest.mark.asyncio
 async def test_compact_blocked_when_running(tmp_path):
     pytest.importorskip("textual")
     from tui.app import TuiApp

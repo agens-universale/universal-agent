@@ -2747,6 +2747,9 @@ class TraceScreen(Screen):
             return
         if runner is None:
             runner = self.app.get_runner()
+        # Сброс якоря таймера: «сжимаю контекст…» должен считать с 0, а не от
+        # момента прошлого хода (как и на обычном send).
+        self._reset_thinking_timer()
         runner.compact_now(tid, self.app._system)
 
     def _cmd_init(self) -> None:
