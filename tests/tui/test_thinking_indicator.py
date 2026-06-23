@@ -204,9 +204,10 @@ async def test_indicator_shows_when_running_and_hides_on_stop(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_indicator_hides_after_agent_event_with_pause(tmp_path):
-    """Эвристика: после event kind=agent и паузы ≥1.5с индикатор скрыт (.hidden),
-    но не уничтожен — runner ещё работает (intent_guard/policy продолжает)."""
+async def test_indicator_shows_processing_after_agent_event_with_pause(tmp_path):
+    """После event kind=agent и паузы ≥1.5с, пока runner ещё работает
+    (intent_guard/policy продолжает), индикатор НЕ прячется, а показывает
+    «обрабатываю…» — объясняет статус [running] (опция A)."""
     pytest.importorskip("textual")
     from tui.app import TuiApp
     from tui.widgets.thinking_indicator import ThinkingIndicator
@@ -235,19 +236,27 @@ async def test_indicator_hides_after_agent_event_with_pause(tmp_path):
     app._executor_factory = lambda: _Fake()
     async with app.run_test() as pilot:
         inp = pilot.app.query_one("#cmdinput")
+        import time as _time
         inp.text = "что нового?"
         await pilot.press("enter")
-        # Polling tick прочитает agent-event → _last_event_kind = "agent".
-        # Через 1.5+ сек эвристика должна скрыть индикатор.
-        await pilot.pause(2.0)
-
-        indicators = pilot.app.query(ThinkingIndicator)
-        # Виджет существует (не destroy), но имеет .hidden класс.
-        assert len(indicators) == 1
-        assert indicators[0].has_class("hidden")
-
-        # Runner ещё работает.
-        assert pilot.app.active_runner.is_running()
+        scr = pilot.app.screen
+        await pilot.pause(0.5)   # дать прогону смонтировать индикатор
+        # Пиним «живой» runner (убираем зависимость от тайминга реального прогона на
+        # момент проверки) и симулируем agent-ответ + тишину ≥1.5с.
+        class _LiveRunner:
+            def is_running(self):
+                return True
+            def stop(self):
+                pass
+        pilot.app.active_runner = _LiveRunner()
+        scr._confirm_active = False
+        scr._last_event_kind = "agent"
+        scr._last_event_at = _time.monotonic() - 5
+        scr._poll_active()
+        ind = scr._thinking
+        assert ind is not None
+        assert not ind.has_class("hidden")
+        assert "обрабатываю…" in str(ind._render_text().plain)
 
 
 @pytest.mark.asyncio

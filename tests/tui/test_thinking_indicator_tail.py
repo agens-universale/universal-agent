@@ -21,6 +21,15 @@ def test_elapsed_uses_cyrillic_s():
     assert "(8s" not in _plain(ind)
 
 
+def test_processing_state_label():
+    """state=processing → «обрабатываю…» (ответ дан, прогон ещё доделывает)."""
+    ind = ThinkingIndicator(started_at=0.0, state="processing", clock=lambda: 5.0)
+    p = _plain(ind)
+    assert "обрабатываю…" in p
+    assert "(5с" in p
+    assert "думаю" not in p
+
+
 def test_tail_thinking_no_word_but_counter():
     ind = ThinkingIndicator(
         started_at=0.0, state="thinking", clock=lambda: 8.0,

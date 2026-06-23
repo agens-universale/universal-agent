@@ -102,6 +102,7 @@ _ANIM_PERIOD = FRAME_HOLD * len(MORPH_FRAMES) * len(GLOW_SHADES)
 _STATE_THINKING = "thinking"
 _STATE_VALIDATING = "validating"
 _STATE_COMPRESSING = "compressing"
+_STATE_PROCESSING = "processing"
 
 
 class ThinkingIndicator(Static):
@@ -137,7 +138,7 @@ class ThinkingIndicator(Static):
 
     def set_state(self, state: str) -> None:
         """Переключить визуал без размонтирования. Идемпотентен."""
-        if state not in (_STATE_THINKING, _STATE_VALIDATING, _STATE_COMPRESSING):
+        if state not in (_STATE_THINKING, _STATE_VALIDATING, _STATE_COMPRESSING, _STATE_PROCESSING):
             return
         if self._state == state:
             return
@@ -182,6 +183,14 @@ class ThinkingIndicator(Static):
             text.append(glyph, style=color)
             text.append(" ")
             text.append("сжимаю контекст…", style=_ACCENT)
+        elif self._state == _STATE_PROCESSING:
+            # Ответ показан, прогон ещё доделывает (finish-gate / баунс / доделка
+            # без финалайзера): анимированный глиф + dim-текст — живо, но не
+            # соревнуется вниманием с уже отрисованным ответом.
+            glyph, color = self._anim()
+            text.append(glyph, style=color)
+            text.append(" ")
+            text.append("обрабатываю…", style=_DIM)
         else:
             glyph, color = self._anim()
             text.append(glyph, style=color)
