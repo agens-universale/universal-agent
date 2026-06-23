@@ -35,6 +35,10 @@ class AgentRunner:
         self._stdin_queue: "queue.Queue[str]" = queue.Queue()
         self._prebuild_messages: list[dict] = []
         self._stop_requested = False
+        # Вид последней работы воркера: "run" | "compact" | "". Falling-edge
+        # стампа терминального статуса (main._poll_active) пропускает "compact",
+        # чтобы ручной /compact не перетирал прежний терминал-статус на completed.
+        self._thread_kind: str = ""
         self._confirm_event = threading.Event()
         self._confirm_choice: str = "deny"
 
@@ -79,6 +83,7 @@ class AgentRunner:
         with self._lock:
             if self._thread is not None and self._thread.is_alive():
                 return False
+            self._thread_kind = "compact"
 
             def _target() -> None:
                 try:
@@ -114,6 +119,7 @@ class AgentRunner:
             if self._thread is not None and self._thread.is_alive():
                 return False
             self._stop_requested = False
+            self._thread_kind = "run"
 
             def _target() -> None:
                 with redirect_stdin(self._stdin_queue):

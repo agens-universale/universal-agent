@@ -1261,7 +1261,8 @@ class TraceScreen(Screen):
         # Спадающий фронт прогона True→False → зафиксировать терминальный статус
         # в meta.tui.status (TUI-owned), чтобы бейдж пережил переоткрытие сессии.
         if self._was_running and not is_running and self._store is not None \
-                and self._active_task_id is not None:
+                and self._active_task_id is not None \
+                and getattr(runner, "_thread_kind", "run") != "compact":
             if getattr(self.app, "last_runner_error", None):
                 outcome = "failed"
             elif getattr(self.app, "last_stop_requested", False):

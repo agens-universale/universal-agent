@@ -51,6 +51,31 @@ async def test_falling_edge_stamps_status(tmp_path, runner, last_stop, last_erro
 
 
 @pytest.mark.asyncio
+async def test_compact_transition_does_not_stamp(tmp_path):
+    """Завершение /compact (runner._thread_kind=='compact') НЕ перетирает
+    терминальный статус: falling-edge должен пропустить compact-переход."""
+    pytest.importorskip("textual")
+    from tui.app import TuiApp
+    tid = "stmp0000000000000000000000000003a"
+    _write_task(tmp_path, tid)
+    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    async with app.run_test() as pilot:
+        scr = pilot.app.screen
+        scr.attach_active_task(tid)
+        scr._store.update_tui_meta(tid, {"status": "stopped"})  # сессия была остановлена
+        scr._was_running = True
+        r = _Runner(running=False)
+        r._thread_kind = "compact"
+        pilot.app.active_runner = r
+        pilot.app.last_stop_requested = False
+        pilot.app.last_runner_error = None
+        scr._poll_active()
+        await pilot.pause()
+        meta = scr._store.get_task_meta(tid)
+        assert (meta.get("tui") or {}).get("status") == "stopped"  # НЕ completed
+
+
+@pytest.mark.asyncio
 async def test_stop_and_replace_sets_stop_flag(tmp_path):
     """`_stop_and_replace_runner` живого прогона взводит app.last_stop_requested →
     следующий спадающий фронт стампит «stopped» (а не «completed»)."""
