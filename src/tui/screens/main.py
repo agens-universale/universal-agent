@@ -211,10 +211,15 @@ class TraceScreen(Screen):
         cfg = getattr(self.app, "_config", None) or {}
         if str(cfg.get("backend_api_mode")) != "chat_completions":
             return None
-        # Порог лежит вложенно в summary_params — берём каноничным парсером
-        # (тот же, что у executor), а не плоским cfg.get с верхнего уровня.
-        from summarize.config import parse_summary_trigger_chars
-        threshold = parse_summary_trigger_chars(cfg)
+        # Калибруем гейдж на ОПЕРАЦИОННЫЙ порог сжатия — turn-end (срабатывает первым,
+        # после каждого tool-output), а не на pre-run summary_trigger. Иначе гейдж считал
+        # бы от полного summary_trigger, а сжатие стартует при 60% (turn-end) → выглядело
+        # бы как «сжатие при ~60-77%». turn-end не задан → fallback на summary_trigger.
+        from summarize.config import (
+            parse_summary_trigger_chars,
+            parse_summary_turn_end_trigger_chars,
+        )
+        threshold = parse_summary_turn_end_trigger_chars(cfg) or parse_summary_trigger_chars(cfg)
         if threshold <= 0 or self._store is None or self._active_task_id is None:
             return None
         # Источник — live data-файл (не in-memory state.messages executor'а):
