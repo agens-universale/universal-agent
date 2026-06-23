@@ -205,8 +205,20 @@ def map_message(msg: dict, *, no: int, ts: str) -> Optional[TraceEvent]:
             )
         return None
 
-    if typ == "function_call_output" and name == "intermediate_reply":
-        return None
+    # INTERMEDIATE_REPLY output — глушим (машинный статус не нужен). Как и у
+    # submit_solution: в chat_completions у output НЕТ name, но output-JSON
+    # содержит "tool" → проверяем оба пути (иначе паразитная строка `  |- …`).
+    if typ == "function_call_output":
+        if name == "intermediate_reply":
+            return None
+        _ir_out = msg.get("output")
+        if isinstance(_ir_out, str):
+            try:
+                _ir_data = json.loads(_ir_out)
+            except json.JSONDecodeError:
+                _ir_data = None
+            if isinstance(_ir_data, dict) and tool_id(_ir_data.get("tool")) == "intermediate_reply":
+                return None
 
     # SUBMIT_SOLUTION output — глушим в двух случаях:
     # 1. backend прислал `name == "submit_solution"` в output-payload (responses-mode).
