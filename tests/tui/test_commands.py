@@ -46,7 +46,7 @@ def test_default_registry_is_exactly_keep_set():
     names = sorted(c.name for c in reg.list_commands())
     assert names == sorted([
         "sessions", "new", "stop", "skill", "skills",
-        "status", "config", "mcp", "export", "help", "init", "quit",
+        "status", "config", "mcp", "export", "help", "init", "compact", "quit",
     ])
 
 
@@ -113,6 +113,15 @@ def test_hotkeys_match_app_bindings():
     for cmd in reg.list_commands():
         if cmd.hotkey:
             assert normalize(cmd.hotkey) in binding_keys, f"{cmd.name}: {cmd.hotkey}"
+
+
+def test_compact_command_registered_with_alias():
+    reg = build_default_registry()
+    cmd = reg.lookup("compact")
+    assert cmd is not None
+    assert cmd.description == "сжать контекст сессии сейчас"
+    # алиас /сжать ведёт на ту же команду
+    assert reg.lookup("сжать") is cmd
 
 
 def test_headers_have_no_fake_version():

@@ -73,6 +73,7 @@ def build_default_registry() -> CommandRegistry:
                              ("json", "структурированные данные сессии"))),
         Command("help", (), "", "справка по командам", hotkey="F1"),
         Command("init", (), "", "анализ проекта и генерация AGENTS.md"),
+        Command("compact", ("сжать",), "", "сжать контекст сессии сейчас"),
         Command("quit", (), "", "выход", hotkey="Esc"),
     ]
     for c in cmds:
