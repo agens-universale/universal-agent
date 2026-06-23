@@ -31,14 +31,27 @@ def test_processing_state_label():
 
 
 def test_processing_uses_pulse_glyph_not_morph():
-    """«обрабатываю…» дышит пульсом ·∙•∙, а не ярким морф-спиннером «думаю…»."""
+    """«обрабатываю…» дышит пульсом из трёх точек, а не ярким морфом «думаю…»."""
     ind = ThinkingIndicator(started_at=0.0, state="processing", clock=lambda: 1.0)
     seen = set()
     for f in range(40):
         ind._frame = f
-        seen.add(_plain(ind)[0])          # первый символ строки = глиф
+        seen.add(_plain(ind)[0])          # первый символ строки = первая точка
     assert seen <= set("·∙•")             # только пульс-кадры
     assert not (seen & set("▴◂▾▸✦✧+"))    # морф-кадры не появляются
+
+
+def test_processing_pulse_travels_across_three_dots():
+    """Акцент `•` бежит по очереди по трём позициям (бегущая волна ·∙•)."""
+    ind = ThinkingIndicator(started_at=0.0, state="processing", clock=lambda: 1.0)
+    glyphs = set()
+    for f in range(40):
+        ind._frame = f
+        glyphs.add(_plain(ind).split(" ", 1)[0])   # глиф = первый токен (3 ячейки)
+    assert glyphs <= {"•∙·", "∙•∙", "·∙•"}
+    assert all(len(g) == 3 for g in glyphs)
+    # `•` побывал в каждой из трёх позиций
+    assert {g.index("•") for g in glyphs if "•" in g} == {0, 1, 2}
 
 
 def test_tail_thinking_no_word_but_counter():
