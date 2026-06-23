@@ -74,6 +74,28 @@ class AgentRunner:
             t = self._thread
         return t is not None and t.is_alive()
 
+    def compact_now(self, thread_id: str, system: str) -> bool:
+        """Off-thread форс-сжатие треда. False если worker занят."""
+        with self._lock:
+            if self._thread is not None and self._thread.is_alive():
+                return False
+
+            def _target() -> None:
+                try:
+                    executor = self._ensure_executor()
+                    executor.compact_thread(thread_id, system=system)
+                except Exception as exc:
+                    if self._on_error is not None:
+                        try:
+                            self._on_error(exc)
+                        except Exception:
+                            pass
+
+            t = threading.Thread(target=_target, name="gc-ua-compact", daemon=True)
+            self._thread = t
+        t.start()
+        return True
+
     def start(
         self,
         *,
