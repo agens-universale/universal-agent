@@ -142,6 +142,7 @@ class TraceScreen(Screen):
         self._pending_orphan_cleanups: list[tuple] = []
         # Флаг состояния runner на предыдущем тике — для детекта спадающего фронта.
         self._was_running: bool = False
+        self._was_summarizing: bool = False   # для baseline last_compact_msg_count
         # Транзиентная подсказка в footer-left (esc-confirm и paste-hint делят слот).
         self._esc_confirm_kind: Optional[str] = None  # "clear" | "stop" | None
         self._footer_hint_timer = None                # textual.Timer
@@ -1295,6 +1296,16 @@ class TraceScreen(Screen):
                 )
             except Exception:
                 summarizing = False
+        # Завершение сжатия (tui_summarizing True→False) → зафиксировать baseline
+        # числа сообщений live-файла: /compact-антиспам разрешит повтор, только
+        # если с этого момента появилась хоть одна новая запись.
+        if self._was_summarizing and not summarizing and self._store is not None \
+                and self._active_task_id is not None:
+            count = len(self._store.read_live_messages(self._active_task_id))
+            self._store.update_tui_meta(
+                self._active_task_id, {"last_compact_msg_count": count}
+            )
+        self._was_summarizing = summarizing
 
         if is_running and not ask_human_active and not self._confirm_active:
             import time as _time
@@ -2721,14 +2732,17 @@ class TraceScreen(Screen):
                                   content="/compact: дождитесь паузы или /stop",
                                   kind_class="line-meta")
             return
-        from summarize.config import parse_summary_trigger_chars
-        threshold = parse_summary_trigger_chars(cfg)
-        chars = calc_history_chars_for_trigger(self._store.read_live_messages(tid))
-        if threshold > 0 and chars < 0.20 * threshold:
-            pct = round(100 * chars / threshold)
+        # Антиспам по контенту: разрешаем только если с последнего сжатия
+        # появилась хоть одна новая запись (любого типа). baseline пишет
+        # _poll_active на завершении сжатия. Нет baseline → тред не сжимали → можно.
+        live_count = len(self._store.read_live_messages(tid))
+        last_compact = (self._store.get_task_meta(tid).get("tui") or {}).get(
+            "last_compact_msg_count"
+        )
+        if last_compact is not None and live_count <= int(last_compact):
             self._mount_trace_row(
                 prefix="[stopped] ",
-                content=f"/compact: контекст ещё небольшой ({pct}% порога) — сжимать нечего",
+                content="/compact: после последнего сжатия ничего не добавилось — сжимать нечего",
                 kind_class="line-meta")
             return
         if runner is None:
