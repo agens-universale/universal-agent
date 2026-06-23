@@ -185,12 +185,13 @@ class ThinkingIndicator(Static):
             text.append("сжимаю контекст…", style=_ACCENT)
         elif self._state == _STATE_PROCESSING:
             # Ответ показан, прогон ещё доделывает (finish-gate / баунс / доделка
-            # без финалайзера): тот же основной морф-спиннер, что и «думаю…» —
-            # отличается только слово.
+            # без финалайзера): тот же основной морф-спиннер, что и «думаю…»,
+            # но слово — серым (dim), чтобы фоновая доделка отличалась от
+            # активной генерации.
             glyph, color = self._anim()
             text.append(glyph, style=color)
             text.append(" ")
-            text.append("обрабатываю…", style=_ACCENT)
+            text.append("обрабатываю…", style=_DIM)
         else:
             glyph, color = self._anim()
             text.append(glyph, style=color)
