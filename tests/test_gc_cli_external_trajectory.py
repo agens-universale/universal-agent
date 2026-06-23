@@ -3,8 +3,10 @@
 The adapter imports `harbor`, which lives in harbor's own tool venv — not the
 default test env. Skip cleanly where harbor is absent.
 """
+import asyncio
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -89,6 +91,42 @@ def test_gc_cli_config_overrides_merge_into_build_config():
     # nested override merges (temperature replaced, top_p kept from defaults)
     assert cfg["chat_completion_kwargs"]["temperature"] == 0.7
     assert cfg["chat_completion_kwargs"]["top_p"] == 0.95
+
+
+def test_partial_trajectory_written_when_run_aborts(tmp_path, monkeypatch):
+    """A Harbor timeout / backend error aborts the worker before _run_loop returns.
+    The adapter must still flush a partial trajectory from the executor's state and
+    re-raise, so timed-out/errored runs leave a trace instead of a black hole.
+    """
+    partial_state = SimpleNamespace(
+        messages=[
+            {"role": "user", "content": "do X"},
+            {"role": "assistant", "content": "partial work before crash"},
+        ]
+    )
+
+    class FakeExecutor:
+        def __init__(self, ctx):
+            pass
+
+        def run(self, messages):
+            raise RuntimeError("HTTPError from backend")  # mimics the abort
+
+        def get_state(self):
+            return partial_state
+
+    monkeypatch.setattr("run_context.create_run_context", lambda *a, **k: SimpleNamespace())
+    monkeypatch.setattr("agent_executor.AgentExecutor", FakeExecutor)
+
+    agent = GcCliExternal(logs_dir=tmp_path, model_name="openai/m", session_id="s")
+    context = SimpleNamespace(metadata=None)
+
+    with pytest.raises(RuntimeError, match="HTTPError"):
+        asyncio.run(agent.run("do X", environment=object(), context=context))
+
+    traj = tmp_path / "trajectory.json"
+    assert traj.exists()  # partial trace flushed despite the abort
+    assert context.metadata["total_steps"] == 2
 
 
 def test_runtime_url_and_model_beat_profile_overrides():

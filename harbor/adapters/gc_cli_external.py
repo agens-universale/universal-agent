@@ -256,7 +256,10 @@ class GcCliExternal(BaseAgent):
         backend = HarborBackend(environment, loop)
         config_dict = self._build_config()
 
+        executor = None
+
         def _run_loop():
+            nonlocal executor
             ctx = create_run_context(config_dict, environment=environment)
             ctx.harbor_backend = backend
             executor = AgentExecutor(ctx)
@@ -265,15 +268,26 @@ class GcCliExternal(BaseAgent):
 
         # Run the synchronous gc-cli loop off the event loop so backend bridging works,
         # then dump the final message history as ATIF trajectory.json.
-        state = await asyncio.to_thread(_run_loop)
-        n_steps = self._write_trajectory(state)
+        state = None
+        try:
+            state = await asyncio.to_thread(_run_loop)
+        finally:
+            # On a Harbor agent timeout (CancelledError) or a backend error the worker
+            # thread is abandoned before _run_loop returns, so `state` stays None. Recover
+            # whatever the executor reached (get_state() is lock-guarded) and still dump a
+            # partial ATIF trajectory — otherwise timed-out/errored runs are a black hole
+            # with no trace to debug. The original exception re-raises after this block.
+            # ponytail: the orphaned thread can't be killed; partial state is best-effort.
+            if state is None and executor is not None:
+                state = executor.get_state()
+            n_steps = self._write_trajectory(state)
 
-        # Populate AgentContext so the run isn't a black box. gc-cli does not track
-        # token usage in `state`, so token/cost counters stay None (would need core
-        # accounting); metadata at least records the run shape for log triage.
-        if context is not None and context.metadata is None:
-            context.metadata = {
-                "agent": self.name(),
-                "session_id": self._session_id,
-                "total_steps": n_steps,
-            }
+            # Populate AgentContext so the run isn't a black box. gc-cli does not track
+            # token usage in `state`, so token/cost counters stay None (would need core
+            # accounting); metadata at least records the run shape for log triage.
+            if context is not None and context.metadata is None:
+                context.metadata = {
+                    "agent": self.name(),
+                    "session_id": self._session_id,
+                    "total_steps": n_steps,
+                }
