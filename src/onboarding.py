@@ -4,61 +4,84 @@
 зовут is_unconfigured()/setup_guide(); сюда же вынесены сентинелы дефолт-шаблона
 (единый источник истины, сверяется тестом с config.default.yml).
 
-Детект идёт по ИТОГОВОМУ (после merge) плоскому config_dict из load_config:
-если в нём остался наш плейсхолдер — конфиг ещё не настроен. Свой конфиг
-пользователя (реальные значения) сюда не попадает — плейсхолдеров там нет.
+Требования стратегия-зависимы: auth удовлетворяется токеном ИЛИ блоком agent_auth
+(сертификатная авторизация — без статического токена). Подсказка перечисляет только
+реально незаполненное; если всё покрыто — позитивное «настроен».
 """
 from typing import Any, Callable, Dict, List, NamedTuple
 
 # Сентинелы из config.default.yml (страж совпадения — tests/test_onboarding.py).
 URL_SENTINEL = "http://your-backend:PORT/v1/chat/completions"
 TOKEN_SENTINEL = "Bearer <ВПИШИТЕ_ТОКЕН>"
+MODEL_SENTINEL = "<ВПИШИТЕ_МОДЕЛЬ>"
 
 
-class _Field(NamedTuple):
-    get: Callable[[Dict[str, Any]], Any]  # достать значение из плоского config_dict
-    sentinel: str                          # значение-плейсхолдер «не заполнено»
-    yaml_path: str                         # путь в config.yml (что правит пользователь)
-    hint: str                              # человекочитаемая подсказка
+def _endpoint_set(c: Dict[str, Any]) -> bool:
+    return c.get("completions_url") not in (None, URL_SENTINEL)
 
 
-# Поля, которые пользователь обязан заполнить под себя. Чтобы добавить новое:
-# дописать строку сюда + плейсхолдер в config.default.yml (тест-страж поймает
-# рассинхрон). И детект, и текст гайда обновятся автоматически.
-REQUIRED_FIELDS: List[_Field] = [
-    _Field(
-        get=lambda c: c.get("completions_url"),
-        sentinel=URL_SENTINEL,
-        yaml_path="backend.completions_url",
-        hint="endpoint OpenAI-совместимого провайдера (chat/completions)",
+def _model_set(c: Dict[str, Any]) -> bool:
+    return c.get("model") not in (None, "", MODEL_SENTINEL)
+
+
+def _token_set(c: Dict[str, Any]) -> bool:
+    auth = (c.get("chat_completion_headers") or {}).get("Authorization")
+    return auth not in (None, "", TOKEN_SENTINEL)
+
+
+def _agent_auth_set(c: Dict[str, Any]) -> bool:
+    auth_cfg = c.get("agent_auth") or {}
+    return bool(auth_cfg) and bool(auth_cfg.get("auth_endpoint"))
+
+
+def _auth_set(c: Dict[str, Any]) -> bool:
+    return _token_set(c) or _agent_auth_set(c)
+
+
+class _Requirement(NamedTuple):
+    is_satisfied: Callable[[Dict[str, Any]], bool]
+    hint: str   # что вписать в config.yml, если требование не удовлетворено
+
+
+# Требования к рабочему конфигу. auth — «либо/либо»: токен ИЛИ agent_auth.
+# Чтобы добавить требование: дописать строку (+ при необходимости сентинел и
+# плейсхолдер в config.default.yml — тест-страж поймает рассинхрон).
+REQUIREMENTS: List[_Requirement] = [
+    _Requirement(
+        _endpoint_set,
+        "backend.completions_url — endpoint OpenAI-совместимого провайдера (chat/completions)",
     ),
-    _Field(
-        get=lambda c: (c.get("chat_completion_headers") or {}).get("Authorization"),
-        sentinel=TOKEN_SENTINEL,
-        yaml_path="backend.chat_completion_headers.Authorization",
-        hint="токен доступа (Bearer ...)",
+    _Requirement(
+        _auth_set,
+        "backend.chat_completion_headers.Authorization — токен доступа (Bearer …)",
+    ),
+    _Requirement(
+        _model_set,
+        "agent.model — имя модели",
     ),
 ]
 
 
-def unconfigured_fields(config: Dict[str, Any]) -> List[_Field]:
-    """Поля, всё ещё равные своему плейсхолдеру (не заполнены)."""
-    return [f for f in REQUIRED_FIELDS if f.get(config) == f.sentinel]
+def pending_requirements(config: Dict[str, Any]) -> List[_Requirement]:
+    """Требования, ещё не удовлетворённые текущим конфигом."""
+    return [r for r in REQUIREMENTS if not r.is_satisfied(config)]
 
 
 def is_unconfigured(config: Dict[str, Any]) -> bool:
-    """True, если конфиг ещё не настроен (остался хоть один плейсхолдер)."""
-    return bool(unconfigured_fields(config))
+    """True, если конфиг ещё не готов к запуску (есть незакрытое требование)."""
+    return bool(pending_requirements(config))
 
 
 def setup_guide(config_path: str, config: Dict[str, Any]) -> str:
-    """Инструкция: какие поля заполнить в config_path, чтобы агент заработал.
+    """Подсказка по config_path.
 
-    Перечисляет ровно те поля, что ещё плейсхолдеры (на свежем конфиге — все)."""
-    pending = unconfigured_fields(config) or list(REQUIRED_FIELDS)
-    lines = "\n".join(f"  • {f.yaml_path} — {f.hint}" for f in pending)
+    pending непуст → что вписать. pending пуст → позитивное «настроен»."""
+    pending = pending_requirements(config)
+    if not pending:
+        return f"[gc] Конфиг настроен: {config_path} — можно запускать."
+    lines = "\n".join(f"  • {r.hint}" for r in pending)
     return (
         f"[gc] Конфиг ещё не настроен: {config_path}\n"
         f"     Впишите перед запуском:\n{lines}\n"
-        f"     (проверьте также agent.model), затем запустите снова."
+        f"     затем запустите снова."
     )
