@@ -11,6 +11,7 @@ from message_policy.chat_completions import prepare_chat_completion_messages_for
 from utils.convertations import output_chat_completion_to_response
 from utils.format_messages import format_message_chat_completions_to_send_backend
 from utils.retry import retry_with_backoff
+from usage.context import record_usage
 
 
 logger = logging.getLogger(__name__)
@@ -124,7 +125,10 @@ def request_backend_responses(
     if result_type != "response.completed":
         raise ValueError(f'wrong stream finish: {chunks[-1].decode("utf-8")}')
 
-    return result["response"], r_headers
+    response_obj = result["response"]
+    if isinstance(response_obj, dict):
+        record_usage(response_obj.get("usage"))
+    return response_obj, r_headers
 
 
 @retry_with_backoff(
@@ -220,7 +224,10 @@ def request_backend_chat_completions(
             print(f"request messages summary={messages_summary}")
         raise
 
-    return r.json()
+    data = r.json()
+    if isinstance(data, dict):
+        record_usage(data.get("usage"))
+    return data
 
 
 def create_call_headers(state, ctx) -> Dict[str, str]:

@@ -25,6 +25,8 @@ from persistence.thread_meta_mapper import ThreadMetaMapper
 from intent_log.user_turn import append_user_ask_deduped, append_user_asks_from_messages
 from message_policy.user_message_policy import extract_real_user_message_text
 from states import State, SharedStateData
+from usage.account import UsageAccount
+from usage.report import build_run_usage_report
 from thread_store import (
     ThreadSession,
     make_message_key,
@@ -190,6 +192,7 @@ class AgentExecutor:
             state.infer_user_turn_seq_if_missing()
             state.init_tool_usage_notice_from_meta(meta)
             state.dialog_steps_offset = int(meta.get("dialog_steps_offset", 0) or 0)
+            state.usage = UsageAccount.from_meta(meta.get("token_usage"))
         if (
             backend_api_mode == "chat_completions"
             and isinstance(chat_completions_system_prompt, str)
@@ -376,6 +379,10 @@ class AgentExecutor:
         def check_stop() -> bool:
             with self._lock:
                 return self._state.stop_requested if self._state is not None else False
+
+        # Снимок usage до прогона: для resume треда state.usage гидрирован кумулятивом,
+        # отчёт же показывает токены именно этого прогона (дельту).
+        run_start_usage = UsageAccount.from_meta(state.usage.to_meta())
         try:
             response = run_agent(
                 messages,
@@ -418,6 +425,23 @@ class AgentExecutor:
         if config_dict.get("dump_storage"):
             cur_dir = config_dict.get("logs_dump_dir") or os.getcwd()
             dump_storage(cur_dir, indent=2)
+
+        # Отчёт по токенам/стоимости за этот прогон (дельта от снимка до старта).
+        try:
+            run_usage = state.usage.delta_from(run_start_usage)
+            usage_text = build_run_usage_report(
+                run_usage,
+                config_dict.get("pricing"),
+                config_dict.get("model"),
+            )
+            if usage_text:
+                if logger is not None:
+                    logger.info("\n<run_usage>\n%s\n</run_usage>\n", usage_text)
+                if config_dict.get("console_trace", True):
+                    print(f"\n{usage_text}\n")
+        except Exception as usage_exc:  # отчёт не должен ронять прогон
+            if logger is not None:
+                logger.warning("run usage report failed: %s", usage_exc, exc_info=True)
 
         if config_dict.get("console_trace", True):
             print(f"\nПуть к файлу с логами: {self._ctx.logging_path}\n")

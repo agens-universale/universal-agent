@@ -47,6 +47,9 @@ class ThreadMetaMapper:
         )
         out["user_turn_seq"] = int(getattr(state, "user_turn_seq", 0) or 0)
         out["dialog_steps_offset"] = int(getattr(state, "dialog_steps_offset", 0) or 0)
+        usage = getattr(state, "usage", None)
+        if usage is not None and hasattr(usage, "to_meta"):
+            out["token_usage"] = usage.to_meta()
         out["state_schema_version"] = STATE_SCHEMA_VERSION
         reject_legacy_memory_keys(out)
         return out

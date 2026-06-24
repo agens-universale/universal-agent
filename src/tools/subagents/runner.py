@@ -19,6 +19,8 @@ from intent_log.user_turn import append_user_asks_from_messages, init_subagent_o
 from states import State
 from tools import build_tools_data
 from tools.subagents.registry import get_subagent_class
+from usage.account import CATEGORY_SUBAGENT as USAGE_CATEGORY_SUBAGENT
+from usage.context import usage_scope
 from utils.generate_message_id import generate_msg_id_sha256 as generate_message_id_func
 from utils.local_render_system_prompt import render_system_prompt
 from utils.logging_module import generate_run_id
@@ -69,11 +71,14 @@ class SubagentRunner:
         model = self._orchestrator_state.default_model
 
         try:
-            instance = asyncio.run(
-                subagent_cls.create_instance(
-                    task=task, model=model, config_dict=self._config, **extra,
+            # create_instance некоторых субагентов (special_agent) делает LLM-вызов
+            # генерации роли — относим его токены к категории subagent родителя.
+            with usage_scope(self._orchestrator_state.usage, USAGE_CATEGORY_SUBAGENT):
+                instance = asyncio.run(
+                    subagent_cls.create_instance(
+                        task=task, model=model, config_dict=self._config, **extra,
+                    )
                 )
-            )
         except Exception as exc:
             return self._error_response(
                 tool_name=tool_name,
@@ -180,6 +185,12 @@ class SubagentRunner:
                 retryable=True,
                 steps=child_state.steps,
             )
+        finally:
+            # Свернуть токены субагента (его main+aux) в категорию subagent родителя.
+            # finally — чтобы учесть и частичный прогон при ошибке/остановке.
+            self._orchestrator_state.usage.merge(
+                child_state.usage, as_category=USAGE_CATEGORY_SUBAGENT
+            )
 
         if result is None:
             self._log_lifecycle(
@@ -210,6 +221,7 @@ class SubagentRunner:
             result=result_payload,
             steps=child_state.steps,
             finish_reason="completed",
+            usage=child_state.usage.to_meta(),
         )
 
     def _check_stop_requested(self) -> bool:
@@ -355,15 +367,23 @@ class SubagentRunner:
         )
 
     def _success_response(
-        self, tool_name: str, result: Any, steps: int, finish_reason: str,
+        self,
+        tool_name: str,
+        result: Any,
+        steps: int,
+        finish_reason: str,
+        usage: Dict[str, Any] | None = None,
     ) -> str:
+        meta: Dict[str, Any] = {
+            "tool_name": tool_name,
+            "steps": steps,
+            "finish_reason": finish_reason,
+        }
+        if usage is not None:
+            meta["usage"] = usage
         payload = {
             "ok": True,
-            "meta": {
-                "tool_name": tool_name,
-                "steps": steps,
-                "finish_reason": finish_reason,
-            },
+            "meta": meta,
             "result": result,
         }
         return json.dumps(payload, ensure_ascii=False)

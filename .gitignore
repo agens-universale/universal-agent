@@ -117,3 +117,6 @@ tests/tui/__snapshots__/**/*.svg
 # superpowers-скиллы пишут сюда черновики спек/планов по дефолту — в git не попадают
 # (доки TUI живут в docs/tui/{specs,plans,visual})
 docs/superpowers/
+
+# Локальные заметки агента Claude Code (не для репозитория)
+CLAUDE.md

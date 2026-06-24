@@ -7,6 +7,7 @@ from tools.session.stored_outputs.tool_call_outputs_store import ToolCallOutputs
 from message_policy.tool_usage_notice.state import hydrate_tool_usage_notice_state
 from tools.skills.skills_policy import render_skills_catalog
 from intent_log import IntentRecord, deserialize_list, flush
+from usage.account import UsageAccount
 
 
 @dataclass
@@ -86,6 +87,9 @@ class State:
         self.project_memory_content_hash: Optional[str] = None
         self.tool_usage_notice_cnt: dict[str, int] = {}
         self.tool_call_outputs_store = ToolCallOutputsStore()
+        # Учёт токенов прогона по категориям (main/summary/finish_gate/.../subagent).
+        # Кумулятив по треду гидрируется из meta на resume (см. AgentExecutor.run).
+        self.usage = UsageAccount()
 
     def set_call_metadata(self):
         metadata: Dict[str, Any] = dict()
