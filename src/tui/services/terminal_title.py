@@ -10,8 +10,15 @@ _EMBLEM = "✦"   # U+2726
 _APP_NAME = "GigaCode"
 
 
-def format_terminal_title(task: Optional[str] = None, *, max_len: int = 50) -> str:
+def format_terminal_title(
+    task: Optional[str] = None,
+    status: Optional[str] = None,
+    *,
+    max_len: int = 50,
+) -> str:
     base = f"{_EMBLEM} {_APP_NAME}"
+    if status:
+        base = f"{base} · {status}"
     one_line = " ".join(task.split()) if task else ""
     if not one_line:
         return base

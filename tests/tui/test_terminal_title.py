@@ -41,3 +41,27 @@ def test_set_terminal_title_uses_utf8_buffer_when_present():
 def test_set_terminal_title_none_out_is_safe():
     # must not raise when out is None
     set_terminal_title("x", out=None)
+
+
+def test_base_no_task_no_status():
+    assert format_terminal_title() == "✦ GigaCode"
+
+
+def test_status_without_task():
+    assert format_terminal_title(status="[running]") == "✦ GigaCode · [running]"
+
+
+def test_status_before_prompt():
+    out = format_terminal_title("сделай рефактор", status="[running]")
+    assert out == "✦ GigaCode · [running] · сделай рефактор"
+
+
+def test_base_and_status_always_kept_prompt_truncated():
+    long = "x" * 200
+    out = format_terminal_title(long, status="[running]", max_len=10)
+    assert out.startswith("✦ GigaCode · [running] · ")
+    assert out.endswith("…")
+
+
+def test_backward_compatible_no_status():
+    assert format_terminal_title("привет") == "✦ GigaCode · привет"
