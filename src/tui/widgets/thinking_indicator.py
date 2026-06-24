@@ -21,6 +21,7 @@ from __future__ import annotations
 import random
 import time
 
+from rich.cells import cell_len
 from rich.text import Text
 from textual.widgets import Static
 
@@ -110,6 +111,8 @@ _STATE_VALIDATING = "validating"
 _STATE_COMPRESSING = "compressing"
 _STATE_PROCESSING = "processing"
 _STATE_DONE = "done"
+_STATE_CANCELLED = "cancelled"
+_STATE_FAILED = "failed"
 
 
 class ThinkingIndicator(Static):
@@ -131,6 +134,7 @@ class ThinkingIndicator(Static):
         clock=time.monotonic,
         sink=None,
         reasoning_tag: bool = False,
+        frozen_elapsed: int | None = None,
     ) -> None:
         self._clock = clock
         self._sink = sink
@@ -140,21 +144,52 @@ class ThinkingIndicator(Static):
         )
         self._frame: int = 0
         self._state: str = state
-        self._frozen_elapsed: int | None = None
+        self._frozen_elapsed: int | None = frozen_elapsed
+        self._status_badge: str | None = None
+        self._status_color: str | None = None
         self._rotator = PhraseRotator(THINKING_PHRASES)
         super().__init__(self._render_text(), classes="thinking-indicator", markup=False)
 
     def set_state(self, state: str) -> None:
         """Переключить визуал без размонтирования. Идемпотентен."""
-        if state not in (_STATE_THINKING, _STATE_VALIDATING, _STATE_COMPRESSING, _STATE_PROCESSING, _STATE_DONE):
+        if state not in (_STATE_THINKING, _STATE_VALIDATING, _STATE_COMPRESSING,
+                         _STATE_PROCESSING, _STATE_DONE, _STATE_CANCELLED, _STATE_FAILED):
             return
         if self._state == state:
             return
         self._state = state
-        if state == _STATE_DONE:
+        if state == _STATE_DONE and self._frozen_elapsed is None:
             self._frozen_elapsed = int(self._clock() - self._started_at)
         if self.is_mounted:
             self.refresh()
+
+    def set_status(self, badge: str | None, color: str | None) -> None:
+        """Правый бейдж статуса на той же строке. Идемпотентен."""
+        if badge == self._status_badge and color == self._status_color:
+            return
+        self._status_badge = badge
+        self._status_color = color
+        if self.is_mounted:
+            self.refresh()
+
+    def _safe_width(self) -> int:
+        try:
+            return int(self.size.width)
+        except Exception:
+            return 0
+
+    def _compose_status(self, body: Text, width: int) -> Text:
+        """Дописать правый бейдж с выравниванием по правому краю строки.
+        Опускаем бейдж, если статуса нет, ширина неизвестна или не хватает
+        места хотя бы на 1 пробел отступа."""
+        if not self._status_badge or width <= 0:
+            return body
+        pad = width - body.cell_len - cell_len(self._status_badge)
+        if pad < 1:
+            return body
+        body.append(" " * pad)
+        body.append(self._status_badge, style=self._status_color or _DIM)
+        return body
 
     def on_mount(self) -> None:
         # Перерисовка 10 раз/сек: глиф держится FRAME_HOLD тиков (≈1.2с цикл),
@@ -184,30 +219,34 @@ class ThinkingIndicator(Static):
 
     def _render_text(self) -> Text:
         text = Text()
+        width = self._safe_width()
         if self._state == _STATE_DONE:
             secs = self._frozen_elapsed if self._frozen_elapsed is not None \
                 else int(self._clock() - self._started_at)
             text.append("✓", style=_DIM)
             text.append(" ")
             text.append(f"Выполнил за {format_duration(secs)}", style=_DIM)
-            return text
-        elif self._state == _STATE_VALIDATING:
-            # Финальный ответ виден; статичный ✓ завершаю… (dim), без анимации —
-            # чтобы НЕ соревноваться вниманием с уже отрисованным task_report.
+            return self._compose_status(text, width)
+        if self._state == _STATE_CANCELLED:
+            text.append("■", style=_DIM)
+            text.append(" ")
+            text.append("Отменено", style=_DIM)
+            return self._compose_status(text, width)
+        if self._state == _STATE_FAILED:
+            text.append("✕", style=_DIM)
+            text.append(" ")
+            text.append("Ошибка", style=_DIM)
+            return self._compose_status(text, width)
+        if self._state == _STATE_VALIDATING:
             text.append("✓", style=_DIM)
             text.append(" ")
             text.append("завершаю…", style=_DIM)
         elif self._state == _STATE_COMPRESSING:
-            # Идёт суммаризация истории: анимированный глиф + фикс-текст (не из
-            # rotator — это конкретная операция, не «общее размышление»).
             glyph, color = self._anim()
             text.append(glyph, style=color)
             text.append(" ")
             text.append("сжимаю контекст…", style=_ACCENT)
         elif self._state == _STATE_PROCESSING:
-            # Ответ показан, прогон ещё доделывает (finish-gate / баунс / доделка
-            # без финалайзера): тихое дыхание точкой ·∙•∙ + слово серым — фоновая
-            # доделка, не активная генерация «думаю…». Всё dim, без цвета.
             text.append(self._pulse_glyph(), style=_DIM)
             text.append(" ")
             text.append("сверяюсь…", style=_DIM)
@@ -217,7 +256,6 @@ class ThinkingIndicator(Static):
             text.append(" ")
             text.append(f"{self._rotator.current()}…", style=_ACCENT)
         elapsed = int(self._clock() - self._started_at)
-        # Elapsed — наследует deep-dim из .thinking-indicator (CSS).
         parens = f" ({format_duration(elapsed)}"
         if self._state == _STATE_THINKING and self._sink is not None:
             units = self._sink.progress_units()
@@ -230,4 +268,4 @@ class ThinkingIndicator(Static):
                 parens += f" · обдумал за {format_duration(round(dur))}"
         parens += ")"
         text.append(parens)
-        return text
+        return self._compose_status(text, width)
