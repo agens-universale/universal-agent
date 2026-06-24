@@ -1341,7 +1341,16 @@ class TraceScreen(Screen):
                 outcome = "stopped"
             else:
                 outcome = "completed"
-            self._store.update_tui_meta(self._active_task_id, {"status": outcome})
+            _KIND = {"completed": "done", "stopped": "cancelled", "failed": "failed"}
+            _elapsed = None
+            if outcome == "completed" and self._thinking_started_at is not None:
+                import time as _t
+                _elapsed = int(_t.monotonic() - self._thinking_started_at)
+            self._store.update_tui_meta(
+                self._active_task_id,
+                {"status": outcome,
+                 "last_indicator": {"kind": _KIND[outcome], "elapsed": _elapsed}},
+            )
             self.app.last_stop_requested = False
             self._update_terminal_title()
         self._was_running = is_running
@@ -1378,6 +1387,11 @@ class TraceScreen(Screen):
                 self._active_task_id, {"last_compact_msg_count": count}
             )
         self._was_summarizing = summarizing
+
+        # Правый бейдж статуса на строке индикатора (если она есть) — каждый тик.
+        if self._thinking is not None:
+            _badge = self._task_status_badge()
+            self._thinking.set_status(_badge, status_badge_color(_badge))
 
         if is_running and not ask_human_active and not self._confirm_active:
             import time as _time
@@ -1436,17 +1450,17 @@ class TraceScreen(Screen):
             # анимация вернётся когда агент продолжит.
             self._hide_thinking_indicator()
         else:
-            # Idle. Если ход успешно завершён — спиннер ОСТАЁТСЯ как «✓ Выполнил за N»
-            # (персистентно до следующего user-send, который сбросит его через
-            # _reset_thinking_timer). На stopped/failed/fresh — уничтожаем, как раньше.
+            # Idle. Терминальный исход прогона держим как строку-итог индикатора
+            # (done → «✓ Выполнил за N», cancelled → «■ Отменено», failed →
+            # «✕ Ошибка») — персистентно до следующего user-send (его _reset
+            # уничтожит индикатор). Свежий/неизвестный исход → уничтожаем.
             outcome = None
             if self._store is not None and self._active_task_id is not None:
                 outcome = (self._store.get_task_meta(self._active_task_id).get("tui") or {}).get("status")
-            # runner._stop_requested: True означает явный stop (в т.ч. прямой вызов
-            # runner.stop() без last_stop_requested) — не «успешное завершение».
-            _runner_stopped = getattr(runner, "_stop_requested", False)
-            if outcome == "completed" and not _runner_stopped and self._thinking is not None:
-                self._thinking.set_state("done")
+            _TERMINAL_STATE = {"completed": "done", "stopped": "cancelled", "failed": "failed"}
+            term_state = _TERMINAL_STATE.get(outcome)
+            if term_state is not None and self._thinking is not None:
+                self._thinking.set_state(term_state)
             else:
                 self._destroy_thinking_indicator()
             self._clear_stream_block()
@@ -2218,8 +2232,8 @@ class TraceScreen(Screen):
             self._hide_confirm_banner()
             if runner is not None and runner.is_running():
                 # live agent-run confirm → also stop the run (Ctrl+C = abort)
-                self._mount_trace_row(prefix="[stopped]", content="", kind_class="line-meta")
-                self._destroy_thinking_indicator()
+                if self._thinking is not None:
+                    self._thinking.set_state("cancelled")
                 self._stop_and_replace_runner()
             else:
                 # /init (or no live runner): parked worker now unblocked → cancel/deny
@@ -2245,9 +2259,10 @@ class TraceScreen(Screen):
             self._cancel_with_undo()
             return
 
-        # Normal interrupt: immediate [stopped] + destroy + replace.
-        self._mount_trace_row(prefix="[stopped]", content="", kind_class="line-meta")
-        self._destroy_thinking_indicator()
+        # Normal interrupt: индикатор → терминальное «■ Отменено» (статус
+        # [stopped] уже справа на той же строке), без отдельной [stopped]-строки.
+        if self._thinking is not None:
+            self._thinking.set_state("cancelled")
         self._stop_and_replace_runner()
 
     def _stop_and_replace_runner(self) -> None:
@@ -2293,8 +2308,8 @@ class TraceScreen(Screen):
             return
         runner.cancel_ask_human()
         self._unmount_ask_human_banner()
-        self._mount_trace_row(prefix="[stopped]", content="", kind_class="line-meta")
-        self._destroy_thinking_indicator()
+        if self._thinking is not None:
+            self._thinking.set_state("cancelled")
         self._stop_and_replace_runner()
 
     def _cancel_with_undo(self) -> None:

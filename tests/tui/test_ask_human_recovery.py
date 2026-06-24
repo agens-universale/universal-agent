@@ -55,7 +55,7 @@ async def test_esc_in_live_ask_human_clean_stops(tmp_path):
     """Esc в live ask_human → clean stop треда:
     - runner.stop() вызван (флаг stop_requested выставлен);
     - banner снят, ask_human_state сброшен;
-    - [stopped]-метка смонтирована в трейсе;
+    - ThinkingIndicator переходит в состояние «cancelled» (вместо [stopped]-строки в трейсе);
     - active_runner обнулён (clean-restart pattern)."""
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
@@ -80,6 +80,8 @@ async def test_esc_in_live_ask_human_clean_stops(tmp_path):
 
         runner = _LiveStoppable()
         app.active_runner = runner
+        # Смонтировать индикатор (как при живом прогоне) и banner.
+        screen._show_thinking_indicator(state="thinking")
         _mount_zombie_banner(screen)
         await pilot.pause()
 
@@ -94,13 +96,12 @@ async def test_esc_in_live_ask_human_clean_stops(tmp_path):
         assert screen._ask_human_banner is None, "banner должен быть снят"
         assert app.tui_state.ask_human_state is None, "ask_human_state должен быть сброшен"
         assert app.active_runner is None, "active_runner должен быть обнулён (clean-restart pattern)"
-        # [stopped]-метка в трейсе
-        from tui.widgets.trace_row import TraceRow
-        rows_text = " ".join(
-            f"{getattr(r, '_prefix', '')}{getattr(r, '_content', '')}"
-            for r in screen.query(TraceRow)
+        # Индикатор в состоянии cancelled (вместо [stopped]-строки в трейсе).
+        from tui.widgets.thinking_indicator import ThinkingIndicator
+        assert screen._thinking is not None, "ThinkingIndicator должен остаться (cancelled-state)"
+        assert screen._thinking._state == "cancelled", (
+            f"ThinkingIndicator должен быть в состоянии 'cancelled', got {screen._thinking._state!r}"
         )
-        assert "[stopped]" in rows_text, f"[stopped] метка должна быть в трейсе, got: {rows_text!r}"
 
 
 @pytest.mark.asyncio
