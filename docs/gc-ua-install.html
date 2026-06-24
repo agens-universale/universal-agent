@@ -174,7 +174,13 @@
 
   </ol>
 
-  <div class="note info"><span class="ic">i</span><div><b>Если не работает.</b> <span class="inl">git</span>/<span class="inl">uv</span> не найдены → повторите шаг&nbsp;1 и перезапустите терминал. uv/gc-ua поставились, но не видны → <span class="inl">uv tool update-shell</span> + перезапустить терминал (все ОС). Прямо сейчас, без перезапуска: macOS/Linux <span class="inl">source ~/.local/bin/env</span>, Windows (PowerShell) <span class="inl">$env:Path = "$env:USERPROFILE\.local\bin;$env:Path"</span>. Падает на сертификатах → флаг <span class="inl">--system-certs</span>. Ошибка&nbsp;401 → проверьте адрес и токен в конфиге.</div></div>
+  <div class="note info"><span class="ic">i</span><div><b>Если не работает.</b>
+  <ul style="margin:8px 0 0;padding-left:20px;line-height:1.75">
+    <li><span class="inl">git</span>/<span class="inl">uv</span> не найдены → повторите шаг&nbsp;1, перезапустите терминал.</li>
+    <li><span class="inl">uv</span>/<span class="inl">gc-ua</span> не видны → <span class="inl">uv tool update-shell</span> + перезапуск (все ОС). Без перезапуска: macOS/Linux <span class="inl">source ~/.local/bin/env</span>; Windows (PowerShell) <span class="inl">$env:Path = "$env:USERPROFILE\.local\bin;$env:Path"</span>.</li>
+    <li>Падает на сертификатах → флаг <span class="inl">--system-certs</span>.</li>
+    <li>Ошибка&nbsp;401 → проверьте адрес и токен в конфиге.</li>
+  </ul></div></div>
 
   <footer><span>© 2026 GigaCode Universal Agent</span><span class="support">Поддержка: <a href="https://t.me/+2AwDQhHxaAdhNmUy" target="_blank" rel="noopener">Телеграм</a> · <a href="https://sberchat.sberbank.ru/@gc-ua-support" target="_blank" rel="noopener">Сберчат</a></span></footer>
 
