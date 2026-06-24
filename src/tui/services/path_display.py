@@ -11,11 +11,12 @@ def truncate_path(path: str, max_cols: int) -> str:
     if len(path) <= max_cols:
         return path
     sep = "\\" if "\\" in path else "/"
+    leading = sep if path.startswith(sep) else ""
     nonempty = [p for p in path.split(sep) if p]
     if not nonempty:
         return path[-max_cols:]
     tail = nonempty[-1]
-    minimal = f"…{sep}{tail}"
+    minimal = f"{leading}…{sep}{tail}"
     if len(minimal) > max_cols:
         # даже хвост не влезает — показать конец хвоста с ведущим …
         return ("…" + tail)[-max_cols:]
@@ -23,7 +24,7 @@ def truncate_path(path: str, max_cols: int) -> str:
     best = minimal
     head_parts = nonempty[:-1]
     for k in range(1, len(head_parts) + 1):
-        cand = f"{sep.join(head_parts[:k])}{sep}…{sep}{tail}"
+        cand = f"{leading}{sep.join(head_parts[:k])}{sep}…{sep}{tail}"
         if len(cand) <= max_cols:
             best = cand
         else:

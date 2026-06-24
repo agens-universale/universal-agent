@@ -25,13 +25,10 @@ from intent_log.serialize import deserialize_list
 from tui.commands import build_default_registry, closest_command
 from tui.models import TaskCursor
 from rich.text import Text
-from tui.palette import ACCENT as _ACCENT
 from tui.palette import DEEP_DIM as _DEEP_DIM
 from tui.palette import DIM as _DIM
 from tui.palette import ERR as _ERR_RED
 from tui.palette import INK as _INK
-from tui.palette import OK as _OK
-from tui.palette import RUN_COLOR as _RUN_COLOR
 from tui.services.context_meter import render_context_meter
 from tui.services.export import export_thread
 from tui.services.path_display import truncate_path
@@ -317,13 +314,6 @@ class TraceScreen(Screen):
     def _current_cwd(self) -> str:
         """Рабочая папка сессии — фиксирована = папка запуска процесса."""
         return str(Path.cwd())
-
-    def _cwd_chip_text(self) -> str:
-        cwd = self._current_cwd()
-        # Длинный путь усекаем слева — хвост (имя проекта) важнее начала.
-        if len(cwd) > 48:
-            cwd = "…" + cwd[-47:]
-        return cwd
 
     def _show_footer_hint(self, text: str, seconds: float = 2.0) -> None:
         """Короткая подсказка в footer-left (esc-confirm — 2с, paste-hint — 5с)."""
@@ -962,6 +952,7 @@ class TraceScreen(Screen):
         self._refresh_header()
         self._refresh_meta()
         self._refresh_footer()
+        self._update_terminal_title()
         if self._trace_is_at_bottom():
             self.query_one("#trace", VerticalScroll).scroll_end(animate=False)
 
@@ -986,6 +977,7 @@ class TraceScreen(Screen):
         self._refresh_header()
         self._refresh_meta()
         self._refresh_footer()
+        self._update_terminal_title()
 
     # ──────────────────────── confirm banner (T2) ───────────────────────────
 

@@ -31,3 +31,18 @@ def test_posix_separator():
     p = "/home/dmitry/work/project"
     out = truncate_path(p, 16)
     assert out.endswith("project") and len(out) <= 16
+
+
+def test_absolute_posix_preserves_leading_slash_narrow():
+    p = "/home/dmitry/work/project"
+    out = truncate_path(p, 18)
+    assert out.startswith("/"), f"leading slash lost: {out!r}"
+    assert out.endswith("project"), f"tail lost: {out!r}"
+    assert len(out) <= 18
+
+
+def test_absolute_posix_preserves_leading_slash_wide():
+    p = "/home/dmitry/work/project"
+    out = truncate_path(p, 40)
+    assert out.startswith("/")
+    assert out == p
