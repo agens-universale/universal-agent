@@ -24,18 +24,16 @@ async def test_header_shows_session_id_and_meta_shows_model(tmp_path):
         scr.attach_active_task("7f3a9b1c")
         await pilot.pause()
 
-        # Хедер: Сессия:id слева, cwd (адаптивный) справа. Модель и статус — в мете.
+        # Хедер: Сессия:id слева, cwd (адаптивный) справа. Модель и статус — не в хедере.
         left = pilot.app.query_one("#header-left")
         header_left_text = str(left.render())
         assert "Сессия: 7f3a9b1c" in header_left_text
         assert "модель" not in header_left_text
         assert "[running]" not in header_left_text
 
-        # Мета: модель слева, статус справа.
-        meta_left = pilot.app.query_one("#meta-left", Static)
-        meta_right = pilot.app.query_one("#meta-right", Static)
-        assert "CodeAgent" in str(meta_left.render())
-        assert "[running]" in str(meta_right.render())
+        # Модель в footer-right (мета-полоса удалена в Task 3).
+        footer_right = pilot.app.query_one("#footer-right", Static)
+        assert "CodeAgent" in str(footer_right.render())
 
 
 @pytest.mark.asyncio

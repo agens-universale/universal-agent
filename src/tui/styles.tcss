@@ -35,11 +35,6 @@ Screen {
 #footer-left  { width: 1fr; color: $dim; }
 #footer-right { width: auto; color: $deep-dim; text-align: right; padding-right: 1; }
 
-/* Мета-полоса над вводом: модель·контекст слева, статус справа */
-#meta { height: 1; background: $bg; color: $deep-dim; padding: 0 1; }
-#meta-left  { width: 1fr; color: $deep-dim; }
-#meta-right { width: auto; color: $deep-dim; text-align: right; padding-right: 1; }
-
 /* Контентная зона трейса */
 #trace { height: 1fr; padding: 0 1; background: $bg; border-bottom: solid $deep-dim; }
 

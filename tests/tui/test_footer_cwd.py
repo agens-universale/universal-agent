@@ -26,5 +26,5 @@ async def test_footer_shows_session_cwd(tmp_path):
         pilot.app.screen.attach_active_task(tid)
         await pilot.pause(0.2)
         right = str(pilot.app.screen.query_one("#footer-right", Static).render())
-        # footer-right показывает статичный бренд-тег (cwd переехал в header-right).
-        assert "gc-ua" in right
+        # footer-right показывает модель (gc-ua убрано; cwd — в header-right).
+        assert "M" in right

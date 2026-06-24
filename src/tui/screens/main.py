@@ -174,16 +174,12 @@ class TraceScreen(Screen):
                 yield Static(left_text, id="header-left", markup=False)
                 yield Static(right_text, id="header-right", markup=False)
             yield VerticalScroll(id="trace")
-            with Horizontal(id="meta"):
-                ml, mr = self._compose_meta_segments()
-                yield Static(ml, id="meta-left", markup=False)
-                yield Static(mr, id="meta-right", markup=False)
             with Horizontal(id="input-row"):
                 yield Static("> ", id="input-prompt", markup=False)
                 yield CommandTextArea(placeholder=_PLACEHOLDER_READY, id="cmdinput")
             with Horizontal(id="footer"):
                 yield Static(_FOOTER_LEFT, id="footer-left", markup=False)
-                yield Static("gc-ua", id="footer-right", markup=False)
+                yield Static(self._compose_footer_right(), id="footer-right", markup=False)
 
     def _compose_header_segments(self) -> "tuple[str, str]":
         """Return (left_text, right_text) for header.
@@ -213,34 +209,19 @@ class TraceScreen(Screen):
 
     def on_resize(self, event) -> None:
         self._refresh_header()   # пересчитать усечение пути под новую ширину
-        self._refresh_meta()
 
-    def _compose_meta_segments(self) -> "tuple[Text, Text]":
-        """Return (left, right) для мета-полосы: модель·контекст слева, статус справа."""
+    def _compose_footer_right(self) -> "Text":
+        """Правый край футера: модель · контекст (метр — только chat_completions)."""
         cfg = getattr(self.app, "_config", None) or {}
         model = cfg.get("model", "?")
-        left = Text()
-        left.append(str(model), style=_INK)
+        text = Text()
+        text.append(str(model), style=_INK)
         meter = self._context_meter()
         if meter is not None:
-            text, color = meter
-            left.append("  ·  ", style=_DIM)
-            left.append(text, style=color)
-        right = Text()
-        if self._active_task_id is not None:
-            status = self._task_status_badge()
-            right.append(status, style=status_badge_color(status))
-        else:
-            right.append("[—]", style=_DEEP_DIM)
-        return left, right
-
-    def _refresh_meta(self) -> None:
-        ml, mr = self._compose_meta_segments()
-        try:
-            self.query_one("#meta-left", Static).update(ml)
-            self.query_one("#meta-right", Static).update(mr)
-        except Exception:
-            pass
+            mtext, color = meter
+            text.append("  ·  ", style=_DIM)
+            text.append(mtext, style=color)
+        return text
 
     def _context_meter(self) -> tuple[str, str] | None:
         """(text, color) индикатора контекста или None (скрыт)."""
@@ -306,8 +287,13 @@ class TraceScreen(Screen):
 
         Left-side update пропускается, если активен Esc-confirm hint — иначе
         тиковый poll затирал бы подсказку до её 2-секундного таймера.
-        Right-side (gc-ua) статична — не обновляется.
+        Right-side (модель·контекст) обновляется каждый тик — метр контекста
+        растёт по ходу прогона.
         """
+        try:
+            self.query_one("#footer-right", Static).update(self._compose_footer_right())
+        except Exception:
+            pass
         try:
             left = self.query_one("#footer-left", Static)
         except Exception:
@@ -455,7 +441,6 @@ class TraceScreen(Screen):
         else:
             self._render_records(records)
         self._refresh_header()
-        self._refresh_meta()
         self._refresh_footer()
         sp = self._session_last_prompt()
         if is_resume:
@@ -1005,7 +990,6 @@ class TraceScreen(Screen):
         inp.placeholder = "ваш ответ агенту…"
         inp.add_class("ask-human-mode")
         self._refresh_header()
-        self._refresh_meta()
         self._refresh_footer()
         self._update_terminal_title()
         if self._trace_is_at_bottom():
@@ -1030,7 +1014,6 @@ class TraceScreen(Screen):
         inp.placeholder = _PLACEHOLDER_READY
         inp.remove_class("ask-human-mode")
         self._refresh_header()
-        self._refresh_meta()
         self._refresh_footer()
         self._update_terminal_title()
 
@@ -1487,13 +1470,11 @@ class TraceScreen(Screen):
             # отвеченного вопроса — снять, иначе ввод уйдёт в stdin «вникуда».
             self._reconcile_ask_human_after_render(allow_remnant=False)
             self._refresh_header()
-            self._refresh_meta()
             self._refresh_footer()
             return
         self._cursor = tail.next_cursor
         self._render_records(tail.new_records, live=True)
         self._refresh_header()
-        self._refresh_meta()
 
     def _show_brand(self) -> None:
         if self._brand is not None and self._brand.parent is not None:
@@ -2589,7 +2570,6 @@ class TraceScreen(Screen):
         self._reset_render_state()
         self._clear_trace()
         self._refresh_header()
-        self._refresh_meta()
         self._refresh_footer()
 
     def _handle_command(self, raw: str) -> None:
