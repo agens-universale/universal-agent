@@ -80,7 +80,7 @@ repo_url: https://<КОРП-SOURCE-CONTROL>/<group>/<repo>
 
 ### 3. Install-команда в доках
 
-В `docs/gc-ua-install.html` (шаг 2) и `docs/install-quickstart-ru.md` (шаг 2) — заменить URL внешнего gitverse на корп-репо. Если раздаёшь из дефолтной ветки (`main`/`master`) — убрать `@feat/...`:
+В `docs/gc-ua-install.html` (шаг 2) — заменить URL внешнего gitverse на корп-репо. Если раздаёшь из дефолтной ветки (`main`/`master`) — убрать `@feat/...`:
 ```bash
 uv tool install "git+https://<КОРП-SOURCE-CONTROL>/<group>/<repo>" --system-certs
 ```
@@ -128,7 +128,7 @@ git push corp corp
 - [ ] Ветка `corp` создана.
 - [ ] `config.default.yml`: `completions_url` (`/api/v2`!), `use_ssl: true`, `model: vllm/DeepSeek-V4-Flash-262k`, авторизация — статический `Authorization` ЛИБО блок `agent_auth` (auto-JWT, реком.).
 - [ ] `recommended_mcp/config.yml`: `repo_url` → корп-репо.
-- [ ] `docs/gc-ua-install.html` + `docs/install-quickstart-ru.md`: install-URL → корп-репо, `@ветку` убрать (если из main).
+- [ ] `docs/gc-ua-install.html`: install-URL → корп-репо, `@ветку` убрать (если из main).
 - [ ] (опц.) корп-MCP mTLS пред-засеяны в `config.default.yml`.
 - [ ] Проверена установка из корп-репо: `uv tool install git+<корп> --system-certs` → `gc-ua` стартует, бьёт в корп-эндпоинт.
 - [ ] Описан процесс синка для команды (merge `main` → `corp`).
