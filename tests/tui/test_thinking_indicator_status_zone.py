@@ -24,7 +24,7 @@ def test_status_badge_right_aligned():
     ind = ThinkingIndicator(state="cancelled", clock=lambda: 0.0)
     ind.set_status("[stopped]", "#888888")
     body = ind._compose_status(Text("■ Отменено"), 30)
-    pad = 30 - cell_len("■ Отменено") - len("[stopped]")
+    pad = 30 - cell_len("■ Отменено") - cell_len("[stopped]")
     assert body.plain == "■ Отменено" + " " * pad + "[stopped]"
 
 
