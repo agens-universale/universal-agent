@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import threading
+import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -1341,11 +1342,12 @@ class TraceScreen(Screen):
                 outcome = "stopped"
             else:
                 outcome = "completed"
+            if outcome == "completed" and getattr(runner, "_stop_requested", False):
+                outcome = "stopped"   # прямой stop в обход _cmd_stop → не «completed»
             _KIND = {"completed": "done", "stopped": "cancelled", "failed": "failed"}
             _elapsed = None
             if outcome == "completed" and self._thinking_started_at is not None:
-                import time as _t
-                _elapsed = int(_t.monotonic() - self._thinking_started_at)
+                _elapsed = int(time.monotonic() - self._thinking_started_at)
             self._store.update_tui_meta(
                 self._active_task_id,
                 {"status": outcome,
@@ -1457,6 +1459,8 @@ class TraceScreen(Screen):
             outcome = None
             if self._store is not None and self._active_task_id is not None:
                 outcome = (self._store.get_task_meta(self._active_task_id).get("tui") or {}).get("status")
+            if outcome == "completed" and getattr(runner, "_stop_requested", False):
+                outcome = "stopped"
             _TERMINAL_STATE = {"completed": "done", "stopped": "cancelled", "failed": "failed"}
             term_state = _TERMINAL_STATE.get(outcome)
             if term_state is not None and self._thinking is not None:

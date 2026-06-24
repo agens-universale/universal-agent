@@ -170,10 +170,9 @@ from pathlib import Path
 
 @pytest.mark.asyncio
 async def test_indicator_shows_when_running_and_stays_on_stop(tmp_path):
-    """После остановки runner-а индикатор не уничтожается, а переходит
-    в терминальное состояние (done/cancelled) — строка-итог остаётся видна
-    до следующего user-send. При естественном завершении (_stop_run без
-    last_stop_requested) — состояние «done»."""
+    """После прямой остановки runner-а (runner.stop() без /stop → last_stop_requested
+    не выставляется, но runner._stop_requested=True) индикатор не уничтожается,
+    а переходит в состояние «cancelled» — прямой stop не «completed»."""
     pytest.importorskip("textual")
     from tui.app import TuiApp
     from tui.widgets.thinking_indicator import ThinkingIndicator
@@ -200,14 +199,14 @@ async def test_indicator_shows_when_running_and_stays_on_stop(tmp_path):
 
         assert len(pilot.app.query(ThinkingIndicator)) == 1
 
-        # Остановим runner напрямую (без /stop → last_stop_requested не выставляется)
-        # → outcome = «completed» → индикатор «done», не уничтожается.
+        # Прямой stop (в обход _cmd_stop → last_stop_requested не выставляется,
+        # но runner._stop_requested=True) → outcome должен быть «stopped» → «cancelled».
         pilot.app.active_runner.stop()
         await pilot.pause(0.5)
 
         assert len(pilot.app.query(ThinkingIndicator)) == 1
         ind = pilot.app.query_one(ThinkingIndicator)
-        assert ind._state in ("done", "cancelled")  # терминальное (зависит от meta)
+        assert ind._state == "cancelled"  # прямой stop → stopped → cancelled
 
 
 @pytest.mark.asyncio
