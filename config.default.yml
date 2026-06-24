@@ -28,7 +28,7 @@ backend:
     Authorization: "Bearer <ВПИШИТЕ_ТОКЕН>"
 
 agent:
-  model: "gigacode_agent_v1_rc"
+  model: "gigacode_agent_v1.6_rc"
   system_prompt_id: v1
   use_server_subagents: true
   use_local_subagents: true
