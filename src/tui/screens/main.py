@@ -40,6 +40,7 @@ from tui.widgets.command_input import CommandTextArea
 from tui.widgets.command_palette import CommandPalette
 from tui.widgets.tool_call_row import ToolCallRow
 from tui import branding
+from tui.services.terminal_title import format_terminal_title, set_terminal_title
 
 
 # Один набор команд в футере; /stop добавляется только при активном run.
@@ -652,13 +653,18 @@ class TraceScreen(Screen):
         """Обработка отправки user query: обнулить счётчик событий с последнего
         user-send и запомнить текст для cancel-with-undo (Tasks 9-10).
         Дополнительно: append текста в input-history и выход из history-навигации."""
-        from tui.services.terminal_title import format_terminal_title, set_terminal_title
-        set_terminal_title(format_terminal_title(text))
-        self._events_since_last_user_send = 0
         self._last_user_send_text = text
+        self._update_terminal_title()
+        self._events_since_last_user_send = 0
         if self._history is not None:
             self._history.append(text)
         self._reset_history_navigation()
+
+    def _update_terminal_title(self) -> None:
+        """Заголовок терминала = последний промпт + текущий статус (для таба/таскбара)."""
+        status = self._task_status_badge() if self._active_task_id is not None else None
+        prompt = self._last_user_send_text if self._active_task_id is not None else None
+        set_terminal_title(format_terminal_title(prompt, status))
 
     def _reset_thinking_timer(self) -> None:
         """Сбросить таймер «думаю…»: новая точка отсчёта = монотоника сейчас,
@@ -1278,6 +1284,7 @@ class TraceScreen(Screen):
                 outcome = "completed"
             self._store.update_tui_meta(self._active_task_id, {"status": outcome})
             self.app.last_stop_requested = False
+            self._update_terminal_title()
         self._was_running = is_running
         # Активный ask_human — агент НЕ работает, он ждёт ответ юзера.
         # Индикатор активности здесь обманывает; банер ask_human уже
@@ -2107,6 +2114,7 @@ class TraceScreen(Screen):
         ))
 
     def _cmd_new(self) -> None:
+        set_terminal_title(format_terminal_title())
         runner = getattr(self.app, "active_runner", None)
         is_running = runner is not None and runner.is_running()
         if not is_running:
