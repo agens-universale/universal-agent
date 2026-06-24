@@ -71,13 +71,17 @@ def test_agent_auth_set_drops_token_from_guide():
     assert "настроен" in text
 
 
-def test_agent_auth_without_endpoint_does_not_satisfy_auth():
+def test_no_token_and_no_complete_agent_auth_is_configured():
+    """Нет токен-заголовка и нет полноценного agent_auth, но и нет шаблонного
+    плейсхолдера → конфиг настроен. Локальный прокси / эндпоинт без auth сам ставит
+    авторизацию; гейт ловит только незаполненный сентинел, а не намеренное отсутствие.
+    `agent_auth: {}` — то, во что config.py:277 разворачивает отсутствие секции."""
     cfg = {
-        "completions_url": "https://real/v1/chat/completions",
-        "model": "gigacode_agent_v1.6_rc",
+        "completions_url": "http://127.0.0.1:8014/v1/chat/completions",
+        "model": "MiniMaxAI/MiniMax-M2.7",
         "agent_auth": {},
     }
-    assert onboarding.is_unconfigured(cfg) is True
+    assert onboarding.is_unconfigured(cfg) is False
 
 
 # --- adaptive model ------------------------------------------------------

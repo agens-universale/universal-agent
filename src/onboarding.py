@@ -24,18 +24,20 @@ def _model_set(c: Dict[str, Any]) -> bool:
     return c.get("model") not in (None, "", MODEL_SENTINEL)
 
 
-def _token_set(c: Dict[str, Any]) -> bool:
-    auth = (c.get("chat_completion_headers") or {}).get("Authorization")
-    return auth not in (None, "", TOKEN_SENTINEL)
-
-
 def _agent_auth_set(c: Dict[str, Any]) -> bool:
     auth_cfg = c.get("agent_auth") or {}
     return bool(auth_cfg) and bool(auth_cfg.get("auth_endpoint"))
 
 
 def _auth_set(c: Dict[str, Any]) -> bool:
-    return _token_set(c) or _agent_auth_set(c)
+    # Auth «не задан» (pending) ТОЛЬКО если в конфиге остался шаблонный плейсхолдер
+    # токена (и нет полноценного agent_auth). Реальный токен ИЛИ намеренное отсутствие
+    # заголовка (локальный прокси / эндпоинт без auth сам ставит авторизацию) → задан.
+    # Гейт — детектор незаполненного шаблона, а не валидатор auth: отсутствие ≠ сентинел.
+    auth = (c.get("chat_completion_headers") or {}).get("Authorization")
+    if auth == TOKEN_SENTINEL:
+        return _agent_auth_set(c)
+    return True
 
 
 class _Requirement(NamedTuple):
