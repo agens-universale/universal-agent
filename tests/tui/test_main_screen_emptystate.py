@@ -64,9 +64,8 @@ async def test_footer_switches_to_main_text_on_attach_active_task(tmp_path):
         assert "Esc" not in rendered
         assert "выход" not in rendered
         footer_right = pilot.app.query_one("#footer-right")
-        # Рабочая папка сессии (Path.cwd() при отсутствии задачи и pending_cwd).
-        from pathlib import Path
-        assert str(Path.cwd()) in str(footer_right.render())
+        # footer-right — статичный бренд-тег (cwd переехал в header-right).
+        assert "gc-ua" in str(footer_right.render())
 
         # Attach task → idle (нет active_runner) → тот же набор команд, /stop НЕТ.
         pilot.app.screen.attach_active_task(tid)
@@ -83,9 +82,9 @@ async def test_footer_switches_to_main_text_on_attach_active_task(tmp_path):
         assert "/stop" not in rendered
         assert "Esc" not in rendered
         assert "back" not in rendered
-        # Right side shows the session working directory chip.
+        # footer-right — статичный бренд-тег (cwd переехал в header-right).
         footer_right = pilot.app.query_one("#footer-right")
-        assert str(Path.cwd()) in str(footer_right.render())
+        assert "gc-ua" in str(footer_right.render())
 
 
 @pytest.mark.asyncio

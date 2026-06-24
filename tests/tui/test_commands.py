@@ -125,8 +125,6 @@ def test_compact_command_registered_with_alias():
 
 
 def test_headers_have_no_fake_version():
-    from tui.screens.main import _HEADER_RIGHT as MAIN_RIGHT
     from tui.screens.skills import _HEADER_RIGHT as SK_RIGHT
-    for s in (MAIN_RIGHT, SK_RIGHT):
-        assert "v0.2" not in s
-        assert branding.HEADER_RIGHT in s
+    assert "v0.2" not in SK_RIGHT
+    assert branding.HEADER_RIGHT in SK_RIGHT

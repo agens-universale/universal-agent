@@ -36,6 +36,7 @@ async def test_header_left_session_when_active(tmp_path):
 
 @pytest.mark.asyncio
 async def test_meta_has_model_context_and_status(tmp_path):
+    """meta-left содержит модель; meta-right — бейдж статуса при активной задаче."""
     pytest.importorskip("textual")
     from tui.app import TuiApp
     from textual.widgets import Static
@@ -43,6 +44,16 @@ async def test_meta_has_model_context_and_status(tmp_path):
     threads_dir.mkdir()
     async with TuiApp(threads_dir=str(threads_dir)).run_test() as pilot:
         scr = pilot.app.screen
+
+        # --- Состояние до задачи: meta-right = [—] ---
+        ml_text = str(scr.query_one("#meta-left", Static).render())
+        mr_text = str(scr.query_one("#meta-right", Static).render())
+        # Модель из конфига (по умолчанию "?" или что выставил TuiApp в _config)
+        cfg_model = str((getattr(pilot.app, "_config", None) or {}).get("model", "?"))
+        assert cfg_model in ml_text, f"model {cfg_model!r} не найдена в meta-left: {ml_text!r}"
+        assert "[—]" in mr_text, f"Ожидался [—] в свежем meta-right, получено: {mr_text!r}"
+
+        # --- Активируем задачу ---
         (threads_dir / "meta_cli_abcd1234.json").write_text(
             '{"thread_id":"abcd1234","status":"stopped","updated_at":"2026-01-01T00:00:00+00:00","messages_count":0}',
             encoding="utf-8",
@@ -50,5 +61,10 @@ async def test_meta_has_model_context_and_status(tmp_path):
         (threads_dir / "data_cli_abcd1234.jsonl").write_text("", encoding="utf-8")
         scr.attach_active_task("abcd1234")
         await pilot.pause()
-        meta_left = scr.query_one("#meta-left", Static)
-        assert meta_left is not None   # мета-полоса существует
+
+        ml_text = str(scr.query_one("#meta-left", Static).render())
+        mr_text = str(scr.query_one("#meta-right", Static).render())
+        # Модель по-прежнему в левой части
+        assert cfg_model in ml_text, f"model {cfg_model!r} не найдена в meta-left: {ml_text!r}"
+        # Статус-бейдж появился в правой части (для stopped-задачи это [stopped])
+        assert "[" in mr_text, f"Бейдж статуса не найден в meta-right: {mr_text!r}"

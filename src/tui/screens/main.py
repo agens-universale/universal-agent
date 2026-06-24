@@ -27,7 +27,6 @@ from tui.models import TaskCursor
 from rich.text import Text
 from tui.palette import ACCENT as _ACCENT
 from tui.palette import DEEP_DIM as _DEEP_DIM
-from tui.palette import DEEP_DIM as _ERR_HINT
 from tui.palette import DIM as _DIM
 from tui.palette import ERR as _ERR_RED
 from tui.palette import INK as _INK
@@ -35,6 +34,7 @@ from tui.palette import OK as _OK
 from tui.palette import RUN_COLOR as _RUN_COLOR
 from tui.services.context_meter import render_context_meter
 from tui.services.export import export_thread
+from tui.services.path_display import truncate_path
 from tui.services.status_badge import status_badge_color
 from message_format import calc_history_chars_for_trigger
 from tui.services.git_info import current_branch
@@ -52,8 +52,6 @@ from tui.services.terminal_title import format_terminal_title, set_terminal_titl
 # (/skills, /export доступны через палитру — в футере лишние.)
 _FOOTER_LEFT = "/sessions  /help  /config  /mcp"
 _FOOTER_RUNNING_LEFT = "/stop  /sessions  /help  /config  /mcp"
-_HEADER_EMPTY = branding.HEADER_LEFT_EMPTY
-_HEADER_RIGHT = branding.HEADER_RIGHT
 _PLACEHOLDER_READY = "опишите задачу или /команда"
 _HINT_TEXT = {
     "clear": "Esc ещё раз, чтобы очистить",
@@ -180,9 +178,7 @@ class TraceScreen(Screen):
                 yield CommandTextArea(placeholder=_PLACEHOLDER_READY, id="cmdinput")
             with Horizontal(id="footer"):
                 yield Static(_FOOTER_LEFT, id="footer-left", markup=False)
-                yield Static(
-                    self._cwd_chip_text(), id="footer-right", markup=False,
-                )
+                yield Static("gc-ua", id="footer-right", markup=False)
 
     def _compose_header_segments(self) -> "tuple[str, str]":
         """Return (left_text, right_text) for header.
@@ -199,31 +195,8 @@ class TraceScreen(Screen):
             left = branding.WELCOME
         else:
             left = f"Сессия: {self._active_task_id[:8]}"
-        right = self._truncate_path_for_header(self._current_cwd())
+        right = truncate_path(self._current_cwd(), self._header_right_cols())
         return left, right
-
-    def _truncate_path_for_header(self, path: str) -> str:
-        """Адаптивное усечение cwd для хедер-право."""
-        max_cols = self._header_right_cols()
-        if len(path) <= max_cols:
-            return path
-        sep = "\\" if "\\" in path else "/"
-        nonempty = [p for p in path.split(sep) if p]
-        if not nonempty:
-            return ("…" + path)[-max_cols:] if max_cols > 0 else ""
-        tail = nonempty[-1]
-        minimal = f"…{sep}{tail}"
-        if len(minimal) > max_cols:
-            return ("…" + tail)[-max_cols:]
-        best = minimal
-        head_parts = nonempty[:-1]
-        for k in range(1, len(head_parts) + 1):
-            cand = f"{sep.join(head_parts[:k])}{sep}…{sep}{tail}"
-            if len(cand) <= max_cols:
-                best = cand
-            else:
-                break
-        return best
 
     def _header_right_cols(self) -> int:
         """Доступная ширина правого слота хедера для усечения пути."""
@@ -235,6 +208,7 @@ class TraceScreen(Screen):
 
     def on_resize(self, event) -> None:
         self._refresh_header()   # пересчитать усечение пути под новую ширину
+        self._refresh_meta()
 
     def _compose_meta_segments(self) -> "tuple[Text, Text]":
         """Return (left, right) для мета-полосы: модель·контекст слева, статус справа."""
@@ -242,25 +216,18 @@ class TraceScreen(Screen):
         model = cfg.get("model", "?")
         left = Text()
         left.append(str(model), style=_INK)
+        meter = self._context_meter()
+        if meter is not None:
+            text, color = meter
+            left.append("  ·  ", style=_DIM)
+            left.append(text, style=color)
         right = Text()
         if self._active_task_id is not None:
             status = self._task_status_badge()
-            right.append(status, style=self._meta_status_color(status))
+            right.append(status, style=status_badge_color(status))
         else:
             right.append("[—]", style=_DEEP_DIM)
         return left, right
-
-    def _meta_status_color(self, status: str) -> str:
-        """Цвет бейджа статуса в мета-полосе."""
-        if status == "[running]":
-            return _RUN_COLOR
-        if status == "[asking]":
-            return _ACCENT
-        if status == "[completed]":
-            return _OK
-        if status == "[failed]":
-            return _ERR_RED
-        return _DIM
 
     def _refresh_meta(self) -> None:
         ml, mr = self._compose_meta_segments()
@@ -328,28 +295,24 @@ class TraceScreen(Screen):
 
         Left-side update пропускается, если активен Esc-confirm hint — иначе
         тиковый poll затирал бы подсказку до её 2-секундного таймера.
-        Right-side (cwd-чип) обновляется всегда.
+        Right-side (gc-ua) статична — не обновляется.
         """
         try:
             left = self.query_one("#footer-left", Static)
-            right = self.query_one("#footer-right", Static)
         except Exception:
             return
         suppress_left = self._footer_hint_active
         if self.app.tui_state.ask_human_state is not None:
             if not suppress_left:
                 left.update("[Esc] /stop  [Enter] ответить")
-            right.update(self._cwd_chip_text())
         elif self.app.tui_state.active_task_id is None:
             if not suppress_left:
                 left.update(_FOOTER_LEFT)
-            right.update(self._cwd_chip_text())
         else:
             runner = getattr(self.app, "active_runner", None)
             is_running = runner is not None and runner.is_running()
             if not suppress_left:
                 left.update(_FOOTER_RUNNING_LEFT if is_running else _FOOTER_LEFT)
-            right.update(self._cwd_chip_text())
 
     def _current_cwd(self) -> str:
         """Рабочая папка сессии — фиксирована = папка запуска процесса."""
@@ -2906,7 +2869,7 @@ class TraceScreen(Screen):
         line = Text()
         line.append(f"[!] неизвестная команда: /{name}", style=_ERR_RED)
         if suggestion:
-            line.append(f" (вы имели в виду /{suggestion}?)", style=_ERR_HINT)
+            line.append(f" (вы имели в виду /{suggestion}?)", style=_DEEP_DIM)
         self._trace_mount(Static(line, classes="line-error", markup=False))
 
     def _mount_trace_row(
