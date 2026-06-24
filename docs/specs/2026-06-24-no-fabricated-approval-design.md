@@ -116,15 +116,17 @@ own / near-repeat». Нужно явно вывести **подтвержден
 
 ### Текст (выверенный черновик — добавляется в конец секции turn-handoff)
 
-> A request for explicit confirmation or approval **before** a consequential, irreversible, or plan-committing action is itself a legitimate hand-off — not stalling — even if the user already made a related choice earlier; a prior choice (a level, an option) is not standing approval to act.
+> A request for explicit confirmation or approval **before** a consequential, irreversible, or plan-committing action is itself a legitimate hand-off — not stalling — even if the user already made a related choice earlier.
 
 Точки точности:
 - Выводит approval-перед-действием из-под гарда «could proceed on its own / near-repeat».
-- **«a prior choice … is not standing approval to act»** — тот же принцип, что в
-  Компоненте 1 (единый инвариант «прежний выбор ≠ постоянное согласие» и в bounce, и в
-  судье).
+  «even if the user already made a related choice earlier» прямо снимает рассуждение
+  судьи «юзер выбрал минимум → иди делай → stalling».
 - «consequential, irreversible, or plan-committing» — узко: не открывает лазейку для
   «спрашиваю вместо тривиальной работы» (это остаётся gap по прежнему гарду).
+- **Сознательно НЕ дублируем тут «прежний выбор ≠ согласие действовать»** — это про
+  *право действовать* (забота агента/bounce, Компонент 1), а судья решает только
+  *классификацию хода* (хэндофф vs stalling). Своя ось — чище фокус.
 
 ---
 
@@ -148,8 +150,8 @@ own / near-repeat». Нужно явно вывести **подтвержден
    `NO_TOOL_CALL_BOUNCE_MESSAGE` содержат маркеры: `their reply has NOT arrived`,
    `Do not assume, invent, or act on`, `not standing approval`. (Дописать в
    существующий `tests/test_no_tool_call_bounce.py`.)
-2. **Судья (Компонент 2):** `_load_guard_prompt()` содержит маркеры новой фразы:
-   `explicit confirmation or approval before a consequential`, `not standing approval to act`.
+2. **Судья (Компонент 2):** `_load_guard_prompt()` содержит маркер новой фразы:
+   `explicit confirmation or approval before a consequential`.
    (Дописать в `tests/test_intent_guard_final_report_consistency.py`.)
 3. **Регресс:** существующие тесты политики сообщений + intent_guard/finish-gate.
 4. **Поведенческая валидация (ручная/живая):** реплей сессии 31a0a127 — запрос
