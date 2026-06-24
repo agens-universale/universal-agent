@@ -59,6 +59,31 @@ async def test_resume_old_session_stopped_falls_back(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_resume_unrecorded_outcome_no_line(tmp_path):
+    """Сессия без записанного исхода (ни last_indicator, ни tui.status, ни
+    meta.status) → строку-итог НЕ рисуем (не выдумываем исход)."""
+    pytest.importorskip("textual")
+    from tui.app import TuiApp
+
+    class _Store:
+        def get_task_meta(self, tid):
+            return {"tui": {}}        # исход нигде не записан
+        def read_live_messages(self, tid):
+            return []
+
+    async with TuiApp(threads_dir=str(tmp_path / "threads")).run_test() as pilot:
+        scr = pilot.app.screen
+        scr._active_task_id = "unknown"
+        scr._store = _Store()
+        scr.app.active_runner = None
+        scr._thinking = None
+
+        scr._restore_terminal_indicator()
+        await pilot.pause()
+        assert scr._thinking is None
+
+
+@pytest.mark.asyncio
 async def test_resume_completed_shows_done_with_elapsed(tmp_path, monkeypatch):
     pytest.importorskip("textual")
     from tui.app import TuiApp

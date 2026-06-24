@@ -247,10 +247,12 @@ class TraceScreen(Screen):
         msgs = self._store.read_live_messages(self._active_task_id)
         return render_context_meter(calc_history_chars_for_trigger(msgs), threshold)
 
-    def _session_status_word(self) -> str:
+    def _session_status_word(self) -> "Optional[str]":
         """Сырое слово статуса сессии (без скобок): asking/running/completed/
-        stopped/failed. Единый источник для бейджа трейса (в скобках) и
-        заголовка окна (без скобок)."""
+        stopped/failed — или None, если исход НЕ записан (старая сессия / прогон
+        не дошёл до чистого финиша). Единый источник для бейджа трейса (в скобках),
+        заголовка окна (без скобок) и строки-итога. None → ничего не выдумываем:
+        ни «stopped» в заголовке, ни строки-итога (см. _restore_terminal_indicator)."""
         # ask_human pending — агент ждёт ответа пользователя (приоритет).
         tui_state = getattr(self.app, "tui_state", None)
         if tui_state is not None and tui_state.ask_human_state is not None:
@@ -270,10 +272,11 @@ class TraceScreen(Screen):
                 return "completed"
             if meta.get("status") in ("failed", "unknown_failed"):
                 return "failed"
-        return "stopped"
+        return None   # исход неизвестен — не выдумываем «stopped»
 
-    def _task_status_badge(self) -> str:
-        return f"[{self._session_status_word()}]"
+    def _task_status_badge(self) -> "Optional[str]":
+        word = self._session_status_word()
+        return f"[{word}]" if word else None
 
     def _refresh_header(self) -> None:
         left, right = self._compose_header_segments()
@@ -637,20 +640,16 @@ class TraceScreen(Screen):
         runner = getattr(self.app, "active_runner", None)
         if runner is not None and runner.is_running():
             return
-        meta = self._store.get_task_meta(self._active_task_id)
-        tui = meta.get("tui") or {}
+        tui = self._store.get_task_meta(self._active_task_id).get("tui") or {}
         last = tui.get("last_indicator")
         if isinstance(last, dict) and last.get("kind") in ("done", "cancelled", "failed"):
             kind = last["kind"]
             elapsed = last.get("elapsed")
         else:
-            # Фолбэк: синтезируем kind из персистентного статуса (без elapsed).
-            status = tui.get("status")
-            if status not in ("completed", "stopped", "failed"):
-                status = {"completed": "completed", "failed": "failed",
-                          "unknown_failed": "failed"}.get(meta.get("status"))
+            # Фолбэк: kind из единого источника статуса (того же, что заголовок).
+            # None (исход не записан) → строку-итог НЕ рисуем — не выдумываем исход.
             kind = {"completed": "done", "stopped": "cancelled",
-                    "failed": "failed"}.get(status)
+                    "failed": "failed"}.get(self._session_status_word())
             if kind is None:
                 return
             elapsed = None
@@ -1354,12 +1353,11 @@ class TraceScreen(Screen):
             )
             self._error_shown = True
             self._mark_pending_failed()
-        # Инвариант: running tool-строки живут, только пока задача жива по тому
-        # же критерию, что и статус в шапке (_task_status_badge: локальный
-        # runner / ask_human / внешний writer с meta.status=running). Стоп,
-        # обрыв runner'а или resume брошенного треда → осиротевшие вызовы
-        # финализируются «прервано».
-        if self._active_calls and self._task_status_badge() in ("[stopped]", "[completed]", "[failed]"):
+        # Инвариант: running tool-строки живут, только пока задача жива (live
+        # runner / ask_human). Любой НЕ-live статус — стоп, обрыв runner'а, resume
+        # брошенного треда или неизвестный исход (бейдж None) → осиротевшие вызовы
+        # финализируются «прервано». Критерий «жива» = бейдж среди live-состояний.
+        if self._active_calls and self._task_status_badge() not in ("[running]", "[asking]"):
             for row in self._active_calls.values():
                 row.mark_interrupted()
             self._active_calls.clear()
