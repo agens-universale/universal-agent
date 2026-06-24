@@ -1369,6 +1369,14 @@ class TraceScreen(Screen):
                 outcome = "stopped"
             else:
                 outcome = "completed"
+            # `runner` здесь может быть None: ручная отмена (_cmd_stop /
+            # _stop_for_ask_human) уже обнулила active_runner через
+            # _stop_and_replace_runner — тогда исход несёт last_stop_requested
+            # выше. getattr(None, "_stop_requested", False) → False, и это
+            # корректно. Случай ниже ловит ПРЯМОЙ runner.stop() в обход _cmd_stop
+            # (active_runner НЕ обнулён, _stop_requested=True, но
+            # last_stop_requested не выставлен) → иначе falling-edge записал бы
+            # «completed» ложно. НЕ менять getattr на чтение active_runner.
             if outcome == "completed" and getattr(runner, "_stop_requested", False):
                 outcome = "stopped"   # прямой stop в обход _cmd_stop → не «completed»
             _KIND = {"completed": "done", "stopped": "cancelled", "failed": "failed"}
