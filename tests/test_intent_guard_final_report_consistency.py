@@ -165,5 +165,13 @@ def test_guard_prompt_contains_turn_handoff_rule():
     assert "near-repeat of an earlier one" in prompt
 
 
+def test_guard_prompt_accepts_confirmation_before_action():
+    """Судья знает: запрос одобрения перед действием — легитимный hand-off, не stalling."""
+    from intent_guard.final_report_consistency import _load_guard_prompt
+
+    prompt = _load_guard_prompt()
+    assert "explicit confirmation or approval **before** a consequential" in prompt
+
+
 if __name__ == "__main__":
     unittest.main()

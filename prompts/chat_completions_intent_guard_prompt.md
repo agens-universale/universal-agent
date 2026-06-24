@@ -26,6 +26,8 @@ Some open turns are **conversational**: their correct completion is a message th
 
 Keep it **narrow** — a normal Axis A gap (not a hand-off) when the agent could proceed on its own, the question is vacuous or a near-repeat of an earlier one (stalling), or intent required concrete actions (write / run / fetch / …) absent or failed in the trace.
 
+A request for explicit confirmation or approval **before** a consequential, irreversible, or plan-committing action is itself a legitimate hand-off — not stalling — even if the user already made a related choice earlier.
+
 ## Trace digest — how to read it
 
 **Structural checks (strict):** For each user-facing requirement in `current_user_requests`, look for visible evidence in the digest:
