@@ -446,6 +446,7 @@ class TraceScreen(Screen):
         sp = self._session_last_prompt()
         if is_resume:
             self._resumed_prompt = sp            # авторитетно из стора (переключение)
+            self._restore_terminal_indicator()   # строка-итог прошлого хода
         elif sp is not None:
             self._resumed_prompt = sp            # auto-create: не затирать свежий send
         self._update_terminal_title()   # статус + последний промпт сессии в таб
@@ -622,6 +623,32 @@ class TraceScreen(Screen):
         trace.mount(indicator)
         if following:
             trace.scroll_end(animate=False)
+
+    def _restore_terminal_indicator(self) -> None:
+        """На resume сессии: смонтировать строку-итог прошлого хода из
+        meta.tui.last_indicator (done/cancelled/failed). Только если прогона нет
+        и индикатор ещё не смонтирован."""
+        if self._thinking is not None or self._store is None or self._active_task_id is None:
+            return
+        runner = getattr(self.app, "active_runner", None)
+        if runner is not None and runner.is_running():
+            return
+        last = (self._store.get_task_meta(self._active_task_id).get("tui") or {}).get("last_indicator")
+        if not isinstance(last, dict):
+            return
+        kind = last.get("kind")
+        if kind not in ("done", "cancelled", "failed"):
+            return
+        from tui.widgets.thinking_indicator import ThinkingIndicator
+        elapsed = last.get("elapsed")
+        ind = ThinkingIndicator(
+            state=kind,
+            frozen_elapsed=elapsed if isinstance(elapsed, int) else None,
+        )
+        self._thinking = ind
+        trace = self.query_one("#trace", VerticalScroll)
+        trace.mount(ind)
+        trace.scroll_end(animate=False)
 
     def _hide_thinking_indicator(self) -> None:
         """Скрыть индикатор (CSS `.hidden`), не удаляя — анимация продолжает идти."""

@@ -1,0 +1,65 @@
+import pytest
+
+
+def _store_with_last_indicator(last):
+    class _Store:
+        def get_task_meta(self, tid):
+            return {"tui": {"last_indicator": last}}
+        def read_live_messages(self, tid):
+            return []
+    return _Store()
+
+
+@pytest.mark.asyncio
+async def test_resume_completed_shows_done_with_elapsed(tmp_path, monkeypatch):
+    pytest.importorskip("textual")
+    from tui.app import TuiApp
+
+    async with TuiApp(threads_dir=str(tmp_path / "threads")).run_test() as pilot:
+        scr = pilot.app.screen
+        scr._active_task_id = "t1"
+        scr._store = _store_with_last_indicator({"kind": "done", "elapsed": 12})
+        scr.app.active_runner = None
+        scr._thinking = None
+
+        scr._restore_terminal_indicator()
+        await pilot.pause()
+        assert scr._thinking is not None
+        assert scr._thinking._render_text().plain == "✓ Выполнил за 12с"
+
+
+@pytest.mark.asyncio
+async def test_resume_stopped_shows_cancelled(tmp_path):
+    pytest.importorskip("textual")
+    from tui.app import TuiApp
+
+    async with TuiApp(threads_dir=str(tmp_path / "threads")).run_test() as pilot:
+        scr = pilot.app.screen
+        scr._active_task_id = "t1"
+        scr._store = _store_with_last_indicator({"kind": "cancelled", "elapsed": None})
+        scr.app.active_runner = None
+        scr._thinking = None
+
+        scr._restore_terminal_indicator()
+        await pilot.pause()
+        assert scr._thinking._render_text().plain == "■ Отменено"
+
+
+@pytest.mark.asyncio
+async def test_restore_noop_when_running(tmp_path):
+    pytest.importorskip("textual")
+    from tui.app import TuiApp
+
+    async with TuiApp(threads_dir=str(tmp_path / "threads")).run_test() as pilot:
+        scr = pilot.app.screen
+        scr._active_task_id = "t1"
+        scr._store = _store_with_last_indicator({"kind": "done", "elapsed": 5})
+
+        class _R:
+            def is_running(self): return True
+        scr.app.active_runner = _R()
+        scr._thinking = None
+
+        scr._restore_terminal_indicator()
+        await pilot.pause()
+        assert scr._thinking is None, "при живом прогоне не восстанавливаем итог"
