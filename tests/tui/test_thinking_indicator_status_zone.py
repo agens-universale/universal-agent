@@ -20,6 +20,12 @@ def test_done_uses_frozen_elapsed():
     assert ind._render_text().plain == "✓ Выполнил за 12с"
 
 
+def test_done_without_elapsed_shows_bare():
+    # Восстановление старой сессии без сохранённого elapsed → «✓ Выполнил» без «за N».
+    ind = ThinkingIndicator(state="done", frozen_elapsed=None, clock=lambda: 0.0)
+    assert ind._render_text().plain == "✓ Выполнил"
+
+
 def test_status_badge_right_aligned():
     ind = ThinkingIndicator(state="cancelled", clock=lambda: 0.0)
     ind.set_status("[stopped]", "#888888")

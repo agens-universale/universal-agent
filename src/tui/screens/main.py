@@ -625,22 +625,36 @@ class TraceScreen(Screen):
             trace.scroll_end(animate=False)
 
     def _restore_terminal_indicator(self) -> None:
-        """На resume сессии: смонтировать строку-итог прошлого хода из
-        meta.tui.last_indicator (done/cancelled/failed). Только если прогона нет
-        и индикатор ещё не смонтирован."""
+        """На resume сессии: смонтировать строку-итог прошлого хода. Только если
+        прогона нет и индикатор ещё не смонтирован.
+
+        Источник: meta.tui.last_indicator (с elapsed). Фолбэк для сессий без него
+        (созданы до фичи / другим writer'ом) — персистентный статус
+        meta.tui.status / meta.status, маппится в kind, elapsed неизвестен (None →
+        «✓ Выполнил» без «за N»)."""
         if self._thinking is not None or self._store is None or self._active_task_id is None:
             return
         runner = getattr(self.app, "active_runner", None)
         if runner is not None and runner.is_running():
             return
-        last = (self._store.get_task_meta(self._active_task_id).get("tui") or {}).get("last_indicator")
-        if not isinstance(last, dict):
-            return
-        kind = last.get("kind")
-        if kind not in ("done", "cancelled", "failed"):
-            return
+        meta = self._store.get_task_meta(self._active_task_id)
+        tui = meta.get("tui") or {}
+        last = tui.get("last_indicator")
+        if isinstance(last, dict) and last.get("kind") in ("done", "cancelled", "failed"):
+            kind = last["kind"]
+            elapsed = last.get("elapsed")
+        else:
+            # Фолбэк: синтезируем kind из персистентного статуса (без elapsed).
+            status = tui.get("status")
+            if status not in ("completed", "stopped", "failed"):
+                status = {"completed": "completed", "failed": "failed",
+                          "unknown_failed": "failed"}.get(meta.get("status"))
+            kind = {"completed": "done", "stopped": "cancelled",
+                    "failed": "failed"}.get(status)
+            if kind is None:
+                return
+            elapsed = None
         from tui.widgets.thinking_indicator import ThinkingIndicator
-        elapsed = last.get("elapsed")
         ind = ThinkingIndicator(
             state=kind,
             frozen_elapsed=elapsed if isinstance(elapsed, int) else None,

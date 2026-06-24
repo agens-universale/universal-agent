@@ -221,11 +221,15 @@ class ThinkingIndicator(Static):
         text = Text()
         width = self._safe_width()
         if self._state == _STATE_DONE:
-            secs = self._frozen_elapsed if self._frozen_elapsed is not None \
-                else int(self._clock() - self._started_at)
             text.append("✓", style=_DIM)
             text.append(" ")
-            text.append(f"Выполнил за {format_duration(secs)}", style=_DIM)
+            # Живой done всегда замораживает elapsed в set_state → «Выполнил за N».
+            # frozen_elapsed=None — восстановление старой сессии без сохранённого
+            # времени → «Выполнил» без «за N» (не выдумываем 0с).
+            if self._frozen_elapsed is not None:
+                text.append(f"Выполнил за {format_duration(self._frozen_elapsed)}", style=_DIM)
+            else:
+                text.append("Выполнил", style=_DIM)
             return self._compose_status(text, width)
         if self._state == _STATE_CANCELLED:
             text.append("■", style=_DIM)
