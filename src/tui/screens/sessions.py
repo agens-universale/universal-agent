@@ -30,7 +30,7 @@ _FOOTER_NOGIT = ("↑↓/Home/End · PgUp/PgDn страница · Enter отк�
                  " · Ctrl+R переименовать · Del удалить · Ctrl+D массовое · Esc")
 
 _STATUS_COLOR = {
-    "running": RUN_COLOR, "stopped": DEEP_DIM, "done": OK, "error": ERR,
+    "running": RUN_COLOR, "stopped": DIM, "completed": OK, "failed": ERR,
 }
 
 
@@ -183,8 +183,9 @@ class SessionsScreen(Screen):
             t.append(branch, style=CODE)
         t.append(" · ", style=MUTED)
         t.append(f"{task.messages_count} сообщ.", style=DIM)
-        t.append(" · ", style=MUTED)
-        t.append(f"[{task.status}]", style=_STATUS_COLOR.get(task.status, DEEP_DIM))
+        if task.status:   # None — исход не записан → бейдж не показываем (без пустых «[]»)
+            t.append(" · ", style=MUTED)
+            t.append(f"[{task.status}]", style=_STATUS_COLOR.get(task.status, DEEP_DIM))
         t.append(" · ", style=MUTED)
         t.append(_short_id(task.thread_id), style=MUTED)
         return t

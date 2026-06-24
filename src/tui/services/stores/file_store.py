@@ -46,7 +46,10 @@ class FileTaskStore:
             except (OSError, json.JSONDecodeError):
                 continue
             tid = meta.get("thread_id") or meta_path.stem[len(prefix):]
-            status = meta.get("status") or "stopped"
+            # Исход сессии: TUI-владелец пишет в meta.tui.status (completed/stopped/
+            # failed); верхний meta.status — для CLI/server-потоков. Нет ни того, ни
+            # другого → None (исход не записан; список не выдумывает «stopped»).
+            status = (meta.get("tui") or {}).get("status") or meta.get("status")
             updated = meta.get("updated_at", "")
             msgs = int(meta.get("messages_count", 0))
             tui_meta = meta.get("tui") or {}

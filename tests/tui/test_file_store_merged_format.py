@@ -60,8 +60,8 @@ def test_file_store_list_tasks_reads_core_meta(tmp_path):
     t = tasks[0]
     assert t.thread_id == _TID
     assert t.messages_count == 3
-    # status отсутствует в meta → fallback "stopped"
-    assert t.status == "stopped"
+    # ни meta.status, ни meta.tui.status → исход не записан → None (не выдумываем)
+    assert t.status is None
     # unread_count отсутствует → 0
     assert t.unread_count == 0
     # last_error отсутствует → None
