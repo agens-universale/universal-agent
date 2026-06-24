@@ -1377,7 +1377,19 @@ class TraceScreen(Screen):
             # анимация вернётся когда агент продолжит.
             self._hide_thinking_indicator()
         else:
-            self._destroy_thinking_indicator()
+            # Idle. Если ход успешно завершён — спиннер ОСТАЁТСЯ как «✓ Выполнил за N»
+            # (персистентно до следующего user-send, который сбросит его через
+            # _reset_thinking_timer). На stopped/failed/fresh — уничтожаем, как раньше.
+            outcome = None
+            if self._store is not None and self._active_task_id is not None:
+                outcome = (self._store.get_task_meta(self._active_task_id).get("tui") or {}).get("status")
+            # runner._stop_requested: True означает явный stop (в т.ч. прямой вызов
+            # runner.stop() без last_stop_requested) — не «успешное завершение».
+            _runner_stopped = getattr(runner, "_stop_requested", False)
+            if outcome == "completed" and not _runner_stopped and self._thinking is not None:
+                self._thinking.set_state("done")
+            else:
+                self._destroy_thinking_indicator()
             self._clear_stream_block()
         # Footer-left зависит от is_running — обновляем каждый тик, чтобы
         # /stop появлялся/исчезал без отдельных вызовов из start/stop путей.
