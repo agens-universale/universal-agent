@@ -49,6 +49,24 @@ async def test_card_shows_title_branch_msgs(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_lists_more_than_200_sessions(tmp_path):
+    """Кап отображения поднят выше 200: при 201 сессии экран видит реальное число."""
+    pytest.importorskip("textual")
+    for i in range(201):
+        tid = f"{i:032d}"
+        (Path(tmp_path) / f"meta_cli_{tid}.json").write_text(
+            json.dumps({"thread_id": tid, "system": "cli", "status": "stopped",
+                        "updated_at": f"2026-05-{(i % 28) + 1:02d}T10:00:00+00:00",
+                        "messages_count": 1}), encoding="utf-8")
+    from tui.screens.sessions import SessionsScreen
+    from tui.app import TuiApp
+    async with TuiApp(threads_dir=str(tmp_path), system="cli").run_test() as pilot:
+        await pilot.app.push_screen(SessionsScreen(threads_dir=str(tmp_path), system="cli"))
+        await pilot.pause()
+        assert len(pilot.app.screen._all_tasks()) == 201
+
+
+@pytest.mark.asyncio
 async def test_custom_title_overrides_prompt(tmp_path):
     pytest.importorskip("textual")
     _seed(tmp_path, "bbbbbbbb", "длинный промпт", title="Мой заголовок")

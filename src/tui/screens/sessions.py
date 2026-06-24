@@ -81,7 +81,11 @@ class SessionsScreen(Screen):
     # ---- data ---------------------------------------------------------
 
     def _all_tasks(self) -> list:
-        return self._store.list_tasks(limit=200)
+        # Кап высокий (не 200) — чтобы счётчик «из N» показывал реальное число
+        # сессий, а не вводил в заблуждение. Дефолтный вид читает только мету (дёшево)
+        # + first-prompt лишь для 25 строк страницы; фильтр-по-названию ограничен этим
+        # же капом. 10000 — как в mass-delete ниже.
+        return self._store.list_tasks(limit=10000)
 
     def _visible_tasks(self) -> list:
         f = self._filter.lower()
