@@ -438,6 +438,7 @@ class TraceScreen(Screen):
         self._refresh_header()
         self._refresh_meta()
         self._refresh_footer()
+        self._update_terminal_title()   # resume: статус + последний промпт сессии в таб
         self._mount_failed_from_meta(task_id)
 
         # Свести ask_human-баннер с реальностью: replay/компакция могли оставить
@@ -678,10 +679,29 @@ class TraceScreen(Screen):
         self._reset_history_navigation()
 
     def _update_terminal_title(self) -> None:
-        """Заголовок терминала = последний промпт + текущий статус (для таба/таскбара)."""
-        status = self._task_status_badge() if self._active_task_id is not None else None
-        prompt = self._last_user_send_text if self._active_task_id is not None else None
+        """Заголовок терминала = последний промпт + текущий статус (для таба/таскбара).
+
+        На возобновлении сессии _last_user_send_text пуст (в этом запуске не слали) —
+        берём последний user-промпт сессии из стора, чтобы таб показывал её контекст."""
+        if self._active_task_id is None:
+            set_terminal_title(format_terminal_title())
+            return
+        status = self._task_status_badge()
+        prompt = self._last_user_send_text or self._session_last_prompt()
         set_terminal_title(format_terminal_title(prompt, status))
+
+    def _session_last_prompt(self) -> "str | None":
+        """Последний user-промпт активной сессии из стора (для заголовка при resume)."""
+        if self._store is None or self._active_task_id is None:
+            return None
+        try:
+            meta = self._store.get_task_meta(self._active_task_id)
+        except Exception:
+            return None
+        for s in reversed(meta.get("user_messages_log") or []):
+            if isinstance(s, str) and s.strip():
+                return s
+        return None
 
     def _reset_thinking_timer(self) -> None:
         """Сбросить таймер «думаю…»: новая точка отсчёта = монотоника сейчас,
