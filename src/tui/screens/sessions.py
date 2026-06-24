@@ -296,7 +296,7 @@ class SessionsScreen(Screen):
         from tui.screens.main import TraceScreen
         scr = self.app.screen
         if isinstance(scr, TraceScreen):
-            scr.attach_active_task(thread_id)
+            scr.attach_active_task(thread_id, is_resume=True)   # промпт заголовка — из стора
 
     def _delete_selected(self) -> None:
         task = self._selected_task()

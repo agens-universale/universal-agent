@@ -136,12 +136,11 @@ class TraceScreen(Screen):
         # Заголовок терминала: кэш промпта возобновлённой сессии (читается из стора
         # 1 раз на attach, не на каждый poll-тик) + дедуп последнего записанного
         # заголовка (poll зовёт обновление каждый тик — пишем OSC только при смене).
+        # Промпт заголовка терминала — ЕДИНЫЙ источник: последнее user-сообщение
+        # активной сессии. Ставится из стора на attach и = тексту на каждом send.
+        # (Раньше второй источник _last_user_send_text давал прилипание/устаревание.)
         self._resumed_prompt: Optional[str] = None
         self._last_terminal_title: Optional[str] = None
-        # Сессия, в которой сделан _last_user_send_text. Заголовок использует
-        # send-текст ТОЛЬКО для своей сессии — иначе при переключении сессий промпт
-        # прошлой «прилипает» к табу новой (_last_user_send_text — per-app-run поле).
-        self._last_send_task_id: Optional[str] = None
         # client_id последней pending-реплики — для полного отката в cancel-with-undo.
         self._last_pending_client_id: Optional[str] = None
         # id последнего user-сообщения (пробрасывается в run) — чтобы точечно
@@ -418,8 +417,13 @@ class TraceScreen(Screen):
         self._last_event_at = _time.monotonic()
         self._last_event_kind = None
 
-    def attach_active_task(self, task_id: str) -> None:
-        """Attach a thread for polling. Initial state loads via read_all_events."""
+    def attach_active_task(self, task_id: str, *, is_resume: bool = False) -> None:
+        """Attach a thread for polling. Initial state loads via read_all_events.
+
+        is_resume=True (переключение/возобновление сессии через пикер): промпт
+        заголовка АВТОРИТЕТНО берётся из стора (даже если None — у пустой сессии).
+        is_resume=False (auto-create после send): не затираем только что
+        отправленный _resumed_prompt, если стор ещё не успел записать сообщение."""
         self._active_task_id = task_id
         self.app.tui_state.active_task_id = task_id
         self._reset_render_state()
@@ -447,8 +451,12 @@ class TraceScreen(Screen):
         self._refresh_header()
         self._refresh_meta()
         self._refresh_footer()
-        self._resumed_prompt = self._session_last_prompt()   # кэш (1 чтение стора)
-        self._update_terminal_title()   # resume: статус + последний промпт сессии в таб
+        sp = self._session_last_prompt()
+        if is_resume:
+            self._resumed_prompt = sp            # авторитетно из стора (переключение)
+        elif sp is not None:
+            self._resumed_prompt = sp            # auto-create: не затирать свежий send
+        self._update_terminal_title()   # статус + последний промпт сессии в таб
         self._mount_failed_from_meta(task_id)
 
         # Свести ask_human-баннер с реальностью: replay/компакция могли оставить
@@ -682,7 +690,7 @@ class TraceScreen(Screen):
         user-send и запомнить текст для cancel-with-undo (Tasks 9-10).
         Дополнительно: append текста в input-history и выход из history-навигации."""
         self._last_user_send_text = text
-        self._last_send_task_id = self._active_task_id   # привязка send-текста к сессии
+        self._resumed_prompt = text   # send = новое последнее сообщение активной сессии
         self._update_terminal_title()
         self._events_since_last_user_send = 0
         if self._history is not None:
@@ -692,20 +700,13 @@ class TraceScreen(Screen):
     def _update_terminal_title(self) -> None:
         """Заголовок терминала = промпт + текущий статус (для таба/таскбара).
 
-        Промпт: send-текст текущего запуска — но ТОЛЬКО если он сделан в активной
-        сессии (_last_send_task_id == _active_task_id); иначе (после переключения
-        сессий) кэш промпта возобновлённой сессии (_resumed_prompt). Статус — live
+        Промпт: ЕДИНЫЙ источник _resumed_prompt (последнее user-сообщение активной
+        сессии: из стора на attach, = тексту на send). Статус — live
         (_task_status_badge). Дедуп: OSC пишем только при смене — поллер зовёт каждый тик."""
         if self._active_task_id is None:
             title = format_terminal_title()
         else:
-            own_send = (
-                self._last_user_send_text
-                if self._last_send_task_id == self._active_task_id
-                else None
-            )
-            prompt = own_send or self._resumed_prompt
-            title = format_terminal_title(prompt, self._task_status_badge())
+            title = format_terminal_title(self._resumed_prompt, self._task_status_badge())
         if title != self._last_terminal_title:
             self._last_terminal_title = title
             set_terminal_title(title)

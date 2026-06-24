@@ -74,9 +74,10 @@ async def test_title_status_is_live_and_deduped(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_title_send_text_scoped_to_its_session(tmp_path, monkeypatch):
-    """Send-текст относится к своей сессии: после переключения на ДРУГУЮ сессию
-    заголовок берёт её _resumed_prompt, а не прилипший промпт прошлой сессии."""
+async def test_title_single_source_no_cross_session_leak(tmp_path, monkeypatch):
+    """Единый источник: заголовок = _resumed_prompt (последнее сообщение активной
+    сессии). attach(is_resume) перезаписывает его из стора → промпт прошлой сессии
+    не прилипает к табу новой."""
     pytest.importorskip("textual")
     from tui.app import TuiApp
     import tui.screens.main as main_mod
@@ -87,14 +88,38 @@ async def test_title_send_text_scoped_to_its_session(tmp_path, monkeypatch):
     async with TuiApp(threads_dir=str(tmp_path / "threads")).run_test() as pilot:
         scr = pilot.app.screen
         monkeypatch.setattr(scr, "_task_status_badge", lambda: "[completed]")
-        # отправили в сессии A
+        # в сессии A отправили запрос → _resumed_prompt = текст
         scr._active_task_id = "A"
-        scr._last_user_send_text = "запрос A"
-        scr._last_send_task_id = "A"
+        scr._resumed_prompt = "запрос A"
         scr._update_terminal_title()
         assert calls[-1] == "✦ GigaCode · [completed] · запрос A"
-        # переключились на B: send-поля от A остались, attach задал _resumed_prompt=B
+        # переключились на B: attach(is_resume=True) задал _resumed_prompt из стора B
         scr._active_task_id = "B"
         scr._resumed_prompt = "вопрос B"
         scr._update_terminal_title()
         assert calls[-1] == "✦ GigaCode · [completed] · вопрос B", calls
+
+
+@pytest.mark.asyncio
+async def test_attach_resume_overwrites_prompt_from_store(tmp_path, monkeypatch):
+    """attach(is_resume=True) АВТОРИТЕТНО ставит _resumed_prompt из стора (даже None),
+    чтобы промпт прошлой сессии не оставался; auto-create (is_resume=False) НЕ затирает
+    свежий _resumed_prompt, если стор ещё пуст."""
+    pytest.importorskip("textual")
+    from tui.app import TuiApp
+
+    async with TuiApp(threads_dir=str(tmp_path / "threads")).run_test() as pilot:
+        scr = pilot.app.screen
+        # переключение на сессию, у которой в сторе есть последнее сообщение
+        scr._resumed_prompt = "промпт прошлой сессии"
+        monkeypatch.setattr(scr, "_session_last_prompt", lambda: "промпт новой")
+        scr.attach_active_task("new-1", is_resume=True)
+        await pilot.pause()
+        assert scr._resumed_prompt == "промпт новой"
+
+        # auto-create: только что отправили (_resumed_prompt=текст), стор ещё пуст
+        scr._resumed_prompt = "только что отправил"
+        monkeypatch.setattr(scr, "_session_last_prompt", lambda: None)
+        scr.attach_active_task("fresh-1", is_resume=False)
+        await pilot.pause()
+        assert scr._resumed_prompt == "только что отправил"   # не затёрт
