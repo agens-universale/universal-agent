@@ -88,8 +88,11 @@ class State:
         self.tool_usage_notice_cnt: dict[str, int] = {}
         self.tool_call_outputs_store = ToolCallOutputsStore()
         # Учёт токенов прогона по категориям (main/summary/finish_gate/.../subagent).
-        # Кумулятив по треду гидрируется из meta на resume (см. AgentExecutor.run).
+        # ``usage`` — кумулятив по треду (гидрируется из meta на resume).
+        # ``last_run_usage`` — дельта именно последнего run() (заполняется в его конце);
+        # None, пока прогон не завершился. Оба доступны in-memory через get_state().
         self.usage = UsageAccount()
+        self.last_run_usage: Optional[UsageAccount] = None
 
     def set_call_metadata(self):
         metadata: Dict[str, Any] = dict()

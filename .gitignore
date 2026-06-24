@@ -120,3 +120,6 @@ docs/superpowers/
 
 # Локальные заметки агента Claude Code (не для репозитория)
 CLAUDE.md
+
+# История ввода TUI (gc-ua) — локальная per-user, как shell history
+input_history.jsonl

@@ -52,3 +52,32 @@ def test_build_report_no_pricing_tokens_only():
 
 def test_build_report_empty_returns_none():
     assert build_run_usage_report(UsageAccount(), _PRICING, "m") is None
+
+
+def test_state_exposes_usage_and_last_run_in_memory():
+    # На свежем State: usage пустой, last_run_usage = None (прогон не завершался).
+    from states import State
+    st = State(
+        verbose=False, model="m", tools_spec=[], tools_descr=[], skills_list=[],
+        max_steps=10, system_prompt_id="v1", use_server_subagents=False,
+    )
+    assert isinstance(st.usage, UsageAccount)
+    assert st.usage.is_empty()
+    assert st.last_run_usage is None
+
+
+def test_last_run_usage_survives_state_snapshot():
+    # last_run_usage (UsageAccount) сериализуется/восстанавливается в session-снапшоте.
+    from states import State
+    from persistence.state_serializer import StateSerializer
+    st = State(
+        verbose=False, model="m", tools_spec=[], tools_descr=[], skills_list=[],
+        max_steps=10, system_prompt_id="v1", use_server_subagents=False,
+    )
+    st.usage.add(CATEGORY_MAIN, 150, 30)
+    st.last_run_usage = UsageAccount()
+    st.last_run_usage.add(CATEGORY_MAIN, 50, 10)
+    restored = StateSerializer.deserialize(StateSerializer.serialize(st))
+    assert restored.usage.totals()["input"] == 150
+    assert isinstance(restored.last_run_usage, UsageAccount)
+    assert restored.last_run_usage.totals()["input"] == 50

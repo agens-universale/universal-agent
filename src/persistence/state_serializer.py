@@ -57,6 +57,12 @@ def load_state_from_snapshot(payload: Mapping[str, Any]) -> State:
     if not isinstance(usage_raw, UsageAccount):
         state.usage = UsageAccount.from_meta(usage_raw if isinstance(usage_raw, dict) else None)
 
+    last_run_raw = state.__dict__.get("last_run_usage")
+    if isinstance(last_run_raw, dict):
+        state.last_run_usage = UsageAccount.from_meta(last_run_raw)
+    elif not isinstance(last_run_raw, UsageAccount):
+        state.last_run_usage = None
+
     state.user_intent_log = deserialize_list(state.__dict__.get("user_intent_log"))
     state.current_user_intent = deserialize_list(
         state.__dict__.get("current_user_intent")
@@ -95,6 +101,10 @@ class StateSerializer:
         usage = raw.get("usage")
         if isinstance(usage, UsageAccount):
             raw["usage"] = usage.to_meta()
+
+        last_run = raw.get("last_run_usage")
+        if isinstance(last_run, UsageAccount):
+            raw["last_run_usage"] = last_run.to_meta()
 
         raw["user_intent_log"] = serialize_for_meta(raw.get("user_intent_log") or [])
         raw["current_user_intent"] = serialize_for_meta(

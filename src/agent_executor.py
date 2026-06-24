@@ -429,6 +429,8 @@ class AgentExecutor:
         # Отчёт по токенам/стоимости за этот прогон (дельта от снимка до старта).
         try:
             run_usage = state.usage.delta_from(run_start_usage)
+            # Доступно in-memory: get_state().usage (кумулятив) и .last_run_usage (этот прогон).
+            state.last_run_usage = run_usage
             usage_text = build_run_usage_report(
                 run_usage,
                 config_dict.get("pricing"),
