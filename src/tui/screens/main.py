@@ -138,6 +138,10 @@ class TraceScreen(Screen):
         # заголовка (poll зовёт обновление каждый тик — пишем OSC только при смене).
         self._resumed_prompt: Optional[str] = None
         self._last_terminal_title: Optional[str] = None
+        # Сессия, в которой сделан _last_user_send_text. Заголовок использует
+        # send-текст ТОЛЬКО для своей сессии — иначе при переключении сессий промпт
+        # прошлой «прилипает» к табу новой (_last_user_send_text — per-app-run поле).
+        self._last_send_task_id: Optional[str] = None
         # client_id последней pending-реплики — для полного отката в cancel-with-undo.
         self._last_pending_client_id: Optional[str] = None
         # id последнего user-сообщения (пробрасывается в run) — чтобы точечно
@@ -678,6 +682,7 @@ class TraceScreen(Screen):
         user-send и запомнить текст для cancel-with-undo (Tasks 9-10).
         Дополнительно: append текста в input-history и выход из history-навигации."""
         self._last_user_send_text = text
+        self._last_send_task_id = self._active_task_id   # привязка send-текста к сессии
         self._update_terminal_title()
         self._events_since_last_user_send = 0
         if self._history is not None:
@@ -687,14 +692,19 @@ class TraceScreen(Screen):
     def _update_terminal_title(self) -> None:
         """Заголовок терминала = промпт + текущий статус (для таба/таскбара).
 
-        Промпт: текст текущего запуска (_last_user_send_text), иначе кэш промпта
-        возобновлённой сессии (_resumed_prompt). Статус — live (_task_status_badge),
-        поэтому в прогоне обновляется на [running]. Дедуп: OSC пишем только при
-        смене заголовка — поллер зовёт это каждый тик."""
+        Промпт: send-текст текущего запуска — но ТОЛЬКО если он сделан в активной
+        сессии (_last_send_task_id == _active_task_id); иначе (после переключения
+        сессий) кэш промпта возобновлённой сессии (_resumed_prompt). Статус — live
+        (_task_status_badge). Дедуп: OSC пишем только при смене — поллер зовёт каждый тик."""
         if self._active_task_id is None:
             title = format_terminal_title()
         else:
-            prompt = self._last_user_send_text or self._resumed_prompt
+            own_send = (
+                self._last_user_send_text
+                if self._last_send_task_id == self._active_task_id
+                else None
+            )
+            prompt = own_send or self._resumed_prompt
             title = format_terminal_title(prompt, self._task_status_badge())
         if title != self._last_terminal_title:
             self._last_terminal_title = title

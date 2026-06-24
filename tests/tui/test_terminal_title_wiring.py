@@ -71,3 +71,30 @@ async def test_title_status_is_live_and_deduped(tmp_path, monkeypatch):
         badge["v"] = "[running]"                   # статус сменился (старт прогона)
         scr._update_terminal_title()
         assert calls == ["✦ GigaCode · [running] · p"]
+
+
+@pytest.mark.asyncio
+async def test_title_send_text_scoped_to_its_session(tmp_path, monkeypatch):
+    """Send-текст относится к своей сессии: после переключения на ДРУГУЮ сессию
+    заголовок берёт её _resumed_prompt, а не прилипший промпт прошлой сессии."""
+    pytest.importorskip("textual")
+    from tui.app import TuiApp
+    import tui.screens.main as main_mod
+
+    calls = []
+    monkeypatch.setattr(main_mod, "set_terminal_title", lambda text, **k: calls.append(text), raising=False)
+
+    async with TuiApp(threads_dir=str(tmp_path / "threads")).run_test() as pilot:
+        scr = pilot.app.screen
+        monkeypatch.setattr(scr, "_task_status_badge", lambda: "[completed]")
+        # отправили в сессии A
+        scr._active_task_id = "A"
+        scr._last_user_send_text = "запрос A"
+        scr._last_send_task_id = "A"
+        scr._update_terminal_title()
+        assert calls[-1] == "✦ GigaCode · [completed] · запрос A"
+        # переключились на B: send-поля от A остались, attach задал _resumed_prompt=B
+        scr._active_task_id = "B"
+        scr._resumed_prompt = "вопрос B"
+        scr._update_terminal_title()
+        assert calls[-1] == "✦ GigaCode · [completed] · вопрос B", calls
