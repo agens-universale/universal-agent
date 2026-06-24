@@ -259,6 +259,19 @@ async def test_indicator_shows_processing_after_agent_event_with_pause(tmp_path)
         assert "сверяюсь…" in str(ind._render_text().plain)
 
 
+def test_done_state_renders_vypolnil_dim_and_frozen():
+    import tui.widgets.thinking_indicator as ti
+    clock = {"t": 100.0}
+    ind = ti.ThinkingIndicator(started_at=0.0, clock=lambda: clock["t"])
+    ind.set_state("done")          # заморозить на 100с
+    clock["t"] = 999.0             # время идёт дальше
+    txt = ind._render_text()
+    s = txt.plain
+    assert s.startswith("✓") and "Выполнил за" in s
+    # длительность заморожена (≈100с от started_at), не 999
+    assert "1м 40с" in s or "100" in s
+
+
 @pytest.mark.asyncio
 async def test_esc_stops_running_run(tmp_path):
     """Esc на главном экране при running + пустой выделение → stop_run."""

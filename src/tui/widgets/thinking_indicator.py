@@ -109,6 +109,7 @@ _STATE_THINKING = "thinking"
 _STATE_VALIDATING = "validating"
 _STATE_COMPRESSING = "compressing"
 _STATE_PROCESSING = "processing"
+_STATE_DONE = "done"
 
 
 class ThinkingIndicator(Static):
@@ -139,16 +140,19 @@ class ThinkingIndicator(Static):
         )
         self._frame: int = 0
         self._state: str = state
+        self._frozen_elapsed: int | None = None
         self._rotator = PhraseRotator(THINKING_PHRASES)
         super().__init__(self._render_text(), classes="thinking-indicator", markup=False)
 
     def set_state(self, state: str) -> None:
         """Переключить визуал без размонтирования. Идемпотентен."""
-        if state not in (_STATE_THINKING, _STATE_VALIDATING, _STATE_COMPRESSING, _STATE_PROCESSING):
+        if state not in (_STATE_THINKING, _STATE_VALIDATING, _STATE_COMPRESSING, _STATE_PROCESSING, _STATE_DONE):
             return
         if self._state == state:
             return
         self._state = state
+        if state == _STATE_DONE:
+            self._frozen_elapsed = int(self._clock() - self._started_at)
         if self.is_mounted:
             self.refresh()
 
@@ -180,7 +184,14 @@ class ThinkingIndicator(Static):
 
     def _render_text(self) -> Text:
         text = Text()
-        if self._state == _STATE_VALIDATING:
+        if self._state == _STATE_DONE:
+            secs = self._frozen_elapsed if self._frozen_elapsed is not None \
+                else int(self._clock() - self._started_at)
+            text.append("✓", style=_DIM)
+            text.append(" ")
+            text.append(f"Выполнил за {format_duration(secs)}", style=_DIM)
+            return text
+        elif self._state == _STATE_VALIDATING:
             # Финальный ответ виден; статичный ✓ завершаю… (dim), без анимации —
             # чтобы НЕ соревноваться вниманием с уже отрисованным task_report.
             text.append("✓", style=_DIM)
