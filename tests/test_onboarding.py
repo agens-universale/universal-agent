@@ -99,7 +99,31 @@ def test_filled_model_not_in_guide():
         "model": "gigacode_agent_v1.6_rc",
     }
     text = onboarding.setup_guide("/p", cfg)
-    assert "agent.model" not in text
+    assert "имя модели" not in text   # модель не в списке полей к заполнению
+
+
+# --- ремарка про preset-модель -------------------------------------------
+
+def test_setup_guide_notes_preset_model_when_pending():
+    cfg = {
+        "completions_url": onboarding.URL_SENTINEL,
+        "chat_completion_headers": {"Authorization": onboarding.TOKEN_SENTINEL},
+        "model": "gigacode_agent_v1.6_rc",
+    }
+    text = onboarding.setup_guide("/p", cfg)
+    assert "Модель по умолчанию уже задана" in text
+    assert "gigacode_agent_v1.6_rc" in text
+
+
+def test_setup_guide_no_preset_model_note_when_model_pending():
+    cfg = {
+        "completions_url": onboarding.URL_SENTINEL,
+        "chat_completion_headers": {"Authorization": onboarding.TOKEN_SENTINEL},
+        "model": onboarding.MODEL_SENTINEL,
+    }
+    text = onboarding.setup_guide("/p", cfg)
+    assert "Модель по умолчанию уже задана" not in text
+    assert "имя модели" in text   # модель в списке pending
 
 
 # --- позитивное сообщение, когда всё покрыто -----------------------------
@@ -135,4 +159,4 @@ def test_setup_guide_lists_pending_fields_and_path(tmp_path, monkeypatch):
     assert "/home/u/.gc/config.yml" in text
     assert "backend.completions_url" in text
     assert "Authorization" in text
-    assert "agent.model" not in text
+    assert "имя модели" not in text   # модель задана в дефолте → не в списке полей

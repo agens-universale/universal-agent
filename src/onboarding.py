@@ -75,13 +75,23 @@ def is_unconfigured(config: Dict[str, Any]) -> bool:
 def setup_guide(config_path: str, config: Dict[str, Any]) -> str:
     """Подсказка по config_path.
 
-    pending непуст → что вписать. pending пуст → позитивное «настроен»."""
+    pending непуст → что вписать. pending пуст → позитивное «настроен».
+    Если модель уже задана (а адрес/токен — нет), добавляем ремарку: эти поля
+    нужны для preset-модели; либо укажи свою модель и адрес/токен под неё."""
     pending = pending_requirements(config)
     if not pending:
         return f"[gc] Конфиг настроен: {config_path} — можно запускать."
     lines = "\n".join(f"  • {r.hint}" for r in pending)
+    note = ""
+    if _model_set(config):
+        note = (
+            f"     Модель по умолчанию уже задана (agent.model = {config.get('model')}) — "
+            f"осталось указать для неё адрес и токен; либо укажите свою модель и "
+            f"соответствующие адрес/токен.\n"
+        )
     return (
         f"[gc] Конфиг ещё не настроен: {config_path}\n"
         f"     Впишите перед запуском:\n{lines}\n"
+        f"{note}"
         f"     затем запустите снова."
     )
