@@ -66,6 +66,7 @@ async def test_footer_switches_to_main_text_on_attach_active_task(tmp_path):
         footer_right = pilot.app.query_one("#footer-right")
         # footer-right показывает модель·контекст (gc-ua удалено в Task 3).
         assert "gc-ua" not in str(footer_right.render())
+        assert "M" in str(footer_right.render())
 
         # Attach task → idle (нет active_runner) → тот же набор команд, /stop НЕТ.
         pilot.app.screen.attach_active_task(tid)
@@ -85,6 +86,7 @@ async def test_footer_switches_to_main_text_on_attach_active_task(tmp_path):
         # footer-right показывает модель (gc-ua удалено в Task 3).
         footer_right = pilot.app.query_one("#footer-right")
         assert "gc-ua" not in str(footer_right.render())
+        assert "M" in str(footer_right.render())
 
 
 @pytest.mark.asyncio
