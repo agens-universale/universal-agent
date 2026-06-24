@@ -25,9 +25,14 @@ from intent_log.serialize import deserialize_list
 from tui.commands import build_default_registry, closest_command
 from tui.models import TaskCursor
 from rich.text import Text
+from tui.palette import ACCENT as _ACCENT
+from tui.palette import DEEP_DIM as _DEEP_DIM
 from tui.palette import DEEP_DIM as _ERR_HINT
 from tui.palette import DIM as _DIM
 from tui.palette import ERR as _ERR_RED
+from tui.palette import INK as _INK
+from tui.palette import OK as _OK
+from tui.palette import RUN_COLOR as _RUN_COLOR
 from tui.services.context_meter import render_context_meter
 from tui.services.export import export_thread
 from tui.services.status_badge import status_badge_color
@@ -166,6 +171,10 @@ class TraceScreen(Screen):
                 yield Static(left_text, id="header-left", markup=False)
                 yield Static(right_text, id="header-right", markup=False)
             yield VerticalScroll(id="trace")
+            with Horizontal(id="meta"):
+                ml, mr = self._compose_meta_segments()
+                yield Static(ml, id="meta-left", markup=False)
+                yield Static(mr, id="meta-right", markup=False)
             with Horizontal(id="input-row"):
                 yield Static("> ", id="input-prompt", markup=False)
                 yield CommandTextArea(placeholder=_PLACEHOLDER_READY, id="cmdinput")
@@ -175,37 +184,91 @@ class TraceScreen(Screen):
                     self._cwd_chip_text(), id="footer-right", markup=False,
                 )
 
-    def _compose_header_segments(self) -> "tuple[Text | str, str]":
+    def _compose_header_segments(self) -> "tuple[str, str]":
         """Return (left_text, right_text) for header.
 
-        Empty state:
-          left = str "GigaCode   модель: <model> · <backend>"
-          right = str "F1 help · gc-ua"
+        Свежий экран (нет активной задачи):
+          left = «Добро пожаловать в GigaCode»
+          right = адаптивный cwd
 
-        Active task:
-          left = rich.Text (colored badge + optional context meter)
-          right = str "F1 help · gc-ua"
+        Активная задача:
+          left = «Сессия: <8ch>»
+          right = адаптивный cwd
         """
-        cfg = getattr(self.app, "_config", None) or {}
-        backend = (
-            "chat" if cfg.get("backend_api_mode") == "chat_completions" else "resp"
-        )
-        model = cfg.get("model", "?")
-        model_chip = f"модель: {model} · {backend}"
         if self._active_task_id is None:
-            return f"{_HEADER_EMPTY}   {model_chip}", _HEADER_RIGHT
-        short_id = self._active_task_id[:8]
-        status = self._task_status_badge()
+            left = branding.WELCOME
+        else:
+            left = f"Сессия: {self._active_task_id[:8]}"
+        right = self._truncate_path_for_header(self._current_cwd())
+        return left, right
+
+    def _truncate_path_for_header(self, path: str) -> str:
+        """Адаптивное усечение cwd для хедер-право."""
+        max_cols = self._header_right_cols()
+        if len(path) <= max_cols:
+            return path
+        sep = "\\" if "\\" in path else "/"
+        nonempty = [p for p in path.split(sep) if p]
+        if not nonempty:
+            return ("…" + path)[-max_cols:] if max_cols > 0 else ""
+        tail = nonempty[-1]
+        minimal = f"…{sep}{tail}"
+        if len(minimal) > max_cols:
+            return ("…" + tail)[-max_cols:]
+        best = minimal
+        head_parts = nonempty[:-1]
+        for k in range(1, len(head_parts) + 1):
+            cand = f"{sep.join(head_parts[:k])}{sep}…{sep}{tail}"
+            if len(cand) <= max_cols:
+                best = cand
+            else:
+                break
+        return best
+
+    def _header_right_cols(self) -> int:
+        """Доступная ширина правого слота хедера для усечения пути."""
+        try:
+            w = self.app.size.width
+        except Exception:
+            w = 80
+        return max(12, w - 34)
+
+    def on_resize(self, event) -> None:
+        self._refresh_header()   # пересчитать усечение пути под новую ширину
+
+    def _compose_meta_segments(self) -> "tuple[Text, Text]":
+        """Return (left, right) для мета-полосы: модель·контекст слева, статус справа."""
+        cfg = getattr(self.app, "_config", None) or {}
+        model = cfg.get("model", "?")
         left = Text()
-        left.append(f"Сессия: {short_id}  ", style=_DIM)
-        left.append(status, style=status_badge_color(status))
-        left.append(f"  {model_chip}", style=_DIM)
-        meter = self._context_meter()
-        if meter is not None:
-            text, color = meter
-            left.append("  ·  ", style=_DIM)
-            left.append(text, style=color)
-        return left, _HEADER_RIGHT
+        left.append(str(model), style=_INK)
+        right = Text()
+        if self._active_task_id is not None:
+            status = self._task_status_badge()
+            right.append(status, style=self._meta_status_color(status))
+        else:
+            right.append("[—]", style=_DEEP_DIM)
+        return left, right
+
+    def _meta_status_color(self, status: str) -> str:
+        """Цвет бейджа статуса в мета-полосе."""
+        if status == "[running]":
+            return _RUN_COLOR
+        if status == "[asking]":
+            return _ACCENT
+        if status == "[completed]":
+            return _OK
+        if status == "[failed]":
+            return _ERR_RED
+        return _DIM
+
+    def _refresh_meta(self) -> None:
+        ml, mr = self._compose_meta_segments()
+        try:
+            self.query_one("#meta-left", Static).update(ml)
+            self.query_one("#meta-right", Static).update(mr)
+        except Exception:
+            pass
 
     def _context_meter(self) -> tuple[str, str] | None:
         """(text, color) индикатора контекста или None (скрыт)."""
@@ -420,6 +483,7 @@ class TraceScreen(Screen):
         else:
             self._render_records(records)
         self._refresh_header()
+        self._refresh_meta()
         self._refresh_footer()
         self._mount_failed_from_meta(task_id)
 
@@ -933,6 +997,7 @@ class TraceScreen(Screen):
         inp.placeholder = "ваш ответ агенту…"
         inp.add_class("ask-human-mode")
         self._refresh_header()
+        self._refresh_meta()
         self._refresh_footer()
         if self._trace_is_at_bottom():
             self.query_one("#trace", VerticalScroll).scroll_end(animate=False)
@@ -956,6 +1021,7 @@ class TraceScreen(Screen):
         inp.placeholder = _PLACEHOLDER_READY
         inp.remove_class("ask-human-mode")
         self._refresh_header()
+        self._refresh_meta()
         self._refresh_footer()
 
     # ──────────────────────── confirm banner (T2) ───────────────────────────
@@ -1410,11 +1476,13 @@ class TraceScreen(Screen):
             # отвеченного вопроса — снять, иначе ввод уйдёт в stdin «вникуда».
             self._reconcile_ask_human_after_render(allow_remnant=False)
             self._refresh_header()
+            self._refresh_meta()
             self._refresh_footer()
             return
         self._cursor = tail.next_cursor
         self._render_records(tail.new_records, live=True)
         self._refresh_header()
+        self._refresh_meta()
 
     def _show_brand(self) -> None:
         if self._brand is not None and self._brand.parent is not None:
@@ -2508,6 +2576,7 @@ class TraceScreen(Screen):
         self._reset_render_state()
         self._clear_trace()
         self._refresh_header()
+        self._refresh_meta()
         self._refresh_footer()
 
     def _handle_command(self, raw: str) -> None:

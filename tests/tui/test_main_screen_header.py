@@ -1,10 +1,12 @@
-"""Main-screen header показывает: Сессия:id [running] модель:M · backend  |  F1 help · gc-ua."""
+"""Main-screen header показывает: хедер — Сессия:id | cwd; мета — модель · статус."""
 import pytest
 
 
 @pytest.mark.asyncio
-async def test_header_shows_task_model_backend(tmp_path):
+async def test_header_shows_session_id_and_meta_shows_model(tmp_path):
+    """После реструктуризации хрома: хедер = Сессия:id + cwd; мета = модель + статус."""
     pytest.importorskip("textual")
+    from textual.widgets import Static
     from tui.app import TuiApp
 
     app = TuiApp(
@@ -22,13 +24,18 @@ async def test_header_shows_task_model_backend(tmp_path):
         scr.attach_active_task("7f3a9b1c")
         await pilot.pause()
 
+        # Хедер: Сессия:id слева, cwd (адаптивный) справа. Модель и статус — в мете.
         left = pilot.app.query_one("#header-left")
-        right = pilot.app.query_one("#header-right")
-        header_text = str(left.render()) + " " + str(right.render())
-        assert "Сессия: 7f3a9b1c" in header_text
-        assert "[running]" in header_text
-        assert "CodeAgent" in header_text
-        assert "chat" in header_text  # короткое имя backend'а
+        header_left_text = str(left.render())
+        assert "Сессия: 7f3a9b1c" in header_left_text
+        assert "модель" not in header_left_text
+        assert "[running]" not in header_left_text
+
+        # Мета: модель слева, статус справа.
+        meta_left = pilot.app.query_one("#meta-left", Static)
+        meta_right = pilot.app.query_one("#meta-right", Static)
+        assert "CodeAgent" in str(meta_left.render())
+        assert "[running]" in str(meta_right.render())
 
 
 @pytest.mark.asyncio

@@ -30,6 +30,9 @@ HEADER_LEFT_EMPTY = APP_NAME
 HEADER_RIGHT = "F1 help · gc-ua"
 HEADER_RIGHT_PLAIN = "gc-ua"
 
+# Приветственная строка для свежего экрана (хедер-слева, нет активной задачи).
+WELCOME = "Добро пожаловать в GigaCode"
+
 # Стопы градиента логотипа: амбер → олива → teal (всё из палитры).
 _WARM = RUN_COLOR
 _OLIVE = OLIVE

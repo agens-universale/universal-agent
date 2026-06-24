@@ -30,10 +30,15 @@ Screen {
           padding: 0 1; border-bottom: solid $deep-dim; }
 #header-left  { width: 1fr; color: $deep-dim; }
 #header-right { width: auto; color: $deep-dim; text-align: right; padding-right: 1; }
-#footer { height: 1; background: #161A23; color: $dim;
+#footer { height: 2; background: #161A23; color: $dim;
           padding: 0 1; }
 #footer-left  { width: 1fr; color: $dim; }
 #footer-right { width: auto; color: $deep-dim; text-align: right; padding-right: 1; }
+
+/* Мета-полоса над вводом: модель·контекст слева, статус справа */
+#meta { height: 1; background: $bg; color: $deep-dim; padding: 0 1; border-bottom: solid $deep-dim; }
+#meta-left  { width: 1fr; color: $deep-dim; }
+#meta-right { width: auto; color: $deep-dim; text-align: right; padding-right: 1; }
 
 /* Контентная зона трейса */
 #trace { height: 1fr; padding: 0 1; background: $bg; }
