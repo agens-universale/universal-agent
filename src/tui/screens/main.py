@@ -133,6 +133,11 @@ class TraceScreen(Screen):
         # Если == 0 при Esc-stop → агент ещё ничего не сгенерировал → rollback.
         self._events_since_last_user_send: int = 0
         self._last_user_send_text: str = ""
+        # Заголовок терминала: кэш промпта возобновлённой сессии (читается из стора
+        # 1 раз на attach, не на каждый poll-тик) + дедуп последнего записанного
+        # заголовка (poll зовёт обновление каждый тик — пишем OSC только при смене).
+        self._resumed_prompt: Optional[str] = None
+        self._last_terminal_title: Optional[str] = None
         # client_id последней pending-реплики — для полного отката в cancel-with-undo.
         self._last_pending_client_id: Optional[str] = None
         # id последнего user-сообщения (пробрасывается в run) — чтобы точечно
@@ -438,6 +443,7 @@ class TraceScreen(Screen):
         self._refresh_header()
         self._refresh_meta()
         self._refresh_footer()
+        self._resumed_prompt = self._session_last_prompt()   # кэш (1 чтение стора)
         self._update_terminal_title()   # resume: статус + последний промпт сессии в таб
         self._mount_failed_from_meta(task_id)
 
@@ -679,25 +685,37 @@ class TraceScreen(Screen):
         self._reset_history_navigation()
 
     def _update_terminal_title(self) -> None:
-        """Заголовок терминала = последний промпт + текущий статус (для таба/таскбара).
+        """Заголовок терминала = промпт + текущий статус (для таба/таскбара).
 
-        На возобновлении сессии _last_user_send_text пуст (в этом запуске не слали) —
-        берём последний user-промпт сессии из стора, чтобы таб показывал её контекст."""
+        Промпт: текст текущего запуска (_last_user_send_text), иначе кэш промпта
+        возобновлённой сессии (_resumed_prompt). Статус — live (_task_status_badge),
+        поэтому в прогоне обновляется на [running]. Дедуп: OSC пишем только при
+        смене заголовка — поллер зовёт это каждый тик."""
         if self._active_task_id is None:
-            set_terminal_title(format_terminal_title())
-            return
-        status = self._task_status_badge()
-        prompt = self._last_user_send_text or self._session_last_prompt()
-        set_terminal_title(format_terminal_title(prompt, status))
+            title = format_terminal_title()
+        else:
+            prompt = self._last_user_send_text or self._resumed_prompt
+            title = format_terminal_title(prompt, self._task_status_badge())
+        if title != self._last_terminal_title:
+            self._last_terminal_title = title
+            set_terminal_title(title)
 
-    def _session_last_prompt(self) -> "str | None":
-        """Последний user-промпт активной сессии из стора (для заголовка при resume)."""
+    def _session_last_prompt(self) -> "Optional[str]":
+        """Последний user-промпт активной сессии из стора (для заголовка при resume).
+
+        Source of truth — meta.user_intent_log (переживает суммаризацию; user_ask-
+        записи), как в _mount_failed_from_meta; legacy user_messages_log — фолбэк
+        (после сжатия он пуст)."""
         if self._store is None or self._active_task_id is None:
             return None
         try:
             meta = self._store.get_task_meta(self._active_task_id)
         except Exception:
             return None
+        for rec in reversed(deserialize_list(meta.get("user_intent_log"))):
+            if rec.action == ACTION_USER_ASK and isinstance(rec.content, str) \
+                    and rec.content.strip():
+                return rec.content
         for s in reversed(meta.get("user_messages_log") or []):
             if isinstance(s, str) and s.strip():
                 return s
@@ -1435,6 +1453,7 @@ class TraceScreen(Screen):
         # Footer-left зависит от is_running — обновляем каждый тик, чтобы
         # /stop появлялся/исчезал без отдельных вызовов из start/stop путей.
         self._refresh_footer()
+        self._update_terminal_title()   # статус живой в табе: [running]→[completed] и т.д.
         if self._store is None or self._active_task_id is None or self._cursor is None:
             return
         tail = self._store.tail_events(self._active_task_id, self._cursor)
@@ -2169,7 +2188,9 @@ class TraceScreen(Screen):
         ))
 
     def _cmd_new(self) -> None:
-        set_terminal_title(format_terminal_title())
+        self._resumed_prompt = None                      # новая сессия — без resume-промпта
+        self._last_terminal_title = format_terminal_title()
+        set_terminal_title(self._last_terminal_title)
         runner = getattr(self.app, "active_runner", None)
         is_running = runner is not None and runner.is_running()
         if not is_running:
