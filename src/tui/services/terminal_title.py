@@ -7,7 +7,7 @@ import sys
 from typing import Optional
 
 _EMBLEM = "✦"   # U+2726
-_APP_NAME = "GigaCode"
+_APP_NAME = "gc-ua"
 
 
 def format_terminal_title(

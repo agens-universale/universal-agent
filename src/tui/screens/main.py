@@ -265,27 +265,33 @@ class TraceScreen(Screen):
         msgs = self._store.read_live_messages(self._active_task_id)
         return render_context_meter(calc_history_chars_for_trigger(msgs), threshold)
 
-    def _task_status_badge(self) -> str:
+    def _session_status_word(self) -> str:
+        """Сырое слово статуса сессии (без скобок): asking/running/completed/
+        stopped/failed. Единый источник для бейджа трейса (в скобках) и
+        заголовка окна (без скобок)."""
         # ask_human pending — агент ждёт ответа пользователя (приоритет).
         tui_state = getattr(self.app, "tui_state", None)
         if tui_state is not None and tui_state.ask_human_state is not None:
-            return "[asking]"
+            return "asking"
         runner = getattr(self.app, "active_runner", None)
         if runner is not None and runner.is_running():
-            return "[running]"
+            return "running"
         # Нет активного runner — терминальный статус.
         if self._store is not None and self._active_task_id is not None:
             meta = self._store.get_task_meta(self._active_task_id)
             tui_status = (meta.get("tui") or {}).get("status")
             if tui_status in ("completed", "stopped", "failed"):
-                return f"[{tui_status}]"
+                return tui_status
             if meta.get("status") == "running":
-                return "[running]"
+                return "running"
             if meta.get("status") == "completed":
-                return "[completed]"
+                return "completed"
             if meta.get("status") in ("failed", "unknown_failed"):
-                return "[failed]"
-        return "[stopped]"
+                return "failed"
+        return "stopped"
+
+    def _task_status_badge(self) -> str:
+        return f"[{self._session_status_word()}]"
 
     def _refresh_header(self) -> None:
         left, right = self._compose_header_segments()
@@ -706,7 +712,7 @@ class TraceScreen(Screen):
         if self._active_task_id is None:
             title = format_terminal_title()
         else:
-            title = format_terminal_title(self._resumed_prompt, self._task_status_badge())
+            title = format_terminal_title(self._resumed_prompt, self._session_status_word())
         if title != self._last_terminal_title:
             self._last_terminal_title = title
             set_terminal_title(title)

@@ -20,7 +20,7 @@ async def test_new_resets_terminal_title(tmp_path, monkeypatch):
         calls.clear()
         scr._cmd_new()
         await pilot.pause()
-        assert any(c == "✦ GigaCode" for c in calls), f"ожидали сброс заголовка, calls={calls}"
+        assert any(c == "✦ gc-ua" for c in calls), f"ожидали сброс заголовка, calls={calls}"
 
 
 @pytest.mark.asyncio
@@ -39,9 +39,9 @@ async def test_resume_title_uses_session_last_prompt(tmp_path, monkeypatch):
         scr._active_task_id = "t1"
         scr._last_user_send_text = ""        # resume — в этом запуске ничего не слали
         scr._resumed_prompt = "что ты умеешь?"   # кэш промпта сессии (attach прочитал из стора)
-        monkeypatch.setattr(scr, "_task_status_badge", lambda: "[completed]")
+        monkeypatch.setattr(scr, "_session_status_word", lambda: "completed")
         scr._update_terminal_title()
-        assert calls[-1] == "✦ GigaCode · [completed] · что ты умеешь?", calls
+        assert calls[-1] == "✦ gc-ua · completed · что ты умеешь?", calls
 
 
 @pytest.mark.asyncio
@@ -60,17 +60,17 @@ async def test_title_status_is_live_and_deduped(tmp_path, monkeypatch):
         scr._active_task_id = "t1"
         scr._resumed_prompt = "p"
         scr._last_user_send_text = ""
-        badge = {"v": "[completed]"}
-        monkeypatch.setattr(scr, "_task_status_badge", lambda: badge["v"])
+        badge = {"v": "completed"}
+        monkeypatch.setattr(scr, "_session_status_word", lambda: badge["v"])
 
         scr._update_terminal_title()
-        assert calls[-1] == "✦ GigaCode · [completed] · p"
+        assert calls[-1] == "✦ gc-ua · completed · p"
         calls.clear()
         scr._update_terminal_title()              # тот же статус → дедуп, без записи
         assert calls == []
-        badge["v"] = "[running]"                   # статус сменился (старт прогона)
+        badge["v"] = "running"                     # статус сменился (старт прогона)
         scr._update_terminal_title()
-        assert calls == ["✦ GigaCode · [running] · p"]
+        assert calls == ["✦ gc-ua · running · p"]
 
 
 @pytest.mark.asyncio
@@ -87,17 +87,15 @@ async def test_title_single_source_no_cross_session_leak(tmp_path, monkeypatch):
 
     async with TuiApp(threads_dir=str(tmp_path / "threads")).run_test() as pilot:
         scr = pilot.app.screen
-        monkeypatch.setattr(scr, "_task_status_badge", lambda: "[completed]")
-        # в сессии A отправили запрос → _resumed_prompt = текст
+        monkeypatch.setattr(scr, "_session_status_word", lambda: "completed")
         scr._active_task_id = "A"
         scr._resumed_prompt = "запрос A"
         scr._update_terminal_title()
-        assert calls[-1] == "✦ GigaCode · [completed] · запрос A"
-        # переключились на B: attach(is_resume=True) задал _resumed_prompt из стора B
+        assert calls[-1] == "✦ gc-ua · completed · запрос A"
         scr._active_task_id = "B"
         scr._resumed_prompt = "вопрос B"
         scr._update_terminal_title()
-        assert calls[-1] == "✦ GigaCode · [completed] · вопрос B", calls
+        assert calls[-1] == "✦ gc-ua · completed · вопрос B", calls
 
 
 @pytest.mark.asyncio
