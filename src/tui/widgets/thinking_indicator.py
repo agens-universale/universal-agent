@@ -105,10 +105,13 @@ _ANIM_PERIOD = FRAME_HOLD * len(MORPH_FRAMES) * len(GLOW_SHADES)
 PULSE_FRAMES = ["·", "∙", "•", "∙"]
 PULSE_HOLD = 3   # кадр держится 3 тика (0.3с) → полный цикл ≈ 1.2с
 
-# Мерцание искры «завершаю…»: ✦ (полная) ↔ ✧ (пустая), мягко, dim — финализация
-# после ответа (тише активного «думаю…», но заметнее фоновой точки «сверяюсь…»).
-_VALIDATING_SPARKS = ["✦", "✧"]
-_VALIDATING_HOLD = 6   # кадр держится 6 тиков (0.6с) → полный цикл ✦✧ ≈ 1.2с
+# «Дыхание» искры «завершаю…»: ✦ статична по форме, цвет плавно тускнеет↔
+# светлеет (серая рампа, ping-pong, ~1.0с) — спокойная финализация. Та же
+# техника, что пульс running-глифа ▸, но в приглушённых серых.
+_VALIDATING_SHADES = [
+    "#5e6675", "#69727f", "#747e8b", "#808c99", "#8c98a6",
+    "#9aa4b2", "#8c98a6", "#808c99", "#747e8b", "#69727f",
+]
 
 _STATE_THINKING = "thinking"
 _STATE_VALIDATING = "validating"
@@ -188,9 +191,9 @@ class ThinkingIndicator(Static):
         """Глиф дыхания «сверяюсь…»: ·∙•∙, кадр держится PULSE_HOLD тиков."""
         return PULSE_FRAMES[(self._frame // PULSE_HOLD) % len(PULSE_FRAMES)]
 
-    def _validating_spark(self) -> str:
-        """Мерцание искры «завершаю…»: ✦↔✧, кадр держится _VALIDATING_HOLD тиков."""
-        return _VALIDATING_SPARKS[(self._frame // _VALIDATING_HOLD) % len(_VALIDATING_SPARKS)]
+    def _validating_shade(self) -> str:
+        """Цвет «дыхания» искры ✦ «завершаю…»: серая рампа, кадр = тик."""
+        return _VALIDATING_SHADES[self._frame % len(_VALIDATING_SHADES)]
 
     def render(self) -> Text:
         return self._render_text()
@@ -219,7 +222,7 @@ class ThinkingIndicator(Static):
             text.append("Ошибка", style=_DIM)
             return text
         if self._state == _STATE_VALIDATING:
-            text.append(self._validating_spark(), style=_DIM)
+            text.append("✦", style=self._validating_shade())
             text.append(" ")
             text.append("завершаю…", style=_DIM)
         elif self._state == _STATE_COMPRESSING:

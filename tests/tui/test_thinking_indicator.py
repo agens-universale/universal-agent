@@ -153,15 +153,25 @@ def test_validating_still_renders_zavershayu():
     assert "завершаю…" in str(w.render())
 
 
-def test_validating_spark_twinkles():
-    """«завершаю…» мерцает искрой ✦↔✧ по кадрам — мягкая анимация финализации."""
+def test_validating_spark_breathes():
+    """«завершаю…»: искра ✦ статична по форме (без ✧), а её цвет «дышит» по
+    кадрам — серая рампа (та же техника, что пульс running-глифа ▸)."""
     pytest.importorskip("textual")
-    from tui.widgets.thinking_indicator import ThinkingIndicator, _VALIDATING_HOLD
+    from tui.widgets.thinking_indicator import ThinkingIndicator, _VALIDATING_SHADES
+
+    def spark_color(w):
+        t = w._render_text()
+        return next(str(s.style) for s in t.spans if "✦" in t.plain[s.start:s.end])
+
     w = ThinkingIndicator(state="validating")
     w._frame = 0
-    assert "✦" in str(w.render())
-    w._frame = _VALIDATING_HOLD          # следующий кадр-холд → пустая искра
-    assert "✧" in str(w.render())
+    rendered = str(w.render())
+    assert "✦" in rendered and "✧" not in rendered   # форма не меняется
+    c0 = spark_color(w)
+    w._frame = 5
+    c5 = spark_color(w)
+    assert c0 != c5                                   # цвет «дышит» между кадрами
+    assert c0 in _VALIDATING_SHADES and c5 in _VALIDATING_SHADES
 
 
 def test_set_state_ignores_unknown_value():
