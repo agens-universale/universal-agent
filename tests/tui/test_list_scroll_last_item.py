@@ -1,15 +1,7 @@
-"""Баг-фикс: при навигации стрелками по спискам скиллов/сессий прокручиваются
-ОБЕ строки карточки (заголовок + мета), и заголовок (верх элемента) — якорь.
-
-Раньше скроллился только заголовок → нижняя строка последнего элемента
-оставалась под сгибом. После первого фикса (скроллим обе) порядок «заголовок,
-потом мета» давал зеркальный баг: при переходе вниз-с-последнего-на-первый видна
-только нижняя строка первого, а заголовок уезжал над сгибом.
-
-Контракт (детерминированно, без зависимости от реальной геометрии): при выборе
-элемента `scroll_visible` зовётся на ОБОИХ его виджетах, причём на МЕТЕ раньше,
-чем на ЗАГОЛОВКЕ (заголовок скроллим последним → верх элемента «выигрывает»
-позицию; 2-строчный элемент влезает в окно, поэтому мета под ним тоже видна).
+"""Списки скиллов/сессий: каждый элемент — ОДИН виджет (.card, 2 строки), как
+карточка MCP. Тогда `scroll_visible` тащит элемент целиком в ОБОИХ направлениях
+кругового перехода — нет конфликта двух независимых прокруток (заголовок vs мета),
+из-за которого то нижняя, то верхняя строка пряталась под сгибом.
 """
 import json
 from pathlib import Path
@@ -23,13 +15,8 @@ _SKILLS = [
 ]
 
 
-def _assert_both_scrolled_meta_first(scrolled, title, meta):
-    assert title in scrolled and meta in scrolled        # прокручены обе строки
-    assert scrolled.index(meta) < scrolled.index(title)  # заголовок — последним (якорь)
-
-
 @pytest.mark.asyncio
-async def test_skills_wrap_to_first_scrolls_both_title_anchored(monkeypatch):
+async def test_skills_item_single_card_scrolls_both_wraps(monkeypatch):
     pytest.importorskip("textual")
     from textual.containers import VerticalScroll
     from textual.widgets import Static
@@ -37,22 +24,26 @@ async def test_skills_wrap_to_first_scrolls_both_title_anchored(monkeypatch):
     from tui.screens.skills import SkillsScreen
 
     scrolled: list = []
-    monkeypatch.setattr(Static, "scroll_visible",
-                        lambda self, *a, **k: scrolled.append(self))
+    monkeypatch.setattr(Static, "scroll_visible", lambda self, *a, **k: scrolled.append(self))
 
     async with TuiApp().run_test() as pilot:
         pilot.app.push_screen(SkillsScreen(skills=_SKILLS))
         await pilot.pause()
         listview = pilot.app.screen.query_one("#skills-list", VerticalScroll)
-        await pilot.press("end")              # на последний
+        # один виджет на элемент (а не два) → scroll_visible тащит обе строки разом
+        assert len(listview.query(".card")) == len(_SKILLS)
+        await pilot.press("end")
         await pilot.pause()
         scrolled.clear()
-        await pilot.press("down")             # вниз → круговой переход на ПЕРВЫЙ (репро)
+        await pilot.press("down")               # круговой переход вниз → первый
         await pilot.pause()
         await pilot.pause()
-        title = list(listview.query(".card-title"))[0]
-        meta = list(listview.query(".card-meta"))[0]
-        _assert_both_scrolled_meta_first(scrolled, title, meta)
+        assert list(listview.query(".card"))[0] in scrolled
+        scrolled.clear()
+        await pilot.press("up")                 # круговой переход вверх → последний
+        await pilot.pause()
+        await pilot.pause()
+        assert list(listview.query(".card"))[-1] in scrolled
 
 
 def _seed_session(threads_dir, i):
@@ -64,7 +55,7 @@ def _seed_session(threads_dir, i):
 
 
 @pytest.mark.asyncio
-async def test_sessions_wrap_to_first_scrolls_both_title_anchored(tmp_path, monkeypatch):
+async def test_sessions_item_single_card_scrolls_both_wraps(tmp_path, monkeypatch):
     pytest.importorskip("textual")
     from textual.containers import VerticalScroll
     from textual.widgets import Static
@@ -75,20 +66,23 @@ async def test_sessions_wrap_to_first_scrolls_both_title_anchored(tmp_path, monk
         _seed_session(tmp_path, i)
 
     scrolled: list = []
-    monkeypatch.setattr(Static, "scroll_visible",
-                        lambda self, *a, **k: scrolled.append(self))
+    monkeypatch.setattr(Static, "scroll_visible", lambda self, *a, **k: scrolled.append(self))
 
     app = TuiApp(threads_dir=str(tmp_path), system="cli")
     async with app.run_test() as pilot:
         await pilot.app.push_screen(SessionsScreen(threads_dir=str(tmp_path), system="cli"))
         await pilot.pause()
         listview = pilot.app.screen.query_one("#sessions-list", VerticalScroll)
+        assert len(listview.query(".card")) == 5
         await pilot.press("end")
         await pilot.pause()
         scrolled.clear()
         await pilot.press("down")
         await pilot.pause()
         await pilot.pause()
-        title = list(listview.query(".card-title"))[0]
-        meta = list(listview.query(".card-meta"))[0]
-        _assert_both_scrolled_meta_first(scrolled, title, meta)
+        assert list(listview.query(".card"))[0] in scrolled
+        scrolled.clear()
+        await pilot.press("up")
+        await pilot.pause()
+        await pilot.pause()
+        assert list(listview.query(".card"))[-1] in scrolled

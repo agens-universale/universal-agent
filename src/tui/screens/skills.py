@@ -95,6 +95,14 @@ class SkillsScreen(Screen):
             t.append(truncate_path_left(path, maxlen), style=DIM)
         return t
 
+    def _card_text(self, skill: dict, *, selected: bool, maxlen: int) -> Text:
+        """Карточка скилла одним 2-строчным виджетом: id + строка типа/пути."""
+        t = Text(no_wrap=True, overflow="ellipsis")
+        t.append_text(self._id_line(skill, selected=selected))
+        t.append("\n")
+        t.append_text(self._meta_line(skill, maxlen=maxlen))
+        return t
+
     def _render_list(self) -> None:
         listview = self.query_one("#skills-list", VerticalScroll)
         listview.remove_children()
@@ -102,27 +110,19 @@ class SkillsScreen(Screen):
             listview.mount(Static("(скиллы недоступны)", classes="line-meta", markup=False))
             return
         maxlen = self._path_maxlen()
-        selected_title: Optional[Static] = None
-        selected_meta: Optional[Static] = None
+        selected_card: Optional[Static] = None
         for idx, s in enumerate(self._skills):
             suffix = " selected" if idx == self._selected_idx else ""
-            id_w = Static(self._id_line(s, selected=bool(suffix)),
-                          classes="card-title" + suffix, markup=False)
-            meta_w = Static(self._meta_line(s, maxlen=maxlen),
-                            classes="card-meta" + suffix, markup=False)
+            card = Static(self._card_text(s, selected=bool(suffix), maxlen=maxlen),
+                          classes="card" + suffix, markup=False)
             if suffix:
-                selected_title = id_w
-                selected_meta = meta_w
-            listview.mount(id_w)
-            listview.mount(meta_w)
-        if selected_title is not None:
-            # Прокрутить ОБЕ строки выбранного: мету ПЕРВОЙ, заголовок ПОСЛЕДНИМ —
-            # заголовок (верх элемента) «выигрывает» позицию-якорь. Иначе при
-            # переходе вниз-с-последнего-на-первый видна только нижняя строка, а
-            # заголовок уезжает над сгибом. 2-строчный элемент влезает в окно,
-            # поэтому когда виден заголовок — мета под ним тоже видна.
-            self.call_after_refresh(selected_meta.scroll_visible, animate=False)
-            self.call_after_refresh(selected_title.scroll_visible, animate=False)
+                selected_card = card
+            listview.mount(card)
+        if selected_card is not None:
+            # Элемент — ОДИН виджет (2 строки): scroll_visible тащит его целиком в
+            # обе стороны кругового перехода (как карточка MCP), без конфликта двух
+            # независимых прокруток заголовка и меты.
+            self.call_after_refresh(selected_card.scroll_visible, animate=False)
 
     def on_input_changed(self, event: Input.Changed) -> None:
         if event.input.id == "skills-filter":

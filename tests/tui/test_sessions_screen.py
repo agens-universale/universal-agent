@@ -215,14 +215,14 @@ async def test_pages_replace_not_grow(tmp_path):
         await pilot.app.push_screen(scr)
         await pilot.pause()
         # страница 0: _PAGE_SIZE карточек, без «показать ещё»
-        cards = pilot.app.screen.query("#sessions-list .card-title")
+        cards = pilot.app.screen.query("#sessions-list .card")
         assert len(cards) == _PAGE_SIZE
         hdr = "\n".join(str(s.render()) for s in pilot.app.screen.query("#sessions-header-left"))
         assert f"1–{_PAGE_SIZE} из {total}" in hdr
         assert "показать ещё" not in _rows_text(pilot)
         await pilot.press("pagedown")
         await pilot.pause()
-        cards = pilot.app.screen.query("#sessions-list .card-title")
+        cards = pilot.app.screen.query("#sessions-list .card")
         assert len(cards) == rest
         hdr = "\n".join(str(s.render()) for s in pilot.app.screen.query("#sessions-header-left"))
         assert f"{_PAGE_SIZE + 1}–{total} из {total}" in hdr

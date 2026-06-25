@@ -263,12 +263,9 @@ TextArea.ask-human-mode { border: solid $run-color; }
 #sessions-header-right { width: auto; color: $deep-dim; text-align: right; padding-right: 1; }
 #sessions-footer { height: 1; padding: 0 1; }
 #sessions-list { height: 1fr; }
-#sessions-list Static { padding: 0 1; height: 1; }
-#sessions-list .card-meta { margin-bottom: 1; }
-#sessions-list .card-title.selected,
-#sessions-list .card-meta.selected { background: $band-bg; }
-#sessions-list .card-title.selected,
-#sessions-list .card-meta.selected { border-left: outer $accent; }
+#sessions-list Static { padding: 0 1; }
+#sessions-list .card { height: auto; margin-bottom: 1; }
+#sessions-list .card.selected { background: $band-bg; border-left: outer $accent; }
 
 /* PreviewScreen — read-only превью сессии (футер с линией-разделителем) */
 #preview-footer { height: 2; background: #161A23; color: $dim;
@@ -281,12 +278,9 @@ TextArea.ask-human-mode { border: solid $run-color; }
 #skills-filter { height: 1; width: 1fr; border: none; padding: 0; background: $bg; color: $ink; }
 #skills-filter:focus { border: none; }
 #skills-list { height: 1fr; }
-#skills-list Static { padding: 0 1; height: 1; }
-#skills-list .card-meta { margin-bottom: 1; }
-#skills-list .card-title.selected,
-#skills-list .card-meta.selected { background: $band-bg; }
-#skills-list .card-title.selected,
-#skills-list .card-meta.selected { border-left: outer $accent; }
+#skills-list Static { padding: 0 1; }
+#skills-list .card { height: auto; margin-bottom: 1; }
+#skills-list .card.selected { background: $band-bg; border-left: outer $accent; }
 
 /* McpScreen — карточки серверов (spec 2026-06-10) */
 .mcp-card { height: auto; padding: 0 1; margin-bottom: 1; }

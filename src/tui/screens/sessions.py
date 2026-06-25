@@ -190,6 +190,14 @@ class SessionsScreen(Screen):
         t.append(_short_id(task.thread_id), style=MUTED)
         return t
 
+    def _card_text(self, task, *, selected: bool) -> Text:
+        """Карточка сессии одним 2-строчным виджетом: заголовок + мета."""
+        t = Text(no_wrap=True, overflow="ellipsis")
+        t.append_text(self._title_line(task, selected=selected))
+        t.append("\n")
+        t.append_text(self._meta_line(task))
+        return t
+
     def _render_list(self) -> None:
         listview = self.query_one("#sessions-list", VerticalScroll)
         listview.remove_children()
@@ -197,27 +205,18 @@ class SessionsScreen(Screen):
         if not page:
             listview.mount(Static("(нет сессий)", classes="line-meta", markup=False))
             return
-        selected_title: Optional[Static] = None
-        selected_meta: Optional[Static] = None
+        selected_card: Optional[Static] = None
         for idx, task in enumerate(page):
             suffix = " selected" if idx == self._selected_idx else ""
-            title_w = Static(self._title_line(task, selected=bool(suffix)),
-                             classes="card-title" + suffix, markup=False)
-            meta_w = Static(self._meta_line(task),
-                            classes="card-meta" + suffix, markup=False)
+            card = Static(self._card_text(task, selected=bool(suffix)),
+                          classes="card" + suffix, markup=False)
             if suffix:
-                selected_title = title_w
-                selected_meta = meta_w
-            listview.mount(title_w)
-            listview.mount(meta_w)
-        if selected_title is not None:
-            # Прокрутить ОБЕ строки выбранного: мету ПЕРВОЙ, заголовок ПОСЛЕДНИМ —
-            # заголовок (верх элемента) «выигрывает» позицию-якорь. Иначе при
-            # переходе вниз-с-последнего-на-первый видна только нижняя строка, а
-            # заголовок уезжает над сгибом. 2-строчный элемент влезает в окно,
-            # поэтому когда виден заголовок — мета под ним тоже видна.
-            self.call_after_refresh(selected_meta.scroll_visible, animate=False)
-            self.call_after_refresh(selected_title.scroll_visible, animate=False)
+                selected_card = card
+            listview.mount(card)
+        if selected_card is not None:
+            # Элемент — ОДИН виджет (2 строки): scroll_visible тащит его целиком в
+            # обе стороны кругового перехода (как карточка MCP).
+            self.call_after_refresh(selected_card.scroll_visible, animate=False)
 
     def _change_page(self, delta: int) -> None:
         new_page = max(0, min(self._page + delta, self._page_count() - 1))
