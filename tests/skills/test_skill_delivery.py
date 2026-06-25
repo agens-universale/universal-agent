@@ -1,4 +1,4 @@
-from tools.skills.skill_delivery import build_skill_delivery
+from tools.skills.skill_delivery import build_skill_delivery, skill_is_available
 
 
 class _FakeReg:
@@ -54,3 +54,13 @@ def test_none_detail_returns_directive_with_empty_instructions():
     assert out.startswith("Используй skill `s`.")
     assert "skills_load_reference" not in out
     assert "read_file не читай" in out
+
+
+def test_skill_is_available_true_when_detail_loads():
+    reg = _FakeReg({"instructions": "x", "references": [], "assets": []})
+    assert skill_is_available("s", reg) is True
+
+
+def test_skill_is_available_false_on_exception():
+    reg = _FakeReg(raises=True)
+    assert skill_is_available("nope", reg) is False

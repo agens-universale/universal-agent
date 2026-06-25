@@ -56,3 +56,14 @@ def build_skill_delivery(skill_id: str, registry: Any) -> str:
     parts.append("")
     parts.append(" ".join(lock))
     return "\n".join(parts)
+
+
+def skill_is_available(skill_id: str, registry: Any) -> bool:
+    """True, если скилл реально загрузим — для честного маркера «загружен»/«не
+    найден». Критерий тот же, что у build_skill_delivery: detail грузится ⟺
+    инструкция инжектнута (fallback ⟺ не найден)."""
+    try:
+        registry.load_skill_detail(skill_id)
+        return True
+    except Exception:
+        return False

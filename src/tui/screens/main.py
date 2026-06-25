@@ -167,6 +167,13 @@ class TraceScreen(Screen):
         # Храним последний программно выставленный текст; Changed, у которого
         # текущее значение совпадает с ним, — не user-edit, не сбрасываем state.
         self._history_last_programmatic_text: Optional[str] = None
+        # Отложенный маркер «[skill] X загружен/не найден»: ставится в
+        # _consume_pending_prefix, монтируется после реплики (_mount_user_reply).
+        self._pending_skill_marker: Optional[str] = None
+        # Промпт inline-доставки скилла — сохраняется в _deliver_skill_with_prompt,
+        # чтобы _flush_skill_marker смог разместить строку «> prompt» перед маркером
+        # и доказать в трейсе порядок: реплика → маркер.
+        self._pending_skill_prompt: Optional[str] = None
 
     def compose(self) -> ComposeResult:
         with Vertical(id="root"):
@@ -1187,7 +1194,31 @@ class TraceScreen(Screen):
         self._trace_mount(widget, force_scroll=(state == "pending"))
         if state == "pending" and client_id is not None:
             self._record_pending_widget(client_id, widget)
+        if state == "pending":
+            self._flush_skill_marker()
         return widget
+
+    def _mount_skill_marker(self, skill_id: str, loaded: bool) -> None:
+        """Серый [skill]-маркер итога доставки скилла."""
+        content = (f"`{skill_id}` загружен" if loaded
+                   else f"`{skill_id}` не найден — инструкция не подгружена")
+        self._mount_trace_row(prefix="[skill] ", content=content, kind_class="line-meta")
+
+    def _flush_skill_marker(self) -> None:
+        """Смонтировать отложенный маркер скилла (выставлен в
+        _consume_pending_prefix), если есть. Вызывается после реплики юзера."""
+        skill_id = self._pending_skill_marker
+        prompt = self._pending_skill_prompt
+        self._pending_skill_marker = None
+        self._pending_skill_prompt = None
+        if not skill_id:
+            return
+        if prompt:
+            self._mount_trace_row(prefix="> ", content=prompt, kind_class="line-meta")
+        from tools.skills.registry import get_skills_registry
+        from tools.skills.skill_delivery import skill_is_available
+        reg = get_skills_registry(getattr(self.app, "_config", None) or {})
+        self._mount_skill_marker(skill_id, skill_is_available(skill_id, reg))
 
     _PENDING_CAP = 20
 
@@ -2218,6 +2249,7 @@ class TraceScreen(Screen):
             reg = get_skills_registry(getattr(self.app, "_config", None) or {})
             prefix.append(build_skill_delivery(pending_skill, reg))
             patch["skills"] = [pending_skill]
+            self._pending_skill_marker = pending_skill
         return ("\n".join(prefix + [text]) if prefix else text), patch
 
     def _build_attachment_technical(self, text: str) -> Optional[str]:
@@ -2538,18 +2570,14 @@ class TraceScreen(Screen):
         if runner is not None and runner.is_running():
             # Идёт run → подкидываем как сообщение и фиксируем в meta.
             from tools.skills.registry import get_skills_registry
-            from tools.skills.skill_delivery import build_skill_delivery
+            from tools.skills.skill_delivery import build_skill_delivery, skill_is_available
             reg = get_skills_registry(getattr(self.app, "_config", None) or {})
             runner.add_message({
                 "role": "user",
                 "content": build_skill_delivery(skill_id, reg),
             })
             self._record_skill_meta(skill_id)
-            self._mount_trace_row(
-                prefix="[skill] ",
-                content=f"`{skill_id}` отправлен агенту",
-                kind_class="line-meta",
-            )
+            self._mount_skill_marker(skill_id, skill_is_available(skill_id, reg))
             return
         # Run не идёт (нет задачи / завершена / открыта через /sessions) — отложенно
         # к следующему сообщению.
@@ -2569,13 +2597,9 @@ class TraceScreen(Screen):
         игнорировать. Дисплей: маркер [skill] + реплика с чистым промптом."""
         self.app.tui_state.pending_skill_id = skill_id
         full_query, _ = self._consume_pending_prefix(prompt)
+        self._pending_skill_prompt = prompt
         msg_id = "m_" + uuid.uuid4().hex
         self._last_user_message_id = msg_id
-
-        self._mount_trace_row(
-            prefix="[skill] ", content=f"`{skill_id}` отправлен агенту",
-            kind_class="line-meta",
-        )
 
         runner = self.app.active_runner
         if runner is not None and runner.is_running():
