@@ -16,6 +16,7 @@ Usage:
 """
 import asyncio
 import os
+from pathlib import Path
 from typing import Any
 
 from harbor.agents.base import BaseAgent
@@ -42,6 +43,16 @@ DEFAULT_MODEL = "MiniMaxAI/MiniMax-M2.7"
 # gc-cli chat roles → ATIF step sources. ATIF has no "tool" source: tool results are
 # folded into the preceding agent step's `observation` (see _messages_to_steps).
 _ROLE_TO_SOURCE = {"system": "system", "user": "user", "assistant": "agent"}
+
+# System prompt bundled WITH the adapter. The CLI/REST flow loads the prompt via
+# load_config → resolve_paths (default <config_dir>/prompts/...); the adapter builds
+# config_dict directly and skips that, so without this the run gets NO system prompt.
+# The repo-root prompts/ is not in the image (not packaged; Dockerfile keeps only
+# adapters/), so the prompt travels inside adapters/ and is resolved from __file__
+# (absolute → agent_executor opens it directly, no resolve_paths needed).
+_BUNDLED_SYSTEM_PROMPT = str(
+    Path(__file__).resolve().parent / "prompts" / "chat_completions_system_prompt_harbor.md"
+)
 
 
 def _deep_merge(base: dict, over: dict) -> dict:
@@ -194,6 +205,7 @@ class GcCliExternal(BaseAgent):
             "backend_api_mode": "chat_completions",
             "completions_url": self._backend_url,
             "model": self._model,
+            "chat_completions_system_prompt_path": _BUNDLED_SYSTEM_PROMPT,
             "chat_completions_max_tokens": 32768,
             "use_max_tokens_param": True,
             "chat_completion_kwargs": {
