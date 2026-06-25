@@ -33,7 +33,6 @@ from tui.palette import INK as _INK
 from tui.services.context_meter import render_context_meter
 from tui.services.export import export_thread
 from tui.services.path_display import truncate_path
-from tui.services.status_badge import status_badge_color
 from message_format import calc_history_chars_for_trigger
 from tui.services.git_info import current_branch
 from tui.services.stores.file_store import FileTaskStore
@@ -1462,11 +1461,6 @@ class TraceScreen(Screen):
                 self._active_task_id, {"last_compact_msg_count": count}
             )
         self._was_summarizing = summarizing
-
-        # Правый бейдж статуса на строке индикатора (если она есть) — каждый тик.
-        if self._thinking is not None:
-            _badge = self._task_status_badge()
-            self._thinking.set_status(_badge, status_badge_color(_badge))
 
         if is_running and not ask_human_active and not self._confirm_active:
             import time as _time
