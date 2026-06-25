@@ -235,13 +235,13 @@ class SessionsScreen(Screen):
     def on_key(self, event: events.Key) -> None:
         page_len = len(self._page_items())
         if event.key == "up":
-            if page_len and self._selected_idx > 0:
-                self._selected_idx -= 1
+            if page_len:   # круговой в пределах страницы: с первой ↑ → на последнюю
+                self._selected_idx = (self._selected_idx - 1) % page_len
                 self._render_list()
             event.stop()
         elif event.key == "down":
-            if page_len and self._selected_idx < page_len - 1:
-                self._selected_idx += 1
+            if page_len:   # круговой: с последней ↓ → на первую
+                self._selected_idx = (self._selected_idx + 1) % page_len
                 self._render_list()
             event.stop()
         elif event.key in ("home", "end"):

@@ -12,9 +12,7 @@ from textual.widgets import Input, Static
 
 from tui.palette import BRIGHT, CODE, DIM, INK, MUTED
 from tui.services.skill_view import source_label, truncate_path_left
-from tui import branding
 
-_HEADER_RIGHT = branding.HEADER_RIGHT
 _FOOTER = "[↑↓] выбрать  [Enter] открыть  [Esc] back  /skill <id>"
 _PATH_MIN = 16          # минимально видимая длина пути (хвост-папка)
 _DEFAULT_WIDTH = 80     # пока ширина списка неизвестна (до первой раскладки)
@@ -39,7 +37,6 @@ class SkillsScreen(Screen):
         with Vertical(id="skills-root"):
             with Horizontal(id="header"):
                 yield Static("", id="header-left", markup=False)
-                yield Static(_HEADER_RIGHT, id="header-right", markup=False)
             yield VerticalScroll(id="skills-list")
             with Horizontal(id="skills-filter-row"):
                 yield Static("> ", id="skills-filter-prompt", markup=False)
@@ -126,13 +123,13 @@ class SkillsScreen(Screen):
 
     def on_key(self, event: events.Key) -> None:
         if event.key == "up":
-            if self._skills and self._selected_idx > 0:
-                self._selected_idx -= 1
+            if self._skills:   # круговой: с первой строки ↑ → на последнюю
+                self._selected_idx = (self._selected_idx - 1) % len(self._skills)
                 self._render_list()
             event.stop()
         elif event.key == "down":
-            if self._skills and self._selected_idx < len(self._skills) - 1:
-                self._selected_idx += 1
+            if self._skills:   # круговой: с последней ↓ → на первую
+                self._selected_idx = (self._selected_idx + 1) % len(self._skills)
                 self._render_list()
             event.stop()
         elif event.key in ("home", "end"):

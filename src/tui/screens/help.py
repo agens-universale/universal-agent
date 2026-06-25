@@ -7,16 +7,6 @@ from textual.screen import Screen
 from textual.widgets import Static
 
 from tui.commands import build_default_registry
-from tui import branding
-
-# Rich-разметка: [bold], [dim], [italic], [#hex]цвет[/].
-# Ссылки: [link="https://..."]текст[/link] — URL в кавычках (иначе : ломает парсер).
-_HELP_FOOTER = """
-[bold]Связь с разработчиками и поддержка[/bold]
-Баги, пожелания, обратная связь
-[link="https://t.me/+2AwDQhHxaAdhNmUy"]В Телеграм[/link]
-[link="https://sberchat.sberbank.ru/@gc-ua-support"]В Сберчат[/link]
-""".strip()
 
 
 class HelpScreen(Screen):
@@ -26,7 +16,6 @@ class HelpScreen(Screen):
         with Vertical(id="root"):
             with Horizontal(id="header"):
                 yield Static("Справка", id="header-left", markup=False)
-                yield Static(branding.HEADER_RIGHT_PLAIN, id="header-right", markup=False)
             # Не фокусируем список: иначе срабатывает #trace:focus { outline },
             # и outline ложится поверх первой строки (выглядит как разорванная
             # рамка-заголовок). Прокрутка мышью остаётся; список короткий.
@@ -50,4 +39,3 @@ class HelpScreen(Screen):
             ))
             if cmd.hotkey:
                 row.mount(Static(cmd.hotkey, classes="help-row-key", markup=False))
-        trace.mount(Static(_HELP_FOOTER, classes="help-footer", markup=True))

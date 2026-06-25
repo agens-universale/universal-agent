@@ -215,7 +215,6 @@ ToolCallRow:focus, TraceRow:focus, UserReplyContainer:focus, AgentReplyLine:focu
 .help-row.help-row-alt { background: #181c26; }  /* зебра: чуть светлее фона для читаемости */
 .help-row-main { width: 1fr; padding-left: 1; }
 .help-row-key  { width: auto; color: $deep-dim; text-align: right; padding-right: 1; }
-.help-footer   { height: auto; width: 1fr; color: $dim; padding: 1 1 0 1; margin-top: 1; }
 
 /* Тело ViewerScreen — read-only payload/файл */
 .viewer-body   { color: $ink; padding: 0 1; }

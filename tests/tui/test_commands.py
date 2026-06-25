@@ -2,7 +2,6 @@
 from tui.commands import (
     Command, CommandRegistry, build_default_registry, closest_command,
 )
-from tui import branding
 
 
 def test_register_and_lookup():
@@ -122,9 +121,3 @@ def test_compact_command_registered_with_alias():
     assert cmd.description == "сжать контекст сессии сейчас"
     # алиас /сжать ведёт на ту же команду
     assert reg.lookup("сжать") is cmd
-
-
-def test_headers_have_no_fake_version():
-    from tui.screens.skills import _HEADER_RIGHT as SK_RIGHT
-    assert "v0.2" not in SK_RIGHT
-    assert branding.HEADER_RIGHT in SK_RIGHT

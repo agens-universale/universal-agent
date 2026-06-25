@@ -8,10 +8,8 @@ from rich.text import Text
 
 from tui.services.redact import redact_secrets
 from tui.services.yaml_view import safe_yaml_dump, yaml_syntax_widget
-from tui import branding
 from tui.palette import DIM, MUTED
 
-_HEADER_RIGHT = branding.HEADER_RIGHT
 _FOOTER = "[Esc] back  [↑↓ / PgUp PgDn] прокрутка"
 _SNAPSHOT_HINT = "снимок на момент запуска · правки применятся после перезапуска"
 
@@ -69,7 +67,6 @@ class ConfigScreen(Screen):
         with Vertical(id="root"):
             with Horizontal(id="header"):
                 yield Static("config · снимок сессии", id="header-left", markup=False)
-                yield Static(_HEADER_RIGHT, id="header-right", markup=False)
             with VerticalScroll(id="trace", classes="quiet-focus"):
                 yield Static(_SNAPSHOT_HINT, classes="config-caption", markup=False)
                 paths = Static(
