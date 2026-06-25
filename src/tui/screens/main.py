@@ -2213,7 +2213,10 @@ class TraceScreen(Screen):
         prefix: list[str] = []
         patch: dict = {}
         if pending_skill:
-            prefix.append(f"Используй skill `{pending_skill}`.")
+            from tools.skills.registry import get_skills_registry
+            from tools.skills.skill_delivery import build_skill_delivery
+            reg = get_skills_registry(getattr(self.app, "_config", None) or {})
+            prefix.append(build_skill_delivery(pending_skill, reg))
             patch["skills"] = [pending_skill]
         return ("\n".join(prefix + [text]) if prefix else text), patch
 
@@ -2534,9 +2537,12 @@ class TraceScreen(Screen):
         runner = self.app.active_runner
         if runner is not None and runner.is_running():
             # Идёт run → подкидываем как сообщение и фиксируем в meta.
+            from tools.skills.registry import get_skills_registry
+            from tools.skills.skill_delivery import build_skill_delivery
+            reg = get_skills_registry(getattr(self.app, "_config", None) or {})
             runner.add_message({
                 "role": "user",
-                "content": f"Загрузи skill `{skill_id}` и продолжай работать с его инструментами.",
+                "content": build_skill_delivery(skill_id, reg),
             })
             self._record_skill_meta(skill_id)
             self._mount_trace_row(
