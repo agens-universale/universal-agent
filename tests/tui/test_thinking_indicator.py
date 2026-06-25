@@ -44,14 +44,14 @@ def test_tick_advances_frame_index():
 
 
 def test_validating_state_renders_check_mark_and_label():
-    """Validating-режим: статичный ✓ + 'завершаю' + анимированные точки + таймер."""
+    """Validating-режим: статичная искра ✦ + 'завершаю' + анимированные точки + таймер."""
     pytest.importorskip("textual")
     from tui.widgets.thinking_indicator import ThinkingIndicator
 
     w = ThinkingIndicator(state="validating")
     rendered = str(w.render())
     assert "завершаю" in rendered
-    assert "✓" in rendered
+    assert "✦" in rendered
     assert "думаю" not in rendered  # не overlap режимов
 
 

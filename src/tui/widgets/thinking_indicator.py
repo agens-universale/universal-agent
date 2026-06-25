@@ -205,12 +205,12 @@ class ThinkingIndicator(Static):
             text.append("Отменено", style=_DIM)
             return text
         if self._state == _STATE_FAILED:
-            text.append("✕", style=_DIM)
+            text.append("✗", style=_DIM)
             text.append(" ")
             text.append("Ошибка", style=_DIM)
             return text
         if self._state == _STATE_VALIDATING:
-            text.append("✓", style=_DIM)
+            text.append("✦", style=_DIM)
             text.append(" ")
             text.append("завершаю…", style=_DIM)
         elif self._state == _STATE_COMPRESSING:
