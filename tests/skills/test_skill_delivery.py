@@ -46,3 +46,11 @@ def test_assets_listed_when_present():
     out = build_skill_delivery("s", reg)
     assert "template_main" in out
     assert "skills_load_asset" in out
+
+
+def test_none_detail_returns_directive_with_empty_instructions():
+    reg = _FakeReg(detail=None)
+    out = build_skill_delivery("s", reg)
+    assert out.startswith("Используй skill `s`.")
+    assert "skills_load_reference" not in out
+    assert "read_file не читай" in out
