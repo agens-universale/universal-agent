@@ -428,9 +428,9 @@ def test_running_glyph_pulses_color():
     assert [str(s.style) for s in p0.spans] != [str(s.style) for s in p3.spans]
 
 
-def test_pulse_cycle_length_is_four():
-    """Цикл пульса = 4 кадра (темп ≈1.0с): frame4 возвращается к frame0,
-    а frame2 (пик) внутри цикла отличается по цвету."""
+def test_pulse_cycle_length_is_ten():
+    """Цикл пульса ▸ = 10 кадров на 0.1с-тике (плавное дыхание ≈1.0с, 10fps):
+    frame10 возвращается к frame0, frame5 (пик) внутри цикла отличается."""
     from tui.widgets.tool_call_row import ToolCallRow
     row = ToolCallRow(call_id="c1", tool_name="t", args_summary="")
 
@@ -440,16 +440,36 @@ def test_pulse_cycle_length_is_four():
         return next(str(s.style) for s in p.spans if "▸" in p.plain[s.start:s.end])
 
     c0 = glyph_color(0)
-    assert glyph_color(4) == c0      # цикл = 4 → frame4 == frame0
-    assert glyph_color(2) != c0      # пик цикла отличается
+    assert glyph_color(10) == c0     # цикл = 10 → frame10 == frame0
+    assert glyph_color(5) != c0      # пик цикла отличается
 
 
-def test_refresh_running_elapsed_advances_pulse():
+def test_pulse_tick_advances_pulse_while_running():
+    """Пульс ▸ двигается на собственном 0.1с-тике (_pulse_tick), пока running."""
+    from tui.widgets.tool_call_row import ToolCallRow
+    row = ToolCallRow(call_id="c1", tool_name="t", args_summary="")
+    f0 = row._pulse_frame
+    row._pulse_tick()
+    assert row._pulse_frame == f0 + 1
+
+
+def test_pulse_tick_noop_after_completion():
+    """После завершения строки _pulse_tick не двигает кадр (тик гасится)."""
+    from tui.widgets.tool_call_row import ToolCallRow
+    row = ToolCallRow(call_id="c1", tool_name="t", args_summary="")
+    row.set_result(summary="ok", error=False)
+    f = row._pulse_frame
+    row._pulse_tick()
+    assert row._pulse_frame == f
+
+
+def test_refresh_running_elapsed_does_not_advance_pulse():
+    """Секундный поллер больше НЕ двигает пульс (он на собственном тике)."""
     from tui.widgets.tool_call_row import ToolCallRow
     row = ToolCallRow(call_id="c1", tool_name="t", args_summary="")
     f0 = row._pulse_frame
     row.refresh_running_elapsed()
-    assert row._pulse_frame == f0 + 1
+    assert row._pulse_frame == f0
 
 
 def test_completed_ok_row_has_no_elapsed():

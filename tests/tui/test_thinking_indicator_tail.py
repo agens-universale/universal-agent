@@ -30,15 +30,21 @@ def test_processing_state_label():
     assert "думаю" not in p
 
 
-def test_processing_uses_pulse_glyph_not_morph():
-    """«сверяюсь…» дышит точкой ·∙•∙, а не ярким морф-спиннером «думаю…»."""
+def test_processing_breathes_dot_brightness():
+    """«сверяюсь…»: одна точка • статична по форме, а её ЦВЕТ дышит по кадрам
+    (тёмно-серая рампа) — плавно, без морф-спиннера «думаю…» и без смены формы."""
+    from tui.widgets.thinking_indicator import _PROCESSING_SHADES
     ind = ThinkingIndicator(started_at=0.0, state="processing", clock=lambda: 1.0)
-    seen = set()
+    glyphs, colors = set(), set()
     for f in range(40):
         ind._frame = f
-        seen.add(_plain(ind)[0])          # первый символ строки = глиф
-    assert seen <= set("·∙•")             # только кадры дыхания
-    assert not (seen & set("▴◂▾▸✦✧+"))    # морф-кадры не появляются
+        t = ind._render_text()
+        glyphs.add(t.plain[0])            # первый символ строки = глиф
+        colors.add(next(str(s.style) for s in t.spans if t.plain[s.start:s.end] == "•"))
+    assert glyphs == {"•"}                            # форма не меняется
+    assert not (glyphs & set("·∙▴◂▾▸✦✧+"))            # ни морф, ни старая растущая точка
+    assert len(colors) > 1                            # цвет дышит
+    assert colors <= set(_PROCESSING_SHADES)          # из тёмно-серой рампы
 
 
 def test_processing_word_is_dim_not_accent():

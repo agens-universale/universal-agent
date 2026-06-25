@@ -99,11 +99,14 @@ GLOW_SHADES = [
 # остаётся ограниченным, а обе под-анимации выходят на старт синхронно.
 _ANIM_PERIOD = FRAME_HOLD * len(MORPH_FRAMES) * len(GLOW_SHADES)
 
-# Дыхание «сверяюсь…» (судья сверяет ответ перед закрытием хода): одна точка
-# плавно растёт и опадает ·→∙→•→∙, без яркого морфа и без цвета — отличает
-# фоновую сверку от активной генерации «думаю…».
-PULSE_FRAMES = ["·", "∙", "•", "∙"]
-PULSE_HOLD = 3   # кадр держится 3 тика (0.3с) → полный цикл ≈ 1.2с
+# «Дыхание» точки «сверяюсь…» (судья сверяет ответ перед закрытием хода): одна
+# точка • статична по форме, её ЦВЕТ плавно тускнеет↔светлеет по ТЁМНО-серой
+# рампе — та же техника дыхания яркостью, что у ✦/▸, но в самых глубоких серых
+# (тише всего: лесенка громкости ▸ > ✦ > •). Плавно на 0.1с-тике, без морфа формы.
+_PROCESSING_SHADES = [
+    "#4c525b", "#545b65", "#5d646e", "#666e78", "#6f7782",
+    "#7a8290", "#6f7782", "#666e78", "#5d646e", "#545b65",
+]
 
 # «Дыхание» искры «завершаю…»: ✦ статична по форме, цвет плавно тускнеет↔
 # светлеет (серая рампа, ping-pong, ~1.0с) — спокойная финализация. Та же
@@ -187,9 +190,9 @@ class ThinkingIndicator(Static):
         color = GLOW_SHADES[self._frame % len(GLOW_SHADES)]
         return glyph, color
 
-    def _pulse_glyph(self) -> str:
-        """Глиф дыхания «сверяюсь…»: ·∙•∙, кадр держится PULSE_HOLD тиков."""
-        return PULSE_FRAMES[(self._frame // PULSE_HOLD) % len(PULSE_FRAMES)]
+    def _processing_shade(self) -> str:
+        """Цвет «дыхания» точки • «сверяюсь…»: тёмно-серая рампа, кадр = тик."""
+        return _PROCESSING_SHADES[self._frame % len(_PROCESSING_SHADES)]
 
     def _validating_shade(self) -> str:
         """Цвет «дыхания» искры ✦ «завершаю…»: серая рампа, кадр = тик."""
@@ -231,7 +234,7 @@ class ThinkingIndicator(Static):
             text.append(" ")
             text.append("сжимаю контекст…", style=_ACCENT)
         elif self._state == _STATE_PROCESSING:
-            text.append(self._pulse_glyph(), style=_DIM)
+            text.append("•", style=self._processing_shade())
             text.append(" ")
             text.append("сверяюсь…", style=_DIM)
         else:

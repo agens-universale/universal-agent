@@ -25,10 +25,13 @@ from tui.palette import RUN_COLOR as _RUN
 from tui.palette import TOOL_NAME as _TOOL_NAME
 from tui.services.duration_format import format_duration
 
-# Пульс яркости running-глифа ▸: амбер тускло→ярко→тускло. Кадр сменяется на
-# каждом тике обновления running-строк (_poll_active ~250мс); 4 кадра → цикл
-# ≈1.0с (бодрый, но не мельтешит).
-_PULSE_SHADES = ["#8a6a3a", "#b8915c", "#d4a574", "#b8915c"]
+# Пульс яркости running-глифа ▸: амбер тускло→ярко→тускло (ping-pong, пик —
+# RUN_COLOR). Двигается на собственном 0.1с-тике строки (см. on_mount) → плавное
+# дыхание 10fps; 10 кадров → цикл ≈1.0с.
+_PULSE_SHADES = [
+    "#8a6a3a", "#977448", "#a47f55", "#b18a62", "#c4986b",
+    "#d4a574", "#c4986b", "#b18a62", "#a47f55", "#977448",
+]
 
 
 class ToolCallRow(Widget):
@@ -78,6 +81,7 @@ class ToolCallRow(Widget):
         self._content_static: Optional[Static] = None
         self._prefix_static: Optional[Static] = None
         self._pulse_frame: int = 0
+        self._pulse_timer = None     # собственный 0.1с-тик дыхания ▸ (on_mount)
         # line-tool на самом widget'е — color: $dim каскадится в prefix-Static,
         # чтобы `  |- ` отрисовалось dim (как и было до compose-рефакторинга).
         self.add_class("line-tool")
@@ -101,6 +105,22 @@ class ToolCallRow(Widget):
             )
             yield self._content_static
 
+    def on_mount(self) -> None:
+        # Пульс ▸ — на собственном 0.1с-тике (как индикатор) → плавное дыхание
+        # 10fps, независимо от 0.25с-поллера (он обновляет только секунды).
+        self._pulse_timer = self.set_interval(0.1, self._pulse_tick)
+
+    def _pulse_tick(self) -> None:
+        """Кадр дыхания running-глифа ▸ (0.1с). После завершения/прерывания
+        гасит собственный таймер — завершённые строки не тикают."""
+        if self._result is not None or self._interrupted:
+            if self._pulse_timer is not None:
+                self._pulse_timer.stop()
+            return
+        self._pulse_frame += 1
+        if self._prefix_static is not None:
+            self._prefix_static.update(self._render_prefix())
+
     def _update(self) -> None:
         """Перерисовать prefix (статус-глиф) и content (имя/хвост)."""
         if self._prefix_static is not None:
@@ -123,11 +143,10 @@ class ToolCallRow(Widget):
         self._update()
 
     def refresh_running_elapsed(self) -> None:
-        """Тик running-строки: продвинуть пульс + перерисовать. После
-        завершения/прерывания — no-op."""
+        """Тик секунд running-строки (поллер ~0.25с): перерисовать `· Nс`. Пульс
+        ▸ живёт отдельно на 0.1с-тике (_pulse_tick). После завершения — no-op."""
         if self._result is not None or self._interrupted:
             return
-        self._pulse_frame += 1
         self._update()
 
     def pause(self) -> None:
