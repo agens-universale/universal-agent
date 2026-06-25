@@ -1391,6 +1391,11 @@ class TraceScreen(Screen):
         _SOFT_HIDE_KINDS = {"agent", "system"}
         runner = getattr(self.app, "active_runner", None)
         is_running = runner is not None and runner.is_running()
+        # Спадающий фронт: агент мог создать скилл в прогоне → инвалидируем
+        # TUI-кэш скиллов (/skill picker/inline); ленивый релоад при следующем
+        # /skill. Открытие пикера/набор по клавишам диск не трогают.
+        if self._was_running and not is_running:
+            self._skills_cache = None
         # Спадающий фронт прогона True→False → зафиксировать терминальный статус
         # в meta.tui.status (TUI-owned), чтобы бейдж пережил переоткрытие сессии.
         if self._was_running and not is_running and self._store is not None \
