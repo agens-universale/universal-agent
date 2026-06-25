@@ -1,17 +1,44 @@
 """ConfigScreen — снимок конфига сессии (read-only) + пути к файлам."""
 from __future__ import annotations
+from textual import events
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import Screen
-from textual.widgets import Static
+from textual.widgets import Input, Static
 from rich.text import Text
 
 from tui.services.redact import redact_secrets
-from tui.services.yaml_view import safe_yaml_dump, yaml_syntax_widget
+from tui.services.yaml_view import (
+    safe_yaml_dump, yaml_syntax_renderable, yaml_syntax_widget,
+)
 from tui.palette import DIM, MUTED
 
 _FOOTER = "[Esc] back  [↑↓ / PgUp PgDn] прокрутка"
 _SNAPSHOT_HINT = "снимок на момент запуска · правки применятся после перезапуска"
+_NO_MATCH = "(нет совпадений)"
+
+
+def _filter_config_by_key(obj, q: str):
+    """Рекурсивно оставить ключи, чьё имя содержит `q` (на любой глубине): при
+    совпадении ключа — всё его поддерево; при совпадении вложенного ключа —
+    путь к нему. `q` — уже в нижнем регистре. Не-dict значения без совпавшего
+    ключа отбрасываются."""
+    if not isinstance(obj, dict):
+        return obj
+    out = {}
+    for k, v in obj.items():
+        if q in str(k).lower():
+            out[k] = v                       # ключ совпал → всё поддерево
+        elif isinstance(v, dict):
+            sub = _filter_config_by_key(v, q)
+            if sub:
+                out[k] = sub                 # вложенный совпал → путь
+        elif isinstance(v, list):
+            kept = [_filter_config_by_key(it, q) for it in v if isinstance(it, dict)]
+            kept = [it for it in kept if it]
+            if kept:
+                out[k] = kept
+    return out
 
 
 def _paths_block(config: dict, config_path: str | None,
@@ -52,9 +79,21 @@ class ConfigScreen(Screen):
         self._config = config or {}
         self._config_path = config_path
         self._project_local = project_local
+        self._filter = ""
+        self._yaml_w: Static | None = None
 
     def _yaml_text(self) -> str:
         return safe_yaml_dump(redact_secrets(self._config))
+
+    def _filtered_yaml_text(self) -> str:
+        """YAML по текущему фильтру ключей; пустой фильтр → полный конфиг,
+        нет совпадений → метка `(нет совпадений)`."""
+        cfg = redact_secrets(self._config)
+        q = self._filter.strip().lower()
+        if not q:
+            return safe_yaml_dump(cfg)
+        filtered = _filter_config_by_key(cfg, q)
+        return safe_yaml_dump(filtered) if filtered else _NO_MATCH
 
     def rendered_text(self) -> str:
         """Для тестов: подсказка + пути + YAML одной строкой."""
@@ -76,9 +115,32 @@ class ConfigScreen(Screen):
                 paths.border_title = "пути"
                 paths.border_subtitle = "правка внешним редактором"
                 yield paths
-                yaml_w = yaml_syntax_widget(self._yaml_text())
-                yaml_w.add_class("config-panel")
-                yaml_w.border_title = "config.yml"
-                yaml_w.border_subtitle = "секреты скрыты"
-                yield yaml_w
+                self._yaml_w = yaml_syntax_widget(self._yaml_text())
+                self._yaml_w.add_class("config-panel")
+                self._yaml_w.border_title = "config.yml"
+                self._yaml_w.border_subtitle = "секреты скрыты"
+                yield self._yaml_w
+            with Horizontal(id="config-filter-row"):
+                yield Static("> ", id="config-filter-prompt", markup=False)
+                yield Input(placeholder="фильтр ключей…", id="config-filter")
             yield Static(_FOOTER, id="footer", markup=False)
+
+    def on_mount(self) -> None:
+        self.query_one("#config-filter", Input).focus()
+
+    def on_input_changed(self, event: Input.Changed) -> None:
+        if event.input.id == "config-filter":
+            self._filter = event.value
+            if self._yaml_w is not None:
+                self._yaml_w.update(yaml_syntax_renderable(self._filtered_yaml_text()))
+
+    # Фильтр-Input в фокусе (как на скиллах) → клавиатурную прокрутку #trace
+    # форвардим вручную. home/end оставляем Input'у (курсор в строке фильтра).
+    _SCROLL = {"up": "scroll_up", "down": "scroll_down",
+               "pageup": "scroll_page_up", "pagedown": "scroll_page_down"}
+
+    def on_key(self, event: events.Key) -> None:
+        action = self._SCROLL.get(event.key)
+        if action is not None:
+            getattr(self.query_one("#trace", VerticalScroll), action)()
+            event.stop()

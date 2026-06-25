@@ -300,3 +300,8 @@ TextArea.ask-human-mode { border: solid $run-color; }
 /* read-only вьюверы: фокус-outline бессмыслен (фокусироваться больше не на чем)
    и рисуется поверх контента */
 #trace.quiet-focus:focus { outline: none; }
+/* строка фильтра ключей конфига — в той же конвенции, что #skills-filter */
+#config-filter-row { height: 3; width: 1fr; padding: 0; background: $bg; border-top: solid $deep-dim; border-bottom: solid $deep-dim; }
+#config-filter-prompt { width: 2; color: $accent; height: 1; background: $bg; content-align: left middle; padding: 0; }
+#config-filter { height: 1; width: 1fr; border: none; padding: 0; background: $bg; color: $ink; }
+#config-filter:focus { border: none; }
