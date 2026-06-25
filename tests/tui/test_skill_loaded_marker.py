@@ -35,9 +35,33 @@ async def test_inline_marker_loaded_after_reply(tmp_path, monkeypatch):
         joined = "\n".join(texts)
         assert "загружен" in joined
         assert "отправлен агенту" not in joined
-        # маркер ПОСЛЕ реплики: индекс строки «загружен» больше индекса «создай скилл»
-        reply_i = next(i for i, t in enumerate(texts) if "создай скилл" in t)
-        marker_i = next(i for i, t in enumerate(texts) if "загружен" in t)
+        # маркер ПОСЛЕ реплики: порядок по mount-индексу виджетов в #trace
+        from tui.widgets.user_reply import UserReplyContainer
+        from textual.widgets import Static
+        trace = scr.query_one("#trace")
+        kids = list(trace.children)
+        reply = scr.query_one(UserReplyContainer)
+        reply_i = kids.index(reply)
+
+        def _widget_text(w):
+            """Рекурсивно собирает текст Static-потомков виджета."""
+            parts = []
+            try:
+                parts.append(str(w.render()))
+            except Exception:
+                pass
+            for child in w.query(Static):
+                try:
+                    parts.append(str(child.render()))
+                except Exception:
+                    pass
+            return "\n".join(parts)
+
+        marker_i = next(
+            (i for i, w in enumerate(kids) if "загружен" in _widget_text(w)),
+            None,
+        )
+        assert marker_i is not None, "Маркер 'загружен' не найден в #trace"
         assert marker_i > reply_i
 
 

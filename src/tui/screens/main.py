@@ -170,10 +170,6 @@ class TraceScreen(Screen):
         # Отложенный маркер «[skill] X загружен/не найден»: ставится в
         # _consume_pending_prefix, монтируется после реплики (_mount_user_reply).
         self._pending_skill_marker: Optional[str] = None
-        # Промпт inline-доставки скилла — сохраняется в _deliver_skill_with_prompt,
-        # чтобы _flush_skill_marker смог разместить строку «> prompt» перед маркером
-        # и доказать в трейсе порядок: реплика → маркер.
-        self._pending_skill_prompt: Optional[str] = None
 
     def compose(self) -> ComposeResult:
         with Vertical(id="root"):
@@ -1208,13 +1204,9 @@ class TraceScreen(Screen):
         """Смонтировать отложенный маркер скилла (выставлен в
         _consume_pending_prefix), если есть. Вызывается после реплики юзера."""
         skill_id = self._pending_skill_marker
-        prompt = self._pending_skill_prompt
         self._pending_skill_marker = None
-        self._pending_skill_prompt = None
         if not skill_id:
             return
-        if prompt:
-            self._mount_trace_row(prefix="> ", content=prompt, kind_class="line-meta")
         from tools.skills.registry import get_skills_registry
         from tools.skills.skill_delivery import skill_is_available
         reg = get_skills_registry(getattr(self.app, "_config", None) or {})
@@ -2597,7 +2589,6 @@ class TraceScreen(Screen):
         игнорировать. Дисплей: маркер [skill] + реплика с чистым промптом."""
         self.app.tui_state.pending_skill_id = skill_id
         full_query, _ = self._consume_pending_prefix(prompt)
-        self._pending_skill_prompt = prompt
         msg_id = "m_" + uuid.uuid4().hex
         self._last_user_message_id = msg_id
 
