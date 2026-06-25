@@ -169,7 +169,7 @@ class TraceScreen(Screen):
         self._history_last_programmatic_text: Optional[str] = None
         # Отложенный маркер «[skill] X загружен/не найден»: ставится в
         # _consume_pending_prefix, монтируется после реплики (_mount_user_reply).
-        self._pending_skill_marker: Optional[str] = None
+        self._pending_skill_marker: Optional[tuple[str, bool]] = None
 
     def compose(self) -> ComposeResult:
         with Vertical(id="root"):
@@ -1203,14 +1203,12 @@ class TraceScreen(Screen):
     def _flush_skill_marker(self) -> None:
         """Смонтировать отложенный маркер скилла (выставлен в
         _consume_pending_prefix), если есть. Вызывается после реплики юзера."""
-        skill_id = self._pending_skill_marker
+        m = self._pending_skill_marker
         self._pending_skill_marker = None
-        if not skill_id:
+        if m is None:
             return
-        from tools.skills.registry import get_skills_registry
-        from tools.skills.skill_delivery import skill_is_available
-        reg = get_skills_registry(getattr(self.app, "_config", None) or {})
-        self._mount_skill_marker(skill_id, skill_is_available(skill_id, reg))
+        skill_id, loaded = m
+        self._mount_skill_marker(skill_id, loaded)
 
     _PENDING_CAP = 20
 
@@ -2237,11 +2235,11 @@ class TraceScreen(Screen):
         patch: dict = {}
         if pending_skill:
             from tools.skills.registry import get_skills_registry
-            from tools.skills.skill_delivery import build_skill_delivery
+            from tools.skills.skill_delivery import build_skill_delivery, skill_is_available
             reg = get_skills_registry(getattr(self.app, "_config", None) or {})
             prefix.append(build_skill_delivery(pending_skill, reg))
             patch["skills"] = [pending_skill]
-            self._pending_skill_marker = pending_skill
+            self._pending_skill_marker = (pending_skill, skill_is_available(pending_skill, reg))
         return ("\n".join(prefix + [text]) if prefix else text), patch
 
     def _build_attachment_technical(self, text: str) -> Optional[str]:
