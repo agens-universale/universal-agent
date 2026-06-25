@@ -7,7 +7,17 @@ import sys
 from typing import Optional
 
 _EMBLEM = "✦"   # U+2726
-_APP_NAME = "gc-ua"
+_APP_NAME = "GigaCode"
+
+# Статус-слово (из _session_status_word) → глиф. Глиф служит разделителем
+# между именем и промптом. Неизвестное/None → глифа нет (разделитель ·).
+_STATUS_GLYPHS = {
+    "running": "▸",
+    "completed": "✓",
+    "stopped": "■",
+    "failed": "✗",
+    "asking": "?",
+}
 
 
 def format_terminal_title(
@@ -17,14 +27,17 @@ def format_terminal_title(
     max_len: int = 50,
 ) -> str:
     base = f"{_EMBLEM} {_APP_NAME}"
-    if status:
-        base = f"{base} · {status}"
+    glyph = _STATUS_GLYPHS.get(status) if status else None
     one_line = " ".join(task.split()) if task else ""
-    if not one_line:
-        return base
-    if len(one_line) > max_len:
+    if one_line and len(one_line) > max_len:
         one_line = one_line[:max_len] + "…"
-    return f"{base} · {one_line}"
+    if glyph and one_line:
+        return f"{base} {glyph} {one_line}"
+    if glyph:
+        return f"{base} {glyph}"
+    if one_line:
+        return f"{base} · {one_line}"
+    return base
 
 
 def set_terminal_title(text: str, *, out=None) -> None:

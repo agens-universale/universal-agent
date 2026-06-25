@@ -20,7 +20,7 @@ async def test_new_resets_terminal_title(tmp_path, monkeypatch):
         calls.clear()
         scr._cmd_new()
         await pilot.pause()
-        assert any(c == "✦ gc-ua" for c in calls), f"ожидали сброс заголовка, calls={calls}"
+        assert any(c == "✦ GigaCode" for c in calls), f"ожидали сброс заголовка, calls={calls}"
 
 
 @pytest.mark.asyncio
@@ -41,7 +41,7 @@ async def test_resume_title_uses_session_last_prompt(tmp_path, monkeypatch):
         scr._resumed_prompt = "что ты умеешь?"   # кэш промпта сессии (attach прочитал из стора)
         monkeypatch.setattr(scr, "_session_status_word", lambda: "completed")
         scr._update_terminal_title()
-        assert calls[-1] == "✦ gc-ua · completed · что ты умеешь?", calls
+        assert calls[-1] == "✦ GigaCode ✓ что ты умеешь?", calls
 
 
 @pytest.mark.asyncio
@@ -64,13 +64,13 @@ async def test_title_status_is_live_and_deduped(tmp_path, monkeypatch):
         monkeypatch.setattr(scr, "_session_status_word", lambda: badge["v"])
 
         scr._update_terminal_title()
-        assert calls[-1] == "✦ gc-ua · completed · p"
+        assert calls[-1] == "✦ GigaCode ✓ p"
         calls.clear()
         scr._update_terminal_title()              # тот же статус → дедуп, без записи
         assert calls == []
         badge["v"] = "running"                     # статус сменился (старт прогона)
         scr._update_terminal_title()
-        assert calls == ["✦ gc-ua · running · p"]
+        assert calls == ["✦ GigaCode ▸ p"]
 
 
 @pytest.mark.asyncio
@@ -91,11 +91,11 @@ async def test_title_single_source_no_cross_session_leak(tmp_path, monkeypatch):
         scr._active_task_id = "A"
         scr._resumed_prompt = "запрос A"
         scr._update_terminal_title()
-        assert calls[-1] == "✦ gc-ua · completed · запрос A"
+        assert calls[-1] == "✦ GigaCode ✓ запрос A"
         scr._active_task_id = "B"
         scr._resumed_prompt = "вопрос B"
         scr._update_terminal_title()
-        assert calls[-1] == "✦ gc-ua · completed · вопрос B", calls
+        assert calls[-1] == "✦ GigaCode ✓ вопрос B", calls
 
 
 @pytest.mark.asyncio
