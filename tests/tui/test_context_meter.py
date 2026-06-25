@@ -26,17 +26,17 @@ def test_pct_and_color(chars, threshold, pct, color):
     assert any(str(s.style) == color for s in m.spans)
 
 
-def test_bar_is_eight_full_blocks():
+def test_bar_is_eight_cells():
     m = render_context_meter(500, 1000)  # 50%
     bar = m.plain.split(" ")[1]
     assert len(bar) == 8
-    assert set(bar) == {"█"}             # один надёжный глиф, без shade-символов
+    assert set(bar) == {"▓"}             # один глиф на всю шкалу (texture сохранён)
 
 
 def test_filled_and_empty_distinguished_by_color_not_shade():
-    """25% → 2 заполненных (цвет порога) + 6 пустых (трек); shade-глифов нет."""
+    """25% → 2 заполненных (цвет порога) + 6 пустых (трек); проблемного ░ нет."""
     m = render_context_meter(250, 1000)
     styles = {str(s.style) for s in m.spans}
     assert OK in styles                  # заполненная часть — цвет порога
     assert _TRACK in styles              # пустая часть — тусклый трек, не «чёрная»
-    assert "░" not in m.plain and "▓" not in m.plain   # ушли от font-зависимых shade
+    assert "░" not in m.plain            # ушли от light-shade ░ (он и чернил на Win-консолях)
