@@ -32,6 +32,26 @@ def _rows_text(pilot):
 
 
 @pytest.mark.asyncio
+async def test_long_prompt_card_stays_two_lines(tmp_path):
+    """Длинный (в т.ч. skill-) промпт: карточка остаётся РОВНО 2 строки —
+    заголовок усечён `…`, а не растёт под весь промпт. Регресс: при height:auto
+    без text-wrap:nowrap длинная строка переносилась и занимала десятки строк."""
+    pytest.importorskip("textual")
+    from textual.containers import VerticalScroll
+    long_prompt = "Используй skill `qa-req-validation`. " + ("очень длинный текст " * 80)
+    _seed(tmp_path, "aaaaaaaa", long_prompt)
+    from tui.screens.sessions import SessionsScreen
+    from tui.app import TuiApp
+    app = TuiApp(threads_dir=str(tmp_path), system="cli")
+    async with app.run_test(size=(90, 40)) as pilot:
+        await pilot.app.push_screen(SessionsScreen(threads_dir=str(tmp_path), system="cli"))
+        await pilot.pause()
+        card = list(pilot.app.screen.query_one(
+            "#sessions-list", VerticalScroll).query(".card"))[0]
+        assert card.size.height == 2
+
+
+@pytest.mark.asyncio
 async def test_card_shows_title_branch_msgs(tmp_path):
     pytest.importorskip("textual")
     _seed(tmp_path, "aaaaaaaa", "первый вопрос", branch="feat/x")

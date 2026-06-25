@@ -264,7 +264,7 @@ TextArea.ask-human-mode { border: solid $run-color; }
 #sessions-footer { height: 1; padding: 0 1; }
 #sessions-list { height: 1fr; }
 #sessions-list Static { padding: 0 1; }
-#sessions-list .card { height: auto; margin-bottom: 1; }
+#sessions-list .card { height: auto; margin-bottom: 1; text-wrap: nowrap; text-overflow: ellipsis; }
 #sessions-list .card.selected { background: $band-bg; border-left: outer $accent; }
 
 /* PreviewScreen — read-only превью сессии (футер с линией-разделителем) */
@@ -279,7 +279,7 @@ TextArea.ask-human-mode { border: solid $run-color; }
 #skills-filter:focus { border: none; }
 #skills-list { height: 1fr; }
 #skills-list Static { padding: 0 1; }
-#skills-list .card { height: auto; margin-bottom: 1; }
+#skills-list .card { height: auto; margin-bottom: 1; text-wrap: nowrap; text-overflow: ellipsis; }
 #skills-list .card.selected { background: $band-bg; border-left: outer $accent; }
 
 /* McpScreen — карточки серверов (spec 2026-06-10) */
