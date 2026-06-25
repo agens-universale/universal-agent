@@ -211,11 +211,13 @@ class SessionsScreen(Screen):
             listview.mount(title_w)
             listview.mount(meta_w)
         if selected_title is not None:
-            # Прокрутить ОБЕ строки выбранного: заголовок (верхняя граница видна при
-            # навигации вверх) и мету (нижняя строка последнего элемента — иначе она
-            # остаётся под сгибом, видна только после ручного доскролла).
-            self.call_after_refresh(selected_title.scroll_visible, animate=False)
+            # Прокрутить ОБЕ строки выбранного: мету ПЕРВОЙ, заголовок ПОСЛЕДНИМ —
+            # заголовок (верх элемента) «выигрывает» позицию-якорь. Иначе при
+            # переходе вниз-с-последнего-на-первый видна только нижняя строка, а
+            # заголовок уезжает над сгибом. 2-строчный элемент влезает в окно,
+            # поэтому когда виден заголовок — мета под ним тоже видна.
             self.call_after_refresh(selected_meta.scroll_visible, animate=False)
+            self.call_after_refresh(selected_title.scroll_visible, animate=False)
 
     def _change_page(self, delta: int) -> None:
         new_page = max(0, min(self._page + delta, self._page_count() - 1))

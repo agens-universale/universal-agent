@@ -1,10 +1,15 @@
-"""Баг-фикс: при выборе ПОСЛЕДНЕГО элемента стрелками прокручиваются ОБЕ строки
-карточки (заголовок + мета). Раньше скроллился только заголовок → вторая строка
-последнего скилла/сессии оставалась под сгибом, пока не доскроллишь мышью.
+"""Баг-фикс: при навигации стрелками по спискам скиллов/сессий прокручиваются
+ОБЕ строки карточки (заголовок + мета), и заголовок (верх элемента) — якорь.
 
-Контракт фикса (детерминированно, без зависимости от реальной геометрии): при
-выборе элемента `scroll_visible` вызывается на ОБОИХ его виджетах — `.card-title`
-и `.card-meta`.
+Раньше скроллился только заголовок → нижняя строка последнего элемента
+оставалась под сгибом. После первого фикса (скроллим обе) порядок «заголовок,
+потом мета» давал зеркальный баг: при переходе вниз-с-последнего-на-первый видна
+только нижняя строка первого, а заголовок уезжал над сгибом.
+
+Контракт (детерминированно, без зависимости от реальной геометрии): при выборе
+элемента `scroll_visible` зовётся на ОБОИХ его виджетах, причём на МЕТЕ раньше,
+чем на ЗАГОЛОВКЕ (заголовок скроллим последним → верх элемента «выигрывает»
+позицию; 2-строчный элемент влезает в окно, поэтому мета под ним тоже видна).
 """
 import json
 from pathlib import Path
@@ -18,8 +23,13 @@ _SKILLS = [
 ]
 
 
+def _assert_both_scrolled_meta_first(scrolled, title, meta):
+    assert title in scrolled and meta in scrolled        # прокручены обе строки
+    assert scrolled.index(meta) < scrolled.index(title)  # заголовок — последним (якорь)
+
+
 @pytest.mark.asyncio
-async def test_skills_last_item_both_lines_scrolled(monkeypatch):
+async def test_skills_wrap_to_first_scrolls_both_title_anchored(monkeypatch):
     pytest.importorskip("textual")
     from textual.containers import VerticalScroll
     from textual.widgets import Static
@@ -34,14 +44,15 @@ async def test_skills_last_item_both_lines_scrolled(monkeypatch):
         pilot.app.push_screen(SkillsScreen(skills=_SKILLS))
         await pilot.pause()
         listview = pilot.app.screen.query_one("#skills-list", VerticalScroll)
+        await pilot.press("end")              # на последний
+        await pilot.pause()
         scrolled.clear()
-        await pilot.press("end")                 # выбрать последний
+        await pilot.press("down")             # вниз → круговой переход на ПЕРВЫЙ (репро)
         await pilot.pause()
         await pilot.pause()
-        title = list(listview.query(".card-title"))[-1]
-        meta = list(listview.query(".card-meta"))[-1]
-        assert title in scrolled                 # заголовок (как и раньше)
-        assert meta in scrolled                  # и мета (фикс) — иначе 2-я строка скрыта
+        title = list(listview.query(".card-title"))[0]
+        meta = list(listview.query(".card-meta"))[0]
+        _assert_both_scrolled_meta_first(scrolled, title, meta)
 
 
 def _seed_session(threads_dir, i):
@@ -53,7 +64,7 @@ def _seed_session(threads_dir, i):
 
 
 @pytest.mark.asyncio
-async def test_sessions_last_item_both_lines_scrolled(tmp_path, monkeypatch):
+async def test_sessions_wrap_to_first_scrolls_both_title_anchored(tmp_path, monkeypatch):
     pytest.importorskip("textual")
     from textual.containers import VerticalScroll
     from textual.widgets import Static
@@ -72,11 +83,12 @@ async def test_sessions_last_item_both_lines_scrolled(tmp_path, monkeypatch):
         await pilot.app.push_screen(SessionsScreen(threads_dir=str(tmp_path), system="cli"))
         await pilot.pause()
         listview = pilot.app.screen.query_one("#sessions-list", VerticalScroll)
-        scrolled.clear()
         await pilot.press("end")
         await pilot.pause()
+        scrolled.clear()
+        await pilot.press("down")
         await pilot.pause()
-        title = list(listview.query(".card-title"))[-1]
-        meta = list(listview.query(".card-meta"))[-1]
-        assert title in scrolled
-        assert meta in scrolled
+        await pilot.pause()
+        title = list(listview.query(".card-title"))[0]
+        meta = list(listview.query(".card-meta"))[0]
+        _assert_both_scrolled_meta_first(scrolled, title, meta)
