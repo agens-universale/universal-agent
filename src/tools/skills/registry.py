@@ -275,6 +275,11 @@ class SkillsRegistry:
         self._load_all_skills()
         self._loaded = True
 
+    def reload(self) -> None:
+        """Сбросить кэш скиллов — следующий доступ пересканирует диск.
+        Нужно, чтобы созданный посреди прогона скилл стал виден без рестарта."""
+        self._loaded = False
+
     def _load_all_skills(self) -> None:
         self._skills_by_id.clear()
         self._packs_by_id.clear()
@@ -413,6 +418,7 @@ class SkillsRegistry:
 
         Если оба заданы — pack имеет приоритет.
         """
+        self.reload()
         self._ensure_loaded()
 
         bootstrap_ids: Dict[str, str] = {}  # pack_id -> canonical bootstrap skill id
@@ -497,6 +503,16 @@ class SkillsRegistry:
         return None
 
     def _get_skill(self, skill_id: str) -> Skill:
+        try:
+            return self._lookup_skill(skill_id)
+        except KeyError:
+            # Промах id — возможно, скилл создан только что: один rescan и
+            # повтор. Второго reload в этом вызове нет → цикла нет.
+            # AmbiguousSkillId сюда не попадает (не KeyError) — не ретраим.
+            self.reload()
+            return self._lookup_skill(skill_id)
+
+    def _lookup_skill(self, skill_id: str) -> Skill:
         self._ensure_loaded()
         if not isinstance(skill_id, str):
             raise KeyError(f"Skill '{skill_id}' not found")
