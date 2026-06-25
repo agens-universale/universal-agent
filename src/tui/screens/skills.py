@@ -102,7 +102,8 @@ class SkillsScreen(Screen):
             listview.mount(Static("(скиллы недоступны)", classes="line-meta", markup=False))
             return
         maxlen = self._path_maxlen()
-        selected_widget: Optional[Static] = None
+        selected_title: Optional[Static] = None
+        selected_meta: Optional[Static] = None
         for idx, s in enumerate(self._skills):
             suffix = " selected" if idx == self._selected_idx else ""
             id_w = Static(self._id_line(s, selected=bool(suffix)),
@@ -110,11 +111,16 @@ class SkillsScreen(Screen):
             meta_w = Static(self._meta_line(s, maxlen=maxlen),
                             classes="card-meta" + suffix, markup=False)
             if suffix:
-                selected_widget = id_w
+                selected_title = id_w
+                selected_meta = meta_w
             listview.mount(id_w)
             listview.mount(meta_w)
-        if selected_widget is not None:
-            self.call_after_refresh(selected_widget.scroll_visible, animate=False)
+        if selected_title is not None:
+            # Прокрутить ОБЕ строки выбранного: заголовок (верхняя граница видна при
+            # навигации вверх) и мету (нижняя строка последнего элемента — иначе она
+            # остаётся под сгибом, видна только после ручного доскролла).
+            self.call_after_refresh(selected_title.scroll_visible, animate=False)
+            self.call_after_refresh(selected_meta.scroll_visible, animate=False)
 
     def on_input_changed(self, event: Input.Changed) -> None:
         if event.input.id == "skills-filter":

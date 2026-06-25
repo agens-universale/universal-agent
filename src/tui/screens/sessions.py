@@ -197,7 +197,8 @@ class SessionsScreen(Screen):
         if not page:
             listview.mount(Static("(нет сессий)", classes="line-meta", markup=False))
             return
-        selected_widget: Optional[Static] = None
+        selected_title: Optional[Static] = None
+        selected_meta: Optional[Static] = None
         for idx, task in enumerate(page):
             suffix = " selected" if idx == self._selected_idx else ""
             title_w = Static(self._title_line(task, selected=bool(suffix)),
@@ -205,11 +206,16 @@ class SessionsScreen(Screen):
             meta_w = Static(self._meta_line(task),
                             classes="card-meta" + suffix, markup=False)
             if suffix:
-                selected_widget = title_w
+                selected_title = title_w
+                selected_meta = meta_w
             listview.mount(title_w)
             listview.mount(meta_w)
-        if selected_widget is not None:
-            self.call_after_refresh(selected_widget.scroll_visible, animate=False)
+        if selected_title is not None:
+            # Прокрутить ОБЕ строки выбранного: заголовок (верхняя граница видна при
+            # навигации вверх) и мету (нижняя строка последнего элемента — иначе она
+            # остаётся под сгибом, видна только после ручного доскролла).
+            self.call_after_refresh(selected_title.scroll_visible, animate=False)
+            self.call_after_refresh(selected_meta.scroll_visible, animate=False)
 
     def _change_page(self, delta: int) -> None:
         new_page = max(0, min(self._page + delta, self._page_count() - 1))
