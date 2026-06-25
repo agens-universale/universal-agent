@@ -104,10 +104,10 @@ async def test_cancel_with_undo_removes_user_widget_and_restores_input():
         assert input_field.text == "исходный запрос"
         # курсор стоит в самом конце восстановленной строки (готов к продолжению)
         assert input_field.cursor_location == input_field.document.end
-        # никакой [stopped] не появился
+        # никакой системной «·»-строки не появилось
         from tui.widgets.trace_row import TraceRow
         meta_rows = [r for r in scr.query(TraceRow) if r.has_class("line-meta")]
-        assert not any("[stopped]" in str(r.query_one(".trace-prefix").render())
+        assert not any("·" in str(r.query_one(".trace-prefix").render())
                        for r in meta_rows)
 
 

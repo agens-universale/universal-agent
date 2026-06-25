@@ -2312,14 +2312,14 @@ class TraceScreen(Screen):
                 self._stop_and_replace_runner()
             else:
                 # /init (or no live runner): parked worker now unblocked → cancel/deny
-                self._mount_trace_row(prefix="[stopped] ", content="confirm отменён",
+                self._mount_trace_row(prefix="· ", content="confirm отменён",
                                       kind_class="line-meta")
             return
 
         runner = self.app.active_runner
         if runner is None or not runner.is_running():
             self._mount_trace_row(
-                prefix="[stopped] ", content="нет активного запуска",
+                prefix="· ", content="нет активного запуска",
                 kind_class="line-meta",
             )
             return
@@ -2892,19 +2892,19 @@ class TraceScreen(Screen):
         """/compact — принудительно сжать сессию (гарды: режим/простой/контент)."""
         cfg = getattr(self.app, "_config", None) or {}
         if str(cfg.get("backend_api_mode")) != "chat_completions":
-            self._mount_trace_row(prefix="[stopped] ",
+            self._mount_trace_row(prefix="· ",
                                   content="/compact недоступен в режиме responses",
                                   kind_class="line-meta")
             return
         tid = self._active_task_id
         runner = getattr(self.app, "active_runner", None)
         if tid is None or self._store is None:
-            self._mount_trace_row(prefix="[stopped] ", content="/compact: нет активной сессии",
+            self._mount_trace_row(prefix="· ", content="/compact: нет активной сессии",
                                   kind_class="line-meta")
             return
         if (runner is not None and runner.is_running()) \
                 or self._task_status_badge() in ("[running]", "[asking]"):
-            self._mount_trace_row(prefix="[stopped] ",
+            self._mount_trace_row(prefix="· ",
                                   content="/compact: дождитесь паузы или /stop",
                                   kind_class="line-meta")
             return
@@ -2917,7 +2917,7 @@ class TraceScreen(Screen):
         )
         if last_compact is not None and live_count <= int(last_compact):
             self._mount_trace_row(
-                prefix="[stopped] ",
+                prefix="· ",
                 content="/compact: после последнего сжатия ничего не добавилось — сжимать нечего",
                 kind_class="line-meta")
             return

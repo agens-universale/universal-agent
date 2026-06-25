@@ -33,7 +33,7 @@ async def test_cmd_stop_sets_indicator_cancelled():
 
 @pytest.mark.asyncio
 async def test_cmd_stop_no_stopped_trace_row_when_run_cancelled():
-    """При отмене активного прогона отдельная [stopped]-строка в трейс НЕ
+    """При отмене активного прогона отдельная инфо-строка в трейс НЕ
     добавляется (статус «Отменено» виден на строке индикатора)."""
     pytest.importorskip("textual")
     from tui.app import TuiApp
@@ -49,10 +49,10 @@ async def test_cmd_stop_no_stopped_trace_row_when_run_cancelled():
         pilot.app.active_runner = _FakeRunner()
         scr._cmd_stop()
         await pilot.pause()
-        # Информационных [stopped]-строк не должно быть (кроме «нет активного запуска»
+        # Информационных «·»-строк не должно быть (кроме «нет активного запуска»
         # и «confirm отменён» — но их здесь нет, runner был живой).
         meta_rows = [r for r in scr.query(TraceRow) if r.has_class("line-meta")]
-        assert not any("[stopped]" in str(r.query_one(".trace-prefix").render())
+        assert not any("·" in str(r.query_one(".trace-prefix").render())
                        for r in meta_rows)
 
 
@@ -79,7 +79,7 @@ async def test_cmd_stop_marks_runner_stopped_and_clears_active():
 
 @pytest.mark.asyncio
 async def test_cmd_stop_no_active_runner_renders_meta():
-    """_cmd_stop когда runner не активен → [stopped] нет активного запуска."""
+    """_cmd_stop когда runner не активен → «· нет активного запуска» (без [stopped])."""
     pytest.importorskip("textual")
     from tui.app import TuiApp
     from tui.widgets.trace_row import TraceRow
@@ -90,5 +90,7 @@ async def test_cmd_stop_no_active_runner_renders_meta():
         scr._cmd_stop()
         await pilot.pause()
         meta_rows = [r for r in scr.query(TraceRow) if r.has_class("line-meta")]
-        assert any("нет активного запуска" in str(r.query_one(".trace-content").render())
-                   for r in meta_rows)
+        row = next(r for r in meta_rows
+                   if "нет активного запуска" in str(r.query_one(".trace-content").render()))
+        prefix = str(row.query_one(".trace-prefix").render())
+        assert "·" in prefix and "[stopped]" not in prefix
