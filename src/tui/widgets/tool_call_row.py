@@ -25,9 +25,10 @@ from tui.palette import RUN_COLOR as _RUN
 from tui.palette import TOOL_NAME as _TOOL_NAME
 from tui.services.duration_format import format_duration
 
-# Пульс яркости running-глифа ▸: амбер тускло→ярко→тускло (ping-pong зашит).
-# Кадр сменяется на каждом тике обновления running-строк (_poll_active ~250мс).
-_PULSE_SHADES = ["#8a6a3a", "#a8814f", "#c69a64", "#d4a574", "#c69a64", "#a8814f"]
+# Пульс яркости running-глифа ▸: амбер тускло→ярко→тускло. Кадр сменяется на
+# каждом тике обновления running-строк (_poll_active ~250мс); 5 кадров → цикл
+# ≈1.25с (темп подобран чуть бодрее).
+_PULSE_SHADES = ["#8a6a3a", "#b8915c", "#d4a574", "#c69a64", "#a07a4a"]
 
 
 class ToolCallRow(Widget):

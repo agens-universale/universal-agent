@@ -153,6 +153,17 @@ def test_validating_still_renders_zavershayu():
     assert "завершаю…" in str(w.render())
 
 
+def test_validating_spark_twinkles():
+    """«завершаю…» мерцает искрой ✦↔✧ по кадрам — мягкая анимация финализации."""
+    pytest.importorskip("textual")
+    from tui.widgets.thinking_indicator import ThinkingIndicator, _VALIDATING_HOLD
+    w = ThinkingIndicator(state="validating")
+    w._frame = 0
+    assert "✦" in str(w.render())
+    w._frame = _VALIDATING_HOLD          # следующий кадр-холд → пустая искра
+    assert "✧" in str(w.render())
+
+
 def test_set_state_ignores_unknown_value():
     """set_state с неизвестным state — no-op."""
     pytest.importorskip("textual")
