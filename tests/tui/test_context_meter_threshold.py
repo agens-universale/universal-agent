@@ -31,8 +31,7 @@ async def test_meter_uses_hard_threshold_not_turn_end(tmp_path):
         scr.attach_active_task(tid)
         meter = scr._context_meter()
         assert meter is not None
-        text, _ = meter
-        assert "0%" in text   # summary 10M в знаменателе; на старом коде (turn_end=1) было бы 100%
+        assert "0%" in meter.plain   # summary 10M в знаменателе; на старом коде (turn_end=1) было бы 100%
 
 
 @pytest.mark.asyncio
@@ -49,5 +48,4 @@ async def test_meter_falls_back_to_turn_end_when_no_hard_threshold(tmp_path):
         scr.attach_active_task(tid)
         meter = scr._context_meter()
         assert meter is not None   # fallback на turn_end (иначе порог 0 → None/скрыт)
-        text, _ = meter
-        assert "%" in text
+        assert "%" in meter.plain

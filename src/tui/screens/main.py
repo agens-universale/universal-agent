@@ -221,13 +221,12 @@ class TraceScreen(Screen):
         text.append(str(model), style=_INK)
         meter = self._context_meter()
         if meter is not None:
-            mtext, color = meter
             text.append("  ·  ", style=_DIM)
-            text.append(mtext, style=color)
+            text.append_text(meter)
         return text
 
-    def _context_meter(self) -> tuple[str, str] | None:
-        """(text, color) индикатора контекста или None (скрыт)."""
+    def _context_meter(self) -> "Text | None":
+        """Rich-Text индикатора контекста или None (скрыт)."""
         cfg = getattr(self.app, "_config", None) or {}
         if str(cfg.get("backend_api_mode")) != "chat_completions":
             return None
