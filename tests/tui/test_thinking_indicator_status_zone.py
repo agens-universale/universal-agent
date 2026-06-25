@@ -1,5 +1,3 @@
-import pytest
-
 from tui.widgets.thinking_indicator import ThinkingIndicator
 
 

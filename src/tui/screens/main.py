@@ -1521,7 +1521,7 @@ class TraceScreen(Screen):
         else:
             # Idle. Терминальный исход прогона держим как строку-итог индикатора
             # (done → «✓ Выполнил за N», cancelled → «■ Отменено», failed →
-            # «✕ Ошибка») — персистентно до следующего user-send (его _reset
+            # «✗ Ошибка») — персистентно до следующего user-send (его _reset
             # уничтожит индикатор). Свежий/неизвестный исход → уничтожаем.
             outcome = None
             if self._store is not None and self._active_task_id is not None:
