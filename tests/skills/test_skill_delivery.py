@@ -22,7 +22,7 @@ def test_injects_instructions_refs_and_lock():
     assert out.startswith("Используй skill `qa-req-validation`.")
     assert "ВАЛИДИРУЙ ТРЕБОВАНИЯ ТАК." in out
     assert "quality_criteria, report_templates" in out
-    assert "skills_load_reference" in out
+    assert "skills_read_reference" in out
     assert "skills_load не вызывай" in out
     assert "read_file не читай" in out
 
@@ -36,7 +36,7 @@ def test_fallback_on_unknown_skill():
 def test_no_reference_clause_when_no_refs_or_assets():
     reg = _FakeReg({"instructions": "X", "references": [], "assets": []})
     out = build_skill_delivery("s", reg)
-    assert "skills_load_reference" not in out      # нет вспом. файлов → нет клаузы их загрузки
+    assert "skills_read_reference" not in out      # нет вспом. файлов → нет клаузы их загрузки
     assert "read_file не читай" in out             # но базовый замок есть
     assert "ВАЛИД" not in out                       # sanity: чужой текст не просочился
 
@@ -45,14 +45,14 @@ def test_assets_listed_when_present():
     reg = _FakeReg({"instructions": "X", "references": [], "assets": ["template_main"]})
     out = build_skill_delivery("s", reg)
     assert "template_main" in out
-    assert "skills_load_asset" in out
+    assert "skills_read_asset" in out
 
 
 def test_none_detail_returns_directive_with_empty_instructions():
     reg = _FakeReg(detail=None)
     out = build_skill_delivery("s", reg)
     assert out.startswith("Используй skill `s`.")
-    assert "skills_load_reference" not in out
+    assert "skills_read_reference" not in out
     assert "read_file не читай" in out
 
 

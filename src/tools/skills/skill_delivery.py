@@ -31,14 +31,14 @@ def build_skill_delivery(skill_id: str, registry: Any) -> str:
     if refs:
         parts.append("")
         parts.append(
-            "Доступные references (грузи по точному имени через skills_load_reference): "
+            "Доступные references (грузи по точному имени через skills_read_reference): "
             + ", ".join(refs)
         )
     if assets:
         if not refs:
             parts.append("")
         parts.append(
-            "Доступные assets (грузи по точному имени через skills_load_asset): "
+            "Доступные assets (грузи по точному имени через skills_read_asset): "
             + ", ".join(assets)
         )
 
@@ -49,7 +49,7 @@ def build_skill_delivery(skill_id: str, registry: Any) -> str:
     if refs or assets:
         lock.append(
             "Вспомогательные файлы грузи по точным именам выше "
-            "(skills_load_reference / skills_load_asset)."
+            "(skills_read_reference / skills_read_asset)."
         )
     lock.append("Файлы скилла через read_file не читай.")
 
