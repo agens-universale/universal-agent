@@ -38,9 +38,10 @@ Screen {
 /* Контентная зона трейса. Разделитель снизу даёт border-top у #input-row —
  * свой border-bottom не ставим, иначе две линии подряд (раньше между ними
  * стояла #meta, теперь её нет). */
-#trace { height: 1fr; padding: 0 1; background: $bg; }
+#trace { height: auto; padding: 0 1; background: $bg; }
 /* Докнутая статус-строка индикатора — вне скролла #trace (стрим не накладывается). */
 #indicator-bar { height: auto; padding: 0 1; background: $bg; }
+#spacer { height: 0; background: $bg; }
 
 /* Brand-блок — постоянная шапка трейса (Claude-style: стартовый экран = начало
  * трейса; ниже flow'ом индикатор загрузки MCP и далее диалог; не скрывается). */

@@ -117,6 +117,7 @@ class TraceScreen(Screen):
         self._suppress_picker_reopen: bool = False
         # Spec 2026-05-26: ThinkingIndicator state.
         self._thinking = None  # type: Optional["ThinkingIndicator"]
+        self._trace_max_height = None  # type: Optional[int]
         # Эфемерный StreamBlock — live-вывод текущего chat_completions-шага;
         # снимается, когда приходит каноничная assistant-строка / run завершён.
         self._stream_block = None  # type: Optional["StreamBlock"]
@@ -179,6 +180,7 @@ class TraceScreen(Screen):
                 yield Static(right_text, id="header-right", markup=False)
             yield VerticalScroll(id="trace")
             yield Vertical(id="indicator-bar")
+            yield Vertical(id="spacer")
             with Horizontal(id="input-row"):
                 yield Static("> ", id="input-prompt", markup=False)
                 yield CommandTextArea(placeholder=_PLACEHOLDER_READY, id="cmdinput")
@@ -716,6 +718,37 @@ class TraceScreen(Screen):
             sink = getattr(self.app, "_stream_sink", None)
             if sink is not None:
                 sink.reset()
+
+    def _sync_trace_max_height(self) -> None:
+        """#trace сжимается до контента: потолок = доступное место (экран минус
+        header/input/footer/indicator-bar). Рост контента до потолка держит Textual;
+        здесь только сам потолок, на гарде (set лишь при изменении значения).
+
+        #spacer высота управляется из кода: забирает слак (available - content),
+        чтобы indicator-bar оставался прижатым к контенту трейса, а не к низу.
+        Примечание: Textual не позволяет 1fr-виджетам иметь высоту 0 (всегда ≥1),
+        поэтому высоту spacer устанавливаем программно."""
+        try:
+            screen_h = self.size.height
+            # .region.height включает бордеры виджетов; .size.height — только контент.
+            # Для правильного расчёта «места под #trace» используем region.height.
+            header_h = self.query_one("#header").region.height
+            input_h = self.query_one("#input-row").region.height
+            footer_h = self.query_one("#footer").region.height
+            bar_h = self.query_one("#indicator-bar").region.height
+            trace = self.query_one("#trace", VerticalScroll)
+            spacer = self.query_one("#spacer")
+        except Exception:
+            return
+        available = screen_h - header_h - input_h - footer_h - bar_h
+        if available <= 0:
+            return
+        if available != self._trace_max_height:
+            self._trace_max_height = available
+            trace.styles.max_height = available
+        # Высота контента трейса (виртуальная — включает прокручиваемое содержимое).
+        content_h = min(trace.virtual_size.height, available)
+        spacer.styles.height = max(0, available - content_h)
 
     def _trace_is_at_bottom(self) -> bool:
         """True, если трейс прокручен в самый низ (с допуском). Используется для
@@ -1388,6 +1421,7 @@ class TraceScreen(Screen):
         return cached.strip() == polled_content.strip()
 
     def _poll_active(self) -> None:
+        self._sync_trace_max_height()
         # Отложенное удаление осиротевших реплик (cancel-with-undo), когда idle.
         self._run_orphan_cleanups()
         # Индикатор загрузки MCP — на старте (до появления активной задачи) тоже.
