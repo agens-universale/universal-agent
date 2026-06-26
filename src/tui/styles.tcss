@@ -199,7 +199,7 @@ ToolCallRow:focus, TraceRow:focus, UserReplyContainer:focus, AgentReplyLine:focu
 /* ThinkingIndicator — «думаю…» (spec 2026-05-26) */
 /* padding слева = 0: глиф встаёт по колонке буллетов ●/> строк трейса
    (.trace-prefix padding:0); правый отступ 1 сохраняем. */
-.thinking-indicator { color: $deep-dim; padding: 0 1 0 0; height: 1; }
+.thinking-indicator { color: $deep-dim; padding: 0 1 0 0; margin-top: 1; height: 1; }
 .thinking-indicator.hidden { display: none; }
 
 /* StreamBlock — эфемерный in-progress поток текущего шага (chat_completions) */
