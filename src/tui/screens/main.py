@@ -2172,12 +2172,14 @@ class TraceScreen(Screen):
                 system=self.app._system,
             )
             full_query, patch = self._consume_pending_prefix(text)
+            display_query, skill_loaded = self._skill_display_args(text)
             technical = self._build_attachment_technical(text)
             self._prepare_for_new_run()
             self._reset_thinking_timer()
             self._on_user_text_submitted(text)
             runner.start(query=full_query, thread_id=tid, system=self.app._system,
-                         message_id=msg_id, technical=technical)
+                         message_id=msg_id, technical=technical,
+                         display_query=display_query, skill_loaded=skill_loaded)
             self.attach_active_task(tid)
             if patch:
                 self._store.update_tui_meta(tid, patch)
@@ -2205,6 +2207,7 @@ class TraceScreen(Screen):
         # Задача есть, но run завершился (или открыта через /sessions) — продолжаем тот же
         # thread, применяя отложенные skill/cwd к этому сообщению.
         full_query, patch = self._consume_pending_prefix(text)
+        display_query, skill_loaded = self._skill_display_args(text)
         if patch and self._store is not None:
             self._store.update_tui_meta(self.app.tui_state.active_task_id, patch)
         client_id = self._track_pending(display_text=text, wire_content=full_query)
@@ -2214,7 +2217,8 @@ class TraceScreen(Screen):
         self._on_user_text_submitted(text)
         technical = self._build_attachment_technical(text)
         runner.start(query=full_query, thread_id=self.app.tui_state.active_task_id,
-                     system=self.app._system, message_id=msg_id, technical=technical)
+                     system=self.app._system, message_id=msg_id, technical=technical,
+                     display_query=display_query, skill_loaded=skill_loaded)
 
     def on_command_text_area_paste_collapsed(
         self, event: CommandTextArea.PasteCollapsed
@@ -2239,6 +2243,18 @@ class TraceScreen(Screen):
             patch["skills"] = [pending_skill]
             self._pending_skill_marker = (pending_skill, skill_is_available(pending_skill, reg))
         return ("\n".join(prefix + [text]) if prefix else text), patch
+
+    def _skill_display_args(self, clean_text: str) -> tuple[str | None, str | None]:
+        """(display_query, skill_loaded) для runner.start по итогу _consume_pending_prefix.
+
+        display_query = чистый текст, только если был инжект скилла;
+        skill_loaded = id, если скилл загружен; иначе оба None (обычное сообщение).
+        """
+        marker = self._pending_skill_marker
+        if not marker:
+            return None, None
+        skill_id, loaded = marker
+        return clean_text, (skill_id if loaded else None)
 
     def _build_attachment_technical(self, text: str) -> Optional[str]:
         """Технический футер для @-вложений в тексте (резолв на сабмите).
@@ -2560,12 +2576,14 @@ class TraceScreen(Screen):
             from tools.skills.registry import get_skills_registry
             from tools.skills.skill_delivery import build_skill_delivery, skill_is_available
             reg = get_skills_registry(getattr(self.app, "_config", None) or {})
-            runner.add_message({
-                "role": "user",
-                "content": build_skill_delivery(skill_id, reg),
-            })
+            loaded = skill_is_available(skill_id, reg)
+            msg = {"role": "user", "content": build_skill_delivery(skill_id, reg),
+                   "display_content": ""}
+            if loaded:
+                msg["skill_loaded"] = skill_id
+            runner.add_message(msg)
             self._record_skill_meta(skill_id)
-            self._mount_skill_marker(skill_id, skill_is_available(skill_id, reg))
+            self._mount_skill_marker(skill_id, loaded)
             return
         # Run не идёт (нет задачи / завершена / открыта через /sessions) — отложенно
         # к следующему сообщению.
@@ -2585,12 +2603,17 @@ class TraceScreen(Screen):
         игнорировать. Дисплей: маркер [skill] + реплика с чистым промптом."""
         self.app.tui_state.pending_skill_id = skill_id
         full_query, _ = self._consume_pending_prefix(prompt)
+        _, skill_loaded = self._skill_display_args(prompt)
         msg_id = "m_" + uuid.uuid4().hex
         self._last_user_message_id = msg_id
 
         runner = self.app.active_runner
         if runner is not None and runner.is_running():
-            runner.add_message({"role": "user", "content": full_query, "id": msg_id})
+            msg = {"role": "user", "content": full_query, "id": msg_id,
+                   "display_content": prompt}
+            if skill_loaded:
+                msg["skill_loaded"] = skill_loaded
+            runner.add_message(msg)
             client_id = self._track_pending(display_text=prompt, wire_content=full_query)
             self._mount_user_reply(prompt, state="pending", client_id=client_id)
             self._reset_thinking_timer()
@@ -2613,7 +2636,8 @@ class TraceScreen(Screen):
             self._reset_thinking_timer()
             self._on_user_text_submitted(prompt)
             runner.start(query=full_query, thread_id=tid, system=self.app._system,
-                         message_id=msg_id)
+                         message_id=msg_id,
+                         display_query=prompt, skill_loaded=skill_loaded)
             # attach_active_task — после start, как в реальном auto-create;
             # сбрасывает _pending_user_widgets через _reset_render_state.
             self.attach_active_task(tid)
@@ -2633,7 +2657,8 @@ class TraceScreen(Screen):
         self._reset_thinking_timer()
         self._on_user_text_submitted(prompt)
         runner.start(query=full_query, thread_id=self.app.tui_state.active_task_id,
-                     system=self.app._system, message_id=msg_id)
+                     system=self.app._system, message_id=msg_id,
+                     display_query=prompt, skill_loaded=skill_loaded)
         self._record_skill_meta(skill_id)
 
     def _record_skill_meta(self, skill_id: str) -> None:
