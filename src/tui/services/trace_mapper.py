@@ -93,6 +93,17 @@ def map_message(msg: dict, *, no: int, ts: str) -> Optional[TraceEvent]:
 
     # USER
     if role == "user":
+        # Скилл-сообщения несут display_content (чистый промпт) и wire content
+        # (с инструкцией скилла). display_content обрабатываем первым, до
+        # технического разбора: скилл-сообщения не technical.
+        if "display_content" in msg:
+            disp = (msg.get("display_content") or "").strip()
+            if not disp:
+                return None                      # mid-run доставка → реплику не рисуем
+            return TraceEvent(
+                no=no, event_ts_utc_iso=ts, kind="user",
+                title="", summary=disp, full_payload=msg, message_id=mid,
+            )
         content = msg.get("content")
         if isinstance(content, str) and content.strip():
             stripped = content.strip()

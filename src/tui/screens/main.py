@@ -578,6 +578,10 @@ class TraceScreen(Screen):
         self._next_no += 1
         self._task_events.append(ev)
         self._render_event(ev, live=live)
+        # После реплики монтируем [skill]-маркер (если payload несёт skill_loaded).
+        sk = payload.get("skill_loaded") if isinstance(payload, dict) else None
+        if sk:
+            self._mount_skill_marker(sk, True)
         # Spec 2026-05-26 + 2026-05-28: запоминаем kind + время последнего
         # события. Для submit_solution финального ответа — sticky sentinel
         # "_finalized" вместо "agent": блокирует повторный mount в
