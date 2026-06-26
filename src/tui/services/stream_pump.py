@@ -9,7 +9,7 @@ from __future__ import annotations
 import time
 from typing import Any, Callable
 
-STREAM_REFRESH_MS = 80   # потолок коалесценса событийной перерисовки стрима
+STREAM_REFRESH_MS = 250   # потолок коалесценса событийной перерисовки стрима (= poll-тик)
 
 
 class StreamPump:
