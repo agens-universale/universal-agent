@@ -222,6 +222,16 @@ def _dispatch_readonly(mount_target, ev, calls: dict) -> None:
                                         kind_class="line-meta", event_no=ev.no))
 
 
+def _mount_skill_marker_readonly(mount_target, skill_id: str, event_no: int) -> None:
+    """[skill] <id> загружен — паритет с MainScreen._mount_skill_marker (read-only).
+    skill_loaded ставится только когда скилл реально загрузился → всегда «загружен»."""
+    from tui.widgets.trace_row import TraceRow
+    row = TraceRow(prefix="[skill] ", content=f"`{skill_id}` загружен",
+                   kind_class="line-meta", event_no=event_no, focusable=False)
+    row.add_class("skill-marker")
+    mount_target.mount(row)
+
+
 def _render_record_readonly(mount_target, rec: dict, no: int, calls: dict) -> int:
     """Одна envelope-запись → виджеты. Возвращает следующий no.
     hidden-события (policy/bounce/context) считаем, но в трейс не рендерим —
@@ -231,12 +241,19 @@ def _render_record_readonly(mount_target, rec: dict, no: int, calls: dict) -> in
     if not isinstance(payload, dict):
         return no
     ev = map_message(payload, no=no, ts=rec.get("ts", ""))
+    # skill_loaded извлекаем ДО early-return: mid-run доставка (display_content="")
+    # даёт ev=None, но маркер [skill] всё равно нужен в превью.
+    sk = payload.get("skill_loaded")
     if ev is None:
+        if sk:
+            _mount_skill_marker_readonly(mount_target, sk, no)   # mid-run: только маркер
         return no
     no += 1
     if ev.hidden:
         return no
     _dispatch_readonly(mount_target, ev, calls)
+    if sk:
+        _mount_skill_marker_readonly(mount_target, sk, no)       # после реплики
     return no
 
 
