@@ -57,7 +57,6 @@ def _write_task(tmp_path, tid):
 async def test_stream_block_mounts_then_clears_on_canonical_row(tmp_path):
     pytest.importorskip("textual")
     from tui.app import TuiApp
-    from tui.widgets.stream_block import StreamBlock
 
     class _FakeRunner:
         def is_running(self) -> bool: return True
@@ -79,9 +78,10 @@ async def test_stream_block_mounts_then_clears_on_canonical_row(tmp_path):
         # mount асинхронный — текст проставляется на следующем тике (≥2 тика).
         await pilot.pause(0.7)
 
-        blocks = pilot.app.query(StreamBlock)
-        assert len(blocks) == 1
-        assert str(blocks[0].render()) == "Это проект."
+        assert scr._stream_answer_row is not None
+        from textual.widgets import Static
+        content = scr._stream_answer_row.query_one(".trace-content", Static)
+        assert "Это проект." in str(content.render())
 
         # Каноничная assistant-строка пришла из thread store — блок снимается,
         # sink сбрасывается. Рендерим запись напрямую (live-путь _render_record).
@@ -91,7 +91,7 @@ async def test_stream_block_mounts_then_clears_on_canonical_row(tmp_path):
         }, live=True)
         await pilot.pause()
 
-        assert len(pilot.app.query(StreamBlock)) == 0
+        assert scr._stream_answer_row is None
         assert pilot.app._stream_sink.snapshot() == ("", "")
 
 
@@ -118,13 +118,13 @@ async def test_reset_render_state_clears_stream_block_and_sink(tmp_path):
         # Push content so sink is non-empty and a StreamBlock is mounted.
         pilot.app._stream_sink.push("answer", "partial answer")
         await pilot.pause(0.7)
-        assert len(pilot.app.query(StreamBlock)) == 1
+        assert scr._stream_answer_row is not None
 
         # Simulate task-switch by calling _reset_render_state directly.
         scr._reset_render_state()
         await pilot.pause()
 
-        assert len(pilot.app.query(StreamBlock)) == 0
+        assert len(pilot.app.query(StreamBlock)) == 0 and scr._stream_answer_row is None
         assert pilot.app._stream_sink.snapshot() == ("", "")
 
 
@@ -132,7 +132,6 @@ async def test_reset_render_state_clears_stream_block_and_sink(tmp_path):
 async def test_stream_block_cleared_when_run_not_running(tmp_path):
     pytest.importorskip("textual")
     from tui.app import TuiApp
-    from tui.widgets.stream_block import StreamBlock
 
     class _FakeRunner:
         def __init__(self) -> None:
@@ -152,12 +151,12 @@ async def test_stream_block_cleared_when_run_not_running(tmp_path):
         pilot.app.active_runner = runner
         pilot.app._stream_sink.push("answer", "partial")
         await pilot.pause(0.7)
-        assert len(pilot.app.query(StreamBlock)) == 1
+        assert scr._stream_answer_row is not None
 
         # Run завершился → не-running ветка poll'а снимает блок и сбрасывает sink.
         runner.stop()
         await pilot.pause(0.7)
-        assert len(pilot.app.query(StreamBlock)) == 0
+        assert scr._stream_answer_row is None
         assert pilot.app._stream_sink.snapshot() == ("", "")
 
 
@@ -302,7 +301,6 @@ async def test_stream_answer_preview_false_hides_answer_block(tmp_path):
     but sink is NOT reset (counter preserved)."""
     pytest.importorskip("textual")
     from tui.app import TuiApp
-    from tui.widgets.stream_block import StreamBlock
 
     class _FakeRunner:
         def is_running(self) -> bool: return True
@@ -323,8 +321,8 @@ async def test_stream_answer_preview_false_hides_answer_block(tmp_path):
         pilot.app._stream_sink.push("answer", "секретный ответ")
         await pilot.pause(0.7)
 
-        # No StreamBlock visible.
-        assert not pilot.app.query(StreamBlock), (
+        # No answer row visible.
+        assert scr._stream_answer_row is None, (
             "StreamBlock не должен отображаться при tui_stream_display=minimal"
         )
         # Sink NOT reset — counter keeps growing (indicator still alive).
@@ -395,9 +393,12 @@ async def test_show_reasoning_line_false_hides_reasoning_block(tmp_path):
         pilot.app._stream_sink.push("think", "скрытое рассуждение")
         await pilot.pause(0.7)
 
-        # No StreamBlock visible.
+        # No StreamBlock visible (reasoning suppressed in answer mode).
         assert not pilot.app.query(StreamBlock), (
             "StreamBlock не должен отображаться при tui_stream_display=answer (без reasoning)"
+        )
+        assert scr._stream_answer_row is None, (
+            "Answer row не должен появляться при think-only дельте"
         )
         # Sink NOT reset — snapshot still has the think text.
         think, _answer = pilot.app._stream_sink.snapshot()

@@ -120,6 +120,7 @@ class TraceScreen(Screen):
         # Эфемерный StreamBlock — live-вывод текущего chat_completions-шага;
         # снимается, когда приходит каноничная assistant-строка / run завершён.
         self._stream_block = None  # type: Optional["StreamBlock"]
+        self._stream_answer_row = None  # type: Optional["TraceRow"]
         # Кумулятивный таймер «думаю…» — стартует на каждом user-send,
         # передаётся в виджет, чтобы elapsed не сбрасывался при show/hide циклах.
         self._thinking_started_at: Optional[float] = None
@@ -700,6 +701,9 @@ class TraceScreen(Screen):
         if self._stream_block is not None:
             self._stream_block.remove()
             self._stream_block = None
+        if self._stream_answer_row is not None:
+            self._stream_answer_row.remove()
+            self._stream_answer_row = None
         if reset_sink:
             sink = getattr(self.app, "_stream_sink", None)
             if sink is not None:
@@ -1520,22 +1524,29 @@ class TraceScreen(Screen):
                 clean = format_stream_block(answer=answer)
                 reasoning = format_reasoning_line(think=think)
                 kind, thinking = select_stream_render(mode, clean, reasoning)
+                from tui.widgets.trace_row import TraceRow
+                following = self._trace_is_at_bottom()
                 if kind == "answer":
-                    renderable = render_prose(clean)
+                    if self._stream_block is not None:          # switch reasoning→answer
+                        self._stream_block.remove()
+                        self._stream_block = None
+                    if self._stream_answer_row is None:
+                        self._stream_answer_row = TraceRow(
+                            prefix="● ", content=render_prose(clean),
+                            kind_class="line-agent", focusable=False)
+                        self._trace_mount(self._stream_answer_row, scroll=True)
+                    else:
+                        self._stream_answer_row.set_content(render_prose(clean))
+                    if following:
+                        self.query_one("#trace", VerticalScroll).scroll_end(animate=False)
                 elif kind == "reasoning":
-                    renderable = reasoning
-                else:
-                    renderable = None
-                if renderable is not None:
-                    following = self._trace_is_at_bottom()
+                    if self._stream_answer_row is not None:      # switch answer→reasoning
+                        self._stream_answer_row.remove()
+                        self._stream_answer_row = None
                     if self._stream_block is None:
                         self._stream_block = StreamBlock()
                         self._trace_mount(self._stream_block, scroll=True)
-                    self._stream_block.set_text(renderable, thinking=thinking)
-                    # Stick-to-bottom: блок растёт по мере стрима — следуем за низом,
-                    # только если юзер уже был внизу (отскроллил вверх читать → не
-                    # дёргаем). Проверку делаем ДО роста контента (после — max_scroll_y
-                    # вырастет и _trace_is_at_bottom уже вернёт False).
+                    self._stream_block.set_text(reasoning, thinking=True)
                     if following:
                         self.query_one("#trace", VerticalScroll).scroll_end(animate=False)
                 else:
