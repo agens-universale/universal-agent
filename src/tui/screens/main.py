@@ -774,7 +774,10 @@ class TraceScreen(Screen):
         following = force_scroll or self._trace_is_at_bottom()
         trace.mount(widget)
         if scroll and following:
-            trace.scroll_end(animate=False)
+            # Скроллим ПОСЛЕ раскладки нового виджета: при height:auto scroll_end
+            # сразу после mount() видит старый max_scroll_y (новый виджет ещё не
+            # разложен) → не доезжает до низа / no-op, если юзер был у старого низа.
+            self.call_after_refresh(trace.scroll_end, animate=False)
 
     def _on_user_text_submitted(self, text: str) -> None:
         """Обработка отправки user query: обнулить счётчик событий с последнего
