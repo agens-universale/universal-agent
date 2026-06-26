@@ -162,6 +162,7 @@ ToolCallRow:focus, TraceRow:focus, UserReplyContainer:focus, AgentReplyLine:focu
 .line-ok        { color: $ok; }
 .line-run       { color: $run-color; }
 .line-meta      { color: $deep-dim; margin-top: 1; }
+.skill-marker   { margin-bottom: 1; }
 .line-note      { color: #a5adb8; margin-top: 1; }  /* чуть светлее $dim; пустая строка сверху — отделяет ремарку; курсив — только на тексте ремарки (см. note_text), ярлык прямой */
 .summary-marker { color: $deep-dim; margin: 1 0; }  /* пустая строка сверху И снизу — маркер обособлен */
 .summary-body   { color: $dim; margin-bottom: 1; }

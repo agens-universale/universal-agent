@@ -509,8 +509,12 @@ class TraceScreen(Screen):
         truly_orphaned: list[dict] = []
         kept_records: list[dict] = []
         for r in records:
-            wire = r.get("wire_content") or r.get("content") or ""
-            if wire and wire in delivered_wires:
+            wire = r.get("wire_content") or ""
+            content = r.get("content") or ""
+            # Считаем доставленным, если совпал либо clean content (новый формат,
+            # user_messages_log хранит display_content), либо wire (старый формат,
+            # где wire == content, или intent_log хранит wire напрямую).
+            if (content and content in delivered_wires) or (wire and wire in delivered_wires):
                 continue
             # Устарело: есть доставленный user_ask с ts позже этой реплики →
             # пользователь ушёл дальше; не монтируем и вычищаем из meta.
@@ -821,16 +825,21 @@ class TraceScreen(Screen):
             # not retry candidates for collapse.
             self._submit_solution_widgets.clear()
 
-            # Reconcile с pending: матч по wire_content в FIFO-порядке.
+            # Reconcile с pending: матч по WIRE (то, что executor записал в .jsonl как
+            # content), а НЕ по ev.summary: у skill-сообщений summary = display_content
+            # (чистый текст для отображения), а в кэше pending лежит wire_content.
+            polled_wire = ev.summary
+            if isinstance(ev.full_payload, dict):
+                c = ev.full_payload.get("content")
+                if isinstance(c, str):
+                    polled_wire = c
             for cid, widget in list(self._pending_user_widgets.items()):
-                # Wire_content хранится в meta; сравним с ev.summary, который и есть
-                # содержимое user-сообщения, записанное executor'ом в .jsonl.
-                if self._pending_wire_match(cid, ev.summary):
+                if self._pending_wire_match(cid, polled_wire):
                     widget.set_state("normal")
                     self._pending_user_widgets.pop(cid, None)
                     self._remove_pending_record(cid)
                     return
-            # Без pending-матча — обычный mount.
+            # Без pending-матча — обычный mount (используем display_content = ev.summary).
             self._mount_user_reply(ev.summary, event_no=ev.no)
             return
 
@@ -1206,7 +1215,8 @@ class TraceScreen(Screen):
         """Серый [skill]-маркер итога доставки скилла."""
         content = (f"`{skill_id}` загружен" if loaded
                    else f"`{skill_id}` не найден — инструкция не подгружена")
-        self._mount_trace_row(prefix="[skill] ", content=content, kind_class="line-meta")
+        row = self._mount_trace_row(prefix="[skill] ", content=content, kind_class="line-meta")
+        row.add_class("skill-marker")
 
     def _flush_skill_marker(self) -> None:
         """Смонтировать отложенный маркер скилла (выставлен в
