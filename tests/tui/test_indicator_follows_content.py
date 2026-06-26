@@ -1,3 +1,10 @@
+"""Индикатор/ввод/футер следуют за концом контента (Claude-style).
+
+Модель: #trace `auto` сжимается до контента, хром ниже (indicator-bar/input/footer)
+идёт сразу за ним, пустота — внизу под футером. Потолок #trace (= экран минус хром)
+лишь включает скролл при заполнении экрана. Спейсера НЕТ — рост контента двигает
+хром нативно (Textual), без покадрового замера высоты → без «прыжка» раскладки.
+"""
 import json
 from pathlib import Path
 
@@ -11,39 +18,39 @@ def _write_task(tmp_path, tid):
     (Path(tmp_path) / f"data_cli_{tid}.jsonl").write_text("", encoding="utf-8")
 
 
-@pytest.mark.asyncio
-async def test_short_content_trace_shrinks_indicator_follows(tmp_path):
-    pytest.importorskip("textual")
-    from textual.containers import Vertical, VerticalScroll
+def _app(tmp_path):
     from tui.app import TuiApp
+    return TuiApp(threads_dir=str(tmp_path), system="cli",
+                  config={"model": "M", "backend_api_mode": "chat_completions"})
 
-    tid = "fc1"
-    _write_task(tmp_path, tid)
-    app = TuiApp(threads_dir=str(tmp_path), system="cli",
-                 config={"model": "M", "backend_api_mode": "chat_completions"})
-    async with app.run_test(size=(80, 24)) as pilot:
+
+@pytest.mark.asyncio
+async def test_short_content_chrome_follows_content(tmp_path):
+    """Короткий контент: #trace не скроллится, хром идёт сразу за контентом, а под
+    футером — пустота (футер НЕ прижат к низу экрана)."""
+    pytest.importorskip("textual")
+    from textual.containers import VerticalScroll
+    tid = "fc1"; _write_task(tmp_path, tid)
+    async with _app(tmp_path).run_test(size=(80, 24)) as pilot:
         scr = pilot.app.screen
         scr.attach_active_task(tid)
         scr._render_record({"payload": {"id": "a1", "role": "assistant",
                                         "content": "короткий ответ"}}, live=True)
-        await pilot.pause(0.4)                  # poll-тик → _sync_trace_max_height
+        await pilot.pause(0.4)
         trace = pilot.app.query_one("#trace", VerticalScroll)
-        spacer = pilot.app.query_one("#spacer", Vertical)
+        footer = pilot.app.query_one("#footer")
         assert trace.max_scroll_y == 0          # контент влез — нет скролла
-        assert spacer.size.height > 0           # спейсер забрал низ → индикатор НЕ у низа
+        assert footer.region.bottom < 24        # хром следует за контентом → пустота снизу
 
 
 @pytest.mark.asyncio
-async def test_tall_content_trace_caps_indicator_at_bottom(tmp_path):
+async def test_tall_content_caps_chrome_at_bottom(tmp_path):
+    """Высокий контент: #trace упирается в потолок (скроллится), хром у низа экрана,
+    футер на самом низу (не выдавлен)."""
     pytest.importorskip("textual")
-    from textual.containers import Vertical, VerticalScroll
-    from tui.app import TuiApp
-
-    tid = "fc2"
-    _write_task(tmp_path, tid)
-    app = TuiApp(threads_dir=str(tmp_path), system="cli",
-                 config={"model": "M", "backend_api_mode": "chat_completions"})
-    async with app.run_test(size=(80, 24)) as pilot:
+    from textual.containers import VerticalScroll
+    tid = "fc2"; _write_task(tmp_path, tid)
+    async with _app(tmp_path).run_test(size=(80, 24)) as pilot:
         scr = pilot.app.screen
         scr.attach_active_task(tid)
         big = "\n".join(f"строка {i}" for i in range(60))
@@ -51,23 +58,39 @@ async def test_tall_content_trace_caps_indicator_at_bottom(tmp_path):
                                         "content": big}}, live=True)
         await pilot.pause(0.4)
         trace = pilot.app.query_one("#trace", VerticalScroll)
-        spacer = pilot.app.query_one("#spacer", Vertical)
         footer = pilot.app.query_one("#footer")
         assert trace.max_scroll_y > 0           # контент не влез — скроллится
-        assert spacer.size.height == 0          # слака нет → индикатор у низа
-        assert footer.region.bottom == 24       # футер на самом низу (не выдавлен)
+        assert footer.region.bottom == 24       # хром у низа, футер на самом низу
+
+
+@pytest.mark.asyncio
+async def test_chrome_follows_as_content_grows(tmp_path):
+    """Пока контент короткий, рост контента двигает футер ВНИЗ (хром следует) —
+    нативно, без замера высоты контента в коде."""
+    pytest.importorskip("textual")
+    tid = "fc3"; _write_task(tmp_path, tid)
+    async with _app(tmp_path).run_test(size=(80, 24)) as pilot:
+        scr = pilot.app.screen
+        scr.attach_active_task(tid)
+        scr._render_record({"payload": {"id": "a1", "role": "assistant",
+                                        "content": "первая строка"}}, live=True)
+        await pilot.pause(0.4)
+        footer = pilot.app.query_one("#footer")
+        b1 = footer.region.bottom
+        scr._render_record({"payload": {"id": "a2", "role": "assistant",
+                                        "content": "\n".join(f"ещё {i}" for i in range(4))}},
+                           live=True)
+        await pilot.pause(0.4)
+        b2 = footer.region.bottom
+        assert b1 < 24                           # короткий контент → футер не у низа
+        assert b2 > b1                           # контент вырос → футер поехал вниз (следует)
 
 
 @pytest.mark.asyncio
 async def test_sync_max_height_guard_stable(tmp_path):
     pytest.importorskip("textual")
-    from tui.app import TuiApp
-
-    tid = "fc3"
-    _write_task(tmp_path, tid)
-    app = TuiApp(threads_dir=str(tmp_path), system="cli",
-                 config={"model": "M", "backend_api_mode": "chat_completions"})
-    async with app.run_test(size=(80, 24)) as pilot:
+    tid = "fc4"; _write_task(tmp_path, tid)
+    async with _app(tmp_path).run_test(size=(80, 24)) as pilot:
         scr = pilot.app.screen
         scr.attach_active_task(tid)
         await pilot.pause(0.4)
@@ -78,49 +101,14 @@ async def test_sync_max_height_guard_stable(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_spacer_shrinks_as_content_grows(tmp_path):
-    """Динамика «следования»: по мере роста контента (как при стриме) спейсер
-    сжимается → индикатор едет за низом контента. Спейсер обновляется на каждом
-    poll-тике (вне гарда max_height), а не только при ресайзе."""
-    pytest.importorskip("textual")
-    from textual.containers import Vertical
-    from tui.app import TuiApp
-
-    tid = "fc4"
-    _write_task(tmp_path, tid)
-    app = TuiApp(threads_dir=str(tmp_path), system="cli",
-                 config={"model": "M", "backend_api_mode": "chat_completions"})
-    async with app.run_test(size=(80, 24)) as pilot:
-        scr = pilot.app.screen
-        scr.attach_active_task(tid)
-        scr._render_record({"payload": {"id": "a1", "role": "assistant",
-                                        "content": "первая строка"}}, live=True)
-        await pilot.pause(0.4)
-        spacer = pilot.app.query_one("#spacer", Vertical)
-        h1 = spacer.size.height                 # короткий контент → большой спейсер
-        scr._render_record({"payload": {"id": "a2", "role": "assistant",
-                                        "content": "\n".join(f"ещё {i}" for i in range(8))}},
-                           live=True)
-        await pilot.pause(0.4)
-        h2 = spacer.size.height
-        assert h1 > 0                            # был запас (индикатор не у низа)
-        assert h2 < h1                           # контент вырос → спейсер сжался (индикатор поехал вниз)
-
-
-@pytest.mark.asyncio
 async def test_ask_human_banner_keeps_footer_onscreen(tmp_path):
-    """Регресс: баннер ask_human монтируется в #root (перед #input-row). available
-    должен учитывать ВСЕ оверлеи #root, иначе #trace забирает лишнее (на высоту
-    баннера) и выдавливает футер за экран."""
+    """Регресс: баннер ask_human монтируется в #root (перед #input-row) → входит в
+    хром. При высоком контенте потолок #trace учитывает баннер, футер остаётся на
+    экране (не выдавлен)."""
     pytest.importorskip("textual")
     from types import SimpleNamespace
-    from tui.app import TuiApp
-
-    tid = "ah1"
-    _write_task(tmp_path, tid)
-    app = TuiApp(threads_dir=str(tmp_path), system="cli",
-                 config={"model": "M", "backend_api_mode": "chat_completions"})
-    async with app.run_test(size=(80, 24)) as pilot:
+    tid = "ah1"; _write_task(tmp_path, tid)
+    async with _app(tmp_path).run_test(size=(80, 24)) as pilot:
         scr = pilot.app.screen
         scr.attach_active_task(tid)
         big = "\n".join(f"строка {i}" for i in range(60))   # #trace упрётся в потолок
@@ -130,6 +118,6 @@ async def test_ask_human_banner_keeps_footer_onscreen(tmp_path):
         ev = SimpleNamespace(call_id="c1", summary="В какую часть углубиться?",
                              no=99, kind="ask_human")
         scr._on_ask_human_event(ev, live=False)             # баннер в #root перед input
-        await pilot.pause(0.4)                              # poll → _sync_trace_max_height
+        await pilot.pause(0.4)
         footer = pilot.app.query_one("#footer")
-        assert footer.region.bottom == 24                  # футер на экране (не выдавлен баннером)
+        assert footer.region.bottom <= 24                  # футер на экране (не выдавлен)

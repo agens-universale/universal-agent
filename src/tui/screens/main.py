@@ -120,7 +120,6 @@ class TraceScreen(Screen):
         self._trace_max_height = None  # type: Optional[int]
         self._stick_bottom = True   # автоскролл-намерение «липнуть к низу» трейса
         self._last_auto_y = 0       # куда мы в прошлый раз программно прижали трейс
-        self._layout_sync_pending = False  # коалесценс _request_layout_sync
         # Эфемерный StreamBlock — live-вывод текущего chat_completions-шага;
         # снимается, когда приходит каноничная assistant-строка / run завершён.
         self._stream_block = None  # type: Optional["StreamBlock"]
@@ -183,7 +182,6 @@ class TraceScreen(Screen):
                 yield Static(right_text, id="header-right", markup=False)
             yield VerticalScroll(id="trace")
             yield Vertical(id="indicator-bar")
-            yield Vertical(id="spacer")
             with Horizontal(id="input-row"):
                 yield Static("> ", id="input-prompt", markup=False)
                 yield CommandTextArea(placeholder=_PLACEHOLDER_READY, id="cmdinput")
@@ -219,6 +217,7 @@ class TraceScreen(Screen):
 
     def on_resize(self, event) -> None:
         self._refresh_header()   # пересчитать усечение пути под новую ширину
+        self._sync_trace_max_height()   # потолок #trace под новую высоту экрана
 
     def _compose_footer_right(self) -> "Text":
         """Правый край футера: модель · контекст (метр — только chat_completions)."""
@@ -629,7 +628,6 @@ class TraceScreen(Screen):
             # unhide/смена state не двигают вид трейса.
             self._thinking.remove_class("hidden")
             self._thinking.set_state(state)
-            self._request_layout_sync()       # unhide мог сменить высоту bar (0→N)
             return
         _cfg = getattr(self.app, "_config", None) or {}
         from tui.widgets.thinking_indicator import ThinkingIndicator
@@ -640,7 +638,6 @@ class TraceScreen(Screen):
         )
         self._thinking = indicator
         self.query_one("#indicator-bar", Vertical).mount(indicator)
-        self._request_layout_sync()           # bar 0→N → спейсер под новую высоту
 
     def _restore_terminal_indicator(self) -> None:
         """На resume сессии: смонтировать строку-итог прошлого хода. Только если
@@ -681,7 +678,6 @@ class TraceScreen(Screen):
         if self._thinking is None:
             return
         self._thinking.add_class("hidden")
-        self._request_layout_sync()           # bar N→0 → спейсер под новую высоту
 
     def _destroy_thinking_indicator(self) -> None:
         """Полностью убрать индикатор. Вызывается когда run завершён."""
@@ -689,7 +685,6 @@ class TraceScreen(Screen):
             return
         self._thinking.remove()
         self._thinking = None
-        self._request_layout_sync()           # bar N→0 → спейсер под новую высоту
 
     def _refresh_stream_content(self) -> None:
         """Освежить контент уже смонтированного стрим-виджета из снапшота sink.
@@ -729,52 +724,27 @@ class TraceScreen(Screen):
                 sink.reset()
 
     def _sync_trace_max_height(self) -> None:
-        """#trace сжимается до контента: потолок = доступное место (экран минус ВСЕ
-        прочие дети #root — header/input/footer/indicator-bar + любые оверлеи в #root:
-        ask_human/confirm-баннер, палитра, пикеры). Рост контента до потолка держит
-        Textual; здесь только сам потолок, на гарде (set лишь при изменении значения).
+        """Потолок #trace = экран минус ВЕСЬ хром #root (header, indicator-bar
+        [зарезервирован], input, footer + оверлеи: ask_human/confirm-баннер, палитра).
 
-        #spacer высота управляется из кода: забирает слак (available - content),
-        чтобы indicator-bar оставался прижатым к контенту трейса, а не к низу.
-        Примечание: Textual не позволяет 1fr-виджетам иметь высоту 0 (всегда ≥1),
-        поэтому высоту spacer устанавливаем программно."""
+        #trace `auto` сам сжимается до контента, а хром ниже (индикатор/ввод/футер)
+        следует за концом контента (Claude-style), пустота — внизу под футером.
+        Потолок лишь включает скролл при заполнении экрана, чтобы #trace не выдавливал
+        ввод/футер. БЕЗ замера высоты контента → нет покадровой гонки раскладки
+        (она и давала «прыжок»: рост контента обрабатывает Textual нативно)."""
         try:
             root = self.query_one("#root", Vertical)
             trace = self.query_one("#trace", VerticalScroll)
-            spacer = self.query_one("#spacer")
         except Exception:
             return
-        # available = место под #trace+#spacer = экран минус все прочие дети #root.
         # region.height включает бордеры; скрытые виджеты (display:none) дают 0.
-        # Так оверлеи #root (ask_human/confirm-баннер, палитра, пикеры) учитываются
-        # автоматически — иначе #trace забирал бы их место и выдавливал футер.
-        others = sum(
-            c.region.height for c in root.children
-            if c.id not in ("trace", "spacer")
-        )
+        others = sum(c.region.height for c in root.children if c.id != "trace")
         available = self.size.height - others
         if available <= 0:
             return
         if available != self._trace_max_height:
             self._trace_max_height = available
             trace.styles.max_height = available
-        # Высота контента трейса (виртуальная — включает прокручиваемое содержимое).
-        content_h = min(trace.virtual_size.height, available)
-        spacer.styles.height = max(0, available - content_h)
-
-    def _request_layout_sync(self) -> None:
-        """Коалесцированный пере-расчёт потолка/спейсера #trace ПОСЛЕ ближайшего
-        refresh — на settled-раскладке (с уже смонтированными индикатором/строками).
-        Зовётся на любое изменение контента трейса / высоты #indicator-bar, чтобы
-        спейсер не отставал на poll-тик (иначе layout «прыгает» в начале хода). Флаг
-        схлопывает пачку изменений одного кадра в один пере-расчёт."""
-        if self._layout_sync_pending:
-            return
-        self._layout_sync_pending = True
-        def _do() -> None:
-            self._layout_sync_pending = False
-            self._sync_trace_max_height()
-        self.call_after_refresh(_do)
 
     _STICK_TOL = 2
 
@@ -827,7 +797,6 @@ class TraceScreen(Screen):
         if force_scroll:
             self._stick_bottom = True   # отправка своего сообщения = re-engage
         trace.mount(widget)
-        self._request_layout_sync()           # спейсер под новый контент (settled-замер)
         if scroll and self._stick_bottom:
             self._scroll_trace_end()
 
@@ -1479,14 +1448,11 @@ class TraceScreen(Screen):
         return cached.strip() == polled_content.strip()
 
     def _poll_active(self) -> None:
-        # Потолок/спейсер #trace пересчитываем ПОСЛЕ refresh (settled-замер) —
-        # backstop к точечным _request_layout_sync из монтажей/индикатора; флаг
-        # схлопывает их в один. Иначе спейсер отставал бы на тик от монтажей этого
-        # тика (индикатор destroy-на-send → remount) → «прыжок» layout в начале хода.
-        self._request_layout_sync()
-        # Липкость к низу: детект ручного скролла (settled-позиции прошлого тика) +
-        # повторное прижатие. Прижатие — после синка (тот же порядок call_after_refresh),
-        # чтобы scroll_end видел уже актуальный max_scroll_y.
+        # Потолок #trace = экран минус хром. Зависит только от стабильных высот
+        # (header/indicator-bar[зарезервирован]/input/footer) → пересчёт синхронный и
+        # без гонки (на гарде ставит max-height лишь при ресайзе / росте ввода).
+        self._sync_trace_max_height()
+        # Липкость к низу: детект ручного скролла + повторное прижатие.
         self._update_stick_state()
         if self._stick_bottom:
             self._scroll_trace_end()
