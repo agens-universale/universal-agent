@@ -1,8 +1,8 @@
 """Лёгкий render-A markdown (§2.5 / §3.2).
 
 API:
-- `render_block` — разбивает текст на структурированные блоки
-  для класс-ориентированного рендера через Textual CSS.
+- `segment_answer` — сегментирует ответ на прозовые прогоны и code/table-блоки.
+- `render_prose`   — рендерит прозовый прогон построчно с inline-стилями.
 
 Семантика соответствует canon §3.2:
 - `**bold**`        → accent (без `**`)
@@ -67,59 +67,54 @@ def _parse_table_aligns(sep_line: str, ncols: int) -> list[str]:
     return (aligns + ["left"] * ncols)[:ncols]
 
 
-def render_block(text: str) -> list[Block]:
-    """Разбивает текст на блоки markdown.
-
-    kind ∈ {'heading-1', 'heading-2', 'bullet', 'code-block', 'para'}.
-    Для 'code-block' дополнительно сохраняется `lang` из fenced-маркера.
-    """
-    blocks: list[Block] = []
+def segment_answer(text: str) -> list[Block]:
+    """Сегментирует ответ на прозовые прогоны (verbatim, пустые строки внутри
+    сохранены, по краям срезаны) и code/table-блоки. kind ∈ {'prose','code-block','table'}."""
+    segs: list[Block] = []
     lines = text.split("\n")
     i = 0
+    prose: list[str] = []
+
+    def _flush() -> None:
+        run = prose[:]
+        while run and not run[0].strip():
+            run.pop(0)
+        while run and not run[-1].strip():
+            run.pop()
+        if run:
+            segs.append(Block("prose", "\n".join(run)))
+        prose.clear()
+
     while i < len(lines):
         ln = lines[i]
         if ln.startswith("```"):
-            # Извлечь lang после открывающих бэктиков (```python -> "python").
+            _flush()
             lang_tag = ln[3:].strip() or None
             j = i + 1
             chunk: list[str] = []
             while j < len(lines) and not lines[j].startswith("```"):
                 chunk.append(lines[j])
                 j += 1
-            blocks.append(Block("code-block", "\n".join(chunk), lang_tag))
+            segs.append(Block("code-block", "\n".join(chunk), lang_tag))
             i = j + 1
             continue
-        m = re.match(r"^(#{1,6})\s+(.*)$", ln)
-        if m:
-            level = len(m.group(1))
-            kind = "heading-1" if level <= 2 else "heading-2"
-            blocks.append(Block(kind, m.group(2).strip()))
-            i += 1
-            continue
         if "|" in ln and i + 1 < len(lines) and _is_table_separator(lines[i + 1]):
+            _flush()
             headers = _split_table_row(ln)
             ncols = len(headers)
             aligns = _parse_table_aligns(lines[i + 1], ncols)
             rows: list[list[str]] = []
             j = i + 2
             while j < len(lines) and "|" in lines[j] and lines[j].strip():
-                row = _split_table_row(lines[j])
-                rows.append((row + [""] * ncols)[:ncols])
+                rows.append((_split_table_row(lines[j]) + [""] * ncols)[:ncols])
                 j += 1
-            blocks.append(Block("table", headers=headers, rows=rows, aligns=aligns))
+            segs.append(Block("table", headers=headers, rows=rows, aligns=aligns))
             i = j
             continue
-        if re.match(r"^\s*[-*]\s+", ln):
-            content = re.sub(r"^\s*[-*]\s+", "", ln)
-            blocks.append(Block("bullet", content))
-            i += 1
-            continue
-        if ln.strip() == "":
-            i += 1
-            continue
-        blocks.append(Block("para", ln))
+        prose.append(ln)
         i += 1
-    return blocks
+    _flush()
+    return segs
 
 
 _BOLD_RE = re.compile(r"\*\*(.+?)\*\*")
@@ -187,26 +182,6 @@ def render_prose(text: str) -> Text:
         _apply_inline_styles(out, line)
     return out
 
-
-def render_block_to_text(blk: Block) -> Text:
-    """Один markdown-блок → rich.text.Text с уже применёнными inline-стилями.
-
-    Для prose-блоков (heading/bullet/para). Code-блоки рендерятся отдельно
-    (см. trace_render.render_code_block).
-    """
-    if blk.kind in ("heading-1", "heading-2"):
-        out = Text()
-        out.append(blk.content, style=f"{_ACC} bold")
-        return out
-    if blk.kind == "bullet":
-        out = Text()
-        out.append("• ", style=_INK)
-        _apply_inline_styles(out, blk.content)
-        return out
-    # para — обычный prose с inline-стилями.
-    out = Text()
-    _apply_inline_styles(out, blk.content)
-    return out
 
 
 def build_markdown_table(headers: list[str], rows: list[list[str]],

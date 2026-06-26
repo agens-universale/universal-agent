@@ -68,39 +68,34 @@ def build_block_widgets(text: str, *, prose_bullet: bool, event_no: int,
     класс прозовых строк (intermediate_reply → «· »/line-intermediate). Код всегда панель,
     таблицы — AgentReplyLine(.table-block). focusable=True только у первого виджета события."""
     from tui.services.markdown_render import (
-        build_markdown_table, render_block, render_block_to_text,
+        build_markdown_table, render_prose, segment_answer,
     )
     from tui.widgets.trace_row import TraceRow
 
     widgets: list = []
     focus_set = False
     first_prose_seen = False
-    for blk in render_block(text):
-        if blk.kind == "code-block":
+    for seg in segment_answer(text):
+        if seg.kind == "code-block":
             widgets.append(render_code_block(
-                blk.content, blk.lang, event_no=event_no,
+                seg.content, seg.lang, event_no=event_no,
                 focusable=not focus_set, indent=prose_bullet,
             ))
             focus_set = True
             continue
-        if blk.kind == "table":
-            # prose_bullet=True (трейс/превью) → отступ под текст реплики (как код-панели);
-            # False (баннер) → без отступа, вровень с прозой на колонке 0.
+        if seg.kind == "table":
             table_classes = "table-block table-indent" if prose_bullet else "table-block"
             widgets.append(AgentReplyLine(
-                build_markdown_table(blk.headers or [], blk.rows or [], blk.aligns or []),
+                build_markdown_table(seg.headers or [], seg.rows or [], seg.aligns or []),
                 event_no=event_no, focusable=not focus_set, classes=table_classes,
             ))
             focus_set = True
             continue
         kind_class = kind_class_base if not first_prose_seen else f"{kind_class_base} line-agent-cont"
-        if prose_bullet:
-            prefix = bullet if not first_prose_seen else "  "
-        else:
-            prefix = ""
+        prefix = (bullet if not first_prose_seen else "  ") if prose_bullet else ""
         first_prose_seen = True
         widgets.append(TraceRow(
-            prefix=prefix, content=render_block_to_text(blk),
+            prefix=prefix, content=render_prose(seg.content),
             kind_class=kind_class, event_no=event_no, focusable=not focus_set,
         ))
         focus_set = True
