@@ -160,8 +160,8 @@ _STREAM_HEADING_RE = re.compile(r"^(#{1,6})\s+(.*)$")
 _STREAM_BULLET_RE = re.compile(r"^\s*[-*]\s+")
 
 
-def render_stream_answer(text: str) -> Text:
-    """V1 live-answer рендер: построчно inline-стили (**bold**, `code`) + line-стили
+def render_prose(text: str) -> Text:
+    """Прозовый рендер (стрим и финал): построчно inline-стили (**bold**, `code`) + line-стили
     heading/bullet; fenced-блоки и таблицы — plain (рамки/сетка только на финале).
     Возвращает rich.Text в нормальном цвете (INK)."""
     out = Text()

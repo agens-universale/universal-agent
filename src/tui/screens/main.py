@@ -1512,7 +1512,7 @@ class TraceScreen(Screen):
                 from tui.services.stream_sink import (
                     format_stream_block, format_reasoning_line, select_stream_render,
                 )
-                from tui.services.markdown_render import render_stream_answer
+                from tui.services.markdown_render import render_prose
                 from tui.widgets.stream_block import StreamBlock
                 think, answer = sink.snapshot()
                 _cfg = getattr(self.app, "_config", None) or {}
@@ -1521,7 +1521,7 @@ class TraceScreen(Screen):
                 reasoning = format_reasoning_line(think=think)
                 kind, thinking = select_stream_render(mode, clean, reasoning)
                 if kind == "answer":
-                    renderable = render_stream_answer(clean)
+                    renderable = render_prose(clean)
                 elif kind == "reasoning":
                     renderable = reasoning
                 else:
