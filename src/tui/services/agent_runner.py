@@ -101,6 +101,25 @@ class AgentRunner:
         t.start()
         return True
 
+    @staticmethod
+    def _run_args(*, query, technical, message_id, display_query, skill_loaded):
+        """Построить параллельные списки аргументов для executor.run.
+
+        Технический хвост (technical) получает None в display_contents/skills_loaded,
+        чтобы executor не добавлял display-поля к служебным сообщениям."""
+        if technical is None:
+            msgs = [query]
+            display_contents = [display_query]
+            skills_loaded = [skill_loaded]
+            mids = [message_id] if message_id else None
+        else:
+            msgs = [query, technical]
+            display_contents = [display_query, None]
+            skills_loaded = [skill_loaded, None]
+            mids = [message_id, None] if message_id else None
+        return {"msgs": msgs, "display_contents": display_contents,
+                "skills_loaded": skills_loaded, "message_ids": mids}
+
     def start(
         self,
         *,
@@ -110,11 +129,15 @@ class AgentRunner:
         system: str = "cli",
         message_id: Optional[str] = None,
         technical: Optional[str] = None,
+        display_query: Optional[str] = None,
+        skill_loaded: Optional[str] = None,
     ) -> bool:
         """Запустить run. Возвращает False если уже работает.
 
         message_id — id user-сообщения (TUI задаёт свой, чтобы потом точечно
-        откатить осиротевшую реплику при быстрой отмене)."""
+        откатить осиротевшую реплику при быстрой отмене).
+        display_query / skill_loaded — чистые display-поля; передаются в executor.run
+        параллельными списками (технический хвост получает None)."""
         with self._lock:
             if self._thread is not None and self._thread.is_alive():
                 return False
@@ -132,18 +155,19 @@ class AgentRunner:
                         self._prebuild_messages.clear()
                         if self._stop_requested:
                             return
-                        msgs = [query] if technical is None else [query, technical]
-                        if message_id:
-                            mids = [message_id] if technical is None else [message_id, None]
-                        else:
-                            mids = None
+                        a = self._run_args(
+                            query=query, technical=technical, message_id=message_id,
+                            display_query=display_query, skill_loaded=skill_loaded,
+                        )
                         executor.run(
-                            msgs,
+                            a["msgs"],
                             thread_id=thread_id,
                             start_new_thread=start_new_thread,
                             system=system,
                             discard_writes_after_stop=True,
-                            message_ids=mids,
+                            message_ids=a["message_ids"],
+                            display_contents=a["display_contents"],
+                            skills_loaded=a["skills_loaded"],
                         )
                     except Exception as exc:
                         if self._on_error is not None:
