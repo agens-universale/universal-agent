@@ -66,6 +66,7 @@ async def test_stream_no_autoscroll_when_scrolled_up(tmp_path, monkeypatch):
         scr.attach_active_task(tid)
         pilot.app.active_runner = _FakeRunner()
         monkeypatch.setattr(scr, "_trace_is_at_bottom", lambda: False)
+        scr._stick_bottom = False                            # юзер отскроллил вверх читать
         trace = pilot.app.query_one("#trace", VerticalScroll)
         calls = []
         monkeypatch.setattr(trace, "scroll_end", lambda *a, **k: calls.append(1))

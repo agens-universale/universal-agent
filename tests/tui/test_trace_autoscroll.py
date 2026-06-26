@@ -26,9 +26,9 @@ async def test_autoscroll_skipped_when_scrolled_up(tmp_path):
         trace = scr.query_one("#trace", VerticalScroll)
         calls = []
         trace.scroll_end = lambda **kw: calls.append(kw)   # spy
-        scr._trace_is_at_bottom = lambda: False             # юзер отскроллил вверх
+        scr._stick_bottom = False                            # юзер отскроллил вверх
         scr._mount_trace_row(prefix="x ", content="новое", kind_class="line-meta")
-        await pilot.pause()
+        await pilot.pause(0.1)
         assert calls == []     # вид не дёрнулся вниз
 
 
@@ -143,10 +143,10 @@ async def test_command_output_forces_scroll(tmp_path):
         trace = scr.query_one("#trace", VerticalScroll)
         calls = []
         trace.scroll_end = lambda **kw: calls.append(kw)
-        scr._trace_is_at_bottom = lambda: False           # отскроллен вверх читать
+        scr._stick_bottom = False                          # отскроллен вверх читать
         scr._handle_command("такой-команды-нет")           # пишет error-строку в трейс
-        await pilot.pause()
-        assert calls    # результат команды форсит скролл вниз
+        await pilot.pause(0.1)                             # скролл отложен (call_after_refresh)
+        assert calls    # результат команды (force) форсит скролл вниз
 
 
 @pytest.mark.asyncio

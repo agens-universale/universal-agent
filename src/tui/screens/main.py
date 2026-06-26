@@ -118,6 +118,8 @@ class TraceScreen(Screen):
         # Spec 2026-05-26: ThinkingIndicator state.
         self._thinking = None  # type: Optional["ThinkingIndicator"]
         self._trace_max_height = None  # type: Optional[int]
+        self._stick_bottom = True   # автоскролл-намерение «липнуть к низу» трейса
+        self._last_auto_y = 0       # куда мы в прошлый раз программно прижали трейс
         # Эфемерный StreamBlock — live-вывод текущего chat_completions-шага;
         # снимается, когда приходит каноничная assistant-строка / run завершён.
         self._stream_block = None  # type: Optional["StreamBlock"]
@@ -372,6 +374,8 @@ class TraceScreen(Screen):
         self._task_events.clear()
         self._last_agent_summary = None
         self._next_no = 1
+        self._stick_bottom = True   # новый/переключённый трейс → показываем низ (latest)
+        self._last_auto_y = 0
         self._active_calls.clear()
         self._submit_solution_call_ids.clear()
         self._submit_solution_widgets.clear()
@@ -691,7 +695,7 @@ class TraceScreen(Screen):
             return
         from tui.services.stream_sink import format_stream_block, format_reasoning_line
         from tui.services.markdown_render import render_prose
-        following = self._trace_is_at_bottom()
+        self._update_stick_state()
         think, answer = sink.snapshot()
         if self._stream_answer_row is not None:
             self._stream_answer_row.set_content(render_prose(format_stream_block(answer=answer)))
@@ -699,8 +703,8 @@ class TraceScreen(Screen):
             self._stream_block.set_text(format_reasoning_line(think=think), thinking=True)
         else:
             return
-        if following:
-            self.query_one("#trace", VerticalScroll).scroll_end(animate=False)
+        if self._stick_bottom:
+            self._scroll_trace_end()
 
     def _clear_stream_block(self, *, reset_sink: bool = True) -> None:
         """Снять эфемерный StreamBlock и (по умолчанию) сбросить sink.
@@ -753,15 +757,45 @@ class TraceScreen(Screen):
         content_h = min(trace.virtual_size.height, available)
         spacer.styles.height = max(0, available - content_h)
 
+    _STICK_TOL = 2
+
     def _trace_is_at_bottom(self) -> bool:
-        """True, если трейс прокручен в самый низ (с допуском). Используется для
-        «прилипания к низу»: авто-скролл на новые события — только когда юзер уже
-        внизу; если он отскроллил вверх читать — не дёргаем вид."""
+        """Сырой замер: трейс прокручен в самый низ (с допуском). Используется в
+        _update_stick_state для повторного «прилипания», когда юзер вернулся к низу."""
         try:
             trace = self.query_one("#trace", VerticalScroll)
         except Exception:
             return True
-        return trace.scroll_offset.y >= trace.max_scroll_y - 2
+        return trace.scroll_offset.y >= trace.max_scroll_y - self._STICK_TOL
+
+    def _update_stick_state(self) -> None:
+        """Поддержать намерение «липнуть к низу» (_stick_bottom). Сравниваем offset с
+        местом, куда сами в прошлый раз прижали (_last_auto_y), а НЕ с max_scroll_y:
+        контент растёт вниз, offset при этом не двигается, поэтому добавление контента
+        липкость не роняет — её снимает только реальный уход юзера вверх. Возврат к
+        низу — возвращает. Вызывать ПЕРЕД прижатием (детект всегда предшествует
+        скроллу → юзера не «дёргает» назад при уходе вверх)."""
+        try:
+            trace = self.query_one("#trace", VerticalScroll)
+        except Exception:
+            return
+        if self._stick_bottom:
+            if trace.scroll_offset.y < self._last_auto_y - self._STICK_TOL:
+                self._stick_bottom = False
+        elif self._trace_is_at_bottom():
+            self._stick_bottom = True
+
+    def _scroll_trace_end(self) -> None:
+        """Прижать трейс к низу ПОСЛЕ раскладки (height:auto → scroll_end сразу после
+        mount() не достаёт до нового низа) и запомнить позицию для _update_stick_state."""
+        def _do() -> None:
+            try:
+                trace = self.query_one("#trace", VerticalScroll)
+            except Exception:
+                return
+            trace.scroll_end(animate=False)
+            self._last_auto_y = trace.max_scroll_y
+        self.call_after_refresh(_do)
 
     def _trace_mount(self, widget, *, scroll: bool = True,
                      force_scroll: bool = False) -> None:
@@ -771,13 +805,11 @@ class TraceScreen(Screen):
         (`_trace_is_at_bottom`) — иначе не дёргаем его прокрутку. force_scroll=True
         прокручивает безусловно (отправка своего сообщения = re-engage)."""
         trace = self.query_one("#trace", VerticalScroll)
-        following = force_scroll or self._trace_is_at_bottom()
+        if force_scroll:
+            self._stick_bottom = True   # отправка своего сообщения = re-engage
         trace.mount(widget)
-        if scroll and following:
-            # Скроллим ПОСЛЕ раскладки нового виджета: при height:auto scroll_end
-            # сразу после mount() видит старый max_scroll_y (новый виджет ещё не
-            # разложен) → не доезжает до низа / no-op, если юзер был у старого низа.
-            self.call_after_refresh(trace.scroll_end, animate=False)
+        if scroll and self._stick_bottom:
+            self._scroll_trace_end()
 
     def _on_user_text_submitted(self, text: str) -> None:
         """Обработка отправки user query: обнулить счётчик событий с последнего
@@ -901,16 +933,16 @@ class TraceScreen(Screen):
             if ev.tool_name == "intermediate_reply":
                 from tui.services.trace_render import build_intermediate_widgets
                 # «Прилипание к низу»: фиксируем ДО монтирования (как у прозы).
-                following = self._trace_is_at_bottom()
+                following = self._stick_bottom
                 for w in build_intermediate_widgets(ev.summary, event_no=ev.no):
                     self._trace_mount(w, scroll=False)
                 if following:
-                    self.query_one("#trace", VerticalScroll).scroll_end(animate=False)
+                    self._scroll_trace_end()
                 return
             from tui.services.trace_render import build_agent_widgets
 
             # «Прилипание к низу»: фиксируем ДО монтирования (mount растит max_scroll_y).
-            following = self._trace_is_at_bottom()
+            following = self._stick_bottom
             mounted_widgets = build_agent_widgets(ev.summary, event_no=ev.no)
             for w in mounted_widgets:
                 self._trace_mount(w, scroll=False)
@@ -929,7 +961,7 @@ class TraceScreen(Screen):
                 )
                 self._trace_mount(note_widget, scroll=False)
             if following:
-                self.query_one("#trace", VerticalScroll).scroll_end(animate=False)
+                self._scroll_trace_end()
 
             if ev.tool_name == "submit_solution" and ev.call_id:
                 self._submit_solution_call_ids.add(ev.call_id)
@@ -1100,8 +1132,8 @@ class TraceScreen(Screen):
         self._refresh_header()
         self._refresh_footer()
         self._update_terminal_title()
-        if self._trace_is_at_bottom():
-            self.query_one("#trace", VerticalScroll).scroll_end(animate=False)
+        if self._stick_bottom:
+            self._scroll_trace_end()
 
     def _unmount_ask_human_banner(self) -> None:
         self._ask_human_owner_runner = None
@@ -1154,8 +1186,8 @@ class TraceScreen(Screen):
         except Exception:
             pass
         self.set_focus(None)
-        if self._trace_is_at_bottom():
-            self.query_one("#trace", VerticalScroll).scroll_end(animate=False)
+        if self._stick_bottom:
+            self._scroll_trace_end()
 
     def _hide_confirm_banner(self) -> None:
         """Снять ConfirmBanner и восстановить поле ввода."""
@@ -1428,6 +1460,11 @@ class TraceScreen(Screen):
 
     def _poll_active(self) -> None:
         self._sync_trace_max_height()
+        # Липкость к низу: детект ручного скролла + повторное прижатие. Держит низ
+        # через каскад relayout'ов после отправки (реплика → индикатор → потолок).
+        self._update_stick_state()
+        if self._stick_bottom:
+            self._scroll_trace_end()
         # Отложенное удаление осиротевших реплик (cancel-with-undo), когда idle.
         self._run_orphan_cleanups()
         # Индикатор загрузки MCP — на старте (до появления активной задачи) тоже.
@@ -2768,7 +2805,8 @@ class TraceScreen(Screen):
         before = len(trace.children)
         self._dispatch_command(raw)
         if len(trace.children) > before:
-            trace.scroll_end(animate=False)
+            self._stick_bottom = True   # команда юзера = re-engage
+            self._scroll_trace_end()
 
     def _dispatch_command(self, raw: str) -> None:
         # Имя команды + остаток строки как единственный аргумент, дословно.
