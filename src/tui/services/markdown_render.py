@@ -26,11 +26,11 @@ from tui.palette import INK as _INK
 
 @dataclass(frozen=True)
 class Block:
-    """Один блок markdown: prose-параграф, заголовок, элемент списка, fenced-код или таблица.
+    """Один блок markdown: prose-прогон, fenced-код или таблица.
 
     `lang` — только для kind="code-block". `headers`/`rows`/`aligns` — только для kind="table".
     """
-    kind: str  # 'heading-1'|'heading-2'|'bullet'|'code-block'|'para'|'table'
+    kind: str  # 'prose' | 'code-block' | 'table'
     content: str = ""
     lang: str | None = None
     headers: list[str] | None = None
@@ -151,8 +151,8 @@ def _apply_inline_styles(text: Text, line: str) -> None:
         text.append(line[pos:], style=_INK)
 
 
-_STREAM_HEADING_RE = re.compile(r"^(#{1,6})\s+(.*)$")
-_STREAM_BULLET_RE = re.compile(r"^\s*[-*]\s+")
+_PROSE_HEADING_RE = re.compile(r"^(#{1,6})\s+(.*)$")
+_PROSE_BULLET_RE = re.compile(r"^\s*[-*]\s+")
 
 
 def render_prose(text: str) -> Text:
@@ -171,13 +171,13 @@ def render_prose(text: str) -> Text:
         if in_fence:
             out.append(line, style=_INK)
             continue
-        m = _STREAM_HEADING_RE.match(line)
+        m = _PROSE_HEADING_RE.match(line)
         if m:
             out.append(m.group(2).strip(), style=f"{_ACC} bold")
             continue
-        if _STREAM_BULLET_RE.match(line):
+        if _PROSE_BULLET_RE.match(line):
             out.append("• ", style=_INK)
-            _apply_inline_styles(out, _STREAM_BULLET_RE.sub("", line))
+            _apply_inline_styles(out, _PROSE_BULLET_RE.sub("", line))
             continue
         _apply_inline_styles(out, line)
     return out

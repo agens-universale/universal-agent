@@ -42,6 +42,7 @@ def test_table_basic():
     assert len(segs) == 1 and segs[0].kind == "table"
     assert segs[0].headers == ["A", "B"]
     assert segs[0].rows == [["1", "2"], ["3", "4"]]
+    assert segs[0].aligns == ["left", "left"]
 
 
 def test_table_alignment_markers():
@@ -61,3 +62,28 @@ def test_table_ragged_row_padded():
 def test_build_markdown_table_smoke():
     t = build_markdown_table(["A", "B"], [["1", "2"]], ["left", "left"])
     assert t.columns[0].header == "A"
+
+
+def test_build_markdown_table_column_count_and_justify():
+    """Columns count matches headers; right-justified column has justify='right'."""
+    t = build_markdown_table(["Name", "Score"], [["Alice", "99"]], ["left", "right"])
+    assert len(t.columns) == 2
+    assert t.columns[0].justify == "left"
+    assert t.columns[1].justify == "right"
+
+
+def test_build_markdown_table_header_style():
+    """Each column header_style is accent (#54B3A6) bold."""
+    t = build_markdown_table(["Col"], [["val"]], ["left"])
+    assert t.columns[0].header_style == "#54B3A6 bold"
+
+
+def test_build_markdown_table_inline_code_cell():
+    """Cell containing `code` spans: backticks stripped, text rendered with code style (#afbdff)."""
+    t = build_markdown_table(["H"], [["`snippet`"]], ["left"])
+    # The cell is a rich.Text; iterate spans to find code-styled segment.
+    cell = t.columns[0]._cells[0]  # first row, first column
+    styles = [span.style for span in cell._spans]
+    assert any("#afbdff" in str(s) for s in styles), (
+        f"Expected code style #afbdff in cell spans, got: {styles}"
+    )

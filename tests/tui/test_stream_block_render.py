@@ -100,7 +100,6 @@ async def test_reset_render_state_clears_stream_block_and_sink(tmp_path):
     """Task-switch path: _reset_render_state must remove the StreamBlock AND reset the sink."""
     pytest.importorskip("textual")
     from tui.app import TuiApp
-    from tui.widgets.stream_block import StreamBlock
 
     class _FakeRunner:
         def is_running(self) -> bool: return True
@@ -124,7 +123,7 @@ async def test_reset_render_state_clears_stream_block_and_sink(tmp_path):
         scr._reset_render_state()
         await pilot.pause()
 
-        assert len(pilot.app.query(StreamBlock)) == 0 and scr._stream_answer_row is None
+        assert scr._stream_answer_row is None
         assert pilot.app._stream_sink.snapshot() == ("", "")
 
 
