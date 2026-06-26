@@ -101,9 +101,15 @@ class TuiApp(App):
         progress = McpProgress()
         progress.begin(list((cfg.get("mcp-servers") or {}).keys()))
         self._mcp_progress = progress
+        from tui.services.stream_pump import StreamPump, STREAM_REFRESH_MS
+        self._stream_pump = StreamPump(
+            self._stream_sink,
+            signal=lambda: self.call_from_thread(self._stream_signal),
+            throttle_s=STREAM_REFRESH_MS / 1000,
+        )
         ctx = create_run_context(
             cfg, auth_connector=auth, on_progress=progress.update,
-            on_stream_delta=self._stream_sink.push,
+            on_stream_delta=self._stream_pump.on_delta,
         )
         # Снапшот MCP «сервер→статус/тулы» app-уровнево — чтобы /mcp показывал
         # результат boot-дискавери сразу, не дожидаясь первого сообщения.
@@ -115,6 +121,13 @@ class TuiApp(App):
             ctx.is_tui = True
             ctx.tui_confirm = runner.make_tui_confirm(self._present_confirm)
         return AgentExecutor(ctx)
+
+    def _stream_signal(self) -> None:
+        """Вызывается на UI-потоке (StreamPump → call_from_thread); событийная
+        перерисовка контента стрима на активном экране (no-op без метода)."""
+        fn = getattr(self.screen, "_refresh_stream_content", None)
+        if callable(fn):
+            fn()
 
     def _present_confirm(self, title: str, question: str, fields: list) -> None:
         """Вызывается на агент-потоке; маршаллит показ баннера в UI-поток."""
