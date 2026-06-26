@@ -692,6 +692,26 @@ class TraceScreen(Screen):
         self._thinking.remove()
         self._thinking = None
 
+    def _refresh_stream_content(self) -> None:
+        """Освежить контент уже смонтированного стрим-виджета из снапшота sink.
+        Зовётся poll-веткой (после mount/switch) и событийно (StreamPump → app →
+        call_from_thread). НЕ монтирует/снимает/переключает — это poll."""
+        sink = getattr(self.app, "_stream_sink", None)
+        if sink is None:
+            return
+        from tui.services.stream_sink import format_stream_block, format_reasoning_line
+        from tui.services.markdown_render import render_prose
+        following = self._trace_is_at_bottom()
+        think, answer = sink.snapshot()
+        if self._stream_answer_row is not None:
+            self._stream_answer_row.set_content(render_prose(format_stream_block(answer=answer)))
+        elif self._stream_block is not None:
+            self._stream_block.set_text(format_reasoning_line(think=think), thinking=True)
+        else:
+            return
+        if following:
+            self.query_one("#trace", VerticalScroll).scroll_end(animate=False)
+
     def _clear_stream_block(self, *, reset_sink: bool = True) -> None:
         """Снять эфемерный StreamBlock и (по умолчанию) сбросить sink.
 
@@ -1525,7 +1545,6 @@ class TraceScreen(Screen):
                 reasoning = format_reasoning_line(think=think)
                 kind, thinking = select_stream_render(mode, clean, reasoning)
                 from tui.widgets.trace_row import TraceRow
-                following = self._trace_is_at_bottom()
                 if kind == "answer":
                     if self._stream_block is not None:          # switch reasoning→answer
                         self._stream_block.remove()
@@ -1535,10 +1554,7 @@ class TraceScreen(Screen):
                             prefix="● ", content=render_prose(clean),
                             kind_class="line-agent", focusable=False)
                         self._trace_mount(self._stream_answer_row, scroll=True)
-                    else:
-                        self._stream_answer_row.set_content(render_prose(clean))
-                    if following:
-                        self.query_one("#trace", VerticalScroll).scroll_end(animate=False)
+                    self._refresh_stream_content()
                 elif kind == "reasoning":
                     if self._stream_answer_row is not None:      # switch answer→reasoning
                         self._stream_answer_row.remove()
@@ -1546,9 +1562,7 @@ class TraceScreen(Screen):
                     if self._stream_block is None:
                         self._stream_block = StreamBlock()
                         self._trace_mount(self._stream_block, scroll=True)
-                    self._stream_block.set_text(reasoning, thinking=True)
-                    if following:
-                        self.query_one("#trace", VerticalScroll).scroll_end(animate=False)
+                    self._refresh_stream_content()
                 else:
                     self._clear_stream_block(reset_sink=False)
             elif not _thinking_phase:
