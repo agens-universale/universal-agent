@@ -1527,10 +1527,17 @@ class TraceScreen(Screen):
                 else:
                     renderable = None
                 if renderable is not None:
+                    following = self._trace_is_at_bottom()
                     if self._stream_block is None:
                         self._stream_block = StreamBlock()
                         self._trace_mount(self._stream_block, scroll=True)
                     self._stream_block.set_text(renderable, thinking=thinking)
+                    # Stick-to-bottom: блок растёт по мере стрима — следуем за низом,
+                    # только если юзер уже был внизу (отскроллил вверх читать → не
+                    # дёргаем). Проверку делаем ДО роста контента (после — max_scroll_y
+                    # вырастет и _trace_is_at_bottom уже вернёт False).
+                    if following:
+                        self.query_one("#trace", VerticalScroll).scroll_end(animate=False)
                 else:
                     self._clear_stream_block(reset_sink=False)
             elif not _thinking_phase:
