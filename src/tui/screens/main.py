@@ -720,27 +720,30 @@ class TraceScreen(Screen):
                 sink.reset()
 
     def _sync_trace_max_height(self) -> None:
-        """#trace сжимается до контента: потолок = доступное место (экран минус
-        header/input/footer/indicator-bar). Рост контента до потолка держит Textual;
-        здесь только сам потолок, на гарде (set лишь при изменении значения).
+        """#trace сжимается до контента: потолок = доступное место (экран минус ВСЕ
+        прочие дети #root — header/input/footer/indicator-bar + любые оверлеи в #root:
+        ask_human/confirm-баннер, палитра, пикеры). Рост контента до потолка держит
+        Textual; здесь только сам потолок, на гарде (set лишь при изменении значения).
 
         #spacer высота управляется из кода: забирает слак (available - content),
         чтобы indicator-bar оставался прижатым к контенту трейса, а не к низу.
         Примечание: Textual не позволяет 1fr-виджетам иметь высоту 0 (всегда ≥1),
         поэтому высоту spacer устанавливаем программно."""
         try:
-            screen_h = self.size.height
-            # .region.height включает бордеры виджетов; .size.height — только контент.
-            # Для правильного расчёта «места под #trace» используем region.height.
-            header_h = self.query_one("#header").region.height
-            input_h = self.query_one("#input-row").region.height
-            footer_h = self.query_one("#footer").region.height
-            bar_h = self.query_one("#indicator-bar").region.height
+            root = self.query_one("#root", Vertical)
             trace = self.query_one("#trace", VerticalScroll)
             spacer = self.query_one("#spacer")
         except Exception:
             return
-        available = screen_h - header_h - input_h - footer_h - bar_h
+        # available = место под #trace+#spacer = экран минус все прочие дети #root.
+        # region.height включает бордеры; скрытые виджеты (display:none) дают 0.
+        # Так оверлеи #root (ask_human/confirm-баннер, палитра, пикеры) учитываются
+        # автоматически — иначе #trace забирал бы их место и выдавливал футер.
+        others = sum(
+            c.region.height for c in root.children
+            if c.id not in ("trace", "spacer")
+        )
+        available = self.size.height - others
         if available <= 0:
             return
         if available != self._trace_max_height:

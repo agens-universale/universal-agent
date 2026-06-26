@@ -105,3 +105,31 @@ async def test_spacer_shrinks_as_content_grows(tmp_path):
         h2 = spacer.size.height
         assert h1 > 0                            # был запас (индикатор не у низа)
         assert h2 < h1                           # контент вырос → спейсер сжался (индикатор поехал вниз)
+
+
+@pytest.mark.asyncio
+async def test_ask_human_banner_keeps_footer_onscreen(tmp_path):
+    """Регресс: баннер ask_human монтируется в #root (перед #input-row). available
+    должен учитывать ВСЕ оверлеи #root, иначе #trace забирает лишнее (на высоту
+    баннера) и выдавливает футер за экран."""
+    pytest.importorskip("textual")
+    from types import SimpleNamespace
+    from tui.app import TuiApp
+
+    tid = "ah1"
+    _write_task(tmp_path, tid)
+    app = TuiApp(threads_dir=str(tmp_path), system="cli",
+                 config={"model": "M", "backend_api_mode": "chat_completions"})
+    async with app.run_test(size=(80, 24)) as pilot:
+        scr = pilot.app.screen
+        scr.attach_active_task(tid)
+        big = "\n".join(f"строка {i}" for i in range(60))   # #trace упрётся в потолок
+        scr._render_record({"payload": {"id": "a1", "role": "assistant",
+                                        "content": big}}, live=True)
+        await pilot.pause(0.4)
+        ev = SimpleNamespace(call_id="c1", summary="В какую часть углубиться?",
+                             no=99, kind="ask_human")
+        scr._on_ask_human_event(ev, live=False)             # баннер в #root перед input
+        await pilot.pause(0.4)                              # poll → _sync_trace_max_height
+        footer = pilot.app.query_one("#footer")
+        assert footer.region.bottom == 24                  # футер на экране (не выдавлен баннером)
