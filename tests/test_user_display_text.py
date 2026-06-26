@@ -35,3 +35,9 @@ def test_extract_empty_display_is_empty():
 
 def test_extract_without_display_unchanged():
     assert extract_real_user_message_text({"role": "user", "content": "запрос"}) == "запрос"
+
+
+def test_display_content_none_falls_back_to_content():
+    msg = {"role": "user", "content": "запрос", "display_content": None}
+    assert user_display_text(msg) == "запрос"
+    assert extract_real_user_message_text(msg) == "запрос"
