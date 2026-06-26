@@ -120,6 +120,7 @@ class TraceScreen(Screen):
         self._trace_max_height = None  # type: Optional[int]
         self._stick_bottom = True   # автоскролл-намерение «липнуть к низу» трейса
         self._last_auto_y = 0       # куда мы в прошлый раз программно прижали трейс
+        self._layout_sync_pending = False  # коалесценс _request_layout_sync
         # Эфемерный StreamBlock — live-вывод текущего chat_completions-шага;
         # снимается, когда приходит каноничная assistant-строка / run завершён.
         self._stream_block = None  # type: Optional["StreamBlock"]
@@ -628,6 +629,7 @@ class TraceScreen(Screen):
             # unhide/смена state не двигают вид трейса.
             self._thinking.remove_class("hidden")
             self._thinking.set_state(state)
+            self._request_layout_sync()       # unhide мог сменить высоту bar (0→N)
             return
         _cfg = getattr(self.app, "_config", None) or {}
         from tui.widgets.thinking_indicator import ThinkingIndicator
@@ -638,6 +640,7 @@ class TraceScreen(Screen):
         )
         self._thinking = indicator
         self.query_one("#indicator-bar", Vertical).mount(indicator)
+        self._request_layout_sync()           # bar 0→N → спейсер под новую высоту
 
     def _restore_terminal_indicator(self) -> None:
         """На resume сессии: смонтировать строку-итог прошлого хода. Только если
@@ -678,6 +681,7 @@ class TraceScreen(Screen):
         if self._thinking is None:
             return
         self._thinking.add_class("hidden")
+        self._request_layout_sync()           # bar N→0 → спейсер под новую высоту
 
     def _destroy_thinking_indicator(self) -> None:
         """Полностью убрать индикатор. Вызывается когда run завершён."""
@@ -685,6 +689,7 @@ class TraceScreen(Screen):
             return
         self._thinking.remove()
         self._thinking = None
+        self._request_layout_sync()           # bar N→0 → спейсер под новую высоту
 
     def _refresh_stream_content(self) -> None:
         """Освежить контент уже смонтированного стрим-виджета из снапшота sink.
@@ -757,6 +762,20 @@ class TraceScreen(Screen):
         content_h = min(trace.virtual_size.height, available)
         spacer.styles.height = max(0, available - content_h)
 
+    def _request_layout_sync(self) -> None:
+        """Коалесцированный пере-расчёт потолка/спейсера #trace ПОСЛЕ ближайшего
+        refresh — на settled-раскладке (с уже смонтированными индикатором/строками).
+        Зовётся на любое изменение контента трейса / высоты #indicator-bar, чтобы
+        спейсер не отставал на poll-тик (иначе layout «прыгает» в начале хода). Флаг
+        схлопывает пачку изменений одного кадра в один пере-расчёт."""
+        if self._layout_sync_pending:
+            return
+        self._layout_sync_pending = True
+        def _do() -> None:
+            self._layout_sync_pending = False
+            self._sync_trace_max_height()
+        self.call_after_refresh(_do)
+
     _STICK_TOL = 2
 
     def _trace_is_at_bottom(self) -> bool:
@@ -808,6 +827,7 @@ class TraceScreen(Screen):
         if force_scroll:
             self._stick_bottom = True   # отправка своего сообщения = re-engage
         trace.mount(widget)
+        self._request_layout_sync()           # спейсер под новый контент (settled-замер)
         if scroll and self._stick_bottom:
             self._scroll_trace_end()
 
@@ -1459,9 +1479,14 @@ class TraceScreen(Screen):
         return cached.strip() == polled_content.strip()
 
     def _poll_active(self) -> None:
-        self._sync_trace_max_height()
-        # Липкость к низу: детект ручного скролла + повторное прижатие. Держит низ
-        # через каскад relayout'ов после отправки (реплика → индикатор → потолок).
+        # Потолок/спейсер #trace пересчитываем ПОСЛЕ refresh (settled-замер) —
+        # backstop к точечным _request_layout_sync из монтажей/индикатора; флаг
+        # схлопывает их в один. Иначе спейсер отставал бы на тик от монтажей этого
+        # тика (индикатор destroy-на-send → remount) → «прыжок» layout в начале хода.
+        self._request_layout_sync()
+        # Липкость к низу: детект ручного скролла (settled-позиции прошлого тика) +
+        # повторное прижатие. Прижатие — после синка (тот же порядок call_after_refresh),
+        # чтобы scroll_end видел уже актуальный max_scroll_y.
         self._update_stick_state()
         if self._stick_bottom:
             self._scroll_trace_end()
