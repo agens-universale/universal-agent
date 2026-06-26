@@ -178,6 +178,7 @@ class TraceScreen(Screen):
                 yield Static(left_text, id="header-left", markup=False)
                 yield Static(right_text, id="header-right", markup=False)
             yield VerticalScroll(id="trace")
+            yield Vertical(id="indicator-bar")
             with Horizontal(id="input-row"):
                 yield Static("> ", id="input-prompt", markup=False)
                 yield CommandTextArea(placeholder=_PLACEHOLDER_READY, id="cmdinput")
@@ -617,17 +618,10 @@ class TraceScreen(Screen):
         истории). Переключается без размонтирования для непрерывного визуала.
         """
         if self._thinking is not None:
-            # Разворот из `.hidden` (height 0 → видимый) растит контент. Если юзер
-            # у низа, доводим вид до индикатора, иначе «✓ завершаю…» остаётся под
-            # сгибом после финального ответа (ответы скроллятся, плашка — нет).
-            # Только при реальном unhide: на обычных тиках «думаю» (уже видим)
-            # высота не меняется — вид не трогаем.
-            was_hidden = self._thinking.has_class("hidden")
-            following = was_hidden and self._trace_is_at_bottom()
+            # Индикатор живёт в фиксированной #indicator-bar (вне скролла) —
+            # unhide/смена state не двигают вид трейса.
             self._thinking.remove_class("hidden")
             self._thinking.set_state(state)
-            if following:
-                self.query_one("#trace", VerticalScroll).scroll_end(animate=False)
             return
         _cfg = getattr(self.app, "_config", None) or {}
         from tui.widgets.thinking_indicator import ThinkingIndicator
@@ -637,11 +631,7 @@ class TraceScreen(Screen):
             reasoning_tag=_cfg.get("tui_stream_display", "answer") != "answer_reasoning",
         )
         self._thinking = indicator
-        trace = self.query_one("#trace", VerticalScroll)
-        following = self._trace_is_at_bottom()
-        trace.mount(indicator)
-        if following:
-            trace.scroll_end(animate=False)
+        self.query_one("#indicator-bar", Vertical).mount(indicator)
 
     def _restore_terminal_indicator(self) -> None:
         """На resume сессии: смонтировать строку-итог прошлого хода. Только если
@@ -675,9 +665,7 @@ class TraceScreen(Screen):
             frozen_elapsed=elapsed if isinstance(elapsed, int) else None,
         )
         self._thinking = ind
-        trace = self.query_one("#trace", VerticalScroll)
-        trace.mount(ind)
-        trace.scroll_end(animate=False)
+        self.query_one("#indicator-bar", Vertical).mount(ind)
 
     def _hide_thinking_indicator(self) -> None:
         """Скрыть индикатор (CSS `.hidden`), не удаляя — анимация продолжает идти."""
@@ -741,18 +729,14 @@ class TraceScreen(Screen):
 
     def _trace_mount(self, widget, *, scroll: bool = True,
                      force_scroll: bool = False) -> None:
-        """Смонтировать widget в #trace перед ThinkingIndicator (если есть),
-        чтобы индикатор всегда оставался последним.
+        """Смонтировать widget в #trace (индикатор живёт отдельно в #indicator-bar).
 
         scroll=True: прокрутить вниз, но только если юзер уже внизу
         (`_trace_is_at_bottom`) — иначе не дёргаем его прокрутку. force_scroll=True
         прокручивает безусловно (отправка своего сообщения = re-engage)."""
         trace = self.query_one("#trace", VerticalScroll)
         following = force_scroll or self._trace_is_at_bottom()
-        if self._thinking is not None and self._thinking.is_mounted:
-            trace.mount(widget, before=self._thinking)
-        else:
-            trace.mount(widget)
+        trace.mount(widget)
         if scroll and following:
             trace.scroll_end(animate=False)
 

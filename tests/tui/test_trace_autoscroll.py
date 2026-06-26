@@ -67,26 +67,25 @@ async def test_user_send_pending_forces_scroll(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_thinking_indicator_unhide_follows_when_at_bottom(tmp_path):
-    """Разворот скрытого индикатора (unhide → «✓ завершаю…») доводит вид до него,
-    если юзер у низа — иначе плашка остаётся под сгибом после финального ответа
-    (ответы скроллятся, а индикатор нет)."""
+async def test_thinking_indicator_unhide_does_not_scroll_trace(tmp_path):
+    """Индикатор докнут в #indicator-bar (вне скролла), всегда виден — его unhide
+    больше НЕ двигает вид #trace (раньше доводил вид до плашки в скролл-потоке)."""
     pytest.importorskip("textual")
     from textual.containers import VerticalScroll
     from tui.app import TuiApp
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     async with app.run_test() as pilot:
         scr = pilot.app.screen
-        scr._show_thinking_indicator(state="thinking")   # смонтирован
+        scr._show_thinking_indicator(state="thinking")   # смонтирован в #indicator-bar
         scr._hide_thinking_indicator()                    # .hidden (height 0)
         await pilot.pause()
         trace = scr.query_one("#trace", VerticalScroll)
         calls = []
         trace.scroll_end = lambda **kw: calls.append(kw)
         scr._trace_is_at_bottom = lambda: True
-        scr._show_thinking_indicator(state="validating")  # unhide → растит контент
+        scr._show_thinking_indicator(state="validating")  # unhide — вне скролла трейса
         await pilot.pause()
-        assert calls    # вид доведён до развёрнутого индикатора
+        assert calls == []    # #trace не дёргается
 
 
 @pytest.mark.asyncio
