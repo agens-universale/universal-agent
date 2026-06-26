@@ -1,13 +1,6 @@
 from agent_executor import AgentExecutor
 
 
-def _build_user_messages(monkeypatch):
-    """Изолированно дёрнуть сборку user-сообщений из run() через хелпер.
-    run() целиком требует ctx/бэкенд — тестируем чистую сборку списка."""
-    # Вынесем логику в статический метод _build_user_messages (см. Step 3).
-    return AgentExecutor._build_user_messages
-
-
 def test_display_content_set_when_differs():
     fn = AgentExecutor._build_user_messages
     msgs = fn(["<skill>\nдавай"], message_ids=["m1"],

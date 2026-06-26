@@ -573,7 +573,12 @@ class TraceScreen(Screen):
         if not isinstance(payload, dict):
             return
         ev = map_message(payload, no=self._next_no, ts=rec.get("ts", ""))
+        # skill_loaded извлекаем ДО early-return: mid-run доставка (display_content="")
+        # даёт ev=None, но маркер [skill] всё равно нужен на resume-пути.
+        sk = payload.get("skill_loaded")
         if ev is None:
+            if sk and not live:
+                self._mount_skill_marker(sk, True)  # mid-run доставка: на resume только маркер
             return
         self._next_no += 1
         self._task_events.append(ev)
@@ -581,7 +586,6 @@ class TraceScreen(Screen):
         # После реплики монтируем [skill]-маркер (если payload несёт skill_loaded).
         # На live-пути маркер уже смонтирован delivery-флоу (_mount_user_reply →
         # _flush_skill_marker → _mount_skill_marker), поэтому только на rebuild.
-        sk = payload.get("skill_loaded")
         if sk and not live:
             self._mount_skill_marker(sk, True)  # resume: восстановить [skill]-маркер (live его уже смонтировал)
         # Spec 2026-05-26 + 2026-05-28: запоминаем kind + время последнего
