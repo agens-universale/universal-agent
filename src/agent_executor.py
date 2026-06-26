@@ -75,6 +75,8 @@ class AgentExecutor:
         verbose: bool | None = None,
         discard_writes_after_stop: bool = False,
         message_ids: list[str] | None = None,
+        display_contents: list[str | None] | None = None,
+        skills_loaded: list[str | None] | None = None,
     ) -> Any:
         """Запускает агента. При каждом вызове state создаётся заново.
 
@@ -268,18 +270,11 @@ class AgentExecutor:
         user_bodies = [str(x) for x in messages]
         # id можно задать снаружи (TUI пробрасывает свой, чтобы потом точечно
         # откатить осиротевшую реплику при быстрой отмене); иначе генерим.
-        new_user_messages = [
-            {
-                "role": "user",
-                "content": body,
-                "id": (
-                    message_ids[i]
-                    if message_ids and i < len(message_ids) and message_ids[i]
-                    else generate_message_id_func("m")
-                ),
-            }
-            for i, body in enumerate(user_bodies)
-        ]
+        new_user_messages = self._build_user_messages(
+            user_bodies, message_ids=message_ids,
+            display_contents=display_contents, skills_loaded=skills_loaded,
+            gen_id=generate_message_id_func,
+        )
         # На старте user turn дописываем текущий CLI-запрос в current_user_intent
         # (только реальные user-сообщения, не technical). user_intent_log — только
         # user_intent_log — только после flush при accept turn_finish.
@@ -451,6 +446,29 @@ class AgentExecutor:
         Изменения state — только под этим замком.
         """
         return self._lock
+
+    @staticmethod
+    def _build_user_messages(user_bodies, *, message_ids, display_contents,
+                             skills_loaded, gen_id):
+        """Собрать user-сообщения с опциональными display_content/skill_loaded.
+        display_content ставится только при отличии от content; skill_loaded — если задан."""
+        out = []
+        for i, body in enumerate(user_bodies):
+            body = str(body)
+            msg = {
+                "role": "user",
+                "content": body,
+                "id": (message_ids[i] if message_ids and i < len(message_ids)
+                       and message_ids[i] else gen_id("m")),
+            }
+            disp = display_contents[i] if display_contents and i < len(display_contents) else None
+            if disp is not None and disp != body:
+                msg["display_content"] = disp
+            sk = skills_loaded[i] if skills_loaded and i < len(skills_loaded) else None
+            if sk:
+                msg["skill_loaded"] = sk
+            out.append(msg)
+        return out
 
     def stop_run(self) -> None:
         """Выставляет флаг остановки; агент завершит текущую итерацию и выйдет.
