@@ -90,6 +90,14 @@ class TraceRow(Widget):
         except Exception:
             pass
 
+    def set_content(self, content) -> None:
+        """Обновить content-колонку после монтирования (пер-тик апдейт стрим-прозы)."""
+        self._content = content
+        try:
+            self.query_one(".trace-content", Static).update(content)
+        except Exception:
+            pass
+
     def compose(self) -> ComposeResult:
         with Horizontal():
             yield Static(
