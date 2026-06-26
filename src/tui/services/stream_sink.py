@@ -109,3 +109,17 @@ def format_reasoning_line(*, think: str, tail_len: int = 64) -> str:
     thinking phase: `⠇ <tail>` (empty string if no reasoning)."""
     tail = _reasoning_tail(think, tail_len)
     return f"⠇ {tail}" if tail else ""
+
+
+def select_stream_render(
+    mode: str, clean_answer: str, reasoning_line: str
+) -> tuple[str, bool]:
+    """Что показать в StreamBlock по режиму tui_stream_display.
+    Возвращает (kind, thinking): kind ∈ {"answer", "reasoning", "none"}."""
+    if mode == "minimal":
+        return ("none", False)
+    if clean_answer.strip():
+        return ("answer", False)
+    if mode == "answer_reasoning" and reasoning_line:
+        return ("reasoning", True)
+    return ("none", False)

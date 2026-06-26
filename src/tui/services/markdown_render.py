@@ -156,6 +156,38 @@ def _apply_inline_styles(text: Text, line: str) -> None:
         text.append(line[pos:], style=_INK)
 
 
+_STREAM_HEADING_RE = re.compile(r"^(#{1,6})\s+(.*)$")
+_STREAM_BULLET_RE = re.compile(r"^\s*[-*]\s+")
+
+
+def render_stream_answer(text: str) -> Text:
+    """V1 live-answer рендер: построчно inline-стили (**bold**, `code`) + line-стили
+    heading/bullet; fenced-блоки и таблицы — plain (рамки/сетка только на финале).
+    Возвращает rich.Text в нормальном цвете (INK)."""
+    out = Text()
+    in_fence = False
+    for i, line in enumerate(text.split("\n")):
+        if i:
+            out.append("\n")
+        if line.startswith("```"):
+            in_fence = not in_fence
+            out.append(line, style=_INK)
+            continue
+        if in_fence:
+            out.append(line, style=_INK)
+            continue
+        m = _STREAM_HEADING_RE.match(line)
+        if m:
+            out.append(m.group(2).strip(), style=f"{_ACC} bold")
+            continue
+        if _STREAM_BULLET_RE.match(line):
+            out.append("• ", style=_INK)
+            _apply_inline_styles(out, _STREAM_BULLET_RE.sub("", line))
+            continue
+        _apply_inline_styles(out, line)
+    return out
+
+
 def render_block_to_text(blk: Block) -> Text:
     """Один markdown-блок → rich.text.Text с уже применёнными inline-стилями.
 
