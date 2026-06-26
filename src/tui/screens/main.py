@@ -633,7 +633,7 @@ class TraceScreen(Screen):
         indicator = ThinkingIndicator(
             started_at=self._thinking_started_at, state=state,
             sink=getattr(self.app, "_stream_sink", None),
-            reasoning_tag=not bool(_cfg.get("tui_show_reasoning_line", False)),
+            reasoning_tag=_cfg.get("tui_stream_display", "answer") != "answer_reasoning",
         )
         self._thinking = indicator
         trace = self.query_one("#trace", VerticalScroll)
@@ -1510,26 +1510,28 @@ class TraceScreen(Screen):
             sink = getattr(self.app, "_stream_sink", None)
             if _thinking_phase and sink is not None and sink.has_content():
                 from tui.services.stream_sink import (
-                    format_stream_block, format_reasoning_line,
+                    format_stream_block, format_reasoning_line, select_stream_render,
                 )
+                from tui.services.markdown_render import render_stream_answer
                 from tui.widgets.stream_block import StreamBlock
                 think, answer = sink.snapshot()
-                ans = format_stream_block(answer=answer)
                 _cfg = getattr(self.app, "_config", None) or {}
-                if ans:
-                    show = bool(_cfg.get("tui_show_stream_answer", False))
-                    text, thinking = ans, False
+                mode = _cfg.get("tui_stream_display", "answer")
+                clean = format_stream_block(answer=answer)
+                reasoning = format_reasoning_line(think=think)
+                kind, thinking = select_stream_render(mode, clean, reasoning)
+                if kind == "answer":
+                    renderable = render_stream_answer(clean)
+                elif kind == "reasoning":
+                    renderable = reasoning
                 else:
-                    show = bool(_cfg.get("tui_show_reasoning_line", False))
-                    text, thinking = format_reasoning_line(think=think), True
-                if show and text:
+                    renderable = None
+                if renderable is not None:
                     if self._stream_block is None:
                         self._stream_block = StreamBlock()
                         self._trace_mount(self._stream_block, scroll=True)
-                    self._stream_block.set_text(text, thinking=thinking)
+                    self._stream_block.set_text(renderable, thinking=thinking)
                 else:
-                    # render disabled by config (or nothing to show) — drop the
-                    # widget but KEEP the sink (counter/indicator unaffected).
                     self._clear_stream_block(reset_sink=False)
             elif not _thinking_phase:
                 self._clear_stream_block()
