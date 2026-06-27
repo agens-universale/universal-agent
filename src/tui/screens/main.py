@@ -2065,15 +2065,24 @@ class TraceScreen(Screen):
         if self._arg_picker is not None:
             self._close_arg_picker()
 
+    _MIN_TRACE_WITH_OVERLAY = 3   # минимум строк трейса видно при открытом оверлее
+
     def _mount_input_overlay(self, widget) -> None:
         """Смонтировать input-оверлей (палитра / skill/arg/file-picker) СРАЗУ ПОД
         полем ввода — список раскрывается ВНИЗ (новая раскладка: ввод следует за
         контентом, под ним есть место). При заполненном экране #trace ужимается под
-        оверлей — он учтён как дитя #root в _sync_trace_max_height; отложенный
-        пересчёт даёт это сразу, не дожидаясь poll-тика."""
-        self.query_one("#root", Vertical).mount(
-            widget, after=self.query_one("#input-row", Horizontal)
-        )
+        оверлей — он учтён как дитя #root в _sync_trace_max_height.
+
+        Высоту оверлея ограничиваем местом под вводом (минус min-строки трейса), иначе
+        большой список (палитра/skill) + хром > экрана → _sync_trace_max_height упрётся
+        в available<=0, оставит трейс на весь экран, а оверлей вожмётся в остаток."""
+        root = self.query_one("#root", Vertical)
+        root.mount(widget, after=self.query_one("#input-row", Horizontal))
+        chrome = sum(c.region.height for c in root.children
+                     if c.id != "trace" and c is not widget)
+        cap = self.size.height - chrome - self._MIN_TRACE_WITH_OVERLAY
+        if cap > 0:
+            widget.styles.max_height = cap
         self.call_after_refresh(self._sync_trace_max_height)
 
     def _open_palette(self, *, prefix: str) -> None:
