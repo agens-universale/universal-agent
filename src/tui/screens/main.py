@@ -2065,14 +2065,23 @@ class TraceScreen(Screen):
         if self._arg_picker is not None:
             self._close_arg_picker()
 
+    def _mount_input_overlay(self, widget) -> None:
+        """Смонтировать input-оверлей (палитра / skill/arg/file-picker) СРАЗУ ПОД
+        полем ввода — список раскрывается ВНИЗ (новая раскладка: ввод следует за
+        контентом, под ним есть место). При заполненном экране #trace ужимается под
+        оверлей — он учтён как дитя #root в _sync_trace_max_height; отложенный
+        пересчёт даёт это сразу, не дожидаясь poll-тика."""
+        self.query_one("#root", Vertical).mount(
+            widget, after=self.query_one("#input-row", Horizontal)
+        )
+        self.call_after_refresh(self._sync_trace_max_height)
+
     def _open_palette(self, *, prefix: str) -> None:
         if self._palette is not None:
             return
         palette = CommandPalette(self._registry, initial_filter=prefix)
         self._palette = palette
-        self.query_one("#root", Vertical).mount(
-            palette, before=self.query_one("#input-row", Horizontal)
-        )
+        self._mount_input_overlay(palette)
 
     def _close_palette(self) -> None:
         if self._palette is None:
@@ -2088,9 +2097,7 @@ class TraceScreen(Screen):
         from tui.widgets.skill_picker import SkillPicker
         picker = SkillPicker(self._skills_cache, initial_filter=prefix)
         self._skill_picker = picker
-        self.query_one("#root", Vertical).mount(
-            picker, before=self.query_one("#input-row", Horizontal)
-        )
+        self._mount_input_overlay(picker)
 
     def _close_skill_picker(self) -> None:
         if self._skill_picker is None:
@@ -2104,9 +2111,7 @@ class TraceScreen(Screen):
         from tui.widgets.arg_picker import ArgPicker
         picker = ArgPicker(options, initial_filter=prefix)
         self._arg_picker = picker
-        self.query_one("#root", Vertical).mount(
-            picker, before=self.query_one("#input-row", Horizontal)
-        )
+        self._mount_input_overlay(picker)
 
     def _close_arg_picker(self) -> None:
         if self._arg_picker is None:
@@ -2133,9 +2138,7 @@ class TraceScreen(Screen):
         from tui.widgets.file_picker import FilePicker
         picker = FilePicker(self._file_picker_entries(query))
         self._file_picker = picker
-        self.query_one("#root", Vertical).mount(
-            picker, before=self.query_one("#input-row", Horizontal)
-        )
+        self._mount_input_overlay(picker)
 
     def _refresh_file_picker(self, *, query: str) -> None:
         if self._file_picker is None:
