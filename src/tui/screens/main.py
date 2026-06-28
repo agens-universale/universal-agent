@@ -724,22 +724,37 @@ class TraceScreen(Screen):
                 sink.reset()
 
     def _sync_trace_max_height(self) -> None:
-        """Потолок #trace = экран минус ВЕСЬ хром #root (header, indicator-bar
-        [зарезервирован], input, footer + оверлеи: ask_human/confirm-баннер, палитра).
+        """Потолок #trace = экран минус хром #root.
 
-        #trace `auto` сам сжимается до контента, а хром ниже (индикатор/ввод/футер)
-        следует за концом контента (Claude-style), пустота — внизу под футером.
-        Потолок лишь включает скролл при заполнении экрана, чтобы #trace не выдавливал
-        ввод/футер. БЕЗ замера высоты контента → нет покадровой гонки раскладки
-        (она и давала «прыжок»: рост контента обрабатывает Textual нативно)."""
+        Без оверлея: #trace `auto` сам сжимается до контента, хром ниже (индикатор/
+        ввод/футер) следует за концом контента (Claude-style), пустота — внизу под
+        футером; потолок лишь включает скролл при заполнении экрана. БЕЗ замера высоты
+        контента → нет покадровой гонки (она давала «прыжок»).
+
+        С открытым input-оверлеем (палитра/пикер): #trace ужимается под его ЖЕЛАЕМУЮ
+        высоту (`virtual_size` — полный контент, а НЕ зажатый `region`: region зависит
+        от #trace, #trace — от него → петля, оверлей оставался бы вжатым в остаток),
+        оставляя оверлею место и min строк трейса; сам оверлей — со своим потолком."""
         try:
             root = self.query_one("#root", Vertical)
             trace = self.query_one("#trace", VerticalScroll)
         except Exception:
             return
+        overlay = self._open_overlay_widget()
         # region.height включает бордеры; скрытые виджеты (display:none) дают 0.
-        others = sum(c.region.height for c in root.children if c.id != "trace")
-        available = self.size.height - others
+        chrome = sum(c.region.height for c in root.children
+                     if c.id != "trace" and c is not overlay)
+        if overlay is not None:
+            cap = self.size.height - chrome - self._MIN_TRACE_WITH_OVERLAY
+            if cap <= 0:
+                return
+            overlay.styles.max_height = cap            # потолок оверлея → дальше его скролл
+            # Желаемая высота = строки+хинт (дети, по 1 строке) + рамка .palette (2).
+            # len(children) обновляется при фильтре сразу, а virtual_size залипает.
+            desired = min(len(overlay.children) + 2, cap)
+            available = self.size.height - chrome - desired
+        else:
+            available = self.size.height - chrome
         if available <= 0:
             return
         if available != self._trace_max_height:
@@ -2067,22 +2082,20 @@ class TraceScreen(Screen):
 
     _MIN_TRACE_WITH_OVERLAY = 3   # минимум строк трейса видно при открытом оверлее
 
+    def _open_overlay_widget(self):
+        """Открытый input-оверлей (палитра/skill/arg/file-picker) или None."""
+        return (self._palette or self._skill_picker
+                or self._arg_picker or self._file_picker)
+
     def _mount_input_overlay(self, widget) -> None:
         """Смонтировать input-оверлей (палитра / skill/arg/file-picker) СРАЗУ ПОД
         полем ввода — список раскрывается ВНИЗ (новая раскладка: ввод следует за
-        контентом, под ним есть место). При заполненном экране #trace ужимается под
-        оверлей — он учтён как дитя #root в _sync_trace_max_height.
-
-        Высоту оверлея ограничиваем местом под вводом (минус min-строки трейса), иначе
-        большой список (палитра/skill) + хром > экрана → _sync_trace_max_height упрётся
-        в available<=0, оставит трейс на весь экран, а оверлей вожмётся в остаток."""
-        root = self.query_one("#root", Vertical)
-        root.mount(widget, after=self.query_one("#input-row", Horizontal))
-        chrome = sum(c.region.height for c in root.children
-                     if c.id != "trace" and c is not widget)
-        cap = self.size.height - chrome - self._MIN_TRACE_WITH_OVERLAY
-        if cap > 0:
-            widget.styles.max_height = cap
+        контентом, под ним есть место). Потолок оверлея и ужатие #trace под его
+        желаемую высоту считает _sync_trace_max_height (по virtual_size оверлея);
+        отложенный вызов даёт это сразу, не дожидаясь poll-тика."""
+        self.query_one("#root", Vertical).mount(
+            widget, after=self.query_one("#input-row", Horizontal)
+        )
         self.call_after_refresh(self._sync_trace_max_height)
 
     def _open_palette(self, *, prefix: str) -> None:
