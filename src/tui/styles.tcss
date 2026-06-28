@@ -251,8 +251,7 @@ TextArea.ask-human-mode { border: solid $run-color; }
 /* confirm banner — служебный/security, бирюзовый (accent) вместо янтарного */
 .confirm-banner {
     background: #161A23;
-    border: solid $accent;
-    border-left: thick $accent;
+    border: round $accent;
     padding: 0 1;
     margin: 0 1;
     height: auto;

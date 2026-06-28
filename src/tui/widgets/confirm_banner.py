@@ -15,7 +15,22 @@ from textual.app import ComposeResult
 from textual.containers import Vertical
 from textual.widgets import Static
 
-from tui.palette import ACCENT, BG, DIM
+from tui.palette import ACCENT, BG, BRIGHT, DIM, RUN_COLOR
+
+# Глиф защитного шлюза (caution). НЕ "?" — это не вопрос агента, а security-gate.
+# Width-safe-кандидат; если ⚠ в целевом терминале рендерится шире 1 ячейки —
+# заменить на "▲" или "!" (единственная точка правки).
+GUARD_GLYPH = "⚠"
+
+
+def build_guard_label(title: str) -> Text:
+    """Заголовок шлюза: янтарный глиф ⚠ + bright-титул. '?' остаётся только
+    в самой строке вопроса ('Разрешить …?'), не в заголовке."""
+    t = Text()
+    t.append(f"{GUARD_GLYPH} ", style=RUN_COLOR)
+    t.append(title, style=BRIGHT)
+    return t
+
 
 # Варианты: (keycap, label). 0 — once, 1 — session, 2 — deny.
 _OPTIONS = [
@@ -78,7 +93,7 @@ class ConfirmBanner(Vertical):
         self._options_static: Static | None = None
 
     def compose(self) -> ComposeResult:
-        yield Static(f"? {self.banner_title}", classes="cb-label", markup=False)
+        yield Static(build_guard_label(self.banner_title), classes="cb-label", markup=False)
         yield Static(self.question, classes="cb-question", markup=False)
         for label, value in self.fields:
             text = _fmt_field_value(value)
