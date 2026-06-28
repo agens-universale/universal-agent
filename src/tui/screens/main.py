@@ -1768,10 +1768,14 @@ class TraceScreen(Screen):
         # на середине переноса ложно уходит в историю вместо сдвига курсора.
         # Palette/picker имеют свои ↑/↓ ветки ниже, поэтому отключаем history-mode,
         # когда они открыты.
+        # Гейт фокуса: история листается ТОЛЬКО когда инпут реально в фокусе.
+        # Без него ↑/↓ всплывают в Screen.on_key от любого сфокусированного
+        # виджета (Tab по трейсу) и ложно листают историю; в PyCharm-терминале
+        # колесо мыши шлётся как ↑/↓ — гейт ограничивает его влияние полем ввода.
         if event.key == "up" and not self._any_picker_open:
             try:
                 input_field = self.query_one("#cmdinput", CommandTextArea)
-                if input_field.cursor_on_first_visual_line():
+                if input_field.has_focus and input_field.cursor_on_first_visual_line():
                     self._history_prev()
                     event.stop()
                     event.prevent_default()
@@ -1782,7 +1786,7 @@ class TraceScreen(Screen):
         if event.key == "down" and not self._any_picker_open:
             try:
                 input_field = self.query_one("#cmdinput", CommandTextArea)
-                if input_field.cursor_on_last_visual_line():
+                if input_field.has_focus and input_field.cursor_on_last_visual_line():
                     self._history_next()
                     event.stop()
                     event.prevent_default()
