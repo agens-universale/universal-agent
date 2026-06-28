@@ -1677,7 +1677,9 @@ class TraceScreen(Screen):
         if self._brand is not None and self._brand.parent is not None:
             return
         trace = self.query_one("#trace", VerticalScroll)
-        self._mcp_status_row = Static("", id="brand-mcp", classes="line-meta", markup=False)
+        # без класса line-meta: его margin-top:1 опускал бы MCP-блок ниже логотипа;
+        # цвет MCP-колонки задаёт #brand-mcp (color: $deep-dim).
+        self._mcp_status_row = Static("", id="brand-mcp", markup=False)
         try:
             wide = self.app.size.width >= self._BRAND_WIDE_MIN
         except Exception:
