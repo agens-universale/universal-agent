@@ -164,6 +164,10 @@ ToolCallRow:focus, TraceRow:focus, UserReplyContainer:focus, AgentReplyLine:focu
     display: none;
 }
 .line-tool      { color: $dim; }       /* |- механика тула */
+/* Первый tool в группе (предыдущий ряд — не tool) отделён верхним отступом;
+   подряд идущие tool-строки компактны (класс вешается в коде — Textual CSS
+   не умеет «соседний элемент»). */
+ToolCallRow.tool-group-start { margin-top: 1; }
 .line-think     { color: $muted; text-style: italic; margin-top: 1; }
 .line-intermediate { color: $ink; margin-top: 1; }  /* ·-реплика — фаза хода, как ● */
 .ask-human-question.hidden { display: none; }  /* вопрос скрыт, пока виден баннер */

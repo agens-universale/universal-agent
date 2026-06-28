@@ -122,6 +122,21 @@ def build_answered_question_widget(question, *, event_no: int = 0,
                     event_no=event_no, focusable=True)
 
 
+def is_tool_group_start(mount_target) -> bool:
+    """True, если последний значимый ряд в `mount_target` — НЕ tool-вызов: тогда
+    эта tool-строка открывает новую группу и получает верхний отступ (CSS
+    `.tool-group-start`). Подряд идущие tool-строки остаются компактными.
+    Общий для live (main) и readonly (preview) путей."""
+    from tui.widgets.tool_call_row import ToolCallRow
+    for child in reversed(list(mount_target.children)):
+        if getattr(child, "id", None) == "brand-block":
+            continue  # шапка трейса — не контент
+        if child.has_class("tool-result-preview"):
+            continue  # hidden-превью результата — часть tool-строки выше
+        return not isinstance(child, ToolCallRow)
+    return True   # перед ним ничего — считаем стартом группы
+
+
 def build_agent_widgets(summary: str, *, event_no: int) -> list:
     """Ответ агента в трейсе/превью: проза с `● `, код панелями, таблицы сеткой."""
     return build_block_widgets(summary, prose_bullet=True, event_no=event_no)
@@ -205,6 +220,8 @@ def _dispatch_readonly(mount_target, ev, calls: dict) -> None:
             call_id=ev.call_id or f"_anon_{ev.no}",
             tool_name=ev.tool_name or "<tool>",
             args_summary=args_portion(ev.summary), event_no=ev.no)
+        if is_tool_group_start(mount_target):
+            row.add_class("tool-group-start")   # первый tool в группе — верхний отступ
         calls[row.call_id] = row
         mount_target.mount(row)
     elif ev.kind in ("result", "error"):

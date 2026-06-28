@@ -997,13 +997,17 @@ class TraceScreen(Screen):
             return
 
         if ev.kind == "call":
-            from tui.services.trace_render import args_portion
+            from tui.services.trace_render import args_portion, is_tool_group_start
             row = ToolCallRow(
                 call_id=ev.call_id or f"_anon_{ev.no}",
                 tool_name=ev.tool_name or "<tool>",
                 args_summary=args_portion(ev.summary),
                 event_no=ev.no,
             )
+            # Первый tool в группе (предыдущий ряд — не tool) получает верхний
+            # отступ; подряд идущие tool-строки остаются компактными.
+            if is_tool_group_start(self.query_one("#trace", VerticalScroll)):
+                row.add_class("tool-group-start")
             self._active_calls[row.call_id] = row
             self._trace_mount(row)
             return
