@@ -189,7 +189,11 @@ ToolCallRow:focus, TraceRow:focus, UserReplyContainer:focus, AgentReplyLine:focu
     background: $band-bg;
     border-left: outer $accent;
     padding: 0 1 0 1;
-    margin: 1 0;       /* пустая строка сверху и снизу — визуально отделяет реплику */
+    /* Только верхний отступ — общая конвенция трейса (разделение «через margin-top
+     * следующего элемента»). Нижний отступ убран: он складывался с margin-top
+     * индикатора через границу контейнеров (#trace ↔ #indicator-bar, где margin
+     * не схлопывается) и давал 2 пустые строки перед индикатором. */
+    margin: 1 0 0 0;
     height: auto;
     width: 1fr;
 }
