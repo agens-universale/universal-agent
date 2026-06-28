@@ -33,5 +33,5 @@ def test_signal_exception_does_not_propagate():
     pump.on_delta("answer", "x")     # must not raise
 
 
-def test_default_constant_is_250ms():
-    assert STREAM_REFRESH_MS == 250
+def test_default_constant_is_350ms():
+    assert STREAM_REFRESH_MS == 350
