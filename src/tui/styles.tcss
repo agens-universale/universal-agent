@@ -217,7 +217,7 @@ ToolCallRow:focus, TraceRow:focus, UserReplyContainer:focus, AgentReplyLine:focu
 .stream-block-think { color: $muted; text-style: italic; }
 
 /* Палитра команд (overlay, Task 3.3) */
-.palette       { background: #161A23; border: solid $run-color; max-height: 80%; }
+.palette       { background: #161A23; border: round $run-color; max-height: 80%; }
 .palette-row   { color: $ink; padding: 0 1; }
 .palette-row.selected { background: $band-bg; color: $bright; }
 .palette-hint  { color: $deep-dim; padding: 0 1; }
@@ -301,7 +301,7 @@ TextArea.ask-human-mode { border: solid $run-color; }
 .config-caption { color: $dim; padding: 0 1; margin: 0 0 1 0; }
 .config-panel {
     height: auto;
-    border: solid $deep-dim;
+    border: round $deep-dim;
     border-title-color: $dim;
     border-subtitle-color: $deep-dim;
     padding: 0 1;
