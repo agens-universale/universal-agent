@@ -82,18 +82,21 @@ def tagline_display() -> str:
     return "   ".join(" ".join(word) for word in TAGLINE.upper().split())
 
 
-# Межсловный зазор тэглайна (широкий, как `.logo-sub` gap в gc-ua-install.html):
-# разрядка букв = 1 пробел, между словами — заметно шире. Меняется одним числом.
-_TAGLINE_WORD_GAP = "     "  # 5 пробелов
+# Разрядка тэглайна (как `.logo-sub` в gc-ua-install.html: airy letter-spacing,
+# заметный gap между словами). Межсловный зазор — двойной от межбуквенного.
+# Оба меняются одним числом.
+_TAGLINE_LETTER_GAP = "  "   # 2 пробела — между буквами
+_TAGLINE_WORD_GAP = "    "    # 4 пробела — между словами (двойной от letter-gap)
 
 
 def tagline_under_logo() -> str:
-    """Тэглайн под логотипом: разрядка букв (1 пробел), широкий межсловный
-    зазор (`_TAGLINE_WORD_GAP`), центрирование по ширине лого (ведущие пробелы).
-    Стиль — как `.logo-sub` в docs/gc-ua-install.html (airy letter-spacing,
-    заметный gap между словами). Сам отступ-строка над тэглайном — CSS
-    (`.brand-tagline { margin-top: 1 }`)."""
-    tag = _TAGLINE_WORD_GAP.join(" ".join(word) for word in TAGLINE.upper().split())
+    """Тэглайн под логотипом: разрядка букв (`_TAGLINE_LETTER_GAP`), межсловный
+    зазор (`_TAGLINE_WORD_GAP`, двойной), центрирование по ширине лого (ведущие
+    пробелы). Стиль — как `.logo-sub` в docs/gc-ua-install.html. Сам
+    отступ-строка над тэглайном — CSS (`.brand-tagline { margin-top: 1 }`)."""
+    tag = _TAGLINE_WORD_GAP.join(
+        _TAGLINE_LETTER_GAP.join(word) for word in TAGLINE.upper().split()
+    )
     logo_w = max((len(line) for line in LOGO.split("\n")), default=0)
     pad = max(0, (logo_w - len(tag)) // 2)
     return " " * pad + tag
