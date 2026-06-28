@@ -27,7 +27,7 @@ def build_guard_label(title: str) -> Text:
     """Заголовок шлюза: янтарный глиф ⚠ + bright-титул. '?' остаётся только
     в самой строке вопроса ('Разрешить …?'), не в заголовке."""
     t = Text()
-    t.append(f"{GUARD_GLYPH} ", style=RUN_COLOR)
+    t.append(f"{GUARD_GLYPH}  ", style=RUN_COLOR)  # двойной пробел: ⚠ широкий, одиночный «съедается»
     t.append(title, style=BRIGHT)
     return t
 
