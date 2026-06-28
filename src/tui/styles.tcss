@@ -41,10 +41,11 @@ Screen {
  * стояла #meta, теперь её нет). */
 /* #trace по умолчанию заполняет доступную высоту и скроллится (read-only экраны:
  * preview/viewer/help/config/mcp/tool_call_detail переиспользуют id="trace"). */
-#trace {
-    height: 1fr; padding: 0 1; background: $bg;
-    /* Скроллбар — узкий и тихий: в покое едва заметная серая полоска,
-     * фирменный teal только при наведении/перетаскивании (акцент — редкий сигнал). */
+#trace { height: 1fr; padding: 0 1; background: $bg; }
+/* Скроллбар — ЕДИНЫЙ стиль для всех скроллируемых контейнеров (трейс, /sessions,
+ * /skills, read-only экраны): узкий и тихий, фирменный teal только при наведении/
+ * перетаскивании (акцент — редкий сигнал). Тип-селектор → одинаково везде. */
+VerticalScroll {
     scrollbar-size: 1 1;
     scrollbar-background: $bg;
     scrollbar-background-hover: $bg;
