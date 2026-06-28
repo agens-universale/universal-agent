@@ -119,7 +119,7 @@ def build_answered_question_widget(question, *, event_no: int = 0,
     content.append(question, style=DIM)
     cls = ("answered-question " + extra_classes).strip()
     return TraceRow(prefix="", content=content, kind_class=cls,
-                    event_no=event_no, focusable=False)
+                    event_no=event_no, focusable=True)
 
 
 def build_agent_widgets(summary: str, *, event_no: int) -> list:
