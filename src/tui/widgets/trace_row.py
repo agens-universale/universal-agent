@@ -57,6 +57,9 @@ class TraceRow(Widget):
     }
     """
     can_focus = True
+    # Клик НЕ фокусирует строку трейса (навигация — только Tab/Shift+Tab, как в
+    # PowerShell). Tab-фокус идёт через set_focus и этим флагом не затрагивается.
+    FOCUS_ON_CLICK = False
 
     def __init__(
         self,

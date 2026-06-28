@@ -30,6 +30,7 @@ class UserReplyContainer(Widget):
 
     DEFAULT_CSS = ""  # стили — .user-band / .user-reply-pending / .user-reply-failed в styles.tcss
     can_focus = True
+    FOCUS_ON_CLICK = False   # клик не фокусирует реплику; навигация — только Tab/Shift+Tab
 
     def __init__(
         self,

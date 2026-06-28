@@ -65,6 +65,7 @@ class ToolCallRow(Widget):
     }
     """
     can_focus = True
+    FOCUS_ON_CLICK = False   # клик не фокусирует строку; навигация — только Tab/Shift+Tab
 
     _PREFIX = "   "   # отступ-индент тула (без «лесенки» |-); статус-глиф ✓/✗/▸ — следом
 
