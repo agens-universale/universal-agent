@@ -26,6 +26,25 @@ def test_format_progress_multiline_block():
     assert any("c" in ln and "✗" in ln for ln in body)
 
 
+def test_format_progress_caps_long_list():
+    # >5 серверов: показываем первые 4 + строку-счётчик «… ещё +N»,
+    # чтобы блок MCP не превышал высоту бренда (заголовок + 4 + счётчик = 6).
+    servers = {f"s{i}": {"status": "connected"} for i in range(8)}
+    lines = format_mcp_progress(servers).splitlines()
+    assert lines[0].startswith("подключаю MCP")
+    assert len(lines) == 6
+    assert lines[-1] == "… ещё +4"          # 8 всего − 4 показанных = 4 скрытых
+    assert sum(1 for ln in lines if "✓" in ln) == 4
+
+
+def test_format_progress_no_cap_at_threshold():
+    # ровно 5 серверов — показываем все, без счётчика.
+    servers = {f"s{i}": {"status": "connected"} for i in range(5)}
+    lines = format_mcp_progress(servers).splitlines()
+    assert len(lines) == 6                   # заголовок + 5 серверов
+    assert not any("ещё" in ln for ln in lines)
+
+
 def test_format_settle_all_ok():
     text = format_mcp_settle({"a": {"status": "connected"}})
     assert text.splitlines() == ["✓ MCP: все подключены", "✓ готов к работе"]
