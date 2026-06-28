@@ -80,3 +80,12 @@ def logo_text() -> Text:
 def tagline_display() -> str:
     """`Universal Agent` → `U N I V E R S A L   A G E N T` (капс + разрядка)."""
     return "   ".join(" ".join(word) for word in TAGLINE.upper().split())
+
+
+def tagline_under_logo() -> str:
+    """Тэглайн с ведущими пробелами, чтобы текст центрировался под логотипом
+    (ширина = ширине лого; левый паддинг = (logo_w - len) / 2)."""
+    logo_w = max((len(line) for line in LOGO.split("\n")), default=0)
+    tag = tagline_display()
+    pad = max(0, (logo_w - len(tag)) // 2)
+    return " " * pad + tag

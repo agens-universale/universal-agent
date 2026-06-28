@@ -44,7 +44,7 @@ def format_mcp_progress(servers: dict) -> str:
     width = max((len(name) for name in servers), default=0)
     lines = ["подключаю MCP:"]
     for name, st in servers.items():
-        lines.append(f"  {name.ljust(width)}  {_glyph(st)}")
+        lines.append(f"{name.ljust(width)}  {_glyph(st)}")
     return "\n".join(lines)
 
 

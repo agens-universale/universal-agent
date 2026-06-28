@@ -57,11 +57,9 @@ TraceScreen #trace { height: auto; }
 #brand-block {
     width: 1fr;
     height: auto;
-    margin: 1 0 1 0;
+    margin: 1 0 0 0;
     padding: 1 2;
     border: round $accent;
-    border-subtitle-color: $dim;
-    border-subtitle-align: left;
 }
 
 /* Поле ввода — Claude-style: две тонкие линии ─ над и под input.
@@ -208,6 +206,8 @@ ToolCallRow:focus, TraceRow:focus, UserReplyContainer:focus, AgentReplyLine:focu
 
 /* Бренд-блок пустого состояния (§2.8) */
 .brand-logo { color: $brand; text-style: bold; width: auto; height: auto; }
+.brand-tagline { color: $dim; width: auto; height: auto; }
+#brand-left { width: auto; height: auto; }
 #brand-row { width: 1fr; height: auto; }
 #brand-mcp  { width: 1fr; color: $deep-dim; padding-left: 6; height: auto; content-align: left top; }
 

@@ -1683,12 +1683,15 @@ class TraceScreen(Screen):
         except Exception:
             wide = True
         logo = Static(branding.logo_text(), classes="brand-logo")
+        # Тэглайн — отдельной строкой под логотипом, центрирован по ширине лого
+        # (а не border_subtitle: тот центрируется по всей рамке, не под брендом).
+        tagline = Static(branding.tagline_under_logo(), classes="brand-tagline", markup=False)
+        left = Vertical(logo, tagline, id="brand-left")
         if wide:
-            inner = Horizontal(logo, self._mcp_status_row, id="brand-row")
+            inner = Horizontal(left, self._mcp_status_row, id="brand-row")
         else:
-            inner = Vertical(logo, self._mcp_status_row, id="brand-row")
+            inner = Vertical(left, self._mcp_status_row, id="brand-row")
         brand = Vertical(inner, id="brand-block")
-        brand.border_subtitle = branding.tagline_display()
         trace.mount(brand)
         self._brand = brand
 
