@@ -1390,9 +1390,8 @@ class TraceScreen(Screen):
         """Подготовить TUI к новому запуску runner.start:
         сбросить error-флаг, очистить last_runner_error.
 
-        _mcp_status_row НЕ обнуляем: строка — часть шапки трейса, переживает
-        пересборку (_clear_trace); потерянная ссылка при живом виджете дала бы
-        дубль #mcp-status-row при следующем монтировании."""
+        _mcp_status_row НЕ обнуляем: колонка — часть бренд-карточки (#brand-mcp),
+        переживает пересборку (_clear_trace); ссылка остаётся валидной."""
         self._error_shown = False
         self._mcp_status_done = False
         self.app.last_runner_error = None
@@ -1407,24 +1406,13 @@ class TraceScreen(Screen):
         servers, _active = progress.snapshot()
         if not servers:
             return
-        from textual.widgets import Static
         from tui.services.mcp_progress import format_mcp_progress, format_mcp_settle
         if self._mcp_status_row is None:
-            self._mcp_status_row = Static(format_mcp_progress(servers),
-                                          id="mcp-status-row",
-                                          classes="line-meta", markup=False)
-            self._trace_mount(self._mcp_status_row, scroll=False)
-        else:
-            self._mcp_status_row.update(format_mcp_progress(servers))
+            return  # карточка ещё не смонтирована
+        self._mcp_status_row.update(format_mcp_progress(servers))
         if progress.all_reported():
             self._mcp_status_done = True
-            # Гасим sink — показ ровно один раз за сессию (на последующих
-            # сообщениях executor кэширован, дискавери нет → индикатор не мелькает).
             self.app._mcp_progress = None
-            # Финальный блок с итоговыми глифами — лингер 1с (видно, что все
-            # серверы проверены), затем схлопывается в итог-запись: статус MCP
-            # + «готов к работе». Ref захватываем, чтобы не задеть строку нового run.
-            self._mcp_status_row.update(format_mcp_progress(servers))
             row = self._mcp_status_row
             self.set_timer(
                 1.0, lambda: self._settle_mcp_row(row, format_mcp_settle(servers))
@@ -1683,21 +1671,30 @@ class TraceScreen(Screen):
         self._render_records(tail.new_records, live=True)
         self._refresh_header()
 
+    _BRAND_WIDE_MIN = 84  # ниже — MCP под логотип (адаптив A2)
+
     def _show_brand(self) -> None:
         if self._brand is not None and self._brand.parent is not None:
             return
         trace = self.query_one("#trace", VerticalScroll)
-        brand = Vertical(
-            Static(branding.logo_text(), classes="brand-logo"),
-            id="brand-block",
-        )
+        self._mcp_status_row = Static("", id="brand-mcp", classes="line-meta", markup=False)
+        try:
+            wide = self.app.size.width >= self._BRAND_WIDE_MIN
+        except Exception:
+            wide = True
+        logo = Static(branding.logo_text(), classes="brand-logo")
+        if wide:
+            inner = Horizontal(logo, self._mcp_status_row, id="brand-row")
+        else:
+            inner = Vertical(logo, self._mcp_status_row, id="brand-row")
+        brand = Vertical(inner, id="brand-block")
         brand.border_subtitle = branding.tagline_display()
         trace.mount(brand)
         self._brand = brand
 
     # Шапка трейса: переживает пересборку (#brand-block — бренд,
-    # #mcp-status-row — boot-статус MCP: app-уровневый, остаётся верным всю сессию).
-    _TRACE_HEADER_IDS = frozenset({"brand-block", "mcp-status-row"})
+    # MCP-статус живёт внутри карточки как #brand-mcp).
+    _TRACE_HEADER_IDS = frozenset({"brand-block"})
 
     def _clear_trace(self) -> None:
         """Очистить #trace, сохранив шапку (инвариант: бренд — первый ребёнок).
