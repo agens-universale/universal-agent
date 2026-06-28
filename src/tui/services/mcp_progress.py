@@ -66,7 +66,7 @@ def format_mcp_settle(servers: dict) -> str:
               if not (st and st.get("status") == "connected")]
     if failed:
         word = "недоступен" if len(failed) == 1 else "недоступны"
-        status = f"⚠ MCP: {', '.join(failed)} {word} — подробности в /mcp (F3)"
+        status = f"⚠  MCP: {', '.join(failed)} {word} — подробности в /mcp (F3)"
     else:
         status = "✓ MCP: все подключены"
     # Пустая строка-отступ: «готов к работе» всегда отделён от статуса MCP
