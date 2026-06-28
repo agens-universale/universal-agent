@@ -18,7 +18,7 @@ $run-color: #D4A574;
 $err:       #C75C54;
 $brand:     #9A6DD7;
 $band-bg:   #1f2128;
-$focus-bg:  #2a2d36;   /* подсветка строки трассы в фокусе (сдвиг-безопасная) */
+$focus-bg:  #363b47;   /* подсветка строки трассы в фокусе — заметно светлее $band-bg/user-band, чтобы фокус читался отдельно */
 $frame-archive: #4b525d;   /* серая рамка «архив» — отвеченный вопрос */
 
 Screen {
@@ -59,7 +59,7 @@ TraceScreen #trace { height: auto; }
 #brand-block {
     width: 1fr;
     height: auto;
-    margin: 1 0 0 0;
+    margin: 0;
     padding: 1 2;
     border: round $accent;
 }
