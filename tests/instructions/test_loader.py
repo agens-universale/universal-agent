@@ -13,9 +13,9 @@ def test_merges_broad_to_narrow_with_markers(tmp_path, monkeypatch):
     proj = tmp_path / "proj"
     l0 = tmp_path / "demo.md"
     _write(l0, "L0BODY")
-    _write((tmp_path / "gc") / "GIGACODE.md", "L1BODY")
+    _write((tmp_path / "gc") / "AGENTS.md", "L1BODY")
     _write(proj / "AGENTS.md", "L2BODY")
-    _write(proj / ".gc" / "GIGACODE.md", "L3BODY")
+    _write(proj / ".gc" / "AGENTS.md", "L3BODY")
 
     res = build_instructions(agent_md_path=str(l0), cwd=str(proj))
 
@@ -25,6 +25,7 @@ def test_merges_broad_to_narrow_with_markers(tmp_path, monkeypatch):
     # английский каркас
     assert "Precedence: when instructions conflict" in res.text
     assert "## Project instructions (AGENTS.md)" in res.text
+    assert "## Project instructions (.gc/AGENTS.md)" in res.text
 
 
 def test_overwrite_drops_L0_L1(tmp_path, monkeypatch):
@@ -33,7 +34,7 @@ def test_overwrite_drops_L0_L1(tmp_path, monkeypatch):
     proj = tmp_path / "proj"
     l0 = tmp_path / "demo.md"
     _write(l0, "L0BODY")
-    _write((tmp_path / "gc") / "GIGACODE.md", "L1BODY")
+    _write((tmp_path / "gc") / "AGENTS.md", "L1BODY")
     _write(proj / "AGENTS.md", "L2BODY")
 
     res = build_instructions(agent_md_path=str(l0), cwd=str(proj), overwrite=True)

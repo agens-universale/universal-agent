@@ -6,7 +6,7 @@ from pathlib import Path
 
 from config_modules.env_vars import effective_config_dir, project_gc_dir
 
-_BRAND = "GIGACODE.md"
+_BRAND = "AGENTS.md"
 
 
 @dataclass(frozen=True)
@@ -41,5 +41,5 @@ def instruction_layer_specs(
         specs.append(LayerSpec("L0", "Base instructions (shipped defaults)", l0, "shipped"))
     specs.append(LayerSpec("L1", f"Global instructions ({files['L1']})", files["L1"], "global"))
     specs.append(LayerSpec("L2", "Project instructions (AGENTS.md)", files["L2"], "project"))
-    specs.append(LayerSpec("L3", "Project-personal instructions (.gc/GIGACODE.md)", files["L3"], "project"))
+    specs.append(LayerSpec("L3", "Project instructions (.gc/AGENTS.md)", files["L3"], "project"))
     return specs

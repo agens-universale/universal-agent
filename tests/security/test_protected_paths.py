@@ -19,5 +19,5 @@ def test_instruction_files_not_in_operational(tmp_path, monkeypatch):
     monkeypatch.setattr(env_vars.env, "gc_home", tmp_path / "gc")
     proj = tmp_path / "proj"
     ps = protected_paths(cwd=str(proj))
-    # L1 GIGACODE.md лежит в gc config-каталоге, но это класс инструкций, не операционный
-    assert any(p.name == "GIGACODE.md" for p in ps.instructions)
+    # L1 AGENTS.md лежит в gc config-каталоге, но это класс инструкций, не операционный
+    assert any(p.name == "AGENTS.md" for p in ps.instructions)

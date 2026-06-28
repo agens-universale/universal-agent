@@ -23,4 +23,4 @@ def test_file_paths_excludes_L0(tmp_path, monkeypatch):
     monkeypatch.setattr(env_vars.env, "gc_home", tmp_path / "gc")
     paths = instruction_file_paths(cwd=str(tmp_path / "proj"))
     assert set(paths) == {"L1", "L2", "L3"}
-    assert paths["L3"] == (tmp_path / "proj" / ".gc" / "GIGACODE.md")
+    assert paths["L3"] == (tmp_path / "proj" / ".gc" / "AGENTS.md")
