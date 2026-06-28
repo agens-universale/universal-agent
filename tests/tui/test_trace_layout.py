@@ -87,7 +87,7 @@ async def test_agent_prose_first_block_has_bullet_prefix():
 
 @pytest.mark.asyncio
 async def test_tool_call_row_has_two_column_layout():
-    """ToolCallRow содержит Horizontal с prefix '  |- ' и content."""
+    """ToolCallRow содержит Horizontal с prefix (отступ-индент + статус-глиф, без '|-') и content."""
     pytest.importorskip("textual")
     from textual.app import App, ComposeResult
     from tui.widgets.tool_call_row import ToolCallRow
@@ -101,7 +101,8 @@ async def test_tool_call_row_has_two_column_layout():
         row = pilot.app.query_one(ToolCallRow)
         prefix = row.query_one(".trace-prefix")
         content = row.query_one(".trace-content")
-        assert "  |- " in str(prefix.render())
+        assert "|-" not in str(prefix.render())     # лесенки больше нет
+        assert "▸" in str(prefix.render())           # статус-глиф running в prefix
         assert "read_file" in str(content.render())
         assert "|- " not in str(content.render())  # prefix НЕ дублируется в content
 
@@ -129,8 +130,9 @@ async def test_long_tool_args_wrap_inside_content_column():
         await pilot.pause()
         prefix = row.query_one(".trace-prefix")
         content = row.query_one(".trace-content")
-        # prefix всегда 5 chars ("  |- "), независимо от длины content
-        assert str(prefix.render()).rstrip("\n") == "  |- "
+        # prefix — ровный отступ-индент + статус-глиф (без «лесенки»), не зависит от длины content
+        assert "|-" not in str(prefix.render())
+        assert str(prefix.render()).startswith("   ")
         # content содержит все длинные args (wrap'нутые, но в одном Static)
         rendered_content = str(content.render())
         assert "execute_command" in rendered_content

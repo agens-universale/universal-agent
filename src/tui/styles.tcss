@@ -24,6 +24,15 @@ $frame-archive: #4b525d;   /* серая рамка «архив» — отве�
 Screen {
     background: $bg;
     color: $ink;
+    /* Скроллбар — узкий и тихий: в покое едва заметная серая полоска,
+     * фирменный teal только при наведении/перетаскивании (акцент — редкий сигнал). */
+    scrollbar-size: 1 1;
+    scrollbar-background: $bg;
+    scrollbar-background-hover: $bg;
+    scrollbar-background-active: $bg;
+    scrollbar-color: $deep-dim;
+    scrollbar-color-hover: $accent;
+    scrollbar-color-active: $accent;
 }
 
 /* Шапка / подвал — тихие хром-полосы */

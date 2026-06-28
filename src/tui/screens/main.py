@@ -55,9 +55,9 @@ _HINT_TEXT = {
     "stop":  "Esc ещё раз, чтобы остановить",
 }
 _PASTE_HINT_TEXT = "вставьте ещё раз, чтобы развернуть"
-# Префикс preview-строк под ToolCallRow (5 пробелов + `| ` чтобы выровняться
-# под `  |- ` префиксом самой row'и и визуально продолжить её column).
-_PREVIEW_PREFIX = "     | "
+# Префикс preview-строк под ToolCallRow: ровный отступ (без `|`), выравнивает
+# вывод под именем тула; левый rail блока даёт CSS (.tool-result-preview border-left).
+_PREVIEW_PREFIX = "     "
 # Модель и backend-режим показываются в шапке экрана (_compose_header_segments).
 
 
@@ -1031,7 +1031,7 @@ class TraceScreen(Screen):
                 self._active_calls.pop(ev.call_id, None)
                 return
             # Fallback (call_id unknown or no matching row) — append separate line
-            prefix = "  |- " if ev.kind == "result" else "  |- [!] "
+            prefix = "   " if ev.kind == "result" else "   [!] "
             cls = "line-ok" if ev.kind == "result" else "line-error"
             self._mount_trace_row(
                 prefix=prefix, content=ev.summary, kind_class=cls,

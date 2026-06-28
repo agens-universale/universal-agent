@@ -66,7 +66,7 @@ class ToolCallRow(Widget):
     """
     can_focus = True
 
-    _PREFIX = "  |- "
+    _PREFIX = "   "   # отступ-индент тула (без «лесенки» |-); статус-глиф ✓/✗/▸ — следом
 
     def __init__(self, *, call_id: str, tool_name: str,
                  args_summary: str, event_no: int = 0, **kwargs) -> None:
@@ -178,9 +178,9 @@ class ToolCallRow(Widget):
         return "✓", _OK
 
     def _render_prefix(self) -> Text:
-        """`  |- <статус-глиф> ` — лесенка (dim) + цветной ведущий глиф."""
+        """`<отступ><статус-глиф> ` — индент-отступ + цветной ведущий глиф (✓/✗/▸/·)."""
         text = Text()
-        text.append(self._PREFIX, style=_DIM)   # "  |- "
+        text.append(self._PREFIX, style=_DIM)   # отступ-индент
         glyph, color = self._status_glyph()
         text.append(glyph, style=color)
         text.append(" ")

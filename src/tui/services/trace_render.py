@@ -229,7 +229,7 @@ def _dispatch_readonly(mount_target, ev, calls: dict) -> None:
         if row is not None:
             row.set_result(summary=ev.summary, error=(ev.kind == "error"))
         else:
-            prefix = "  |- " if ev.kind == "result" else "  |- [!] "
+            prefix = "   " if ev.kind == "result" else "   [!] "
             cls = "line-ok" if ev.kind == "result" else "line-error"
             mount_target.mount(TraceRow(prefix=prefix, content=ev.summary,
                                         kind_class=cls, event_no=ev.no))
