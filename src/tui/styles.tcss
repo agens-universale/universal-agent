@@ -57,11 +57,11 @@ TraceScreen #trace { height: auto; }
 #brand-block {
     width: 1fr;
     height: auto;
-    margin: 1 0 0 0;
+    margin: 1 0 1 0;
     padding: 1 2;
     border: round $accent;
     border-subtitle-color: $dim;
-    border-subtitle-align: center;
+    border-subtitle-align: left;
 }
 
 /* Поле ввода — Claude-style: две тонкие линии ─ над и под input.
