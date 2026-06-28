@@ -368,6 +368,7 @@ class TraceScreen(Screen):
         warm = getattr(runner, "warm", None)
         if callable(warm):
             warm()
+        self._sync_indicator_reserve()   # пустой старт → резерв бара 2 (без лишней строки)
 
     def _reset_render_state(self) -> None:
         """Clear all per-task rendering state. Called on task switch and stream_reset."""
@@ -462,6 +463,7 @@ class TraceScreen(Screen):
         elif sp is not None:
             self._resumed_prompt = sp            # auto-create: не затирать свежий send
         self._update_terminal_title()   # статус + последний промпт сессии в таб
+        self._sync_indicator_reserve()   # активная задача → резерв бара 3 (отступ снизу)
         self._mount_failed_from_meta(task_id)
 
         # Свести ask_human-баннер с реальностью: replay/компакция могли оставить
@@ -2806,6 +2808,17 @@ class TraceScreen(Screen):
         self._clear_trace()
         self._refresh_header()
         self._refresh_footer()
+        self._sync_indicator_reserve()
+
+    def _sync_indicator_reserve(self) -> None:
+        """Высота #indicator-bar: 3 при активной задаче (отступ-строка снизу под
+        индикатором), 2 на пустом старте (без задачи) — чтобы чистый экран не нёс
+        лишнюю строку. В пределах состояния высота фиксирована → нет «прыжка»."""
+        try:
+            bar = self.query_one("#indicator-bar", Vertical)
+        except Exception:
+            return
+        bar.styles.height = 3 if self._active_task_id is not None else 2
 
     def _handle_command(self, raw: str) -> None:
         """Диспетчеризовать команду и, если она что-то дописала в трейс,
