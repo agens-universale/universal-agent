@@ -52,13 +52,14 @@
     display:flex;align-items:center;justify-content:center;font-weight:700;font-size:15px;box-shadow:inset 0 0 0 1px rgba(63,208,201,.35)}
   .step-h h3{margin:0;font-size:18px;font-weight:700}
   .step p{color:var(--mut);margin:8px 0}
-  .inl{background:var(--panel2);border:1px solid var(--bd);border-radius:5px;padding:1px 6px;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:12.5px;color:#cfd6e2}
+  .inl{background:var(--panel2);border:1px solid var(--bd);border-radius:5px;padding:1px 6px;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:12.5px;color:#cfd6e2;overflow-wrap:anywhere}
   .code{position:relative;background:var(--panel);border:1px solid var(--bd2);border-radius:11px;padding:14px 44px 14px 16px;margin:12px 0;
     font-family:'JetBrains Mono',ui-monospace,Consolas,Menlo,monospace;font-size:13px;color:#d7deea;white-space:pre;overflow-x:auto}
   .code .cp{position:absolute;top:10px;right:10px;color:var(--mut);cursor:pointer;font-size:14px;background:none;border:0;font-family:inherit}
   .code .cp:hover{color:var(--acc)} .code .cp.ok{color:var(--acc)}
   .tok-cmd{color:var(--acc)} .tok-cmt{color:var(--mut2)} .tok-key{color:#9bb4ff} .tok-str{color:#e6b86b}
   .note{display:flex;gap:12px;border-radius:11px;padding:14px 16px;margin:14px 0;border:1px solid;font-size:14px}
+  .note>div{min-width:0}   /* flex-элемент текста может ужиматься → длинный inline-код переносится, не вылезает на мобильном */
   .note .ic{flex:none;width:22px;height:22px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px}
   .note.warn{background:rgba(230,150,80,.07);border-color:rgba(230,150,80,.35)} .note.warn .ic{background:rgba(230,150,80,.18);color:#e6964f}
   .note.info{background:rgba(70,224,210,.06);border-color:rgba(70,224,210,.3)} .note.info .ic{background:rgba(70,224,210,.16);color:#46e0d2}
