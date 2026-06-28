@@ -237,8 +237,7 @@ ToolCallRow:focus, TraceRow:focus, UserReplyContainer:focus, AgentReplyLine:focu
 /* ask_human banner (§3.4) — янтарный тон (как running), сигнал «жду тебя» */
 .ask-human-banner {
     background: #161A23;
-    border: solid $run-color;
-    border-left: thick $run-color;
+    border: round $run-color;
     padding: 0 1;
     margin: 0 1;
     height: auto;
