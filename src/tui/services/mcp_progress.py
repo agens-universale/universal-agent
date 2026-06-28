@@ -69,4 +69,6 @@ def format_mcp_settle(servers: dict) -> str:
         status = f"⚠ MCP: {', '.join(failed)} {word} — подробности в /mcp (F3)"
     else:
         status = "✓ MCP: все подключены"
-    return f"{status}\n✓ готов к работе"
+    # Пустая строка-отступ: «готов к работе» всегда отделён от статуса MCP
+    # (особенно когда предупреждение о недоступных переносится на неск. строк).
+    return f"{status}\n\n✓ готов к работе"

@@ -47,14 +47,17 @@ def test_format_progress_no_cap_at_threshold():
 
 def test_format_settle_all_ok():
     text = format_mcp_settle({"a": {"status": "connected"}})
-    assert text.splitlines() == ["✓ MCP: все подключены", "✓ готов к работе"]
+    # пустая строка-отступ перед «готов к работе»
+    assert text.splitlines() == ["✓ MCP: все подключены", "", "✓ готов к работе"]
 
 
 def test_format_settle_failed():
     text = format_mcp_settle({"a": {"status": "connected"}, "office": {"status": "failed"}})
-    status, ready = text.splitlines()
+    lines = text.splitlines()
+    status, ready = lines[0], lines[-1]
     assert "office" in status and "/mcp" in status
     assert "(F3)" in status   # подсказка хоткея экрана /mcp
+    assert "" in lines[1:-1]  # отступ-строка между статусом и готовностью
     assert ready == "✓ готов к работе"
 
 
