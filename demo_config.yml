@@ -131,7 +131,7 @@ paths:
   # Относительные пути резолвятся от каталога config.yml.
   agent_md_path: "prompts/demo_cli_agent.md"
   # chat_completions_system_prompt_path: "prompts/chat_completions_system_prompt.md"
-  # instructions_overwrite: false  # загружать только проектные слои (AGENTS.md + .gc/GIGACODE.md), отбрасывая глобальный и shipped
+  # instructions_overwrite: false  # загружать только проектные слои (AGENTS.md + .gc/AGENTS.md), отбрасывая глобальный и shipped
 
   # threads_data_path / logs_dump_dir / skills_data_path по умолчанию НЕ заданы —
   # тогда runtime-данные пишутся в кросс-платформенные дефолтные каталоги:

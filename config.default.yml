@@ -62,7 +62,7 @@ logging:
 
 paths:
   agent_md_path: "prompts/demo_cli_agent.md"
-  # instructions_overwrite: false  # загружать только проектные слои (AGENTS.md + .gc/GIGACODE.md), отбрасывая глобальный и shipped
+  # instructions_overwrite: false  # загружать только проектные слои (AGENTS.md + .gc/AGENTS.md), отбрасывая глобальный и shipped
 
 summary:
   # ~67–80k токенов истории — рассчитано на контекст моделей ~131k (под меньшие

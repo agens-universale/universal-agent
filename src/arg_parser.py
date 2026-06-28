@@ -218,7 +218,7 @@ parser.add_argument(
     "--instructions-overwrite",
     action="store_true",
     help=(
-        "Загружать только проектные слои инструкций (AGENTS.md + .gc/GIGACODE.md), "
+        "Загружать только проектные слои инструкций (AGENTS.md + .gc/AGENTS.md), "
         "отбрасывая глобальный и shipped-слои"
     ),
 )
