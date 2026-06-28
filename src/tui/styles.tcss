@@ -19,6 +19,7 @@ $err:       #C75C54;
 $brand:     #9A6DD7;
 $band-bg:   #1f2128;
 $focus-bg:  #2a2d36;   /* подсветка строки трассы в фокусе (сдвиг-безопасная) */
+$frame-archive: #4b525d;   /* серая рамка «архив» — отвеченный вопрос */
 
 Screen {
     background: $bg;
@@ -164,6 +165,8 @@ ToolCallRow:focus, TraceRow:focus, UserReplyContainer:focus, AgentReplyLine:focu
 .line-think     { color: $muted; text-style: italic; margin-top: 1; }
 .line-intermediate { color: $ink; margin-top: 1; }  /* ·-реплика — фаза хода, как ● */
 .ask-human-question.hidden { display: none; }  /* вопрос скрыт, пока виден баннер */
+.answered-question { border: round $frame-archive; color: $dim; padding: 0 1; margin: 1 0; width: 1fr; }
+.answered-question.hidden { display: none; }
 .line-error     { color: $err; }
 .line-code      { color: $code; }      /* inline-код/путь */
 .line-bold      { color: $accent; text-style: bold; }

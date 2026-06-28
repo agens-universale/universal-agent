@@ -97,7 +97,8 @@ async def test_ask_human_banner_appears_and_disappears(tmp_path):
         trace_text = " ".join(
             f"{w._prefix}{w._content}" for w in scr.query(TraceRow)
         )
-        assert "ask_human:" in trace_text
+        assert "ask_human:" not in trace_text  # тех-префикс убран — серая рамка с «? »
+        assert "? " in trace_text
         assert "Какого типа отчёт" in trace_text
 
 
@@ -157,7 +158,7 @@ async def test_replay_unanswered_question_does_not_swallow_later_ones(tmp_path):
 
 @pytest.mark.asyncio
 async def test_replay_answered_question_keeps_question_row(tmp_path):
-    """История с отвеченным ask_human: вопрос виден dim-строкой «? ask_human: …»,
+    """История с отвеченным ask_human: вопрос виден серой рамкой с «? …» (без ask_human:),
     баннера нет — диалог читается целиком (вопрос + ответ), live и replay одинаковы."""
     pytest.importorskip("textual")
     from tui.app import TuiApp
@@ -194,7 +195,8 @@ async def test_replay_answered_question_keeps_question_row(tmp_path):
         trace_text = " ".join(
             f"{w._prefix}{w._content}" for w in scr.query(TraceRow)
         )
-        assert "ask_human: Какой вариант — A или B?" in trace_text
+        assert "ask_human:" not in trace_text  # тех-префикс убран
+        assert "? Какой вариант — A или B?" in trace_text
 
 
 @pytest.mark.asyncio

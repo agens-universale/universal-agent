@@ -102,6 +102,26 @@ def build_block_widgets(text: str, *, prose_bullet: bool, event_no: int,
     return widgets
 
 
+def build_answered_question_widget(question, *, event_no: int = 0,
+                                   extra_classes: str = ""):
+    """Отвеченный вопрос ask_human как строка истории: серая round-рамка
+    (CSS .answered-question) + янтарный маркер '?'. Тех-префикс 'ask_human:'
+    не добавляем. Общий для live (main) и readonly (preview) путей.
+
+    Цвет рамки — токен $frame-archive (серый). Альтернатива (живое сравнение
+    после релиза) — янтарная рамка: сменить border в .answered-question на
+    $run-color, точка правки одна."""
+    from rich.text import Text
+    from tui.widgets.trace_row import TraceRow
+    from tui.palette import RUN_COLOR, DIM
+    content = Text()
+    content.append("? ", style=RUN_COLOR)
+    content.append(question, style=DIM)
+    cls = ("answered-question " + extra_classes).strip()
+    return TraceRow(prefix="", content=content, kind_class=cls,
+                    event_no=event_no, focusable=False)
+
+
 def build_agent_widgets(summary: str, *, event_no: int) -> list:
     """Ответ агента в трейсе/превью: проза с `● `, код панелями, таблицы сеткой."""
     return build_block_widgets(summary, prose_bullet=True, event_no=event_no)
@@ -204,8 +224,7 @@ def _dispatch_readonly(mount_target, ev, calls: dict) -> None:
         mount_target.mount(TraceRow(prefix="[!] ", content=ev.summary,
                                     kind_class="line-error", event_no=ev.no))
     elif ev.kind == "ask_human":
-        mount_target.mount(TraceRow(prefix="  ? ", content=f"ask_human: {ev.summary}",
-                                    kind_class="line-meta", event_no=ev.no))
+        mount_target.mount(build_answered_question_widget(ev.summary, event_no=ev.no))
     else:
         m = TAG_RE.match(ev.summary or "")
         if m:

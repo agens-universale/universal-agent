@@ -1111,12 +1111,11 @@ class TraceScreen(Screen):
         # и одинаковая в live и replay. Пока баннер виден, строка скрыта (нет
         # дубля на экране); монтируем её сразу, чтобы зафиксировать позицию
         # ВЫШЕ будущего ответа юзера — раскроется при схлопывании баннера.
-        self._ask_human_question_row = self._mount_trace_row(
-            prefix="  ? ",
-            content=f"ask_human: {ev.summary}",
-            kind_class="line-meta ask-human-question hidden",
-            event_no=ev.no,
+        from tui.services.trace_render import build_answered_question_widget
+        self._ask_human_question_row = build_answered_question_widget(
+            ev.summary, event_no=ev.no, extra_classes="ask-human-question hidden",
         )
+        self._trace_mount(self._ask_human_question_row, scroll=False)
         banner = AskHumanBanner(question=ev.summary)
         self._ask_human_banner = banner
         self._ask_human_call_id = ev.call_id
@@ -1270,8 +1269,8 @@ class TraceScreen(Screen):
             return  # живой агент действительно ждёт ответа
         self._unmount_ask_human_banner()
         if allow_remnant:
-            # Текст вопроса не дублируем: он уже в трейсе dim-строкой
-            # «? ask_human: …» (её монтирует _on_ask_human_event).
+            # Текст вопроса не дублируем: он уже в трейсе серой рамкой «? …»
+            # (её монтирует _on_ask_human_event через build_answered_question_widget).
             self._mount_trace_row(
                 prefix="Агент спрашивал (прервано) — ",
                 content="продолжите сообщением или Esc для выхода",
