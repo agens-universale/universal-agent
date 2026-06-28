@@ -745,7 +745,10 @@ class TraceScreen(Screen):
         chrome = sum(c.region.height for c in root.children
                      if c.id != "trace" and c is not overlay)
         if overlay is not None:
-            cap = self.size.height - chrome - self._MIN_TRACE_WITH_OVERLAY
+            # Оверлей ≤ половины экрана (дальше — его скролл) и оставляет ≥ min строк
+            # трейса. На малых экранах вторая граница жёстче, на больших — половина.
+            cap = min(self.size.height // 2,
+                      self.size.height - chrome - self._MIN_TRACE_WITH_OVERLAY)
             if cap <= 0:
                 return
             overlay.styles.max_height = cap            # потолок оверлея → дальше его скролл

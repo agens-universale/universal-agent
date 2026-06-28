@@ -68,6 +68,20 @@ async def test_trace_regrows_after_palette_close(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_overlay_capped_at_half_screen(tmp_path):
+    """Длинный список не занимает больше половины экрана — дальше его скролл.
+    На 28-строчном экране палитра из 13 команд = 16 строк > половины (14) → режется."""
+    pytest.importorskip("textual")
+    tid = "ov4"; _write_task(tmp_path, tid)
+    async with _app(tmp_path).run_test(size=(80, 28)) as pilot:
+        scr = await _tall(pilot, tid)
+        scr._open_palette(prefix="")
+        await pilot.pause(0.4)
+        palette = scr._palette
+        assert palette.region.height == 28 // 2   # ровно половина (контент 16 > 14 → cap)
+
+
+@pytest.mark.asyncio
 async def test_trace_regrows_when_palette_filtered_down(tmp_path):
     """Фильтр сужает палитру → #trace растёт обратно. desired считаем по len(children)
     (обновляется сразу), а не по virtual_size (залипает после rebuild)."""
