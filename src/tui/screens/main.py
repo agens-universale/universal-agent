@@ -219,6 +219,18 @@ class TraceScreen(Screen):
         self._refresh_header()   # пересчитать усечение пути под новую ширину
         self._sync_trace_max_height()   # потолок #trace под новую высоту экрана
 
+    def on_click(self, event: events.Click) -> None:
+        """Клик в ЛЮБОЙ части трейса → фокус на #trace, чтобы колесо/стрелки/PgUp-
+        PgDn скроллили его (а не зависели от попадания в пустой край). Строки
+        событий кликом не выделяются (FOCUS_ON_CLICK=False) — навигация по ним Tab.
+        Клик вне трейса (инпут/футер) фокус трейса не трогает."""
+        try:
+            trace = self.query_one("#trace", VerticalScroll)
+        except Exception:
+            return
+        if not trace.has_focus and trace.region.contains(event.screen_x, event.screen_y):
+            trace.focus()
+
     def _compose_footer_right(self) -> "Text":
         """Правый край футера: модель · контекст (метр — только chat_completions)."""
         cfg = getattr(self.app, "_config", None) or {}
