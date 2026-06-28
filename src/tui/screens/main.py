@@ -1687,23 +1687,11 @@ class TraceScreen(Screen):
         if self._brand is not None and self._brand.parent is not None:
             return
         trace = self.query_one("#trace", VerticalScroll)
-        # Тег-стабы тянем до ширины логотипа: `rule · TAGLINE · rule` ≈ ширине лого.
-        logo_width = max(
-            (len(line) for line in branding.LOGO.split("\n")), default=0,
-        )
-        tag_label = f" {branding.tagline_display()} "
-        rule = "─" * max(0, (logo_width - len(tag_label)) // 2)
-        tagline_row = Horizontal(
-            Static(rule, classes="brand-rule", markup=False),
-            Static(tag_label, classes="brand-tagline", markup=False),
-            Static(rule, classes="brand-rule", markup=False),
-            classes="brand-tagline-row",
-        )
         brand = Vertical(
             Static(branding.logo_text(), classes="brand-logo"),
-            tagline_row,
             id="brand-block",
         )
+        brand.border_subtitle = branding.tagline_display()
         trace.mount(brand)
         self._brand = brand
 

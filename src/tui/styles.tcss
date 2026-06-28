@@ -55,9 +55,12 @@ TraceScreen #trace { height: auto; }
 /* Brand-блок — постоянная шапка трейса (Claude-style: стартовый экран = начало
  * трейса; ниже flow'ом индикатор загрузки MCP и далее диалог; не скрывается). */
 #brand-block {
-    width: 100%;
+    width: 1fr;
     height: auto;
-    margin-top: 1;
+    margin: 1 1 0 1;
+    padding: 0 1;
+    border: round $accent;
+    border-subtitle-color: $dim;
 }
 
 /* Поле ввода — Claude-style: две тонкие линии ─ над и под input.
@@ -204,9 +207,6 @@ ToolCallRow:focus, TraceRow:focus, UserReplyContainer:focus, AgentReplyLine:focu
 
 /* Бренд-блок пустого состояния (§2.8) */
 .brand-logo    { color: $brand; text-style: bold; text-align: left; width: 100%; }
-.brand-tagline-row { width: 100%; height: auto; margin-top: 1; }
-.brand-rule    { color: $accent; width: auto; height: auto; }
-.brand-tagline { color: $dim; width: auto; height: auto; }
 
 /* ThinkingIndicator — «думаю…» (spec 2026-05-26) */
 /* padding слева = 0: глиф встаёт по колонке буллетов ●/> строк трейса
