@@ -44,15 +44,17 @@ DEFAULT_MODEL = "MiniMaxAI/MiniMax-M2.7"
 # folded into the preceding agent step's `observation` (see _messages_to_steps).
 _ROLE_TO_SOURCE = {"system": "system", "user": "user", "assistant": "agent"}
 
-# System prompt bundled WITH the adapter. The CLI/REST flow loads the prompt via
-# load_config → resolve_paths (default <config_dir>/prompts/...); the adapter builds
-# config_dict directly and skips that, so without this the run gets NO system prompt.
-# The repo-root prompts/ is not in the image (not packaged; Dockerfile keeps only
-# adapters/), so the prompt travels inside adapters/ and is resolved from __file__
-# (absolute → agent_executor opens it directly, no resolve_paths needed).
-_BUNDLED_SYSTEM_PROMPT = str(
-    Path(__file__).resolve().parent / "prompts" / "chat_completions_system_prompt_harbor.md"
-)
+# Dependency files (prompts/, skills/) are copied next to adapters/ in the image
+# (see harbor/Dockerfile) and live at repo-root in editable/local runs. Resolve them
+# from __file__ so they work in both layouts, bypassing the source-checkout-only
+# default path helpers (which break in the non-editable image install).
+_ADAPTER_DIR = Path(__file__).resolve().parent          # .../adapters
+_PROMPTS_DIR = _ADAPTER_DIR.parent / "prompts"          # image: /opt/gc-harbor-adapters/prompts
+_SKILLS_DIR = _ADAPTER_DIR.parent / "skills"
+if not _PROMPTS_DIR.is_dir():                            # editable/local: fall back to repo root
+    _repo_root = _ADAPTER_DIR.parent.parent
+    _PROMPTS_DIR = _repo_root / "prompts"
+    _SKILLS_DIR = _repo_root / "skills"
 
 
 def _deep_merge(base: dict, over: dict) -> dict:
@@ -205,7 +207,13 @@ class GcCliExternal(BaseAgent):
             "backend_api_mode": "chat_completions",
             "completions_url": self._backend_url,
             "model": self._model,
-            "chat_completions_system_prompt_path": _BUNDLED_SYSTEM_PROMPT,
+            "chat_completions_system_prompt_path": str(_PROMPTS_DIR / "chat_completions_system_prompt.md"),
+            "skills_data_path": str(_SKILLS_DIR),
+            "summary_params": {
+                "chat_completions_summary_prompt_path": str(_PROMPTS_DIR / "chat_completions_summary_prompt.md"),
+                "chat_completions_memory_patch_append_prompt_path": str(_PROMPTS_DIR / "chat_completions_memory_patch_append.md"),
+                "chat_completions_memory_patch_replace_prompt_path": str(_PROMPTS_DIR / "chat_completions_memory_patch_replace.md"),
+            },
             "chat_completions_max_tokens": 32768,
             "use_max_tokens_param": True,
             "chat_completion_kwargs": {

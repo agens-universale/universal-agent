@@ -61,5 +61,7 @@ RUN --mount=type=ssh \
       ssh://git@gitverse.ru/gigacode-ai/background-agent.git /opt/gc-cli-src \
     && mkdir -p /opt/gc-harbor-adapters \
     && cp -r /opt/gc-cli-src/harbor/adapters /opt/gc-harbor-adapters/adapters \
+    && cp -r /opt/gc-cli-src/prompts /opt/gc-harbor-adapters/prompts \
+    && cp -r /opt/gc-cli-src/skills /opt/gc-harbor-adapters/skills \
     && rm -rf /opt/gc-cli-src
 ENV PYTHONPATH=/opt/gc-harbor-adapters
