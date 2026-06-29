@@ -152,7 +152,7 @@ paths:
   #   GC_HOME, GC_STATE_DIR, GC_CONFIG_DIR, GC_CACHE_DIR, GC_DATA_DIR,
   #   XDG_*_HOME (стандарт freedesktop.org, только Linux/macOS).
 
-# Лимиты trace digest для finish gate (отдельно от summary; см. docs_md/quality_gate/SPEC.md)
+# Лимиты trace digest для finish gate (отдельно от summary).
 quality_gate:
   max_dialogue_chars: 200000
   max_message_chars: 5000
@@ -407,7 +407,7 @@ security:
 
 mcp:
   servers:
-    # python recommended_mcp/install.py --config recommended_mcp/config.local.yml
+    # python recommended_mcp/install.py   # ставит MCP из recommended_mcp/config.yml
     # gc-cli -a … — автозапуск HTTP-daemon'ов (science); stdio MCP спавнит агент сам
     office:
       transport: stdio
