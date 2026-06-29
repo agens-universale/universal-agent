@@ -2,8 +2,8 @@ import pytest
 from config_modules.tui import TuiConfig
 
 
-def test_tui_default_stream_display_answer():
-    assert TuiConfig().stream_display == "answer"
+def test_tui_default_stream_display_minimal():
+    assert TuiConfig().stream_display == "minimal"
 
 
 def test_tui_stream_display_accepts_three_values():

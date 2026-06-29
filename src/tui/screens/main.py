@@ -648,7 +648,7 @@ class TraceScreen(Screen):
         indicator = ThinkingIndicator(
             started_at=self._thinking_started_at, state=state,
             sink=getattr(self.app, "_stream_sink", None),
-            reasoning_tag=_cfg.get("tui_stream_display", "answer") != "answer_reasoning",
+            reasoning_tag=_cfg.get("tui_stream_display", "minimal") != "answer_reasoning",
         )
         self._thinking = indicator
         self.query_one("#indicator-bar", Vertical).mount(indicator)
@@ -1615,7 +1615,7 @@ class TraceScreen(Screen):
                 from tui.widgets.stream_block import StreamBlock
                 think, answer = sink.snapshot()
                 _cfg = getattr(self.app, "_config", None) or {}
-                mode = _cfg.get("tui_stream_display", "answer")
+                mode = _cfg.get("tui_stream_display", "minimal")
                 clean = format_stream_block(answer=answer)
                 reasoning = format_reasoning_line(think=think)
                 kind, thinking = select_stream_render(mode, clean, reasoning)

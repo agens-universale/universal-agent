@@ -45,9 +45,9 @@ agent:
 # TUI: что рендерить во время стриминга (действует только при backend.stream: true;
 # на счётчик токенов и индикатор не влияет — только контент).
 tui:
-  # minimal — только индикатор + счётчик; answer (default) — прогрессивный ответ;
+  # minimal (default) — только индикатор + счётчик; answer — прогрессивный ответ;
   # answer_reasoning — + строка-мысль «⠇ …».
-  stream_display: answer
+  stream_display: minimal
   # adaptive bounce (только TUI): как поступать с текст-ответом без тула.
   #   strict — всегда требовать tool-call (как CLI/server/swarm);
   #   judge  — судья решает, полный ли это ответ (привет/объяснение → принять);
