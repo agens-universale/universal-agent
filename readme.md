@@ -12,6 +12,8 @@ Background и CLI-клиент для работы с агентом GigaCode: �
 - Два режима бэкенда: `chat_completions` и `v1/responses` (deprecated).
 - MCP: 6 транспортов, готовые рецепты в `recommended_mcp/`.
 - Скиллы и пакеты скиллов (встроенные паки `supercoder` / `codebase` / `articles`).
+- Слои инструкций `AGENTS.md` (L0 shipped → L1 `~/.gc/AGENTS.md` → L2 проект → L3 `.gc/AGENTS.md`) — задать агенту проектный/глобальный контекст; `--init` генерирует `AGENTS.md` по структуре репо.
+- Защита файловой системы: `write_guard` ограничивает запись в `launch_root`, `security.protected_paths` включена по умолчанию.
 - Серверный режим: REST-обёртка на FastAPI.
 - Swarm-режим (только Linux): изолированные песочницы (bubblewrap).
 
@@ -41,7 +43,7 @@ gc-mcp install   # MCP → ~/.local/share/gc/recommended_mcp/venv + авто-wir
 # Требуется: git на PATH + доступ к сети.
 ```
 
-После установки `gc-ua` / `gc-cli` работают **без `--config`**: при первом запуске конфиг создаётся (Windows — `~/.gc/config.yml`, macOS/Linux — `~/.config/gc/config.yml`), и агент **останавливается с подсказкой** — впишите `backend.completions_url` и токен (`backend.chat_completion_headers.Authorization`), при необходимости `agent.model`, затем запустите снова. Подготовить конфиг заранее, не запуская агента: `gc-cli --init` (или `gc-ua --init`).
+После установки `gc-ua` / `gc-cli` работают **без `--config`**: при первом запуске конфиг создаётся (Windows — `~/.gc/config.yml`, macOS/Linux — `~/.config/gc/config.yml`), и агент **останавливается с подсказкой** — впишите `backend.completions_url` и токен (`backend.chat_completion_headers.Authorization`), при необходимости `agent.model`, затем запустите снова. Подготовить конфиг заранее, не запуская агента: `gc-cli --init-config` (или `gc-ua --init-config`).
 
 > **Миграция с gc-cli-pub:** если ранее была установлена старая версия дистрибутива, сначала удалите её: `uv tool uninstall gc-cli-pub`, затем выполните установку выше.
 
@@ -78,4 +80,4 @@ gc-ua -a
 - [Серверный режим](docs/server.md) — REST-обёртка (FastAPI), конфиги сервера, эндпоинты, Swarm-режим (Linux).
 - [Swarm-режим](docs/swarm.md) — изолированные bubblewrap-песочницы для каждой задачи, pipeline запроса, эндпоинты, AR-1..AR-9, troubleshooting.
 - [TUI режим (gc-ua)](docs/tui.md) — кроссплатформенный TUI поверх агента: установка, запуск, основные команды и экраны.
-- [RootBox режим](docs/rootbox.md) — Roox box режим, конфиги (command_moderation, read_guard, root_box (write_guard), url_policy)
+- [RootBox режим](docs/rootbox.md) — конфиги защиты: `command_moderation`, `read_guard`, `write_guard` (бывший `root_box`), `url_policy`
