@@ -210,9 +210,12 @@
 
 ## Остаточные проверки для фазы плана (проверить, не предполагать)
 
-- **№1:** путь отправки в бэкенд терпит лишний ключ `call_id` на user-сообщении (фильтрует к
-  role/content или прокидывает). Если строгий — фильтровать ключ только на отправке, сохранив в
-  persisted/TUI-dict. (`call_id` — валидное поле схемы, есть на tool-записях.)
+- **№1 — ЗАКРЫТО:** проверено по коду. `chat_completions` срезает лишний `call_id` формат-
+  конвертером (`_legacy_role_to_chat_completions_message` → свежий `{role, content}`,
+  `src/utils/format_messages.py:180-184`). `responses` кладёт `input = messages` дословно
+  (`src/utils/connect_backend.py:327`) → нужен strip; решено в плане (Task C1b): снять `call_id`
+  с role-based message-элементов не мутируя persist/TUI-копию (на `function_call`/
+  `function_call_output` сохранить). Wire-риска не остаётся.
 - **3b:** `set_result` идемпотентен при повторной финализации.
 - **3b:** схема `attributes` — `anyOf` без строковой ветки (тогда коэрция достижима); из текста
   ошибки почти однозначно.

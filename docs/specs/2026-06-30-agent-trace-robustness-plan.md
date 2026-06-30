@@ -519,6 +519,78 @@ git add src/tools/arguments_validation.py src/processing_responses.py tests/test
 git commit -m "fix(harness): technical-feedback по невалидному tool-call несёт call_id отказавшего вызова"
 ```
 
+### Task C1b: не отправлять call_id user-сообщения на wire в режиме responses
+
+**Контекст:** call_id на technical-feedback нужен TUI/persist, но в `responses`-режиме `create_call_data_responses` кладёт `input = messages` **дословно** (`src/utils/connect_backend.py:327`) — лишний ключ ушёл бы на бэкенд. В `chat_completions` он уже срезается формат-конвертером (`_legacy_role_to_chat_completions_message` строит свежий `{role, content}`), там правка не нужна. Снимаем call_id с role-based message-элементов **не мутируя** исходные dict'ы (persist/TUI сохраняют call_id); на `function_call`/`function_call_output` call_id обязателен — не трогаем.
+
+**Files:**
+- Modify: `src/utils/connect_backend.py` (хелпер + `create_call_data_responses:327`)
+- Test: `tests/test_responses_input_call_id.py`
+
+**Interfaces:**
+- Consumes: `create_call_data_responses(messages, state, tools=None, set_previous_response_id=True) -> dict`.
+
+- [ ] **Step 1: Написать падающий тест**
+
+```python
+# tests/test_responses_input_call_id.py
+from types import SimpleNamespace
+from utils.connect_backend import create_call_data_responses
+
+def test_responses_input_strips_extra_call_id_from_message_items():
+    state = SimpleNamespace(default_model="m", tools=[], call_metadata={},
+                            previous_response_id=None)
+    msgs = [
+        {"role": "user", "content": "x", "id": "m1", "call_id": "call_1"},
+        {"type": "function_call", "call_id": "call_2", "name": "f", "arguments": "{}"},
+    ]
+    data = create_call_data_responses(msgs, state)
+    assert "call_id" not in data["input"][0]      # снят с user-сообщения
+    assert data["input"][1]["call_id"] == "call_2"  # на function_call сохранён
+    assert msgs[0]["call_id"] == "call_1"          # исходник НЕ мутирован (TUI/persist)
+```
+
+- [ ] **Step 2: Прогнать — падает**
+
+Run: `pytest tests/test_responses_input_call_id.py -v`
+Expected: FAIL (`call_id` остаётся в input[0]).
+
+- [ ] **Step 3: Хелпер + применение**
+
+В `src/utils/connect_backend.py` перед `create_call_data_responses`:
+
+```python
+def _responses_input_without_message_call_id(messages):
+    """call_id на role-based message-элементах (напр. technical-feedback user) —
+    только для TUI/persist; в responses input не отправляем. На function_call/
+    function_call_output call_id обязателен — сохраняем. Не мутируем исходники."""
+    cleaned = []
+    for m in messages:
+        if (isinstance(m, dict) and "call_id" in m
+                and m.get("type") not in ("function_call", "function_call_output")):
+            m = {k: v for k, v in m.items() if k != "call_id"}
+        cleaned.append(m)
+    return cleaned
+```
+
+В `create_call_data_responses` заменить `call_data["input"] = messages` (327):
+
+```python
+    call_data["input"] = _responses_input_without_message_call_id(messages)
+```
+
+- [ ] **Step 4: Прогнать — зелёный**
+
+Run: `pytest tests/test_responses_input_call_id.py -v`
+Expected: PASS.
+
+- [ ] **Step 5: Коммит**
+
+```bash
+git add src/utils/connect_backend.py tests/test_responses_input_call_id.py
+git commit -m "fix(harness): не слать call_id user-сообщения в responses input (только TUI/persist)"
+```
+
 ### Task C2: trace_mapper кладёт call_id на error_msg-событие
 
 **Files:**
@@ -1111,7 +1183,7 @@ git commit -m "feat(tui): лимитный исход → честный тер�
 
 ## Остаточные проверки (из спеки — закрыть в ходе реализации)
 
-- **C1/отправка в бэкенд:** убедиться, что лишний ключ `call_id` на user-сообщении не ломает сериализацию запроса (path отправки в `v1/responses`/`chat_completions`). Если строгий — фильтровать ключ только на отправке, сохранив в persisted/TUI-dict. (Сериализация для саммари ключ игнорирует — проверено в `src/message_format/serialization.py`.)
+- **C1/отправка в бэкенд — ЗАКРЫТО (Task C1b):** `chat_completions` срезает call_id формат-конвертером (`_legacy_role_to_chat_completions_message` → свежий `{role, content}`); `responses` слал бы `input` дословно — добавлен strip в `create_call_data_responses` (Task C1b), не мутирующий persist/TUI-копию. Сериализация для саммари ключ игнорирует (`src/message_format/serialization.py`).
 - **A1:** `ToolCallRow.set_result` идемпотентен при повторной финализации (orphan-repair output не шлёт, конкуренции нет — но подтвердить).
 
 ## Вне scope (зафиксировано в спеке)
