@@ -155,18 +155,37 @@
   образцу `finish_gate_rejection_count`. **Форму возврата `run_agent` не менять.**
 - **Мост:** `AgentExecutor.run()` / `agent_runner` после прогона выставляет app-флаг (зеркало
   существующих `last_runner_error` / `last_stop_requested`) из `state.terminal_outcome`.
-- **TUI:** спадающий фронт (`src/tui/screens/main.py:1521-1526`) получает ветку: лимитный исход →
-  `outcome = "stopped"` с отдельным лейблом индикатора («остановлено: лимит шагов / ошибки»).
-  Тип `Status` (`running/stopped/completed/failed`) переиспользуем, различимость — через
-  `last_indicator.kind`/лейбл.
+- **TUI — новое 4-е терминальное состояние индикатора.** Сейчас их три
+  (`src/tui/widgets/thinking_indicator.py:206-226`): `done → «✓ Выполнил за N»`,
+  `cancelled → «■ Отменено»`, `failed → «✗ Ошибка»`. Лимитный выход сейчас ошибочно идёт в `done`.
+  Добавляем состояние **`stopped_incomplete`** с текстом **по причине** (глиф `⏹`, стиль `_DIM`):
+  - `step_limit` → `⏹ Остановлено: лимит шагов`
+  - `tool_errors` → `⏹ Остановлено: слишком много ошибок`
+- **Точки правки TUI:**
+  - `src/tui/widgets/thinking_indicator.py` — новая `_STATE_*`-константа + ветка рендера; текст
+    выбирается по причине (причина приходит в `frozen`/последнем индикаторе).
+  - спадающий фронт `src/tui/screens/main.py:1521-1545` — ветка: `state.terminal_outcome in
+    (step_limit, tool_errors)` → `outcome = "stopped_incomplete"`, в `last_indicator` пишем
+    `{kind, reason}` (reason нужен для выбора текста).
+  - маппинги `_KIND` (`src/tui/screens/main.py:1537`) и `_TERMINAL_STATE`
+    (`src/tui/screens/main.py:1659`) + восстановление `_restore_terminal_indicator`
+    (`src/tui/screens/main.py:671-685`) — распознать новый kind, без `elapsed`.
+  - тип `Status` в `src/tui/models.py:9` (`running/stopped/completed/failed`) — решить в плане:
+    переиспользовать `stopped` для `TaskSummary.status` (список сессий), а различие нести в
+    индикаторе через `last_indicator.kind`/reason (минимально), либо расширить `Status`.
 
-**Поведение:** пользователь сразу видит «остановлено по лимиту», а не ложное «Выполнил за…».
+**Поведение:** пользователь видит честное «⏹ Остановлено: лимит шагов / слишком много ошибок»
+вместо ложного «✓ Выполнил за N». В трейсе при этом повторяющиеся невалидные вызовы уже
+финализированы как `✗` (Секция 1) — картина согласована.
 
-**Тесты:** `max_steps` → `state.terminal_outcome == "step_limit"`; нормальный finish → `completed`;
-TUI-рендер обоих исходов (снапшот).
+**Тесты:** `max_steps` → `state.terminal_outcome == "step_limit"`; кап ошибок → `tool_errors`;
+нормальный finish → `completed`; рендер индикатора для каждой причины (`⏹ … лимит шагов` /
+`⏹ … слишком много ошибок`) — снапшот; восстановление терминального индикатора из
+`last_indicator` после переоткрытия сессии.
 
 **Риск:** контракт возврата `run_agent` не трогаем — потребители CLI/server/swarm не затронуты;
-новое поле `State` аддитивно.
+новое поле `State` и новое TUI-состояние аддитивны. В плане решить вопрос `Status`-литерала
+(переиспользовать `stopped` vs расширить) — на остальной TUI не влияет.
 
 ## Чистота размещения (по слоям)
 
