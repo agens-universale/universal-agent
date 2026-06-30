@@ -120,10 +120,12 @@ def map_message(msg: dict, *, no: int, ts: str) -> Optional[TraceEvent]:
                     tech_type = tag_m.group(1) if tag_m else ""
                 if tech_type == "error_message":
                     # Ошибки бэкенда — заметная красная строка (см. _render_event).
+                    cid = msg.get("call_id")
                     return TraceEvent(
                         no=no, event_ts_utc_iso=ts, kind="error_msg",
                         title="!", summary=inner_text,
                         full_payload=msg, message_id=mid,
+                        call_id=cid if isinstance(cid, str) else None,
                     )
                 if tech_type == "dialog_summary":
                     # Суммаризация — видимый маркер + блок очищенной сводки.
