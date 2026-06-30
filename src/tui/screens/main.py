@@ -1072,10 +1072,7 @@ class TraceScreen(Screen):
             return
 
         if ev.kind == "error_msg":
-            self._mount_trace_row(
-                prefix="[!] ", content=ev.summary,
-                kind_class="line-error", event_no=ev.no,
-            )
+            self._render_error_msg(ev)
             return
 
         # default: meta. summary вида "[tag] описание" — отрезаем prefix для TraceRow.
@@ -1092,6 +1089,19 @@ class TraceScreen(Screen):
             self._mount_trace_row(
                 prefix="", content=ev.summary, kind_class="line-meta", event_no=ev.no,
             )
+
+    def _render_error_msg(self, ev) -> None:
+        """error_msg с известным call_id финализирует соответствующую строку-вызов
+        (✗ inline, таймер стоп) и подавляет дублирующую [!]-строку. Иначе — [!] как есть."""
+        row = self._active_calls.get(ev.call_id) if ev.call_id else None
+        if row is not None:
+            row.set_result(summary=ev.summary, error=True)
+            self._active_calls.pop(ev.call_id, None)
+            return
+        self._mount_trace_row(
+            prefix="[!] ", content=ev.summary,
+            kind_class="line-error", event_no=ev.no,
+        )
 
     def _maybe_mount_tool_preview(self, row, ev) -> None:
         """При наличии полезного preview-контента — смонтировать Static после row.
