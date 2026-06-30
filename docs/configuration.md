@@ -26,7 +26,7 @@
   - опциональный параметр `threads_data_path` в `config.yml` должен быть **абсолютным путём** к директории хранения; если не задан — используется кросс-платформенный дефолт `<state>/projects/<project-slug>/threads/` (на Linux/macOS — `~/.local/state/gc/...`, на Windows — `~/.gc/...`);
   - параметры суммаризации в `chat_completions` задаются в секции `summary_params`:
     - `summary_params.chat_completions_summary_trigger_chars`:
-      - `<= 0` (или отсутствует) — суммаризация выключена;
+      - `<= 0` (или отсутствует) — суммаризация выключена (дефолт в коде: `0`); рекомендуемое значение для моделей с контекстом ~131k — `180000`;
       - `> 0` — при достижении/превышении порога тред архивируется (`data_*`/`meta_*` с суффиксом `__summarized_<YYYYMMDD_HHMMSS>`) и продолжается от compact summary;
     - `summary_params.incremental_batch_chars` — размер батча для кумулятивной суммаризации; если не задан, используется `int(summary_params.chat_completions_summary_trigger_chars * 1.4)`;
     - `summary_params.chat_completions_summary_prompt_path` (опционально), по умолчанию `prompts/chat_completions_summary_prompt.md`;
@@ -45,44 +45,125 @@
   - `-n/--new` можно использовать только вместе с `-t/--thread-id`.
   - в директории для тредов создаются файлы `data_<thread_id>.jsonl` (сообщения) и `meta_<thread_id>.json` (метаданные, включая `previous_response_id`).
 - По умолчанию логи будут сохраняться в той папке, из которой запущена команда.
+- **Стриминг**: `backend.stream` (по умолчанию `true`) — мастер-переключатель SSE-стриминга ответа.
+  При `false` ответ ждётся целиком; при `true` — чанки поступают по мере генерации.
+- **TUI**: секция `tui` управляет поведением интерфейса:
+  - `tui.stream_display` (`minimal | answer | answer_reasoning`, по умолчанию `minimal`) —
+    что показывать во время стриминга (`minimal` — только индикатор, `answer` — прогрессивный
+    текст ответа, `answer_reasoning` — + однострочный «глазок» рассуждения).
+    Актуально только при `backend_api_mode: chat_completions` и `backend.stream: true`.
+  - `tui.text_answer_mode` (`strict | judge | always`, по умолчанию `judge`) — как поступать
+    с текстовым ответом агента без вызова инструмента:
+    `strict` — всегда bounce (как CLI), `judge` — intent_guard решает, `always` — принять текст.
+- **Слои инструкций** (`paths.agent_md_path`, `paths.instructions_overwrite`) — см. раздел
+  [«Слои инструкций (AGENTS.md)»](#слои-инструкций-agentsmd) ниже.
 
-## Security policy (`security.command_moderation`)
+## Слои инструкций (AGENTS.md)
 
-Клиент поддерживает единый контур безопасности для файловых изменений,
-запуска команд/кода и сетевых запросов:
+Системные инструкции агента формируются из нескольких файлов, мерджимых в порядке broad→narrow
+(каждый следующий слой уточняет/перекрывает предыдущий):
+
+| Слой | Файл | Описание |
+|------|------|----------|
+| L0 (shipped) | `paths.agent_md_path` | Базовые инструкции из пакета (или кастомный путь) |
+| L1 (global) | `~/.gc/AGENTS.md` (Linux/macOS: `~/.config/gc/AGENTS.md`) | Глобальные инструкции пользователя |
+| L2 (project) | `<cwd>/AGENTS.md` | Инструкции проекта |
+| L3 (project) | `<cwd>/.gc/AGENTS.md` | Уточнения для конкретного проекта |
+
+- `paths.agent_md_path` (по умолчанию — shipped `prompts/demo_cli_agent.md`) задаёт L0.
+  Укажите свой файл, если хотите заменить базовые инструкции.
+- `paths.instructions_overwrite` (`false` по умолчанию) — при `true` загружаются только
+  проектные слои (L2 + L3), глобальный (L1) и shipped (L0) отбрасываются.
+  Из CLI: `--instructions-overwrite`.
+- Файл `AGENTS.md` генерируется командой `gc-cli --init` (агент сканирует репозиторий и
+  создаёт/обновляет `AGENTS.md` через `write_to_file`).
+
+## Security policy
+
+Клиент поддерживает несколько независимых слоев безопасности для файловых изменений,
+чтения файлов, запуска команд/кода и сетевых запросов. Все слои safe-by-default-OFF,
+**кроме `protected_paths`** — он включён по умолчанию.
 
 ```yaml
 security:
   command_moderation:
-    mode: deny # allow | ask | deny
-    root_box:
-      enabled: true
-      extra_write_paths: []
+    enabled: false       # safe-by-default-OFF
+    mode: allow          # allow | ask | deny
     allowed_command_examples: []
-    url_policy:
-      allowed_schemes: ["http", "https"]
-      url_blacklist: []
+  write_guard:
+    enabled: false       # safe-by-default-OFF (бывший root_box)
+    mode: deny           # allow | ask | deny
+    extra_paths: []
+  read_guard:
+    enabled: false       # safe-by-default-OFF
+    mode: deny           # allow | ask | deny
+  url_policy:
+    enabled: false       # safe-by-default-OFF
+    mode: deny
+    allowed_schemes: ["http", "https"]
+    url_blacklist: []
+  protected_paths:
+    enabled: true        # единственный слой ON-by-default
+    extra: []
 ```
 
-- `root_box.enabled` по умолчанию включён и ограничивает файловые изменения директорией запуска `gc-cli` (`launch_root`).
-  Чтение файлов не ограничивается этим периметром, но запись/создание/редактирование вне него блокируются.
-- `root_box.extra_write_paths` — дополнительные директории, куда разрешена запись помимо `launch_root`.
+### `security.write_guard` (файловый периметр)
+
+- `enabled` (по умолчанию `false`) — включает периметр на запись. При `enabled: true` агент
+  может писать только в директорию запуска `gc-cli` (`launch_root`) и в `extra_paths`.
+- `extra_paths` — дополнительные директории, куда разрешена запись помимо `launch_root`.
   Относительные пути разрешаются от директории `config.yml`.
-- `mode` управляет только `execute_command` и `run_python_code`:
+- `mode` (`allow | ask | deny`, по умолчанию `deny`) — реакция на нарушение периметра:
+  - `deny` — блокировать (ошибка `write_guard_violation`);
+  - `ask` — запрос подтверждения у пользователя;
+  - `allow` — пропустить, пометить в audit log как `out_of_perimeter`.
+
+Включить/выключить из CLI: `--write-guard true|false` или `--no-write-guard`.
+
+### `security.command_moderation` (LLM judge для команд)
+
+- `enabled` (по умолчанию `false`) — при `false` judge не вызывается, все команды проходят.
+- `mode` (`allow | ask | deny`, по умолчанию `allow`) — управляет только `execute_command` и `run_python_code`:
   - `allow` — выполнять без judge;
-  - `ask` — безопасное выполнять, опасное выполнять только после подтверждения пользователя;
-  - `deny` — безопасное выполнять, опасное блокировать.
-- `allowed_command_examples` — positive examples для LLM judge. Это не строгий allowlist,
+  - `ask` — опасные команды выполнять только после подтверждения пользователя;
+  - `deny` — опасные команды блокировать.
+- `allowed_command_examples` — positive examples для LLM judge; не строгий allowlist,
   а ориентир безопасного профиля команд проекта.
-- `url_policy.allowed_schemes` и `url_policy.url_blacklist` проверяются для исходного URL
+
+Переключить режим из CLI: `--command-moderation allow|ask|deny`.
+
+### `security.read_guard` (периметр на чтение)
+
+- `enabled` (по умолчанию `false`) — при `false` чтение файлов не ограничивается.
+- `mode` (`allow | ask | deny`, по умолчанию `deny`) — реакция на нарушение.
+- Дополнительные поля: `allowed_read_roots`, `allowed_read_paths`, `denied_read_paths`,
+  `denied_file_patterns`, `denied_extensions`.
+
+Включить/выключить из CLI: `--read-guard true|false` или `--no-read-guard`.
+Режим: `--read-guard-mode allow|ask|deny`.
+
+### `security.url_policy` (URL-политика)
+
+- `enabled` (по умолчанию `false`) — при `false` проверки URL не выполняются.
+- `allowed_schemes` и `url_blacklist` проверяются для исходного URL
   в `fetch_url`/`simple_fetch_url` до сетевого запроса. Redirect targets повторно не проверяются.
-- Основные policy-ошибки в JSON-envelope инструментов:
-  - `root_box_violation` — файловое изменение вне разрешённых roots;
-  - `unsafe_command_blocked` — опасная команда/код заблокированы в `deny`;
-  - `unsafe_command_cancelled_by_user` — пользователь не подтвердил опасное действие в `ask`;
-  - `url_validation_failed` — URL не прошёл схему/формат;
-  - `url_blocked_by_policy` — URL совпал с blacklist.
-- Все policy-решения пишутся в run logger как `security_policy_decision` без полного payload команды/кода.
+
+### `security.protected_paths` (floor-защита — единственный ON-by-default слой)
+
+- `enabled` (по умолчанию `true`) — защищает операционный каталог `.gc` от записи и чтения
+  даже когда остальные guard'ы выключены. Также ставит детерминированный tripwire:
+  команды вроде `rm -rf .gc` блокируются до запуска subprocess, без обращения к LLM-судье.
+- `extra` — дополнительные пути с floor-защитой.
+
+### Основные policy-ошибки
+
+- `write_guard_violation` — файловое изменение вне разрешённых roots (write_guard);
+- `unsafe_command_blocked` — опасная команда/код заблокированы в `deny`;
+- `unsafe_command_cancelled_by_user` — пользователь не подтвердил опасное действие в `ask`;
+- `url_validation_failed` — URL не прошёл схему/формат;
+- `url_blocked_by_policy` — URL совпал с blacklist.
+
+Все policy-решения пишутся в run logger как `security_policy_decision` без полного payload команды/кода.
 
 ## Переопределение настроек из CLI
 
@@ -100,9 +181,9 @@ security:
 
 **Примеры:**
 
-- Отключить файловый периметр для разового запуска:
+- Отключить файловый периметр записи для разового запуска:
   ```bash
-  gc-cli -q "..." --no-root-box
+  gc-cli -q "..." --no-write-guard
   ```
 
 - Переключить режим command moderation:
@@ -163,13 +244,23 @@ security:
 ### Встроенные интеграции — `recommended_mcp/`
 
 В корне репозитория есть каталог `recommended_mcp/` с готовыми рецептами
-подключения нескольких MCP. Установка одной командой:
+подключения нескольких MCP.
+
+**Основной способ — `gc-mcp install`** (автоматически ставит пакет и прописывает в `~/.gc/config.local.yml`):
+
+```bash
+gc-mcp install computer   # пример: установить computer MCP
+gc-mcp list               # список установленных
+gc-mcp remove computer    # удалить
+```
+
+**Фолбэк — ручная установка** (если `gc-mcp` недоступен):
 
 ```bash
 python recommended_mcp/install.py
 ```
 
-После установки нужно скопировать сниппеты из
+После ручной установки нужно скопировать сниппеты из
 `recommended_mcp/<name>/agent_config.snippet.yml` в секцию `mcp-servers:`
 своего `config.yml`. На момент написания доступны:
 
