@@ -37,6 +37,30 @@ def resolve_tool_arguments_feedback_hint(
     return text if text else None
 
 
+def _describe_schema_type(spec: Dict[str, Any]) -> str:
+    """Человекочитаемый тип поля для 'Correct call format'.
+    Раскрывает anyOf/oneOf (object|array|...), а не наивный <any>."""
+    if not isinstance(spec, dict):
+        return "any"
+    t = spec.get("type")
+    if isinstance(t, str):
+        return t
+    if isinstance(t, list):
+        return "|".join(str(x) for x in t if x != "null") or "any"
+    for key in ("anyOf", "oneOf"):
+        branches = spec.get(key)
+        if isinstance(branches, list):
+            types: list[str] = []
+            for b in branches:
+                if isinstance(b, dict):
+                    bt = b.get("type")
+                    if isinstance(bt, str) and bt != "null" and bt not in types:
+                        types.append(bt)
+            if types:
+                return "|".join(types)
+    return "any"
+
+
 class WrongFunctionArgumentsException(Exception):
     def __init__(
         self,
@@ -77,7 +101,7 @@ class WrongFunctionArgumentsException(Exception):
             required_entries = []
             optional_entries = []
             for field, spec in properties.items():
-                ftype = spec.get("type", "any")
+                ftype = _describe_schema_type(spec)
                 fdesc = spec.get("description", "")
                 fdesc_short = fdesc.split(".")[0] if fdesc else ""
                 entry = f'  "{field}": <{ftype}>'
