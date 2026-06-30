@@ -86,6 +86,7 @@ class State:
         self.current_user_intent: list[IntentRecord] = []
         self.user_turn_seq: int = 0
         self.finish_gate_rejection_count: int = 0
+        self.terminal_outcome: Optional[str] = None  # None | "step_limit" | "tool_errors"
         self.project_memory_content_hash: Optional[str] = None
         self.tool_usage_notice_cnt: dict[str, int] = {}
         self.tool_call_outputs_store = ToolCallOutputsStore()

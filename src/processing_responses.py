@@ -548,9 +548,11 @@ def run_agent(
             _maybe_persist(persist_messages_callback, messages, state)
 
             if state.steps > state.max_steps:
+                state.terminal_outcome = "step_limit"
                 return f'Agent executed {state.max_steps} steps and doesn\'t finish his work because of step limits.'
 
             if tool_error_cnt > max_tool_errors:
+                state.terminal_outcome = "tool_errors"
                 return f'Agent tools call errors.'
 
             mode = check_mode(messages, run_logger)
