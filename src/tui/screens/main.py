@@ -45,6 +45,20 @@ from tui import branding
 from tui.services.terminal_title import format_terminal_title, set_terminal_title
 
 
+def resolve_terminal_outcome(*, runner_error, stop_requested, terminal_outcome):
+    """Выбор терминального исхода по флагам прогона. Порядок важен:
+    error → stop → лимитные исходы → completed (дефолт)."""
+    if runner_error:
+        return "failed"
+    if stop_requested:
+        return "stopped"
+    if terminal_outcome == "step_limit":
+        return "stopped_steps"
+    if terminal_outcome == "tool_errors":
+        return "stopped_errors"
+    return "completed"
+
+
 # Один набор команд в футере; /stop добавляется только при активном run.
 # (/skills, /export доступны через палитру — в футере лишние.)
 _FOOTER_LEFT = "/sessions  /help  /config  /mcp"
@@ -668,7 +682,9 @@ class TraceScreen(Screen):
             return
         tui = self._store.get_task_meta(self._active_task_id).get("tui") or {}
         last = tui.get("last_indicator")
-        if isinstance(last, dict) and last.get("kind") in ("done", "cancelled", "failed"):
+        if isinstance(last, dict) and last.get("kind") in (
+            "done", "cancelled", "failed", "stopped_steps", "stopped_errors"
+        ):
             kind = last["kind"]
             elapsed = last.get("elapsed")
         else:
@@ -1529,29 +1545,24 @@ class TraceScreen(Screen):
         if self._was_running and not is_running and self._store is not None \
                 and self._active_task_id is not None \
                 and getattr(runner, "_thread_kind", "run") != "compact":
-            if getattr(self.app, "last_runner_error", None):
-                outcome = "failed"
-            elif getattr(self.app, "last_stop_requested", False):
-                outcome = "stopped"
-            else:
-                outcome = "completed"
-            # `runner` здесь может быть None: ручная отмена (_cmd_stop /
-            # _stop_for_ask_human) уже обнулила active_runner через
-            # _stop_and_replace_runner — тогда исход несёт last_stop_requested
-            # выше. getattr(None, "_stop_requested", False) → False, и это
-            # корректно. Случай ниже ловит ПРЯМОЙ runner.stop() в обход _cmd_stop
-            # (active_runner НЕ обнулён, _stop_requested=True, но
-            # last_stop_requested не выставлен) → иначе falling-edge записал бы
-            # «completed» ложно. НЕ менять getattr на чтение active_runner.
+            outcome = resolve_terminal_outcome(
+                runner_error=getattr(self.app, "last_runner_error", None),
+                stop_requested=getattr(self.app, "last_stop_requested", False),
+                terminal_outcome=getattr(self.app, "last_terminal_outcome", None),
+            )
+            # Прямой stop в обход _cmd_stop (active_runner НЕ обнулён) → не «completed».
             if outcome == "completed" and getattr(runner, "_stop_requested", False):
-                outcome = "stopped"   # прямой stop в обход _cmd_stop → не «completed»
-            _KIND = {"completed": "done", "stopped": "cancelled", "failed": "failed"}
+                outcome = "stopped"
+            _STATUS = {"completed": "completed", "stopped": "stopped", "failed": "failed",
+                       "stopped_steps": "stopped", "stopped_errors": "stopped"}
+            _KIND = {"completed": "done", "stopped": "cancelled", "failed": "failed",
+                     "stopped_steps": "stopped_steps", "stopped_errors": "stopped_errors"}
             _elapsed = None
             if outcome == "completed" and self._thinking_started_at is not None:
                 _elapsed = int(time.monotonic() - self._thinking_started_at)
             self._store.update_tui_meta(
                 self._active_task_id,
-                {"status": outcome,
+                {"status": _STATUS[outcome],
                  "last_indicator": {"kind": _KIND[outcome], "elapsed": _elapsed}},
             )
             self.app.last_stop_requested = False
