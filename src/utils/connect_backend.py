@@ -316,6 +316,19 @@ def create_call_headers(state, ctx) -> Dict[str, str]:
     return call_headers
 
 
+def _responses_input_without_message_call_id(messages):
+    """call_id на role-based message-элементах (напр. technical-feedback user) —
+    только для TUI/persist; в responses input не отправляем. На function_call/
+    function_call_output call_id обязателен — сохраняем. Не мутируем исходники."""
+    cleaned = []
+    for m in messages:
+        if (isinstance(m, dict) and "call_id" in m
+                and m.get("type") not in ("function_call", "function_call_output")):
+            m = {k: v for k, v in m.items() if k != "call_id"}
+        cleaned.append(m)
+    return cleaned
+
+
 def create_call_data_responses(
     messages,
     state,
@@ -324,7 +337,7 @@ def create_call_data_responses(
 ) -> Dict:
     call_data = dict()
     call_data["model"] = state.default_model
-    call_data["input"] = messages
+    call_data["input"] = _responses_input_without_message_call_id(messages)
     call_data["tools"] = tools if tools else state.tools
     call_data["metadata"] = state.call_metadata
     call_data["previous_response_id"] = (
