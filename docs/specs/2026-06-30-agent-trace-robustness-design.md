@@ -175,6 +175,11 @@
   - маппинги `_KIND` (`src/tui/screens/main.py:1537`) и `_TERMINAL_STATE`
     (`src/tui/screens/main.py:1659`) + восстановление `_restore_terminal_indicator`
     (`src/tui/screens/main.py:671-685`) — распознать новый kind, без `elapsed`.
+    > ВАЖНО (выяснилось на финальном review): `_TERMINAL_STATE` на 1659 — это **живой
+    > idle-рендер** `_poll_active`, а не только legacy-restore. Он читает схлопнутый
+    > `status`, поэтому для лимитного стопа показывал бы `■ Отменено` на живом прогоне.
+    > Решение: чистый хелпер `resolve_live_terminal_indicator_state`, idle-ветка
+    > предпочитает `last_indicator.kind` (commit `72d9a1d3`).
   - тип `Status` в `src/tui/models.py:9` (`running/stopped/completed/failed`) — решить в плане:
     переиспользовать `stopped` для `TaskSummary.status` (список сессий), а различие нести в
     индикаторе через `last_indicator.kind`/reason (минимально), либо расширить `Status`.

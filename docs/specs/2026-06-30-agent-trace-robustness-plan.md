@@ -1157,7 +1157,7 @@ def resolve_terminal_outcome(*, runner_error, stop_requested, terminal_outcome):
         ):
 ```
 
-> Legacy-фолбэк (без `last_indicator`) маппит persisted `status="stopped"` → `cancelled` → «■ Отменено». Это принятый компромисс (reason не сохранён); менять `_TERMINAL_STATE` не требуется.
+> ПОПРАВКА (по финальному review): `_TERMINAL_STATE` на `main.py:1659` используется не только в legacy-restore, но и в **живом idle-рендере** `_poll_active` — он читал схлопнутый `status` и показывал `■ Отменено` для лимитных стопов на живом прогоне (честный текст появлялся лишь при переоткрытии). Фикс (commit `72d9a1d3`): вынесен чистый хелпер `resolve_live_terminal_indicator_state(*, last_indicator_kind, status, stop_requested)`, idle-ветка предпочитает `last_indicator.kind` (`stopped_steps`/`stopped_errors`), сохраняя guard прямого stop. Legacy-фолбэк без `last_indicator` по-прежнему даёт `cancelled` (принятый компромисс).
 
 - [ ] **Step 6: Прогнать — зелёный + снапшот-регресс**
 
