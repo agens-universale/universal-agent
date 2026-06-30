@@ -1,6 +1,8 @@
 import json
 from typing import Any, Dict, Type
 
+from jsonschema import Draft7Validator
+
 from tools.connect_mcp.validation import _validate_tool_arguments
 from tools.schema_optional import (
     normalize_optional_empty_as_omit,
@@ -138,6 +140,40 @@ def _raise_wrong_function_arguments(
     )
 
 
+def _coerce_double_encoded_fields(
+    parsed_args: Dict[str, Any], params_schema: Dict[str, Any]
+) -> tuple[Dict[str, Any], bool]:
+    """Recovery-проход: развернуть поля, пришедшие JSON-строкой второго уровня.
+
+    Для каждого строкового значения, которое не проходит свою под-схему, пробуем
+    json.loads; принимаем только dict/list, который под-схему проходит. Строки,
+    валидные как есть, не трогаем (поэтому "123" не превращается в 42). Возвращаем
+    (изменённая_копия_или_исходник, changed)."""
+    properties = params_schema.get("properties", {}) or {}
+    if not isinstance(parsed_args, dict) or not properties:
+        return parsed_args, False
+    coerced = dict(parsed_args)
+    changed = False
+    for field, value in parsed_args.items():
+        if not isinstance(value, str):
+            continue
+        subschema = properties.get(field)
+        if not isinstance(subschema, dict):
+            continue
+        if Draft7Validator(subschema).is_valid(value):
+            continue  # строка валидна как есть — не трогаем
+        try:
+            decoded = json.loads(value)
+        except Exception:  # noqa: BLE001
+            continue
+        if not isinstance(decoded, (dict, list)):
+            continue
+        if Draft7Validator(subschema).is_valid(decoded):
+            coerced[field] = decoded
+            changed = True
+    return coerced, changed
+
+
 def parse_and_validate_tool_arguments(
     *,
     tool_name: str,
@@ -194,14 +230,25 @@ def parse_and_validate_tool_arguments(
     try:
         _validate_tool_arguments(tool_name, params_schema, parsed_args)
     except Exception as e:  # noqa: BLE001
-        _raise_wrong_function_arguments(
-            message=str(e),
-            received_args=json.dumps(parsed_args, ensure_ascii=False),
-            expected_schema=tool_spec,
-            tool_name=tool_name,
-            tool_fabric=tool_fabric,
-            parsed_args=parsed_args,
-        )
+        coerced, changed = _coerce_double_encoded_fields(parsed_args, params_schema)
+        recovered = False
+        if changed:
+            try:
+                _validate_tool_arguments(tool_name, params_schema, coerced)
+            except Exception:  # noqa: BLE001
+                recovered = False
+            else:
+                parsed_args = coerced
+                recovered = True
+        if not recovered:
+            _raise_wrong_function_arguments(
+                message=str(e),
+                received_args=json.dumps(parsed_args, ensure_ascii=False),
+                expected_schema=tool_spec,
+                tool_name=tool_name,
+                tool_fabric=tool_fabric,
+                parsed_args=parsed_args,
+            )
 
     return normalize_optional_empty_as_omit(parsed_args, params_schema)
 
