@@ -73,6 +73,21 @@ def resolve_live_terminal_indicator_state(*, last_indicator_kind, status, stop_r
     return {"completed": "done", "stopped": "cancelled", "failed": "failed"}.get(outcome)
 
 
+def select_indicator_mode(*, err, is_running, ask_human, confirm):
+    """Режим строки-индикатора в _poll_active. Порядок важен.
+
+    err (краш раннера) имеет ПРИОРИТЕТ → "failed": терминальный ✗ Ошибка сразу,
+    не дожидаясь reaping воркера / falling-edge. Иначе при быстром следующем
+    сообщении статус теряется, а idle-ветка уничтожает индикатор."""
+    if err:
+        return "failed"
+    if is_running and not ask_human and not confirm:
+        return "active"
+    if ask_human or confirm:
+        return "hide"
+    return "terminal"
+
+
 # Один набор команд в футере; /stop добавляется только при активном run.
 # (/skills, /export доступны через палитру — в футере лишние.)
 _FOOTER_LEFT = "/sessions  /help  /config  /mcp"
@@ -1616,7 +1631,17 @@ class TraceScreen(Screen):
             )
         self._was_summarizing = summarizing
 
-        if is_running and not ask_human_active and not self._confirm_active:
+        _indicator_mode = select_indicator_mode(
+            err=err, is_running=is_running,
+            ask_human=ask_human_active, confirm=self._confirm_active,
+        )
+        if _indicator_mode == "failed":
+            # Краш раннера → ✗ Ошибка сразу и персистентно: не ждём
+            # falling-edge/idle и не зависим от reaping воркера. _show создаёт
+            # индикатор, если его нет.
+            self._show_thinking_indicator(state="failed")
+            self._clear_stream_block()
+        elif _indicator_mode == "active":
             import time as _time
             since_last = _time.monotonic() - self._last_event_at
             if summarizing:
@@ -1678,11 +1703,11 @@ class TraceScreen(Screen):
                     self._clear_stream_block(reset_sink=False)
             elif not _thinking_phase:
                 self._clear_stream_block()
-        elif ask_human_active or self._confirm_active:
+        elif _indicator_mode == "hide":
             # Агент заблокирован — ждёт ответа пользователя. Скрываем (не destroy),
             # анимация вернётся когда агент продолжит.
             self._hide_thinking_indicator()
-        else:
+        else:  # terminal
             # Idle. Терминальный исход прогона держим как строку-итог индикатора
             # (done → «✓ Выполнил за N», cancelled → «■ Отменено», failed →
             # «✗ Ошибка») — персистентно до следующего user-send (его _reset
