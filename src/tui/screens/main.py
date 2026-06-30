@@ -59,6 +59,20 @@ def resolve_terminal_outcome(*, runner_error, stop_requested, terminal_outcome):
     return "completed"
 
 
+def resolve_live_terminal_indicator_state(*, last_indicator_kind, status, stop_requested):
+    """Состояние терминального индикатора в idle-фазе живого прогона.
+    last_indicator.kind несёт точный лимитный исход (stopped_steps/stopped_errors),
+    тогда как meta.tui.status схлопнут в Status-литерал ("stopped"). Для лимитных
+    исходов предпочитаем kind; для прочих — прежняя логика status→state с guard
+    прямого stop в обход _cmd_stop."""
+    if last_indicator_kind in ("stopped_steps", "stopped_errors"):
+        return last_indicator_kind
+    outcome = status
+    if outcome == "completed" and stop_requested:
+        outcome = "stopped"
+    return {"completed": "done", "stopped": "cancelled", "failed": "failed"}.get(outcome)
+
+
 # Один набор команд в футере; /stop добавляется только при активном run.
 # (/skills, /export доступны через палитру — в футере лишние.)
 _FOOTER_LEFT = "/sessions  /help  /config  /mcp"
@@ -1673,13 +1687,18 @@ class TraceScreen(Screen):
             # (done → «✓ Выполнил за N», cancelled → «■ Отменено», failed →
             # «✗ Ошибка») — персистентно до следующего user-send (его _reset
             # уничтожит индикатор). Свежий/неизвестный исход → уничтожаем.
-            outcome = None
+            li_kind = None
+            status = None
             if self._store is not None and self._active_task_id is not None:
-                outcome = (self._store.get_task_meta(self._active_task_id).get("tui") or {}).get("status")
-            if outcome == "completed" and getattr(runner, "_stop_requested", False):
-                outcome = "stopped"
-            _TERMINAL_STATE = {"completed": "done", "stopped": "cancelled", "failed": "failed"}
-            term_state = _TERMINAL_STATE.get(outcome)
+                tui = self._store.get_task_meta(self._active_task_id).get("tui") or {}
+                li = tui.get("last_indicator")
+                if isinstance(li, dict):
+                    li_kind = li.get("kind")
+                status = tui.get("status")
+            term_state = resolve_live_terminal_indicator_state(
+                last_indicator_kind=li_kind, status=status,
+                stop_requested=getattr(runner, "_stop_requested", False),
+            )
             if term_state is not None and self._thinking is not None:
                 self._thinking.set_state(term_state)
             else:
