@@ -116,15 +116,19 @@ def _without_tool_call_pairs(messages: List[Dict], tool_name: str) -> List[Dict]
 
 
 def _make_technical_feedback_user_message(
-    content: str, *, technical_type: str = TECHNICAL_TYPE_TECHNICAL
+    content: str, *, technical_type: str = TECHNICAL_TYPE_TECHNICAL,
+    call_id: str | None = None,
 ) -> Dict[str, str]:
-    return {
+    msg = {
         "role": "user",
         "content": wrap_technical_user_content(
             content, technical_type=technical_type
         ),
         "id": generate_message_id_func("m"),
     }
+    if call_id:
+        msg["call_id"] = call_id
+    return msg
 
 
 def _is_previous_response_cache_miss(exc: Exception) -> bool:
@@ -384,13 +388,18 @@ def process_tool_calls(
             _maybe_persist(persist_messages_callback, list(tools_outputs) + skip_outputs, state)
         tool_name = str(m.get("name") or "")
         tool_arguments = str(m.get("arguments", ""))
-        tool_res_raw = apply_tool(
-            tool_name=tool_name,
-            arguments=tool_arguments,
-            ctx=ctx,
-            state=state,
-            run_agent_func=run_agent_func,
-        )
+        try:
+            tool_res_raw = apply_tool(
+                tool_name=tool_name,
+                arguments=tool_arguments,
+                ctx=ctx,
+                state=state,
+                run_agent_func=run_agent_func,
+            )
+        except WrongFunctionArgumentsException as exc:
+            if getattr(exc, "call_id", None) is None:
+                exc.call_id = m.get("call_id")
+            raise
         tool_res = maybe_store_and_wrap_tool_output(
             tool_res_raw,
             call_id=m["call_id"],
@@ -760,6 +769,7 @@ def run_agent(
                     _make_technical_feedback_user_message(
                         e.to_llm_feedback(),
                         technical_type=TECHNICAL_TYPE_ERROR_MESSAGE,
+                        call_id=getattr(e, "call_id", None),
                     )
                 ]
 

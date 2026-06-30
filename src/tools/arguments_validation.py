@@ -69,6 +69,7 @@ class WrongFunctionArgumentsException(Exception):
         expected_schema: dict | None = None,
         tool_name: str | None = None,
         extra_hint: str | None = None,
+        call_id: str | None = None,
     ):
         super().__init__(message)
         self.message = message
@@ -76,6 +77,7 @@ class WrongFunctionArgumentsException(Exception):
         self.expected_schema = expected_schema
         self.tool_name = tool_name
         self.extra_hint = extra_hint
+        self.call_id = call_id
 
     def to_llm_feedback(self) -> str:
         """
