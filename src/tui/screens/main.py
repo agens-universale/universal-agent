@@ -1423,6 +1423,7 @@ class TraceScreen(Screen):
         self._error_shown = False
         self._mcp_status_done = False
         self.app.last_runner_error = None
+        self.app.last_terminal_outcome = None
         self.app.last_stop_requested = False
 
     def _update_mcp_indicator(self) -> None:

@@ -9,7 +9,7 @@ State создаётся заново при каждом run(). Возвращ�
 import os
 import threading
 from copy import copy as _shallow_copy_msg
-from typing import Any
+from typing import Any, Optional
 
 from processing_responses import run_agent
 from run_context import RunContext
@@ -64,6 +64,7 @@ class AgentExecutor:
         # stop_run() до создания state (run() ещё в setup-фазе): запоминаем, и
         # run() применит флаг сразу при создании state, до первого persist.
         self._stop_pending: bool = False
+        self.last_terminal_outcome: Optional[str] = None
 
     def run(
         self,
@@ -397,6 +398,7 @@ class AgentExecutor:
                     else None
                 ),
             )
+            self.last_terminal_outcome = getattr(state, "terminal_outcome", None)
             if thread_session is not None and not (
                 state.discard_writes_after_stop and state.stop_requested
             ):

@@ -22,6 +22,7 @@ class AgentRunner:
         *,
         executor_factory: Optional[Callable[[], Any]] = None,
         on_error: Optional[Callable[[BaseException], None]] = None,
+        on_complete: Optional[Callable[[Optional[str]], None]] = None,
     ) -> None:
         # executor задан напрямую (тесты) ИЛИ строится лениво из factory в
         # worker-потоке (прод): сборка executor включает MCP-дискавери с сетевыми
@@ -32,6 +33,7 @@ class AgentRunner:
         self._lock = threading.Lock()
         self._build_lock = threading.Lock()
         self._on_error = on_error
+        self._on_complete = on_complete
         self._stdin_queue: "queue.Queue[str]" = queue.Queue()
         self._prebuild_messages: list[dict] = []
         self._stop_requested = False
@@ -169,6 +171,12 @@ class AgentRunner:
                             display_contents=a["display_contents"],
                             skills_loaded=a["skills_loaded"],
                         )
+                        outcome = getattr(executor, "last_terminal_outcome", None)
+                        if self._on_complete is not None:
+                            try:
+                                self._on_complete(outcome)
+                            except Exception:
+                                pass
                     except Exception as exc:
                         if self._on_error is not None:
                             try:
