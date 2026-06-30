@@ -15,7 +15,7 @@
 - **Push only `release/*`** — `publish()` refuses any branch not prefixed `release/`. Force-push uses `--force-with-lease`.
 - **Skill sees only committed state** of the working branch (reads its HEAD sha).
 - **No AI attribution anywhere** — commit messages, PR text, code comments. No "Claude/Anthropic/Co-Authored-By" strings. (Project rule.)
-- **Skill lives outside the project repo** at `~/.claude/skills/release-prep/` (global, like `reintegrating-master`). It is version-controlled in its own git repo there for TDD checkpoints. The project repo only ever gains this plan, the spec, and the auto-generated `CHANGES-vs-master.md` on the release branch.
+- **Skill lives outside the project repo** at `~/.claude/skills/release-prep/` (global, like `reintegrating-master`). It is version-controlled in its own git repo there for TDD checkpoints. The project repo only ever gains this plan and the spec. The generated `CHANGES-vs-master.md` is an untracked worktree file + PR body — it is NOT committed to any branch (variant B).
 - **State lives beside the skill** at `~/.claude/skills/release-prep/state/<repo-slug>.json` (NOT in the worktree).
 - Source of truth spec: `docs/specs/2026-07-01-release-prep-loop-design.md`.
 
@@ -520,11 +520,9 @@ Frontmatter `description` MUST trigger on release-prep intents (RU/EN): «офо
 - **Phase 1 Sense:** `git fetch`; run `release_prep.py sense --repo <repo> --branch <working> --last-seen <state.last_seen_head>`. If `advanced=false` → **STOP, no-op** (skip Classify…Self-review). If `pushed=false` → push the working branch (data safety) before continuing.
 - **Phase 2 Classify (incremental):** delta = `git diff <state.last_rebuild_head>..<head> --name-only` (full `master..head` on first run). Classify ONLY delta files into categories (the table's sections), merge into `state.file_category_map`. Build `commit_plan`: group by category, order by importance, FOLD categories with `< min_files_per_commit` files into a trailing "Сопровождение/прочее" entry. Verify: every `master..head` file is in exactly one entry.
 - **Phase 3 Rebuild:** write `commit_plan` to a temp file; `release_prep.py rebuild ... --plan <file>`. If exit≠0 (`ok=false`) → **STOP, do not push**, surface `tree_diff`.
-- **Phase 4 Document:** regenerate `docs/CHANGES-vs-master.md` in the worktree per the §7 content contract (every row carries что·почему·зачем·как·нюанс-флага; no fluff; sections + rows ordered by importance; importance glyph in Тип). Header numbers from `release_prep.py numbers`. Add the «дельта с прошлой пересборки» line. Commit the doc onto the release branch (amend into the relevant category commit OR a final `docs:` commit — keep tree-identity by NOT counting the doc against the working tree: the doc is a release-only artifact, so the tree-identity check compares working_head to the release branch BEFORE the doc commit — see Note).
+- **Phase 4 Document (variant B — NOT committed):** regenerate `CHANGES-vs-master.md` as an **untracked file in the worktree** (`<worktree>/CHANGES-vs-master.md`) per the §7 content contract (every row carries что·почему·зачем·как·нюанс-флага; no fluff; sections + rows ordered by importance; importance glyph in Тип). Header from `release_prep.py numbers` + BOTH commit figures («461 коммит рабочей истории → N логических коммитов release») + the «дельта с прошлой пересборки» line. The file is NEVER `git add`-ed to the release branch — it is the PR body and a viewable artifact only. This keeps the Phase-3 invariant pristine: `git diff <working_head> <release_branch>` is empty with no `~1` caveat, and nothing transient leaks into master on merge.
 - **Phase 5 Self-review (§7.1):** delta-scoped checklist; one bounded fix-pass; skipped on no-op.
-- **Phase 6 Publish:** if `autonomy=push-branch`, `release_prep.py publish`. Then print a ready `gh pr create` command + the doc as PR body. NEVER open the PR.
-
-**Note on tree-identity vs the release-only doc:** `CHANGES-vs-master.md` exists on the release branch but reflects the working branch; if the working branch already tracks its own (stale) copy, the doc differs. Resolve deterministically: the tree-identity verify (Phase 3) runs on the category commits BEFORE the Document commit. The Document commit is the single allowed deviation (a release-only `docs:` commit on top). Encode this explicitly so the invariant stays checkable: `git diff <working_head> <release_branch>~1` (i.e. release minus the doc commit) MUST be empty.
+- **Phase 6 Publish:** if `autonomy=push-branch`, `release_prep.py publish`. Then print a ready `gh pr create --body-file <worktree>/CHANGES-vs-master.md` command. NEVER open the PR.
 
 - [ ] **Step 3: Write the CLI contract reference into SKILL.md**
 
@@ -532,10 +530,10 @@ Include a compact table of the 5 subcommands with their flags and JSON outputs (
 
 - [ ] **Step 4: RED/GREEN validation (skill behavior on a fixture)**
 
-Create a throwaway synthetic repo (same shape as `_setup_working`) with a stale `docs/CHANGES-vs-master.md`. Drive the skill end-to-end against it with `autonomy=local-only` (no push). GREEN criteria:
+Create a throwaway synthetic repo (same shape as `_setup_working`). Drive the skill end-to-end against it with `autonomy=local-only` (no push). GREEN criteria:
 1. `release/agent-stack` exists with category commits.
-2. `git diff <working_head> release/agent-stack~1` is empty (invariant, doc commit excluded).
-3. `docs/CHANGES-vs-master.md` header numbers match `release_prep.py numbers`.
+2. `git diff <working_head> release/agent-stack` is empty (invariant — NO `~1`, the doc is not committed).
+3. `<worktree>/CHANGES-vs-master.md` exists as an untracked file; header numbers match `release_prep.py numbers`; it is NOT tracked on the release branch (`git status` in worktree shows it untracked).
 4. No push occurred (local-only).
 RED first: run with a deliberately incomplete `commit_plan` (omit a file) and confirm the skill STOPS at Phase 3 without pushing.
 
@@ -569,8 +567,8 @@ Document the two run modes:
 
 Run the skill once against the real `background-agent` repo with `autonomy=local-only`:
 - worktree created at `../bg-release`.
-- `release/agent-stack` built; `git diff feat/agent-instructions-and-gc-guard release/agent-stack~1` empty.
-- `docs/CHANGES-vs-master.md` regenerated; eyeball: header numbers match `461`-era reality (recompute live), every section present, rows informative per §7.
+- `release/agent-stack` built; `git diff feat/agent-instructions-and-gc-guard release/agent-stack` empty (no `~1`).
+- `../bg-release/CHANGES-vs-master.md` regenerated as an untracked file; eyeball: header numbers match live reality (recompute), both commit figures shown, every section present, rows informative per §7.
 Expected: invariant holds; doc is a faithful, fluff-free superset of the current stale table. NO push.
 
 - [ ] **Step 3: Surface to the user for review**
