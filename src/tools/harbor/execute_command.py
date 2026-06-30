@@ -10,6 +10,8 @@ from tools.exec.execute_command import ExecuteCommand
 
 
 class HarborExecuteCommand(ExecuteCommand):
+    timeout = 300
+
     def __call__(self, **arguments) -> str:
         backend = self._ctx.harbor_backend
         command = arguments.get("command")
