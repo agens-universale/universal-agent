@@ -512,6 +512,21 @@ class SkillsRegistry:
             self.reload()
             return self._lookup_skill(skill_id)
 
+    def _candidate_ids_for(self, skill_id: str) -> List[str]:
+        """Кандидаты по совпадению хвоста — для подсказки в not-found ошибке."""
+        target = skill_id.split(":")[-1].replace("_", "-")
+        cands: List[str] = []
+        for canonical in self._skills_by_id:
+            tail = canonical.split(":", 1)[1] if ":" in canonical else canonical
+            if target and (target in tail or tail in target):
+                cands.append(canonical)
+        return sorted(cands)
+
+    def _not_found_message(self, skill_id: str) -> str:
+        cands = self._candidate_ids_for(skill_id)
+        base = f"Skill '{skill_id}' not found"
+        return f"{base}. Did you mean: {cands}?" if cands else base
+
     def _lookup_skill(self, skill_id: str) -> Skill:
         self._ensure_loaded()
         if not isinstance(skill_id, str):
@@ -528,8 +543,13 @@ class SkillsRegistry:
                 pack_part, _, tail = skill_id.partition(":")
                 normalized_tail = tail.replace("_", "-")
                 skill = self._skills_by_id.get(f"{pack_part}:{normalized_tail}")
+                if skill is None and pack_part in (tail, normalized_tail):
+                    # Удвоённый namespace (pack==skill, напр. 'x:x') — модель угадала
+                    # форму pack:skill для flat-скилла. Безопасный bare-lookup по хвосту.
+                    skill = (self._skills_by_id.get(tail)
+                             or self._skills_by_id.get(normalized_tail))
             if skill is None:
-                raise KeyError(f"Skill '{skill_id}' not found")
+                raise KeyError(self._not_found_message(skill_id))
             return skill
 
         # 2) Short alias — собрать кандидатов по skill-сегменту.
@@ -548,7 +568,7 @@ class SkillsRegistry:
             bootstrap = self._resolve_pack_bootstrap(skill_id)
             if bootstrap is not None:
                 return bootstrap
-            raise KeyError(f"Skill '{skill_id}' not found")
+            raise KeyError(self._not_found_message(skill_id))
         if len(candidates) > 1:
             raise AmbiguousSkillId(
                 short_id=skill_id,
