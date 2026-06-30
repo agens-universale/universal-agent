@@ -123,6 +123,8 @@ _STATE_PROCESSING = "processing"
 _STATE_DONE = "done"
 _STATE_CANCELLED = "cancelled"
 _STATE_FAILED = "failed"
+_STATE_STOPPED_STEPS = "stopped_steps"
+_STATE_STOPPED_ERRORS = "stopped_errors"
 
 
 class ThinkingIndicator(Static):
@@ -161,7 +163,8 @@ class ThinkingIndicator(Static):
     def set_state(self, state: str) -> None:
         """Переключить визуал без размонтирования. Идемпотентен."""
         if state not in (_STATE_THINKING, _STATE_VALIDATING, _STATE_COMPRESSING,
-                         _STATE_PROCESSING, _STATE_DONE, _STATE_CANCELLED, _STATE_FAILED):
+                         _STATE_PROCESSING, _STATE_DONE, _STATE_CANCELLED, _STATE_FAILED,
+                         _STATE_STOPPED_STEPS, _STATE_STOPPED_ERRORS):
             return
         if self._state == state:
             return
@@ -223,6 +226,16 @@ class ThinkingIndicator(Static):
             text.append("✗", style=_DIM)
             text.append(" ")
             text.append("Ошибка", style=_DIM)
+            return text
+        if self._state == _STATE_STOPPED_STEPS:
+            text.append("⏹", style=_DIM)
+            text.append(" ")
+            text.append("Остановлено: превышен лимит шагов", style=_DIM)
+            return text
+        if self._state == _STATE_STOPPED_ERRORS:
+            text.append("⏹", style=_DIM)
+            text.append(" ")
+            text.append("Остановлено: превышен лимит ошибок", style=_DIM)
             return text
         if self._state == _STATE_VALIDATING:
             text.append("✦", style=self._validating_shade())
