@@ -13,14 +13,39 @@ from intent_log.serialize import deserialize_list, records_to_jsonl_lines
 from message_format.dialog_history import truncate_text
 from summarize.llm import request_summary_text
 from utils.llm_chat_client import log_llm_prompt_and_result
+from bundled_assets import bundled_root
 
 _logger = logging.getLogger(__name__)
 
-_BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-_PROJECT_ROOT = os.path.abspath(os.path.join(_BASE_DIR, "..", ".."))
+# bundled_root() — единый резолвер ассетов (editable → repo, wheel → site-packages).
+_PROJECT_ROOT = str(bundled_root())
 _DEFAULT_PROMPT_PATH = os.path.join(
     _PROJECT_ROOT, "prompts", "intent_scope_tool_summary_prompt.md"
 )
+_DEFAULT_FINAL_ANSWER_PROMPT_PATH = os.path.join(
+    _PROJECT_ROOT, "prompts", "intent_scope_final_answer_summary_prompt.md"
+)
+
+
+def _resolve_final_answer_prompt_path(ctx: Any) -> str:
+    cfg = _scope_cfg(ctx)
+    raw = str(cfg.intent_scope_final_answer_summary_prompt_path or "").strip()
+    if not raw:
+        return _DEFAULT_FINAL_ANSWER_PROMPT_PATH
+    if os.path.isabs(raw):
+        return raw
+    return os.path.abspath(os.path.join(_PROJECT_ROOT, raw))
+
+
+def _load_prompt_file(path: str) -> str:
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"Intent scope prompt file not found: {path}")
+    with open(path, "r", encoding="utf-8") as fd:
+        system = fd.read().strip()
+    if not system:
+        raise ValueError(f"Intent scope prompt file is empty: {path}")
+    return system
+
 
 def _scope_cfg(ctx: Any) -> IntentScopeConfig:
     cfg = getattr(ctx, "intent_scope", None)
@@ -160,3 +185,56 @@ def build_fallback_aggregated_content(
     if max_chars > 0:
         body = truncate_text(body, max_chars)
     return body
+
+
+def summarize_final_answer_line(
+    *,
+    ctx: Any,
+    state: Any,
+    assistant_text: str,
+    logger: Any | None = None,
+) -> str:
+    """LLM compression of a long final prose answer into 1–3 sentences. Fail-open: '' on error."""
+    log = logger if logger is not None else _logger
+    scope_cfg = _scope_cfg(ctx)
+    text = str(assistant_text or "").strip()
+    if not text:
+        return ""
+
+    log_intent_scope_summary_start(log, tool_name="final_answer", output_chars=len(text))
+
+    prior = list(getattr(state, "current_user_intent", []) or [])
+    body = truncate_text(text, scope_cfg.max_tool_output_chars)
+    request_label = "intent_scope:final_answer"
+    try:
+        request_messages = [
+            {"role": "system", "content": _load_prompt_file(_resolve_final_answer_prompt_path(ctx))},
+            {
+                "role": "user",
+                "content": (
+                    f"final_answer:\n{body}\n\n"
+                    f"prior_intent:\n{_format_prior_intent(prior)}\n"
+                ),
+            },
+        ]
+        raw = request_summary_text(
+            ctx=ctx,
+            state=state,
+            messages=request_messages,
+            request_label=request_label,
+        )
+    except Exception as exc:
+        log.warning(
+            "intent_scope summary_failed tool=final_answer error=%s", exc, exc_info=True
+        )
+        return ""
+
+    log_llm_prompt_and_result(
+        logger=log, label=request_label, messages=request_messages, output_text=raw
+    )
+
+    line = str(raw or "").strip()
+    if line and scope_cfg.max_summary_chars > 0:
+        line = truncate_text(line, scope_cfg.max_summary_chars)
+    log_intent_scope_summary_done(log, tool_name="final_answer", summary_chars=len(line))
+    return line

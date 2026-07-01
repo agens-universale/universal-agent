@@ -108,11 +108,28 @@ def user_content_to_text(content: Any) -> str:
     return str(content)
 
 
+def user_display_text(message: Any) -> str | None:
+    """Человеко-текст user-сообщения для показа: display_content если ключ есть
+    (включая ""), иначе content. None — если это не user-сообщение."""
+    if not isinstance(message, dict):
+        return None
+    if str(message.get("role", "")).strip().lower() != "user":
+        return None
+    disp = message.get("display_content")
+    if disp is not None:
+        return str(disp)
+    return user_content_to_text(message.get("content"))
+
+
 def extract_real_user_message_text(message: Any) -> str:
     if not isinstance(message, dict):
         return ""
     if str(message.get("role", "")).strip().lower() != "user":
         return ""
+    disp = message.get("display_content")
+    if disp is not None:
+        # Чистый человеко-текст (skill-инжект): "" = доставка без промпта → пусто.
+        return str(disp).strip()
     content = user_content_to_text(message.get("content")).strip()
     if not content:
         return ""
