@@ -49,6 +49,19 @@ backend:
   #   X-Custom-Header: "value"
   use_ssl: false
   use_retry: true
+  # Транспортный стриминг ответа (chat_completions): true — читать ответ по SSE
+  # по мере генерации (виден прогресс, нет таймаутов на длинных ответах);
+  # false — блокирующий путь (ждём ответ целиком). Default on.
+  #
+  # ВАЖНО: это мастер-переключатель всего живого вывода. При stream: false дельт
+  # нет — НЕ работают счётчик «↓ N токенов», строка-мысль «⠇ …» / тег
+  # «· размышление», «обдумал за Nс» и живой текст ответа. Флаг
+  # tui.stream_display (ниже) имеет эффект ТОЛЬКО
+  # при stream: true (оно лишь выбирает, что из живого вывода рендерить).
+  #
+  # NB: сейчас стрим задействован ТОЛЬКО в TUI (дельты потребляет лишь оно);
+  # в CLI/server/swarm ответ всегда читается блокирующе — там флаг no-op.
+  stream: true
 
 # Вспомогательные LLM (summary, finish gate, intent scope) — без thinking.
 chat_completions:
@@ -58,6 +71,25 @@ chat_completions:
       separate_reasoning: false
       chat_template_kwargs:
         enable_thinking: false
+
+# TUI: что показывать во время стриминга. На подсчёт токенов и индикатор
+# (спиннер, «↓ N токенов», «обдумал за Nс») НЕ влияет — только рендер контента.
+# Действуют ТОЛЬКО при backend.stream: true (иначе живого вывода нет вовсе).
+tui:
+  # Что показывать во время стрима:
+  #   minimal (default) — только индикатор + счётчик токенов (без текста);
+  #   answer — прогрессивный ответ, дорастающий до финала;
+  #   answer_reasoning — + живая строка-мысль «⠇ …».
+  stream_display: minimal
+  # adaptive bounce (ТОЛЬКО TUI): как поступать с текст-ответом без вызова тула —
+  # убирает дубль финального ответа и латентность «завершаю» для простых сообщений.
+  #   strict — всегда требовать tool-call (как CLI/server/swarm);
+  #   judge  — судья (intent_guard) решает, полный ли это ответ: простой ответ
+  #            принять текстом, на комплексной задаче — bounce. Активен при
+  #            backend.api_mode: chat_completions (+ strict_turn_finish_validation);
+  #   always — всегда принимать текст (ни bounce, ни судьи).
+  # Default: judge. Не зависит от backend.stream.
+  text_answer_mode: judge
 
 agent:
   model: MiniMax-M2.7
@@ -99,6 +131,7 @@ paths:
   # Относительные пути резолвятся от каталога config.yml.
   agent_md_path: "prompts/demo_cli_agent.md"
   # chat_completions_system_prompt_path: "prompts/chat_completions_system_prompt.md"
+  # instructions_overwrite: false  # загружать только проектные слои (AGENTS.md + .gc/AGENTS.md), отбрасывая глобальный и shipped
 
   # threads_data_path / logs_dump_dir / skills_data_path по умолчанию НЕ заданы —
   # тогда runtime-данные пишутся в кросс-платформенные дефолтные каталоги:
@@ -119,7 +152,7 @@ paths:
   #   GC_HOME, GC_STATE_DIR, GC_CONFIG_DIR, GC_CACHE_DIR, GC_DATA_DIR,
   #   XDG_*_HOME (стандарт freedesktop.org, только Linux/macOS).
 
-# Лимиты trace digest для finish gate (отдельно от summary; см. docs_md/quality_gate/SPEC.md)
+# Лимиты trace digest для finish gate (отдельно от summary).
 quality_gate:
   max_dialogue_chars: 200000
   max_message_chars: 5000
@@ -164,6 +197,8 @@ intent_scope:
   max_summary_chars: 500
   max_tool_output_chars: 8000
   max_raw_record_chars: 5000
+  # Финальная проза в intent log: <= порога -> raw как есть; > порога -> LLM-саммари.
+  max_final_answer_raw_chars: 2000
   read_page_record_limit: 10
   fallback_raw_on_llm_error: true
 
@@ -362,9 +397,19 @@ security:
     max_bytes: 52428800             # 50 MiB; превышение → file_too_large, файл не создаётся
     # download_dir: /tmp/agent-scratch/downloads
 
+  protected_paths:
+    # Floor-защита системных путей (ssh-ключи, токены, конфиги — «нельзя трогать»).
+    # enabled: true — активна по умолчанию; false — отключить защиту (не рекомендуется).
+    # extra — дополнительные пути, которые нельзя читать/писать агенту.
+    enabled: true
+    extra: []
+    # extra:
+    #   - "/etc/secrets"
+    #   - "~/.corporate/tokens"
+
 mcp:
   servers:
-    # python recommended_mcp/install.py --config recommended_mcp/config.local.yml
+    # python recommended_mcp/install.py   # ставит MCP из recommended_mcp/config.yml
     # gc-cli -a … — автозапуск HTTP-daemon'ов (science); stdio MCP спавнит агент сам
     office:
       transport: stdio
