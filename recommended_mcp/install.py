@@ -10,8 +10,10 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import tomllib
 import urllib.request
 import zipfile
+from itertools import takewhile
 from pathlib import Path
 from typing import Optional, Tuple
 # Позволяет запускать файл напрямую: `python recommended_mcp/install.py`.
@@ -27,6 +29,7 @@ from mcp_runtime.state import save_runtime_state
 from mcp_runtime.venv import (
     active_pip_python,
     ensure_mcp_venv,
+    pip_argv,
     pip_install_argv,
     pip_install_target,
     query_installed_version,
@@ -35,6 +38,7 @@ from recommended_mcp.manifest import (
     MCPEntry,
     load_agent_dep_dir,
     load_manifest,
+    load_repo_url,
 )
 
 NODE_VERSION = "18.0.0"
@@ -45,9 +49,111 @@ class InstallError(RuntimeError):
     """Невозможно выполнить установку MCP."""
 
 
-def install_entry(entry: MCPEntry, root: Path, agent_dep_dir: Optional[Path] = None) -> None:
+def _platform_supported(entry: MCPEntry) -> bool:
+    return not entry.install.platforms or sys.platform in entry.install.platforms
+
+
+def _short_reason(exc: Exception) -> str:
+    if isinstance(exc, subprocess.CalledProcessError):
+        return f"pip завершился с кодом {exc.returncode}"
+    return str(exc) or exc.__class__.__name__
+
+
+def run_install_entries(
+    manifest,
+    root: Path,
+    agent_dep_dir,
+    *,
+    editable: bool,
+    repo_url: str | None = None,
+    repo_ref: str | None = None,
+):
+    """Установить все рецепты с изоляцией падений. Возвращает список
+    (name, status, detail), status ∈ {installed, skipped, failed}."""
+    results: list[tuple[str, str, str]] = []
+    for entry in manifest:
+        if not _platform_supported(entry):
+            results.append((entry.name, "skipped", f"platform {sys.platform}"))
+            continue
+        try:
+            if entry.install.type == "source" and editable:
+                install_source_entry(entry, root, editable=True)
+            else:
+                install_entry(entry, root, agent_dep_dir, repo_url=repo_url, repo_ref=repo_ref)
+            results.append((entry.name, "installed", ""))
+        except (subprocess.CalledProcessError, InstallError, OSError) as exc:
+            reason = _short_reason(exc)
+            results.append((entry.name, "failed", reason))
+            print(f"[warn] {entry.name}: пропущен — {reason}")
+    return results
+
+
+def find_entry(manifest, name: str):
+    """Найти запись манифеста по имени; None если нет."""
+    for entry in manifest:
+        if entry.name == name:
+            return entry
+    return None
+
+
+def _dist_name(entry: MCPEntry, root: Path = Path(".")) -> str | None:
+    """Имя дистрибутива для `pip uninstall`. Приоритет: явное install.dist (source-dir-независимо) → тип-специфичный фолбэк
+    (pypi → package; source → [project].name из pyproject; wheel → имя .whl)."""
+    if entry.install.dist:
+        return entry.install.dist
+    itype = entry.install.type
+    if itype == "pypi" and entry.install.package:
+        return _pypi_distribution_name(entry.install.package)
+    if itype == "source" and entry.install.source is not None:
+        pyproject = (root / entry.install.source).resolve() / "pyproject.toml"
+        if pyproject.is_file():
+            data = tomllib.loads(pyproject.read_text(encoding="utf-8"))
+            name = (data.get("project") or {}).get("name")
+            return str(name) if name else None
+        return None
+    if itype == "wheel":
+        pkg_path = (root / entry.path).resolve() / "dist"
+        wheels = sorted(pkg_path.glob("*.whl"))
+        if wheels:
+            parts = wheels[0].stem.split("-")
+            return "-".join(takewhile(lambda p: not (p and p[0].isdigit()), parts)) or None
+    return None
+
+
+def uninstall_entry(entry: MCPEntry, root: Path) -> None:
+    """Деинсталл MCP из venv. pip-типы → pip uninstall <dist>; npx → npm uninstall -g.
+    Сносит ТОЛЬКО сам пакет (зависимости не трогает). Best-effort: ошибки → warn."""
+    itype = entry.install.type
+    if itype in ("pypi", "source", "wheel"):
+        dist = _dist_name(entry, root)
+        if not dist:
+            print(f"[warn] {entry.name}: не удалось определить имя пакета — деинсталл пропущен")
+            return
+        print(f"[uninstall] {entry.name}: pip uninstall {dist}")
+        subprocess.run(pip_argv("uninstall", "-y", dist), check=False)
+    elif itype == "npx":
+        pkg = entry.install.npm_package
+        if not pkg:
+            print(f"[warn] {entry.name}: npm_package не задан — деинсталл пропущен")
+            return
+        from config_modules.env_vars import gc_paths
+        agent_dep_dir = gc_paths()["data"]
+        npm = _node_install_paths(agent_dep_dir)["npm"]
+        print(f"[uninstall] {entry.name}: npm uninstall -g {pkg}")
+        subprocess.run([str(npm), "uninstall", "-g", pkg], check=False)
+    else:
+        print(f"[warn] {entry.name}: деинсталл для type={itype!r} не поддержан (вне scope)")
+
+
+def install_entry(
+    entry: MCPEntry,
+    root: Path,
+    agent_dep_dir: Optional[Path] = None,
+    repo_url: str | None = None,
+    repo_ref: str | None = None,
+) -> None:
     """Установить один MCP. root — каталог, относительно которого резолвится entry.path."""
-    if entry.install.platforms and sys.platform not in entry.install.platforms:
+    if not _platform_supported(entry):
         print(
             f"[skip] {entry.name}: platform {sys.platform!r} not in "
             f"{list(entry.install.platforms)}"
@@ -66,7 +172,8 @@ def install_entry(entry: MCPEntry, root: Path, agent_dep_dir: Optional[Path] = N
         _install_npx(entry.name, entry.install.commands, agent_dep_dir)
 
     elif itype == "source":
-        _install_source(entry.name, entry.install.source, root, editable=False)
+        _install_source(entry.name, entry.install.source, root, editable=False,
+                        repo_url=repo_url, repo_ref=repo_ref)
     elif itype == "pypi":
         _install_pypi(entry.name, entry.install.package)
     else:
@@ -129,28 +236,52 @@ def _install_docker(name: str, pkg_path: Path) -> None:
     )
 
 
+def _repo_subdir(source: Path, root: Path) -> str:
+    """Путь source внутри репо для git `#subdirectory`. source относителен
+    recipe_root (recommended_mcp/), напр. ../external/office-mcp → external/office-mcp.
+    Ведёт за пределы репо (ведущий ..) или абсолютный → ошибка."""
+    rel = os.path.normpath(os.path.join(root.name, str(source))).replace(os.sep, "/")
+    if rel.startswith("../") or rel == ".." or os.path.isabs(rel):
+        raise InstallError(
+            f"install.source {source!r} ведёт за пределы репо — git-установка невозможна"
+        )
+    return rel
+
+
 def _install_source(
     name: str,
     source: Path | None,
     root: Path,
     *,
     editable: bool,
+    repo_url: str | None = None,
+    repo_ref: str | None = None,
 ) -> None:
     if source is None:
         raise InstallError(f"mcp {name!r}: install.type=source requires install.source")
     src_path = (root / source).resolve()
-    if not (src_path / "pyproject.toml").exists():
-        raise InstallError(
-            f"mcp {name!r}: pyproject.toml not found in {src_path} "
-            f"(install.source must point to a Python package root)"
-        )
-    cmd = [str(active_pip_python()), "-m", "pip", "install"]
-    if editable:
-        cmd.append("-e")
-    cmd.append(str(src_path))
-    mode = "pip install -e " if editable else "pip install "
-    print(f"[install] {name}: {mode}{src_path}")
-    subprocess.run(cmd, check=True)
+    if (src_path / "pyproject.toml").exists():
+        # method-1: локальные исходники из клона
+        cmd = [str(active_pip_python()), "-m", "pip", "install"]
+        if editable:
+            cmd.append("-e")
+        cmd.append(str(src_path))
+        mode = "pip install -e " if editable else "pip install "
+        print(f"[install] {name}: {mode}{src_path}")
+        subprocess.run(cmd, check=True)
+        return
+    # method-2: локальных исходников нет → ставим из git-подкаталога репо
+    if repo_url:
+        subdir = _repo_subdir(source, root)
+        ref = f"@{repo_ref}" if repo_ref else ""
+        spec = f"git+{repo_url}{ref}#subdirectory={subdir}"
+        print(f"[install] {name}: pip install {spec}")
+        subprocess.run(pip_argv("install", spec), check=True)
+        return
+    raise InstallError(
+        f"mcp {name!r}: pyproject.toml не найден в {src_path} и repo_url не задан "
+        f"(нужен клон репо или repo_url в манифесте для git-установки)"
+    )
 
 
 def install_source_entry(entry: MCPEntry, root: Path, *, editable: bool) -> None:
@@ -219,6 +350,22 @@ def _node_install_paths(agent_dep_dir: Path) -> dict[str, Path]:
         npm = bin_dir / "npm"
         npx = bin_dir / "npx"
     return {"root": root, "bin": bin_dir, "node": node, "npm": npm, "npx": npx}
+
+
+def npm_global_has(npm_package: str, agent_dep_dir: Path) -> bool | None:
+    """Есть ли npm-пакет в node-окружении агента (`npm ls -g`).
+    True/False — проверили; None — проверить не удалось (npm недоступен / ошибка)."""
+    npm = _node_install_paths(agent_dep_dir)["npm"]
+    if not Path(npm).exists():
+        return None
+    try:
+        result = subprocess.run(
+            [str(npm), "ls", "-g", npm_package, "--depth=0"],
+            capture_output=True, text=True, check=False,
+        )
+    except OSError:
+        return None
+    return result.returncode == 0
 
 
 def _verify_existing_node(paths: dict[str, Path]) -> bool:
@@ -424,12 +571,21 @@ def main() -> int:
     if not manifest:
         print("[info] no mcps declared in config.yml — nothing to install")
         return 0
+    repo_url, repo_ref = load_repo_url(manifest_path)
     with pip_install_target(mcp_py):
-        for entry in manifest:
-            if entry.install.type == "source" and args.editable:
-                install_source_entry(entry, root, editable=True)
-            else:
-                install_entry(entry, root, agent_dep_dir)
+        results = run_install_entries(manifest, root, agent_dep_dir, editable=args.editable,
+                                      repo_url=repo_url, repo_ref=repo_ref)
+    installed = [n for n, s, _ in results if s == "installed"]
+    skipped = [(n, d) for n, s, d in results if s == "skipped"]
+    failed = [(n, d) for n, s, d in results if s == "failed"]
+    print(f"[summary] установлено: {', '.join(installed) or '—'}")
+    for n, d in skipped:
+        print(f"[summary] пропущено ({d}): {n}")
+    for n, d in failed:
+        print(f"[summary] НЕ установлено: {n} — {d}")
+    if failed:
+        print(f"[summary] {len(failed)} MCP пропущено — агент будет работать; "
+              f"поставь вручную или используй совместимый Python")
     state = save_runtime_state(manifest_path=manifest_path)
     print(f"[state] {state.bin_dir}")
     paths = _node_install_paths(agent_dep_dir)

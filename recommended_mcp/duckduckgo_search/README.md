@@ -1,14 +1,17 @@
 # duckduckgo_search — ddgs-mcp
 
-Интеграция [ddgs-mcp](https://pypi.org/project/ddgs-mcp/) — MCP-сервер
-метапоиска DuckDuckGo (библиотека [DDGS](https://github.com/deedy5/ddgs)).
-Ставится из PyPI через `recommended_mcp/install.py`.
+Тонкая MCP-обёртка над библиотекой [DDGS](https://github.com/deedy5/ddgs) —
+исходник в `external/ddgs-mcp/` репозитория.
+Устанавливается из исходника через `recommended_mcp/install.py` (рецепт `source`).
+
+> Ранее использовался пакет `ddgs-mcp==0.1.0` с PyPI, который требовал Python <3.14.
+> Своя обёртка снимает это ограничение.
 
 ## Требования
 
-- **Python 3.10–3.13** (ограничение пакета `ddgs-mcp`).
+- **Python >=3.10** (верхнего потолка нет, включая Python 3.14+).
 - **Активный venv агента** перед запуском `install.py`.
-- Сетевой доступ при установке (`pip install ddgs-mcp`).
+- Сетевой доступ при установке (pip тянет зависимость `ddgs`).
 
 ## Установка
 
@@ -18,10 +21,10 @@
 python recommended_mcp/install.py
 ```
 
-Или вручную:
+Или вручную (из корня репозитория):
 
 ```bash
-pip install ddgs-mcp==0.1.0
+pip install external/ddgs-mcp
 ```
 
 После установки в PATH активного venv появится команда `ddgs-mcp`.
@@ -87,5 +90,5 @@ env:
 
 ## Обновление
 
-Поменяй пин `install.package` в `recommended_mcp/config.yml`
-(например `ddgs-mcp==0.2.0`) и снова запусти `python recommended_mcp/install.py`.
+Обнови зависимость `ddgs` в `external/ddgs-mcp/pyproject.toml` и снова
+запусти `python recommended_mcp/install.py`.
