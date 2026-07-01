@@ -75,6 +75,24 @@ def reset_stale_summarizing_flag(thread_session) -> None:
         save_thread_meta(ts.threads_dir, ts.system_id, ts.thread_id, ts.meta)
 
 
+def set_tui_finalizing(thread_session, active: bool) -> None:
+    """TUI-индикатор: пометить/снять «идёт финализация ответа» (``tui_finalizing``).
+
+    Пишется top-level в meta + немедленный flush (как ``tui_summarizing``; TUI поллит
+    meta). Ставится на время записи/саммари финальной прозы в accept-ветке run_agent,
+    снимается строго в finally. ``active=False`` также снимает протухший флаг на старте
+    run'а. ``thread_session=None`` (CLI без треда) → no-op.
+    """
+    if thread_session is None:
+        return
+    ts = thread_session
+    if active:
+        ts.meta["tui_finalizing"] = True
+    else:
+        ts.meta.pop("tui_finalizing", None)
+    save_thread_meta(ts.threads_dir, ts.system_id, ts.thread_id, ts.meta)
+
+
 def _messages_tail_matches(messages: list[dict], suffix: list[dict]) -> bool:
     """True, если ``messages`` заканчивается на ``suffix`` (поэлементное ``==``)."""
     if not suffix or len(messages) < len(suffix):
@@ -298,6 +316,22 @@ class RunSummaryCoordinator:
                     is_cli_mode=self._is_cli_mode,
                 ),
                 summarize_exc,
+            )
+
+    def force_compact_once(self, *, trigger_reason: str = "manual") -> None:
+        """Один безусловный проход сжатия (ручной /compact) — БЕЗ проверки порога.
+        Та же машинерия, что и автосжатие; персист через on_summary_applied."""
+        state = self._state
+        if state.backend_api_mode != "chat_completions":
+            return
+        with _summarizing_flag(self._thread_session):
+            run_summary_compaction(
+                ctx=self._ctx,
+                state=state,
+                trigger_reason=trigger_reason,
+                is_cli_mode=self._is_cli_mode,
+                on_summary_applied=self.on_summary_applied,
+                trigger_threshold_chars=self._summary_trigger_chars,
             )
 
     def pre_backend_compaction_hook(
