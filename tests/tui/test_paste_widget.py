@@ -130,3 +130,48 @@ async def test_bracketed_paste_small_inserted_once():
         await pilot.pause()
         await pilot.pause()
         assert inp.text == "short"           # один раз, не "shortshort"
+
+
+@pytest.mark.asyncio
+async def test_cr_separated_paste_collapses_like_lf():
+    """Bracketed-paste (Windows Terminal Ctrl+V) разделяет строки символом \\r.
+    should_collapse считает \\n — без нормализации многострочная \\r-вставка <500
+    симв не сворачивалась (уходила инлайн). _handle_paste нормализует \\r→\\n."""
+    pytest.importorskip("textual")
+    from tui.app import TuiApp
+    async with TuiApp().run_test() as pilot:
+        inp = await _input(pilot)
+        inp._handle_paste("a\rb\rc\rd\re")   # 5 строк через \r, <500 симв
+        await pilot.pause()
+        assert inp.text == "[Вставка #1 · 5 строк]"   # свернулось по «строкам»
+        assert inp._chips.get(1) == "a\nb\nc\nd\ne"   # хранится с нормализованными \n
+
+
+@pytest.mark.asyncio
+async def test_crlf_paste_normalized_inline():
+    """Маленькая \\r\\n-вставка (read_clipboard на Windows) — инлайн без мусорных \\r."""
+    pytest.importorskip("textual")
+    from tui.app import TuiApp
+    async with TuiApp().run_test() as pilot:
+        inp = await _input(pilot)
+        inp._handle_paste("a\r\nb")
+        await pilot.pause()
+        assert inp.text == "a\nb"            # \r\n → \n, без \r
+
+
+@pytest.mark.asyncio
+async def test_expand_works_always_no_timer():
+    """Разворот по повторной вставке последней пасты — без лимита времени: после
+    сворачивания _expand_chip_id держится, авто-таймера закрытия нет."""
+    pytest.importorskip("textual")
+    from tui.app import TuiApp
+    async with TuiApp().run_test() as pilot:
+        inp = await _input(pilot)
+        inp._handle_paste(BIG5)
+        await pilot.pause()
+        assert inp._expand_chip_id == 1                      # окно «развернуть» открыто
+        assert getattr(inp, "_expand_timer", None) is None   # без авто-закрытия по таймеру
+        inp._handle_paste(BIG5)                              # повторная вставка → разворот
+        await pilot.pause()
+        assert inp.text == BIG5
+        assert inp._chips.get(1) is None

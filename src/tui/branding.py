@@ -25,10 +25,12 @@ LOGO = (
 # Позиционирующее заявление под логотипом.
 TAGLINE = "Universal Agent"
 
-# Шапка: слева — только имя (роль несёт тег); справа — бренд-якорь без версии.
+# Шапка: слева — только имя (роль несёт тег). Правый бренд-блок («F1 help · gc-ua»)
+# убран со всех подэкранов — оставляем больше места под заголовок/путь.
 HEADER_LEFT_EMPTY = APP_NAME
-HEADER_RIGHT = "F1 help · gc-ua"
-HEADER_RIGHT_PLAIN = "gc-ua"
+
+# Приветственная строка для свежего экрана (хедер-слева, нет активной задачи).
+WELCOME = "Добро пожаловать в GigaCode"
 
 # Стопы градиента логотипа: амбер → олива → teal (всё из палитры).
 _WARM = RUN_COLOR
@@ -78,3 +80,23 @@ def logo_text() -> Text:
 def tagline_display() -> str:
     """`Universal Agent` → `U N I V E R S A L   A G E N T` (капс + разрядка)."""
     return "   ".join(" ".join(word) for word in TAGLINE.upper().split())
+
+
+# Разрядка тэглайна (как `.logo-sub` в gc-ua-install.html: airy letter-spacing,
+# заметный gap между словами). Межсловный зазор — двойной от межбуквенного.
+# Оба меняются одним числом.
+_TAGLINE_LETTER_GAP = "  "   # 2 пробела — между буквами
+_TAGLINE_WORD_GAP = "    "    # 4 пробела — между словами (двойной от letter-gap)
+
+
+def tagline_under_logo() -> str:
+    """Тэглайн под логотипом: разрядка букв (`_TAGLINE_LETTER_GAP`), межсловный
+    зазор (`_TAGLINE_WORD_GAP`, двойной), центрирование по ширине лого (ведущие
+    пробелы). Стиль — как `.logo-sub` в docs/gc-ua-install.html. Сам
+    отступ-строка над тэглайном — CSS (`.brand-tagline { margin-top: 1 }`)."""
+    tag = _TAGLINE_WORD_GAP.join(
+        _TAGLINE_LETTER_GAP.join(word) for word in TAGLINE.upper().split()
+    )
+    logo_w = max((len(line) for line in LOGO.split("\n")), default=0)
+    pad = max(0, (logo_w - len(tag)) // 2)
+    return " " * pad + tag
