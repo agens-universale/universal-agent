@@ -8,12 +8,14 @@ from typing import Any, Mapping
 ACTION_USER_ASK = "user_ask"
 ACTION_TOOL_AGGREGATED = "tool_result_aggregated"
 ACTION_TOOL_RAW = "tool_result_raw"
+ACTION_FINAL_ANSWER = "final_answer"
 
 ALLOWED_ACTIONS = frozenset(
     {
         ACTION_USER_ASK,
         ACTION_TOOL_AGGREGATED,
         ACTION_TOOL_RAW,
+        ACTION_FINAL_ANSWER,
     }
 )
 
@@ -84,6 +86,13 @@ def validate_record(record: IntentRecord | Mapping[str, Any]) -> IntentRecord:
             raise ValueError("tool_result_raw requires tool_name")
         if not isinstance(content, Mapping):
             raise ValueError("tool_result_raw content must be an object")
+        fallback = None
+    elif action == ACTION_FINAL_ANSWER:
+        if tool_name is not None:
+            raise ValueError("final_answer record must have tool_name=null")
+        if not isinstance(content, str) or not content.strip():
+            raise ValueError("final_answer content must be a non-empty string")
+        content = content.strip()
         fallback = None
 
     return IntentRecord(

@@ -10,6 +10,7 @@ _logger = logging.getLogger(__name__)
 DEFAULT_INTENT_SCOPE_MAX_SUMMARY_CHARS = 500
 DEFAULT_INTENT_SCOPE_MAX_TOOL_OUTPUT_CHARS = 8000
 DEFAULT_INTENT_SCOPE_MAX_RAW_RECORD_CHARS = 5000
+DEFAULT_INTENT_SCOPE_MAX_FINAL_ANSWER_RAW_CHARS = 2000
 DEFAULT_INTENT_LOG_READ_PAGE_RECORD_LIMIT = 10
 
 IntentScopeRecordMode = Literal["aggregated", "raw"]
@@ -39,9 +40,11 @@ class IntentScopeConfig(BaseModel):
     max_summary_chars: int = DEFAULT_INTENT_SCOPE_MAX_SUMMARY_CHARS
     max_tool_output_chars: int = DEFAULT_INTENT_SCOPE_MAX_TOOL_OUTPUT_CHARS
     max_raw_record_chars: int = DEFAULT_INTENT_SCOPE_MAX_RAW_RECORD_CHARS
+    max_final_answer_raw_chars: int = DEFAULT_INTENT_SCOPE_MAX_FINAL_ANSWER_RAW_CHARS
     read_page_record_limit: int = DEFAULT_INTENT_LOG_READ_PAGE_RECORD_LIMIT
     fallback_raw_on_llm_error: bool = True
     intent_scope_tool_summary_prompt_path: str | None = None
+    intent_scope_final_answer_summary_prompt_path: str | None = None
 
 
 def normalize_intent_scope_config(cfg: IntentScopeConfig) -> None:
@@ -66,6 +69,13 @@ def normalize_intent_scope_config(cfg: IntentScopeConfig) -> None:
             DEFAULT_INTENT_SCOPE_MAX_RAW_RECORD_CHARS,
         )
         cfg.max_raw_record_chars = DEFAULT_INTENT_SCOPE_MAX_RAW_RECORD_CHARS
+    if cfg.max_final_answer_raw_chars <= 0:
+        _logger.warning(
+            "intent_scope.max_final_answer_raw_chars=%s must be > 0; using %s",
+            cfg.max_final_answer_raw_chars,
+            DEFAULT_INTENT_SCOPE_MAX_FINAL_ANSWER_RAW_CHARS,
+        )
+        cfg.max_final_answer_raw_chars = DEFAULT_INTENT_SCOPE_MAX_FINAL_ANSWER_RAW_CHARS
     if cfg.read_page_record_limit <= 0:
         _logger.warning(
             "intent_scope.read_page_record_limit=%s must be > 0; using %s",
