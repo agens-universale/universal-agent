@@ -46,16 +46,17 @@ def _parse_finish_handoff_args(arguments: Any) -> Dict[str, Any]:
     return obj if isinstance(obj, dict) else {}
 
 
-def _load_guard_prompt() -> str:
-    if not os.path.exists(DEFAULT_INTENT_GUARD_PROMPT_PATH):
+def _load_guard_prompt(prompt_path: str | None = None) -> str:
+    path = prompt_path or DEFAULT_INTENT_GUARD_PROMPT_PATH
+    if not os.path.exists(path):
         raise FileNotFoundError(
-            f"Intent guard prompt file not found: {DEFAULT_INTENT_GUARD_PROMPT_PATH}"
+            f"Intent guard prompt file not found: {path}"
         )
-    with open(DEFAULT_INTENT_GUARD_PROMPT_PATH, "r", encoding="utf-8") as fd:
+    with open(path, "r", encoding="utf-8") as fd:
         prompt = fd.read().strip()
     if not prompt:
         raise ValueError(
-            f"Intent guard prompt file is empty: {DEFAULT_INTENT_GUARD_PROMPT_PATH}"
+            f"Intent guard prompt file is empty: {path}"
         )
     return prompt
 
@@ -92,7 +93,13 @@ def validate_final_report_vs_user_intent(
             cfg=cfg if isinstance(cfg, dict) else None,
         )
 
-    system_prompt = _load_guard_prompt()
+    ctx_cfg = getattr(ctx, "config_dict", {}) or {}
+    guard_prompt_path = (
+        ctx_cfg.get("chat_completions_intent_guard_prompt_path")
+        if isinstance(ctx_cfg, dict)
+        else None
+    )
+    system_prompt = _load_guard_prompt(guard_prompt_path)
     is_subagent = getattr(state, "parent_state_id", None) is not None
     payload = {
         "user_context": user_context,

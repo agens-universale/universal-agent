@@ -44,8 +44,10 @@ def test_adapter_points_dependency_paths_to_existing_files():
               "chat_completions_memory_patch_append_prompt_path",
               "chat_completions_memory_patch_replace_prompt_path"):
         assert os.path.isfile(sp[k]), k
-    # NO intent_guard key is set (core untouched)
-    assert "chat_completions_intent_guard_prompt_path" not in c
+    # intent_guard prompt path is bundled + exists (activates the finish gate in the
+    # image; without it the gate fail-opens because its default path is source-only)
+    assert c["chat_completions_intent_guard_prompt_path"].endswith("prompts/chat_completions_intent_guard_prompt.md")
+    assert os.path.isfile(c["chat_completions_intent_guard_prompt_path"])
 
 def test_profile_overrides_still_win():
     GcCliExternal = _load_adapter()

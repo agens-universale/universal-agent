@@ -208,6 +208,7 @@ class GcCliExternal(BaseAgent):
             "completions_url": self._backend_url,
             "model": self._model,
             "chat_completions_system_prompt_path": str(_PROMPTS_DIR / "chat_completions_system_prompt.md"),
+            "chat_completions_intent_guard_prompt_path": str(_PROMPTS_DIR / "chat_completions_intent_guard_prompt.md"),
             "skills_data_path": str(_SKILLS_DIR),
             "summary_params": {
                 "chat_completions_summary_prompt_path": str(_PROMPTS_DIR / "chat_completions_summary_prompt.md"),
