@@ -13,6 +13,7 @@ from utils.file_text import (
 from tools.schema_optional import coalesce_optional_string
 from tools.simple_tool_base import AbstractSimpleTool
 from utils.tool_report_paths import tool_report_abspath
+from utils.atomic_io import atomic_replace
 
 
 class ApplyFileEdits(AbstractSimpleTool):
@@ -460,7 +461,7 @@ class ApplyFileEdits(AbstractSimpleTool):
         try:
             with open(tmp_path, "w", encoding="utf-8", errors="replace") as f:
                 f.write(current)
-            os.replace(tmp_path, path)
+            atomic_replace(tmp_path, path)
         except Exception as e:
             try:
                 if os.path.exists(tmp_path):
