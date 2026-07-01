@@ -10,6 +10,7 @@ from textual.screen import Screen
 
 from tui import branding
 from tui.screens.main import TraceScreen
+from tui.services.stream_sink import StreamSink
 
 
 class TuiApp(App):
@@ -46,12 +47,19 @@ class TuiApp(App):
         self._system = system
         self._config = config or {}
         self._executor_factory = None  # callable returning an executor; for tests
+        self._stream_sink = StreamSink()
         self._mcp_progress = None
         self._mcp_snapshot = None      # boot-дискавери для /mcp (сервер→статус/тулы)
         self.active_runner = None      # AgentRunner | None
         self.last_runner_error: Optional[str] = None
+        self.last_terminal_outcome: Optional[str] = None
+        self.last_stop_requested: bool = False   # юзер /stop по живому прогону → терминал «stopped»
         from tui.state import TuiState
         self.tui_state = TuiState()
+
+    def on_mount(self) -> None:
+        from tui.services.terminal_title import format_terminal_title, set_terminal_title
+        set_terminal_title(format_terminal_title())
 
     def get_default_screen(self) -> Screen:
         return TraceScreen()
@@ -72,8 +80,12 @@ class TuiApp(App):
         def _on_runner_error(exc: BaseException) -> None:
             self.last_runner_error = str(exc) or exc.__class__.__name__
 
+        def _on_runner_complete(outcome: Optional[str]) -> None:
+            self.last_terminal_outcome = outcome
+
         self.active_runner = AgentRunner(
             executor_factory=factory, on_error=_on_runner_error,
+            on_complete=_on_runner_complete,
         )
         return self.active_runner
 
@@ -87,16 +99,48 @@ class TuiApp(App):
         cfg["console_trace"] = False
         from tui.services.prompt_assets import tui_special_instructions_path
         cfg["chat_completions_special_instructions_path"] = tui_special_instructions_path()
+        # TUI adaptive bounce: сигнал в общий run_agent (только TUI ставит его).
+        # CLI/server/swarm не ставят → строгий контракт. Управляется tui.text_answer_mode.
+        cfg["text_answer_mode"] = cfg.get("tui_text_answer_mode", "judge")
         auth = build_auth_connector(cfg)
         progress = McpProgress()
         progress.begin(list((cfg.get("mcp-servers") or {}).keys()))
         self._mcp_progress = progress
-        ctx = create_run_context(cfg, auth_connector=auth, on_progress=progress.update)
+        from tui.services.stream_pump import StreamPump, STREAM_REFRESH_MS
+        self._stream_pump = StreamPump(
+            self._stream_sink,
+            signal=lambda: self.call_from_thread(self._stream_signal),
+            throttle_s=STREAM_REFRESH_MS / 1000,
+        )
+        ctx = create_run_context(
+            cfg, auth_connector=auth, on_progress=progress.update,
+            on_stream_delta=self._stream_pump.on_delta,
+        )
         # Снапшот MCP «сервер→статус/тулы» app-уровнево — чтобы /mcp показывал
         # результат boot-дискавери сразу, не дожидаясь первого сообщения.
         from tools.mcp_snapshot import build_mcp_tools_snapshot
         self._mcp_snapshot = build_mcp_tools_snapshot(cfg, ctx.tools_data, ctx.mcp_status)
+        # Проводка confirm-канала: TUI-раннер умеет показывать баннер; CLI/server — нет.
+        runner = self.active_runner
+        if runner is not None and hasattr(runner, "make_tui_confirm"):
+            ctx.is_tui = True
+            ctx.tui_confirm = runner.make_tui_confirm(self._present_confirm)
         return AgentExecutor(ctx)
+
+    def _stream_signal(self) -> None:
+        """Вызывается на UI-потоке (StreamPump → call_from_thread); событийная
+        перерисовка контента стрима на активном экране (no-op без метода)."""
+        fn = getattr(self.screen, "_refresh_stream_content", None)
+        if callable(fn):
+            fn()
+
+    def _present_confirm(self, title: str, question: str, fields: list) -> None:
+        """Вызывается на агент-потоке; маршаллит показ баннера в UI-поток."""
+        def _show() -> None:
+            fn = getattr(self.screen, "show_confirm_banner", None)
+            if fn is not None:
+                fn(title, question, fields)
+        self.call_from_thread(_show)
 
     # --- actions ------------------------------------------------------
 
@@ -150,7 +194,9 @@ class TuiApp(App):
         """Ctrl+C: есть выделение → копировать в буфер; иначе → остановить run."""
         sel = self._current_selection()
         if sel:
-            self.copy_to_clipboard(sel)
+            self.copy_to_clipboard(sel)  # OSC 52 + внутренний app.clipboard (SSH/удалённые)
+            from tui.services.os_ops import write_clipboard
+            write_clipboard(sel)         # нативный ОС-буфер (локальные терминалы без OSC 52)
             return
         scr = self.screen
         if hasattr(scr, "_cmd_stop"):

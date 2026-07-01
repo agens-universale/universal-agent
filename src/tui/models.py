@@ -6,7 +6,7 @@ from typing import Any, Literal, Optional, Union
 
 
 Kind = Literal["user", "agent", "call", "result", "error", "error_msg", "system", "ask_human", "summary"]
-Status = Literal["running", "stopped"]
+Status = Literal["running", "stopped", "completed", "failed"]
 
 
 @dataclass
@@ -33,7 +33,7 @@ class TaskSummary:
     """Строка списка задач (tui3_impl §10.1)."""
 
     thread_id: str
-    status: Status
+    status: Optional[Status]   # None — исход не записан (легаси / прогон без чистого финиша)
     updated_at: str
     messages_count: int
     skill_id: Optional[str]
