@@ -55,7 +55,7 @@ async def test_esc_in_live_ask_human_clean_stops(tmp_path):
     """Esc в live ask_human → clean stop треда:
     - runner.stop() вызван (флаг stop_requested выставлен);
     - banner снят, ask_human_state сброшен;
-    - [stopped]-метка смонтирована в трейсе;
+    - ThinkingIndicator переходит в состояние «cancelled» (вместо [stopped]-строки в трейсе);
     - active_runner обнулён (clean-restart pattern)."""
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
@@ -80,6 +80,8 @@ async def test_esc_in_live_ask_human_clean_stops(tmp_path):
 
         runner = _LiveStoppable()
         app.active_runner = runner
+        # Смонтировать индикатор (как при живом прогоне) и banner.
+        screen._show_thinking_indicator(state="thinking")
         _mount_zombie_banner(screen)
         await pilot.pause()
 
@@ -94,13 +96,12 @@ async def test_esc_in_live_ask_human_clean_stops(tmp_path):
         assert screen._ask_human_banner is None, "banner должен быть снят"
         assert app.tui_state.ask_human_state is None, "ask_human_state должен быть сброшен"
         assert app.active_runner is None, "active_runner должен быть обнулён (clean-restart pattern)"
-        # [stopped]-метка в трейсе
-        from tui.widgets.trace_row import TraceRow
-        rows_text = " ".join(
-            f"{getattr(r, '_prefix', '')}{getattr(r, '_content', '')}"
-            for r in screen.query(TraceRow)
+        # Индикатор в состоянии cancelled (вместо [stopped]-строки в трейсе).
+        from tui.widgets.thinking_indicator import ThinkingIndicator
+        assert screen._thinking is not None, "ThinkingIndicator должен остаться (cancelled-state)"
+        assert screen._thinking._state == "cancelled", (
+            f"ThinkingIndicator должен быть в состоянии 'cancelled', got {screen._thinking._state!r}"
         )
-        assert "[stopped]" in rows_text, f"[stopped] метка должна быть в трейсе, got: {rows_text!r}"
 
 
 @pytest.mark.asyncio
@@ -387,3 +388,88 @@ async def test_enter_in_zombie_continues_thread_as_new_user_message(tmp_path):
         assert started[0]["thread_id"] == thread_id
         from tui.widgets.user_reply import UserReplyContainer
         assert list(screen.query(UserReplyContainer))
+
+
+@pytest.mark.asyncio
+async def test_reconcile_keeps_active_ask_human_banner(tmp_path):
+    """Гвард к Task 5: reconcile в live-потоке НЕ снимает активный баннер
+    (живой раннер ждёт, продолжения нет) — иначе юзер не смог бы ответить."""
+    pytest.importorskip("textual")
+    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    async with app.run_test() as pilot:
+        scr = app.screen
+
+        class _Live:
+            def is_running(self): return True
+
+        app.active_runner = _Live()
+        _mount_zombie_banner(scr)
+        await pilot.pause()
+        assert scr._ask_human_banner is not None
+        scr._reconcile_ask_human_after_render(allow_remnant=False)
+        assert scr._ask_human_banner is not None      # активный сохранён
+
+
+@pytest.mark.asyncio
+async def test_reconcile_unmounts_superseded_ask_human_banner(tmp_path):
+    """Перекрытый ask_human (после вопроса есть событие = продолжение диалога) →
+    reconcile снимает баннер (наш skip-output из Task 1 = kind=result)."""
+    pytest.importorskip("textual")
+    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    async with app.run_test() as pilot:
+        scr = app.screen
+        _mount_zombie_banner(scr)
+        await pilot.pause()
+        scr._task_events.append(TraceEvent(
+            no=1, event_ts_utc_iso="2026-06-20T00:00:00+00:00", kind="ask_human",
+            title="ask_human", summary="Готовы?", full_payload={},
+            message_id="ah", call_id="call_zombie_1", tool_name="ask_human"))
+        scr._task_events.append(TraceEvent(
+            no=2, event_ts_utc_iso="2026-06-20T00:00:00+00:00", kind="result",
+            title="", summary="ok", full_payload={}, message_id="r"))
+        scr._reconcile_ask_human_after_render(allow_remnant=False)
+        assert scr._ask_human_banner is None          # перекрытый снят
+
+
+@pytest.mark.asyncio
+async def test_live_poll_keeps_active_banner_despite_flush_output(tmp_path):
+    """Регресс-гвард к 4a9d9e8 (убран live-reconcile): в живом потоке приход
+    флаш-output'а не-блокирующего тула ПОСЛЕ ask_human (тот же ход, агент ещё ждёт)
+    НЕ должен снимать активный баннер. До фикса live-reconcile видел событие после
+    вопроса → считал диалог продолженным → сносил ЖИВОЙ баннер → агент висел зомби."""
+    tid = "ahliveflush00000000000000000000a"
+    (tmp_path / f"data_cli_{tid}.jsonl").write_text(
+        _ah_envelope_lines(tid, [
+            {"id": "u1", "role": "user", "content": "запусти"},
+            _ah_call_payload("Подтверждаете?", "call_ah_x"),
+        ]), encoding="utf-8")
+    (tmp_path / f"meta_cli_{tid}.json").write_text(json.dumps({
+        "thread_id": tid, "updated_at": "t0", "messages_count": 2,
+    }), encoding="utf-8")
+
+    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    app.active_runner = _LiveRunner()             # живой агент ждёт ответа на ask_human
+    async with app.run_test() as pilot:
+        scr = app.screen
+        scr.attach_active_task(tid)
+        await pilot.pause(0.05)
+        assert scr._ask_human_banner is not None  # живой вопрос — баннер есть
+
+        # Через poll прилетает output не-блокирующего тула (session_memory) ПОСЛЕ
+        # ask_human — ровно то, что флаш кладёт в поток. Агент всё ещё ждёт.
+        (tmp_path / f"data_cli_{tid}.jsonl").write_text(
+            _ah_envelope_lines(tid, [
+                {"id": "u1", "role": "user", "content": "запусти"},
+                _ah_call_payload("Подтверждаете?", "call_ah_x"),
+                {"id": "fco_sm", "type": "function_call_output", "call_id": "call_sm",
+                 "output": json.dumps({"tool": "session_memory", "ok": True})},
+            ]), encoding="utf-8")
+        (tmp_path / f"meta_cli_{tid}.json").write_text(json.dumps({
+            "thread_id": tid, "updated_at": "t1", "messages_count": 3,
+        }), encoding="utf-8")
+        await pilot.pause(0.4)                     # poll → live-render (путь без reconcile)
+
+        assert scr._ask_human_banner is not None, (
+            "активный баннер НЕ должен сниматься в live при флаш-output'е после ask_human"
+        )
+        assert app.tui_state.ask_human_state is not None  # состояние диалога цело

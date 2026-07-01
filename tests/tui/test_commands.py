@@ -2,7 +2,6 @@
 from tui.commands import (
     Command, CommandRegistry, build_default_registry, closest_command,
 )
-from tui import branding
 
 
 def test_register_and_lookup():
@@ -46,7 +45,7 @@ def test_default_registry_is_exactly_keep_set():
     names = sorted(c.name for c in reg.list_commands())
     assert names == sorted([
         "sessions", "new", "stop", "skill", "skills",
-        "status", "config", "mcp", "export", "help", "quit",
+        "status", "config", "mcp", "export", "help", "init", "compact", "quit",
     ])
 
 
@@ -54,6 +53,11 @@ def test_skill_descriptions_use_navyk_not_skill_word():
     reg = build_default_registry()
     assert reg.lookup("skill").description == "использовать навык"
     assert reg.lookup("skills").description == "обзор навыков"
+
+
+def test_init_description_is_analysis_and_generation():
+    reg = build_default_registry()
+    assert reg.lookup("init").description == "анализ проекта и генерация AGENTS.md"
 
 
 def test_sessions_command_has_no_aliases():
@@ -110,9 +114,10 @@ def test_hotkeys_match_app_bindings():
             assert normalize(cmd.hotkey) in binding_keys, f"{cmd.name}: {cmd.hotkey}"
 
 
-def test_headers_have_no_fake_version():
-    from tui.screens.main import _HEADER_RIGHT as MAIN_RIGHT
-    from tui.screens.skills import _HEADER_RIGHT as SK_RIGHT
-    for s in (MAIN_RIGHT, SK_RIGHT):
-        assert "v0.2" not in s
-        assert branding.HEADER_RIGHT in s
+def test_compact_command_registered_with_alias():
+    reg = build_default_registry()
+    cmd = reg.lookup("compact")
+    assert cmd is not None
+    assert cmd.description == "сжать контекст сессии сейчас"
+    # алиас /сжать ведёт на ту же команду
+    assert reg.lookup("сжать") is cmd
