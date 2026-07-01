@@ -2,6 +2,19 @@
 import pytest
 
 
+def test_compaction_label_with_chars():
+    comp = {"messages_in_segment": 8, "chars_before": 12300,
+            "chars_after": 3100, "synthesis": "x"}
+    from tui.services.trace_render import build_compaction_label
+    assert build_compaction_label(1, comp) == "контекст сжат #1 · 8→1 · 12.3k→3.1k симв"
+
+
+def test_compaction_label_legacy_no_chars():
+    comp = {"messages_in_segment": 5, "synthesis": "x"}
+    from tui.services.trace_render import build_compaction_label
+    assert build_compaction_label(2, comp) == "контекст сжат #2 · 5→1"
+
+
 def test_render_code_block_with_lang():
     pytest.importorskip("textual")
     from tui.services.trace_render import render_code_block

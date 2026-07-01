@@ -1,148 +1,89 @@
-"""render-A: парсит markdown, удаляет синтаксис, возвращает spans (text, class)."""
-from tui.palette import CODE
-from tui.services.markdown_render import (
-    Block,
-    render_block,
-    render_block_to_text,
-)
+"""segment_answer: сегментация ответа на прозовые прогоны + code/table-блоки."""
+from tui.services.markdown_render import Block, segment_answer, build_markdown_table
 
 
-_CODE_HEX = CODE[1:].lower()  # '#XXXXXX' → 'xxxxxx' для substring-проверок в span.style
+def test_pure_prose_is_one_run():
+    assert segment_answer("просто текст") == [Block("prose", "просто текст")]
 
 
-def test_heading_h1_strips_hashes():
-    blocks = render_block("## Заголовок\nтело")
-    assert blocks[0].kind == "heading-1"
-    assert "Заголовок" in blocks[0].content
-    assert "##" not in blocks[0].content
+def test_blank_lines_preserved_inside_run():
+    assert segment_answer("абзац1\n\nабзац2") == [Block("prose", "абзац1\n\nабзац2")]
 
 
-def test_heading_h3_uses_heading_2_class():
-    blocks = render_block("### Подзаголовок\ntext")
-    assert blocks[0].kind == "heading-2"
+def test_heading_and_bullet_stay_in_prose_run():
+    # синтаксис НЕ срезаем — render_prose отрисует # и - построчно
+    assert segment_answer("# Title\n- item") == [Block("prose", "# Title\n- item")]
 
 
-def test_bullet_list_neutral():
-    blocks = render_block("- первый\n- второй")
-    kinds = [b.kind for b in blocks]
-    assert kinds.count("bullet") == 2
+def test_edge_blank_lines_trimmed():
+    assert segment_answer("\n\nтекст\n\n") == [Block("prose", "текст")]
 
 
-def test_code_block_is_neutral():
-    blocks = render_block("```\ncode here\n```")
-    kinds = [b.kind for b in blocks]
-    assert "code-block" in kinds
+def test_fenced_with_lang_is_code_block():
+    assert segment_answer("```python\nx = 1\ny = 2\n```") == [
+        Block("code-block", "x = 1\ny = 2", "python")]
 
 
-def test_render_block_fenced_with_lang():
-    blocks = render_block("```python\nx = 1\ny = 2\n```")
-    assert blocks == [Block(kind="code-block", content="x = 1\ny = 2", lang="python")]
+def test_fenced_no_lang():
+    assert segment_answer("```\nx = 1\n```") == [Block("code-block", "x = 1", None)]
 
 
-def test_render_block_fenced_no_lang():
-    blocks = render_block("```\nx = 1\n```")
-    assert blocks == [Block(kind="code-block", content="x = 1", lang=None)]
-
-
-def test_render_block_mixed_prose_and_code():
+def test_mixed_prose_and_code_splits_runs():
     text = "Вот пример:\n```js\nconst x = 1;\n```\nКонец."
-    blocks = render_block(text)
-    assert blocks == [
-        Block(kind="para", content="Вот пример:", lang=None),
-        Block(kind="code-block", content="const x = 1;", lang="js"),
-        Block(kind="para", content="Конец.", lang=None),
+    assert segment_answer(text) == [
+        Block("prose", "Вот пример:"),
+        Block("code-block", "const x = 1;", "js"),
+        Block("prose", "Конец."),
     ]
 
 
-def test_render_block_heading_and_bullet_have_no_lang():
-    blocks = render_block("# Title\n- item")
-    assert blocks == [
-        Block(kind="heading-1", content="Title", lang=None),
-        Block(kind="bullet", content="item", lang=None),
-    ]
+def test_table_basic():
+    segs = segment_answer("| A | B |\n|---|---|\n| 1 | 2 |\n| 3 | 4 |")
+    assert len(segs) == 1 and segs[0].kind == "table"
+    assert segs[0].headers == ["A", "B"]
+    assert segs[0].rows == [["1", "2"], ["3", "4"]]
+    assert segs[0].aligns == ["left", "left"]
 
 
-# ----------------------------------------------------------------------------
-# render_block_to_text — Block → rich.text.Text (canon §3.2)
-# ----------------------------------------------------------------------------
-
-def test_render_block_to_text_heading_is_accent_bold():
-    text = render_block_to_text(Block(kind="heading-1", content="Заголовок"))
-    assert text.plain == "Заголовок"
-    accent_bold_spans = [
-        s for s in text.spans
-        if "54b3a6" in str(s.style).lower() and "bold" in str(s.style).lower()
-    ]
-    assert any("Заголовок" in text.plain[s.start:s.end] for s in accent_bold_spans)
+def test_table_alignment_markers():
+    segs = segment_answer("| L | C | R |\n|:--|:-:|--:|\n| a | b | c |")
+    assert segs[0].aligns == ["left", "center", "right"]
 
 
-def test_render_block_to_text_bullet_has_marker_prefix():
-    text = render_block_to_text(Block(kind="bullet", content="первый"))
-    assert text.plain == "• первый"
+def test_pipe_line_without_separator_is_prose():
+    assert segment_answer("a | b | c\nплейн текст") == [Block("prose", "a | b | c\nплейн текст")]
 
 
-def test_render_block_to_text_para_applies_inline_styles():
-    text = render_block_to_text(Block(kind="para", content="есть **bold** и `code`"))
-    plain = text.plain
-    assert "**" not in plain
-    assert "`" not in plain
-    assert "bold" in plain
-    assert "code" in plain
-    accent_spans = [s for s in text.spans if "54b3a6" in str(s.style).lower()]
-    assert any("bold" in text.plain[s.start:s.end] for s in accent_spans)
-    code_spans = [s for s in text.spans if _CODE_HEX in str(s.style).lower()]
-    assert any("code" in text.plain[s.start:s.end] for s in code_spans)
+def test_table_ragged_row_padded():
+    segs = segment_answer("| A | B | C |\n|---|---|---|\n| 1 | 2 |")
+    assert segs[0].rows == [["1", "2", ""]]
 
 
-def test_render_block_table_basic():
-    blocks = render_block("| A | B |\n|---|---|\n| 1 | 2 |\n| 3 | 4 |")
-    assert len(blocks) == 1
-    b = blocks[0]
-    assert b.kind == "table"
-    assert b.headers == ["A", "B"]
-    assert b.rows == [["1", "2"], ["3", "4"]]
-    assert b.aligns == ["left", "left"]
+def test_build_markdown_table_smoke():
+    t = build_markdown_table(["A", "B"], [["1", "2"]], ["left", "left"])
+    assert t.columns[0].header == "A"
 
 
-def test_render_block_table_alignment_markers():
-    blocks = render_block("| L | C | R |\n|:--|:-:|--:|\n| a | b | c |")
-    assert blocks[0].aligns == ["left", "center", "right"]
-
-
-def test_render_block_pipe_line_without_separator_is_para():
-    blocks = render_block("a | b | c\nплейн текст")
-    assert all(b.kind != "table" for b in blocks)
-    assert blocks[0].kind == "para"
-
-
-def test_render_block_table_ragged_row_padded():
-    blocks = render_block("| A | B | C |\n|---|---|---|\n| 1 | 2 |")
-    assert blocks[0].rows == [["1", "2", ""]]
-
-
-# ----------------------------------------------------------------------------
-# build_markdown_table — rich.Table (полная сетка, dim-рамка, accent-заголовок)
-# ----------------------------------------------------------------------------
-
-def test_build_markdown_table_columns_and_justify():
-    from tui.services.markdown_render import build_markdown_table
-    t = build_markdown_table(["A", "B"], [["1", "2"]], ["left", "right"])
+def test_build_markdown_table_column_count_and_justify():
+    """Columns count matches headers; right-justified column has justify='right'."""
+    t = build_markdown_table(["Name", "Score"], [["Alice", "99"]], ["left", "right"])
     assert len(t.columns) == 2
+    assert t.columns[0].justify == "left"
     assert t.columns[1].justify == "right"
 
 
-def test_build_markdown_table_header_accent_bold():
-    from tui.palette import ACCENT
-    from tui.services.markdown_render import build_markdown_table
-    t = build_markdown_table(["Заголовок"], [["x"]], ["left"])
-    hs = str(t.columns[0].header_style).lower()
-    assert ACCENT[1:].lower() in hs and "bold" in hs
+def test_build_markdown_table_header_style():
+    """Each column header_style is accent (#54B3A6) bold."""
+    t = build_markdown_table(["Col"], [["val"]], ["left"])
+    assert t.columns[0].header_style == "#54B3A6 bold"
 
 
-def test_build_markdown_table_cell_inline_code_stripped():
-    from rich.text import Text
-    from tui.services.markdown_render import build_markdown_table
-    t = build_markdown_table(["H"], [["`x`"]], ["left"])
-    cell = t.columns[0]._cells[0]
-    assert isinstance(cell, Text)
-    assert cell.plain == "x"  # бэктики срезаны → inline отработал
+def test_build_markdown_table_inline_code_cell():
+    """Cell containing `code` spans: backticks stripped, text rendered with code style (#afbdff)."""
+    t = build_markdown_table(["H"], [["`snippet`"]], ["left"])
+    # The cell is a rich.Text; iterate spans to find code-styled segment.
+    cell = t.columns[0]._cells[0]  # first row, first column
+    styles = [span.style for span in cell._spans]
+    assert any("#afbdff" in str(s) for s in styles), (
+        f"Expected code style #afbdff in cell spans, got: {styles}"
+    )

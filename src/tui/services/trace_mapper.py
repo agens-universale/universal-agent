@@ -10,7 +10,14 @@ from tui.services.tool_identity import tool_id
 
 
 _TECHNICAL_TAG_RE = re.compile(r"<technical[^>]*>(.*?)</technical>", re.DOTALL)
-_THINK_BLOCK_RE = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
+# Greedy: strips first <think> → LAST </think> (one span). Robust к тому, что
+# модель цитирует/обсуждает think-теги внутри рассуждения (рассогласованные/
+# вложенные теги). Tradeoff: реальный ответ МЕЖДУ двумя think-блоками будет
+# срезан — патологический редкий случай vs частая утечка рассуждения наружу.
+# Вторая ветка (<think>.*) — если </think> нет вовсе (модель не закрыла тег),
+# режем до конца строки (зеркалит stream_sink._THINK_RE), иначе сырое рассуждение
+# течёт в трейс. Порядок важен: закрытый спан матчим первым.
+_THINK_BLOCK_RE = re.compile(r"<think>.*</think>|<think>.*", re.DOTALL | re.IGNORECASE)
 _SUMMARY_TAG_RE = re.compile(r"<summary[^>]*>(.*?)</summary>", re.DOTALL)
 _SUMMARIZED_PREFIX_RE = re.compile(
     r"^Summarized context from previous dialogue\.\s*", re.IGNORECASE
@@ -86,6 +93,17 @@ def map_message(msg: dict, *, no: int, ts: str) -> Optional[TraceEvent]:
 
     # USER
     if role == "user":
+        # Скилл-сообщения несут display_content (чистый промпт) и wire content
+        # (с инструкцией скилла). display_content обрабатываем первым, до
+        # технического разбора: скилл-сообщения не technical.
+        if "display_content" in msg:
+            disp = (msg.get("display_content") or "").strip()
+            if not disp:
+                return None                      # mid-run доставка → реплику не рисуем
+            return TraceEvent(
+                no=no, event_ts_utc_iso=ts, kind="user",
+                title="", summary=disp, full_payload=msg, message_id=mid,
+            )
         content = msg.get("content")
         if isinstance(content, str) and content.strip():
             stripped = content.strip()
@@ -102,10 +120,12 @@ def map_message(msg: dict, *, no: int, ts: str) -> Optional[TraceEvent]:
                     tech_type = tag_m.group(1) if tag_m else ""
                 if tech_type == "error_message":
                     # Ошибки бэкенда — заметная красная строка (см. _render_event).
+                    cid = msg.get("call_id")
                     return TraceEvent(
                         no=no, event_ts_utc_iso=ts, kind="error_msg",
                         title="!", summary=inner_text,
                         full_payload=msg, message_id=mid,
+                        call_id=cid if isinstance(cid, str) else None,
                     )
                 if tech_type == "dialog_summary":
                     # Суммаризация — видимый маркер + блок очищенной сводки.
@@ -142,15 +162,10 @@ def map_message(msg: dict, *, no: int, ts: str) -> Optional[TraceEvent]:
             )
         return None
 
-    # THINK (reasoning) — kind="system" sentinel + title="think" (renders as .line-think)
+    # THINK (reasoning) — suppressed: reasoning is shown via the ThinkingIndicator
+    # tail (docs/tui/specs/2026-06-16-reasoning-indicator-design.md), not as a
+    # trace row. Export keeps reasoning (services/export.py).
     if typ in ("reasoning", "think"):
-        text = msg.get("summary") or msg.get("content") or ""
-        if isinstance(text, str) and text.strip():
-            return TraceEvent(
-                no=no, event_ts_utc_iso=ts, kind="system",
-                title="think", summary=text.strip(),
-                full_payload=msg, message_id=mid,
-            )
         return None
 
     # Special tool-event handling (must precede generic function_call mapping).
@@ -203,8 +218,20 @@ def map_message(msg: dict, *, no: int, ts: str) -> Optional[TraceEvent]:
             )
         return None
 
-    if typ == "function_call_output" and name == "intermediate_reply":
-        return None
+    # INTERMEDIATE_REPLY output — глушим (машинный статус не нужен). Как и у
+    # submit_solution: в chat_completions у output НЕТ name, но output-JSON
+    # содержит "tool" → проверяем оба пути (иначе паразитная строка `  |- …`).
+    if typ == "function_call_output":
+        if name == "intermediate_reply":
+            return None
+        _ir_out = msg.get("output")
+        if isinstance(_ir_out, str):
+            try:
+                _ir_data = json.loads(_ir_out)
+            except json.JSONDecodeError:
+                _ir_data = None
+            if isinstance(_ir_data, dict) and tool_id(_ir_data.get("tool")) == "intermediate_reply":
+                return None
 
     # SUBMIT_SOLUTION output — глушим в двух случаях:
     # 1. backend прислал `name == "submit_solution"` в output-payload (responses-mode).
