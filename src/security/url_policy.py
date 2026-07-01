@@ -154,16 +154,18 @@ def enforce_url_policy(
                 )
                 return func(*args, **kwargs)
             if mode == "ask":
-                from security.path_policy import prompt_user_confirmation
-                confirmed = prompt_user_confirmation(
-                    title="URL policy",
+                from security.confirm_port import request_confirm
+                confirmed = request_confirm(
+                    title="Политика URL",
+                    question=f"Разрешить запрос вне политики URL: {decision.url}?",
                     fields=[
                         ("Tool", _tool_name(func, args)),
                         ("URL", decision.url),
                         ("Reason", decision.reason or ""),
                         ("Matched rule", decision.matched_rule or "-"),
                     ],
-                    question="Allow URL request outside policy?",
+                    ctx=context.ctx,
+                    decision_key=f"url:{decision.url}",
                 )
                 if confirmed:
                     audit_policy_decision(
@@ -176,6 +178,10 @@ def enforce_url_policy(
                     )
                     return func(*args, **kwargs)
                 error["type"] = "url_blocked_by_policy_cancelled_by_user"
+                error["message"] = (
+                    f"User declined the request to '{decision.url}'. Do NOT retry the same "
+                    "URL, and do NOT silently fetch a different URL — ask the user or stop."
+                )
             audit_policy_decision(
                 context,
                 tool_name=_tool_name(func, args),
