@@ -110,7 +110,7 @@ def test_exec_command_ask_mode_executes_when_user_confirms(tmp_path):
     command = f'"{sys.executable}" -c "from pathlib import Path; Path({str(marker)!r}).write_text(\'ok\')"'
 
     tool = ExecuteCommand(config_dict=_config(tmp_path, "ask"))
-    original_call = tool.__call__.__wrapped__
+    original_call = tool.__call__.__wrapped__.__wrapped__
     guarded_call = command_moderation.moderate_command_execution(
         payload_arg="command",
         tool_name="exec_command",
@@ -170,7 +170,7 @@ def test_command_moderation_asks_when_judge_unavailable_in_ask(tmp_path, monkeyp
     command = f'"{sys.executable}" -c "from pathlib import Path; Path({str(marker)!r}).write_text(\'ok\')"'
 
     tool = ExecuteCommand(config_dict=_config(tmp_path, "ask"))
-    original_call = tool.__call__.__wrapped__
+    original_call = tool.__call__.__wrapped__.__wrapped__
     guarded_call = command_moderation.moderate_command_execution(
         payload_arg="command",
         tool_name="exec_command",

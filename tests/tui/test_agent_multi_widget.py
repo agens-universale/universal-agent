@@ -77,8 +77,14 @@ async def test_continuation_widgets_have_cont_class(tmp_path):
     from tui.widgets.trace_row import TraceRow
 
     tid = "multi_para"
-    # Три параграфа prose — каждый отдельный блок.
-    content = "Первый параграф.\n\nВторой параграф.\n\nТретий параграф."
+    # Проза теперь режется на отдельные prose-блоки ТОЛЬКО границей code/table
+    # (пустые строки сохраняются внутри одного блока, 0ff36ad8). Разделяем три
+    # prose-рана code-блоками, чтобы получить 3 отдельные line-agent строки.
+    content = (
+        "Первый параграф.\n```text\na\n```\n"
+        "Второй параграф.\n```text\nb\n```\n"
+        "Третий параграф."
+    )
     _write_thread_with_agent_reply(tmp_path, tid, content)
 
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})

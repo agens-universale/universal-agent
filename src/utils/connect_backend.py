@@ -163,6 +163,10 @@ def request_backend_chat_completions(
     if on_delta is not None:
         stream_data = dict(data)
         stream_data["stream"] = True
+        # OpenAI-совместимые провайдеры отдают usage в стриме только по явному
+        # запросу — иначе финального usage-чанка нет и токены основного цикла
+        # (он всегда стримится) не учитываются.
+        stream_data["stream_options"] = {"include_usage": True}
         if logger is not None:
             try:
                 logger.debug(
@@ -198,9 +202,14 @@ def request_backend_chat_completions(
                 )
                 raise
             on_delta("reset", "")
-            return assemble_streamed_completion(
+            streamed = assemble_streamed_completion(
                 iter_sse_data_lines(r.iter_lines()), on_delta=on_delta
             )
+            # Учитываем токены стрима так же, как в блокирующем пути (иначе usage
+            # основного цикла терялся — фиксировался только non-stream aux-вызов).
+            if isinstance(streamed, dict):
+                record_usage(streamed.get("usage"))
+            return streamed
 
     if logger is not None:
         try:

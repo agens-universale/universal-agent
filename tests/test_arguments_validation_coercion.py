@@ -1,4 +1,11 @@
-from tools.arguments_validation import parse_and_validate_tool_arguments
+# Импортируем ОБА символа из одного module-top-биндинга: autouse-фикстура
+# ensure_real_tools_package перегружает tools.* между сбором и прогоном, поэтому
+# импорт исключения внутри теста дал бы ДРУГОЙ класс → pytest.raises не ловил бы
+# исключение, поднятое parse_and_validate (старый класс). Один импорт — одна личность.
+from tools.arguments_validation import (
+    WrongFunctionArgumentsException,
+    parse_and_validate_tool_arguments,
+)
 
 _SPEC = {
     "parameters": {
@@ -34,7 +41,6 @@ def test_string_valid_as_is_not_touched():
 
 def test_unrecoverable_still_rejected():
     import pytest
-    from tools.arguments_validation import WrongFunctionArgumentsException
     # строка, чей json.loads даёт скаляр (не dict/list) → коэрция не применяется
     args = '{"summary": "TC1", "attributes": "42"}'
     with pytest.raises(WrongFunctionArgumentsException):

@@ -1,20 +1,22 @@
 """force_compact_once: один безусловный проход сжатия (без проверки порога)."""
+import importlib
 import types
-
-from run_summary_coordinator import RunSummaryCoordinator
 
 
 def _coord(monkeypatch, calls, backend="chat_completions"):
+    # Разрешаем модуль в CALL-time из sys.modules: другой тест мог перезагрузить
+    # run_summary_coordinator (новый объект модуля). Если брать класс из module-top
+    # импорта (старый объект), его force_compact_once читал бы run_summary_compaction
+    # из СТАРОГО namespace, а monkeypatch по строке пропатчил бы НОВЫЙ → патч мимо,
+    # звался бы реальный компактор. Берём класс и патчим атрибут ОДНОГО объекта.
+    rsc = importlib.import_module("run_summary_coordinator")
     state = types.SimpleNamespace(backend_api_mode=backend)
-    coord = RunSummaryCoordinator(
+    coord = rsc.RunSummaryCoordinator(
         ctx=types.SimpleNamespace(), state=state, thread_session=None,
         summary_trigger_chars=10_000, is_cli_mode=True,
         pre_backend_trigger_reason="pre_backend", logger=None,
     )
-    monkeypatch.setattr(
-        "run_summary_coordinator.run_summary_compaction",
-        lambda **kw: calls.append(kw),
-    )
+    monkeypatch.setattr(rsc, "run_summary_compaction", lambda **kw: calls.append(kw))
     return coord
 
 

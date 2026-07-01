@@ -97,6 +97,10 @@ class State:
         # None, пока прогон не завершился. Оба доступны in-memory через get_state().
         self.usage = UsageAccount()
         self.last_run_usage: Optional[UsageAccount] = None
+        # Снимок кумулятива на старте текущего прогона (meta-dict, JSON-safe).
+        # По нему футер считает live-«запрос» текущего хода (usage − baseline),
+        # пока last_run_usage ещё не выставлен. Транзиентный (per-run), не биллится.
+        self.run_start_usage_meta: Optional[dict] = None
 
     def set_call_metadata(self):
         metadata: Dict[str, Any] = dict()

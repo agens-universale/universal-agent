@@ -15,14 +15,16 @@ class _FakeExecutor:
         self.stopped = False
         self.messages_added: list[dict] = []
         self._event = threading.Event()
+        self.started = threading.Event()   # выставляется, когда run реально начался
 
     def run(self, messages, *, thread_id, start_new_thread=False,
             system=None, verbose=None, discard_writes_after_stop=False,
-            message_ids=None):
+            message_ids=None, display_contents=None, skills_loaded=None):
         self.run_called_with = {
             "messages": messages, "thread_id": thread_id,
             "start_new_thread": start_new_thread, "system": system,
         }
+        self.started.set()   # детерминированный сигнал вместо sleep в тестах
         self._event.wait(timeout=2.0)
         return None
 
@@ -38,7 +40,7 @@ def test_runner_starts_in_background_and_stops():
     fake = _FakeExecutor()
     runner = AgentRunner(executor=fake)
     runner.start(query="привет", thread_id="t1")
-    time.sleep(0.05)
+    assert fake.started.wait(2.0)          # ждём реального старта, без гонки sleep
     assert fake.run_called_with is not None
     assert fake.run_called_with["messages"] == ["привет"]
     assert fake.run_called_with["thread_id"] == "t1"
@@ -125,7 +127,8 @@ def test_start_passes_message_id_as_message_ids():
 
     class _Stub:
         def run(self, messages, *, thread_id, start_new_thread=False, system=None,
-                verbose=None, discard_writes_after_stop=False, message_ids=None):
+                verbose=None, discard_writes_after_stop=False, message_ids=None,
+                display_contents=None, skills_loaded=None):
             seen.append(message_ids)
 
         def stop_run(self): pass
@@ -145,7 +148,8 @@ async def test_runner_start_passes_discard_writes_after_stop_kwarg():
     calls = []
     class _StubExec:
         def run(self, messages, *, thread_id, start_new_thread, system,
-                discard_writes_after_stop=False, message_ids=None):
+                discard_writes_after_stop=False, message_ids=None,
+                display_contents=None, skills_loaded=None):
             calls.append({
                 "messages": messages,
                 "thread_id": thread_id,

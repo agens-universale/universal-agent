@@ -13,7 +13,7 @@ def test_bootstrap_creates_user_config(tmp_path, monkeypatch):
     assert not dest.exists()
     cfg = config.load_config()          # no --config, no ~/.gc/config.yml
     assert dest.is_file()               # bootstrap создал
-    assert cfg["model"] == "gigacode_agent_v1_rc"
+    assert cfg["model"] == "gigacode_agent_v1.6_rc"
 
 
 def test_bootstrap_does_not_clobber_existing(tmp_path, monkeypatch):

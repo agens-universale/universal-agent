@@ -80,6 +80,14 @@ class AgentRunner:
             t = self._thread
         return t is not None and t.is_alive()
 
+    def usage_snapshot(self) -> Optional[tuple]:
+        """Снимок usage от executor'а для футера: ``(session_meta, last_run_meta|None)``
+        или None. Не строит executor (снапшот нужен и до первого прогона — тогда None)."""
+        ex = self._executor
+        if ex is None or not hasattr(ex, "usage_meta_snapshot"):
+            return None
+        return ex.usage_meta_snapshot()
+
     def compact_now(self, thread_id: str, system: str) -> bool:
         """Off-thread форс-сжатие треда. False если worker занят."""
         with self._lock:

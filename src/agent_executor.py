@@ -29,9 +29,11 @@ from usage.account import UsageAccount
 from usage.report import build_run_usage_report
 from thread_store import (
     ThreadSession,
+    load_thread_meta,
     make_message_key,
     reset_thread_files,
     resolve_threads_dir,
+    save_thread_meta,
     update_tui_meta,
 )
 from tools.connect_mcp.persistent_stdio import PersistentStdioRegistry
@@ -386,8 +388,10 @@ class AgentExecutor:
                 return self._state.stop_requested if self._state is not None else False
 
         # Снимок usage до прогона: для resume треда state.usage гидрирован кумулятивом,
-        # отчёт же показывает токены именно этого прогона (дельту).
+        # отчёт же показывает токены именно этого прогона (дельту). Тот же baseline
+        # кладём на state — по нему TUI-футер считает live-«запрос» текущего хода.
         run_start_usage = UsageAccount.from_meta(state.usage.to_meta())
+        state.run_start_usage_meta = run_start_usage.to_meta()
         try:
             response = run_agent(
                 messages,
@@ -475,6 +479,37 @@ class AgentExecutor:
         """
         return self._lock
 
+    def usage_meta_snapshot(self) -> Optional[tuple[dict, Optional[dict]]]:
+        """Снимок usage для TUI-футера: ``(session_meta, request_meta | None)``.
+
+        ``session_meta`` — кумулятив треда (``state.usage``), тикает вживую.
+        ``request_meta`` — «запрос»:
+        - ход идёт (``last_run_usage`` ещё None) → **live-дельта** ``usage − baseline``,
+          где baseline (``run_start_usage_meta``) снят на старте хода: число
+          сбрасывается с новым вопросом и растёт по мере работы агента;
+        - ход завершён (``last_run_usage`` выставлен) → итог этого хода;
+        - прогонов ещё не было → None.
+        Всё через ``to_meta()`` под замком — против гонки «dictionary changed size»
+        с живым ``UsageAccount.add()`` в agent-потоке. None, если state не создан.
+        """
+        with self._lock:
+            state = self._state
+            if state is None:
+                return None
+            usage = getattr(state, "usage", None)
+            session_meta = usage.to_meta() if usage is not None else {}
+            last_run = getattr(state, "last_run_usage", None)
+            if last_run is not None:
+                request_meta: Optional[dict] = last_run.to_meta()
+            else:
+                baseline_meta = getattr(state, "run_start_usage_meta", None)
+                if baseline_meta is not None and usage is not None:
+                    baseline = UsageAccount.from_meta(baseline_meta)
+                    request_meta = usage.delta_from(baseline).to_meta()
+                else:
+                    request_meta = None
+            return (session_meta, request_meta)
+
     @staticmethod
     def _build_user_messages(user_bodies, *, message_ids, display_contents,
                              skills_loaded, gen_id):
@@ -542,6 +577,9 @@ class AgentExecutor:
             workspace_config=config_dict,
         )
         state.backend_api_mode = "chat_completions"
+        # Гидрируем кумулятив токенов треда, чтобы summary-вызов компакции лёг
+        # ПОВЕРХ него (иначе транзиентный state.usage пуст и дельта теряется).
+        state.usage = UsageAccount.from_meta(meta.get("token_usage"))
         state.dialog_steps_offset = int(meta.get("dialog_steps_offset", 0) or 0)
         state.init_user_intent_log(meta.get("user_intent_log"))
         state.init_current_user_intent(meta.get("current_user_intent"))
@@ -561,4 +599,21 @@ class AgentExecutor:
         )
         setattr(self._ctx, "on_summary_applied", coord.on_summary_applied)
         coord.force_compact_once(trigger_reason="manual")
+
+        # Компакция сохраняет thread meta из ts.meta (старый token_usage переносится
+        # как есть) — поэтому обновлённый кумулятив (baseline + summary) персистим
+        # отдельно и обновляем live-state, чтобы TUI-футер сразу увидел рост.
+        # ВАЖНО: пишем в TOP-LEVEL ``token_usage`` (его гидрирует run()), НЕ через
+        # update_tui_meta — тот кладёт под вложенный meta["tui"], откуда run() не читает
+        # → на следующем прогоне summary «пропадал» (откат кумулятива).
+        try:
+            threads_dir = thread_session.threads_dir
+            persisted_meta = load_thread_meta(threads_dir, system_id, thread_id) or {}
+            persisted_meta["token_usage"] = state.usage.to_meta()
+            save_thread_meta(threads_dir, system_id, thread_id, persisted_meta)
+        except Exception:
+            pass
+        with self._lock:
+            if self._state is not None and getattr(self._state, "thread_id", None) == thread_id:
+                self._state.usage = UsageAccount.from_meta(state.usage.to_meta())
         return True

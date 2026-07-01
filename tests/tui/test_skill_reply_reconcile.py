@@ -214,8 +214,11 @@ def test_skill_marker_css_rule_exists():
     match = re.search(r"\.skill-marker\s*\{([^}]*)\}", content)
     assert match is not None, ".skill-marker { ... } не найден как блок"
     block = match.group(1)
-    assert "margin-bottom" in block, (
-        f".skill-marker должен задавать margin-bottom, блок: {block!r}"
+    # Нижний отступ может задаваться как margin-bottom, так и шорткатом margin:
+    # (напр. `margin: 1 0` → top И bottom). Оба варианта дают зазор под маркером.
+    has_bottom_margin = "margin-bottom" in block or re.search(r"\bmargin\s*:", block)
+    assert has_bottom_margin, (
+        f".skill-marker должен задавать нижний отступ (margin-bottom или margin:), блок: {block!r}"
     )
 
 

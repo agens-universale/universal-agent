@@ -161,9 +161,12 @@ async def test_tab_skips_agent_continuation_rows(tmp_path):
         scr.attach_active_task(tid)
         await pilot.pause(0.2)
 
+        # Проза режется на отдельные prose-строки только границей code/table
+        # (пустые строки сохраняются внутри блока, 0ff36ad8) — разделяем code-блоками.
         scr._render_event(TraceEvent(
             no=2, event_ts_utc_iso="...", kind="agent", title=None,
-            summary="первый блок\n\nвторой блок\n\nтретий блок",
+            summary=("первый блок\n```text\na\n```\nвторой блок\n"
+                     "```text\nb\n```\nтретий блок"),
             tool_name=None, call_id=None, full_payload=None,
         ))
         await pilot.pause(0.1)
