@@ -46,7 +46,10 @@ class FileTaskStore:
             except (OSError, json.JSONDecodeError):
                 continue
             tid = meta.get("thread_id") or meta_path.stem[len(prefix):]
-            status = meta.get("status") or "stopped"
+            # Исход сессии: TUI-владелец пишет в meta.tui.status (completed/stopped/
+            # failed); верхний meta.status — для CLI/server-потоков. Нет ни того, ни
+            # другого → None (исход не записан; список не выдумывает «stopped»).
+            status = (meta.get("tui") or {}).get("status") or meta.get("status")
             updated = meta.get("updated_at", "")
             msgs = int(meta.get("messages_count", 0))
             tui_meta = meta.get("tui") or {}
@@ -178,7 +181,7 @@ class FileTaskStore:
         """Тред → сегменты (части между сжатиями). Read-only реконструкция.
 
         Каждый сегмент: {"index", "messages": [envelope-records], "compacted_by":
-        {"ts", "messages_in_segment", "synthesis"} | None}.
+        {"ts", "messages_in_segment", "synthesis", "chars_before", "chars_after"} | None}.
         Сегмент i = файл i минус лидирующая dialog_summary; его synthesis =
         лидирующая dialog_summary СЛЕДУЮЩЕГО файла; у последнего (live) — None.
         """
@@ -213,13 +216,35 @@ class FileTaskStore:
                 if next_leading is not None:
                     payload = next_leading.get("payload") or {}
                     synthesis = _clean_summary(user_content_to_text(payload.get("content")))
+                    chars_before = sum(
+                        len(user_content_to_text((r.get("payload") or {}).get("content")))
+                        for r in seg
+                    )
                     compacted_by = {
                         "ts": next_leading.get("ts", ""),
                         "messages_in_segment": len(seg),
                         "synthesis": synthesis,
+                        "chars_before": chars_before,
+                        "chars_after": len(synthesis),
                     }
             segments.append({"index": i, "messages": seg, "compacted_by": compacted_by})
         return segments
+
+    def read_live_messages(self, task_id: str, system: Optional[str] = None) -> list[dict]:
+        """payload-словари сообщений ТОЛЬКО из live data-файла (без архивов).
+        Для лёгкого подсчёта объёма контекста (индикатор). Нет файла → []."""
+        sys_ = system or self._system
+        live = self._data_path(task_id, sys_)
+        if not live.exists():
+            return []
+        out: list[dict] = []
+        with open(live, "r", encoding="utf-8") as f:
+            for line in f:
+                rec = self._parse_line(line.rstrip("\n"))
+                payload = rec.get("payload") if isinstance(rec, dict) else None
+                if isinstance(payload, dict):
+                    out.append(payload)
+        return out
 
     def tail_events(
         self, task_id: str, cursor: TaskCursor, system: Optional[str] = None

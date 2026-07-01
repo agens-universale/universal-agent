@@ -1,6 +1,6 @@
-# Security policy: `command_moderation`, `write_guard`, `read_guard`, `url_policy`
+# Security policy: `command_moderation`, `write_guard`, `read_guard`, `url_policy`, `protected_paths`
 
-Клиент поддерживает четыре **независимых** слоя безопасности на одном уровне внутри `security:`.
+Клиент поддерживает пять **независимых** слоёв безопасности на одном уровне внутри `security:`.
 
 | Слой | Что блокирует | Тулы под защитой | Error type |
 |---|---|---|---|
@@ -8,8 +8,42 @@
 | `write_guard` | запись вне `launch_root` + `extra_paths` | `write_to_file`, `append_to_file`, `search_and_replace`, write-fragments в `execute_command`, `download_file` | `write_guard_violation` |
 | `read_guard` | чтение вне `allowed_read_roots`, в `denied_*`, по запрещённым паттернам/расширениям | `read_file`, `list_files`, `search_files` | `read_guard_violation` |
 | `url_policy` | URL по схеме или `url_blacklist` (включая SSRF-подсети) | `fetch_url`, `simple_fetch_url`, `download_file` | `url_validation_failed`, `url_blocked_by_policy` |
+| `protected_paths` | запись/чтение `.gc` и инструкций; детерминированный command-guard на shell-команды | все write-тулы + `execute_command`, `run_python_code` | `protected_path_denied` |
 
-Слои независимы: `read_guard` блокирует чтение в любом `command_moderation.mode` (даже `allow`); `url_policy` не зависит от `mode`; `write_guard` независим от `read_guard`. **Safe-by-default-OFF**: каждый слой требует явный `enabled: true`, чтобы включиться.
+Слои независимы: `read_guard` блокирует чтение в любом `command_moderation.mode` (даже `allow`); `url_policy` не зависит от `mode`; `write_guard` независим от `read_guard`. **Safe-by-default-OFF**: каждый слой требует явный `enabled: true`, чтобы включиться — **кроме `protected_paths`, который включён по умолчанию** (`enabled: true` из коробки).
+
+## `security.protected_paths` — floor-защита `.gc` (ON по умолчанию)
+
+Единственный слой, который **включён без явного `enabled: true`**. Это «пол» безопасности: работает поверх всех остальных слоёв и не отключается вместе с `write_guard`/`read_guard`/`command_moderation`.
+
+```yaml
+security:
+  protected_paths:
+    enabled: true   # дефолт; явно задавать не нужно
+    extra: []       # дополнительные пути, приравниваемые к operational
+```
+
+### Что защищает
+
+Три класса путей с разным решением:
+
+| Класс | Примеры | Решение |
+|---|---|---|
+| `instructions` | `AGENTS.md`, `CLAUDE.md`, инструктивные файлы | `ask` — запрос подтверждения у пользователя |
+| `operational` | весь `.gc/` проекта, `~/.local/state/gc/` (config/state/cache) | `deny` — блок без возможности подтвердить |
+| `skills` | `.gc/skills/`, `~/.local/share/gc/skills/` | `allow` — запись разрешена (скиллы можно редактировать) |
+
+### Детерминированный command-guard (tripwire)
+
+Перед тем как команда уйдёт в subprocess, `execute_command` и `run_python_code` проходят через `command_guard` — детерминированный сканер токенов команды. Он ловит прямые обращения к protected-путям в тексте команды (например, `rm -rf .gc`) и блокирует их **до** запуска процесса. Это закрывает сценарий, при котором агент сам себе стирал `.gc` через `execute_command` (баг TSKBCKGRNDGNT-2).
+
+Обфускацию (`$(echo .gc)` и т.п.) tripwire не ловит — второй рубеж там LLM-судья (`command_moderation`).
+
+Список protected-путей передаётся в prompt судьи как `never_touch_paths`; если судья недоступен — fail-closed (команда блокируется).
+
+### Long-memory backup
+
+Проектная долгосрочная память (`.gc/GIGACODE_memory.md`) автоматически резервируется в `<gc_state>/projects/<slug>/GIGACODE_memory_backup.md`. Этот путь лежит **вне дерева проекта**, поэтому при вайпе `.gc/` бэкап сохраняется. При следующем обращении к памяти `storage.read()` / `storage.stat()` автоматически восстанавливает основной файл из бэкапа.
 
 ## Базовый пример конфига
 

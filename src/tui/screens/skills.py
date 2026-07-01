@@ -12,9 +12,7 @@ from textual.widgets import Input, Static
 
 from tui.palette import BRIGHT, CODE, DIM, INK, MUTED
 from tui.services.skill_view import source_label, truncate_path_left
-from tui import branding
 
-_HEADER_RIGHT = branding.HEADER_RIGHT
 _FOOTER = "[↑↓] выбрать  [Enter] открыть  [Esc] back  /skill <id>"
 _PATH_MIN = 16          # минимально видимая длина пути (хвост-папка)
 _DEFAULT_WIDTH = 80     # пока ширина списка неизвестна (до первой раскладки)
@@ -39,7 +37,6 @@ class SkillsScreen(Screen):
         with Vertical(id="skills-root"):
             with Horizontal(id="header"):
                 yield Static("", id="header-left", markup=False)
-                yield Static(_HEADER_RIGHT, id="header-right", markup=False)
             yield VerticalScroll(id="skills-list")
             with Horizontal(id="skills-filter-row"):
                 yield Static("> ", id="skills-filter-prompt", markup=False)
@@ -98,6 +95,14 @@ class SkillsScreen(Screen):
             t.append(truncate_path_left(path, maxlen), style=DIM)
         return t
 
+    def _card_text(self, skill: dict, *, selected: bool, maxlen: int) -> Text:
+        """Карточка скилла одним 2-строчным виджетом: id + строка типа/пути."""
+        t = Text(no_wrap=True, overflow="ellipsis")
+        t.append_text(self._id_line(skill, selected=selected))
+        t.append("\n")
+        t.append_text(self._meta_line(skill, maxlen=maxlen))
+        return t
+
     def _render_list(self) -> None:
         listview = self.query_one("#skills-list", VerticalScroll)
         listview.remove_children()
@@ -105,19 +110,19 @@ class SkillsScreen(Screen):
             listview.mount(Static("(скиллы недоступны)", classes="line-meta", markup=False))
             return
         maxlen = self._path_maxlen()
-        selected_widget: Optional[Static] = None
+        selected_card: Optional[Static] = None
         for idx, s in enumerate(self._skills):
             suffix = " selected" if idx == self._selected_idx else ""
-            id_w = Static(self._id_line(s, selected=bool(suffix)),
-                          classes="card-title" + suffix, markup=False)
-            meta_w = Static(self._meta_line(s, maxlen=maxlen),
-                            classes="card-meta" + suffix, markup=False)
+            card = Static(self._card_text(s, selected=bool(suffix), maxlen=maxlen),
+                          classes="card" + suffix, markup=False)
             if suffix:
-                selected_widget = id_w
-            listview.mount(id_w)
-            listview.mount(meta_w)
-        if selected_widget is not None:
-            self.call_after_refresh(selected_widget.scroll_visible, animate=False)
+                selected_card = card
+            listview.mount(card)
+        if selected_card is not None:
+            # Элемент — ОДИН виджет (2 строки): scroll_visible тащит его целиком в
+            # обе стороны кругового перехода (как карточка MCP), без конфликта двух
+            # независимых прокруток заголовка и меты.
+            self.call_after_refresh(selected_card.scroll_visible, animate=False)
 
     def on_input_changed(self, event: Input.Changed) -> None:
         if event.input.id == "skills-filter":
@@ -126,13 +131,13 @@ class SkillsScreen(Screen):
 
     def on_key(self, event: events.Key) -> None:
         if event.key == "up":
-            if self._skills and self._selected_idx > 0:
-                self._selected_idx -= 1
+            if self._skills:   # круговой: с первой строки ↑ → на последнюю
+                self._selected_idx = (self._selected_idx - 1) % len(self._skills)
                 self._render_list()
             event.stop()
         elif event.key == "down":
-            if self._skills and self._selected_idx < len(self._skills) - 1:
-                self._selected_idx += 1
+            if self._skills:   # круговой: с последней ↓ → на первую
+                self._selected_idx = (self._selected_idx + 1) % len(self._skills)
                 self._render_list()
             event.stop()
         elif event.key in ("home", "end"):

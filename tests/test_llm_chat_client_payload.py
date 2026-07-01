@@ -121,3 +121,24 @@ def test_request_chat_completion_text_uses_max_tokens_when_flag_enabled(monkeypa
 
     assert captured["payload"]["max_tokens"] == 444
     assert "max_completion_tokens" not in captured["payload"]
+
+
+def test_request_chat_completion_text_omits_empty_tools(monkeypatch):
+    # gigacode (/api/v2/chat/completions) отвергает пустой tools:[] 400 Bad Request —
+    # этот text-only клиент не использует инструменты, ключ tools не отправляем.
+    captured = _patch_policy(monkeypatch)
+
+    ctx = SimpleNamespace(
+        config_dict={"completions_url": "http://example.test/v1/chat/completions"},
+        logger=None,
+    )
+    state = SimpleNamespace(default_model="test-model")
+
+    llm_chat_client.request_chat_completion_text(
+        ctx=ctx,
+        state=state,
+        messages=[{"role": "user", "content": "hi"}],
+        max_tokens=10,
+    )
+
+    assert "tools" not in captured["payload"]

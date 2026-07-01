@@ -70,14 +70,14 @@ async def test_indicator_warning_survives_trace_rebuild(tmp_path):
         # Пересборка трейса (все точки идут через _clear_trace)
         scr._switch_to_empty_state()
         await pilot.pause()
-        rows = pilot.app.query("#mcp-status-row")
+        # MCP-статус теперь живёт внутри #brand-block как #brand-mcp (A2).
+        rows = pilot.app.query("#brand-mcp")
         assert len(rows) == 1
         assert "/mcp" in _content(rows[0])
-        # Порядок шапки: бренд первый, предупреждение под ним.
+        # Шапка: только #brand-block (MCP внутри карточки, не отдельным виджетом).
         trace = pilot.app.query_one("#trace")
         children = list(trace.children)
         assert children[0].id == "brand-block"
-        assert children[1].id == "mcp-status-row"
 
 
 @pytest.mark.asyncio

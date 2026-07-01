@@ -267,3 +267,94 @@ def test_warm_idempotent():
     r.warm()
     time.sleep(0.1)
     assert calls["n"] == 1
+
+
+# ---------------------------------------------------------------------------
+# confirm-канал (T1) — ConfirmChoice: once|session|deny
+# ---------------------------------------------------------------------------
+
+class _SimpleStub:
+    """Минимальный stub-executor для тестов confirm-канала (без блокирующего run)."""
+    def run(self, messages, *, thread_id, **kw): pass
+    def stop_run(self): pass
+    def add_message(self, m): pass
+
+
+def test_confirm_submit_session_returns_session():
+    """submit_confirm_reply('session') → make_tui_confirm-замыкание возвращает 'session'."""
+    runner = AgentRunner(executor=_SimpleStub())
+
+    def present(title, question, fields):
+        def _reply():
+            time.sleep(0.05)
+            runner.submit_confirm_reply("session")
+        threading.Thread(target=_reply, daemon=True).start()
+
+    confirm = runner.make_tui_confirm(present)
+    result = confirm(title="t", question="q", fields=[])
+    assert result == "session"
+
+
+def test_confirm_submit_once_returns_once():
+    """submit_confirm_reply('once') → make_tui_confirm-замыкание возвращает 'once'."""
+    runner = AgentRunner(executor=_SimpleStub())
+
+    def present(title, question, fields):
+        def _reply():
+            time.sleep(0.05)
+            runner.submit_confirm_reply("once")
+        threading.Thread(target=_reply, daemon=True).start()
+
+    confirm = runner.make_tui_confirm(present)
+    result = confirm(title="t", question="q", fields=[])
+    assert result == "once"
+
+
+def test_confirm_submit_deny_returns_deny():
+    """submit_confirm_reply('deny') → make_tui_confirm-замыкание возвращает 'deny'."""
+    runner = AgentRunner(executor=_SimpleStub())
+
+    def present(title, question, fields):
+        def _reply():
+            time.sleep(0.05)
+            runner.submit_confirm_reply("deny")
+        threading.Thread(target=_reply, daemon=True).start()
+
+    confirm = runner.make_tui_confirm(present)
+    result = confirm(title="t", question="q", fields=[])
+    assert result == "deny"
+
+
+def test_confirm_cancel_returns_deny():
+    """cancel_confirm() → make_tui_confirm-замыкание возвращает 'deny'."""
+    runner = AgentRunner(executor=_SimpleStub())
+
+    def present(title, question, fields):
+        threading.Thread(target=runner.cancel_confirm, daemon=True).start()
+
+    confirm = runner.make_tui_confirm(present)
+    result = confirm(title="t", question="q", fields=[])
+    assert result == "deny"
+
+
+def test_confirm_stop_unblocks_blocked_confirm():
+    """stop() разблокирует агент-поток, зависший в confirm (возвращает 'deny')."""
+    runner = AgentRunner(executor=_SimpleStub())
+
+    # present ничего не делает — confirm будет ждать вечно, пока не придёт stop()
+    def present(title, question, fields):
+        pass
+
+    confirm = runner.make_tui_confirm(present)
+    result_holder: list[str] = []
+
+    def _run_confirm():
+        result_holder.append(confirm(title="t", question="q", fields=[]))
+
+    t = threading.Thread(target=_run_confirm, daemon=True)
+    t.start()
+    time.sleep(0.05)  # дать confirm зависнуть
+    runner.stop()
+    t.join(timeout=2.0)
+    assert not t.is_alive(), "confirm-поток не разблокировался за 2 с"
+    assert result_holder == ["deny"]

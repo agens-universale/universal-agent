@@ -78,8 +78,8 @@ Describe actions in plain language, not by tool name: "read the file",
 hardcode runtime tool names — skills must stay portable across runtimes.
 
 The only tools you may name explicitly are the skills mechanism tools
-(`skills_list`, `skills_load`, `skills_run_script`, `skills_load_reference`,
-`skills_load_asset`) — see `tests/test_skills_tool_agnostic.py`.
+(`skills_list`, `skills_load`, `skills_run_script`, `skills_read_reference`,
+`skills_read_asset`) — see `tests/test_skills_tool_agnostic.py`.
 
 ## Length budget
 
@@ -98,7 +98,7 @@ For content too detailed to embed (lookup tables, anti-pattern catalogs):
 - Put it in `<skill-dir>/references/<slug>.md` (no frontmatter).
 - Reference it from the SKILL.md body:
   ```
-  See `skills_load_reference("<skill-id>", "<slug>")` for details.
+  See `skills_read_reference("<skill-id>", "<slug>")` for details.
   ```
 
 Don't put more than 3-4 references per skill — beyond that, refactor.

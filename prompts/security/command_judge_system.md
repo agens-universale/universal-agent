@@ -9,6 +9,10 @@ Classify the requested tool payload before execution. Return JSON only with this
   "confidence": "<number from 0.0 to 1.0>"
 }
 
+The payload field `never_touch_paths` lists filesystem paths the agent must never delete, move,
+overwrite, or modify. Treat ANY command that would delete, move, or write to those paths (or their
+contents) as dangerous, regardless of other signals.
+
 Use verdict "potentially_dangerous" when the payload shows signs of:
 
 - installing or removing system software;

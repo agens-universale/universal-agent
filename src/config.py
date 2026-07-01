@@ -1,4 +1,7 @@
 import os
+import shutil
+import sys
+from pathlib import Path
 from typing import Any, Dict, Optional
 
 import urllib3
@@ -17,6 +20,7 @@ from config_modules.security import (
 )
 from config_modules.summary import DEFAULT_LAST_DIALOG_STEP_MESSAGE_MAX_CHARS
 from config_modules import env_vars
+from bundled_assets import bundled_root
 
 # Backward compatibility for existing imports.
 _DEFAULT_LAST_DIALOG_STEP_MESSAGE_MAX_CHARS = (
@@ -44,10 +48,8 @@ def sync_logging_flat_and_params(config_dict: Dict[str, Any]) -> None:
 
 
 def _default_config_path() -> str:
-    base_dir = os.path.dirname(os.path.abspath(__file__))
-    # normpath: путь показывают пользователю (например, экран /config в TUI) —
-    # без сырого "src\..\config.yml".
-    return os.path.normpath(os.path.join(base_dir, "..", "config.yml"))
+    # Floor: bundled дефолт-конфиг (едет в wheel через force-include).
+    return str(bundled_root() / "config.default.yml")
 
 
 def _project_local_config_path() -> Optional[str]:
@@ -74,10 +76,38 @@ def _xdg_config_path() -> Optional[str]:
     пакетные дефолты (project-local <cwd>/.gc/config.yml по-прежнему
     мерджится поверх выбранной базы).
     """
-    candidate = os.path.abspath(str(env_vars.gc_paths()["config"] / "config.yml"))
+    candidate = os.path.abspath(str(env_vars.effective_config_dir() / "config.yml"))
     if os.path.isfile(candidate):
         return candidate
     return None
+
+
+def user_config_path() -> Path:
+    """Путь дефолтного пользовательского конфига: <gc config>/config.yml.
+    На залоченном ~/.config (корп-Mac/Linux) автоматически уезжает в ~/.gc."""
+    return env_vars.effective_config_dir() / "config.yml"
+
+
+def _bootstrap_user_config() -> bool:
+    """Первый запуск без --config и без ~/.gc/config.yml: скопировать floor
+    в ~/.gc/config.yml, чтобы у пользователя был редактируемый конфиг.
+
+    Возвращает True, если файл создан сейчас (иначе уже существовал). Презентация
+    (онбординг-гайд) — на стороне контроллеров (cli/tui), не здесь."""
+    dest = user_config_path()
+    if dest.is_file():
+        return False
+    try:
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(_default_config_path(), dest)
+    except OSError as exc:
+        print(
+            f"[gc] не удалось создать пользовательский конфиг {dest} ({exc}); "
+            f"работаю на дефолте. Задайте GC_HOME на доступную папку или используйте --config.",
+            file=sys.stderr,
+        )
+        return False
+    return True
 
 
 def resolve_base_config_path(config_path: Optional[str] = None) -> str:
@@ -100,6 +130,7 @@ def apply_cli_overrides(
     read_guard_enabled: Optional[bool] = None,
     no_read_guard: bool = False,
     read_guard_mode: Optional[str] = None,
+    instructions_overwrite: bool = False,
 ) -> None:
     if extra_overrides:
         config_dict.update(extra_overrides)
@@ -112,6 +143,8 @@ def apply_cli_overrides(
         read_guard_enabled=effective_read_guard_override,
         read_guard_mode=read_guard_mode,
     )
+    if instructions_overwrite:
+        config_dict["instructions_overwrite"] = True
     sync_logging_flat_and_params(config_dict)
 
 
@@ -121,11 +154,22 @@ def resolve_config_path(config_path: Optional[str] = None) -> str:
 
 
 def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
+    if config_path is None and _xdg_config_path() is None:
+        _bootstrap_user_config()
     path = resolve_config_path(config_path)
     config_dir = os.path.dirname(os.path.abspath(path))
 
     with open(path, "r", encoding="utf-8") as file:
         raw_config = yaml.safe_load(file) or {}
+
+    # Machine-managed overlay (gc-mcp install/remove): ~/.gc/config.local.yml.
+    # Мёржится поверх base, под project-local. mcp.servers аккумулируются.
+    from mcp_runtime.paths import managed_config_path
+    managed_path = managed_config_path()
+    if managed_path.is_file() and os.path.abspath(str(managed_path)) != os.path.abspath(path):
+        with open(managed_path, "r", encoding="utf-8") as file:
+            managed_raw = yaml.safe_load(file) or {}
+        raw_config = deep_merge(raw_config, managed_raw)
 
     # Layered loading: project <cwd>/.gc/config.yml поверх глобального.
     project_path = _project_local_config_path()
@@ -148,6 +192,9 @@ def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
         "openai_strict_tools_schema": app_cfg.backend.openai_strict_tools_schema,
         "use_ssl": app_cfg.backend.use_ssl,
         "use_retry": app_cfg.backend.use_retry,
+        "stream": app_cfg.backend.stream,
+        "tui_stream_display": app_cfg.tui.stream_display,
+        "tui_text_answer_mode": app_cfg.tui.text_answer_mode,
         "command_moderation": {
             "enabled": app_cfg.security.command_moderation.enabled,
             "mode": app_cfg.security.command_moderation.mode,
@@ -197,6 +244,7 @@ def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
         "threads_data_path": app_cfg.paths.threads_data_path,
         "skills_data_path": app_cfg.paths.skills_data_path,
         "logs_dump_dir": app_cfg.paths.logs_dump_dir,
+        "instructions_overwrite": app_cfg.paths.instructions_overwrite,
         "model": app_cfg.agent.model,
         "system_prompt_id": app_cfg.agent.system_prompt_id,
         "use_server_subagents": app_cfg.agent.use_server_subagents,

@@ -12,6 +12,8 @@ Background и CLI-клиент для работы с агентом GigaCode: �
 - Два режима бэкенда: `chat_completions` и `v1/responses` (deprecated).
 - MCP: 6 транспортов, готовые рецепты в `recommended_mcp/`.
 - Скиллы и пакеты скиллов (встроенные паки `supercoder` / `codebase` / `articles`).
+- Слои инструкций `AGENTS.md` (L0 shipped → L1 `~/.gc/AGENTS.md` → L2 проект → L3 `.gc/AGENTS.md`) — задать агенту проектный/глобальный контекст; `--init` генерирует `AGENTS.md` по структуре репо.
+- Защита файловой системы: `write_guard` ограничивает запись в `launch_root`, `security.protected_paths` включена по умолчанию.
 - Серверный режим: REST-обёртка на FastAPI.
 - Swarm-режим (только Linux): изолированные песочницы (bubblewrap).
 - Подсчёт токенов и стоимости прогона (с учётом prompt-кэша).
@@ -25,16 +27,26 @@ Background и CLI-клиент для работы с агентом GigaCode: �
 
 ## Быстрый старт
 
+> 📄 **Наглядная инструкция по установке (HTML):** [docs/gc-ua-install.html](docs/gc-ua-install.html) — пошаговая страница, откройте локально в браузере.
+
 ```bash
 uv tool install -e .   # gc-cli + gc-ua (TUI по умолчанию)
-gc-mcp-install --config recommended_mcp/config.local.yml   # MCP → ~/.local/share/gc/recommended_mcp/venv
+gc-mcp install duckduckgo_search   # поставить один MCP + авто-подключить в ~/.gc/config.local.yml
+# gc-mcp install   # поставить все MCP из манифеста
 ```
 
 ```bash
 # установка без клонирования репо gc-cli + gc-ua (TUI по умолчанию)
 uv tool install git+ssh://git@gitverse.ru/gigacode-ai/background-agent
-gc-mcp-install --config recommended_mcp/config.local.yml   # MCP → ~/.local/share/gc/recommended_mcp/venv
+gc-mcp install   # MCP → ~/.local/share/gc/recommended_mcp/venv + авто-wire в ~/.gc/config.local.yml
+# Примечание: source-MCP (office/science/computer) устанавливаются напрямую из git-подкаталога репо
+# (pip install "git+...#subdirectory=external/<name>") — клонировать репо не нужно.
+# Требуется: git на PATH + доступ к сети.
 ```
+
+После установки `gc-ua` / `gc-cli` работают **без `--config`**: при первом запуске конфиг создаётся (Windows — `~/.gc/config.yml`, macOS/Linux — `~/.config/gc/config.yml`), и агент **останавливается с подсказкой** — впишите `backend.completions_url` и токен (`backend.chat_completion_headers.Authorization`), при необходимости `agent.model`, затем запустите снова. Подготовить конфиг заранее, не запуская агента: `gc-cli --init-config` (или `gc-ua --init-config`).
+
+> **Миграция с gc-cli-pub:** если ранее была установлена старая версия дистрибутива, сначала удалите её: `uv tool uninstall gc-cli-pub`, затем выполните установку выше.
 
 Headless-установка только `gc-cli` (без TUI): см. [docs/usage.md](docs/usage.md#минимальная-установка-gc-cli-без-tui).
 
@@ -58,7 +70,7 @@ gc-ua -a
 Ключ `-q` определяет входной запрос к агенту.
 Клюс `--config` переопределяет конфиг агента на кастомный.
 
-Конфиг по умолчанию — `config.yml` рядом с установленным пакетом; свой путь — `--config ./config.yml`. Подробнее см. документацию ниже.
+Конфиг по умолчанию: Windows — `~/.gc/config.yml`, macOS/Linux — `~/.config/gc/config.yml` (создаётся автоматически при первом запуске); свой путь — `--config ./config.yml`. Подробнее см. документацию ниже.
 
 ## Документация
 

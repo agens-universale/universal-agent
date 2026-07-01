@@ -10,10 +10,10 @@
 
 | MCP | Источник | Установка | Платформа |
 |---|---|---|---|
-| `computer` | `external/computer-mcp/` (исходники в monorepo) | `pip install` из source | **только Windows** (`platforms: [win32]`) |
-| `office` | `external/office-mcp/` (исходники в monorepo) | `pip install` из source | Linux, macOS, Windows |
-| `science` | `external/science-mcp/` (исходники в monorepo) | `pip install` из source + HTTP-daemon | Linux, macOS, Windows |
-| `duckduckgo_search` | [ddgs-mcp](https://pypi.org/project/ddgs-mcp/) (PyPI) | `pip install` из PyPI | Linux, macOS, Windows |
+| `computer` | `external/computer-mcp/` (git-подкаталог monorepo) | `pip install` из git-подкаталога (`repo_url`) | **только Windows** (`platforms: [win32]`) |
+| `office` | `external/office-mcp/` (git-подкаталог monorepo) | `pip install` из git-подкаталога (`repo_url`) | Linux, macOS, Windows |
+| `science` | `external/science-mcp/` (git-подкаталог monorepo) | `pip install` из git-подкаталога (`repo_url`) + HTTP-daemon | Linux, macOS, Windows |
+| `duckduckgo_search` | `external/ddgs-mcp/` (своя обёртка над `ddgs`, git-подкаталог monorepo + бандлится в wheel) | `pip install` из source (локально / из бандла в method-2) | Linux, macOS, Windows |
 | `browser_playwright` | [@playwright/mcp](https://www.npmjs.com/package/@playwright/mcp) | **Docker** (`docker compose build` + `run.py`) или npx (Node в `gc_data`) | Linux, macOS, Windows |
 
 По умолчанию в `config.yml` для `browser_playwright` включён **npx** (stdio, без Docker).
@@ -24,47 +24,85 @@
 
 ## Как пользоваться
 
-### 1. Установить MCP (одна команда)
+### 1. Установить MCP (основной путь)
 
-После `uv tool install -e .` MCP ставятся в **отдельный venv** агента
+После `uv tool install -e .` доступна команда `gc-mcp` с подкомандами `install`,
+`list`, `remove`. MCP ставятся в **отдельный venv** агента
 (`<gc_data>/recommended_mcp/venv`, Linux: `~/.local/share/gc/recommended_mcp/venv`).
-Окружение `gc-cli` не
-затрагивается. `gc-cli` может работать из любой папки (в т.ч. временной).
+Окружение `gc-cli` не затрагивается.
+
+#### `gc-mcp install [name]` — установить + авто-подключить
 
 ```bash
-# вариант A: команда из PATH (после uv tool install)
-gc-mcp-install --config recommended_mcp/config.local.yml
+# поставить ОДИН MCP по имени (pакет + авто-wire в ~/.gc/config.local.yml)
+gc-mcp install duckduckgo_search
 
-# вариант B: из репозитория
-cp recommended_mcp/config.local.example.yml recommended_mcp/config.local.yml   # первый раз
-python3 recommended_mcp/install.py --config recommended_mcp/config.local.yml
+# поставить ВСЕ MCP из манифеста + авто-wire всех
+gc-mcp install
 ```
 
-Манифест для install и `gc-cli -a` (по умолчанию, без `--config`):
+**Ручное копирование `agent_config.snippet.yml` в `config.yml` больше не нужно.**
+`gc-mcp install` автоматически записывает конфиг каждого MCP в машино-управляемый
+файл `~/.gc/config.local.yml`, который агент мёржит поверх основного `config.yml`.
+Ваш `config.yml` не трогается.
+
+`gc-mcp-install` — back-compat алиас; `gc-mcp-install` (без имени) равнозначен
+`gc-mcp install` (ставит и wire'ит всё).
+
+Манифест (по умолчанию, без `--config`):
 
 1. `mcp-meta.recommended-mcp-manifest` в config агента
 2. `<gc_config>/recommended_mcp/config.local.yml` (Linux: `~/.config/gc/recommended_mcp/`)
 3. встроенный `recommended_mcp/config.yml` из пакета
 
-Полный набор из встроенного `config.yml`:
+#### `gc-mcp list` — состояние MCP
 
 ```bash
-gc-mcp-install
+gc-mcp list
 ```
 
-Тот же `--config` работает и для `run.py`.
+Показывает таблицу: доступные MCP из манифеста, для каждого —
+установлен ли пакет в venv (`INSTALLED`) и подключён ли к агенту через
+`config.local.yml` (`WIRED`).
+
+#### `gc-mcp remove <name>` — отключить + деинсталл
+
+```bash
+# убрать из конфига + деинсталл пакета из venv
+gc-mcp remove science
+
+# только un-wire из конфига (пакет в venv остаётся)
+gc-mcp remove science --keep-package
+```
+
+#### Ручной путь (фолбэк / для кастомных манифестов)
+
+Если нужен кастомный манифест — передай его через `--config`:
+
+```bash
+# gc-mcp-install — алиас gc-mcp install; ДЕЛАЕТ авто-wire в config.local.yml
+gc-mcp-install --config recommended_mcp/config.local.yml
+
+# скрипт напрямую — авто-wire НЕ делает (только установка пакетов)
+cp recommended_mcp/config.local.example.yml recommended_mcp/config.local.yml   # первый раз
+python3 recommended_mcp/install.py --config recommended_mcp/config.local.yml
+```
+
+При запуске `python3 recommended_mcp/install.py` (скрипт напрямую) авто-wire не выполняется —
+нужно вручную скопировать `<mcp>/agent_config.snippet.yml`
+в секцию `mcp-servers:` своего `config.yml` — см. раздел «4. Подключить MCP к агенту» ниже.
 
 Для каждого `install.type` — свой шаг:
 
 | `install.type` | Что делает |
 |---|---|
-| `source` | `pip install <path>` из `external/<name>/` (PEP 517 build из исходников) |
+| `source` | при наличии локальных исходников `external/<name>/` (клон) — `pip install <path>`; иначе (method-2, без клона) — `pip install "git+<repo_url>[@repo_ref]#subdirectory=external/<name>"` из git-подкаталога репо (нужен `git` в PATH + сеть). |
 | `wheel` | `pip install` локального wheel из `<name>/dist/*.whl` |
 | `pypi` | `pip install <package>` из PyPI (пин версии в `install.package`) |
 | `docker` | `docker compose -f <name>/docker-compose.yml build` (локальный билд образа) |
 | `npx` | bootstrap Node.js (если нет) + прогрев `npm install -g` / `npx` команд |
 
-Для итеративной разработки наших MCP (`source`-тип):
+Для итеративной разработки наших MCP (`source`-тип) при наличии локального клона:
 
 ```bash
 python recommended_mcp/install.py --editable
@@ -128,11 +166,16 @@ python recommended_mcp/run.py --config recommended_mcp/config.local.yml --stop
 
 MCP без блока `run:` пропускаются — агент спавнит их по stdio сам.
 
-### 4. Подключить MCP к агенту
+### 4. Подключить MCP к агенту (ручной путь)
 
-Скопируй содержимое `<mcp>/agent_config.snippet.yml` в секцию `mcp-servers:`
+> При использовании `gc-mcp install` этот шаг **не нужен** — авто-wire делает его автоматически
+> через `~/.gc/config.local.yml`.
+
+Если ты использовал скрипт напрямую (`python3 recommended_mcp/install.py`):
+скопируй содержимое `<mcp>/agent_config.snippet.yml` в секцию `mcp-servers:`
 своего `config.yml` агента. `install.py` **не редактирует** `config.yml` агента
 автоматически — чтобы не повредить твои кастомные правки.
+(`gc-mcp-install` и `gc-mcp install` авто-wire делают — этот шаг не нужен.)
 
 ## Как пропустить MCP
 
@@ -145,14 +188,15 @@ MCP без блока `run:` пропускаются — агент спавн�
 ### science + duckduckgo (типичный Linux-набор)
 
 ```bash
-gc-mcp-install --config recommended_mcp/config.local.yml
-gc-cli -a --config demo_config_openai.yml -q "..."
+gc-mcp install science
+gc-mcp install duckduckgo_search
+gc-cli -a -q "..."
 ```
 
 Дальше:
 
-1. Snippet'ы уже есть в `demo_config_openai.yml` / `config.yml` (секция `mcp-servers:`).
-2. **science** — HTTP-daemon: поднимает `gc-cli -a` (или вручную `python recommended_mcp/run.py --config …`).
+1. Подключение в `~/.gc/config.local.yml` выполнено автоматически шагом выше.
+2. **science** — HTTP-daemon: поднимает `gc-cli -a` (или вручную `python recommended_mcp/run.py`).
 3. **duckduckgo_search** и **office** — stdio, агент спавнит сам после install.
 
 ## Как добавить новый MCP

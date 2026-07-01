@@ -7,9 +7,7 @@ from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import Screen
 from textual.widgets import Static
 from tui.palette import TOOL_NAME as _TOOL_NAME
-from tui import branding
 
-_HEADER_RIGHT = branding.HEADER_RIGHT
 _FOOTER = "[Enter] раскрыть  [↑↓] серверы  [PgUp PgDn] прокрутка  [Esc] back"
 
 # Палитра — в тон styles.tcss (держать синхронно с токенами там).
@@ -186,7 +184,6 @@ class McpScreen(Screen):
         with Vertical(id="root"):
             with Horizontal(id="header"):
                 yield Static("mcp · серверы и тулы", id="header-left", markup=False)
-                yield Static(_HEADER_RIGHT, id="header-right", markup=False)
             trace = VerticalScroll(id="trace")
             trace.can_focus = False  # фокус живёт на карточках; глобальный
             # #trace:focus-outline рисуется поверх контента — здесь не нужен

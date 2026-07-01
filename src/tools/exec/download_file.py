@@ -13,7 +13,6 @@ from security.path_policy import (
     audit_policy_decision,
     check_write_path_allowed,
     normalize_path_for_policy,
-    prompt_user_confirmation,
     resolve_tool_context,
 )
 from security.url_policy import UrlPolicyDecision, enforce_url_policy, validate_url_policy
@@ -205,15 +204,18 @@ class DownloadFile(AbstractSimpleTool):
                 )
                 return None
             if wg_mode == "ask":
-                confirmed = prompt_user_confirmation(
-                    title="Write guard",
+                from security.confirm_port import request_confirm
+                confirmed = request_confirm(
+                    title="Защита записи",
+                    question=f"Разрешить запись вне периметра проекта в {dest}?",
                     fields=[
                         ("Tool", self.registered_tool_name()),
                         ("Operation", "write"),
                         ("Path", dest),
                         ("Allowed roots", exc.error.get("allowed_write_roots") or []),
                     ],
-                    question="Allow write outside perimeter?",
+                    ctx=context.ctx,
+                    decision_key=f"write:{dest}",
                 )
                 if confirmed:
                     audit_policy_decision(
@@ -225,7 +227,11 @@ class DownloadFile(AbstractSimpleTool):
                     )
                     return None
                 exc.error["type"] = "write_guard_cancelled_by_user"
-                exc.error["message"] = "User declined out-of-perimeter write."
+                exc.error["message"] = (
+                    f"User declined the write to '{dest}'. Do NOT retry the same "
+                    "write, and do NOT silently write somewhere else — ask the user how to "
+                    "proceed, or stop and report that it was declined."
+                )
             audit_policy_decision(
                 context,
                 tool_name=self.registered_tool_name(),

@@ -53,3 +53,19 @@ def test_segments_no_compaction(tmp_path):
     assert len(segs) == 1
     assert segs[0]["compacted_by"] is None
     assert len(segs[0]["messages"]) == 2
+
+
+def test_segments_expose_chars_before_after(tmp_path):
+    # seg0 raw = 10 символов; сжат → synthesis "abcde" = 5 символов
+    _write_file(tmp_path, f"data_cli_{_TID}__pre_summary__20260603_100000.jsonl",
+                [{"role": "user", "content": "0123456789"}])
+    _write_file(tmp_path, f"data_cli_{_TID}.jsonl",
+                [_sum_msg("abcde"), {"role": "user", "content": "вопрос-2"}])
+
+    store = FileTaskStore(threads_dir=str(tmp_path), system="cli")
+    segs = store.read_segments(_TID)
+
+    assert segs[0]["compacted_by"]["chars_before"] == 10
+    assert segs[0]["compacted_by"]["chars_after"] == 5
+    # live-сегмент без сжатия — полей нет (compacted_by is None)
+    assert segs[1]["compacted_by"] is None

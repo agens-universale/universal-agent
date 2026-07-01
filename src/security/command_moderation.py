@@ -12,12 +12,14 @@ from typing import Any, Callable
 
 from config_modules.security import validate_command_moderation_mode
 from constants.tool_names import EXEC_PYTHON_NAME
+from security.confirm_port import confirm_available, request_confirm
 from security.path_policy import (
     ToolSecurityContext,
     audit_policy_decision,
     resolve_tool_context,
 )
 from utils.project_data import os_label
+from bundled_assets import bundled_root
 
 SAFE_VERDICT = "safe"
 DANGEROUS_VERDICT = "potentially_dangerous"
@@ -30,7 +32,8 @@ _VERDICT_DANGEROUS_RE = re.compile(
     r'"verdict"\s*:\s*"(?:potentially_dangerous|dangerous|unsafe)"\s*[,}]',
     re.IGNORECASE,
 )
-_PROJECT_ROOT = Path(__file__).resolve().parents[2]
+# bundled_root() — единый резолвер ассетов (editable → repo, wheel → site-packages).
+_PROJECT_ROOT = bundled_root()
 
 
 def effective_command_cwd(
@@ -92,11 +95,23 @@ class JudgeUnavailable(RuntimeError):
     pass
 
 
+def _get_protected_paths(cwd: str | None):
+    from security.protected_paths import protected_paths
+    return protected_paths(cwd=cwd)
+
+
 def build_judge_payload(
     tool_name: str,
     payload: str,
     context: ModerationContext,
 ) -> dict[str, Any]:
+    try:
+        ps = _get_protected_paths(context.cwd)
+        never_touch = sorted(
+            str(p) for p in ps.instructions | ps.operational
+        )
+    except Exception:
+        never_touch = []
     return {
         "tool_name": tool_name,
         "payload": payload,
@@ -112,6 +127,7 @@ def build_judge_payload(
             "has_venv": context.has_venv,
         },
         "allowed_command_examples": context.allowed_command_examples,
+        "never_touch_paths": never_touch,
     }
 
 
@@ -124,10 +140,30 @@ def run_command_judge(judge_client: Any, judge_payload: dict[str, Any]) -> Judge
     return validate_judge_result(raw_result)
 
 
+def run_command_judge_with_retry(
+    judge_client: Any, judge_payload: dict[str, Any], *, retries: int = 1
+) -> JudgeResult:
+    """Судья с ретраями: слабая модель часто отдаёт мусорный вердикт разово —
+    один повтор перед тем как признать судью недоступным. Если все попытки
+    исчерпаны — пробрасываем последнее исключение (декоратор переведёт это в
+    judge_unavailable → fail-closed, security не ослаблен)."""
+    last_exc: Exception | None = None
+    for _ in range(retries + 1):
+        try:
+            return run_command_judge(judge_client, judge_payload)
+        except Exception as exc:
+            last_exc = exc
+    assert last_exc is not None
+    raise last_exc
+
+
 def validate_judge_result(raw: dict[str, Any]) -> JudgeResult:
     if not isinstance(raw, dict):
         raise ValueError("judge result must be an object")
-    verdict = str(raw.get("verdict", "")).strip().lower()
+    # Нормализуем ФОРМАТ (пробел/дефис/регистр): слабая модель часто пишет
+    # «potentially dangerous» через пробел/в другом регистре. Синонимы НЕ маппим —
+    # неузнанный вердикт по-прежнему отвергается (security не ослаблен).
+    verdict = re.sub(r"[\s\-]+", "_", str(raw.get("verdict", "")).strip().lower())
     if verdict not in ALLOWED_VERDICTS:
         raise ValueError("judge result verdict must be 'safe' or 'potentially_dangerous'")
     reasons = _string_list(raw.get("reasons"), field_name="reasons")
@@ -148,6 +184,8 @@ def decide_command_execution(
     judge_result: JudgeResult | None,
     judge_available: bool,
     user_confirmation: bool | None,
+    *,
+    ctx: Any = None,
 ) -> ExecutionDecision:
     normalized_mode = validate_command_moderation_mode(mode)
     if normalized_mode == "allow":
@@ -171,7 +209,10 @@ def decide_command_execution(
                     allowed=False,
                     decision="cancelled",
                     reason_code="user_confirmation",
-                    reason="User cancelled execution after judge was unavailable.",
+                    reason=(
+                        "User declined the command. Do NOT retry the same command, "
+                        "and do NOT silently run a modified command — ask the user or stop."
+                    ),
                     error_type="unsafe_command_cancelled_by_user",
                 )
             return ExecutionDecision(
@@ -181,7 +222,22 @@ def decide_command_execution(
                 reason="Judge is unavailable; user confirmation is required.",
                 requires_confirmation=True,
             )
-        # Fail-closed: при недоступности судьи в deny — блокируем.
+        # C1 Часть 2: при недоступности судьи в deny — пробуем confirm-порт.
+        if confirm_available(ctx):
+            confirmed = request_confirm(
+                title="Проверка команды",
+                question="Судья недоступен. Выполнить команду?",
+                fields=[("mode", normalized_mode)],
+                ctx=ctx,
+            )
+            if confirmed:
+                return ExecutionDecision(
+                    allowed=True,
+                    decision="executed",
+                    reason_code="judge_unavailable_user_confirmed",
+                    reason="User confirmed execution after judge was unavailable.",
+                )
+        # Fail-closed: confirm недоступен или пользователь отказал — блокируем.
         return ExecutionDecision(
             allowed=False,
             decision="blocked",
@@ -219,7 +275,10 @@ def decide_command_execution(
             allowed=False,
             decision="cancelled",
             reason_code="user_confirmation",
-            reason="User cancelled potentially dangerous execution.",
+            reason=(
+                "User declined the command. Do NOT retry the same command, "
+                "and do NOT silently run a modified command — ask the user or stop."
+            ),
             risk_flags=judge_result.risk_flags,
             error_type="unsafe_command_cancelled_by_user",
         )
@@ -299,9 +358,10 @@ def moderate_command_execution(
                     if judge_client_extractor is not None
                     else _default_judge_client(args, kwargs)
                 )
-                judge_result = run_command_judge(
+                judge_result = run_command_judge_with_retry(
                     judge_client,
                     build_judge_payload(moderation_context.tool_name, payload, moderation_context),
+                    retries=1,
                 )
             except Exception as exc:
                 judge_available = False
@@ -311,11 +371,13 @@ def moderate_command_execution(
                     exc=exc,
                 )
 
+            tool_ctx = getattr(context, "ctx", None)
             decision = decide_command_execution(
                 moderation_context.mode,
                 judge_result,
                 judge_available,
                 None,
+                ctx=tool_ctx,
             )
             if decision.requires_confirmation:
                 audit_policy_decision(
@@ -329,13 +391,14 @@ def moderate_command_execution(
                 user_confirmation = (
                     user_confirmation_extractor(*args, **kwargs)
                     if user_confirmation_extractor is not None
-                    else _ask_user_confirmation(payload, moderation_context, decision)
+                    else _ask_user_confirmation(payload, moderation_context, decision, ctx=tool_ctx)
                 )
                 decision = decide_command_execution(
                     moderation_context.mode,
                     judge_result,
                     judge_available,
                     user_confirmation,
+                    ctx=tool_ctx,
                 )
             if decision.allowed:
                 audit_policy_decision(
@@ -637,17 +700,19 @@ def _ask_user_confirmation(
     payload: str,
     context: ModerationContext,
     decision: ExecutionDecision,
+    ctx: Any = None,
 ) -> bool:
-    from security.path_policy import prompt_user_confirmation
-    return prompt_user_confirmation(
-        title="Command moderation",
+    return request_confirm(
+        title="Проверка команды",
+        question=f"Разрешить выполнение команды? ({context.tool_name})",
         fields=[
             ("Tool", context.tool_name),
             ("Reason", decision.reason),
             ("Risk flags", ", ".join(decision.risk_flags) or "-"),
             ("Preview", _payload_preview(payload)),
         ],
-        question="Allow execution?",
+        ctx=ctx,
+        decision_key=f"command:{payload}",
     )
 
 

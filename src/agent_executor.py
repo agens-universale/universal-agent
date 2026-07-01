@@ -9,7 +9,7 @@ State создаётся заново при каждом run(). Возвращ�
 import os
 import threading
 from copy import copy as _shallow_copy_msg
-from typing import Any
+from typing import Any, Optional
 
 from processing_responses import run_agent
 from run_context import RunContext
@@ -66,6 +66,7 @@ class AgentExecutor:
         # stop_run() до создания state (run() ещё в setup-фазе): запоминаем, и
         # run() применит флаг сразу при создании state, до первого persist.
         self._stop_pending: bool = False
+        self.last_terminal_outcome: Optional[str] = None
 
     def run(
         self,
@@ -77,6 +78,8 @@ class AgentExecutor:
         verbose: bool | None = None,
         discard_writes_after_stop: bool = False,
         message_ids: list[str] | None = None,
+        display_contents: list[str | None] | None = None,
+        skills_loaded: list[str | None] | None = None,
     ) -> Any:
         """Запускает агента. При каждом вызове state создаётся заново.
 
@@ -172,6 +175,7 @@ class AgentExecutor:
             "chat_completions_system_prompt": chat_completions_system_prompt,
             "use_server_subagents": config_dict.get("use_server_subagents", False),
             "agent_md_path": config_dict.get("agent_md_path"),
+            "instructions_overwrite": bool(config_dict.get("instructions_overwrite", False)),
             "thread_id": thread_id,
             "shared": thread_shared,
             "workspace_config": config_dict,
@@ -227,6 +231,14 @@ class AgentExecutor:
                 self._stop_pending = False
             self._pending_messages = []
 
+        # Permission memory: store оборачивает state.shared.confirm_rules ПО ССЫЛКЕ —
+        # session-правила пишутся прямо в shared и сохраняются обычной персистентностью.
+        from security.permission_store import PermissionStore
+        setattr(
+            self._ctx, "permission_store",
+            PermissionStore(session_rules=state.shared.confirm_rules),
+        )
+
         if (
             thread_session is not None
             and backend_api_mode == "chat_completions"
@@ -262,18 +274,11 @@ class AgentExecutor:
         user_bodies = [str(x) for x in messages]
         # id можно задать снаружи (TUI пробрасывает свой, чтобы потом точечно
         # откатить осиротевшую реплику при быстрой отмене); иначе генерим.
-        new_user_messages = [
-            {
-                "role": "user",
-                "content": body,
-                "id": (
-                    message_ids[i]
-                    if message_ids and i < len(message_ids) and message_ids[i]
-                    else generate_message_id_func("m")
-                ),
-            }
-            for i, body in enumerate(user_bodies)
-        ]
+        new_user_messages = self._build_user_messages(
+            user_bodies, message_ids=message_ids,
+            display_contents=display_contents, skills_loaded=skills_loaded,
+            gen_id=generate_message_id_func,
+        )
         # На старте user turn дописываем текущий CLI-запрос в current_user_intent
         # (только реальные user-сообщения, не technical). user_intent_log — только
         # user_intent_log — только после flush при accept turn_finish.
@@ -400,6 +405,7 @@ class AgentExecutor:
                     else None
                 ),
             )
+            self.last_terminal_outcome = getattr(state, "terminal_outcome", None)
             if thread_session is not None and not (
                 state.discard_writes_after_stop and state.stop_requested
             ):
@@ -469,6 +475,29 @@ class AgentExecutor:
         """
         return self._lock
 
+    @staticmethod
+    def _build_user_messages(user_bodies, *, message_ids, display_contents,
+                             skills_loaded, gen_id):
+        """Собрать user-сообщения с опциональными display_content/skill_loaded.
+        display_content ставится только при отличии от content; skill_loaded — если задан."""
+        out = []
+        for i, body in enumerate(user_bodies):
+            body = str(body)
+            msg = {
+                "role": "user",
+                "content": body,
+                "id": (message_ids[i] if message_ids and i < len(message_ids)
+                       and message_ids[i] else gen_id("m")),
+            }
+            disp = display_contents[i] if display_contents and i < len(display_contents) else None
+            if disp is not None and disp != body:
+                msg["display_content"] = disp
+            sk = skills_loaded[i] if skills_loaded and i < len(skills_loaded) else None
+            if sk:
+                msg["skill_loaded"] = sk
+            out.append(msg)
+        return out
+
     def stop_run(self) -> None:
         """Выставляет флаг остановки; агент завершит текущую итерацию и выйдет.
 
@@ -479,3 +508,57 @@ class AgentExecutor:
                 self._state.stop_requested = True
             else:
                 self._stop_pending = True
+
+    def compact_thread(self, thread_id: str, system: str | None = None) -> bool:
+        """Принудительное сжатие треда (ручной /compact) — вне run-loop.
+
+        Грузит тред, строит минимальный state (только нужное сжатию) + координатор,
+        зовёт force_compact_once. True если сжатие выполнено (chat-режим + есть тред)."""
+        config_dict = self._ctx.config_dict
+        backend_api_mode = str(config_dict.get("backend_api_mode", "responses")).strip().lower()
+        if backend_api_mode != "chat_completions" or not thread_id:
+            return False
+        system_id = system or "cli"
+        thread_session = ThreadSession.from_config(
+            config_dict=config_dict, system_id=system_id, thread_id=thread_id,
+        )
+        thread_session.history_messages = repair_tool_call_pairing(
+            thread_session.history_messages, keep_latest_unanswered=False,
+        )
+        meta = getattr(thread_session, "meta", None) or {}
+        thread_shared = ThreadMetaMapper.shared_from_meta(meta)
+
+        state = State(
+            verbose=bool(config_dict.get("verbose", False)),
+            model=config_dict["model"],
+            tools_spec=self._ctx.tools_spec,
+            tools_descr=self._ctx.tools_description,
+            skills_list=[],
+            max_steps=int(config_dict.get("max_steps", 30) or 30),
+            system_prompt_id=config_dict.get("system_prompt_id", ""),
+            use_server_subagents=bool(config_dict.get("use_server_subagents", False)),
+            thread_id=thread_id,
+            shared=thread_shared,
+            workspace_config=config_dict,
+        )
+        state.backend_api_mode = "chat_completions"
+        state.dialog_steps_offset = int(meta.get("dialog_steps_offset", 0) or 0)
+        state.init_user_intent_log(meta.get("user_intent_log"))
+        state.init_current_user_intent(meta.get("current_user_intent"))
+        state.init_user_turn_seq(meta.get("user_turn_seq"))
+        state.infer_user_turn_seq_if_missing()
+        state.messages = [
+            _shallow_copy_msg(m)
+            for m in thread_session.history_messages
+            if isinstance(m, dict)
+        ]
+
+        coord = RunSummaryCoordinator(
+            ctx=self._ctx, state=state, thread_session=thread_session,
+            summary_trigger_chars=parse_summary_trigger_chars(config_dict),
+            is_cli_mode=(system_id == "cli"),
+            pre_backend_trigger_reason="pre_backend", logger=getattr(self._ctx, "logger", None),
+        )
+        setattr(self._ctx, "on_summary_applied", coord.on_summary_applied)
+        coord.force_compact_once(trigger_reason="manual")
+        return True

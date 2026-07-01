@@ -6,9 +6,15 @@ from intent_guard.feedback import (
     build_finish_gate_feedback,
     build_finish_gate_reject_technical_user_content,
 )
-from constants.tool_names import FINISH_TOOL_NAME, SESSION_COMPACT_TOOL_NAME
+from constants.tool_names import (
+    ASK_HUMAN_TOOL_NAME,
+    FINISH_TOOL_NAME,
+    SESSION_COMPACT_TOOL_NAME,
+    TURN_FINALIZING_TOOLS,
+)
 from run_summary_coordinator import build_preserved_batch, filter_messages_not_in_state
 from intent_guard.guard import FinishGateGuard
+from intent_guard.text_answer_judge import should_return_text_answer
 from intent_guard.turn_finish_emit import (
     apply_finish_gate_to_turn_finish_output_in_state,
     get_function_call_output_text,
@@ -112,15 +118,19 @@ def _without_tool_call_pairs(messages: List[Dict], tool_name: str) -> List[Dict]
 
 
 def _make_technical_feedback_user_message(
-    content: str, *, technical_type: str = TECHNICAL_TYPE_TECHNICAL
+    content: str, *, technical_type: str = TECHNICAL_TYPE_TECHNICAL,
+    call_id: str | None = None,
 ) -> Dict[str, str]:
-    return {
+    msg = {
         "role": "user",
         "content": wrap_technical_user_content(
             content, technical_type=technical_type
         ),
         "id": generate_message_id_func("m"),
     }
+    if call_id:
+        msg["call_id"] = call_id
+    return msg
 
 
 def _is_previous_response_cache_miss(exc: Exception) -> bool:
@@ -213,6 +223,9 @@ def _request_backend_canonical(
             max_tokens=max_tokens,
         )
 
+    _stream_on = bool(cfg.get("stream", True))
+    _on_delta = getattr(ctx, "on_stream_delta", None) if _stream_on else None
+
     with usage_scope(getattr(state, "usage", None), USAGE_CATEGORY_MAIN, backend_mode):
         res, call_data = request_chat_completions_with_policy(
             payload_factory=_create_payload,
@@ -223,6 +236,7 @@ def _request_backend_canonical(
             verify=verify,
             use_retry=use_retry,
             logger=getattr(ctx, "logger", None),
+            on_delta=_on_delta,
         )
     if not isinstance(res, dict):
         raise ValueError("chat/completions backend response must be an object")
@@ -323,11 +337,22 @@ def process_user_ask(messages, state: State, ctx: Any):
     return resp_messages, response_id
 
 
+def split_at_first_finalizer(tool_calls: List[Dict]) -> tuple[List[Dict], List[Dict]]:
+    """Разбивает tool_calls на (executed, skipped): всё до и включая первый
+    turn-финализирующий тул исполняется; остальное в этом ответе — пропускается
+    (ход уже завершён). intermediate_reply финализатором не считается."""
+    for i, m in enumerate(tool_calls):
+        if str(m.get("name") or "") in TURN_FINALIZING_TOOLS:
+            return tool_calls[: i + 1], tool_calls[i + 1:]
+    return tool_calls, []
+
+
 def process_tool_calls(
     messages: List[Dict],
     state: State,
     ctx: Any,
     run_agent_func,
+    persist_messages_callback: Optional[Callable[[List[Dict]], None]] = None,
 ):
     grouped_messages = group_messages(messages)
     if len(grouped_messages['tool_outputs']) > 0:
@@ -338,16 +363,47 @@ def process_tool_calls(
     state.session_compact_applied = False
 
     tools_outputs = []
-    for m in grouped_messages["tool_calls"]:
+    executed, skipped = split_at_first_finalizer(grouped_messages["tool_calls"])
+    # Skip-output'ы синтетические — считаем заранее, чтобы сфлашить ВМЕСТЕ с
+    # executed-output'ами до блокирующего turn_ask_human (иначе пропущенный тул
+    # тоже висит "running" до ответа юзера).
+    skip_outputs = []
+    if skipped:
+        finalizer = str(executed[-1].get("name") or "the finalizing tool")
+        for m in skipped:
+            skip_outputs.append({
+                "id": generate_message_id_func("fco"),
+                "type": "function_call_output",
+                "call_id": m["call_id"],
+                "output": (
+                    f'{{"ok": false, "skipped": true, "message": '
+                    f'"Skipped: turn already finalized by {finalizer}; '
+                    f'one finalizer per turn."}}'
+                ),
+            })
+    # turn_ask_human блокируется на input() до ответа юзера. Если он последний в
+    # батче, output'ы предыдущих (не-блокирующих) тулов + skip'ов иначе висят
+    # "running", пока ждём ответ (персист всего батча — только когда функция вернётся).
+    blocks_at_end = bool(executed) and str(executed[-1].get("name") or "") == ASK_HUMAN_TOOL_NAME
+    for i, m in enumerate(executed):
+        if blocks_at_end and i == len(executed) - 1 and (tools_outputs or skip_outputs):
+            # Сфлашить уже посчитанные output'ы + skip'ы ДО блокировки. Тред дедупит
+            # по make_message_key → повторный персист на выходе из run_agent — no-op.
+            _maybe_persist(persist_messages_callback, list(tools_outputs) + skip_outputs, state)
         tool_name = str(m.get("name") or "")
         tool_arguments = str(m.get("arguments", ""))
-        tool_res_raw = apply_tool(
-            tool_name=tool_name,
-            arguments=tool_arguments,
-            ctx=ctx,
-            state=state,
-            run_agent_func=run_agent_func,
-        )
+        try:
+            tool_res_raw = apply_tool(
+                tool_name=tool_name,
+                arguments=tool_arguments,
+                ctx=ctx,
+                state=state,
+                run_agent_func=run_agent_func,
+            )
+        except WrongFunctionArgumentsException as exc:
+            if getattr(exc, "call_id", None) is None:
+                exc.call_id = m.get("call_id")
+            raise
         tool_res = maybe_store_and_wrap_tool_output(
             tool_res_raw,
             call_id=m["call_id"],
@@ -372,6 +428,10 @@ def process_tool_calls(
         }
 
         tools_outputs.append(new_message)
+
+    # Skip-output'ы уже посчитаны выше и сфлашены перед блокировкой — добавляем в
+    # возврат (тред/state дедупят повторный персист по make_message_key).
+    tools_outputs.extend(skip_outputs)
 
     if getattr(state, "session_compact_applied", False):
         state.session_compact_applied = False
@@ -492,9 +552,11 @@ def run_agent(
             _maybe_persist(persist_messages_callback, messages, state)
 
             if state.steps > state.max_steps:
+                state.terminal_outcome = "step_limit"
                 return f'Agent executed {state.max_steps} steps and doesn\'t finish his work because of step limits.'
 
             if tool_error_cnt > max_tool_errors:
+                state.terminal_outcome = "tool_errors"
                 return f'Agent tools call errors.'
 
             mode = check_mode(messages, run_logger)
@@ -666,7 +728,10 @@ def run_agent(
                         else:
                             state.current_user_intent = []
                         return finish_arguments
-                    messages = process_tool_calls(messages, state, ctx, run_agent_func=run_agent)
+                    messages = process_tool_calls(
+                        messages, state, ctx, run_agent_func=run_agent,
+                        persist_messages_callback=persist_messages_callback,
+                    )
                     tool_error_cnt = 0
                 elif mode == "function_call_output":
                     messages, response_id = process_tool_outputs(messages, state, ctx)
@@ -675,6 +740,21 @@ def run_agent(
                     state.last_backend_response_id = response_id
                 elif mode == "text_response":
                     assistant_text = extract_last_assistant_text(messages)
+                    # TUI adaptive bounce: режим ставит только TUI (CLI/server/swarm →
+                    # ключа нет → строго). always → принять текст; judge → судья решает
+                    # (accept → текст и есть ответ хода, без bounce/turn_finish/finish-gate).
+                    # Завершаем ход как finish-accept: флашим интент, прогоняем compaction-
+                    # hook, сливаем сообщения, пришедшие во время хода.
+                    if should_return_text_answer(ctx, state, assistant_text):
+                        state.flush_current_user_intent()
+                        if turn_end_compaction_hook is not None:
+                            turn_end_compaction_hook()
+                        if get_pending_messages is not None:
+                            pending = get_pending_messages()
+                            if pending:
+                                messages = pending
+                                continue
+                        return assistant_text
                     run_logger.warning(
                         "Agent returned text response without tool call, requesting tool call"
                     )
@@ -695,6 +775,7 @@ def run_agent(
                     _make_technical_feedback_user_message(
                         e.to_llm_feedback(),
                         technical_type=TECHNICAL_TYPE_ERROR_MESSAGE,
+                        call_id=getattr(e, "call_id", None),
                     )
                 ]
 

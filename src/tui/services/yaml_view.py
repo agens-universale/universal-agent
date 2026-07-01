@@ -34,13 +34,17 @@ def safe_yaml_dump(data) -> str:
 _YAML_SYNTAX_THEME = "solarized-dark"
 
 
-def yaml_syntax_widget(text: str) -> Static:
-    """Текст YAML → Static(Syntax) с подсветкой на фоне BAND_BG."""
-    syntax = Syntax(
+def yaml_syntax_renderable(text: str) -> Syntax:
+    """Текст YAML → Rich Syntax с подсветкой на фоне BAND_BG (для in-place update)."""
+    return Syntax(
         text or "",
         lexer="yaml",
         theme=_YAML_SYNTAX_THEME,
         background_color=BAND_BG,
         word_wrap=False,
     )
-    return Static(syntax)
+
+
+def yaml_syntax_widget(text: str) -> Static:
+    """Текст YAML → Static(Syntax) с подсветкой на фоне BAND_BG."""
+    return Static(yaml_syntax_renderable(text))

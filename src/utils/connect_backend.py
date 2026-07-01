@@ -12,9 +12,18 @@ from utils.convertations import output_chat_completion_to_response
 from utils.format_messages import format_message_chat_completions_to_send_backend
 from utils.retry import retry_with_backoff
 from usage.context import record_usage
+from utils.chat_completions_stream import iter_sse_data_lines, assemble_streamed_completion, OnDelta
 
 
 logger = logging.getLogger(__name__)
+
+# Session без чтения ~/.netrc: requests при trust_env=True читает ~/.netrc,
+# и Basic-auth оттуда перетирает явный Authorization-заголовок → 401.
+# trust_env=False также отключает env-прокси и REQUESTS_CA_BUNDLE — CA передаём
+# явно через verify=. Без cookies/auth — общую сессию безопасно звать из разных
+# потоков (server-режим спавнит поток на запуск).
+_NO_NETRC_SESSION = requests.Session()
+_NO_NETRC_SESSION.trust_env = False
 
 
 def normalize_chat_completions_tools(
@@ -105,7 +114,7 @@ def request_backend_responses(
 
     data['stream'] = True
 
-    with requests.post(url, json=data, headers=headers, stream=True, verify=verify) as r:
+    with _NO_NETRC_SESSION.post(url, json=data, headers=headers, stream=True, verify=verify) as r:
         r.raise_for_status()
         r_headers = r.headers
         for line in r.iter_lines():
@@ -144,12 +153,55 @@ def request_backend_chat_completions(
     verify: bool = True,
     use_retry: bool = True,
     logger: Optional[logging.Logger] = None,
+    on_delta: Optional[OnDelta] = None,
 ):
     """
     Отправить запрос в backend chat completions API.
 
     url передаётся явно вызывающим кодом (как правило, из ctx.config_dict).
     """
+    if on_delta is not None:
+        stream_data = dict(data)
+        stream_data["stream"] = True
+        if logger is not None:
+            try:
+                logger.debug(
+                    "Send request to backend chat/completions (stream=True) url=%s payload=%s",
+                    url,
+                    json.dumps(stream_data, ensure_ascii=False),
+                )
+            except Exception:
+                logger.debug(
+                    "Send request to backend chat/completions (stream=True) url=%s", url
+                )
+        with _NO_NETRC_SESSION.post(
+            url, json=stream_data, headers=headers, stream=True, verify=verify
+        ) as r:
+            try:
+                r.raise_for_status()
+            except requests.exceptions.HTTPError:
+                # Preserve error-body diagnostics (parity with blocking path).
+                err_text = None
+                try:
+                    err_text = r.text
+                except Exception:
+                    err_text = None
+                if logger is not None:
+                    logger.error(
+                        "Backend chat/completions (stream) HTTP error status=%s url=%s body=%s",
+                        getattr(r, "status_code", None), url, err_text,
+                    )
+                print(
+                    "=== backend chat/completions (stream) error ===\n"
+                    f"url={url}\nstatus={getattr(r, 'status_code', None)}\n"
+                    f"response_body={(err_text or '')[:4000]}\n"
+                )
+                raise
+            on_delta("reset", "")
+            return assemble_streamed_completion(
+                iter_sse_data_lines(r.iter_lines()), on_delta=on_delta
+            )
+
     if logger is not None:
         try:
             logger.debug(
@@ -161,7 +213,7 @@ def request_backend_chat_completions(
             # Не роняем процесс из-за проблем с сериализацией payload.
             logger.debug("Send request to backend chat/completions url=%s", url)
 
-    r = requests.post(url, json=data, headers=headers, verify=verify)
+    r = _NO_NETRC_SESSION.post(url, json=data, headers=headers, verify=verify)
     try:
         r.raise_for_status()
     except requests.exceptions.HTTPError:
@@ -271,6 +323,19 @@ def create_call_headers(state, ctx) -> Dict[str, str]:
     return call_headers
 
 
+def _responses_input_without_message_call_id(messages):
+    """call_id на role-based message-элементах (напр. technical-feedback user) —
+    только для TUI/persist; в responses input не отправляем. На function_call/
+    function_call_output call_id обязателен — сохраняем. Не мутируем исходники."""
+    cleaned = []
+    for m in messages:
+        if (isinstance(m, dict) and "call_id" in m
+                and m.get("type") not in ("function_call", "function_call_output")):
+            m = {k: v for k, v in m.items() if k != "call_id"}
+        cleaned.append(m)
+    return cleaned
+
+
 def create_call_data_responses(
     messages,
     state,
@@ -279,7 +344,7 @@ def create_call_data_responses(
 ) -> Dict:
     call_data = dict()
     call_data["model"] = state.default_model
-    call_data["input"] = messages
+    call_data["input"] = _responses_input_without_message_call_id(messages)
     call_data["tools"] = tools if tools else state.tools
     call_data["metadata"] = state.call_metadata
     call_data["previous_response_id"] = (

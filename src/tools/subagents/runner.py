@@ -5,6 +5,7 @@ import os
 from functools import partial
 from typing import Any, Callable, Dict, List, Optional
 
+from bundled_assets import bundled_root
 from config_modules.stored_outputs import get_stored_tool_outputs_max_entries
 from run_summary_coordinator import RunSummaryCoordinator
 from summarize.config import parse_summary_trigger_chars
@@ -276,16 +277,9 @@ class SubagentRunner:
         candidate_paths: List[str] = []
         if isinstance(prompt_path_raw, str) and prompt_path_raw.strip():
             candidate_paths.append(os.path.abspath(prompt_path_raw.strip()))
-        base_dir = os.path.dirname(os.path.abspath(__file__))
-        default_prompt_path = os.path.abspath(
-            os.path.join(
-                base_dir,
-                "..",
-                "..",
-                "..",
-                "prompts",
-                "chat_completions_subagent_system_prompt.md",
-            )
+        # bundled_root() — единый резолвер ассетов (editable → repo, wheel → site-packages).
+        default_prompt_path = str(
+            bundled_root() / "prompts" / "chat_completions_subagent_system_prompt.md"
         )
         candidate_paths.append(default_prompt_path)
 

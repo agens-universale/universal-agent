@@ -7,7 +7,6 @@ from __future__ import annotations
 
 COLLAPSE_MIN_LINES = 5
 COLLAPSE_MIN_CHARS = 500
-EXPAND_WINDOW_SECONDS = 2.0
 
 
 def should_collapse(text: str) -> bool:

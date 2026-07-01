@@ -40,7 +40,9 @@ async def test_call_then_output_mutates_in_place(tmp_path):
 
         rows = pilot.app.query(ToolCallRow)
         assert len(rows) == 1
-        assert "[..]" in str(rows[0].query_one(".trace-content").render())
+        # running: глиф ▸ в prefix, content несёт имя + elapsed (без "[..]")
+        assert "read_file" in str(rows[0].query_one(".trace-content").render())
+        assert "▸" in str(rows[0].query_one(".trace-prefix").render())
 
         # 2) добавляем output, ждём polling (>= 1s)
         with open(data, "a", encoding="utf-8") as f:
@@ -59,8 +61,9 @@ async def test_call_then_output_mutates_in_place(tmp_path):
         rows = pilot.app.query(ToolCallRow)
         assert len(rows) == 1  # тот же widget, не появился новый
         rendered = str(rows[0].query_one(".trace-content").render())
-        assert "[ok]" in rendered
-        assert "[..]" not in rendered
+        prefix = str(rows[0].query_one(".trace-prefix").render())
+        assert "✓" in prefix    # ok-глиф в prefix
+        assert "▸" not in prefix
 
 
 @pytest.mark.asyncio
@@ -221,7 +224,9 @@ async def test_local_stop_finalizes_running_rows(tmp_path):
 
         scr._poll_active()                       # run жив — строка тикает
         await pilot.pause()
-        assert "running" in str(row._content_static.render())
+        # running: глиф ▸ в prefix, content несёт elapsed «· Nс» (без слова «running»)
+        assert "▸" in str(row._prefix_static.render())
+        assert "running" not in str(row._content_static.render())
 
         runner.live = False                      # стоп
         scr._poll_active()

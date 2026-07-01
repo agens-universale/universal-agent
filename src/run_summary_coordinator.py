@@ -300,6 +300,22 @@ class RunSummaryCoordinator:
                 summarize_exc,
             )
 
+    def force_compact_once(self, *, trigger_reason: str = "manual") -> None:
+        """Один безусловный проход сжатия (ручной /compact) — БЕЗ проверки порога.
+        Та же машинерия, что и автосжатие; персист через on_summary_applied."""
+        state = self._state
+        if state.backend_api_mode != "chat_completions":
+            return
+        with _summarizing_flag(self._thread_session):
+            run_summary_compaction(
+                ctx=self._ctx,
+                state=state,
+                trigger_reason=trigger_reason,
+                is_cli_mode=self._is_cli_mode,
+                on_summary_applied=self.on_summary_applied,
+                trigger_threshold_chars=self._summary_trigger_chars,
+            )
+
     def pre_backend_compaction_hook(
         self,
         current_messages: list[dict],

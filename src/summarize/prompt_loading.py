@@ -1,7 +1,5 @@
 """Путь к файлу промпта суммаризации по умолчанию и чтение шаблона."""
 
-import os
-
 from summarize.summary_spec import (
     MEMORY_PATCH_SUMMARY_TAGS_PLACEHOLDER,
     SUMMARY_OUTPUT_SHAPE_PLACEHOLDER,
@@ -13,6 +11,7 @@ from summarize.summary_spec import (
 from summarize.working_memory_gateway import (
     inject_working_memory_prompt_placeholders,
 )
+from bundled_assets import bundled_root
 
 
 def default_prompt_path() -> str:
@@ -24,9 +23,7 @@ def default_prompt_path() -> str:
     Returns:
         Абсолютный путь к `prompts/chat_completions_summary_prompt.md` в корне репозитория.
     """
-    base_dir = os.path.dirname(os.path.abspath(__file__))
-    project_root = os.path.abspath(os.path.join(base_dir, "..", ".."))
-    return os.path.join(project_root, "prompts", "chat_completions_summary_prompt.md")
+    return str(bundled_root() / "prompts" / "chat_completions_summary_prompt.md")
 
 
 def load_prompt_template(path: str) -> str:

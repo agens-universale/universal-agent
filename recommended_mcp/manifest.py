@@ -22,6 +22,12 @@ class InstallSpec:
     source: Path | None = None
     # Для type=pypi: pip-спецификация, например ddgs-mcp==0.1.0
     package: str | None = None
+    # Для type=npx: имя npm-пакета для `npm uninstall -g` (деинсталл). Деривировать
+    # из install-команд ненадёжно (scoped-имена + версия), поэтому объявляется явно.
+    npm_package: str | None = None
+    # Имя python-дистрибутива (для проверки установки/деинсталла), source-dir-независимо.
+    # Для pypi имя берётся из package; для source — объявляется здесь явно.
+    dist: str | None = None
 
 
 @dataclass(frozen=True)
@@ -100,6 +106,17 @@ def load_agent_dep_dir(path: Path) -> Path:
     return Path(raw).expanduser().resolve()
 
 
+def load_repo_url(path: Path) -> tuple[str | None, str | None]:
+    """Прочитать top-level repo_url / repo_ref из манифеста (для git-установки
+    source-MCP в method-2). Отсутствуют → (None, None)."""
+    data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    raw_url = data.get("repo_url")
+    raw_ref = data.get("repo_ref")
+    url = str(raw_url).strip() if raw_url and str(raw_url).strip() else None
+    ref = str(raw_ref).strip() if raw_ref and str(raw_ref).strip() else None
+    return url, ref
+
+
 def _parse_entry(raw: dict[str, Any], source: Path) -> MCPEntry:
     name = raw.get("name")
     if not name:
@@ -114,6 +131,10 @@ def _parse_entry(raw: dict[str, Any], source: Path) -> MCPEntry:
     install_source = Path(source_raw) if source_raw else None
     package_raw = install_raw.get("package")
     install_package = str(package_raw).strip() if package_raw else None
+    npm_package_raw = install_raw.get("npm_package")
+    install_npm_package = str(npm_package_raw).strip() if npm_package_raw else None
+    dist_raw = install_raw.get("dist")
+    install_dist = str(dist_raw).strip() if dist_raw else None
     raw_commands = install_raw.get("commands", ()) or ()
     commands = tuple(tuple(str(arg) for arg in cmd) for cmd in raw_commands)
 
@@ -123,6 +144,8 @@ def _parse_entry(raw: dict[str, Any], source: Path) -> MCPEntry:
         commands=commands,
         source=install_source,
         package=install_package,
+        npm_package=install_npm_package,
+        dist=install_dist,
     )
     if not install.type:
         raise ManifestError(f"mcp '{name}' missing 'install.type' in {source}")

@@ -29,6 +29,7 @@ class ThreadMetaMapper:
                 working_memory=normalize_working_memory(shared_raw.get("working_memory")),
                 notes_md=str(shared_raw.get("notes_md") or ""),
                 fetch_url_cache=dict(shared_raw.get("fetch_url_cache") or {}),
+                confirm_rules=dict(shared_raw.get("confirm_rules") or {}),
             )
 
         return None

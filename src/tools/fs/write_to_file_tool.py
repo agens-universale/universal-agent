@@ -40,7 +40,7 @@ class WriteToFile(AbstractSimpleTool):
                     },
                     "make_dirs": {
                         "type": "boolean",
-                        "description": "If true, creates parent directories when missing. Default false."
+                        "description": "If true, creates any missing parent folders before writing. Set true when the target file's parent folder does not exist yet. Default false — the write fails with 'parent_not_found' if the parent folder is missing."
                     },
                     "encoding": {
                         "type": "string",
@@ -67,10 +67,11 @@ class WriteToFile(AbstractSimpleTool):
     def prompt_description(cls):
         description = '''Tool name: fs_write_file
 Tool description: Writes a file to the local filesystem.
-Input schema: {"type": "object", "properties": {"path": {"type": "string", "description": "The absolute path of the file to write to (must be absolute, not relative)."}, "content": {"type": "string", "description": "The complete content to write to the file."}}, "required": ["path", "content"], "additionalProperties": false}
+Input schema: {"type": "object", "properties": {"path": {"type": "string", "description": "The absolute path of the file to write to (must be absolute, not relative)."}, "content": {"type": "string", "description": "The complete content to write to the file."}, "make_dirs": {"type": "boolean", "description": "If true, create any missing parent folders before writing. Default false."}}, "required": ["path", "content"], "additionalProperties": false}
 
 Usage:
 - This tool will overwrite the existing file if there is one at the provided path.
+- To write a file into a folder that does not exist yet, pass make_dirs: true — it creates the missing parent folders. Without it, the write fails when the parent folder is missing.
 - **Payload size:** put only brief `content` here (stub, headers, or first small section). For anything long, append to the file repeatedly in moderate chunks—never one massive single write.
 - If this is an existing file, you MUST read the file first (filesystem read). This tool will fail if you did not read the file first.
 - ALWAYS prefer editing existing files in the codebase. NEVER write new files unless explicitly required.

@@ -223,6 +223,22 @@ def test_submit_solution_no_comment_no_sidecar():
     assert "_submit_comment" not in ev.full_payload
 
 
+def test_intermediate_reply_output_suppressed_by_name():
+    ev = map_message({"type": "function_call_output", "name": "intermediate_reply",
+                      "call_id": "c1", "output": '{"ok": true}'}, no=1, ts="t")
+    assert ev is None
+
+
+def test_intermediate_reply_output_suppressed_chat_mode_by_tool():
+    # chat_completions: у output НЕТ name, но в JSON есть "tool" → тоже глушим
+    # (иначе вывод turn_intermediate_reply рендерится паразитной строкой `  |- …`).
+    ev = map_message(
+        {"type": "function_call_output", "call_id": "c1",
+         "output": json.dumps({"tool": "turn_intermediate_reply", "ok": True, "answer": "x"})},
+        no=1, ts="t")
+    assert ev is None
+
+
 # --- Phase 2 hot-fix: _summarize_output friendly keys + empty fallback ---
 
 
