@@ -543,13 +543,13 @@ create files"). Overwrite **yourself** at the absolute paths:
 **Step 5 — Completion report (mandatory).**
 
 Load the template via
-`skills_load_asset(skill_id='skill-creator', slug='completion_report_template')`.
+`skills_read_asset(skill_id='skill-creator', slug='completion_report_template')`.
 The asset contains the full structure (5 sections) and detailed
 filling rules — read them and fill in every section. If a section has
 nothing meaningful — write "Нет." rather than skipping. Save the result
 to `<workspace>/completion_report.md`.
 
-**MUST call `skills_load_asset` first; do not write the template from
+**MUST call `skills_read_asset` first; do not write the template from
 memory** — the asset is the single source of truth for the template
 structure and Russian wording.
 
@@ -670,7 +670,7 @@ This skill runs inside the `gc-cli` agent. Notable differences from upstream:
   layer-aware — see `## Branching` and `### New skill — choose destination
   layer` above.
 - **Skills tools:** prefer `skills_list`, `skills_load`, `skills_run_script`,
-  `skills_load_reference`, `skills_load_asset` for any skill operation.
+  `skills_read_reference`, `skills_read_asset` for any skill operation.
   Don't shell out to scripts directly when `skills_run_script` does the same.
 - **package_skill is portable:** invoke it directly from any CWD; the script
   inserts its own directory into `sys.path` for sibling-import resolution.

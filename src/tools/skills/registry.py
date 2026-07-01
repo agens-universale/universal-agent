@@ -9,6 +9,8 @@ from typing import Any, Dict, List, Optional
 
 import yaml
 
+from bundled_assets import bundled_root
+
 logger = logging.getLogger(__name__)
 
 
@@ -27,22 +29,15 @@ class AmbiguousSkillId(Exception):
         )
 
 
-def _project_root() -> str:
-    """
-    Определяет корень проекта относительно текущего файла.
-    Ожидается структура: project_root/src/tools/skills/registry.py
-    """
-    here = os.path.dirname(os.path.abspath(__file__))
-    return os.path.abspath(os.path.join(here, "..", "..", ".."))
-
-
 def _system_skills_root() -> str:
     """
     Корень System-слоя — встроенные скиллы пакета.
 
-    По умолчанию: <project_root>/skills.
+    Через bundled_root() (тот же резолвер, что для prompts/ и config.default.yml):
+    editable → <repo>/skills, wheel → site-packages/skills. Завязка на ../../..
+    ломалась в wheel, где src/ схлопнут и уровень тот же промахивался мимо skills/.
     """
-    return os.path.join(_project_root(), "skills")
+    return str(bundled_root() / "skills")
 
 
 def _user_skills_root() -> str:
@@ -280,6 +275,11 @@ class SkillsRegistry:
         self._load_all_skills()
         self._loaded = True
 
+    def reload(self) -> None:
+        """Сбросить кэш скиллов — следующий доступ пересканирует диск.
+        Нужно, чтобы созданный посреди прогона скилл стал виден без рестарта."""
+        self._loaded = False
+
     def _load_all_skills(self) -> None:
         self._skills_by_id.clear()
         self._packs_by_id.clear()
@@ -418,6 +418,7 @@ class SkillsRegistry:
 
         Если оба заданы — pack имеет приоритет.
         """
+        self.reload()
         self._ensure_loaded()
 
         bootstrap_ids: Dict[str, str] = {}  # pack_id -> canonical bootstrap skill id
@@ -502,6 +503,31 @@ class SkillsRegistry:
         return None
 
     def _get_skill(self, skill_id: str) -> Skill:
+        try:
+            return self._lookup_skill(skill_id)
+        except KeyError:
+            # Промах id — возможно, скилл создан только что: один rescan и
+            # повтор. Второго reload в этом вызове нет → цикла нет.
+            # AmbiguousSkillId сюда не попадает (не KeyError) — не ретраим.
+            self.reload()
+            return self._lookup_skill(skill_id)
+
+    def _candidate_ids_for(self, skill_id: str) -> List[str]:
+        """Кандидаты по совпадению хвоста — для подсказки в not-found ошибке."""
+        target = skill_id.split(":")[-1].replace("_", "-")
+        cands: List[str] = []
+        for canonical in self._skills_by_id:
+            tail = canonical.split(":", 1)[1] if ":" in canonical else canonical
+            if target and (target in tail or tail in target):
+                cands.append(canonical)
+        return sorted(cands)
+
+    def _not_found_message(self, skill_id: str) -> str:
+        cands = self._candidate_ids_for(skill_id)
+        base = f"Skill '{skill_id}' not found"
+        return f"{base}. Did you mean: {cands}?" if cands else base
+
+    def _lookup_skill(self, skill_id: str) -> Skill:
         self._ensure_loaded()
         if not isinstance(skill_id, str):
             raise KeyError(f"Skill '{skill_id}' not found")
@@ -517,8 +543,13 @@ class SkillsRegistry:
                 pack_part, _, tail = skill_id.partition(":")
                 normalized_tail = tail.replace("_", "-")
                 skill = self._skills_by_id.get(f"{pack_part}:{normalized_tail}")
+                if skill is None and pack_part in (tail, normalized_tail):
+                    # Удвоённый namespace (pack==skill, напр. 'x:x') — модель угадала
+                    # форму pack:skill для flat-скилла. Безопасный bare-lookup по хвосту.
+                    skill = (self._skills_by_id.get(tail)
+                             or self._skills_by_id.get(normalized_tail))
             if skill is None:
-                raise KeyError(f"Skill '{skill_id}' not found")
+                raise KeyError(self._not_found_message(skill_id))
             return skill
 
         # 2) Short alias — собрать кандидатов по skill-сегменту.
@@ -537,7 +568,7 @@ class SkillsRegistry:
             bootstrap = self._resolve_pack_bootstrap(skill_id)
             if bootstrap is not None:
                 return bootstrap
-            raise KeyError(f"Skill '{skill_id}' not found")
+            raise KeyError(self._not_found_message(skill_id))
         if len(candidates) > 1:
             raise AmbiguousSkillId(
                 short_id=skill_id,
@@ -598,7 +629,11 @@ class SkillsRegistry:
         skill = self._get_skill(skill_id)
         path = skill.references.get(slug)
         if not path:
-            raise KeyError(f"Reference '{slug}' not found for skill '{skill_id}'")
+            available = ", ".join(sorted(skill.references)) or "(нет references)"
+            raise KeyError(
+                f"Reference '{slug}' not found for skill '{skill_id}'. "
+                f"Available references: {available}"
+            )
 
         with open(path, "r", encoding="utf-8") as f:
             content = f.read()
@@ -622,7 +657,11 @@ class SkillsRegistry:
         skill = self._get_skill(skill_id)
         path = skill.assets.get(slug)
         if not path:
-            raise KeyError(f"Asset '{slug}' not found for skill '{skill_id}'")
+            available = ", ".join(sorted(skill.assets)) or "(нет assets)"
+            raise KeyError(
+                f"Asset '{slug}' not found for skill '{skill_id}'. "
+                f"Available assets: {available}"
+            )
 
         with open(path, "r", encoding="utf-8") as f:
             content = f.read()

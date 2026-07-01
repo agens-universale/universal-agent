@@ -1,7 +1,7 @@
 # completion_report шаблон для skill-creator self-check Step 5
 
 Загружается агентом через
-`skills_load_asset(skill_id='skill-creator', slug='completion_report_template')`
+`skills_read_asset(skill_id='skill-creator', slug='completion_report_template')`
 в Step 5 self-check флоу. Заполни **все 5 секций** структуры ниже и
 сохрани результат в `<workspace>/completion_report.md`.
 
