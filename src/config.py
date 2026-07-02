@@ -14,6 +14,7 @@ from config_modules.common import (
     apply_swarm_env_overrides,
 )
 from config_modules.merge import deep_merge
+from config_modules.env_interpolation import resolve_env_placeholders
 from config_modules.root import AppConfig, resolve_paths
 from config_modules.security import (
     apply_cli_command_moderation_overrides,
@@ -133,7 +134,7 @@ def apply_cli_overrides(
     instructions_overwrite: bool = False,
 ) -> None:
     if extra_overrides:
-        config_dict.update(extra_overrides)
+        config_dict.update(resolve_env_placeholders(extra_overrides))
     effective_write_guard_override = False if no_write_guard else write_guard_enabled
     effective_read_guard_override = False if no_read_guard else read_guard_enabled
     apply_cli_command_moderation_overrides(
@@ -177,6 +178,9 @@ def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
         with open(project_path, "r", encoding="utf-8") as file:
             project_raw = yaml.safe_load(file) or {}
         raw_config = deep_merge(raw_config, project_raw)
+
+    # Резолв ${ENV:VAR} после всех merge-слоёв, до валидации — креды модели/MCP из окружения.
+    raw_config = resolve_env_placeholders(raw_config)
 
     app_cfg = AppConfig.model_validate(raw_config)
     resolve_paths(app_cfg, config_dir)
