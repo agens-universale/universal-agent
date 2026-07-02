@@ -1,6 +1,4 @@
 from tools.simple_tool_base import AbstractSimpleTool
-import subprocess
-import os
 import json
 
 from constants.tool_names import EXEC_COMMAND_NAME
@@ -171,7 +169,7 @@ Important Usage Rules:
         return self._result(
             ok=False,
             command=command,
-            cwd=cwd or os.getcwd(),
+            cwd=cwd or (self._backend.default_cwd() or ""),
             exit_code=None,
             timed_out=False,
             truncated=False,
@@ -190,14 +188,14 @@ Important Usage Rules:
         env_vars: list[dict] | None = None,
         **kwargs,
     ) -> str:
-        cwd_used = cwd or os.getcwd()
+        cwd_used = cwd if cwd is not None else self._backend.default_cwd()
 
         # Input validation
         if not isinstance(command, str):
             return self._result(
                 ok=False,
                 command=str(command),
-                cwd=cwd_used,
+                cwd=cwd_used or "",
                 exit_code=None,
                 timed_out=False,
                 truncated=False,
@@ -210,7 +208,7 @@ Important Usage Rules:
             return self._result(
                 ok=False,
                 command=command,
-                cwd=cwd_used,
+                cwd=cwd_used or "",
                 exit_code=None,
                 timed_out=False,
                 truncated=False,
@@ -220,12 +218,16 @@ Important Usage Rules:
             )
 
         if timeout_seconds is None:
-            timeout_seconds = self.timeout
+            timeout_seconds = (
+                self._backend.default_exec_timeout
+                if self._backend.default_exec_timeout is not None
+                else self.timeout
+            )
         if not isinstance(timeout_seconds, int) or timeout_seconds <= 0:
             return self._result(
                 ok=False,
                 command=command,
-                cwd=cwd_used,
+                cwd=cwd_used or "",
                 exit_code=None,
                 timed_out=False,
                 truncated=False,
@@ -240,7 +242,7 @@ Important Usage Rules:
             return self._result(
                 ok=False,
                 command=command,
-                cwd=cwd_used,
+                cwd=cwd_used or "",
                 exit_code=None,
                 timed_out=False,
                 truncated=False,
@@ -249,38 +251,39 @@ Important Usage Rules:
                 error={"type": "invalid_argument", "field": "max_output_chars"},
             )
 
-        if not isinstance(cwd_used, str) or not cwd_used.strip():
-            return self._result(
-                ok=False,
-                command=command,
-                cwd=str(cwd_used),
-                exit_code=None,
-                timed_out=False,
-                truncated=False,
-                stdout="",
-                stderr="",
-                error={"type": "invalid_argument", "field": "cwd"},
-            )
-        if not os.path.isdir(cwd_used):
-            return self._result(
-                ok=False,
-                command=command,
-                cwd=cwd_used,
-                exit_code=None,
-                timed_out=False,
-                truncated=False,
-                stdout="",
-                stderr="",
-                error={"type": "invalid_argument", "field": "cwd", "message": "Not a directory"},
-            )
+        if cwd_used is not None:
+            if not isinstance(cwd_used, str) or not cwd_used.strip():
+                return self._result(
+                    ok=False,
+                    command=command,
+                    cwd=str(cwd_used),
+                    exit_code=None,
+                    timed_out=False,
+                    truncated=False,
+                    stdout="",
+                    stderr="",
+                    error={"type": "invalid_argument", "field": "cwd"},
+                )
+            if not self._backend.is_dir(cwd_used):
+                return self._result(
+                    ok=False,
+                    command=command,
+                    cwd=cwd_used,
+                    exit_code=None,
+                    timed_out=False,
+                    truncated=False,
+                    stdout="",
+                    stderr="",
+                    error={"type": "invalid_argument", "field": "cwd", "message": "Not a directory"},
+                )
 
-        merged_env = None
+        env_sanitized: dict[str, str] = {}
         if env_vars is not None:
             if not isinstance(env_vars, list):
                 return self._result(
                     ok=False,
                     command=command,
-                    cwd=cwd_used,
+                    cwd=cwd_used or "",
                     exit_code=None,
                     timed_out=False,
                     truncated=False,
@@ -298,7 +301,7 @@ Important Usage Rules:
                     return self._result(
                         ok=False,
                         command=command,
-                        cwd=cwd_used,
+                        cwd=cwd_used or "",
                         exit_code=None,
                         timed_out=False,
                         truncated=False,
@@ -315,7 +318,7 @@ Important Usage Rules:
                     return self._result(
                         ok=False,
                         command=command,
-                        cwd=cwd_used,
+                        cwd=cwd_used or "",
                         exit_code=None,
                         timed_out=False,
                         truncated=False,
@@ -328,7 +331,7 @@ Important Usage Rules:
                     return self._result(
                         ok=False,
                         command=command,
-                        cwd=cwd_used,
+                        cwd=cwd_used or "",
                         exit_code=None,
                         timed_out=False,
                         truncated=False,
@@ -341,76 +344,20 @@ Important Usage Rules:
                         },
                     )
                 env_from_pairs[name.strip()] = value
-            # Ensure string keys and values for subprocess env
-            env_sanitized: dict[str, str] = {}
+            # Ensure string keys and values for the backend's exec()
             for k, v in env_from_pairs.items():
                 env_sanitized[str(k)] = "" if v is None else str(v)
-            merged_env = {**os.environ, **env_sanitized}
 
         try:
-            # На Windows запуск subprocess гасит ENABLE_MOUSE_INPUT родительской
-            # консоли → TUI теряет мышь до перезапуска. Возвращаем режим после.
-            from utils.win_console import preserve_console_mode
-            with preserve_console_mode():
-                result = subprocess.run(
-                    command,
-                    shell=True,
-                    capture_output=True,
-                    text=True,
-                    timeout=timeout_seconds,
-                    cwd=cwd_used,
-                    encoding="utf-8",
-                    errors="replace",
-                    env=merged_env,
-                )
-
-            stdout_raw = result.stdout or ""
-            stderr_raw = result.stderr or ""
-            stdout, stdout_trunc = self._truncate_text(stdout_raw.rstrip(), max_output_chars)
-            stderr, stderr_trunc = self._truncate_text(stderr_raw.rstrip(), max_output_chars)
-            truncated = stdout_trunc or stderr_trunc
-
-            exit_code = result.returncode
-            ok = exit_code == 0
-            error = None
-            if not ok:
-                error = {"type": "non_zero_exit", "message": f"Command exited with status {exit_code}"}
-
-            return self._result(
-                ok=ok,
-                command=command,
-                cwd=cwd_used,
-                exit_code=exit_code,
-                timed_out=False,
-                truncated=truncated,
-                stdout=stdout,
-                stderr=stderr,
-                error=error,
-            )
-
-        except subprocess.TimeoutExpired as e:
-            stdout_raw = getattr(e, "stdout", "") or ""
-            stderr_raw = getattr(e, "stderr", "") or ""
-            stdout, _stdout_trunc = self._truncate_text(stdout_raw.rstrip(), max_output_chars)
-            stderr, _stderr_trunc = self._truncate_text(stderr_raw.rstrip(), max_output_chars)
-            truncated = _stdout_trunc or _stderr_trunc
-            return self._result(
-                ok=False,
-                command=command,
-                cwd=cwd_used,
-                exit_code=None,
-                timed_out=True,
-                truncated=truncated,
-                stdout=stdout,
-                stderr=stderr,
-                error={"type": "timeout", "message": f"Command timed out after {timeout_seconds} seconds"},
+            res = self._backend.exec(
+                command, cwd=cwd_used, timeout=timeout_seconds, env=env_sanitized or None
             )
         except Exception as e:
             err = str(e).replace("\n", " ").strip()
             return self._result(
                 ok=False,
                 command=command,
-                cwd=cwd_used,
+                cwd=cwd_used or "",
                 exit_code=-1,
                 timed_out=False,
                 truncated=False,
@@ -418,3 +365,35 @@ Important Usage Rules:
                 stderr="",
                 error={"type": "execution_failed", "message": err},
             )
+
+        stdout, stdout_trunc = self._truncate_text((res.stdout or "").rstrip(), max_output_chars)
+        stderr, stderr_trunc = self._truncate_text((res.stderr or "").rstrip(), max_output_chars)
+        truncated = stdout_trunc or stderr_trunc
+
+        if res.timed_out:
+            return self._result(
+                ok=False,
+                command=command,
+                cwd=cwd_used or "",
+                exit_code=None,
+                timed_out=True,
+                truncated=truncated,
+                stdout=stdout,
+                stderr=stderr,
+                error={"type": "timeout", "message": f"Command timed out after {timeout_seconds} seconds"},
+            )
+
+        exit_code = res.return_code
+        ok = exit_code == 0
+        error = None if ok else {"type": "non_zero_exit", "message": f"Command exited with status {exit_code}"}
+        return self._result(
+            ok=ok,
+            command=command,
+            cwd=cwd_used or "",
+            exit_code=exit_code,
+            timed_out=False,
+            truncated=truncated,
+            stdout=stdout,
+            stderr=stderr,
+            error=error,
+        )

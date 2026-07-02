@@ -1,9 +1,9 @@
-"""HarborAppendToFile must behave 1:1 with the base AppendToFile.
+"""AppendToFile must behave 1:1 regardless of the physical I/O backend.
 
-VERIFICATION METHOD: differential (oracle) testing. The base tool is the oracle — the
-harbor shim must produce an IDENTICAL envelope and IDENTICAL resulting file content for
-the same input. `_run_both` feeds one case through the base (real temp file) and the
-shim (in-memory FakeBackend). Any divergence on any case fails the suite.
+VERIFICATION METHOD: differential (oracle) testing. The base tool against a real temp
+file is the oracle — the same base tool driven by an in-memory FakeBackend must produce
+an IDENTICAL envelope and IDENTICAL resulting file content for the same input.
+`_run_both` feeds one case through both backends.
 """
 import json
 from types import SimpleNamespace
@@ -12,14 +12,14 @@ import pytest
 
 from tests.harbor.fakes import FakeBackend, strip_path_fields
 from tools.fs.append_to_file import AppendToFile
-from tools.harbor.append_to_file import HarborAppendToFile
 
 EXISTING_CONTENT = "hello world"
 
 
 def _harbor(files):
-    t = HarborAppendToFile.__new__(HarborAppendToFile)
-    t._ctx = SimpleNamespace(harbor_backend=FakeBackend(files))
+    t = AppendToFile.__new__(AppendToFile)
+    t._ctx = SimpleNamespace(config_dict={})
+    t._backend = FakeBackend(files)   # sandbox path now = base tool + fake backend
     return t
 
 
@@ -46,7 +46,7 @@ def _run_both(tmp_path, existing_content, **kwargs):
 
     h = _harbor(files)
     harbor_env = json.loads(h(path="/work/f.txt", **kwargs))
-    harbor_content = h._ctx.harbor_backend.files.get("/work/f.txt")
+    harbor_content = h._backend.files.get("/work/f.txt")
 
     return base_env, base_content, harbor_env, harbor_content
 
@@ -126,7 +126,7 @@ def test_identical_to_base(tmp_path, case):
 
         h = _harbor(files)
         harbor_env = json.loads(h(path="/work/f.txt", **kw))
-        harbor_content = h._ctx.harbor_backend.files.get("/work/f.txt")
+        harbor_content = h._backend.files.get("/work/f.txt")
 
         assert strip_path_fields(harbor_env, "path") == strip_path_fields(base_env, "path"), _id
         assert harbor_content == base_content, _id
@@ -144,7 +144,7 @@ def test_identical_to_base(tmp_path, case):
 
         h = _harbor({})
         harbor_env = json.loads(h(path=harbor_path, **kw))
-        harbor_content = h._ctx.harbor_backend.files.get(harbor_path)
+        harbor_content = h._backend.files.get(harbor_path)
 
         assert strip_path_fields(harbor_env, "path") == strip_path_fields(base_env, "path"), _id
         assert harbor_content == base_content, _id
@@ -186,7 +186,7 @@ def test_create_if_missing_creates_file():
     env = json.loads(h(path="/work/new.txt", content="hello", create_if_missing=True))
     assert env["ok"] is True
     assert env["created"] is True
-    assert h._ctx.harbor_backend.files["/work/new.txt"] == "\n\nhello"
+    assert h._backend.files["/work/new.txt"] == "\n\nhello"
 
 
 def test_bytes_appended_matches_base(tmp_path):

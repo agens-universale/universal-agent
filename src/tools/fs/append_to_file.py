@@ -179,7 +179,7 @@ Usage:
             )
 
         # Проверка существования файла
-        exists = os.path.exists(path)
+        exists = self._backend.exists(path)
         if not exists:
             if not create_if_missing:
                 return self._result(
@@ -189,10 +189,10 @@ Usage:
                     error={"type": "not_found"},
                 )
             parent = os.path.dirname(path) or "."
-            if not os.path.exists(parent):
+            if not self._backend.is_dir(parent):
                 if make_dirs:
                     try:
-                        os.makedirs(parent, exist_ok=True)
+                        self._backend.makedirs(parent)
                     except Exception as e:
                         return self._result(
                             ok=False,
@@ -209,10 +209,9 @@ Usage:
                     )
 
         try:
-            before = os.path.getsize(path) if os.path.exists(path) else 0
-            with open(path, 'a', encoding=encoding, errors="replace") as fd:
-                fd.write(separator + content)
-            after = os.path.getsize(path)
+            before = self._backend.getsize(path) if self._backend.exists(path) else 0
+            self._backend.append(path, separator + content, encoding=encoding)
+            after = self._backend.getsize(path)
             appended = max(0, after - before)
         except Exception as e:
             return self._result(

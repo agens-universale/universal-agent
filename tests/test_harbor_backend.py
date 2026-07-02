@@ -1,7 +1,8 @@
 import asyncio
 import threading
 import pytest
-from tools.harbor.backend import HarborBackend
+from tools.backends.harbor import HarborBackend
+from tools.backends.protocol import FsBackend
 
 
 class FakeExecResult:
@@ -60,14 +61,6 @@ def test_write_uses_upload(loop_in_thread):
     assert env.uploaded and env.uploaded[0][1] == "/work/new.txt"
 
 
-def test_edit_download_modify_upload(loop_in_thread):
-    env = FakeEnv()
-    backend = HarborBackend(env, loop_in_thread)
-    count = backend.edit("/work/f.txt", "old-content", "new-content")
-    assert count == 1
-    assert env.downloaded and env.uploaded
-
-
 def test_is_file_is_dir_use_native_env_handles(loop_in_thread):
     # is_file/is_dir must delegate to Harbor's BaseEnvironment, not shell `test`.
     env = FakeEnv()
@@ -78,3 +71,126 @@ def test_is_file_is_dir_use_native_env_handles(loop_in_thread):
     assert backend.is_dir("/work/a.txt") is False
     # delegation goes through env.is_file/is_dir, NOT exec → no shell `test` calls
     assert not any("test -" in c for c in env.calls)
+
+
+def test_is_sandbox_and_default_exec_timeout(loop_in_thread):
+    env = FakeEnv()
+    backend = HarborBackend(env, loop_in_thread)
+    assert backend.is_sandbox is True
+    assert backend.default_exec_timeout == 300
+
+
+def test_implements_full_fsbackend_protocol(loop_in_thread):
+    env = FakeEnv()
+    backend = HarborBackend(env, loop_in_thread)
+    assert isinstance(backend, FsBackend)
+
+
+def test_listdir_parses_find_output(loop_in_thread):
+    env = FakeEnv()
+    env.exec = _make_exec_returning(env, "b\td\na\tf\n")
+    backend = HarborBackend(env, loop_in_thread)
+    result = backend.listdir("/work")
+    assert result == [("a", False), ("b", True)]
+
+
+def test_listdir_raises_file_not_found_on_nonzero_rc(loop_in_thread):
+    env = FakeEnv()
+    env.exec = _make_exec_returning(env, "", return_code=1)
+    backend = HarborBackend(env, loop_in_thread)
+    with pytest.raises(FileNotFoundError):
+        backend.listdir("/missing")
+
+
+def test_append_creates_file_if_missing(loop_in_thread):
+    env = FakeEnv()
+    backend = HarborBackend(env, loop_in_thread)
+    # exists() -> exec("test -e ...") returns rc 0 by default FakeEnv.exec, so
+    # simulate missing file via a custom exec that fails "test -e" but succeeds otherwise.
+    async def fake_exec(command, **kw):
+        env.calls.append(command)
+        if command.startswith("test -e"):
+            return FakeExecResult(stdout="", return_code=1)
+        return FakeExecResult(stdout=f"ran:{command}", return_code=0)
+
+    env.exec = fake_exec
+    backend.append("/work/new.txt", "hello")
+    assert env.uploaded and env.uploaded[0][1] == "/work/new.txt"
+
+
+def test_append_concatenates_existing_content(loop_in_thread):
+    env = FakeEnv()
+    uploaded_contents = []
+
+    async def fake_exec(command, **kw):
+        env.calls.append(command)
+        if command.startswith("test -e"):
+            return FakeExecResult(stdout="", return_code=0)
+        if command.startswith("cat "):
+            return FakeExecResult(stdout="existing-", return_code=0)
+        return FakeExecResult(stdout=f"ran:{command}", return_code=0)
+
+    async def fake_upload_file(src, dst):
+        from pathlib import Path
+        uploaded_contents.append(Path(src).read_text(encoding="utf-8"))
+        env.uploaded.append((str(src), dst))
+
+    env.exec = fake_exec
+    env.upload_file = fake_upload_file
+    backend = HarborBackend(env, loop_in_thread)
+    backend.append("/work/f.txt", "more")
+    assert uploaded_contents == ["existing-more"]
+
+
+def test_exec_env_prefix_quoting(loop_in_thread):
+    env = FakeEnv()
+    backend = HarborBackend(env, loop_in_thread)
+    backend.exec("echo hi", env={"FOO": "bar baz"})
+    assert env.calls == ["env FOO='bar baz' echo hi"]
+
+
+def test_exec_env_prefix_with_cwd(loop_in_thread):
+    env = FakeEnv()
+    backend = HarborBackend(env, loop_in_thread)
+    backend.exec("echo hi", cwd="/work", env={"FOO": "bar"})
+    assert env.calls == ["cd /work && env FOO=bar echo hi"]
+
+
+def test_every_impl_signature_accepts_protocol_parameters():
+    # ABC registration only checks method NAMES; this guards signatures.
+    # For each abstract method, a protocol-shaped call (keyword-capable params
+    # passed by name — catches renamed/missing params like write() without
+    # `encoding`) must bind onto the HarborBackend implementation.
+    import inspect
+
+    for name in sorted(FsBackend.__abstractmethods__):
+        proto = inspect.signature(getattr(FsBackend, name))
+        impl = inspect.signature(getattr(HarborBackend, name))
+        args, kwargs = [None], {}  # leading None stands for self
+        for p in list(proto.parameters.values())[1:]:
+            if p.kind == p.POSITIONAL_ONLY:
+                args.append(None)
+            else:
+                kwargs[p.name] = None
+        try:
+            impl.bind(*args, **kwargs)
+        except TypeError as e:
+            pytest.fail(f"HarborBackend.{name}{impl} rejects protocol call {proto}: {e}")
+
+
+def test_write_and_append_accept_encoding_kwarg(loop_in_thread):
+    # Regression guard: unified fs tools call backend.write(..., encoding=...)
+    # (e.g. fs_write_file); must not TypeError against the container backend.
+    env = FakeEnv()
+    backend = HarborBackend(env, loop_in_thread)
+    backend.write("/work/a.txt", "data", encoding="utf-8")
+    backend.append("/work/a.txt", "more", encoding="utf-8")
+    assert env.uploaded and env.uploaded[0][1] == "/work/a.txt"
+
+
+def _make_exec_returning(env, stdout, return_code=0):
+    async def fake_exec(command, **kw):
+        env.calls.append(command)
+        return FakeExecResult(stdout=stdout, return_code=return_code)
+
+    return fake_exec

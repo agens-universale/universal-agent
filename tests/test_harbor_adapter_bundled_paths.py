@@ -1,8 +1,14 @@
 # tests/test_harbor_adapter_bundled_paths.py
+# Requires the `harbor` framework (dependency-group `test`).
 import importlib.util, os, sys
 from pathlib import Path
 
+import pytest
+
 REPO = Path(__file__).resolve().parent.parent
+
+_TEST_URL = "http://test-backend/v1/chat/completions"
+
 
 def _load_adapter():
     # tests/harbor/ (a test-fixture package with __init__.py) is added to sys.path by
@@ -29,9 +35,16 @@ def _load_adapter():
     spec.loader.exec_module(mod)
     return mod.GcCliExternal
 
-def test_adapter_points_dependency_paths_to_existing_files():
+
+def _agent(GcCliExternal, **gc_cli_config):
+    cfg = {"completions_url": _TEST_URL, **gc_cli_config}
+    return GcCliExternal(logs_dir=Path("/tmp"), model_name="openai/m", gc_cli_config=cfg)
+
+
+def test_adapter_points_dependency_paths_to_existing_files(monkeypatch):
+    monkeypatch.delenv("GC_CLI_BACKEND_URL", raising=False)
     GcCliExternal = _load_adapter()
-    a = GcCliExternal(logs_dir=Path("/tmp"), model_name="openai/m")
+    a = _agent(GcCliExternal)
     c = a._build_config()
     # system prompt is the BASE prompt, and exists
     assert c["chat_completions_system_prompt_path"].endswith("prompts/chat_completions_system_prompt.md")
@@ -49,11 +62,59 @@ def test_adapter_points_dependency_paths_to_existing_files():
     assert c["chat_completions_intent_guard_prompt_path"].endswith("prompts/chat_completions_intent_guard_prompt.md")
     assert os.path.isfile(c["chat_completions_intent_guard_prompt_path"])
 
-def test_profile_overrides_still_win():
+
+def test_security_guards_pinned_off_for_benches(monkeypatch):
+    # Fuse: if a release flips guard defaults to enabled/ask, benches must
+    # still get them explicitly OFF (absent keys would inherit the flip).
+    monkeypatch.delenv("GC_CLI_BACKEND_URL", raising=False)
     GcCliExternal = _load_adapter()
-    a = GcCliExternal(logs_dir=Path("/tmp"), model_name="openai/m",
-                      gc_cli_config={"use_local_subagents": True,
-                                     "summary_params": {"chat_completions_summary_trigger_chars": 150000}})
+    c = _agent(GcCliExternal)._build_config()
+    assert c["read_guard"] == {"enabled": False}
+    assert c["write_guard"] == {"enabled": False}
+    assert c["url_policy"] == {"enabled": False}
+    assert c["command_moderation"] == {"mode": "allow"}
+
+
+def test_no_backend_url_fails_fast(monkeypatch):
+    # No api_base / env / profile url -> RuntimeError, no silent default.
+    monkeypatch.delenv("GC_CLI_BACKEND_URL", raising=False)
+    GcCliExternal = _load_adapter()
+    a = GcCliExternal(logs_dir=Path("/tmp"), model_name="openai/m")
+    with pytest.raises(RuntimeError, match="No LLM backend configured"):
+        a._build_config()
+
+
+def test_no_model_fails_fast(monkeypatch):
+    monkeypatch.delenv("GC_CLI_BACKEND_URL", raising=False)
+    monkeypatch.delenv("GC_CLI_MODEL", raising=False)
+    GcCliExternal = _load_adapter()
+    a = GcCliExternal(logs_dir=Path("/tmp"), model_name=None,
+                      gc_cli_config={"completions_url": _TEST_URL})
+    with pytest.raises(RuntimeError, match="No model configured"):
+        a._build_config()
+
+
+def test_url_and_model_sources_resolve(monkeypatch):
+    GcCliExternal = _load_adapter()
+    # env beats profile for the URL (preserves the old force-override precedence)
+    monkeypatch.setenv("GC_CLI_BACKEND_URL", "http://env-backend/v1/chat/completions")
+    a = _agent(GcCliExternal)
+    assert a._build_config()["completions_url"] == "http://env-backend/v1/chat/completions"
+    # profile is used when env is absent
+    monkeypatch.delenv("GC_CLI_BACKEND_URL", raising=False)
+    assert _agent(GcCliExternal)._build_config()["completions_url"] == _TEST_URL
+    # model comes from profile when the runner passed none
+    b = GcCliExternal(logs_dir=Path("/tmp"), model_name=None,
+                      gc_cli_config={"completions_url": _TEST_URL, "model": "openai/VendorX/M1"})
+    assert b._build_config()["model"] == "VendorX/M1"
+
+
+def test_profile_overrides_still_win(monkeypatch):
+    monkeypatch.delenv("GC_CLI_BACKEND_URL", raising=False)
+    GcCliExternal = _load_adapter()
+    a = _agent(GcCliExternal,
+               use_local_subagents=True,
+               summary_params={"chat_completions_summary_trigger_chars": 150000})
     c = a._build_config()
     assert c["use_local_subagents"] is True
     # merged: profile trigger + adapter-provided summary prompt path coexist

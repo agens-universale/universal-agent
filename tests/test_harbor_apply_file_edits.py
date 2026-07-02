@@ -1,11 +1,12 @@
 """HarborApplyFileEdits must behave 1:1 with the base ApplyFileEdits.
 
 VERIFICATION METHOD: differential (oracle) testing. The base tool is the oracle — the
-harbor shim must produce an IDENTICAL envelope and IDENTICAL resulting file content for
-the same input. `_run_both` feeds one case through the base (real temp file) and the
-shim (in-memory backend) and the parametrized matrix below exercises every `__call__`
-branch (validation errors, file checks, sha stale, every edit outcome, dry_run, backup,
-diff, occurrence/scope variants). Any divergence on any case fails the suite.
+same base tool driven by an in-memory FakeBackend must produce an IDENTICAL envelope
+and IDENTICAL resulting file content for the same input. `_run_both` feeds one case
+through the base (real temp file) and the FakeBackend-driven instance and the
+parametrized matrix below exercises every `__call__` branch (validation errors, file
+checks, sha stale, every edit outcome, dry_run, backup, diff, occurrence/scope
+variants). Any divergence on any case fails the suite.
 """
 import hashlib
 import json
@@ -13,8 +14,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from tests.harbor.fakes import FakeBackend, strip_path_fields
 from tools.fs.apply_file_edits import ApplyFileEdits
-from tools.harbor.apply_file_edits import HarborApplyFileEdits
 
 CONTENT = "alpha\nbeta\nalpha\ngamma\n"
 CONTENT_SHA = hashlib.sha256(CONTENT.encode("utf-8")).hexdigest()
@@ -30,33 +31,10 @@ def _edit(search, replace, **over):
     return e
 
 
-class _FakeBackend:
-    """In-memory stand-in for HarborBackend (path -> content)."""
-
-    def __init__(self, files):
-        self.files = dict(files)
-
-    def exists(self, p):
-        return p in self.files
-
-    def is_file(self, p):
-        return p in self.files
-
-    def getsize(self, p):
-        return len(self.files[p].encode("utf-8"))
-
-    def read(self, p):
-        if p not in self.files:
-            raise FileNotFoundError(p)
-        return self.files[p]
-
-    def write(self, p, content):
-        self.files[p] = content
-
-
 def _harbor(files):
-    t = HarborApplyFileEdits.__new__(HarborApplyFileEdits)
-    t._ctx = SimpleNamespace(harbor_backend=_FakeBackend(files))
+    t = ApplyFileEdits.__new__(ApplyFileEdits)
+    t._ctx = SimpleNamespace(config_dict={})
+    t._backend = FakeBackend(files)   # sandbox path now = base tool + fake backend
     return t
 
 
@@ -69,10 +47,7 @@ def _base():
 def _strip_path_fields(env):
     # path/backup_path are location-specific; diff embeds the path in its header.
     # diff_truncated stays in the comparison so diff truncation parity is still checked.
-    env = dict(env)
-    for k in ("path", "backup_path", "diff"):
-        env.pop(k, None)
-    return env
+    return strip_path_fields(env, "path", "backup_path", "diff")
 
 
 def _run_both(tmp_path, content, edits, **kwargs):
@@ -92,7 +67,7 @@ def _run_both(tmp_path, content, edits, **kwargs):
 
     h = _harbor(files)
     harbor_env = json.loads(h(path="/work/f.txt", edits=edits, **kwargs))
-    harbor_content = h._ctx.harbor_backend.files.get("/work/f.txt")
+    harbor_content = h._backend.files.get("/work/f.txt")
     return base_env, base_content, harbor_env, harbor_content
 
 
@@ -145,7 +120,7 @@ def test_harbor_matches_base_envelope_and_content(tmp_path):
 
     h = _harbor({"/work/x.txt": CONTENT})
     harbor_env = json.loads(h(path="/work/x.txt", edits=edits))
-    harbor_content = h._ctx.harbor_backend.files["/work/x.txt"]
+    harbor_content = h._backend.files["/work/x.txt"]
 
     assert harbor_content == base_content == "alpha\nBETA\nalpha\nGAMMA\n"
     # Identical envelope apart from the (location-specific) path fields.
@@ -159,7 +134,7 @@ def test_dry_run_does_not_write():
     h = _harbor({"/f": CONTENT})
     env = json.loads(h(path="/f", edits=[_edit("beta", "X")], dry_run=True))
     assert env["ok"] is True and env["applied"] is False
-    assert h._ctx.harbor_backend.files["/f"] == CONTENT  # unchanged
+    assert h._backend.files["/f"] == CONTENT  # unchanged
 
 
 def test_no_match_is_atomic_failure():
@@ -170,7 +145,7 @@ def test_no_match_is_atomic_failure():
     assert env["ok"] is False and env["applied"] is False
     assert env["failed_edit_index"] == 1
     assert env["error"]["type"] == "not_found"
-    assert h._ctx.harbor_backend.files["/f"] == CONTENT  # atomic: untouched
+    assert h._backend.files["/f"] == CONTENT  # atomic: untouched
 
 
 def test_occurrence_last_replaces_correct_match_and_counts():
@@ -178,7 +153,7 @@ def test_occurrence_last_replaces_correct_match_and_counts():
     env = json.loads(h(path="/f", edits=[_edit("alpha", "Z", occurrence="last")]))
     assert env["applied"] is True
     assert env["total_replaced"] == 1  # not the file's total match count (=2)
-    assert h._ctx.harbor_backend.files["/f"] == "alpha\nbeta\nZ\ngamma\n"
+    assert h._backend.files["/f"] == "alpha\nbeta\nZ\ngamma\n"
 
 
 def test_expected_matches_mismatch_blocks():
@@ -186,7 +161,7 @@ def test_expected_matches_mismatch_blocks():
     env = json.loads(h(path="/f", edits=[_edit("alpha", "Z", expected_matches=1)]))
     assert env["ok"] is False and env["applied"] is False
     assert env["error"]["type"] == "match_count_mismatch"
-    assert h._ctx.harbor_backend.files["/f"] == CONTENT
+    assert h._backend.files["/f"] == CONTENT
 
 
 def test_not_found_envelope():

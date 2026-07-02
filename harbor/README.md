@@ -6,36 +6,47 @@
 
 Запускает gc-cli как **External**-агент Harbor: цикл агента крутится **в раннере** (вне
 контейнера задачи), а файловые/shell-тулы gc-cli работают **внутри контейнера задачи**
-через `BaseEnvironment` Harbor (пак `use_harbor_tools` + `HarborBackend`). **В контейнер
-задачи ничего не устанавливается** — это и есть смысл External-паттерна (важно для
-честности замеров: установка чего-либо в контейнер может неявно изменить условия задачи).
+через `BaseEnvironment` Harbor (адаптер кладёт `HarborBackend` в `ctx.harbor_backend`,
+тулы подхватывают его автоматически). **В контейнер задачи ничего не устанавливается** —
+это и есть смысл External-паттерна (важно для честности замеров: установка чего-либо
+в контейнер может неявно изменить условия задачи).
 
 ```
 Runner / main-контейнер (хост-сайд)            task-контейнер (поднят через DinD)
   GcCliExternal(BaseAgent)                       [ничего не ставится]
     run() → AgentExecutor (gc-cli loop)
-              └─ HarborToolPack
-                   └─ HarborBackend  ──exec/upload/download──►  ФС/shell контейнера
+              └─ базовые тулы gc-cli (единственные, без копий)
+                   └─ self._backend = HarborBackend
+                        ──exec/upload/download──►  ФС/shell контейнера
 ```
 
-## Тул-пак (`src/tools/harbor/`)
+## Бэкенд (`src/tools/backends/`)
 
-11 тулов-обёрток — **тонкие подклассы базовых тулов gc-cli**. Каждый переопределяет
-**только `__call__`** для маршрутизации I/O через `HarborBackend`; вся логика, валидация
-и формат ответа **наследуются** от базы → поведение **1:1 с обычными тулами**.
+Физический I/O тулов вынесен за интерфейс `FsBackend` (`protocol.py`) — паттерн
+DeepAgents: **тул определён один раз** (валидация, форматы ошибок, envelope — в базовом
+туле), а «где живут байты / где бежит команда» решает подставленная реализация:
 
-Меняются **только тулы с ФС/shell** (`read_file`, `write_to_file`, `append_to_file`,
-`apply_file_edits`, `search_and_replace`, `list_files`, `search_files`, `file_info`,
-`save_base64_file`, `exec_command`, `run_python_code`). Остальные тулы (think, web,
-память, subagents, скиллы, MCP) хост не трогают — остаются без изменений.
+- `local.py` — `LocalFsBackend`: хост (`os`/`open`/`subprocess`), дефолт;
+- `harbor.py` — `HarborBackend`: контейнер задачи через `BaseEnvironment`
+  (`is_sandbox = True`, дефолтный exec-timeout 300s).
+
+Резолв в `AbstractSimpleTool._backend`: явный override в тестах →
+`ctx.harbor_backend` (ставит адаптер) → `LocalFsBackend`. Отдельного harbor-пака
+тулов **нет** — контейнерный режим и хост-режим гоняют один и тот же код тулов.
+
+Бэкенд затрагивает **только тулы с ФС/shell** (`fs_read_file`, `fs_write_file`,
+`fs_append_file`, `fs_apply_file_edits`, `fs_search_and_replace`, `fs_list_files`,
+`fs_search_files`, `fs_file_info`, `fs_save_base64_file`, `exec_command`, `exec_python`).
+Остальные тулы (think, web, память, subagents, скиллы, MCP) хост не трогают — остаются
+без изменений.
 
 `HarborBackend` использует нативные ручки `BaseEnvironment` где они есть
-(`exec`, `upload_file`/`download_file`, `is_file`/`is_dir`); для read/stat/sha256/walk
+(`exec`, `upload_file`, `is_file`/`is_dir`); для read/stat/sha256/walk/listdir
 нативных ручек у Harbor нет — там shell через `exec` (GNU coreutils, как в Linux-докере).
 
 Корректность проверяется **дифференциальными oracle-тестами** (`tests/test_harbor_*.py`):
-один и тот же ввод через базовый тул (реальная ФС) и шим (in-memory backend) должны дать
-**идентичный envelope и результат**.
+один и тот же ввод через базовый тул с реальной ФС (`LocalFsBackend`) и с in-memory
+`FakeBackend` должен дать **идентичный envelope и результат**.
 
 ## Запись траекторий
 
@@ -59,7 +70,10 @@ uv pip install --python "$(dirname "$(readlink -f "$(command -v harbor)")")/pyth
 
 ```bash
 cd harbor
-export GC_CLI_BACKEND_URL=http://127.0.0.1:8014/v1/chat/completions   # бэкенд на хосте
+# ОБЯЗАТЕЛЬНО для локальных запусков: хардкод-дефолта URL нет. Источники:
+# api_base от раннера → env GC_CLI_BACKEND_URL → gc_cli_config.completions_url
+# из профиля; без всех трёх адаптер падает с понятной ошибкой (fail-fast).
+export GC_CLI_BACKEND_URL=http://127.0.0.1:<port>/v1/chat/completions   # бэкенд на хосте
 harbor run \
   --path <task-dir> \
   --agent-import-path adapters.gc_cli_external:GcCliExternal \
@@ -106,6 +120,14 @@ agent_kwargs:
 - **Model id сохраняет vendor-path** (`MiniMaxAI/MiniMax-M2.7`); срезается только префикс
   провайдера `openai/`.
 - Security-декораторы (`@enforce_write_guard`/`@enforce_read_guard`/`@moderate_command_execution`)
-  в harbor-шимах **сняты** — контейнер сам песочница.
-- Тул-пак включается флагом `use_harbor_tools` (в `_build_config` адаптера / через
-  `build_tools_data`).
+  остаются на тулах, но адаптер **явно пинит их OFF** в `_build_config()`
+  (`read_guard`/`write_guard`/`url_policy` → `enabled: false`, `command_moderation` → `allow`) —
+  независимо от дефолтов релиза gc-cli. Причины: (1) контейнер сам песочница; (2) гарды
+  резолвят пути по ФС **раннера** (`launch_root` = cwd раннера) — контейнерный `/app` для них
+  всегда «вне периметра», включённый гард блокирует 100% файловых операций; (3) режим `ask`
+  на non-tty раннере авто-отклоняет → `ask` ≡ `deny`. Пин защищён тестом
+  (`test_security_guards_pinned_off_for_benches`); отдельный профиль может явно включить
+  гард через `gc_cli_config` (deep-merge поверх дефолтов).
+- Флаг `use_harbor_tools` теперь означает только одно: из реестра выбрасывается
+  `download_file` (он пишет на хост-ФС — в контейнер-режиме файл лёг бы мимо контейнера).
+  Маршрутизация I/O в контейнер идёт не через флаг, а через `ctx.harbor_backend`.

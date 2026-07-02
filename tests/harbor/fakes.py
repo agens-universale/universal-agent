@@ -5,12 +5,18 @@ import hashlib
 class FakeBackend:
     """Models a container filesystem as path -> content (str)."""
 
+    is_sandbox = True
+    default_exec_timeout = 300
+
     def __init__(self, files=None):
         self.files = dict(files or {})
 
     # stat primitives
     def exists(self, p):
-        return p in self.files
+        # A path "exists" if it is a tracked file OR an implicit directory
+        # (has tracked files under it) — mirrors os.path.exists() for dirs,
+        # matching LocalFsBackend.exists() semantics for directory-based tools.
+        return p in self.files or self.is_dir(p)
 
     def is_file(self, p):
         return p in self.files
@@ -59,11 +65,77 @@ class FakeBackend:
             raise FileNotFoundError(p)
         return self.files[p].encode("utf-8")
 
-    def write(self, p, content):
+    def write(self, p, content, encoding="utf-8"):
         self.files[p] = content
 
     def write_bytes(self, p, data):
         self.files[p] = data.decode("utf-8")
+
+    def lexists(self, p):
+        return self.exists(p)
+
+    def is_symlink(self, p):
+        return False
+
+    def realpath(self, p):
+        return p
+
+    def readable(self, p):
+        return True
+
+    def writable(self, p):
+        return True
+
+    def is_hidden(self, p):
+        return p.rsplit("/", 1)[-1].startswith(".")
+
+    def stat_info(self, p, follow_symlinks=False):
+        st = self.stat(p)
+        return {
+            "size": st["size"], "mtime": st["mtime"], "mode": int(str(st["mode"]), 8),
+            "is_file": st["is_file"], "is_dir": st["is_dir"], "is_symlink": st["is_symlink"],
+        }
+
+    def iter_lines(self, p):
+        return iter(self.read(p).splitlines(keepends=True))
+
+    def read_head_bytes(self, p, n):
+        return self.read_bytes(p)[:n]
+
+    def sha256_bytes(self, p):
+        return self.sha256(p)
+
+    def append(self, p, content, encoding="utf-8"):
+        self.files[p] = self.files.get(p, "") + content
+
+    def copy(self, src, dst):
+        self.files[dst] = self.files[src]
+
+    def makedirs(self, p):
+        pass  # dict-modeled fs: dirs are implicit
+
+    def listdir(self, p):
+        base = p.rstrip("/") + "/"
+        names = {}
+        for rel, is_d in self.walk(p):
+            if "/" not in rel:
+                names[rel] = is_d
+        return sorted(names.items())
+
+    def normpath(self, p):
+        return p.rstrip("/") or "/"
+
+    def join(self, base, name):
+        return base.rstrip("/") + "/" + name
+
+    def default_cwd(self):
+        return None
+
+    def exec(self, command, *, cwd=None, timeout=None, env=None):
+        raise NotImplementedError("exec parity tests use their own recording fake")
+
+    def run_python(self, code, *, cwd=None, timeout=None, env=None):
+        raise NotImplementedError
 
 
 def strip_path_fields(env, *keys):

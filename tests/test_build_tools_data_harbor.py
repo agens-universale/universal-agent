@@ -1,30 +1,26 @@
 from tools import build_tools_data
+from tools.exec.execute_command import ExecuteCommand
+from tools.exec.run_python_code import RunPythonCode
+from tools.fs.apply_file_edits import ApplyFileEdits
+from tools.fs.read_file import ReadFile
+from tools.fs.write_to_file_tool import WriteToFile
 
 
 def test_harbor_pack_off_by_default():
     cfg = {"backend_api_mode": "chat_completions"}
     tools_data, _, _, _ = build_tools_data(cfg)
-    assert tools_data["fs_read_file"]["tool_fabric"].__name__ == "ReadFile"
+    assert tools_data["fs_read_file"]["tool_fabric"] is ReadFile
     assert "download_file" in tools_data
 
 
-def test_harbor_pack_overrides_when_enabled():
+def test_harbor_flag_keeps_base_tools_and_drops_download_file():
+    # fs/exec tools now follow ctx.harbor_backend at call time (AbstractSimpleTool._backend)
+    # instead of being swapped for shim classes; only download_file (host-only) is dropped.
     cfg = {"backend_api_mode": "chat_completions", "use_harbor_tools": True}
     tools_data, _, _, _ = build_tools_data(cfg)
-    assert tools_data["fs_read_file"]["tool_fabric"].__name__ == "HarborReadFile"
-    assert tools_data["exec_command"]["tool_fabric"].__name__ == "HarborExecuteCommand"
+    assert tools_data["fs_read_file"]["tool_fabric"] is ReadFile
+    assert tools_data["fs_write_file"]["tool_fabric"] is WriteToFile
+    assert tools_data["fs_apply_file_edits"]["tool_fabric"] is ApplyFileEdits
+    assert tools_data["exec_command"]["tool_fabric"] is ExecuteCommand
+    assert tools_data["exec_python"]["tool_fabric"] is RunPythonCode
     assert "download_file" not in tools_data
-
-
-def test_all_eleven_harbor_tools_registered():
-    from tools.harbor import harbor_registry
-    keys = set(harbor_registry())
-    expected = {
-        "fs_read_file", "fs_write_file", "fs_append_file", "fs_apply_file_edits",
-        "fs_search_and_replace", "fs_list_files", "fs_search_files", "fs_file_info",
-        "fs_save_base64_file", "exec_command", "exec_python",
-    }
-    assert keys == expected
-    # every harbor tool keeps its builtin registry key as its tool name
-    for key, entry in harbor_registry().items():
-        assert entry["tool_fabric"].registered_tool_name() == key

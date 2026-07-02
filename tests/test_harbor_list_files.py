@@ -1,9 +1,16 @@
-"""Differential tests: HarborListFiles vs base ListFiles.
+"""Differential tests: base ListFiles over FakeBackend vs base ListFiles over the real fs.
 
-Strategy: build a real temp directory tree for the base; mirror the same
-tree in FakeBackend for the shim.  Compare structured entries/count/truncated
-modulo absolute path roots (strip 'path' from each entry, compare only
-'type' and 'is_hidden'; also strip the top-level 'path' field).
+VERIFICATION METHOD: differential (oracle) testing. The base tool driven by the
+real host filesystem is the oracle — the same base tool driven by an in-memory
+FakeBackend must produce an IDENTICAL structured envelope (modulo absolute path
+roots) for a mirrored directory tree. This pins the harbor-proven DFS-reconstruction
+traversal (`_walk_directory`) and flat `backend.listdir` traversal (`_list_directory`)
+to the same os.walk-order semantics the old inline os.walk/os.listdir traversal had.
+
+Strategy: build a real temp directory tree for one run; mirror the same tree in
+FakeBackend for the other.  Compare structured entries/count/truncated modulo
+absolute path roots (strip 'path' from each entry, compare only 'type' and
+'is_hidden'; also strip the top-level 'path' field).
 """
 import json
 import os
@@ -13,7 +20,6 @@ import pytest
 
 from tests.harbor.fakes import FakeBackend, strip_path_fields
 from tools.fs.list_files import ListFiles
-from tools.harbor.list_files import HarborListFiles
 
 # ---------------------------------------------------------------------------
 # Tree layout used in most tests (linear chain — BFS == DFS, kept for compat)
@@ -80,20 +86,16 @@ def _base():
 
 
 def _harbor():
-    t = HarborListFiles.__new__(HarborListFiles)
-    t._ctx = SimpleNamespace(
-        harbor_backend=FakeBackend(_FAKE_FILES),
-        config_dict={},
-    )
+    t = ListFiles.__new__(ListFiles)
+    t._ctx = SimpleNamespace(config_dict={})
+    t._backend = FakeBackend(_FAKE_FILES)
     return t
 
 
 def _harbor_branching():
-    t = HarborListFiles.__new__(HarborListFiles)
-    t._ctx = SimpleNamespace(
-        harbor_backend=FakeBackend(_BRANCHING_FILES),
-        config_dict={},
-    )
+    t = ListFiles.__new__(ListFiles)
+    t._ctx = SimpleNamespace(config_dict={})
+    t._backend = FakeBackend(_BRANCHING_FILES)
     return t
 
 
@@ -314,12 +316,10 @@ def test_not_a_directory(tmp_path):
     f.write_text("x", encoding="utf-8")
     base_raw = _base()(path=str(f))
 
-    # shim: /work/a.py is a file in FakeBackend
-    t = HarborListFiles.__new__(HarborListFiles)
-    t._ctx = SimpleNamespace(
-        harbor_backend=FakeBackend({"/work/a.py": "x"}),
-        config_dict={},
-    )
+    # fake-backed: /work/a.py is a file in FakeBackend
+    t = ListFiles.__new__(ListFiles)
+    t._ctx = SimpleNamespace(config_dict={})
+    t._backend = FakeBackend({"/work/a.py": "x"})
     harbor_raw = t(path="/work/a.py")
     _compare_results(base_raw, harbor_raw, "not_a_directory")
 
@@ -329,10 +329,53 @@ def test_not_found(tmp_path):
     nonexistent = str(tmp_path / "does_not_exist")
     base_raw = _base()(path=nonexistent)
 
-    t = HarborListFiles.__new__(HarborListFiles)
-    t._ctx = SimpleNamespace(
-        harbor_backend=FakeBackend({}),
-        config_dict={},
-    )
+    t = ListFiles.__new__(ListFiles)
+    t._ctx = SimpleNamespace(config_dict={})
+    t._backend = FakeBackend({})
     harbor_raw = t(path="/work/does_not_exist")
     _compare_results(base_raw, harbor_raw, "not_found")
+
+
+# ---------------------------------------------------------------------------
+# Read-guard regression: denied dirs must be pruned from recursion, not just
+# from the emitted entry.
+# ---------------------------------------------------------------------------
+
+def test_walk_does_not_descend_into_denied_dir_via_nested_override():
+    """A guard-DENIED directory must never be recursed into, even when a
+    nested subpath re-allows itself via `allowed_read_paths`.
+
+    Config: denied_read_paths=["/work/secret"] + allowed_read_paths=["/work/secret/public"].
+    `/work/secret` itself fails the read-guard check (denied), so the whole
+    subtree under it -- including `/work/secret/public`, which independently
+    passes the per-path check via the allowed_read_paths override -- must not
+    appear in the results. The old os.walk-based base pruned `dirnames` in
+    place so nothing under a denied dir was ever visited; `_dfs` must gate
+    recursion the same way (not just whether the entry itself is emitted).
+    """
+    files = {
+        "/work/out.txt": "x",
+        "/work/secret/public/file.txt": "y",
+    }
+    t = ListFiles.__new__(ListFiles)
+    t._ctx = SimpleNamespace(
+        config_dict={
+            "launch_root": "/work",
+            "read_guard": {
+                "enabled": True,
+                "allowed_read_roots": ["*"],
+                "denied_read_paths": ["/work/secret"],
+                "allowed_read_paths": ["/work/secret/public"],
+            },
+        }
+    )
+    t._backend = FakeBackend(files)
+
+    raw = t(path="/work", max_depth=5)
+    payload = json.loads(raw)
+
+    assert payload["ok"] is True
+    paths = [e["path"] for e in payload["entries"]]
+    assert not any("/secret/" in p or p.endswith("/secret") for p in paths), (
+        f"read-guard leak: denied subtree visible in entries: {paths}"
+    )

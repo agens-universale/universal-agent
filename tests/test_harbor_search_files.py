@@ -1,9 +1,9 @@
-"""Differential tests: HarborSearchFiles vs SearchFiles on a real temp tree.
+"""Differential tests: SearchFiles over FakeBackend vs SearchFiles over a real temp tree.
 
 Strategy:
-- Build a real temp dir tree for the base tool.
-- Mirror the same files in FakeBackend for the shim (rooted at /work).
-- Run both tools with the same kwargs.
+- Build a real temp dir tree for one run of the base tool (LocalFsBackend, via ctx fallback).
+- Mirror the same files in FakeBackend for the other run (explicit `_backend` override).
+- Run the SAME tool class with the same kwargs against both.
 - Compare structured output, normalizing absolute path roots (base=real tmpdir, shim=/work).
 """
 import json
@@ -15,7 +15,6 @@ import pytest
 
 from tests.harbor.fakes import FakeBackend
 from tools.fs.search_files import SearchFiles
-from tools.harbor.search_files import HarborSearchFiles
 
 # ---------------------------------------------------------------------------
 # Tree fixture
@@ -53,11 +52,9 @@ def _base_tool():
 
 
 def _shim_tool():
-    t = HarborSearchFiles.__new__(HarborSearchFiles)
-    t._ctx = SimpleNamespace(
-        harbor_backend=_make_fake_backend(),
-        config_dict={},
-    )
+    t = SearchFiles.__new__(SearchFiles)
+    t._ctx = SimpleNamespace(config_dict={})
+    t._backend = FakeBackend(_make_fake_backend().files)
     return t
 
 
@@ -212,8 +209,9 @@ def test_long_line_truncation(tmp_path):
 
     # Run shim with same content
     fake = FakeBackend({f"{SHIM_ROOT}/long.txt": content})
-    shim = HarborSearchFiles.__new__(HarborSearchFiles)
-    shim._ctx = SimpleNamespace(harbor_backend=fake, config_dict={})
+    shim = SearchFiles.__new__(SearchFiles)
+    shim._ctx = SimpleNamespace(config_dict={})
+    shim._backend = fake
     shim_raw = shim(path=SHIM_ROOT, regex="FINDME", file_pattern="*.txt")
     shim_env = json.loads(shim_raw)
 
@@ -234,28 +232,24 @@ def test_long_line_truncation(tmp_path):
 
 
 def test_invalid_regex(tmp_path):
-    """Invalid regex: shim must return ok=False with error.type=invalid_argument.
+    """Invalid regex: SearchFiles raises ValueError once a file is actually searched.
 
-    Note: the base SearchFiles.__call__ raises ValueError for invalid regex (it validates
-    per-file inside _search_in_file and the exception propagates uncaught).  The shim
-    validates early and returns a structured error — this is an intentional improvement
-    over the base behavior, not a divergence in the output contract.
+    Regex compilation happens lazily inside `_search_lines`, called per file during
+    the walk — same as the pre-refactor `_search_in_file`. There is no early/upfront
+    regex validation in `__call__`; an invalid pattern only raises once at least one
+    file is reached in the walk order. This is base behavior, unchanged by the
+    backend-seam refactor, and applies identically whether driven by LocalFsBackend
+    (real fs) or an injected FakeBackend.
     """
     real_root = _make_real_tree(tmp_path)
 
-    # Base tool raises — document that behavior
     base = _base_tool()
     with pytest.raises(ValueError, match="Invalid regex pattern"):
         base(path=real_root, regex="[invalid(")
 
-    # Shim returns structured error (ok=False)
     shim = _shim_tool()
-    shim_raw = shim(path=SHIM_ROOT, regex="[invalid(")
-    shim_env = json.loads(shim_raw)
-    assert shim_env["ok"] is False
-    err = shim_env.get("error") or {}
-    assert err.get("type") == "invalid_argument"
-    assert err.get("field") == "regex"
+    with pytest.raises(ValueError, match="Invalid regex pattern"):
+        shim(path=SHIM_ROOT, regex="[invalid(")
 
 
 def test_not_a_directory(tmp_path):
@@ -270,8 +264,9 @@ def test_not_a_directory(tmp_path):
 
     # Shim: /work/file.txt is a file, not a dir — FakeBackend.is_dir will return False
     fake = FakeBackend({"/work/file.txt": "content"})
-    shim = HarborSearchFiles.__new__(HarborSearchFiles)
-    shim._ctx = SimpleNamespace(harbor_backend=fake, config_dict={})
+    shim = SearchFiles.__new__(SearchFiles)
+    shim._ctx = SimpleNamespace(config_dict={})
+    shim._backend = fake
     shim_raw = shim(path="/work/file.txt", regex="content")
     shim_env = json.loads(shim_raw)
 
@@ -333,11 +328,9 @@ def _run_both_branching(tmp_path, **kwargs):
     base_raw = base(path=real_root, **kwargs)
     base_env = json.loads(base_raw)
 
-    shim = HarborSearchFiles.__new__(HarborSearchFiles)
-    shim._ctx = SimpleNamespace(
-        harbor_backend=_make_fake_branching_backend(),
-        config_dict={},
-    )
+    shim = SearchFiles.__new__(SearchFiles)
+    shim._ctx = SimpleNamespace(config_dict={})
+    shim._backend = _make_fake_branching_backend()
     shim_raw = shim(path=SHIM_ROOT, **kwargs)
     shim_env = json.loads(shim_raw)
 
@@ -375,11 +368,9 @@ def test_truncated_page_ordering(tmp_path):
       - Sorted DFS shim: page contains alpha/beta/z.md (position 1)
       - Buggy flat-walk shim: page contains alpha/x.py (position 1)  ← wrong
     """
-    shim = HarborSearchFiles.__new__(HarborSearchFiles)
-    shim._ctx = SimpleNamespace(
-        harbor_backend=_make_fake_branching_backend(),
-        config_dict={},
-    )
+    shim = SearchFiles.__new__(SearchFiles)
+    shim._ctx = SimpleNamespace(config_dict={})
+    shim._backend = _make_fake_branching_backend()
 
     # Sanity: 3 total matches (one per file), all match "MARKER"
     shim_all_raw = shim(path=SHIM_ROOT, regex="MARKER")
@@ -431,4 +422,49 @@ def test_truncated_page_ordering(tmp_path):
     assert shim_page["next_offset"] == 3, (
         f"next_offset should be 3 (there is 1 more match after position 1), "
         f"got {shim_page['next_offset']}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Read-guard regression: denied dirs must be pruned from recursion, not just
+# filtered from the emitted file list (Task 6 precedent for fs_list_files).
+# ---------------------------------------------------------------------------
+
+def test_walk_does_not_descend_into_denied_dir_via_nested_override():
+    """A guard-DENIED directory must never be recursed into, even when a nested
+    subpath re-allows itself via `allowed_read_paths`.
+
+    Config: denied_read_paths=["/work/secret"] + allowed_read_paths=["/work/secret/public"].
+    `/work/secret` itself fails the read-guard check (denied), so the whole subtree
+    under it — including `/work/secret/public`, which independently passes the
+    per-path check via the allowed_read_paths override — must not appear in results.
+    The old os.walk-based implementation pruned `dirnames` in place so nothing under
+    a denied dir was ever visited; `_iter_files_dfs` must gate recursion the same way
+    (not just whether the file itself passes the per-file guard).
+    """
+    files = {
+        "/work/out.txt": "MATCH here\n",
+        "/work/secret/public/file.txt": "MATCH here too\n",
+    }
+    t = SearchFiles.__new__(SearchFiles)
+    t._ctx = SimpleNamespace(
+        config_dict={
+            "launch_root": "/work",
+            "read_guard": {
+                "enabled": True,
+                "allowed_read_roots": ["*"],
+                "denied_read_paths": ["/work/secret"],
+                "allowed_read_paths": ["/work/secret/public"],
+            },
+        }
+    )
+    t._backend = FakeBackend(files)
+
+    raw = t(path="/work", regex="MATCH")
+    payload = json.loads(raw)
+
+    assert payload["ok"] is True
+    files_seen = [m["file"] for m in payload["matches"]]
+    assert not any("/secret/" in p or p.endswith("/secret") for p in files_seen), (
+        f"read-guard leak: denied subtree visible in matches: {files_seen}"
     )

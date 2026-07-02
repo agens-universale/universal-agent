@@ -1,4 +1,3 @@
-import os
 import json
 import functools
 import difflib
@@ -7,7 +6,7 @@ from tools.simple_tool_base import AbstractSimpleTool
 from utils.tool_report_paths import tool_report_abspath
 from security.path_policy import enforce_write_guard
 from tools.schema_optional import coalesce_optional_string
-from utils.file_text import check_expected_file_sha256, is_valid_sha256_hex, read_text_for_edit
+from utils.file_text import check_expected_file_sha256, is_valid_sha256_hex
 
 
 class SearchAndReplace(AbstractSimpleTool):
@@ -569,7 +568,7 @@ Update version string:
                 suggestions_total=0,
                 error={"type": "invalid_argument", "field": "path"},
             )
-        if not os.path.exists(path):
+        if not self._backend.exists(path):
             return _result(
                 ok=False,
                 matched=False,
@@ -581,7 +580,7 @@ Update version string:
                 suggestions_total=0,
                 error={"type": "not_found"},
             )
-        if not os.path.isfile(path):
+        if not self._backend.is_file(path):
             return _result(
                 ok=False,
                 matched=False,
@@ -594,7 +593,7 @@ Update version string:
                 error={"type": "not_a_file"},
             )
         try:
-            file_size = os.path.getsize(path)
+            file_size = self._backend.getsize(path)
         except Exception as e:
             return _result(
                 ok=False,
@@ -641,7 +640,7 @@ Update version string:
             )
 
         try:
-            content = read_text_for_edit(path)
+            content = self._backend.read(path)
         except Exception as e:
             return _result(
                 ok=False,
@@ -825,13 +824,11 @@ Update version string:
                 error=None,
             )
 
-        tmp_path = f"{path}.tmp"
         backup_path = None
         if backup:
             backup_path = f"{path}.bak"
             try:
-                with open(path, "rb") as src, open(backup_path, "wb") as dst:
-                    dst.write(src.read())
+                self._backend.copy(path, backup_path)
             except Exception as e:
                 return _result(
                     ok=False,
@@ -846,15 +843,8 @@ Update version string:
                 )
 
         try:
-            with open(tmp_path, 'w', encoding='utf-8', errors='replace') as f:
-                f.write(new_content)
-            os.replace(tmp_path, path)
+            self._backend.write(path, new_content, encoding="utf-8")
         except Exception as e:
-            try:
-                if os.path.exists(tmp_path):
-                    os.remove(tmp_path)
-            except Exception:
-                pass
             return _result(
                 ok=False,
                 matched=True,

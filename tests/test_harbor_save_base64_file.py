@@ -1,8 +1,9 @@
-"""HarborSaveBase64File must behave 1:1 with the base SaveBase64File.
+"""SaveBase64File must behave 1:1 regardless of the physical I/O backend.
 
 VERIFICATION METHOD: differential (oracle) testing for UTF-8-safe cases;
-direct assertion for binary/bytes_written fidelity. The base tool is the oracle —
-the harbor shim must produce an IDENTICAL envelope for the same input.
+direct assertion for binary/bytes_written fidelity. The base tool against a real temp
+file is the oracle — the same base tool driven by a FakeBackend must produce an
+IDENTICAL envelope for the same input.
 
 ``FakeBackend.write_bytes`` stores ``data.decode('utf-8')``, so differential
 comparisons are restricted to valid-UTF-8 payloads; binary payloads are verified
@@ -15,7 +16,6 @@ from types import SimpleNamespace
 import pytest
 
 from tools.fs.save_base64_file import SaveBase64File
-from tools.harbor.save_base64_file import HarborSaveBase64File
 from tests.harbor.fakes import FakeBackend, strip_path_fields
 
 
@@ -42,14 +42,15 @@ class _CapturingFakeBackend(FakeBackend):
         self.written_bytes[path] = data
 
 
-def _harbor_with(fake: FakeBackend) -> HarborSaveBase64File:
-    t = HarborSaveBase64File.__new__(HarborSaveBase64File)
-    t._ctx = SimpleNamespace(harbor_backend=fake)
+def _harbor_with(fake: FakeBackend) -> SaveBase64File:
+    t = SaveBase64File.__new__(SaveBase64File)
+    t._ctx = SimpleNamespace(config_dict={})
+    t._backend = fake
     return t
 
 
-def _harbor_seeded(*extra_files) -> HarborSaveBase64File:
-    """Return a HarborSaveBase64File backed by FakeBackend with /work/ as parent dir."""
+def _harbor_seeded(*extra_files) -> SaveBase64File:
+    """Return a SaveBase64File backed by FakeBackend with /work/ as parent dir."""
     fake = FakeBackend()
     fake.files["/work/.keep"] = ""
     for k, v in extra_files:

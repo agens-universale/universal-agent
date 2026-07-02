@@ -6,15 +6,15 @@ import pytest
 
 from tests.harbor.fakes import FakeBackend, strip_path_fields
 from tools.fs.search_and_replace import SearchAndReplace
-from tools.harbor.search_and_replace import HarborSearchAndReplace
 
 CONTENT = "alpha\nbeta\nalpha\ngamma\n"
 SHA = hashlib.sha256(CONTENT.encode()).hexdigest()
 
 
 def _harbor(files):
-    t = HarborSearchAndReplace.__new__(HarborSearchAndReplace)
-    t._ctx = SimpleNamespace(harbor_backend=FakeBackend(files))
+    t = SearchAndReplace.__new__(SearchAndReplace)
+    t._ctx = SimpleNamespace(config_dict={})
+    t._backend = FakeBackend(files)   # sandbox path now = base tool + fake backend
     return t
 
 
@@ -34,7 +34,7 @@ def _run_both(tmp_path, content, **kwargs):
     base_content = f.read_text(encoding="utf-8") if f.exists() else None
     h = _harbor(files)
     harbor_env = json.loads(h(path="/work/f.txt", **kwargs))
-    return base_env, base_content, harbor_env, h._ctx.harbor_backend.files.get("/work/f.txt")
+    return base_env, base_content, harbor_env, h._backend.files.get("/work/f.txt")
 
 
 _CASES = [

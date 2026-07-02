@@ -8,6 +8,26 @@ class AbstractSimpleTool(ABC):
         self._state = kwargs.get("state")
         self._config_dict = kwargs.get("config_dict")
 
+    @property
+    def _backend(self):
+        """Physical I/O port: test override → ctx.harbor_backend → LocalFsBackend.
+
+        Property (not __init__) so instances built via __new__ in tests resolve too.
+        """
+        override = self.__dict__.get("_backend_override")
+        if override is not None:
+            return override
+        ctx = getattr(self, "_ctx", None)
+        ctx_backend = getattr(ctx, "harbor_backend", None) if ctx is not None else None
+        if ctx_backend is not None:
+            return ctx_backend
+        from tools.backends.local import LocalFsBackend
+        return LocalFsBackend()
+
+    @_backend.setter
+    def _backend(self, value):
+        self.__dict__["_backend_override"] = value
+
     @classmethod
     @abstractmethod
     def tool_description(cls) -> Dict[str, Any]:

@@ -1,7 +1,6 @@
 """Tests for the ATIF trajectory mapping in the Harbor external adapter.
 
-The adapter imports `harbor`, which lives in harbor's own tool venv — not the
-default test env. Skip cleanly where harbor is absent.
+Requires the `harbor` framework (dependency-group `test`).
 """
 import asyncio
 import sys
@@ -10,7 +9,19 @@ from types import SimpleNamespace
 
 import pytest
 
-pytest.importorskip("harbor")
+# tests/harbor/ (a test-fixture package) shadows the real harbor framework:
+# reorder sys.path so real site-packages wins, then evict cached shadows.
+_harbor_sp = next(
+    (p for p in sys.path
+     if (Path(p) / "harbor" / "agents" / "base.py").exists()),
+    None,
+)
+if _harbor_sp:
+    sys.path.remove(_harbor_sp)
+    sys.path.insert(0, _harbor_sp)
+for _key in list(sys.modules.keys()):
+    if _key == "harbor" or _key.startswith("harbor."):
+        del sys.modules[_key]
 
 # The adapter is not part of src/; load it from harbor/adapters/.
 _ADAPTERS = Path(__file__).resolve().parent.parent / "harbor" / "adapters"
@@ -81,6 +92,7 @@ def test_gc_cli_config_overrides_merge_into_build_config():
         model_name="openai/m",
         session_id="s",
         gc_cli_config={
+            "completions_url": "http://test/v1/chat/completions",
             "no_tool_call_max_count": 5,
             "chat_completion_kwargs": {"temperature": 0.7},
         },
@@ -122,7 +134,8 @@ def test_partial_trajectory_written_when_run_aborts(tmp_path, monkeypatch):
     monkeypatch.setattr("run_context.create_run_context", lambda *a, **k: SimpleNamespace())
     monkeypatch.setattr("agent_executor.AgentExecutor", FakeExecutor)
 
-    agent = GcCliExternal(logs_dir=tmp_path, model_name="openai/m", session_id="s")
+    agent = GcCliExternal(logs_dir=tmp_path, model_name="openai/m", session_id="s",
+                          gc_cli_config={"completions_url": "http://test/v1/chat/completions"})
     context = SimpleNamespace(metadata=None)
 
     with pytest.raises(RuntimeError, match="HTTPError"):
@@ -133,9 +146,11 @@ def test_partial_trajectory_written_when_run_aborts(tmp_path, monkeypatch):
     assert context.metadata["total_steps"] == 2
 
 
-def test_runtime_url_and_model_beat_profile_overrides():
+def test_runtime_url_and_model_beat_profile_overrides(monkeypatch):
     from pathlib import Path
 
+    # Runtime sources (runner --model / env URL) are authoritative over profile.
+    monkeypatch.setenv("GC_CLI_BACKEND_URL", "http://runtime/v1/chat/completions")
     agent = GcCliExternal(
         logs_dir=Path("/tmp"),
         model_name="openai/real-model",
@@ -143,4 +158,4 @@ def test_runtime_url_and_model_beat_profile_overrides():
     )
     cfg = agent._build_config()
     assert cfg["model"] == "real-model"  # openai/ stripped, profile value ignored
-    assert cfg["completions_url"] != "http://stale"
+    assert cfg["completions_url"] == "http://runtime/v1/chat/completions"

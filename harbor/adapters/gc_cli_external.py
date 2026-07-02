@@ -3,8 +3,9 @@
 The gc-cli agent loop runs in-process on the host (not a subprocess). Its synchronous
 tool loop runs in a worker thread; Harbor's async `environment` is reached through
 HarborBackend, which marshals coroutines onto this adapter's event loop. gc-cli's
-filesystem/shell tools are swapped for the harbor pack (use_harbor_tools), so file
-edits land inside the task container.
+filesystem/shell tools follow `ctx.harbor_backend` automatically (see
+`AbstractSimpleTool._backend`), so file edits land inside the task container; the
+`use_harbor_tools` flag now only drops the host-only `download_file` tool.
 
 Setup (once): install gc-cli into the harbor runner env so it imports directly:
     uv pip install --python "$(command -v harbor)/../python" -e /path/to/background-agent
@@ -34,11 +35,10 @@ from harbor.utils.trajectory_utils import format_trajectory_json
 
 # gc-cli is installed as a package into the harbor runner env
 # (`uv pip install gc-cli-pub`), so it imports directly — no source-dir / PYTHONPATH.
-
-# EXTERNAL agent: the gc-cli loop runs on the HOST, so the backend is reached at
-# 127.0.0.1 directly (NOT host.docker.internal, which only resolves inside a container).
-DEFAULT_BACKEND_URL = "http://127.0.0.1:8014/v1/chat/completions"
-DEFAULT_MODEL = "MiniMaxAI/MiniMax-M2.7"
+#
+# No hardcoded backend URL / model: runner (api_base / --model) → env → profile
+# gc_cli_config, else fail fast. The loop runs on the HOST → local backends via
+# 127.0.0.1 (not host.docker.internal).
 
 # gc-cli chat roles → ATIF step sources. ATIF has no "tool" source: tool results are
 # folded into the preceding agent step's `observation` (see _messages_to_steps).
@@ -176,22 +176,38 @@ class GcCliExternal(BaseAgent):
 
     @property
     def _model(self) -> str:
-        # Strip only the harbor provider prefix ("openai/"); keep the vendor path
-        # ("MiniMaxAI/MiniMax-M2.7") which the backend expects as the full model id.
-        m = self.model_name or DEFAULT_MODEL
+        # runner --model → env → profile. Strip only the provider prefix
+        # ("openai/"); the backend expects the full vendor path as the model id.
+        m = (
+            self.model_name
+            or os.environ.get("GC_CLI_MODEL")
+            or self._overrides.get("model")
+        )
+        if not m:
+            raise RuntimeError(
+                "No model configured: pass --model to the runner, set GC_CLI_MODEL, "
+                "or provide gc_cli_config.model in the agent profile."
+            )
         if m.startswith("openai/"):
             m = m[len("openai/"):]
         return m
 
     @property
     def _backend_url(self) -> str:
-        # Priority: Polar api_base (from the runner) → env override → local default.
-        # gc-cli needs a FULL completions URL; Polar gives the /v1 base (LiteLLM would
-        # append the path itself for Terminus, so we append it here for gc-cli).
+        # Polar api_base (runner) → env → profile. gc-cli needs a FULL completions
+        # URL; Polar gives the /v1 base, so append the path here.
         if self._api_base:
             base = self._api_base.rstrip("/")
             return base if base.endswith("/chat/completions") else base + "/chat/completions"
-        return os.environ.get("GC_CLI_BACKEND_URL", DEFAULT_BACKEND_URL)
+        url = os.environ.get("GC_CLI_BACKEND_URL") or self._overrides.get("completions_url")
+        if not url:
+            raise RuntimeError(
+                "No LLM backend configured: the runner passed no api_base, "
+                "GC_CLI_BACKEND_URL is unset, and the profile has no "
+                "gc_cli_config.completions_url. For local runs: "
+                "export GC_CLI_BACKEND_URL=http://127.0.0.1:<port>/v1/chat/completions"
+            )
+        return url
 
     def _build_config(self) -> dict:
         # Structural/fleet-parity defaults; the harbor profile may override any key via
@@ -231,6 +247,14 @@ class GcCliExternal(BaseAgent):
             "save_logs": False,
             "dump_storage": False,
             "console_trace": False,
+            # Guards pinned OFF for benches regardless of release defaults:
+            # host-path guards resolve against the RUNNER's fs tree (container
+            # paths always "out of perimeter"), and "ask" auto-declines on
+            # non-tty == deny. Profiles may re-enable via gc_cli_config.
+            "read_guard": {"enabled": False},
+            "write_guard": {"enabled": False},
+            "url_policy": {"enabled": False},
+            "command_moderation": {"mode": "allow"},
         }
         # completions_url/model are derived from runtime (api_base/model_name) — keep
         # them authoritative over any stale profile value.
@@ -275,7 +299,7 @@ class GcCliExternal(BaseAgent):
     ) -> None:
         from run_context import create_run_context
         from agent_executor import AgentExecutor
-        from tools.harbor.backend import HarborBackend
+        from tools.backends.harbor import HarborBackend
 
         loop = asyncio.get_running_loop()
         backend = HarborBackend(environment, loop)

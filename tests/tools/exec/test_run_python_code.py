@@ -4,7 +4,8 @@ import stat
 
 import pytest
 
-from tools.exec.run_python_code import RunPythonCode, _sanitize_env
+from tools.backends.local import _sanitize_env
+from tools.exec.run_python_code import RunPythonCode
 
 
 def test_run_python_success_non_zero_and_timeout():

@@ -5,14 +5,15 @@ import pytest
 
 from tests.harbor.fakes import FakeBackend, strip_path_fields
 from tools.fs.read_file import ReadFile
-from tools.harbor.read_file import HarborReadFile
 
 CONTENT = "line1\nline2\nline3\nline4\n"
 
 
 def _harbor(files):
-    t = HarborReadFile.__new__(HarborReadFile)
-    t._ctx = SimpleNamespace(harbor_backend=FakeBackend(files), config_dict={})
+    t = ReadFile.__new__(ReadFile)
+    t._ctx = SimpleNamespace(config_dict={})
+    t._config_dict = None
+    t._backend = FakeBackend(files)   # sandbox path now = base tool + fake backend
     return t
 
 
