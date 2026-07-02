@@ -121,8 +121,7 @@
 
     <li class="step">
       <div class="step-h"><span class="num">2</span><h3>Установить агента</h3></div>
-      <!-- ВРЕМЕННО: команда пиннит ветку feat/agent-instructions-and-gc-guard (метод-2 пока работает только из ветки). После мержа в master убрать "@feat/..." — master дефолтная. -->
-      <div class="code"><button class="cp" onclick="cp(this)">⧉</button><span class="tok-cmd">uv</span> tool install "git+https://gitverse.ru/gigacode-ai/background-agent@feat/agent-instructions-and-gc-guard"</div>
+      <div class="code"><button class="cp" onclick="cp(this)">⧉</button><span class="tok-cmd">uv</span> tool install "git+https://gitverse.ru/gigacode-ai/background-agent"</div>
       <div class="note warn"><span class="ic">!</span><div>В <b>корпоративной сети Сбера</b> добавьте в конец флаг <span class="inl">--system-certs</span> — иначе установка прервётся на проверке сертификатов.</div></div>
       <p>Устанавливаются две команды: <span class="inl">gc-ua</span> — основной режим с интерфейсом, и <span class="inl">gc-cli</span> — командная строка без интерфейса (разовые запросы, скрипты, автоматизация).</p>
     </li>

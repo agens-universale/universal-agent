@@ -123,3 +123,8 @@ CLAUDE.md
 
 # История ввода TUI (gc-ua) — локальная per-user, как shell history
 input_history.jsonl
+# Внутренние рабочие доки — не в PR/master (спеки, планы, TUI-дизайн, corp-mirror overlay)
+docs/specs/
+docs/tui/
+docs/2026-06-23-corp-mirror-config-overlay.md
+docs/CHANGES-vs-master.md

@@ -197,6 +197,8 @@ intent_scope:
   max_summary_chars: 500
   max_tool_output_chars: 8000
   max_raw_record_chars: 5000
+  # Финальная проза в intent log: <= порога -> raw как есть; > порога -> LLM-саммари.
+  max_final_answer_raw_chars: 2000
   read_page_record_limit: 10
   fallback_raw_on_llm_error: true
 

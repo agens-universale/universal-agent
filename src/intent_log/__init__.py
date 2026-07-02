@@ -1,4 +1,5 @@
 from intent_log.operations import (
+    append_final_answer,
     append_tool_aggregated,
     append_tool_raw,
     append_user_ask,
@@ -9,6 +10,7 @@ from intent_log.operations import (
     utc_now_ts,
 )
 from intent_log.record import (
+    ACTION_FINAL_ANSWER,
     ACTION_TOOL_AGGREGATED,
     ACTION_TOOL_RAW,
     ACTION_USER_ASK,
@@ -25,11 +27,13 @@ from intent_log.serialize import (
 )
 
 __all__ = [
+    "ACTION_FINAL_ANSWER",
     "ACTION_TOOL_AGGREGATED",
     "ACTION_TOOL_RAW",
     "ACTION_USER_ASK",
     "ALLOWED_ACTIONS",
     "IntentRecord",
+    "append_final_answer",
     "append_tool_aggregated",
     "append_tool_raw",
     "append_user_ask",

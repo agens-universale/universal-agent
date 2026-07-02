@@ -18,6 +18,7 @@ from security.path_policy import (
 from security.url_policy import UrlPolicyDecision, enforce_url_policy, validate_url_policy
 from tools.simple_tool_base import AbstractSimpleTool
 from utils.tool_report_paths import tool_report_abspath
+from utils.atomic_io import atomic_replace
 
 
 class _RedirectBlocked(Exception):
@@ -341,7 +342,7 @@ class DownloadFile(AbstractSimpleTool):
         try:
             with open(tmp_path, "wb") as fd:
                 fd.write(body)
-            os.replace(tmp_path, dest)
+            atomic_replace(tmp_path, dest)
             if hasattr(os, "chmod"):
                 try:
                     os.chmod(dest, 0o644)

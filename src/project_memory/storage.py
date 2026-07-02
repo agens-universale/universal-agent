@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from config_modules.project_memory import DEFAULT_PROJECT_MEMORY_MAX_CHARS
+from utils.atomic_io import atomic_replace
 
 DEFAULT_MAX_CHARS: int = DEFAULT_PROJECT_MEMORY_MAX_CHARS
 MAX_CHARS: int = DEFAULT_MAX_CHARS
@@ -121,7 +122,7 @@ def _atomic_write(path: Path, content: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + ".tmp")
     tmp.write_text(content, encoding="utf-8")
-    os.replace(tmp, path)
+    atomic_replace(tmp, path)
 
 
 def append(

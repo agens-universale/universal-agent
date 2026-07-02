@@ -89,6 +89,25 @@ def select_indicator_mode(*, err, is_running, ask_human, confirm):
     return "terminal"
 
 
+def select_active_substate(*, summarizing, finalizing, last_event_kind, since_last, soft_hide_kinds):
+    """Под-состояние индикатора в режиме "active". Порядок = приоритет.
+
+    - summarizing (компакция истории) → "compressing" (сжимаю контекст…);
+    - finalizing (принят финальный ответ — turn_finish ИЛИ финальная проза —
+      идёт запись/саммари/flush/cleanup) → "validating" (завершаю…);
+    - последнее событие скрыто (agent/system) и висит ≥1.5с (finish-gate сверяет
+      ответ / bounce / доделка) → "processing" (сверяюсь…);
+    - иначе → "thinking" (думаю…).
+    """
+    if summarizing:
+        return "compressing"
+    if finalizing or last_event_kind == "_finalized":
+        return "validating"
+    if last_event_kind in soft_hide_kinds and since_last >= 1.5:
+        return "processing"
+    return "thinking"
+
+
 # Один набор команд в футере; /stop добавляется только при активном run.
 # (/skills, /export доступны через палитру — в футере лишние.)
 _FOOTER_LEFT = "/sessions  /help  /config  /mcp"
@@ -1663,13 +1682,15 @@ class TraceScreen(Screen):
             row.pause() if human_wait else row.resume()
             row.refresh_running_elapsed()
         summarizing = False
+        finalizing = False
         if self._store is not None and self._active_task_id is not None:
             try:
-                summarizing = bool(
-                    self._store.get_task_meta(self._active_task_id).get("tui_summarizing")
-                )
+                _tmeta = self._store.get_task_meta(self._active_task_id)
+                summarizing = bool(_tmeta.get("tui_summarizing"))
+                finalizing = bool(_tmeta.get("tui_finalizing"))
             except Exception:
                 summarizing = False
+                finalizing = False
         # Завершение сжатия (tui_summarizing True→False) → зафиксировать baseline
         # числа сообщений live-файла: /compact-антиспам разрешит повтор, только
         # если с этого момента появилась хоть одна новая запись.
@@ -1680,6 +1701,16 @@ class TraceScreen(Screen):
                 self._active_task_id, {"last_compact_msg_count": count}
             )
         self._was_summarizing = summarizing
+
+        # Инвариант: нет активной задачи (пустое состояние) → никакого статус-индикатора.
+        # Ни один протухший глобальный флаг (last_runner_error и пр.) не должен
+        # репейнтить индикатор поверх чистого старта.
+        if self._active_task_id is None:
+            self._destroy_thinking_indicator()
+            self._clear_stream_block()
+            self._refresh_footer()
+            self._update_terminal_title()
+            return
 
         _indicator_mode = select_indicator_mode(
             err=err, is_running=is_running,
@@ -1694,29 +1725,26 @@ class TraceScreen(Screen):
         elif _indicator_mode == "active":
             import time as _time
             since_last = _time.monotonic() - self._last_event_at
-            if summarizing:
-                self._show_thinking_indicator(state="compressing")
-            elif self._last_event_kind == "_finalized":
-                # Финальный submit_solution виден — индикатор переключается
-                # в режим «✓ завершаю…» (статичный dim) и держится пока
-                # runner.is_running() (intent_guard / MCP cleanup). Sentinel
-                # сбрасывается в _render_records / _reset_thinking_timer /
-                # _reset_render_state, после чего возвращается «думаю…».
-                self._show_thinking_indicator(state="validating")
-            elif self._last_event_kind in _SOFT_HIDE_KINDS and since_last >= 1.5:
-                # Ответ показан, прогон ещё жив (finish-gate сверяет ответ / баунс
-                # / доделка) → «сверяюсь…» вместо пустоты, чтобы объяснить
-                # статус [running] (не прячем, как раньше).
-                self._show_thinking_indicator(state="processing")
-            else:
-                self._show_thinking_indicator(state="thinking")
+            # summarizing → «сжимаю контекст…»; finalizing (принят финальный ответ:
+            # submit_solution ИЛИ финальная проза — идёт запись/саммари/flush/cleanup)
+            # → «✓ завершаю…»; скрытое событие ≥1.5с (finish-gate сверяет / bounce /
+            # доделка) → «сверяюсь…»; иначе «думаю…». Sentinel «_finalized» и флаг
+            # tui_finalizing оба дают validating (см. select_active_substate).
+            substate = select_active_substate(
+                summarizing=summarizing,
+                finalizing=finalizing,
+                last_event_kind=self._last_event_kind,
+                since_last=since_last,
+                soft_hide_kinds=_SOFT_HIDE_KINDS,
+            )
+            self._show_thinking_indicator(state=substate)
             # Эфемерный StreamBlock — live-вывод текущего шага. Источник —
             # app._stream_sink (кормится из worker-потока через on_stream_delta);
             # монтаж/обновление строго здесь, на UI-потоке (set_interval-колбэк).
             # StreamBlock — только в активной фазе «thinking». В validating
             # (финальный ответ виден, идёт finish-gate) и compressing reasoning
             # не показываем — иначе строка-мысль висит после финального ответа (баг B).
-            _thinking_phase = (not summarizing) and (self._last_event_kind != "_finalized")
+            _thinking_phase = (not summarizing) and (not finalizing) and (self._last_event_kind != "_finalized")
             sink = getattr(self.app, "_stream_sink", None)
             if _thinking_phase and sink is not None and sink.has_content():
                 from tui.services.stream_sink import (
@@ -2932,6 +2960,9 @@ class TraceScreen(Screen):
 
     def _switch_to_empty_state(self) -> None:
         """Очистить trace и перейти в empty-state. pending_skill_id/cwd сохраняются."""
+        # Сбросить терминальные error/stop-флаги app-уровня (last_runner_error и пр.):
+        # иначе poll видит протухшую ошибку и репейнтит «✗ Ошибка» поверх пустой сессии.
+        self._prepare_for_new_run()
         self._active_task_id = None
         self.app.tui_state.active_task_id = None
         self._store = None

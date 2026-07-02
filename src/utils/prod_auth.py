@@ -72,9 +72,9 @@ class AuthConnector:
         resp_data = resp.json()
         return resp_data
 
-    def get_token(self) -> str:
+    def get_token(self, force: bool = False) -> str:
         now = time.time()
-        if now < self.ttl and self.access_token is not None:
+        if not force and now < self.ttl and self.access_token is not None:
             return self.access_token
 
         auth_url = self.get_auth_url(self.entry_point, self.verify)

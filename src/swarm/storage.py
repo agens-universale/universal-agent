@@ -3,6 +3,8 @@ import os
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Tuple
 
+from utils.atomic_io import atomic_replace
+
 
 def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -95,7 +97,7 @@ def save_swarm_meta(
     tmp_path = f"{meta_path}.tmp"
     with open(tmp_path, "w", encoding="utf-8") as f:
         json.dump(merged, f, ensure_ascii=False, indent=2)
-    os.replace(tmp_path, meta_path)
+    atomic_replace(tmp_path, meta_path)
 
     # Убеждаемся, что директория для messages тоже существует.
     _ensure_dir(os.path.dirname(data_path))

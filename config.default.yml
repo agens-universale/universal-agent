@@ -75,6 +75,11 @@ summary:
   last_dialog_steps_count: 5
   last_dialog_step_message_max_chars: 1500
 
+intent_scope:
+  # Финальная проза, закрывающая ход, пишется в intent log:
+  # <= порога — как есть (raw); > порога — LLM-саммари (кап max_summary_chars).
+  max_final_answer_raw_chars: 2000
+
 security:
   command_moderation:
     enabled: true

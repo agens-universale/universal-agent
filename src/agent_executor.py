@@ -15,7 +15,11 @@ from processing_responses import run_agent
 from run_context import RunContext
 from config_modules.stored_outputs import get_stored_tool_outputs_max_entries
 from message_policy.chat_completions import repair_tool_call_pairing
-from run_summary_coordinator import RunSummaryCoordinator, reset_stale_summarizing_flag
+from run_summary_coordinator import (
+    RunSummaryCoordinator,
+    reset_stale_summarizing_flag,
+    set_tui_finalizing,
+)
 from summarize.config import (
     parse_summary_trigger_chars,
     parse_summary_turn_end_trigger_chars,
@@ -122,6 +126,8 @@ class AgentExecutor:
         # Снять протухший флаг компакции от прерванного прошлого run'а: на старте
         # компакция не идёт, иначе TUI вечно показывает «сжимаю контекст».
         reset_stale_summarizing_flag(thread_session)
+        # Снять протухший флаг финализации от прерванного прошлого run'а.
+        set_tui_finalizing(thread_session, False)
 
         # Снимок MCP «сервер→тулы» для TUI-экрана /mcp (необязателен — не валим run).
         if thread_id is not None and config_dict.get("mcp-servers"):
@@ -401,12 +407,16 @@ class AgentExecutor:
                 persist_messages_callback=persist_messages_callback,
                 pre_backend_compaction_hook=summary.pre_backend_compaction_hook,
                 turn_end_compaction_hook=summary.turn_end_compact_if_needed,
+                force_compact_hook=summary.force_compact_once,
                 get_pending_messages=get_pending_messages,
                 check_stop=check_stop,
                 session_meta=(
                     thread_session.meta
                     if thread_session is not None
                     else None
+                ),
+                mark_finalizing=(
+                    lambda active: set_tui_finalizing(thread_session, active)
                 ),
             )
             self.last_terminal_outcome = getattr(state, "terminal_outcome", None)

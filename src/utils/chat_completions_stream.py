@@ -11,6 +11,28 @@ from typing import Any, Callable, Dict, Iterable, List, Optional
 
 OnDelta = Callable[[str, str], None]
 
+
+class BackendStreamError(ValueError):
+    """SSE-стрим принёс error-событие: провайдер вернул ошибку ВНУТРИ 200-стрима
+    (`data: {"error": …}`), а не HTTP-статусом. Раньше такой чанк молча
+    пропускался → пустая сборка → downstream «Unknown finish reason» (маскировка).
+    Несёт реальное сообщение провайдера. Подкласс ValueError — существующие
+    `except ValueError` продолжают ловить, но тип различим для ретрай-политики.
+
+    ``status_code`` — код из error-события (напр. 400), чтобы адаптивная политика
+    ретраев трактовала стрим-ошибку так же, как HTTP-ошибку того же кода
+    (паритет stream ↔ non-stream: в non-stream это был бы HTTP 4xx/5xx)."""
+
+    def __init__(self, message: str, *, status_code: Any = None) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+
+
+def _raise_stream_error(err: Any) -> None:
+    code = err.get("code") if isinstance(err, dict) else None
+    raise BackendStreamError(f"Backend stream error: {err}", status_code=code)
+
+
 _THINK_OPEN = "<think>"
 _THINK_CLOSE = "</think>"
 
@@ -104,6 +126,12 @@ def assemble_streamed_completion(
             continue
         if not isinstance(chunk, dict):
             continue
+        # Провайдер вернул error-событие внутри 200-стрима — не глотать: поднять
+        # с реальным сообщением, иначе сборка выйдет пустой и downstream даст
+        # загадочное «Unknown finish reason».
+        stream_err = chunk.get("error")
+        if stream_err is not None:
+            _raise_stream_error(stream_err)
         if chunk.get("usage") is not None:
             usage = chunk["usage"]
         if model is None and chunk.get("model"):
@@ -117,6 +145,9 @@ def assemble_streamed_completion(
         ch0 = choices[0]
         if not isinstance(ch0, dict):
             continue
+        choice_err = ch0.get("error")
+        if choice_err is not None:
+            _raise_stream_error(choice_err)
         if ch0.get("finish_reason"):
             finish_reason = ch0["finish_reason"]
         delta = ch0.get("delta") or {}

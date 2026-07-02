@@ -20,12 +20,18 @@ from intent_guard.turn_finish_emit import (
     get_function_call_output_text,
 )
 from intent_scope.hook import maybe_update_intent_scope_from_tool
+from intent_scope.final_answer import maybe_record_final_answer_intent
 from message_policy.cycle_stop import append_cycle_stop_tool_outputs_for_batch
 from request_backend_policy import request_chat_completions_with_policy
 from tools import apply_tool, WrongFunctionArgumentsException
 from tools.session.stored_outputs.wrapping import maybe_store_and_wrap_tool_output
 from utils.connect_backend import create_call_headers
 from utils.connect_backend import request_backend_responses as request_backend
+from utils.backend_errors import is_auth_error, is_context_overflow_error
+
+# Переполнение контекста → force-компакция + повтор запроса; лимит на случай,
+# когда даже после сжатия история всё ещё не влезает (единичное огромное сообщение).
+_MAX_CONTEXT_OVERFLOW_RETRIES = 3
 from utils.connect_backend import create_call_data_responses as create_call_data
 from utils.connect_backend import create_call_data_completions
 from utils.convertations import (
@@ -160,8 +166,37 @@ def _request_backend_canonical(
     *,
     set_previous_response_id: bool = True,
 ) -> Tuple[List[Dict], str, Dict]:
+    """Обёртка над одиночной попыткой: на 401 (истёкший токен доступа) пере-выпускает
+    токен (`auth_connector.get_token(force=True)`) и повторяет запрос РОВНО один раз.
+    Повторный 401 после свежего токена — настоящий auth-fail, уходит наверх внятно.
+    Прочие ошибки — наверх без изменений. Все call-site получают это единообразно."""
+    auth_connector = getattr(ctx, "auth_connector", None)
+    try:
+        return _request_backend_canonical_once(
+            messages, state, ctx, set_previous_response_id=set_previous_response_id
+        )
+    except Exception as exc:
+        if auth_connector is None or not is_auth_error(exc):
+            raise
+        run_logger = getattr(ctx, "logger", None) or _fallback_logger
+        run_logger.warning(
+            "backend auth 401 → пере-выпуск токена и повтор запроса один раз: %s", exc
+        )
+        auth_connector.get_token(force=True)
+        return _request_backend_canonical_once(
+            messages, state, ctx, set_previous_response_id=set_previous_response_id
+        )
+
+
+def _request_backend_canonical_once(
+    messages: List[Dict],
+    state: State,
+    ctx: Any,
+    *,
+    set_previous_response_id: bool = True,
+) -> Tuple[List[Dict], str, Dict]:
     """
-    Унифицированный вызов backend для двух режимов API.
+    Унифицированный вызов backend для двух режимов API (одна попытка).
 
     Возвращает:
     - канонические сообщения (responses-like),
@@ -472,11 +507,14 @@ def run_agent(
     persist_messages_callback: Optional[Callable[[List[Dict]], None]] = None,
     pre_backend_compaction_hook: Optional[Callable[[List[Dict], str], None]] = None,
     turn_end_compaction_hook: Optional[Callable[[], None]] = None,
+    force_compact_hook: Optional[Callable[[], None]] = None,
     get_pending_messages: Optional[Callable[[], List[Dict]]] = None,
     check_stop: Optional[Callable[[], bool]] = None,
     session_meta: Optional[Dict[str, Any]] = None,
+    mark_finalizing: Optional[Callable[[bool], None]] = None,
 ) -> Union[str, None]:
     tool_error_cnt = 0
+    context_overflow_retries = 0
     run_logger = getattr(ctx, "logger", None) or _fallback_logger
     cfg = getattr(ctx, "config_dict", {}) or {}
     console_trace = cfg.get("console_trace", True)
@@ -746,7 +784,19 @@ def run_agent(
                     # Завершаем ход как finish-accept: флашим интент, прогоняем compaction-
                     # hook, сливаем сообщения, пришедшие во время хода.
                     if should_return_text_answer(ctx, state, assistant_text):
-                        state.flush_current_user_intent()
+                        # Финальная проза принята → TUI-индикатор «✓ завершаю…»
+                        # на время записи/саммари/flush (mark_finalizing пишет
+                        # tui_finalizing в meta; снимаем строго в finally).
+                        if mark_finalizing is not None:
+                            mark_finalizing(True)
+                        try:
+                            maybe_record_final_answer_intent(
+                                assistant_text=assistant_text, state=state, ctx=ctx
+                            )
+                            state.flush_current_user_intent()
+                        finally:
+                            if mark_finalizing is not None:
+                                mark_finalizing(False)
                         if turn_end_compaction_hook is not None:
                             turn_end_compaction_hook()
                         if get_pending_messages is not None:
@@ -778,6 +828,26 @@ def run_agent(
                         call_id=getattr(e, "call_id", None),
                     )
                 ]
+            except Exception as backend_exc:
+                # Переполнение контекстного окна модели → не крашимся: форс-сжатие
+                # истории (безусловное, как /compact) и повтор запроса со сжатым
+                # контекстом. Лимит попыток — если даже сжатие не помогает, уходим
+                # наверх. Прочие ошибки — как раньше, наверх без изменений.
+                if (
+                    force_compact_hook is not None
+                    and is_context_overflow_error(backend_exc)
+                    and context_overflow_retries < _MAX_CONTEXT_OVERFLOW_RETRIES
+                ):
+                    context_overflow_retries += 1
+                    run_logger.warning(
+                        "Context overflow → force-compaction + retry (%s/%s): %s",
+                        context_overflow_retries,
+                        _MAX_CONTEXT_OVERFLOW_RETRIES,
+                        backend_exc,
+                    )
+                    force_compact_hook()
+                    continue
+                raise
 
         # На первом `user_ask`-цикле при продолжении диалога по `-t` мы
         # отправляем бэкенду всю историю треда. Чтобы старые сообщения

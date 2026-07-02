@@ -13,6 +13,7 @@ from message_policy.user_message_policy import (
     wrap_technical_user_content,
 )
 from utils.generate_message_id import generate_msg_id_sha256 as generate_message_id_func
+from utils.atomic_io import atomic_replace
 
 
 _THREAD_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]+$")
@@ -255,7 +256,7 @@ def save_thread_meta(
     tmp_path = f"{meta_path}.tmp"
     with open(tmp_path, "w", encoding="utf-8") as f:
         json.dump(to_save, f, ensure_ascii=False, indent=2)
-    os.replace(tmp_path, meta_path)
+    atomic_replace(tmp_path, meta_path)
 
 
 def update_tui_meta(
@@ -316,7 +317,7 @@ def discard_message_by_id(
     with open(tmp_path, "w", encoding="utf-8") as f:
         for row in kept:
             f.write(row + "\n")
-    os.replace(tmp_path, data_path)
+    atomic_replace(tmp_path, data_path)
 
     meta = load_thread_meta(threads_dir, sys_norm, thread_id)
     if meta:
@@ -526,16 +527,16 @@ class ThreadSession:
         moved_meta = False
         try:
             if data_exists:
-                os.replace(data_path, archive_data_path)
+                atomic_replace(data_path, archive_data_path)
                 moved_data = True
             if meta_exists:
-                os.replace(meta_path, archive_meta_path)
+                atomic_replace(meta_path, archive_meta_path)
                 moved_meta = True
         except Exception:
             if moved_meta and not os.path.exists(meta_path):
-                os.replace(archive_meta_path, meta_path)
+                atomic_replace(archive_meta_path, meta_path)
             if moved_data and not os.path.exists(data_path):
-                os.replace(archive_data_path, data_path)
+                atomic_replace(archive_data_path, data_path)
             raise
 
         summary_message = {

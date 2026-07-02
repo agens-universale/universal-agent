@@ -3,6 +3,7 @@ import os
 
 from tools.simple_tool_base import AbstractSimpleTool
 from utils.tool_report_paths import tool_report_abspath
+from utils.atomic_io import atomic_replace
 from security.path_policy import enforce_write_guard
 
 class WriteToFile(AbstractSimpleTool):
@@ -246,7 +247,7 @@ Usage:
         try:
             with open(tmp_path, "w", encoding=encoding, errors="replace") as fd:
                 fd.write(normalized)
-            os.replace(tmp_path, path)
+            atomic_replace(tmp_path, path)
         except Exception as e:
             try:
                 if os.path.exists(tmp_path):

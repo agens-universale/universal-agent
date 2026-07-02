@@ -1,6 +1,6 @@
 import unittest
 
-from utils.convertations import output_chat_completion_to_response
+from utils.convertations import output_chat_completion_to_response, get_output_list
 
 
 def _base_payload():
@@ -76,6 +76,24 @@ class ConvertationsTest(unittest.TestCase):
         types_out = [item["type"] for item in res["output"]]
         self.assertIn("message", types_out)
         self.assertIn("function_call", types_out)
+
+
+def _dct(finish_reason, content="ответ", tool_calls=None):
+    msg = {"role": "assistant", "content": content}
+    if tool_calls is not None:
+        msg["tool_calls"] = tool_calls
+    return {"choices": [{"index": 0, "message": msg, "finish_reason": finish_reason}]}
+
+
+def test_get_output_list_accepts_unknown_finish_with_content():
+    # раньше падало ValueError("Unknown finish reason"); теперь принимает
+    out = get_output_list(_dct("content_filter", content="текст"))
+    assert any(o["type"] == "message" for o in out)
+
+def test_get_output_list_rejects_unknown_finish_when_empty():
+    import pytest
+    with pytest.raises(ValueError):
+        get_output_list(_dct(None, content=""))   # пусто → внятный raise
 
 
 if __name__ == "__main__":

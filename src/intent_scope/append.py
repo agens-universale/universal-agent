@@ -5,8 +5,10 @@ from __future__ import annotations
 from typing import Any
 
 from intent_log import (
+    ACTION_FINAL_ANSWER,
     ACTION_TOOL_AGGREGATED,
     ACTION_TOOL_RAW,
+    append_final_answer,
     append_tool_aggregated,
     append_tool_raw,
 )
@@ -102,5 +104,27 @@ def append_tool_raw_to_current(
         args,
         output,
         user_turn_seq=int(getattr(state, "user_turn_seq", 0)),
+    )
+    return True
+
+
+def _current_has_final_answer(current: list[Any], content: str) -> bool:
+    body = str(content or "")
+    for record in current:
+        if record.action == ACTION_FINAL_ANSWER and str(record.content) == body:
+            return True
+    return False
+
+
+def append_final_answer_to_current(state: Any, content: str) -> bool:
+    """Append final prose answer to ``state.current_user_intent``. Returns True if appended."""
+    body = str(content or "").strip()
+    if not body:
+        return False
+    current = list(getattr(state, "current_user_intent", []) or [])
+    if _current_has_final_answer(current, body):
+        return False
+    state.current_user_intent = append_final_answer(
+        current, body, user_turn_seq=int(getattr(state, "user_turn_seq", 0))
     )
     return True

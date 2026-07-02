@@ -12,7 +12,8 @@ from utils.convertations import output_chat_completion_to_response
 from utils.format_messages import format_message_chat_completions_to_send_backend
 from utils.retry import retry_with_backoff
 from usage.context import record_usage
-from utils.chat_completions_stream import iter_sse_data_lines, assemble_streamed_completion, OnDelta
+from utils.chat_completions_stream import iter_sse_data_lines, assemble_streamed_completion, OnDelta, BackendStreamError
+from utils.backend_errors import is_empty_completion
 
 
 logger = logging.getLogger(__name__)
@@ -202,14 +203,20 @@ def request_backend_chat_completions(
                 )
                 raise
             on_delta("reset", "")
-            streamed = assemble_streamed_completion(
+
+            assembled = assemble_streamed_completion(
                 iter_sse_data_lines(r.iter_lines()), on_delta=on_delta
             )
-            # Учитываем токены стрима так же, как в блокирующем пути (иначе usage
-            # основного цикла терялся — фиксировался только non-stream aux-вызов).
-            if isinstance(streamed, dict):
-                record_usage(streamed.get("usage"))
-            return streamed
+            if is_empty_completion(assembled):
+                raise BackendStreamError(
+                    "Backend returned empty stream response (no content, tool_calls, "
+                    "finish_reason, or error)",
+                    status_code=None,
+                )
+                        # основного цикла терялся — фиксировался только non-stream aux-вызов).
+            if isinstance(assembled, dict):
+                record_usage(assembled.get("usage"))
+            return assembled
 
     if logger is not None:
         try:
