@@ -150,6 +150,16 @@ def test_file_size_bytes_on_not_found_and_success(tmp_path):
     assert missing["file_size_bytes"] is None
 
 
+def test_read_file_via_symlink(tmp_path):
+    real = tmp_path / "real.txt"
+    real.write_text("hello via link", encoding="utf-8")
+    link = tmp_path / "link.txt"
+    link.symlink_to(real)
+    res = json.loads(ReadFile()(path=str(link)))
+    assert res["ok"] is True
+    assert "hello via link" in res["content"]
+
+
 def test_default_max_bytes_constant_is_modest():
     assert DEFAULT_READ_FILE_MAX_BYTES == 8 * 1024 * 1024
 

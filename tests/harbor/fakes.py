@@ -1,6 +1,8 @@
 """In-memory stand-in for HarborBackend, for differential tool tests."""
 import hashlib
 
+from tools.backends.walk_util import iter_files_from_flat, iter_walk_from_flat
+
 
 class FakeBackend:
     """Models a container filesystem as path -> content (str)."""
@@ -53,6 +55,22 @@ class FakeBackend:
                 dirs.add("/".join(parts[:i]))
             files.append(rel)
         return [(d, True) for d in sorted(dirs)] + [(f, False) for f in sorted(files)]
+
+    def iter_walk(self, path, *, should_descend=None):
+        yield from iter_walk_from_flat(
+            self.walk(path),
+            should_descend=should_descend,
+            join=self.join,
+            root=path,
+        )
+
+    def iter_files(self, path, *, should_descend=None):
+        yield from iter_files_from_flat(
+            self.walk(path),
+            should_descend=should_descend,
+            join=self.join,
+            root=path,
+        )
 
     # read / write
     def read(self, p):

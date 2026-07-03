@@ -10,9 +10,10 @@ import asyncio
 import shlex
 import tempfile
 from pathlib import Path
-from typing import Any, Iterable, Optional
+from typing import Any, Callable, Iterable, Optional
 
 from tools.backends.protocol import ExecResult, FsBackend
+from tools.backends.walk_util import iter_files_from_flat, iter_walk_from_flat
 
 
 class HarborBackend(FsBackend):
@@ -37,7 +38,7 @@ class HarborBackend(FsBackend):
         res = self._await(self._env.exec(full, timeout_sec=timeout))
         return ExecResult(
             stdout=res.stdout or "", stderr=res.stderr or "", return_code=res.return_code,
-            timed_out=False,
+            timed_out=bool(getattr(res, "timed_out", False)),
         )
 
     def run_python(self, code: str, *, cwd: Optional[str] = None, timeout: Optional[int] = None,
@@ -57,8 +58,10 @@ class HarborBackend(FsBackend):
         return iter(self.read(path).splitlines(keepends=True))
 
     def read_head_bytes(self, path: str, n: int) -> bytes:
-        # Text-channel ceiling (cat via exec).
-        return self.read(path).encode("utf-8")[:n]
+        res = self.exec(f"head -c {int(n)} {shlex.quote(path)}")
+        if res.return_code != 0:
+            raise OSError(res.stderr.strip() or f"head failed: {path}")
+        return (res.stdout or "").encode("utf-8", errors="surrogateescape")[:n]
 
     def sha256_bytes(self, path: str) -> str:
         return self.sha256(path)
@@ -147,6 +150,33 @@ class HarborBackend(FsBackend):
             name, _, kind = line.partition("\t")
             out.append((name, kind == "d"))
         return sorted(out)
+
+    def iter_walk(
+        self,
+        path: str,
+        *,
+        should_descend: Optional[Callable[[str], bool]] = None,
+    ) -> Iterable[tuple[str, bool]]:
+        """DFS from flat ``find`` listing (materialized ``walk()``)."""
+        yield from iter_walk_from_flat(
+            self.walk(path),
+            should_descend=should_descend,
+            join=self.join,
+            root=path,
+        )
+
+    def iter_files(
+        self,
+        path: str,
+        *,
+        should_descend: Optional[Callable[[str], bool]] = None,
+    ) -> Iterable[str]:
+        yield from iter_files_from_flat(
+            self.walk(path),
+            should_descend=should_descend,
+            join=self.join,
+            root=path,
+        )
 
     # --- path semantics ---
     def normpath(self, path: str) -> str:

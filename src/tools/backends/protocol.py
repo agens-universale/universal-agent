@@ -3,7 +3,7 @@
 does this byte live / where does this command run"."""
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Iterable, Optional
+from typing import Callable, Iterable, Optional
 
 
 @dataclass
@@ -72,6 +72,22 @@ class FsBackend(ABC):
     def listdir(self, path: str) -> list: ...
     @abstractmethod
     def walk(self, path: str) -> list: ...
+
+    @abstractmethod
+    def iter_walk(
+        self,
+        path: str,
+        *,
+        should_descend: Optional[Callable[[str], bool]] = None,
+    ) -> Iterable[tuple[str, bool]]: ...
+
+    @abstractmethod
+    def iter_files(
+        self,
+        path: str,
+        *,
+        should_descend: Optional[Callable[[str], bool]] = None,
+    ) -> Iterable[str]: ...
 
     # --- path semantics ---
     @abstractmethod

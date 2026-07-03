@@ -328,50 +328,16 @@ Search for error logs in Rust source files:
                 return False
             return True
 
-        # --- Walk the tree via the backend (flat [(relpath, is_dir)] list) ---
+        # --- Walk files via backend.iter_files (streaming os.walk on local) ---
         try:
-            entries = self._backend.walk(path)
+            file_iter = self._backend.iter_files(path, should_descend=_rg_pass)
         except FileNotFoundError:
             return _result(ok=False, error={"type": "not_found"})
 
-        # Reconstruct os.walk DFS top-down order from the flat list returned by
-        # backend.walk: group entries by parent dir, sort files/dirs alphabetically
-        # at each level, then recurse files-first — mirrors `for filename in files`
-        # inside `os.walk(path, followlinks=False)`.
-        from collections import defaultdict
-        dir_children: dict = defaultdict(list)
-        for rel, is_d in entries:
-            parts = rel.split("/")
-            parent_rel = "/".join(parts[:-1])  # "" for depth-1 entries
-            name = parts[-1]
-            dir_children[parent_rel].append((name, is_d))
-
-        for parent_rel in dir_children:
-            level = dir_children[parent_rel]
-            dirs = sorted((n, True) for n, d in level if d)
-            files = sorted((n, False) for n, d in level if not d)
-            # Store files-first so DFS emits them before recursing into subdirs.
-            dir_children[parent_rel] = files + dirs
-
-        def _iter_files_dfs(parent_rel: str):
-            dirs_to_recurse = []
-            for name, is_d in dir_children.get(parent_rel, []):
-                rel = (parent_rel + "/" + name) if parent_rel else name
-                if not is_d:
-                    yield rel
-                else:
-                    # Prune denied subdirs from recursion in-place, mirroring
-                    # base's `dirnames[:] = [...]` pruning of os.walk.
-                    if _rg_pass(self._backend.join(path, rel)):
-                        dirs_to_recurse.append(rel)
-            for subdir_rel in dirs_to_recurse:
-                yield from _iter_files_dfs(subdir_rel)
-
-        for relpath in _iter_files_dfs(""):
+        for relpath in file_iter:
             abs_path = self._backend.join(path, relpath)
             if file_pattern and not file_matcher(abs_path, path):
                 continue
-            # Per-file guard перед открытием.
             if not _rg_pass(abs_path):
                 continue
             try:

@@ -5,7 +5,7 @@ import os
 import stat as stat_module
 import subprocess
 import sys
-from typing import Any, Dict, Iterable, Optional
+from typing import Any, Callable, Dict, Iterable, Optional
 
 from tools.backends.protocol import ExecResult, FsBackend
 from utils.file_text import read_text_for_edit
@@ -140,16 +140,60 @@ class LocalFsBackend(FsBackend):
             entries.append((name, is_dir))
         return entries
 
-    def walk(self, path: str) -> list:
-        out = []
+    def iter_walk(
+        self,
+        path: str,
+        *,
+        should_descend: Optional[Callable[[str], bool]] = None,
+    ) -> Iterable[tuple[str, bool]]:
+        """Stream top-down DFS via ``os.walk`` (dirs first, then files per level)."""
         for dirpath, dirnames, filenames in os.walk(path, followlinks=False):
+            dirnames.sort()
+            filenames.sort()
             rel_dir = os.path.relpath(dirpath, path)
             prefix = "" if rel_dir == "." else rel_dir.replace(os.sep, "/") + "/"
+
             for d in dirnames:
-                out.append((prefix + d, True))
+                full = os.path.join(dirpath, d)
+                try:
+                    st = os.lstat(full)
+                    is_dir = stat_module.S_ISDIR(st.st_mode)
+                except OSError:
+                    is_dir = False
+                yield (prefix + d, is_dir)
+
             for f in filenames:
-                out.append((prefix + f, False))
-        return out
+                yield (prefix + f, False)
+
+            if should_descend is not None:
+                dirnames[:] = [
+                    d for d in dirnames
+                    if should_descend(os.path.join(dirpath, d))
+                ]
+
+    def iter_files(
+        self,
+        path: str,
+        *,
+        should_descend: Optional[Callable[[str], bool]] = None,
+    ) -> Iterable[str]:
+        """Stream file relpaths in native ``os.walk`` filename order."""
+        for dirpath, dirnames, filenames in os.walk(path, followlinks=False):
+            dirnames.sort()
+            filenames.sort()
+            rel_dir = os.path.relpath(dirpath, path)
+            prefix = "" if rel_dir == "." else rel_dir.replace(os.sep, "/") + "/"
+            for f in filenames:
+                yield prefix + f
+
+            if should_descend is not None:
+                dirnames[:] = [
+                    d for d in dirnames
+                    if should_descend(os.path.join(dirpath, d))
+                ]
+
+    def walk(self, path: str) -> list:
+        return list(self.iter_walk(path))
 
     # --- path semantics ---
     def normpath(self, path: str) -> str:

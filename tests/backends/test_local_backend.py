@@ -112,3 +112,60 @@ def test_tool_backend_resolution(tmp_path):
     # explicit override (tests) wins over everything
     t2._backend = "fake"
     assert t2._backend == "fake"
+
+
+def test_walk_symlink_to_dir_is_file_entry(be, tmp_path):
+    """Symlink to a directory must be is_dir=False in walk (lstat parity with listdir)."""
+    sub = tmp_path / "sub"
+    sub.mkdir()
+    (sub / "inner.txt").write_text("x", encoding="utf-8")
+    link = tmp_path / "linkdir"
+    link.symlink_to(sub)
+    root = str(tmp_path)
+    walked = dict(be.walk(root))
+    assert walked.get("linkdir") is False
+    assert walked.get("sub") is True
+    assert "sub/inner.txt" in walked
+
+
+def test_walk_symlink_to_file(be, tmp_path):
+    real = tmp_path / "real.txt"
+    real.write_text("x", encoding="utf-8")
+    link = tmp_path / "link.txt"
+    link.symlink_to(real)
+    walked = dict(be.walk(str(tmp_path)))
+    assert walked.get("link.txt") is False
+
+
+def test_write_replace_failure_cleans_tmp(be, tmp_path, monkeypatch):
+    p = str(tmp_path / "target.txt")
+    (tmp_path / "target.txt").write_text("keep", encoding="utf-8")
+    calls = {"n": 0}
+
+    def flaky_replace(src, dst):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise OSError("simulated replace failure")
+
+    monkeypatch.setattr(os, "replace", flaky_replace)
+    with pytest.raises(OSError, match="simulated"):
+        be.write(p, "new content")
+    assert not os.path.exists(p + ".tmp")
+    assert (tmp_path / "target.txt").read_text(encoding="utf-8") == "keep"
+
+
+def test_write_bytes_replace_failure_cleans_tmp(be, tmp_path, monkeypatch):
+    p = str(tmp_path / "bin.dat")
+    monkeypatch.setattr(os, "replace", lambda _s, _d: (_ for _ in ()).throw(OSError("nope")))
+    with pytest.raises(OSError):
+        be.write_bytes(p, b"\xff\xfe")
+    assert not os.path.exists(p + ".tmp")
+    assert not os.path.exists(p)
+
+
+def test_read_head_bytes_binary(be, tmp_path):
+    p = str(tmp_path / "raw.bin")
+    data = b"hello\x00world\xff"
+    with open(p, "wb") as fd:
+        fd.write(data)
+    assert be.read_head_bytes(p, 8) == data[:8]

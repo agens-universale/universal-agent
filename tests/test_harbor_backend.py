@@ -6,8 +6,9 @@ from tools.backends.protocol import FsBackend
 
 
 class FakeExecResult:
-    def __init__(self, stdout="", stderr="", return_code=0):
+    def __init__(self, stdout="", stderr="", return_code=0, timed_out=False):
         self.stdout, self.stderr, self.return_code = stdout, stderr, return_code
+        self.timed_out = timed_out
 
 
 class FakeEnv:
@@ -194,3 +195,34 @@ def _make_exec_returning(env, stdout, return_code=0):
         return FakeExecResult(stdout=stdout, return_code=return_code)
 
     return fake_exec
+
+
+def test_exec_propagates_timed_out_from_environment(loop_in_thread):
+    env = FakeEnv()
+
+    async def timed_exec(command, **kw):
+        env.calls.append(command)
+        return FakeExecResult(stdout="partial", stderr="", return_code=None, timed_out=True)
+
+    env.exec = timed_exec
+    backend = HarborBackend(env, loop_in_thread)
+    result = backend.exec("sleep 99", timeout=1)
+    assert result.timed_out is True
+    assert result.return_code is None
+    assert result.stdout == "partial"
+
+
+def test_read_head_bytes_uses_head_not_full_file(loop_in_thread):
+    env = FakeEnv()
+
+    async def head_exec(command, **kw):
+        env.calls.append(command)
+        if command.startswith("head -c"):
+            return FakeExecResult(stdout="hel", return_code=0)
+        return FakeExecResult(stdout="", return_code=1)
+
+    env.exec = head_exec
+    backend = HarborBackend(env, loop_in_thread)
+    sample = backend.read_head_bytes("/work/a.bin", 3)
+    assert sample == b"hel"
+    assert any(c.startswith("head -c 3 ") for c in env.calls)

@@ -344,55 +344,31 @@ List deeper files (example):
         rg_root=None,
         rg_extra=None,
     ):
-        """Walk (max_depth>=1) mirroring os.walk top-down DFS: per level sorted
-        dirs first, then sorted files, then recurse depth-first (not BFS)."""
-        all_entries = self._backend.walk(root_path)
+        """Walk (max_depth>=1) via backend.iter_walk (os.walk on local)."""
+        def _should_descend(abs_path: str) -> bool:
+            if not self._read_guard_pass(abs_path, rg_cfg, rg_root, rg_extra):
+                return False
+            if max_depth is not None:
+                rel = os.path.relpath(abs_path, root_path).replace(os.sep, "/")
+                if rel.count("/") >= max_depth:
+                    return False
+            return True
 
-        # Group entries by their parent directory (relpath from root, "" = immediate children).
-        from collections import defaultdict
-        dir_children: dict = defaultdict(list)
+        try:
+            walk_iter = self._backend.iter_walk(root_path, should_descend=_should_descend)
+        except FileNotFoundError:
+            raise
+        except OSError as e:
+            raise RuntimeError(f"Failed to walk directory '{root_path}': {e}") from e
 
-        for rel, is_d in all_entries:
-            parts = rel.split("/")
-            parent_rel = "/".join(parts[:-1])  # "" for depth-1 entries
-            name = parts[-1]
-            dir_children[parent_rel].append((name, is_d))
+        for rel, is_d in walk_iter:
+            if file_matcher is not None and not file_matcher(rel):
+                continue
+            abs_path = self._backend.join(root_path, rel)
+            if not self._read_guard_pass(abs_path, rg_cfg, rg_root, rg_extra):
+                continue
+            result.append(self._entry(abs_path, is_d))
+            if max_entries is not None and len(result) >= max_entries:
+                return True
 
-        # Sort each level: dirs first (alphabetically), then files (alphabetically).
-        # Mirrors os.walk with dirnames.sort() + filenames.sort() and dirs emitted first.
-        for parent_rel in dir_children:
-            entries = dir_children[parent_rel]
-            dirs = sorted((n, True) for n, d in entries if d)
-            files = sorted((n, False) for n, d in entries if not d)
-            dir_children[parent_rel] = dirs + files
-
-        def _dfs(parent_rel: str, depth: int) -> bool:
-            """Recursively visit parent_rel in DFS order, mirroring os.walk."""
-            children = dir_children.get(parent_rel, [])
-            prune = max_depth is not None and depth >= max_depth
-
-            # Emit all children of this directory (dirs first, then files)
-            subdirs_to_recurse = []
-            for name, is_d in children:
-                rel = (parent_rel + "/" + name) if parent_rel else name
-                abs_path = self._backend.join(root_path, rel)
-
-                if file_matcher is None or file_matcher(rel):
-                    # Per-entry read_guard: пропускаем entries которые резолвятся
-                    # в denied paths (включая symlink escape наружу launch_root).
-                    if self._read_guard_pass(abs_path, rg_cfg, rg_root, rg_extra):
-                        result.append(self._entry(abs_path, is_d))
-                        if max_entries is not None and len(result) >= max_entries:
-                            return True  # hit limit early
-
-                if is_d and not prune and self._read_guard_pass(abs_path, rg_cfg, rg_root, rg_extra):
-                    subdirs_to_recurse.append(rel)
-
-            # Recurse into each child dir IN ORDER (DFS: fully expand alpha/ before gamma/)
-            for subdir_rel in subdirs_to_recurse:
-                if _dfs(subdir_rel, depth + 1):
-                    return True  # propagate early exit
-
-            return False
-
-        return _dfs("", 0)
+        return False
