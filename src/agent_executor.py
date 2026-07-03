@@ -473,6 +473,11 @@ class AgentExecutor:
 
         if config_dict.get("console_trace", True):
             print(f"\nПуть к файлу с логами: {self._ctx.logging_path}\n")
+        if logger is not None:
+            logger.info(
+                "log_path",
+                extra={"event": "log_path", "path": getattr(self._ctx, "logging_path", None)},
+            )
         return response
 
     def add_message(self, message: dict) -> None:
