@@ -158,6 +158,11 @@ class AgentExecutor:
                         print(
                             f"Не удалось прочитать chat_completions system prompt: {prompt_path}"
                         )
+                    if logger is not None:
+                        logger.warning(
+                            "system_prompt_read_failed",
+                            extra={"event": "system_prompt_read_failed", "path": prompt_path},
+                        )
                     raise e
 
             # Клиент-специфичные инструкции (напр. TUI) — отсутствие/нечитаемость
@@ -187,6 +192,7 @@ class AgentExecutor:
             "thread_id": thread_id,
             "shared": thread_shared,
             "workspace_config": config_dict,
+            "logger": logger,
         }
         if config_dict.get("use_local_subagents", False):
             state_data["specific_role"] = ORCHESTRATOR_SPECIFIC_ROLE
@@ -585,6 +591,7 @@ class AgentExecutor:
             thread_id=thread_id,
             shared=thread_shared,
             workspace_config=config_dict,
+            logger=getattr(self._ctx, "logger", None),
         )
         state.backend_api_mode = "chat_completions"
         # Гидрируем кумулятив токенов треда, чтобы summary-вызов компакции лёг

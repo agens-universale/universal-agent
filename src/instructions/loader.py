@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 from instructions.layers import instruction_layer_specs
 
@@ -25,7 +26,11 @@ def _read(path) -> str | None:
 
 
 def build_instructions(
-    *, agent_md_path: str | None, cwd: str | None = None, overwrite: bool = False
+    *,
+    agent_md_path: str | None,
+    cwd: str | None = None,
+    overwrite: bool = False,
+    logger: Any | None = None,
 ) -> LoadedInstructions:
     specs = instruction_layer_specs(agent_md_path=agent_md_path, cwd=cwd)
     if overwrite:
@@ -36,6 +41,14 @@ def build_instructions(
     for spec in specs:
         body = _read(spec.path)
         if body is None:
+            # L0 is the caller-supplied override (agent_md_path) — unlike the
+            # optional global/project layers, its absence/unreadability is
+            # worth surfacing since the caller explicitly asked for it.
+            if spec.id == "L0" and logger is not None:
+                logger.warning(
+                    "agent_md_read_failed",
+                    extra={"event": "agent_md_read_failed", "path": str(spec.path)},
+                )
             continue
         loaded.append(spec.id)
         sections.append(f"## {spec.title}\n{body.rstrip()}")

@@ -115,6 +115,12 @@ def request_backend_responses(
 
     data['stream'] = True
 
+    if logger is not None:
+        logger.debug(
+            "backend_request",
+            extra={"event": "backend_request", "api_mode": "responses", "url": url, "payload": data},
+        )
+
     with _NO_NETRC_SESSION.post(url, json=data, headers=headers, stream=True, verify=verify) as r:
         r.raise_for_status()
         r_headers = r.headers
@@ -129,6 +135,11 @@ def request_backend_responses(
         result = json.loads(re.sub('^data: +', '', last_chunk))
     except Exception as e:
         print(f'Error read json from backend. Last chunk: {last_chunk}')
+        if logger is not None:
+            logger.error(
+                "backend_responses_json_error",
+                extra={"event": "backend_responses_json_error", "last_chunk": last_chunk},
+            )
         raise e
 
     result_type = result.get("type")
@@ -138,6 +149,11 @@ def request_backend_responses(
     response_obj = result["response"]
     if isinstance(response_obj, dict):
         record_usage(response_obj.get("usage"))
+    if logger is not None:
+        logger.debug(
+            "backend_response",
+            extra={"event": "backend_response", "api_mode": "responses", "response": response_obj},
+        )
     return response_obj, r_headers
 
 
@@ -179,6 +195,15 @@ def request_backend_chat_completions(
                 logger.debug(
                     "Send request to backend chat/completions (stream=True) url=%s", url
                 )
+            logger.debug(
+                "backend_request",
+                extra={
+                    "event": "backend_request",
+                    "api_mode": "chat_completions",
+                    "url": url,
+                    "payload": stream_data,
+                },
+            )
         with _NO_NETRC_SESSION.post(
             url, json=stream_data, headers=headers, stream=True, verify=verify
         ) as r:
@@ -216,6 +241,15 @@ def request_backend_chat_completions(
                         # основного цикла терялся — фиксировался только non-stream aux-вызов).
             if isinstance(assembled, dict):
                 record_usage(assembled.get("usage"))
+            if logger is not None:
+                logger.debug(
+                    "backend_response",
+                    extra={
+                        "event": "backend_response",
+                        "api_mode": "chat_completions",
+                        "response": assembled,
+                    },
+                )
             return assembled
 
     if logger is not None:
@@ -228,6 +262,10 @@ def request_backend_chat_completions(
         except Exception:
             # Не роняем процесс из-за проблем с сериализацией payload.
             logger.debug("Send request to backend chat/completions url=%s", url)
+        logger.debug(
+            "backend_request",
+            extra={"event": "backend_request", "api_mode": "chat_completions", "url": url, "payload": data},
+        )
 
     r = _NO_NETRC_SESSION.post(url, json=data, headers=headers, verify=verify)
     try:
@@ -295,6 +333,11 @@ def request_backend_chat_completions(
     data = r.json()
     if isinstance(data, dict):
         record_usage(data.get("usage"))
+    if logger is not None:
+        logger.debug(
+            "backend_response",
+            extra={"event": "backend_response", "api_mode": "chat_completions", "response": data},
+        )
     return data
 
 

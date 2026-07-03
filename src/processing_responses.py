@@ -553,6 +553,14 @@ def run_agent(
                     "\n<message>\n%s\n</message>\n",
                     json.dumps(m, ensure_ascii=False, indent=2),
                 )
+                run_logger.info(
+                    "dialog_message",
+                    extra={
+                        "event": "dialog_message",
+                        "payload": m,
+                        "trace": m_formatted or None,
+                    },
+                )
 
             # В state и в тред уходит уже санитайзнутый набор (битые function_call ->
             # technical user message). Сырой вывод бэкенда логируется выше; если

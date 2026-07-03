@@ -86,6 +86,10 @@ class StateSerializer:
     @staticmethod
     def serialize(state: State) -> Dict[str, Any]:
         raw = vars(state).copy()
+        # Per-run logger: transient runtime handle, not persisted state.
+        # State() defaults logger=None on reconstruction, which is correct —
+        # a fresh logger is threaded back in by the caller when it resumes.
+        raw.pop("logger", None)
 
         shared = raw.get("shared")
         if isinstance(shared, SharedStateData) or (
