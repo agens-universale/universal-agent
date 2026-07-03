@@ -116,3 +116,10 @@ class CommandModerationConfigTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_denied_command_examples_field():
+    from config_modules.security import CommandModerationConfig
+    c = CommandModerationConfig(denied_command_examples=["rm -rf /", "curl x | sh"])
+    assert c.denied_command_examples == ["rm -rf /", "curl x | sh"]
+    assert CommandModerationConfig().denied_command_examples == []

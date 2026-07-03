@@ -23,6 +23,7 @@ class ToolSecurityContext:
     write_guard: WriteGuardConfig = field(default_factory=WriteGuardConfig)
     command_moderation_mode: str = "allow"
     allowed_command_examples: list[str] = field(default_factory=list)
+    denied_command_examples: list[str] = field(default_factory=list)
     url_allowed_schemes: list[str] = field(default_factory=lambda: ["http", "https"])
     url_blacklist: list[str] = field(default_factory=list)
     url_policy_enabled: bool = False
@@ -165,6 +166,7 @@ def resolve_tool_context(*args: Any, **kwargs: Any) -> ToolSecurityContext:
         ),
         command_moderation_mode=str(moderation.get("mode", "allow")).strip().lower(),
         allowed_command_examples=list(moderation.get("allowed_command_examples") or []),
+        denied_command_examples=list(moderation.get("denied_command_examples") or []),
         url_allowed_schemes=list(url_policy_cfg.get("allowed_schemes") or ["http", "https"]),
         url_blacklist=list(url_policy_cfg.get("url_blacklist") or []),
         url_policy_enabled=bool(url_policy_cfg.get("enabled", False)),

@@ -205,6 +205,7 @@ def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
             "enabled": app_cfg.security.command_moderation.enabled,
             "mode": app_cfg.security.command_moderation.mode,
             "allowed_command_examples": app_cfg.security.command_moderation.allowed_command_examples,
+            "denied_command_examples": app_cfg.security.command_moderation.denied_command_examples,
         },
         "write_guard": {
             "enabled": app_cfg.security.write_guard.enabled,
