@@ -31,6 +31,7 @@ def build_instructions(
     cwd: str | None = None,
     overwrite: bool = False,
     logger: Any | None = None,
+    verbose: bool = False,
 ) -> LoadedInstructions:
     specs = instruction_layer_specs(agent_md_path=agent_md_path, cwd=cwd)
     if overwrite:
@@ -44,7 +45,7 @@ def build_instructions(
             # L0 is the caller-supplied override (agent_md_path) — unlike the
             # optional global/project layers, its absence/unreadability is
             # worth surfacing since the caller explicitly asked for it.
-            if spec.id == "L0" and logger is not None:
+            if spec.id == "L0" and logger is not None and verbose:
                 logger.warning(
                     "agent_md_read_failed",
                     extra={"event": "agent_md_read_failed", "path": str(spec.path)},

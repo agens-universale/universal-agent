@@ -202,6 +202,7 @@ def test_backend_responses_json_error_event(tmp_path, monkeypatch):
 
 
 def test_agent_md_read_failed_event(tmp_path, monkeypatch):
+    """Event fires when verbose=True, logger is present, and L0 read fails."""
     from config_modules import env_vars
     from instructions.loader import build_instructions
 
@@ -209,7 +210,12 @@ def test_agent_md_read_failed_event(tmp_path, monkeypatch):
     logger, path = _make_logger(tmp_path)
 
     missing_path = tmp_path / "does_not_exist.md"
-    build_instructions(agent_md_path=str(missing_path), cwd=str(tmp_path / "proj"), logger=logger)
+    build_instructions(
+        agent_md_path=str(missing_path),
+        cwd=str(tmp_path / "proj"),
+        logger=logger,
+        verbose=True,
+    )
     _flush(logger)
     recs = _records(path)
 
@@ -217,10 +223,61 @@ def test_agent_md_read_failed_event(tmp_path, monkeypatch):
     assert failed and failed[0]["path"] == str(missing_path)
 
 
+def test_agent_md_read_failed_event_not_emitted_when_not_verbose(tmp_path, monkeypatch):
+    """Same L0 read-failure + logger present, but verbose=False (the default)
+    must suppress the event — matching the fork's ``if self.verbose:`` gate."""
+    from config_modules import env_vars
+    from instructions.loader import build_instructions
+
+    monkeypatch.setattr(env_vars.env, "gc_home", tmp_path / "gc")
+    logger, path = _make_logger(tmp_path)
+
+    missing_path = tmp_path / "does_not_exist.md"
+    build_instructions(
+        agent_md_path=str(missing_path),
+        cwd=str(tmp_path / "proj"),
+        logger=logger,
+        verbose=False,
+    )
+    _flush(logger)
+    recs = _records(path)
+
+    failed = [r for r in recs if r["event"] == "agent_md_read_failed"]
+    assert not failed
+
+
 def test_state_threads_logger_into_agent_md_read_failed(tmp_path, monkeypatch):
-    """State() stores the given logger and set_call_metadata() forwards it to
-    build_instructions(), so a missing agent_md_path surfaces the event
-    through the per-run logger the caller passed to State."""
+    """State() stores the given logger and verbose flag, and set_call_metadata()
+    forwards both to build_instructions(), so a missing agent_md_path surfaces
+    the event through the per-run logger the caller passed to State — but only
+    when verbose is True."""
+    from config_modules import env_vars
+    from states import State
+
+    monkeypatch.setattr(env_vars.env, "gc_home", tmp_path / "gc")
+    logger, path = _make_logger(tmp_path)
+
+    missing_path = tmp_path / "missing_agent.md"
+    State(
+        verbose=True,
+        model="m",
+        tools_spec=[],
+        tools_descr=[],
+        skills_list=[],
+        max_steps=10,
+        system_prompt_id="",
+        use_server_subagents=False,
+        agent_md_path=str(missing_path),
+        logger=logger,
+    )
+    _flush(logger)
+    recs = _records(path)
+    failed = [r for r in recs if r["event"] == "agent_md_read_failed"]
+    assert failed and failed[0]["path"] == str(missing_path)
+
+
+def test_state_does_not_emit_agent_md_read_failed_when_not_verbose(tmp_path, monkeypatch):
+    """Same setup as above but verbose=False: State must not emit the event."""
     from config_modules import env_vars
     from states import State
 
@@ -243,7 +300,7 @@ def test_state_threads_logger_into_agent_md_read_failed(tmp_path, monkeypatch):
     _flush(logger)
     recs = _records(path)
     failed = [r for r in recs if r["event"] == "agent_md_read_failed"]
-    assert failed and failed[0]["path"] == str(missing_path)
+    assert not failed
 
 
 # ---------------------------------------------------------------------------

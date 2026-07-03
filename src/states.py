@@ -120,7 +120,10 @@ class State:
         agent_md_path = getattr(self, "agent_md_path", None)
         overwrite = bool(getattr(self, "instructions_overwrite", False))
         loaded = build_instructions(
-            agent_md_path=agent_md_path, overwrite=overwrite, logger=self.logger
+            agent_md_path=agent_md_path,
+            overwrite=overwrite,
+            logger=self.logger,
+            verbose=self.verbose,
         )
         if loaded.text:
             user_instructions = (

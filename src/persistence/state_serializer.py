@@ -34,6 +34,7 @@ def load_state_from_snapshot(payload: Mapping[str, Any]) -> State:
     validate_state_snapshot_for_load(snapshot)
 
     state = State.__new__(State)
+    snapshot.setdefault("logger", None)
     state.__dict__ = snapshot
 
     shared_raw = state.__dict__.get("shared")
