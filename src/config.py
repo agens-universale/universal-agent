@@ -33,6 +33,8 @@ _LOGGING_SYNC_KEYS = (
     "console_trace",
     "dump_storage",
     "save_logs",
+    "logging_format",
+    "log_level",
 )
 
 
@@ -269,6 +271,9 @@ def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
         "console_trace": app_cfg.logging.console_trace,
         "dump_storage": app_cfg.logging.dump_storage,
         "save_logs": app_cfg.logging.save_logs,
+        "logging_format": app_cfg.logging.format,
+        "log_level": app_cfg.logging.log_level,
+        "redact_secrets": app_cfg.logging.redact_secrets.model_dump(),
         "limit_project_metadata": app_cfg.agent.limit_project_metadata,
         "tool_output_inline_max_chars": app_cfg.agent.tool_output_inline_max_chars,
         "stored_tool_outputs_max_entries": app_cfg.agent.stored_tool_outputs_max_entries,
