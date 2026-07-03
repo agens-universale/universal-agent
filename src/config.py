@@ -197,6 +197,8 @@ def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
         "use_max_tokens_param": app_cfg.backend.use_max_tokens_param,
         "openai_strict_tools_schema": app_cfg.backend.openai_strict_tools_schema,
         "use_ssl": app_cfg.backend.use_ssl,
+        "cert_path": app_cfg.backend.cert_path,
+        "key_path": app_cfg.backend.key_path,
         "use_retry": app_cfg.backend.use_retry,
         "stream": app_cfg.backend.stream,
         "tui_stream_display": app_cfg.tui.stream_display,

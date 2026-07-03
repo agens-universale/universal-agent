@@ -68,6 +68,26 @@ def get_client_cert(server_cfg: Dict[str, Any]) -> Optional[Tuple[str, str]]:
     return None
 
 
+def get_backend_client_cert(config_dict: Dict[str, Any]) -> Optional[Tuple[str, str]]:
+    """Клиентский сертификат модели-бэкенда из config_dict (cert_path/key_path).
+
+    Оба заданы → (cert, key) с раскрытыми путями; только один → warning + None;
+    ни одного → None. Отдельно от MCP get_client_cert (там дефисные ключи)."""
+    cfg = config_dict or {}
+    cert_path = cfg.get("cert_path")
+    key_path = cfg.get("key_path")
+    if cert_path and key_path:
+        return (_expand_path(str(cert_path)), _expand_path(str(key_path)))
+    if cert_path or key_path:
+        logger.warning(
+            "backend mTLS: задан только %s без %s — клиентский сертификат не будет использован",
+            "cert_path" if cert_path else "key_path",
+            "key_path" if cert_path else "cert_path",
+        )
+        return None
+    return None
+
+
 def _expand_path(path: str) -> str:
     """Раскрыть `~` и переменные окружения в пути к серту/CA-bundle."""
     return os.path.expanduser(os.path.expandvars(path))
