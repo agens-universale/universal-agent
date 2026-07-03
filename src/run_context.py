@@ -71,10 +71,27 @@ def create_run_context(
         config_dict, run_id=effective_run_id, agent_kind="main"
     )
 
-    #run_logger.debug(
-    #    "Tools specs for this run:\n\n%s",
-    #    json.dumps(tools_spec, ensure_ascii=False, indent=2),
-    #)
+    run_logger.info(
+        "agent started: model=%s url=%s mode=%s",
+        config_dict.get("model"),
+        config_dict.get("completions_url"),
+        config_dict.get("backend_api_mode"),
+        extra={
+            "event": "agent_start",
+            "model": config_dict.get("model"),
+            "url": config_dict.get("completions_url") or None,
+            "backend_api_mode": config_dict.get("backend_api_mode"),
+        },
+    )
+
+    run_logger.debug(
+        "agent_tools",
+        extra={
+            "event": "agent_tools",
+            "tools": sorted(tools_data.keys()),
+            "count": len(tools_data),
+        },
+    )
 
     chat_completions_llm = chat_completions_llm_from_config_dict(config_dict)
 

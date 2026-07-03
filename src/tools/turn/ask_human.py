@@ -1,7 +1,10 @@
 import sys
 import json
+import logging
 from typing import Optional, Dict, Any
 from tools.simple_tool_base import AbstractSimpleTool
+
+_logger = logging.getLogger(__name__)
 
 # Shown on every successful ask_human observation (agent-visible JSON).
 _RESPONSE_HINT = (
@@ -54,6 +57,12 @@ class AskHuman(AbstractSimpleTool):
         if hint:
             payload["hint"] = hint
         return json.dumps(payload, ensure_ascii=False)
+
+    def _run_logger(self) -> logging.Logger:
+        """Prefer the per-run logger from RunContext; fall back to the module logger."""
+        ctx = getattr(self, "_ctx", None)
+        logger = getattr(ctx, "logger", None) if ctx is not None else None
+        return logger or _logger
 
     """
     Tool that allows the AI agent to ask a question and receive input from a human user.
@@ -209,6 +218,10 @@ Do not implement until they confirm.
             print(question, file=sys.stderr)
             print("-"*60, file=sys.stderr)
             print("Please enter your response (end with EOF or empty line):", file=sys.stderr)
+            self._run_logger().info(
+                "ask_human_question",
+                extra={"event": "ask_human_question", "question": question},
+            )
 
             # Read multi-line input until EOF or empty line
             lines = []
@@ -228,6 +241,10 @@ Do not implement until they confirm.
 
             print(f"Human responded: {repr(response)}", file=sys.stderr)
             print("="*60 + "\n", file=sys.stderr)
+            self._run_logger().info(
+                "ask_human_response",
+                extra={"event": "ask_human_response", "response": response},
+            )
 
             return self._result(
                 ok=True,
@@ -239,6 +256,10 @@ Do not implement until they confirm.
 
         except KeyboardInterrupt:
             print("\n\n[Interaction interrupted by user]", file=sys.stderr)
+            self._run_logger().warning(
+                "ask_human_interrupted",
+                extra={"event": "ask_human_interrupted"},
+            )
             return self._result(
                 ok=False,
                 question=question,
@@ -249,6 +270,10 @@ Do not implement until they confirm.
             # Fallback in case of unexpected error
             error_msg = f"(error reading input: {str(e)})"
             print(f"[turn_ask_human error]: {error_msg}", file=sys.stderr)
+            self._run_logger().warning(
+                "ask_human_error",
+                extra={"event": "ask_human_error", "error": error_msg},
+            )
             return self._result(
                 ok=False,
                 question=question,
