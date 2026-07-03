@@ -209,10 +209,15 @@ def main() -> int:
     finally:
         if auto_mcp:
             shutdown_mcp_daemons()
+    formatted = format_json_for_display(response)
     if config_dict.get("console_trace", True):
-        formatted = format_json_for_display(response)
         if formatted:
             print(formatted)
+    if formatted:
+        ctx.logger.info(
+            "final_answer",
+            extra={"event": "final_answer", "answer": formatted},
+        )
     return 0
 
 

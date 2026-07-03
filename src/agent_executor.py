@@ -30,7 +30,7 @@ from intent_log.user_turn import append_user_ask_deduped, append_user_asks_from_
 from message_policy.user_message_policy import extract_real_user_message_text
 from states import State, SharedStateData
 from usage.account import UsageAccount
-from usage.report import build_run_usage_report
+from usage.report import build_run_usage_report, build_run_usage_dict
 from thread_store import (
     ThreadSession,
     load_thread_meta,
@@ -467,6 +467,17 @@ class AgentExecutor:
                     logger.info("\n<run_usage>\n%s\n</run_usage>\n", usage_text)
                 if config_dict.get("console_trace", True):
                     print(f"\n{usage_text}\n")
+            if logger is not None:
+                usage_dict = build_run_usage_dict(
+                    run_usage,
+                    config_dict.get("pricing"),
+                    config_dict.get("model"),
+                )
+                if usage_dict:
+                    logger.info(
+                        "run_usage",
+                        extra={"event": "run_usage", "usage": usage_dict},
+                    )
         except Exception as usage_exc:  # отчёт не должен ронять прогон
             if logger is not None:
                 logger.warning("run usage report failed: %s", usage_exc, exc_info=True)

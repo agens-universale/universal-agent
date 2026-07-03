@@ -94,3 +94,45 @@ def build_run_usage_report(
         return None
     cost_report = compute_cost(run_usage, pricing, model_name)
     return render_cost_report(cost_report, model_name=model_name, title="Run usage")
+
+
+def build_run_usage_dict(
+    run_usage: UsageAccount,
+    pricing: Any,
+    model_name: Optional[str],
+) -> Optional[dict]:
+    """Структурный (JSON-friendly) отчёт по usage прогона или None, если считать нечего.
+
+    Используется для jsonl-события ``run_usage`` (см. ``AgentExecutor.run``), в
+    дополнение к текстовому отчёту ``build_run_usage_report``.
+    """
+    if not isinstance(run_usage, UsageAccount) or run_usage.is_empty():
+        return None
+    report = compute_cost(run_usage, pricing, model_name)
+
+    categories: dict[str, dict[str, Any]] = {}
+    for c in report.categories:
+        entry: dict[str, Any] = {"input": c.input, "output": c.output}
+        if c.cached:
+            entry["cached"] = c.cached
+        if c.missing_usage_calls:
+            entry["missing_usage_calls"] = c.missing_usage_calls
+        if report.has_pricing and c.cost is not None:
+            entry["cost"] = c.cost
+            entry["currency"] = c.currency
+        categories[c.category] = entry
+
+    total: dict[str, Any] = {"input": report.total_input, "output": report.total_output}
+    if report.total_cached:
+        total["cached"] = report.total_cached
+    if report.total_missing_usage_calls:
+        total["missing_usage_calls"] = report.total_missing_usage_calls
+
+    out: dict[str, Any] = {
+        "model": model_name,
+        "categories": categories,
+        "total": total,
+    }
+    if report.has_pricing:
+        out["cost"] = {"by_currency": dict(report.by_currency)}
+    return out
