@@ -18,7 +18,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from tests.harbor.fakes import FakeBackend, strip_path_fields
+from tests.harbor.fakes import FakeBackend, bind_os_backend, strip_path_fields
+from tools.backends.local import LocalFsBackend
 from tools.fs.list_files import ListFiles
 
 # ---------------------------------------------------------------------------
@@ -81,22 +82,17 @@ _BRANCHING_FILES = {
 
 def _base():
     t = ListFiles.__new__(ListFiles)
-    t._ctx = SimpleNamespace(config_dict={})
-    return t
+    return bind_os_backend(t, LocalFsBackend())
 
 
 def _harbor():
     t = ListFiles.__new__(ListFiles)
-    t._ctx = SimpleNamespace(config_dict={})
-    t._backend = FakeBackend(_FAKE_FILES)
-    return t
+    return bind_os_backend(t, FakeBackend(_FAKE_FILES))
 
 
 def _harbor_branching():
     t = ListFiles.__new__(ListFiles)
-    t._ctx = SimpleNamespace(config_dict={})
-    t._backend = FakeBackend(_BRANCHING_FILES)
-    return t
+    return bind_os_backend(t, FakeBackend(_BRANCHING_FILES))
 
 
 def _make_real_tree(tmp_path: "pathlib.Path"):
@@ -317,9 +313,7 @@ def test_not_a_directory(tmp_path):
     base_raw = _base()(path=str(f))
 
     # fake-backed: /work/a.py is a file in FakeBackend
-    t = ListFiles.__new__(ListFiles)
-    t._ctx = SimpleNamespace(config_dict={})
-    t._backend = FakeBackend({"/work/a.py": "x"})
+    t = bind_os_backend(ListFiles.__new__(ListFiles), FakeBackend({"/work/a.py": "x"}))
     harbor_raw = t(path="/work/a.py")
     _compare_results(base_raw, harbor_raw, "not_a_directory")
 
@@ -329,9 +323,7 @@ def test_not_found(tmp_path):
     nonexistent = str(tmp_path / "does_not_exist")
     base_raw = _base()(path=nonexistent)
 
-    t = ListFiles.__new__(ListFiles)
-    t._ctx = SimpleNamespace(config_dict={})
-    t._backend = FakeBackend({})
+    t = bind_os_backend(ListFiles.__new__(ListFiles), FakeBackend({}))
     harbor_raw = t(path="/work/does_not_exist")
     _compare_results(base_raw, harbor_raw, "not_found")
 
@@ -357,19 +349,20 @@ def test_walk_does_not_descend_into_denied_dir_via_nested_override():
         "/work/out.txt": "x",
         "/work/secret/public/file.txt": "y",
     }
-    t = ListFiles.__new__(ListFiles)
-    t._ctx = SimpleNamespace(
-        config_dict={
-            "launch_root": "/work",
-            "read_guard": {
-                "enabled": True,
-                "allowed_read_roots": ["*"],
-                "denied_read_paths": ["/work/secret"],
-                "allowed_read_paths": ["/work/secret/public"],
-            },
-        }
+    cfg = {
+        "launch_root": "/work",
+        "read_guard": {
+            "enabled": True,
+            "allowed_read_roots": ["*"],
+            "denied_read_paths": ["/work/secret"],
+            "allowed_read_paths": ["/work/secret/public"],
+        },
+    }
+    t = bind_os_backend(
+        ListFiles.__new__(ListFiles),
+        FakeBackend(files),
+        config_dict=cfg,
     )
-    t._backend = FakeBackend(files)
 
     raw = t(path="/work", max_depth=5)
     payload = json.loads(raw)

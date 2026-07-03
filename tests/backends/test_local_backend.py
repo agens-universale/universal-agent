@@ -3,6 +3,7 @@ import stat as stat_module
 
 import pytest
 
+from run_context import create_run_context
 from tools.backends.local import LocalFsBackend
 from tools.backends.protocol import ExecResult, FsBackend
 
@@ -97,21 +98,21 @@ def test_default_cwd(be):
     assert be.default_cwd() == os.getcwd()
 
 
-def test_tool_backend_resolution(tmp_path):
+def test_tool_backend_resolution():
     from types import SimpleNamespace
+
     from tools.fs.read_file import ReadFile
-    # no ctx → LocalFsBackend
-    t = ReadFile.__new__(ReadFile)
-    t._ctx = None
+
+    cfg = {"backend_api_mode": "chat_completions", "save_logs": False}
+    ctx = create_run_context(cfg)
+    t = ReadFile(ctx=ctx)
     assert isinstance(t._backend, LocalFsBackend)
-    # ctx.harbor_backend set → that object wins
+    assert t._backend is ctx.os_backend
+
     sentinel = object()
     t2 = ReadFile.__new__(ReadFile)
-    t2._ctx = SimpleNamespace(harbor_backend=sentinel)
+    t2._ctx = SimpleNamespace(os_backend=sentinel)
     assert t2._backend is sentinel
-    # explicit override (tests) wins over everything
-    t2._backend = "fake"
-    assert t2._backend == "fake"
 
 
 def test_walk_symlink_to_dir_is_file_entry(be, tmp_path):

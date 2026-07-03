@@ -14,9 +14,7 @@ def test_harbor_pack_off_by_default():
 
 
 def test_harbor_flag_keeps_base_tools_and_drops_download_file():
-    # fs/exec tools now follow ctx.harbor_backend at call time (AbstractSimpleTool._backend)
-    # instead of being swapped for shim classes; only download_file (host-only) is dropped.
-    cfg = {"backend_api_mode": "chat_completions", "use_harbor_tools": True}
+    cfg = {"backend_api_mode": "chat_completions", "os_backend": "harbor"}
     tools_data, _, _, _ = build_tools_data(cfg)
     assert tools_data["fs_read_file"]["tool_fabric"] is ReadFile
     assert tools_data["fs_write_file"]["tool_fabric"] is WriteToFile

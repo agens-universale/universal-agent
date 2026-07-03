@@ -3,9 +3,9 @@
 The gc-cli agent loop runs in-process on the host (not a subprocess). Its synchronous
 tool loop runs in a worker thread; Harbor's async `environment` is reached through
 HarborBackend, which marshals coroutines onto this adapter's event loop. gc-cli's
-filesystem/shell tools follow `ctx.harbor_backend` automatically (see
-`AbstractSimpleTool._backend`), so file edits land inside the task container; the
-`use_harbor_tools` flag now only drops the host-only `download_file` tool.
+filesystem/shell tools use ``ctx.os_backend`` (``HarborBackend`` when ``os_backend: harbor``
+in config), so file edits land inside the task container. ``download_file`` is omitted
+when ``os_backend`` is ``harbor`` (host-only tool).
 
 Setup (once): install gc-cli into the harbor runner env so it imports directly:
     uv pip install --python "$(command -v harbor)/../python" -e /path/to/background-agent
@@ -240,7 +240,7 @@ class GcCliExternal(BaseAgent):
             "use_ssl": False,
             "use_retry": True,
             "use_local_subagents": False,
-            "use_harbor_tools": True,
+            "os_backend": "harbor",
             "system_prompt_id": "v1",
             "no_tool_call_max_count": 3,
             "max_steps": 200,
@@ -299,18 +299,15 @@ class GcCliExternal(BaseAgent):
     ) -> None:
         from run_context import create_run_context
         from agent_executor import AgentExecutor
-        from tools.backends.harbor import HarborBackend
 
         loop = asyncio.get_running_loop()
-        backend = HarborBackend(environment, loop)
         config_dict = self._build_config()
 
         executor = None
 
         def _run_loop():
             nonlocal executor
-            ctx = create_run_context(config_dict, environment=environment)
-            ctx.harbor_backend = backend
+            ctx = create_run_context(config_dict, environment=environment, loop=loop)
             executor = AgentExecutor(ctx)
             executor.run([instruction])
             return executor.get_state()

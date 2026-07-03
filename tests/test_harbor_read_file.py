@@ -3,7 +3,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from tests.harbor.fakes import FakeBackend, strip_path_fields
+from tests.harbor.fakes import FakeBackend, bind_os_backend, strip_path_fields
+from tools.backends.local import LocalFsBackend
 from tools.fs.read_file import ReadFile
 
 CONTENT = "line1\nline2\nline3\nline4\n"
@@ -11,17 +12,14 @@ CONTENT = "line1\nline2\nline3\nline4\n"
 
 def _harbor(files):
     t = ReadFile.__new__(ReadFile)
-    t._ctx = SimpleNamespace(config_dict={})
     t._config_dict = None
-    t._backend = FakeBackend(files)   # sandbox path now = base tool + fake backend
-    return t
+    return bind_os_backend(t, FakeBackend(files))
 
 
 def _base():
     t = ReadFile.__new__(ReadFile)
-    t._ctx = SimpleNamespace(config_dict={})
     t._config_dict = None  # __new__ skips __init__; base uses this for _max_file_bytes/_resolve_char_limit
-    return t
+    return bind_os_backend(t, LocalFsBackend())
 
 
 def _run_both(tmp_path, content, **kwargs):

@@ -16,7 +16,8 @@ from types import SimpleNamespace
 import pytest
 
 from tools.fs.save_base64_file import SaveBase64File
-from tests.harbor.fakes import FakeBackend, strip_path_fields
+from tests.harbor.fakes import FakeBackend, bind_os_backend, strip_path_fields
+from tools.backends.local import LocalFsBackend
 
 
 # ---------------------------------------------------------------------------
@@ -44,9 +45,7 @@ class _CapturingFakeBackend(FakeBackend):
 
 def _harbor_with(fake: FakeBackend) -> SaveBase64File:
     t = SaveBase64File.__new__(SaveBase64File)
-    t._ctx = SimpleNamespace(config_dict={})
-    t._backend = fake
-    return t
+    return bind_os_backend(t, fake)
 
 
 def _harbor_seeded(*extra_files) -> SaveBase64File:
@@ -60,8 +59,7 @@ def _harbor_seeded(*extra_files) -> SaveBase64File:
 
 def _base() -> SaveBase64File:
     t = SaveBase64File.__new__(SaveBase64File)
-    t._ctx = SimpleNamespace(config_dict={})
-    return t
+    return bind_os_backend(t, LocalFsBackend())
 
 
 def _run_both_utf8(tmp_path, b64_data, filename="out.txt"):

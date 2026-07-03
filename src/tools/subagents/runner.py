@@ -3,9 +3,12 @@ import json
 import logging
 import os
 from functools import partial
+from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 from config_modules.stored_outputs import get_stored_tool_outputs_max_entries
+from config_modules.chat_completions import chat_completions_llm_from_config_dict
+from config_modules.intent_scope import intent_scope_from_config_dict
 from run_summary_coordinator import RunSummaryCoordinator
 from summarize.config import parse_summary_trigger_chars
 from message_policy.tool_usage_notice.policy import (
@@ -16,12 +19,14 @@ from message_policy.tool_usage_notice.policy import (
 from message_policy.tool_usage_notice.state import persist_tool_usage_notice_state
 from persistence.state_storage import save_state
 from intent_log.user_turn import append_user_asks_from_messages, init_subagent_open_turn
+from run_context import RunContext
 from states import State
 from tools import build_tools_data
+from tools.backends.factory import resolve_os_backend
 from tools.subagents.registry import get_subagent_class
 from utils.generate_message_id import generate_msg_id_sha256 as generate_message_id_func
 from utils.local_render_system_prompt import render_system_prompt
-from utils.logging_module import generate_run_id
+from utils.logging_module import create_run_logger, generate_run_id
 
 _log = logging.getLogger(__name__)
 
@@ -325,11 +330,6 @@ class SubagentRunner:
 
     def _build_child_ctx(self, tool_name: str) -> Any:
         """Построить RunContext для дочернего агента (без субагентов в tools)."""
-        from run_context import RunContext
-        from config_modules.intent_scope import intent_scope_from_config_dict
-        from config_modules.chat_completions import chat_completions_llm_from_config_dict
-        from utils.logging_module import create_run_logger
-
         child_config = {**self._config, "use_local_subagents": False}
         child_run_id = generate_run_id()
         child_agent_kind = tool_name
@@ -339,6 +339,10 @@ class SubagentRunner:
         child_logger, child_log_path, child_summary_trace_path = create_run_logger(
             child_config, run_id=child_run_id, agent_kind=child_agent_kind
         )
+
+        parent_backend = getattr(self._ctx, "os_backend", None)
+        if parent_backend is None:
+            parent_backend = resolve_os_backend(child_config)
 
         return RunContext(
             config_dict=child_config,
@@ -352,6 +356,9 @@ class SubagentRunner:
             tools_data=child_tools_data,
             tools_spec=child_tools_spec,
             tools_description=child_tools_descr,
+            os_backend=parent_backend,
+            environment=getattr(self._ctx, "environment", None),
+            project_gc_dir=getattr(self._ctx, "project_gc_dir", Path(".")),
         )
 
     def _success_response(

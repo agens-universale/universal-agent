@@ -4,7 +4,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from tests.harbor.fakes import FakeBackend, strip_path_fields
+from tests.harbor.fakes import FakeBackend, bind_os_backend, strip_path_fields
+from tools.backends.local import LocalFsBackend
 from tools.fs.search_and_replace import SearchAndReplace
 
 CONTENT = "alpha\nbeta\nalpha\ngamma\n"
@@ -13,15 +14,12 @@ SHA = hashlib.sha256(CONTENT.encode()).hexdigest()
 
 def _harbor(files):
     t = SearchAndReplace.__new__(SearchAndReplace)
-    t._ctx = SimpleNamespace(config_dict={})
-    t._backend = FakeBackend(files)   # sandbox path now = base tool + fake backend
-    return t
+    return bind_os_backend(t, FakeBackend(files))
 
 
 def _base():
     t = SearchAndReplace.__new__(SearchAndReplace)
-    t._ctx = SimpleNamespace(config_dict={})
-    return t
+    return bind_os_backend(t, LocalFsBackend())
 
 
 def _run_both(tmp_path, content, **kwargs):

@@ -13,7 +13,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from tests.harbor.fakes import FakeBackend
+from tests.harbor.fakes import FakeBackend, bind_os_backend
+from tools.backends.local import LocalFsBackend
 from tools.fs.search_files import SearchFiles
 
 # ---------------------------------------------------------------------------
@@ -47,15 +48,12 @@ def _make_fake_backend():
 
 def _base_tool():
     t = SearchFiles.__new__(SearchFiles)
-    t._ctx = SimpleNamespace(config_dict={})
-    return t
+    return bind_os_backend(t, LocalFsBackend())
 
 
 def _shim_tool():
     t = SearchFiles.__new__(SearchFiles)
-    t._ctx = SimpleNamespace(config_dict={})
-    t._backend = FakeBackend(_make_fake_backend().files)
-    return t
+    return bind_os_backend(t, FakeBackend(_make_fake_backend().files))
 
 
 def _normalize_file(path: str, root: str) -> str:
@@ -209,9 +207,7 @@ def test_long_line_truncation(tmp_path):
 
     # Run shim with same content
     fake = FakeBackend({f"{SHIM_ROOT}/long.txt": content})
-    shim = SearchFiles.__new__(SearchFiles)
-    shim._ctx = SimpleNamespace(config_dict={})
-    shim._backend = fake
+    shim = bind_os_backend(SearchFiles.__new__(SearchFiles), fake)
     shim_raw = shim(path=SHIM_ROOT, regex="FINDME", file_pattern="*.txt")
     shim_env = json.loads(shim_raw)
 
@@ -264,9 +260,7 @@ def test_not_a_directory(tmp_path):
 
     # Shim: /work/file.txt is a file, not a dir — FakeBackend.is_dir will return False
     fake = FakeBackend({"/work/file.txt": "content"})
-    shim = SearchFiles.__new__(SearchFiles)
-    shim._ctx = SimpleNamespace(config_dict={})
-    shim._backend = fake
+    shim = bind_os_backend(SearchFiles.__new__(SearchFiles), fake)
     shim_raw = shim(path="/work/file.txt", regex="content")
     shim_env = json.loads(shim_raw)
 
@@ -328,9 +322,7 @@ def _run_both_branching(tmp_path, **kwargs):
     base_raw = base(path=real_root, **kwargs)
     base_env = json.loads(base_raw)
 
-    shim = SearchFiles.__new__(SearchFiles)
-    shim._ctx = SimpleNamespace(config_dict={})
-    shim._backend = _make_fake_branching_backend()
+    shim = bind_os_backend(SearchFiles.__new__(SearchFiles), _make_fake_branching_backend())
     shim_raw = shim(path=SHIM_ROOT, **kwargs)
     shim_env = json.loads(shim_raw)
 
@@ -368,9 +360,7 @@ def test_truncated_page_ordering(tmp_path):
       - Sorted DFS shim: page contains alpha/beta/z.md (position 1)
       - Buggy flat-walk shim: page contains alpha/x.py (position 1)  ← wrong
     """
-    shim = SearchFiles.__new__(SearchFiles)
-    shim._ctx = SimpleNamespace(config_dict={})
-    shim._backend = _make_fake_branching_backend()
+    shim = bind_os_backend(SearchFiles.__new__(SearchFiles), _make_fake_branching_backend())
 
     # Sanity: 3 total matches (one per file), all match "MARKER"
     shim_all_raw = shim(path=SHIM_ROOT, regex="MARKER")
@@ -446,19 +436,20 @@ def test_walk_does_not_descend_into_denied_dir_via_nested_override():
         "/work/out.txt": "MATCH here\n",
         "/work/secret/public/file.txt": "MATCH here too\n",
     }
-    t = SearchFiles.__new__(SearchFiles)
-    t._ctx = SimpleNamespace(
-        config_dict={
-            "launch_root": "/work",
-            "read_guard": {
-                "enabled": True,
-                "allowed_read_roots": ["*"],
-                "denied_read_paths": ["/work/secret"],
-                "allowed_read_paths": ["/work/secret/public"],
-            },
-        }
+    cfg = {
+        "launch_root": "/work",
+        "read_guard": {
+            "enabled": True,
+            "allowed_read_roots": ["*"],
+            "denied_read_paths": ["/work/secret"],
+            "allowed_read_paths": ["/work/secret/public"],
+        },
+    }
+    t = bind_os_backend(
+        SearchFiles.__new__(SearchFiles),
+        FakeBackend(files),
+        config_dict=cfg,
     )
-    t._backend = FakeBackend(files)
 
     raw = t(path="/work", regex="MATCH")
     payload = json.loads(raw)

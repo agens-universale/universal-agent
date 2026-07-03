@@ -14,7 +14,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from tests.harbor.fakes import FakeBackend, strip_path_fields
+from tests.harbor.fakes import FakeBackend, bind_os_backend, strip_path_fields
+from tools.backends.local import LocalFsBackend
 from tools.fs.apply_file_edits import ApplyFileEdits
 
 CONTENT = "alpha\nbeta\nalpha\ngamma\n"
@@ -33,15 +34,12 @@ def _edit(search, replace, **over):
 
 def _harbor(files):
     t = ApplyFileEdits.__new__(ApplyFileEdits)
-    t._ctx = SimpleNamespace(config_dict={})
-    t._backend = FakeBackend(files)   # sandbox path now = base tool + fake backend
-    return t
+    return bind_os_backend(t, FakeBackend(files))
 
 
 def _base():
     t = ApplyFileEdits.__new__(ApplyFileEdits)
-    t._ctx = SimpleNamespace(config_dict={})  # write_guard disabled
-    return t
+    return bind_os_backend(t, LocalFsBackend(), config_dict={})  # write_guard disabled
 
 
 def _strip_path_fields(env):

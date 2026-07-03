@@ -1,5 +1,6 @@
 """In-memory stand-in for HarborBackend, for differential tool tests."""
 import hashlib
+from types import SimpleNamespace
 
 from tools.backends.walk_util import iter_files_from_flat, iter_walk_from_flat
 
@@ -154,6 +155,15 @@ class FakeBackend:
 
     def run_python(self, code, *, cwd=None, timeout=None, env=None):
         raise NotImplementedError
+
+
+def bind_os_backend(tool, backend, *, config_dict=None):
+    """Attach ``backend`` via minimal RunContext-like ``_ctx`` (unit/diff tests)."""
+    tool._ctx = SimpleNamespace(
+        config_dict=config_dict if config_dict is not None else {},
+        os_backend=backend,
+    )
+    return tool
 
 
 def strip_path_fields(env, *keys):

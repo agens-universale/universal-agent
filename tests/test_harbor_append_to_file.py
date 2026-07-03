@@ -10,7 +10,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from tests.harbor.fakes import FakeBackend, strip_path_fields
+from tests.harbor.fakes import FakeBackend, bind_os_backend, strip_path_fields
+from tools.backends.local import LocalFsBackend
 from tools.fs.append_to_file import AppendToFile
 
 EXISTING_CONTENT = "hello world"
@@ -18,15 +19,12 @@ EXISTING_CONTENT = "hello world"
 
 def _harbor(files):
     t = AppendToFile.__new__(AppendToFile)
-    t._ctx = SimpleNamespace(config_dict={})
-    t._backend = FakeBackend(files)   # sandbox path now = base tool + fake backend
-    return t
+    return bind_os_backend(t, FakeBackend(files))
 
 
 def _base():
     t = AppendToFile.__new__(AppendToFile)
-    t._ctx = SimpleNamespace(config_dict={})
-    return t
+    return bind_os_backend(t, LocalFsBackend())
 
 
 def _run_both(tmp_path, existing_content, **kwargs):

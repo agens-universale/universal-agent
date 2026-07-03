@@ -17,7 +17,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from tests.harbor.fakes import FakeBackend
+from tests.harbor.fakes import FakeBackend, bind_os_backend
+from tools.backends.local import LocalFsBackend
 from tools.fs.file_info import FileInfo
 
 # ---------------------------------------------------------------------------
@@ -28,18 +29,15 @@ ENV_FIELDS = {"path", "modified_time"}
 
 
 def _base_tool():
-    """Instantiate FileInfo with no backend override (host fs, real path)."""
+    """Instantiate FileInfo with host LocalFsBackend (real path)."""
     t = FileInfo.__new__(FileInfo)
-    t._ctx = SimpleNamespace(config_dict={})
-    return t
+    return bind_os_backend(t, LocalFsBackend())
 
 
 def _harbor_tool(files: dict):
-    """Instantiate FileInfo backed by FakeBackend (sandbox path = base tool + fake backend)."""
+    """Instantiate FileInfo backed by FakeBackend (sandbox path)."""
     t = FileInfo.__new__(FileInfo)
-    t._ctx = SimpleNamespace(config_dict={})
-    t._backend = FakeBackend(files)
-    return t
+    return bind_os_backend(t, FakeBackend(files))
 
 
 def _strip(env: dict) -> dict:

@@ -12,6 +12,7 @@ from tools.arguments_validation import (
 from tools.skills.registry import get_skills_registry
 from tools.skills.skills_tools import get_skills_tools_data
 from tools.registry import get_builtin_tools_data
+from tools.backends.factory import parse_os_backend_kind
 from tools.subagents.registry import is_subagent_tool
 from tools.inject_tool_fields import (
     apply_injected_fields_to_spec,
@@ -86,8 +87,8 @@ def build_tools_data(
         for k, v in subagent_tools.items():
             tools_data[k] = v
 
-    if config_dict.get("use_harbor_tools", False):
-        # Tools follow ctx.harbor_backend; download_file writes host-side — drop it.
+    if parse_os_backend_kind(config_dict) == "harbor":
+        # Host-only: writes to local disk; not available in harbor/sandbox mode.
         tools_data.pop("download_file", None)
 
     # Логирование оставляем модульным, так как build_tools_data вызывается

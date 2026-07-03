@@ -1,5 +1,8 @@
 from abc import ABC, abstractmethod
+from types import SimpleNamespace
 from typing import Any, Dict, Optional
+
+from tools.backends.local import LocalFsBackend
 
 
 class AbstractSimpleTool(ABC):
@@ -7,26 +10,24 @@ class AbstractSimpleTool(ABC):
         self._ctx = kwargs.get("ctx")
         self._state = kwargs.get("state")
         self._config_dict = kwargs.get("config_dict")
+        if self._ctx is None:
+            cfg = self._config_dict if isinstance(self._config_dict, dict) else {}
+            self._ctx = SimpleNamespace(config_dict=cfg, os_backend=LocalFsBackend())
 
     @property
     def _backend(self):
-        """Physical I/O port: test override → ctx.harbor_backend → LocalFsBackend.
-
-        Property (not __init__) so instances built via __new__ in tests resolve too.
-        """
-        override = self.__dict__.get("_backend_override")
-        if override is not None:
-            return override
+        """Physical I/O port from ``RunContext.os_backend`` (set in ``create_run_context``)."""
         ctx = getattr(self, "_ctx", None)
-        ctx_backend = getattr(ctx, "harbor_backend", None) if ctx is not None else None
-        if ctx_backend is not None:
-            return ctx_backend
-        from tools.backends.local import LocalFsBackend
-        return LocalFsBackend()
-
-    @_backend.setter
-    def _backend(self, value):
-        self.__dict__["_backend_override"] = value
+        if ctx is None:
+            raise RuntimeError(
+                f"{type(self).__name__} requires ctx; use apply_tool or bind_os_backend in tests"
+            )
+        backend = getattr(ctx, "os_backend", None)
+        if backend is None:
+            raise RuntimeError(
+                f"{type(self).__name__}: ctx.os_backend is missing; use create_run_context()"
+            )
+        return backend
 
     @classmethod
     @abstractmethod

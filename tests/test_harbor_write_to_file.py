@@ -10,7 +10,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from tests.harbor.fakes import FakeBackend, strip_path_fields
+from tests.harbor.fakes import FakeBackend, bind_os_backend, strip_path_fields
+from tools.backends.local import LocalFsBackend
 from tools.fs.write_to_file_tool import WriteToFile
 
 # A sentinel file that makes /work/ appear as an existing directory in FakeBackend.
@@ -24,15 +25,12 @@ def _harbor(files=None):
     if files:
         seed.update(files)
     t = WriteToFile.__new__(WriteToFile)
-    t._ctx = SimpleNamespace(config_dict={})
-    t._backend = FakeBackend(seed)   # sandbox path now = base tool + fake backend
-    return t
+    return bind_os_backend(t, FakeBackend(seed))
 
 
 def _base():
     t = WriteToFile.__new__(WriteToFile)
-    t._ctx = SimpleNamespace(config_dict={})
-    return t
+    return bind_os_backend(t, LocalFsBackend())
 
 
 def _run_both(tmp_path, initial_content, path_name, call_kwargs):

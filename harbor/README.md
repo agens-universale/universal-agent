@@ -6,8 +6,8 @@
 
 Запускает gc-cli как **External**-агент Harbor: цикл агента крутится **в раннере** (вне
 контейнера задачи), а файловые/shell-тулы gc-cli работают **внутри контейнера задачи**
-через `BaseEnvironment` Harbor (адаптер кладёт `HarborBackend` в `ctx.harbor_backend`,
-тулы подхватывают его автоматически). **В контейнер задачи ничего не устанавливается** —
+через `BaseEnvironment` Harbor (`os_backend: harbor` в конфиге → `ctx.os_backend` =
+`HarborBackend`, собирается в `create_run_context`). **В контейнер задачи ничего не устанавливается** —
 это и есть смысл External-паттерна (важно для честности замеров: установка чего-либо
 в контейнер может неявно изменить условия задачи).
 
@@ -16,7 +16,7 @@ Runner / main-контейнер (хост-сайд)            task-конте�
   GcCliExternal(BaseAgent)                       [ничего не ставится]
     run() → AgentExecutor (gc-cli loop)
               └─ базовые тулы gc-cli (единственные, без копий)
-                   └─ self._backend = HarborBackend
+                   └─ ctx.os_backend (HarborBackend)
                         ──exec/upload/download──►  ФС/shell контейнера
 ```
 
@@ -30,9 +30,10 @@ DeepAgents: **тул определён один раз** (валидация, �
 - `harbor.py` — `HarborBackend`: контейнер задачи через `BaseEnvironment`
   (`is_sandbox = True`, дефолтный exec-timeout 300s).
 
-Резолв в `AbstractSimpleTool._backend`: явный override в тестах →
-`ctx.harbor_backend` (ставит адаптер) → `LocalFsBackend`. Отдельного harbor-пака
-тулов **нет** — контейнерный режим и хост-режим гоняют один и тот же код тулов.
+Резолв: `create_run_context` собирает `ctx.os_backend` через `tools/backends/factory.py`
+(`os_backend: local` по умолчанию, `harbor` — при запуске через адаптер). Тулы читают
+`self._ctx.os_backend`. Отдельного harbor-пака тулов **нет** — контейнерный режим и
+хост-режим гоняют один и тот же код тулов.
 
 Бэкенд затрагивает **только тулы с ФС/shell** (`fs_read_file`, `fs_write_file`,
 `fs_append_file`, `fs_apply_file_edits`, `fs_search_and_replace`, `fs_list_files`,
@@ -128,6 +129,6 @@ agent_kwargs:
   на non-tty раннере авто-отклоняет → `ask` ≡ `deny`. Пин защищён тестом
   (`test_security_guards_pinned_off_for_benches`); отдельный профиль может явно включить
   гард через `gc_cli_config` (deep-merge поверх дефолтов).
-- Флаг `use_harbor_tools` теперь означает только одно: из реестра выбрасывается
-  `download_file` (он пишет на хост-ФС — в контейнер-режиме файл лёг бы мимо контейнера).
-  Маршрутизация I/O в контейнер идёт не через флаг, а через `ctx.harbor_backend`.
+- При `os_backend: harbor` из реестра выбрасывается `download_file` (пишет на
+  хост-ФС — в контейнер-режиме файл лёг бы мимо контейнера). Маршрутизация I/O в
+  контейнер идёт через `ctx.os_backend`.
