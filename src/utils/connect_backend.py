@@ -103,6 +103,7 @@ def request_backend_responses(
     headers: Dict,
     url: str,
     verify: bool = True,
+    cert: Optional[Tuple[str, str]] = None,
     use_retry: bool = True,
     logger: Optional[logging.Logger] = None,
 ) -> Tuple[Dict, Dict]:
@@ -121,7 +122,7 @@ def request_backend_responses(
             extra={"event": "backend_request", "api_mode": "responses", "url": url, "payload": data},
         )
 
-    with _NO_NETRC_SESSION.post(url, json=data, headers=headers, stream=True, verify=verify) as r:
+    with _NO_NETRC_SESSION.post(url, json=data, headers=headers, stream=True, verify=verify, cert=cert) as r:
         r.raise_for_status()
         r_headers = r.headers
         for line in r.iter_lines():
@@ -168,6 +169,7 @@ def request_backend_chat_completions(
     headers: Dict,
     url: str,
     verify: bool = True,
+    cert: Optional[Tuple[str, str]] = None,
     use_retry: bool = True,
     logger: Optional[logging.Logger] = None,
     on_delta: Optional[OnDelta] = None,
@@ -205,7 +207,7 @@ def request_backend_chat_completions(
                 },
             )
         with _NO_NETRC_SESSION.post(
-            url, json=stream_data, headers=headers, stream=True, verify=verify
+            url, json=stream_data, headers=headers, stream=True, verify=verify, cert=cert
         ) as r:
             try:
                 r.raise_for_status()
@@ -267,7 +269,7 @@ def request_backend_chat_completions(
             extra={"event": "backend_request", "api_mode": "chat_completions", "url": url, "payload": data},
         )
 
-    r = _NO_NETRC_SESSION.post(url, json=data, headers=headers, verify=verify)
+    r = _NO_NETRC_SESSION.post(url, json=data, headers=headers, verify=verify, cert=cert)
     try:
         r.raise_for_status()
     except requests.exceptions.HTTPError:

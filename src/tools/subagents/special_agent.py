@@ -2,6 +2,7 @@ from typing import Any, Dict
 
 from tools.subagents.abstract_subagent import AbstractSubagent
 from utils.connect_backend import request_backend_chat_completions
+from utils.ssl_config import get_backend_client_cert
 
 
 _ROLE_GENERATE_PROMPT = """Write prompt for AI assistant by role name and short role descriptions. Please make prompt as good as possible according with some examples.
@@ -193,6 +194,7 @@ class SpecialAgent(AbstractSubagent):
 
         url = self.config_dict.get("completions_url", "")
         verify = self.config_dict.get("use_ssl", True)
+        cert = get_backend_client_cert(self.config_dict)
         headers: Dict[str, str] = {}
         raw_headers = self.config_dict.get("chat_completion_headers")
         if isinstance(raw_headers, dict):
@@ -227,7 +229,7 @@ class SpecialAgent(AbstractSubagent):
                 call_data[key] = value
 
         res_data = request_backend_chat_completions(
-            call_data, headers, url=url, verify=verify,
+            call_data, headers, url=url, verify=verify, cert=cert,
         )
         return res_data["choices"][0]["message"]["content"]
 

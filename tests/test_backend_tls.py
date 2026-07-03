@@ -39,3 +39,53 @@ def test_get_backend_client_cert():
     assert get_backend_client_cert({"cert_path": "/c", "key_path": "/k"}) == ("/c", "/k")
     assert get_backend_client_cert({"cert_path": "/c"}) is None       # only one → None
     assert get_backend_client_cert({}) is None
+
+
+from unittest.mock import MagicMock, patch
+
+
+def test_chat_completions_passes_verify_and_cert():
+    from utils import connect_backend
+    fake = MagicMock()
+    fake.json.return_value = {"id": "x", "choices": [{"message": {"content": "ok"}}]}
+    fake.raise_for_status.return_value = None
+    with patch.object(connect_backend._NO_NETRC_SESSION, "post", return_value=fake) as post:
+        connect_backend.request_backend_chat_completions(
+            {"messages": []}, {}, url="https://b/v1/chat",
+            verify="/ca.pem", cert=("/c.crt", "/k.key"), use_retry=False,
+        )
+    kwargs = post.call_args.kwargs
+    assert kwargs["verify"] == "/ca.pem"
+    assert kwargs["cert"] == ("/c.crt", "/k.key")
+
+
+def test_responses_passes_verify_and_cert():
+    from utils import connect_backend
+    fake = MagicMock()
+    fake.__enter__.return_value = fake
+    fake.__exit__.return_value = False
+    fake.headers = {}
+    fake.iter_lines.return_value = [
+        b'data: {"type":"response.completed","response":{"id":"r1","output":[]}}'
+    ]
+    with patch.object(connect_backend._NO_NETRC_SESSION, "post", return_value=fake) as post:
+        connect_backend.request_backend_responses(
+            {"messages": []}, {}, url="https://b/v1/responses",
+            verify="/ca.pem", cert=("/c.crt", "/k.key"), use_retry=False,
+        )
+    kwargs = post.call_args.kwargs
+    assert kwargs["verify"] == "/ca.pem"
+    assert kwargs["cert"] == ("/c.crt", "/k.key")
+
+
+def test_backend_cert_defaults_none_backward_compat():
+    from utils import connect_backend
+    fake = MagicMock()
+    fake.json.return_value = {"id": "x", "choices": [{"message": {"content": "ok"}}]}
+    fake.raise_for_status.return_value = None
+    with patch.object(connect_backend._NO_NETRC_SESSION, "post", return_value=fake) as post:
+        connect_backend.request_backend_chat_completions(
+            {"messages": []}, {}, url="https://b/v1/chat", verify=True, use_retry=False,
+        )
+    assert post.call_args.kwargs["cert"] is None
+    assert post.call_args.kwargs["verify"] is True

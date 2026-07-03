@@ -56,7 +56,9 @@ def _stub_tools_modules() -> None:
     sys.modules["tools"] = tools_pkg
 
     skills_pkg = types.ModuleType("tools.skills")
-    skills_pkg.__path__ = []
+    # Point at the real skills dir so genuine submodules (skills_policy) resolve;
+    # tools.skills.registry is still stubbed below via sys.modules.
+    skills_pkg.__path__ = [str(tools_dir / "skills")]
     sys.modules["tools.skills"] = skills_pkg
 
     registry_mod = types.ModuleType("tools.skills.registry")
@@ -85,7 +87,7 @@ class BackendModeSwitchTest(unittest.TestCase):
         responses_calls = []
         completions_calls = []
 
-        def _mock_responses_backend(data, headers, url, verify=True, use_retry=True, logger=None):
+        def _mock_responses_backend(data, headers, url, verify=True, cert=None, use_retry=True, logger=None):
             responses_calls.append(
                 {
                     "data": data,
@@ -116,7 +118,7 @@ class BackendModeSwitchTest(unittest.TestCase):
             )
 
         def _mock_completions_backend(
-            data, headers, url, verify=True, use_retry=True, logger=None,
+            data, headers, url, verify=True, cert=None, use_retry=True, logger=None,
         ):
             completions_calls.append(
                 {

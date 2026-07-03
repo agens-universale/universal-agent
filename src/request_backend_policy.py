@@ -1,6 +1,6 @@
 import logging
 import time
-from typing import Any, Callable, Dict, Tuple
+from typing import Any, Callable, Dict, Optional, Tuple
 
 from utils.connect_backend import request_backend_chat_completions
 from utils.backend_errors import is_retriable_backend_error
@@ -25,6 +25,7 @@ def request_chat_completions_with_policy(
     headers: Dict[str, str],
     url: str,
     verify: bool,
+    cert: Optional[Tuple[str, str]] = None,
     use_retry: bool,
     logger: logging.Logger | None = None,
     on_delta=None,
@@ -47,6 +48,7 @@ def request_chat_completions_with_policy(
             headers,
             url=url,
             verify=verify,
+            cert=cert,
             use_retry=transport_use_retry,
             logger=logger,
             on_delta=on_delta,

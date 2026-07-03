@@ -27,6 +27,7 @@ from tools import apply_tool, WrongFunctionArgumentsException
 from tools.session.stored_outputs.wrapping import maybe_store_and_wrap_tool_output
 from utils.connect_backend import create_call_headers
 from utils.connect_backend import request_backend_responses as request_backend
+from utils.ssl_config import get_backend_client_cert
 from utils.backend_errors import is_auth_error, is_context_overflow_error
 
 # Переполнение контекста → force-компакция + повтор запроса; лимит на случай,
@@ -206,6 +207,7 @@ def _request_backend_canonical_once(
     call_headers = create_call_headers(state, ctx)
     cfg = getattr(ctx, "config_dict", {}) or {}
     verify = cfg.get("use_ssl", True)
+    cert = get_backend_client_cert(cfg)
     use_retry = cfg.get("use_retry", False)
     backend_mode = _get_backend_api_mode(ctx)
 
@@ -222,6 +224,7 @@ def _request_backend_canonical_once(
                 call_headers,
                 url=url,
                 verify=verify,
+                cert=cert,
                 use_retry=use_retry,
                 logger=getattr(ctx, "logger", None),
             )
@@ -269,6 +272,7 @@ def _request_backend_canonical_once(
             headers=call_headers,
             url=url,
             verify=verify,
+            cert=cert,
             use_retry=use_retry,
             logger=getattr(ctx, "logger", None),
             on_delta=_on_delta,

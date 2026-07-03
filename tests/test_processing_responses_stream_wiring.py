@@ -19,6 +19,7 @@ def _patch_policy(monkeypatch):
         headers,
         url,
         verify,
+        cert=None,
         use_retry,
         logger=None,
         on_delta=None,
