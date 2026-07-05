@@ -3,12 +3,24 @@ from tui.widgets.thinking_indicator import ThinkingIndicator
 
 
 class _FakeSink:
-    def __init__(self, units, state):
-        self._units, self._state = units, state
+    def __init__(self, units, state=None):
+        self._units = units
+        # state param kept for backward compat but no longer used
     def progress_units(self):
         return self._units
     def reasoning_state(self):
-        return self._state
+        # legacy method, not used by new implementation
+        return (None, None)
+
+
+class _StubClock:
+    def __init__(self, live: bool, episode: float) -> None:
+        self._live = live
+        self._episode = episode
+    def live(self) -> bool:
+        return self._live
+    def episode(self) -> float:
+        return self._episode
 
 
 def _plain(ind):
@@ -70,7 +82,8 @@ def test_tail_thinking_no_word_but_counter():
 def test_tail_done_shows_obdumal():
     ind = ThinkingIndicator(
         started_at=0.0, state="thinking", clock=lambda: 31.0,
-        sink=_FakeSink(3300, ("done", 6.0)),
+        sink=_FakeSink(3300),
+        reasoning_clock=_StubClock(live=False, episode=6.0),
     )
     p = _plain(ind)
     assert "↓ 3.3k токенов" in p
@@ -98,7 +111,8 @@ def test_no_reasoning_tag_when_state_none():
 def test_reasoning_tag_shown_when_enabled():
     ind = ThinkingIndicator(
         started_at=0.0, state="thinking", clock=lambda: 8.0,
-        sink=_FakeSink(1200, ("thinking", None)), reasoning_tag=True,
+        sink=_FakeSink(1200), reasoning_tag=True,
+        reasoning_clock=_StubClock(live=True, episode=0.0),
     )
     p = _plain(ind)
     assert "· размышление" in p
@@ -116,7 +130,8 @@ def test_reasoning_tag_hidden_by_default():
 def test_reasoning_tag_not_shown_in_done_state():
     ind = ThinkingIndicator(
         started_at=0.0, state="thinking", clock=lambda: 31.0,
-        sink=_FakeSink(3300, ("done", 6.0)), reasoning_tag=True,
+        sink=_FakeSink(3300), reasoning_tag=True,
+        reasoning_clock=_StubClock(live=False, episode=6.0),
     )
     p = _plain(ind)
     assert "размышление" not in p          # done → no "размышление"
