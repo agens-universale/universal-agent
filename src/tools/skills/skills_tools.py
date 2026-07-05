@@ -10,6 +10,7 @@ import json
 import logging
 from typing import Any, Dict, Optional
 
+from tools.schema_optional import coalesce_optional_string
 from tools.skills.registry import AmbiguousSkillId, SkillsRegistry
 from utils.arg_decorators import parse_json_object_argument
 from utils.json_arg_parser import JsonArgParseError
@@ -60,8 +61,6 @@ class SkillsListTool:
         self._registry = registry
 
     def __call__(self, pack: Optional[str] = None, **kwargs: Any) -> Dict[str, Any]:
-        from tools.schema_optional import coalesce_optional_string
-
         pack = coalesce_optional_string(pack)
         try:
             skills = self._registry.list_skills(pack=pack)

@@ -6,6 +6,7 @@ import json
 from constants.tool_names import EXEC_COMMAND_NAME
 from security.command_guard import enforce_command_guard
 from security.command_moderation import moderate_command_execution
+from utils.win_console import preserve_console_mode
 
 
 class ExecuteCommand(AbstractSimpleTool):
@@ -352,7 +353,6 @@ Important Usage Rules:
         try:
             # На Windows запуск subprocess гасит ENABLE_MOUSE_INPUT родительской
             # консоли → TUI теряет мышь до перезапуска. Возвращаем режим после.
-            from utils.win_console import preserve_console_mode
             with preserve_console_mode():
                 result = subprocess.run(
                     command,

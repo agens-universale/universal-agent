@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Any, Literal
 
 from intent_log import deserialize_list, records_to_jsonl_lines
+from intent_guard.trace_digest import build_finish_gate_trace_digest
 from intent_guard.agent_logging import (
     log_finish_gate_decision,
     log_finish_gate_skipped,
@@ -153,8 +154,6 @@ class FinishGateGuard:
 
         digest_chars = 0
         try:
-            from intent_guard.trace_digest import build_finish_gate_trace_digest
-
             digest = build_finish_gate_trace_digest(state=self._state, cfg=cfg)
             digest_chars = len(digest.trace_digest_text or "")
         except Exception:
