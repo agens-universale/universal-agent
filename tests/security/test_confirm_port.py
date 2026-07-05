@@ -31,7 +31,7 @@ def test_tui_always_available_and_routes_to_banner():
 
 def test_cli_disabled_when_ask_human_in_stop_tools(monkeypatch):
     monkeypatch.setattr("sys.stdin", types.SimpleNamespace(isatty=lambda: True))
-    ctx = _ctx(config_dict={"stop_tools": ["ask_human"]})
+    ctx = _ctx(config_dict={"stop_tools": ["turn_ask_human"]})
     assert confirm_available(ctx) is False
 
 

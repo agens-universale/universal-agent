@@ -22,6 +22,7 @@ PROJECT_MEMORY_TOOL_NAME = "project_memory"
 # FS (representative; prefer cls.tool_description()["name"] in tool implementations)
 FS_READ_FILE_NAME = "fs_read_file"
 FS_WRITE_FILE_NAME = "fs_write_file"
+FS_APPEND_FILE_NAME = "fs_append_file"
 
 # Exec (representative)
 EXEC_COMMAND_NAME = "exec_command"
