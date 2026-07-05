@@ -57,7 +57,7 @@ async def test_footer_switches_to_main_text_on_attach_active_task(tmp_path):
         assert "/help" in rendered
         assert "/sessions" in rendered
         assert "/config" in rendered
-        assert "/mcp" in rendered
+        assert "/mcp" not in rendered
         assert "/skills" not in rendered
         assert "/stop" not in rendered
         assert "/export" not in rendered
@@ -77,7 +77,7 @@ async def test_footer_switches_to_main_text_on_attach_active_task(tmp_path):
         assert "/sessions" in rendered
         assert "/help" in rendered
         assert "/config" in rendered
-        assert "/mcp" in rendered
+        assert "/mcp" not in rendered
         assert "/skills" not in rendered
         assert "/export" not in rendered
         assert "/stop" not in rendered

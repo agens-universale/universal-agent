@@ -115,23 +115,34 @@ def _apply_stop_tools(
     }
 
 
-def get_builtin_tools_data(config_dict: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
-    """
-    Собрать словарь builtin tools в формате tools_data.
-
-    Инструменты из stop_tools исключаются из результата.
-    """
+def _collect_builtin_registry(config_dict: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+    """Все встроенные tools_data ДО применения stop_tools."""
     tools_data: Dict[str, Dict[str, Any]] = {}
     tools_data.update(_fs_registry())
     tools_data.update(_exec_registry())
     tools_data.update(_turn_registry())
     tools_data.update(_session_registry(config_dict))
     tools_data.update(_project_registry())
-    return _apply_stop_tools(tools_data, config_dict)
+    return tools_data
+
+
+def all_builtin_tool_names(config_dict: Dict[str, Any]) -> set[str]:
+    """Имена всех встроенных тулов (до stop_tools) — для валидации stop_tools."""
+    return set(_collect_builtin_registry(config_dict).keys())
+
+
+def get_builtin_tools_data(config_dict: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+    """
+    Собрать словарь builtin tools в формате tools_data.
+
+    Инструменты из stop_tools исключаются из результата.
+    """
+    return _apply_stop_tools(_collect_builtin_registry(config_dict), config_dict)
 
 
 __all__ = [
     "get_builtin_tools_data",
+    "all_builtin_tool_names",
     "_fs_registry",
     "_exec_registry",
     "_turn_registry",

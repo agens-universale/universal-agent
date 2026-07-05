@@ -15,7 +15,7 @@ class HelpScreen(Screen):
     def compose(self) -> ComposeResult:
         with Vertical(id="root"):
             with Horizontal(id="header"):
-                yield Static("Справка", id="header-left", markup=False)
+                yield Static("справка", id="header-left", markup=False)
             # Не фокусируем список: иначе срабатывает #trace:focus { outline },
             # и outline ложится поверх первой строки (выглядит как разорванная
             # рамка-заголовок). Прокрутка мышью остаётся; список короткий.

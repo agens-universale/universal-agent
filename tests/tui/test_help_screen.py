@@ -14,7 +14,7 @@ async def test_help_header_and_hotkeys():
 
     async with _A().run_test() as pilot:
         scr = pilot.app.screen
-        assert "Справка" in str(scr.query_one("#header-left", Static).render())
+        assert "справка" in str(scr.query_one("#header-left", Static).render())
         # правый бренд-блок убран со всех подэкранов
         assert len(scr.query("#header-right")) == 0
         keys = " ".join(str(s.render()) for s in scr.query(".help-row-key"))

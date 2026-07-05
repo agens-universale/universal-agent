@@ -1,25 +1,10 @@
 /* Палитра-токены TUI MVP — §2.4 спеки.
  * Принцип: цвет — редкий сигнал, тело монохромно; смысл несут ASCII-глифы.
+ *
+ * Значения цветов ($bg, $code, $ok, …) НЕ определяются здесь — единый источник
+ * tui/palette.py, инжектится через TuiApp.get_css_variables(). Правка цвета —
+ * только в palette.py (там же Python-рендер берёт те же токены).
  */
-
-/* Базовые цвета (hex как в спеке) */
-$bg:        #0E1119;
-$ink:       #ebe9e6;
-$bright:    #eef2f6;
-$dim:       #8b949e;
-$muted:     #6e7681;
-$deep-dim:  #7a8290;
-$accent:    #54B3A6;
-$code:      #afbdff;
-$tool-name: #BCC3CC;
-$code-block:#9aa4b2;
-$ok:        #5FAE7F;
-$run-color: #D4A574;
-$err:       #C75C54;
-$brand:     #9A6DD7;
-$band-bg:   #1f2128;
-$focus-bg:  #363b47;   /* подсветка строки трассы в фокусе — заметно светлее $band-bg/user-band, чтобы фокус читался отдельно */
-$frame-archive: #4b525d;   /* серая рамка «архив» — отвеченный вопрос */
 
 Screen {
     background: $bg;
