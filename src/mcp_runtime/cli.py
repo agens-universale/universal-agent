@@ -84,6 +84,8 @@ def _cmd_install(name: Optional[str], config: Optional[str] = None, editable: bo
     installed_names: list[str] = []
     failed_names: list[str] = []
     for entry in entries:
+        if getattr(entry, "optional", False):
+            continue
         if _install_one(entry, root, dep, editable, repo_url, repo_ref):
             _wire_one(entry, root, dep)
             installed_names.append(entry.name)
@@ -125,8 +127,9 @@ def _cmd_list() -> int:
         installed = _installed_status(e, root, dep)
         srv = wired.get(e.name) or {}
         transport = srv.get("transport", "—")
+        opt = " (opt)" if getattr(e, "optional", False) else ""
         print(f"{e.name:22} {transport:14} {installed:10} "
-              f"{'yes' if e.name in wired else '—'}")
+              f"{'yes' if e.name in wired else '—'}{opt}")
     return 0
 
 

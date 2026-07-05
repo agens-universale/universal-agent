@@ -48,6 +48,7 @@ mcps:
 
   - name: browser_playwright
     path: ./browser_playwright
+    optional: true
     install:
       type: npx
       npm_package: "@playwright/mcp"
