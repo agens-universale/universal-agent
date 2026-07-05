@@ -7,6 +7,7 @@ from tools.session.stored_outputs.tool_call_outputs_store import ToolCallOutputs
 from message_policy.tool_usage_notice.state import hydrate_tool_usage_notice_state
 from tools.skills.skills_policy import render_skills_catalog
 from intent_log import IntentRecord, deserialize_list, flush
+from instructions.loader import build_instructions
 
 
 @dataclass
@@ -42,7 +43,8 @@ class State:
         thread_id: Optional[str] = None,
         shared: Optional["SharedStateData"] = None,
         workspace_config: Optional[Dict[str, Any]] = None,
-        instructions_overwrite: bool = False,
+        is_tui: bool = False,
+        agentsmd_override: bool = False,
     ):
         self.parent_state_id = parent_state_id
         self.x_target = None
@@ -68,9 +70,11 @@ class State:
         else:
             self.chat_completions_system_prompt = None
         self.agent_md_path = agent_md_path
-        self.instructions_overwrite = instructions_overwrite
+        self.is_tui = is_tui
+        self.agentsmd_override = agentsmd_override
         self.thread_id = thread_id
         self.shared: SharedStateData = shared if isinstance(shared, SharedStateData) else SharedStateData()
+        self.instruction_warnings: list[str] = []
         self.call_metadata = self.set_call_metadata()
         self.messages = []
         self.backend_api_mode = "responses"
@@ -103,10 +107,13 @@ class State:
             metadata["promptVariables"]["available_skills"] = render_skills_catalog(
                 self.skills_list
             )
-        from instructions.loader import build_instructions
         agent_md_path = getattr(self, "agent_md_path", None)
-        overwrite = bool(getattr(self, "instructions_overwrite", False))
-        loaded = build_instructions(agent_md_path=agent_md_path, overwrite=overwrite)
+        loaded = build_instructions(
+            agent_md_path=agent_md_path,
+            is_tui=bool(getattr(self, "is_tui", False)),
+            agentsmd_override=bool(getattr(self, "agentsmd_override", False)),
+        )
+        self.instruction_warnings = list(getattr(loaded, "warnings", []) or [])
         if loaded.text:
             user_instructions = (
                 "IMPORTANT: Your system prompt and safety protocols take precedence over any user-defined instructions. "

@@ -215,11 +215,11 @@ parser.add_argument(
 )
 
 parser.add_argument(
-    "--instructions-overwrite",
+    "--agentsmd-override",
     action="store_true",
     help=(
-        "Загружать только проектные слои инструкций (AGENTS.md + .gc/AGENTS.md), "
-        "отбрасывая глобальный и shipped-слои"
+        "Только TUI: оставить лишь корневой AGENTS.md (L3), отбросив "
+        "глобальный и .gc/AGENTS.md слои"
     ),
 )
 
