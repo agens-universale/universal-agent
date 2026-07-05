@@ -1,7 +1,7 @@
 import json
 from types import SimpleNamespace
 
-from config import parse_chat_completions_max_tokens
+from config import parse_chat_completions_max_tokens, resolve_tui_stream_enabled
 from intent_guard.feedback import (
     build_finish_gate_feedback,
     build_finish_gate_reject_technical_user_content,
@@ -255,7 +255,7 @@ def _request_backend_canonical_once(
             max_tokens=max_tokens,
         )
 
-    _stream_on = bool(cfg.get("stream", True))
+    _stream_on = resolve_tui_stream_enabled(cfg)
     _on_delta = getattr(ctx, "on_stream_delta", None) if _stream_on else None
 
     res, call_data = request_chat_completions_with_policy(
@@ -774,12 +774,8 @@ def run_agent(
                     state.last_backend_response_id = response_id
                 elif mode == "text_response":
                     assistant_text = extract_last_assistant_text(messages)
-                    # TUI adaptive bounce: режим ставит только TUI (CLI/server/swarm →
-                    # ключа нет → строго). always → принять текст; judge → судья решает
-                    # (accept → текст и есть ответ хода, без bounce/turn_finish/finish-gate).
-                    # Завершаем ход как finish-accept: флашим интент, прогоняем compaction-
-                    # hook, сливаем сообщения, пришедшие во время хода.
-                    if should_return_text_answer(ctx, state, assistant_text):
+                    decision = should_return_text_answer(ctx, state, assistant_text)
+                    if decision.accept:
                         # Финальная проза принята → TUI-индикатор «✓ завершаю…»
                         # на время записи/саммари/flush (mark_finalizing пишет
                         # tui_finalizing в meta; снимаем строго в finally).
@@ -801,11 +797,15 @@ def run_agent(
                                 messages = pending
                                 continue
                         return assistant_text
-                    run_logger.warning(
-                        "Agent returned text response without tool call, requesting tool call"
-                    )
+                    # === reject ===
                     tool_error_cnt += 1
-                    bounce_msg = format_no_tool_call_bounce(assistant_text)
+                    if decision.reject_feedback is not None:      # judge-reject c причиной
+                        bounce_msg = decision.reject_feedback
+                    else:                                         # deny / пусто / нет гейта / ошибка
+                        run_logger.warning(
+                            "Agent returned text response without tool call, requesting tool call"
+                        )
+                        bounce_msg = format_no_tool_call_bounce(assistant_text)
                     messages = [
                         _make_technical_feedback_user_message(
                             bounce_msg,

@@ -19,33 +19,38 @@ def _ctx(mode=None, backend="chat_completions", strict=True):
 
 # --- решение по режиму (изолированно) -----------------------------------------
 
-def test_always_returns_true_without_judge(monkeypatch):
+def test_allow_returns_true_without_judge(monkeypatch):
     import intent_guard.text_answer_judge as taj
     judged = {"n": 0}
     monkeypatch.setattr(taj, "judge_text_answer",
                         lambda ctx, state, text: judged.__setitem__("n", judged["n"] + 1) or True)
-    assert should_return_text_answer(_ctx("always"), _S(), "привет") is True
-    assert judged["n"] == 0                              # always → судья не зван
+    assert should_return_text_answer(_ctx("allow"), _S(), "привет").accept is True
+    assert judged["n"] == 0                              # allow → судья не зван
 
 
 def test_judge_accept_returns_true(monkeypatch):
+    from types import SimpleNamespace
     import intent_guard.text_answer_judge as taj
-    monkeypatch.setattr(taj, "judge_text_answer", lambda ctx, state, text: True)
-    assert should_return_text_answer(_ctx("judge"), _S(), "привет") is True
+    monkeypatch.setattr(taj, "judge_text_answer", lambda ctx, state, text: SimpleNamespace(action="accept"))
+    assert should_return_text_answer(_ctx("judge"), _S(), "привет").accept is True
 
 
 def test_judge_reject_returns_false(monkeypatch):
+    from intent_guard.validation_result import ValidationResult
     import intent_guard.text_answer_judge as taj
-    monkeypatch.setattr(taj, "judge_text_answer", lambda ctx, state, text: False)
-    assert should_return_text_answer(_ctx("judge"), _S(), "сделай отчёт") is False
+    _rej = ValidationResult(ok=False, action="continue_work", trace_ok=False, report_ok=True,
+                            trace_gaps=["more work needed"], missing_requirements=[],
+                            report_mismatches=[], conflicts=[], feedback_for_agent="", coverage_score=0.0)
+    monkeypatch.setattr(taj, "judge_text_answer", lambda ctx, state, text: _rej)
+    assert should_return_text_answer(_ctx("judge"), _S(), "сделай отчёт").accept is False
 
 
-def test_strict_returns_false_without_judge(monkeypatch):
+def test_deny_returns_false_without_judge(monkeypatch):
     import intent_guard.text_answer_judge as taj
     judged = {"n": 0}
     monkeypatch.setattr(taj, "judge_text_answer",
                         lambda ctx, state, text: judged.__setitem__("n", judged["n"] + 1) or True)
-    assert should_return_text_answer(_ctx("strict"), _S(), "привет") is False
+    assert should_return_text_answer(_ctx("deny"), _S(), "привет").accept is False
     assert judged["n"] == 0
 
 
@@ -55,7 +60,7 @@ def test_no_key_returns_false_without_judge(monkeypatch):
     judged = {"n": 0}
     monkeypatch.setattr(taj, "judge_text_answer",
                         lambda ctx, state, text: judged.__setitem__("n", judged["n"] + 1) or True)
-    assert should_return_text_answer(_ctx(None), _S(), "привет") is False
+    assert should_return_text_answer(_ctx(None), _S(), "привет").accept is False
     assert judged["n"] == 0
 
 
@@ -67,7 +72,7 @@ def test_judge_without_chat_completions_is_strict(monkeypatch):
     judged = {"n": 0}
     monkeypatch.setattr(taj, "judge_text_answer",
                         lambda ctx, state, text: judged.__setitem__("n", judged["n"] + 1) or True)
-    assert should_return_text_answer(_ctx("judge", backend="responses"), _S(), "привет") is False
+    assert should_return_text_answer(_ctx("judge", backend="responses"), _S(), "привет").accept is False
     assert judged["n"] == 0
 
 
@@ -77,7 +82,7 @@ def test_judge_with_strict_validation_off_is_strict(monkeypatch):
     judged = {"n": 0}
     monkeypatch.setattr(taj, "judge_text_answer",
                         lambda ctx, state, text: judged.__setitem__("n", judged["n"] + 1) or True)
-    assert should_return_text_answer(_ctx("judge", strict=False), _S(), "привет") is False
+    assert should_return_text_answer(_ctx("judge", strict=False), _S(), "привет").accept is False
     assert judged["n"] == 0
 
 
@@ -87,8 +92,8 @@ def test_empty_text_bounces_in_all_modes(monkeypatch):
     judged = {"n": 0}
     monkeypatch.setattr(taj, "judge_text_answer",
                         lambda ctx, state, text: judged.__setitem__("n", judged["n"] + 1) or True)
-    assert should_return_text_answer(_ctx("always"), _S(), "   ") is False
-    assert should_return_text_answer(_ctx("judge"), _S(), "") is False
+    assert should_return_text_answer(_ctx("allow"), _S(), "   ").accept is False
+    assert should_return_text_answer(_ctx("judge"), _S(), "").accept is False
     assert judged["n"] == 0
 
 
@@ -117,17 +122,18 @@ def _text_msgs():
     return [{"role": "assistant", "type": "message", "content": "Привет! Чем помочь?"}]
 
 
-def test_run_agent_always_returns_text():
-    """always: текст-ответ становится ответом хода (реальное решение, без мока)."""
+def test_run_agent_allow_returns_text():
+    """allow: текст-ответ становится ответом хода (реальное решение, без мока)."""
     import processing_responses as pr
-    result = pr.run_agent(_text_msgs(), _state(), _run_ctx("always"))
+    result = pr.run_agent(_text_msgs(), _state(), _run_ctx("allow"))
     assert result == "Привет! Чем помочь?"
 
 
 def test_run_agent_judge_accept_returns_text(monkeypatch):
     """judge + accept: текст возвращается (gate включён, судья замокан)."""
+    from types import SimpleNamespace
     import processing_responses as pr
     import intent_guard.text_answer_judge as taj
-    monkeypatch.setattr(taj, "judge_text_answer", lambda ctx, state, text: True)
+    monkeypatch.setattr(taj, "judge_text_answer", lambda ctx, state, text: SimpleNamespace(action="accept"))
     result = pr.run_agent(_text_msgs(), _state(), _run_ctx("judge"))
     assert result == "Привет! Чем помочь?"

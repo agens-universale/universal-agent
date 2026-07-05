@@ -70,6 +70,29 @@ def build_finish_gate_feedback(result: ValidationResult) -> str:
     return "\n".join(lines)
 
 
+TEXT_ANSWER_REJECT_TOOL_HINT = (
+    "Prefer finalizing this turn with a proper tool call over plain prose: if the work "
+    "is genuinely done, use the designated finalization tool to deliver the answer; if it "
+    "is not, call the appropriate tool for the next step. A structured tool handoff is "
+    "preferred here."
+)
+
+
+def build_text_answer_reject_feedback(result: ValidationResult) -> str:
+    """Judge rejected a prose text-answer as the turn's final answer.
+    Agent-facing, tool-agnostic (§7.4). English only."""
+    lines = [
+        "Your text reply was not accepted as this turn's final answer: it does not "
+        "adequately close the user's request. Continue the current turn; do not treat "
+        "it as complete.",
+        "",
+        build_finish_gate_feedback(result),
+        "",
+        TEXT_ANSWER_REJECT_TOOL_HINT,
+    ]
+    return "\n".join(lines)
+
+
 def build_finish_gate_reject_technical_user_content(feedback: str) -> str:
     """Technical user message after finish gate reject — continue the open turn."""
     body = str(feedback or "").strip()
