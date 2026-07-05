@@ -21,7 +21,7 @@ def news_search(query: str, max_results: int = 10, timelimit: str | None = None)
 
 
 def main() -> None:
-    mcp.run()
+    mcp.run(transport="stdio")
 
 
 if __name__ == "__main__":
