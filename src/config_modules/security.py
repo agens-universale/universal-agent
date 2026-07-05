@@ -45,16 +45,16 @@ def validate_binary_read_policy(raw_mode: Any) -> str:
 
 class WriteGuardConfig(BaseModel):
     """
-    Write-периметр (бывший root_box). Safe-by-default-OFF: enabled=False.
+    Write-периметр (бывший root_box). On/ask по дефолту (secure-by-default).
 
     mode:
-      deny  — нарушение → блок с `write_guard_violation` (по умолчанию);
+      deny  — нарушение → блок с `write_guard_violation`;
       ask   — нарушение → запрос подтверждения у пользователя (interactive);
       allow — нарушение → пропустить, audit log пометит `out_of_perimeter`.
     """
     model_config = ConfigDict(extra="forbid")
-    enabled: bool = False
-    mode: str = "deny"
+    enabled: bool = True
+    mode: str = "ask"
     extra_paths: list[str] = Field(default_factory=list)
 
     @field_validator("mode")
@@ -68,16 +68,16 @@ class WriteGuardConfig(BaseModel):
 
 class UrlPolicyConfig(BaseModel):
     """
-    URL-policy для fetch_url/simple_fetch_url. Safe-by-default-OFF: enabled=False.
+    URL-policy для fetch_url/simple_fetch_url. On/ask по дефолту (secure-by-default).
 
     mode:
-      deny  — нарушение → блок с `url_blocked_by_policy` (по умолчанию);
+      deny  — нарушение → блок с `url_blocked_by_policy`;
       ask   — нарушение → запрос подтверждения у пользователя (interactive);
       allow — нарушение → пропустить, audit log пометит `out_of_perimeter`.
     """
     model_config = ConfigDict(extra="forbid")
-    enabled: bool = False
-    mode: str = "deny"
+    enabled: bool = True
+    mode: str = "ask"
     allowed_schemes: list[str] = Field(default_factory=lambda: ["http", "https"])
     url_blacklist: list[str] = Field(default_factory=list)
 
@@ -92,15 +92,15 @@ class UrlPolicyConfig(BaseModel):
 
 class ReadGuardConfig(BaseModel):
     """
-    Контур чтения read_guard. Safe-by-default-OFF: enabled=False.
+    Контур чтения read_guard. On/ask по дефолту (secure-by-default).
 
     В v1 реализован только Контур 1 (детерминированный path-policy).
     Поля для бинарных файлов и size‑лимита присутствуют в схеме для
     forward‑compat, но в v1 не enforce'ятся (kept-for-future).
     """
     model_config = ConfigDict(extra="forbid")
-    enabled: bool = False
-    mode: str = "deny"
+    enabled: bool = True
+    mode: str = "ask"
     # Пустой список трактуется как [launch_root] — строгий периметр проекта.
     # Спецэлемент "*" / "all" включает allow-by-default (см. spec).
     allowed_read_roots: list[str] = Field(default_factory=list)
@@ -140,15 +140,15 @@ class DownloadConfig(BaseModel):
 
 class CommandModerationConfig(BaseModel):
     """
-    Judge-настройки для execute_command/run_python_code. Safe-by-default-OFF.
+    Judge-настройки для execute_command/run_python_code. On/ask по дефолту (secure-by-default).
 
     enabled=False — слой выключен полностью, judge не вызывается (всё проходит).
     enabled=True + mode=allow — то же самое (без судьи).
     enabled=True + mode=ask/deny — судья активен.
     """
     model_config = ConfigDict(extra="forbid")
-    enabled: bool = False
-    mode: str = "allow"
+    enabled: bool = True
+    mode: str = "ask"
     allowed_command_examples: list[str] = Field(default_factory=list)
 
     @field_validator("mode")
@@ -174,7 +174,7 @@ class ProtectedPathsConfig(BaseModel):
 
 class SecurityConfig(BaseModel):
     """
-    Независимые слои безопасности. Все safe-by-default-OFF кроме protected_paths.
+    Независимые слои безопасности. Все on/ask по дефолту (secure-by-default).
     Структура (clean break c прежней вложенностью под command_moderation):
         security:
           command_moderation: {mode, allowed_command_examples}
@@ -213,20 +213,21 @@ def apply_cli_command_moderation_overrides(
             command_moderation_mode
         )
     elif "mode" not in command_moderation:
-        command_moderation["mode"] = "allow"
+        command_moderation["mode"] = "ask"
+    command_moderation.setdefault("enabled", True)
 
     write_guard = config_dict.setdefault("write_guard", {})
     if write_guard_enabled is not None:
         write_guard["enabled"] = bool(write_guard_enabled)
     elif "enabled" not in write_guard:
-        write_guard["enabled"] = False
+        write_guard["enabled"] = True
 
     read_guard = config_dict.setdefault("read_guard", {})
     if read_guard_enabled is not None:
         read_guard["enabled"] = bool(read_guard_enabled)
     elif "enabled" not in read_guard:
-        read_guard["enabled"] = False
+        read_guard["enabled"] = True
     if read_guard_mode is not None:
         read_guard["mode"] = validate_read_guard_mode(read_guard_mode)
     elif "mode" not in read_guard:
-        read_guard["mode"] = "deny"
+        read_guard["mode"] = "ask"
