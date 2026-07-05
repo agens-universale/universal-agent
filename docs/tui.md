@@ -179,7 +179,7 @@ Enter — агент продолжит. Esc при пустом поле ост
 | Ключ | Значения | По умолчанию | Что делает |
 |---|---|---|---|
 | `tui.stream_display` | `minimal` / `answer` / `answer_reasoning` | `minimal` | Что показывать во время стрима (`chat_completions + backend.stream: true`): `minimal` — только индикатор + счётчик токенов; `answer` — прогрессивный ответ, дорастающий до финала; `answer_reasoning` — то же + однострочный «глазок» рассуждения. |
-| `tui.text_answer_mode` | `strict` / `judge` / `always` | `judge` | Как поступать с текстовым ответом без tool-вызова (адаптивный turn-contract): `strict` — всегда bounce, как в CLI; `judge` — судья intent_guard решает, закрывает ли текст интент пользователя; `always` — всегда принять текст. |
+| `tui.text_answer_mode` | `deny` / `judge` / `allow` | `judge` | Как поступать с текстовым ответом без tool-вызова (адаптивный turn-contract): `deny` — всегда bounce, как в CLI; `judge` — судья intent_guard решает, закрывает ли текст интент пользователя; `allow` — всегда принять текст. |
 
 Параметр `backend.stream` (`true` / `false`, по умолчанию `true`) — мастер-переключатель SSE-стрима.
 При `false` стриминг, живой счётчик токенов и прогрессивный ответ недоступны.

@@ -21,6 +21,7 @@ from config_modules.security import (
 from config_modules.summary import DEFAULT_LAST_DIALOG_STEP_MESSAGE_MAX_CHARS
 from config_modules import env_vars
 from bundled_assets import bundled_root
+from mcp_runtime.paths import managed_config_path
 
 # Backward compatibility for existing imports.
 _DEFAULT_LAST_DIALOG_STEP_MESSAGE_MAX_CHARS = (
@@ -47,9 +48,19 @@ def sync_logging_flat_and_params(config_dict: Dict[str, Any]) -> None:
             config_dict[key] = lp[key]
 
 
+def resolve_tui_stream_enabled(config_dict: Dict[str, Any]) -> bool:
+    """Мастер-свитч live-стриминга TUI: явный `tui_stream` (True/False) побеждает;
+    иначе legacy top-level `stream` (backend.stream); иначе дефолт True.
+    None у `tui_stream` = «не задан» → падаем на legacy, чтобы не затирать его."""
+    tui_stream = config_dict.get("tui_stream")
+    if tui_stream is not None:
+        return bool(tui_stream)
+    return bool(config_dict.get("stream", True))
+
+
 def _default_config_path() -> str:
     # Floor: bundled дефолт-конфиг (едет в wheel через force-include).
-    return str(bundled_root() / "config.default.yml")
+    return os.path.join(str(bundled_root()), "config.default.yml")
 
 
 def _project_local_config_path() -> Optional[str]:
@@ -76,7 +87,7 @@ def _xdg_config_path() -> Optional[str]:
     пакетные дефолты (project-local <cwd>/.gc/config.yml по-прежнему
     мерджится поверх выбранной базы).
     """
-    candidate = os.path.abspath(str(env_vars.effective_config_dir() / "config.yml"))
+    candidate = os.path.abspath(os.path.join(str(env_vars.effective_config_dir()), "config.yml"))
     if os.path.isfile(candidate):
         return candidate
     return None
@@ -130,7 +141,7 @@ def apply_cli_overrides(
     read_guard_enabled: Optional[bool] = None,
     no_read_guard: bool = False,
     read_guard_mode: Optional[str] = None,
-    instructions_overwrite: bool = False,
+    agentsmd_override: bool = False,
 ) -> None:
     if extra_overrides:
         config_dict.update(extra_overrides)
@@ -143,8 +154,8 @@ def apply_cli_overrides(
         read_guard_enabled=effective_read_guard_override,
         read_guard_mode=read_guard_mode,
     )
-    if instructions_overwrite:
-        config_dict["instructions_overwrite"] = True
+    if agentsmd_override:
+        config_dict["agentsmd_override"] = True
     sync_logging_flat_and_params(config_dict)
 
 
@@ -164,7 +175,6 @@ def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
 
     # Machine-managed overlay (gc-mcp install/remove): ~/.gc/config.local.yml.
     # Мёржится поверх base, под project-local. mcp.servers аккумулируются.
-    from mcp_runtime.paths import managed_config_path
     managed_path = managed_config_path()
     if managed_path.is_file() and os.path.abspath(str(managed_path)) != os.path.abspath(path):
         with open(managed_path, "r", encoding="utf-8") as file:
@@ -181,6 +191,12 @@ def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
     app_cfg = AppConfig.model_validate(raw_config)
     resolve_paths(app_cfg, config_dir)
 
+    # Устаревшие ключи, заданные юзером ЯВНО (pydantic model_fields_set знает
+    # explicit-set vs дефолт). Голый факт → startup_notices форматирует текст.
+    _deprecated_keys_used: list[str] = []
+    if "stream" in app_cfg.backend.model_fields_set:
+        _deprecated_keys_used.append("backend.stream")
+
     config_dict: Dict[str, Any] = {
         "backend_api_mode": app_cfg.backend.api_mode,
         "completions_url": app_cfg.backend.completions_url,
@@ -192,7 +208,9 @@ def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
         "openai_strict_tools_schema": app_cfg.backend.openai_strict_tools_schema,
         "use_ssl": app_cfg.backend.use_ssl,
         "use_retry": app_cfg.backend.use_retry,
-        "stream": app_cfg.backend.stream,
+        "stream": app_cfg.backend.stream,  # legacy: канонический ключ — tui.stream
+        "deprecated_keys_used": _deprecated_keys_used,
+        "tui_stream": app_cfg.tui.stream,
         "tui_stream_display": app_cfg.tui.stream_display,
         "tui_text_answer_mode": app_cfg.tui.text_answer_mode,
         "command_moderation": {
@@ -244,7 +262,7 @@ def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
         "threads_data_path": app_cfg.paths.threads_data_path,
         "skills_data_path": app_cfg.paths.skills_data_path,
         "logs_dump_dir": app_cfg.paths.logs_dump_dir,
-        "instructions_overwrite": app_cfg.paths.instructions_overwrite,
+        "agentsmd_override": app_cfg.tui.agentsmd_override,
         "model": app_cfg.agent.model,
         "system_prompt_id": app_cfg.agent.system_prompt_id,
         "use_server_subagents": app_cfg.agent.use_server_subagents,

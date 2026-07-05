@@ -19,11 +19,6 @@ backend:
   use_max_tokens_param: true
   openai_strict_tools_schema: false
   use_retry: true
-  # Транспортный стриминг ответа (chat_completions). true — живой вывод по SSE
-  # (прогресс, нет таймаутов на длинных ответах). Мастер-переключатель: при
-  # stream: false нет ни счётчика токенов, ни строки-мысли, ни живого ответа.
-  # Сейчас стрим задействован только в TUI. Default on.
-  stream: true
   chat_completion_headers:
     Authorization: "Bearer <ВПИШИТЕ_ТОКЕН>"
 
@@ -45,14 +40,21 @@ agent:
 # TUI: что рендерить во время стриминга (действует только при backend.stream: true;
 # на счётчик токенов и индикатор не влияет — только контент).
 tui:
+  # Мастер-свитч live-стриминга в TUI (chat_completions). На CLI/server/swarm НЕ
+  # влияет — там всегда non-stream (гейтится on_stream_delta, ставит только TUI).
+  # Не задан → legacy backend.stream.
+  stream: true
   # minimal (default) — только индикатор + счётчик; answer — прогрессивный ответ;
   # answer_reasoning — + строка-мысль «⠇ …».
   stream_display: minimal
   # adaptive bounce (только TUI): как поступать с текст-ответом без тула.
-  #   strict — всегда требовать tool-call (как CLI/server/swarm);
-  #   judge  — судья решает, полный ли это ответ (привет/объяснение → принять);
-  #   always — всегда принимать текст (ни bounce, ни судьи).
+  #   deny  — всегда требовать tool-call (как CLI/server/swarm);
+  #   judge — судья решает, полный ли это ответ (привет/объяснение → принять);
+  #   allow — всегда принимать текст (ни bounce, ни судьи).
   text_answer_mode: judge
+  # Только TUI: оставить лишь корневой AGENTS.md (L3), отбросив global (~/.config/gc)
+  # и .gc/AGENTS.md. Игнорируется, если задан paths.agent_md_path (путь главнее).
+  agentsmd_override: false
 
 logging:
   full_log_backend: false
@@ -61,8 +63,9 @@ logging:
   save_logs: true
 
 paths:
-  agent_md_path: "prompts/demo_cli_agent.md"
-  # instructions_overwrite: false  # загружать только проектные слои (AGENTS.md + .gc/AGENTS.md), отбрасывая глобальный и shipped
+  # Промпт роли запуска (agent_md). Пусто = ролевого промпта нет.
+  # В CLI/server/swarm это единственный источник инструкций; задан → замещает всё.
+  agent_md_path: ""
 
 summary:
   # ~67–80k токенов истории — рассчитано на контекст моделей ~131k (под меньшие
@@ -83,7 +86,7 @@ intent_scope:
 security:
   command_moderation:
     enabled: true
-    mode: deny
+    mode: ask
     allowed_command_examples: []
   write_guard:
     enabled: true
@@ -91,11 +94,12 @@ security:
     extra_paths: []
   url_policy:
     enabled: true
-    mode: deny
+    mode: ask
     allowed_schemes: ["http", "https"]
     url_blacklist: []
   read_guard:
-    enabled: false
+    enabled: true
+    mode: ask
   protected_paths:
     enabled: true
     extra: []

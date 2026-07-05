@@ -49,19 +49,6 @@ backend:
   #   X-Custom-Header: "value"
   use_ssl: false
   use_retry: true
-  # Транспортный стриминг ответа (chat_completions): true — читать ответ по SSE
-  # по мере генерации (виден прогресс, нет таймаутов на длинных ответах);
-  # false — блокирующий путь (ждём ответ целиком). Default on.
-  #
-  # ВАЖНО: это мастер-переключатель всего живого вывода. При stream: false дельт
-  # нет — НЕ работают счётчик «↓ N токенов», строка-мысль «⠇ …» / тег
-  # «· размышление», «обдумал за Nс» и живой текст ответа. Флаг
-  # tui.stream_display (ниже) имеет эффект ТОЛЬКО
-  # при stream: true (оно лишь выбирает, что из живого вывода рендерить).
-  #
-  # NB: сейчас стрим задействован ТОЛЬКО в TUI (дельты потребляет лишь оно);
-  # в CLI/server/swarm ответ всегда читается блокирующе — там флаг no-op.
-  stream: true
 
 # Вспомогательные LLM (summary, finish gate, intent scope) — без thinking.
 chat_completions:
@@ -76,20 +63,29 @@ chat_completions:
 # (спиннер, «↓ N токенов», «обдумал за Nс») НЕ влияет — только рендер контента.
 # Действуют ТОЛЬКО при backend.stream: true (иначе живого вывода нет вовсе).
 tui:
-  # Что показывать во время стрима:
+  # Мастер-свитч live-стриминга в TUI (chat_completions). На CLI/server/swarm НЕ
+  # влияет — там всегда non-stream (стрим гейтится наличием on_stream_delta, который
+  # ставит только TUI). При stream: false нет дельт → не работают счётчик
+  # «↓ N токенов», строка-мысль «⠇ …», «обдумал за Nс», живой текст ответа, и
+  # tui.stream_display (ниже) не имеет эффекта. Не задан → legacy backend.stream.
+  stream: true
+  # Что показывать во время стрима (действует только при stream: true):
   #   minimal (default) — только индикатор + счётчик токенов (без текста);
   #   answer — прогрессивный ответ, дорастающий до финала;
   #   answer_reasoning — + живая строка-мысль «⠇ …».
   stream_display: minimal
   # adaptive bounce (ТОЛЬКО TUI): как поступать с текст-ответом без вызова тула —
   # убирает дубль финального ответа и латентность «завершаю» для простых сообщений.
-  #   strict — всегда требовать tool-call (как CLI/server/swarm);
-  #   judge  — судья (intent_guard) решает, полный ли это ответ: простой ответ
-  #            принять текстом, на комплексной задаче — bounce. Активен при
-  #            backend.api_mode: chat_completions (+ strict_turn_finish_validation);
-  #   always — всегда принимать текст (ни bounce, ни судьи).
+  #   deny  — всегда требовать tool-call (как CLI/server/swarm);
+  #   judge — судья (intent_guard) решает, полный ли это ответ: простой ответ
+  #           принять текстом, на комплексной задаче — bounce. Активен при
+  #           backend.api_mode: chat_completions (+ strict_turn_finish_validation);
+  #   allow — всегда принимать текст (ни bounce, ни судьи).
   # Default: judge. Не зависит от backend.stream.
   text_answer_mode: judge
+  # Только TUI: оставить лишь корневой AGENTS.md (L3), отбросив global (~/.config/gc)
+  # и .gc/AGENTS.md. Игнорируется, если задан paths.agent_md_path (путь главнее).
+  agentsmd_override: false
 
 agent:
   model: MiniMax-M2.7
@@ -129,9 +125,10 @@ logging:
 
 paths:
   # Относительные пути резолвятся от каталога config.yml.
-  agent_md_path: "prompts/demo_cli_agent.md"
+  # Промпт роли запуска (agent_md). Пусто = ролевого промпта нет.
+  # В CLI/server/swarm это единственный источник инструкций; задан → замещает всё.
+  agent_md_path: ""
   # chat_completions_system_prompt_path: "prompts/chat_completions_system_prompt.md"
-  # instructions_overwrite: false  # загружать только проектные слои (AGENTS.md + .gc/AGENTS.md), отбрасывая глобальный и shipped
 
   # threads_data_path / logs_dump_dir / skills_data_path по умолчанию НЕ заданы —
   # тогда runtime-данные пишутся в кросс-платформенные дефолтные каталоги:
@@ -217,8 +214,8 @@ summary:
 security:
   # =========================================================================
   # 4 независимых слоя на одном уровне.
-  # Safe-by-default-OFF: каждый требует `enabled: true`, чтобы активироваться.
-  # Подробная документация — docs/rootbox.md.
+  # On/ask по дефолту (secure-by-default). Escape-hatch: mode: allow или enabled: false.
+  # Подробная документация — docs/configuration.md §Security policy.
   # =========================================================================
 
   command_moderation:
@@ -229,10 +226,10 @@ security:
     enabled: true
     # mode:
     #   allow — судья не вызывается (всё проходит) — эквивалент enabled: false;
-    #   ask   — опасное → запрос подтверждения у пользователя в stdin;
+    #   ask   — опасное → запрос подтверждения у пользователя в stdin (дефолт);
     #   deny  — опасное → блок.
     # При недоступности judge'а: deny → fail-CLOSED; ask → запрос пользователю.
-    mode: deny
+    mode: ask
     # Positive examples — ориентир безопасного профиля. Не allowlist.
     allowed_command_examples: []
     # allowed_command_examples:
@@ -249,9 +246,9 @@ security:
     enabled: true
     # mode (как у command_moderation):
     #   deny  — write вне периметра → блок;
-    #   ask   — write вне периметра → запрос подтверждения;
+    #   ask   — write вне периметра → запрос подтверждения (дефолт);
     #   allow — write вне периметра → пропустить + audit `out_of_perimeter`.
-    mode: deny
+    mode: ask
     # Дополнительные writable directories помимо launch_root.
     # Относительные пути резолвятся от каталога config.yml.
     extra_paths: []
@@ -268,9 +265,9 @@ security:
     enabled: true
     # mode:
     #   deny  — read вне периметра / в denied_* → блок;
-    #   ask   — то же → запрос подтверждения у пользователя;
+    #   ask   — то же → запрос подтверждения у пользователя (дефолт);
     #   allow — то же → пропустить + audit `out_of_perimeter`.
-    mode: deny
+    mode: ask
     # -----------------------------------------------------------------
     # Разница между allowed_read_roots и allowed_read_paths (важно!):
     #
@@ -344,9 +341,9 @@ security:
     enabled: true
     # mode:
     #   deny  — нарушение → блок;
-    #   ask   — нарушение → запрос подтверждения;
+    #   ask   — нарушение → запрос подтверждения (дефолт);
     #   allow — нарушение → пропустить + audit `out_of_perimeter`.
-    mode: deny
+    mode: ask
     # Разрешённые URI схемы (всё остальное → url_validation_failed).
     allowed_schemes: ["http", "https"]
     # Blacklist хостов / URL-паттернов (fnmatch + special-case "*.suffix"):
