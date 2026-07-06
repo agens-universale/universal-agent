@@ -8,11 +8,13 @@ from __future__ import annotations
 
 import hashlib
 import os
+import shutil
 import threading
 from dataclasses import dataclass
 from pathlib import Path
 
 from config_modules.project_memory import DEFAULT_PROJECT_MEMORY_MAX_CHARS
+from utils.atomic_io import atomic_replace
 
 DEFAULT_MAX_CHARS: int = DEFAULT_PROJECT_MEMORY_MAX_CHARS
 MAX_CHARS: int = DEFAULT_MAX_CHARS
@@ -46,14 +48,23 @@ def _count_lines(text: str) -> int:
     return text.count("\n") + (0 if text.endswith("\n") else 1)
 
 
-def stat(path: Path) -> ProjectMemoryStat:
+def stat(path: Path, *, backup: Path | None = None) -> ProjectMemoryStat:
     """Return existence + char/line counts of the long-memory file at `path`.
 
     Returns `ProjectMemoryStat(exists=False, chars=0, lines=0)` if the file is missing
     or unreadable. Other readers/writers in this process won't observe partial state
     because the operation runs under `_lock`.
+
+    If `backup` is given and `path` is missing, the backup is copied to `path`
+    (auto-restore) before stat.
     """
     with _lock:
+        if not path.is_file() and backup is not None and backup.is_file():
+            try:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(backup, path)
+            except OSError:
+                pass
         if not path.is_file():
             return ProjectMemoryStat(exists=False, chars=0, lines=0)
         try:
@@ -75,14 +86,24 @@ def content_hash(path: Path) -> str | None:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
-def read(path: Path) -> str:
+def read(path: Path, *, backup: Path | None = None) -> str:
     """Return the full file content as text, or "" if the file is missing or unreadable.
 
     Symmetric with `stat()` for the missing/unreadable case: callers can rely on
     "missing or unreadable" producing an empty string, never an exception.
     Other I/O failures (mid-read errors) are not raised either — callers see "".
+
+    If `backup` is given and `path` is missing, the backup is copied to `path`
+    (auto-restore) before reading.
     """
     with _lock:
+        if not path.is_file() and backup is not None and backup.is_file():
+            # Auto-restore: primary missing but backup exists — copy backup → primary.
+            try:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(backup, path)
+            except OSError:
+                pass
         if not path.is_file():
             return ""
         try:
@@ -101,7 +122,7 @@ def _atomic_write(path: Path, content: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + ".tmp")
     tmp.write_text(content, encoding="utf-8")
-    os.replace(tmp, path)
+    atomic_replace(tmp, path)
 
 
 def append(
@@ -109,6 +130,7 @@ def append(
     delta: str,
     *,
     max_chars: int = DEFAULT_MAX_CHARS,
+    backup: Path | None = None,
 ) -> ProjectMemoryStat:
     """Append `delta` (stripped) to the long-memory file separated by a blank line.
 
@@ -119,6 +141,9 @@ def append(
     Raises ProjectMemoryError("empty_content") if `delta` is empty/whitespace.
     Raises ProjectMemoryError("limit_exceeded") when the resulting size would exceed
     MAX_CHARS; in that case the file on disk is left unchanged.
+
+    If `backup` is given, mirrors the resulting content to that path after the
+    primary write succeeds (mkdir parents as needed). Backup failures are silenced.
     """
     if not isinstance(delta, str) or not delta.strip():
         raise ProjectMemoryError("empty_content", "delta must be non-empty for append.")
@@ -137,6 +162,12 @@ def append(
                 f"resulting length {len(new_text)} exceeds limit {max_chars}.",
             )
         _atomic_write(path, new_text)
+        if backup is not None:
+            try:
+                backup.parent.mkdir(parents=True, exist_ok=True)
+                backup.write_text(new_text, encoding="utf-8")
+            except OSError:
+                pass
     return ProjectMemoryStat(
         exists=True,
         chars=len(new_text),
@@ -149,12 +180,16 @@ def write(
     content: str,
     *,
     max_chars: int = DEFAULT_MAX_CHARS,
+    backup: Path | None = None,
 ) -> ProjectMemoryStat:
     """Atomically replace the long-memory file with `content` (stripped).
 
     Raises ProjectMemoryError(code="empty_content") if content is empty/whitespace.
     Raises ProjectMemoryError(code="limit_exceeded") if stripped content > MAX_CHARS;
     in this case the file on disk is left unchanged.
+
+    If `backup` is given, mirrors the written content to that path after the
+    primary write succeeds (mkdir parents as needed). Backup failures are silenced.
     """
     if not isinstance(content, str) or not content.strip():
         raise ProjectMemoryError("empty_content", "content must be non-empty for write.")
@@ -166,6 +201,12 @@ def write(
         )
     with _lock:
         _atomic_write(path, new_text)
+        if backup is not None:
+            try:
+                backup.parent.mkdir(parents=True, exist_ok=True)
+                backup.write_text(new_text, encoding="utf-8")
+            except OSError:
+                pass
     return ProjectMemoryStat(
         exists=True,
         chars=len(new_text),

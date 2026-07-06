@@ -5,6 +5,7 @@ import os
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from bundled_assets import bundled_root
 from config_modules import env_vars
 from config_modules.agent import (
     AgentConfig,
@@ -32,6 +33,7 @@ from config_modules.project_memory import (
     normalize_project_memory_config,
 )
 from config_modules.chat_completions import ChatCompletionsConfig
+from config_modules.tui import TuiConfig
 from config_modules.summary import (
     DEFAULT_INCREMENTAL_BATCH_MULTIPLIER,
     DEFAULT_INTENT_LOG_PREVIEW_CHARS,
@@ -65,7 +67,30 @@ class AppConfig(BaseModel):
     paths: PathsConfig = Field(default_factory=PathsConfig)
     agent: AgentConfig = Field(default_factory=AgentConfig)
     mcp: McpConfig = Field(default_factory=McpConfig)
+    tui: TuiConfig = Field(default_factory=TuiConfig)
     agent_auth: AgentAuthConfig | None = None
+
+
+def _prompt_default(config_dir: str, name: str) -> str:
+    """config_dir/prompts/<name> если существует, иначе bundled_root()/prompts/<name>."""
+    local = os.path.join(config_dir, "prompts", name)
+    if os.path.isfile(local):
+        return local
+    return os.path.join(str(bundled_root()), "prompts", name)
+
+
+def _asset_default(config_dir: str, rel_path: str) -> str:
+    """config_dir/<rel_path> если файл существует; иначе bundled_root()/<rel_path>
+    (для относительных asset-путей вроде agent_md_path). Абсолютные/пустые — как есть."""
+    if not rel_path or os.path.isabs(rel_path):
+        return rel_path
+    local = os.path.abspath(os.path.join(config_dir, rel_path))
+    if os.path.isfile(local):
+        return local
+    bundled = os.path.normpath(os.path.join(str(bundled_root()), rel_path))
+    if os.path.isfile(bundled):
+        return bundled
+    return local
 
 
 def resolve_paths(cfg: AppConfig, config_dir: str) -> None:
@@ -81,13 +106,13 @@ def resolve_paths(cfg: AppConfig, config_dir: str) -> None:
     slug = env_vars.project_slug()
     project_state = paths["state"] / "projects" / slug
 
-    cfg.paths.agent_md_path = to_abs(cfg.paths.agent_md_path) or cfg.paths.agent_md_path
+    cfg.paths.agent_md_path = _asset_default(config_dir, cfg.paths.agent_md_path)
     cfg.paths.chat_completions_system_prompt_path = to_abs(
         cfg.paths.chat_completions_system_prompt_path
-    ) or os.path.join(config_dir, "prompts", "chat_completions_system_prompt.md")
+    ) or _prompt_default(config_dir, "chat_completions_system_prompt.md")
     cfg.paths.chat_completions_intent_guard_prompt_path = to_abs(
         cfg.paths.chat_completions_intent_guard_prompt_path
-    ) or os.path.join(config_dir, "prompts", "chat_completions_intent_guard_prompt.md")
+    ) or _prompt_default(config_dir, "chat_completions_intent_guard_prompt.md")
     cfg.paths.threads_data_path = (
         to_abs(cfg.paths.threads_data_path) or str(project_state / "threads")
     )
@@ -97,17 +122,13 @@ def resolve_paths(cfg: AppConfig, config_dir: str) -> None:
     )
     cfg.summary.chat_completions_summary_prompt_path = to_abs(
         cfg.summary.chat_completions_summary_prompt_path
-    ) or os.path.join(config_dir, "prompts", "chat_completions_summary_prompt.md")
+    ) or _prompt_default(config_dir, "chat_completions_summary_prompt.md")
     cfg.summary.chat_completions_memory_patch_append_prompt_path = to_abs(
         cfg.summary.chat_completions_memory_patch_append_prompt_path
-    ) or os.path.join(
-        config_dir, "prompts", "chat_completions_memory_patch_append.md"
-    )
+    ) or _prompt_default(config_dir, "chat_completions_memory_patch_append.md")
     cfg.summary.chat_completions_memory_patch_replace_prompt_path = to_abs(
         cfg.summary.chat_completions_memory_patch_replace_prompt_path
-    ) or os.path.join(
-        config_dir, "prompts", "chat_completions_memory_patch_replace.md"
-    )
+    ) or _prompt_default(config_dir, "chat_completions_memory_patch_replace.md")
     if cfg.summary.intent_log_preview_chars <= 0:
         cfg.summary.intent_log_preview_chars = DEFAULT_INTENT_LOG_PREVIEW_CHARS
     if cfg.summary.chat_completions_summary_trigger_chars < 0:
@@ -146,7 +167,7 @@ def resolve_paths(cfg: AppConfig, config_dir: str) -> None:
     normalize_intent_scope_config(cfg.intent_scope)
     cfg.intent_scope.intent_scope_tool_summary_prompt_path = to_abs(
         cfg.intent_scope.intent_scope_tool_summary_prompt_path
-    ) or os.path.join(config_dir, "prompts", "intent_scope_tool_summary_prompt.md")
+    ) or _prompt_default(config_dir, "intent_scope_tool_summary_prompt.md")
     if cfg.agent.finish_gate_max_iterations < 1:
         logging.getLogger(__name__).warning(
             "finish_gate_reject_limit_invalid finish_gate_max_iterations=%s; using %s",

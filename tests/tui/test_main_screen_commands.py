@@ -20,6 +20,19 @@ async def test_unknown_command_shows_closest_match():
 
 
 @pytest.mark.asyncio
+async def test_notices_command_opens_screen():
+    # Набранная /notices должна открыть NoticesScreen (диспатч-ветка, не только реестр).
+    pytest.importorskip("textual")
+    from tui.app import TuiApp
+    from tui.screens.notices import NoticesScreen
+
+    async with TuiApp().run_test() as pilot:
+        pilot.app.screen._handle_command("notices")
+        await pilot.pause()
+        assert isinstance(pilot.app.screen, NoticesScreen)
+
+
+@pytest.mark.asyncio
 async def test_unknown_command_no_close_match():
     pytest.importorskip("textual")
     from tui.app import TuiApp

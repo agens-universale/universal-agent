@@ -7,6 +7,17 @@ from __future__ import annotations
 
 from typing import Any, Dict, List
 
+# Anti-fabrication: append to every no-tool-call bounce. The agent must never
+# act on a user reply it did not receive (spec 2026-06-24-no-fabricated-approval).
+_NO_FABRICATION_CLAUSE = (
+    "\n\nIf your prose asked the user a question, requested approval, or awaited "
+    "their decision, their reply has NOT arrived — it is not in this conversation. "
+    "Do not assume, invent, or act on a user response that has not actually arrived. "
+    "If you need their input to proceed, wait for it: ask via the user-input tool if "
+    "one is available, otherwise finalize the turn as blocked / needing input. "
+    "A prior user choice is not standing approval for a later action."
+)
+
 NO_TOOL_CALL_BOUNCE_MESSAGE = (
     "There is no tool call in your response. This runtime's contract is that "
     "every turn must contain at least one appropriate tool call — satisfy it now:\n"
@@ -16,6 +27,7 @@ NO_TOOL_CALL_BOUNCE_MESSAGE = (
     "  - If you are not finished, call the tool for your next step — the tool that "
     "asks the user / waits for input (one precise question), or an action tool "
     "(read, search, write, run, etc.)."
+    + _NO_FABRICATION_CLAUSE
 )
 
 
@@ -74,4 +86,5 @@ def format_no_tool_call_bounce(assistant_text: str) -> str:
         "tool (read, search, write, run, etc.).\n"
         "Reuse the relevant part of the block above VERBATIM where it is the "
         "content the user must react to — do not paraphrase or summarize it."
+        + _NO_FABRICATION_CLAUSE
     )

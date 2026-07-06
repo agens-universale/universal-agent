@@ -5,6 +5,10 @@ FINISH_TOOL_NAME = "turn_finish"
 ASK_HUMAN_TOOL_NAME = "turn_ask_human"
 INTERMEDIATE_REPLY_TOOL_NAME = "turn_intermediate_reply"
 
+# Тулы, завершающие ход агента (ход не продолжается после них). intermediate_reply
+# сюда НЕ входит: он «Finalizes turn: no» — агент продолжает работу в том же ходу.
+TURN_FINALIZING_TOOLS = frozenset({FINISH_TOOL_NAME, ASK_HUMAN_TOOL_NAME})
+
 # Session
 SESSION_MEMORY_TOOL_NAME = "session_memory"
 SESSION_THINK_TOOL_NAME = "session_think"
@@ -18,6 +22,7 @@ PROJECT_MEMORY_TOOL_NAME = "project_memory"
 # FS (representative; prefer cls.tool_description()["name"] in tool implementations)
 FS_READ_FILE_NAME = "fs_read_file"
 FS_WRITE_FILE_NAME = "fs_write_file"
+FS_APPEND_FILE_NAME = "fs_append_file"
 
 # Exec (representative)
 EXEC_COMMAND_NAME = "exec_command"

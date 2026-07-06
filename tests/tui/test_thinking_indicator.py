@@ -26,7 +26,7 @@ def test_render_includes_elapsed_seconds_marker():
     # Сдвинем started_at в прошлое — чтобы elapsed был ≥ 2 секунд.
     w._started_at = time.monotonic() - 2.5
     rendered = str(w.render())
-    assert "(2s)" in rendered or "(3s)" in rendered  # допускаем оба округления
+    assert "(2с)" in rendered or "(3с)" in rendered  # допускаем оба округления
 
 
 def test_tick_advances_frame_index():
@@ -44,14 +44,14 @@ def test_tick_advances_frame_index():
 
 
 def test_validating_state_renders_check_mark_and_label():
-    """Validating-режим: статичный ✓ + 'завершаю' + анимированные точки + таймер."""
+    """Validating-режим: статичная искра ✦ + 'завершаю' + анимированные точки + таймер."""
     pytest.importorskip("textual")
     from tui.widgets.thinking_indicator import ThinkingIndicator
 
     w = ThinkingIndicator(state="validating")
     rendered = str(w.render())
     assert "завершаю" in rendered
-    assert "✓" in rendered
+    assert "✦" in rendered
     assert "думаю" not in rendered  # не overlap режимов
 
 
@@ -117,19 +117,22 @@ def test_thinking_phrases_pool_starts_with_dumayu():
 def test_morph_frames_constant_shape():
     pytest.importorskip("textual")
     from tui.widgets.thinking_indicator import MORPH_FRAMES
-    assert MORPH_FRAMES[0] == "⠋"
+    assert MORPH_FRAMES[0] == "·"
     assert len(MORPH_FRAMES) >= 4
-    # Все кадры — braille (одинаковая ширина, без дёрганья строки).
-    assert all(0x2800 <= ord(c) <= 0x28FF for c in MORPH_FRAMES)
+    # Компас × искра: курируемый набор глифов (narrow-искра + ambiguous-width
+    # треугольники). Внутри цикла ширина консистентна — строка не дёргается.
+    assert all(c in {"·", "+", "✧", "✦", "✶", "▴", "▸", "▾", "◂"} for c in MORPH_FRAMES)
 
 
 def test_thinking_render_uses_morph_glyph_for_frame():
     pytest.importorskip("textual")
-    from tui.widgets.thinking_indicator import ThinkingIndicator, MORPH_FRAMES
+    from tui.widgets.thinking_indicator import ThinkingIndicator, MORPH_FRAMES, FRAME_HOLD
     w = ThinkingIndicator()
     w._frame = 4
     rendered = str(w.render())
-    assert MORPH_FRAMES[4] in rendered           # глиф соответствует кадру
+    # Глиф держится FRAME_HOLD тиков — индекс кадра считаем с учётом hold.
+    expected = MORPH_FRAMES[(4 // FRAME_HOLD) % len(MORPH_FRAMES)]
+    assert expected in rendered
     assert "думаю…" in rendered                  # фраза (старт пула)
 
 
@@ -150,6 +153,27 @@ def test_validating_still_renders_zavershayu():
     assert "завершаю…" in str(w.render())
 
 
+def test_validating_spark_breathes():
+    """«завершаю…»: искра ✦ статична по форме (без ✧), а её цвет «дышит» по
+    кадрам — серая рампа (та же техника, что пульс running-глифа ▸)."""
+    pytest.importorskip("textual")
+    from tui.widgets.thinking_indicator import ThinkingIndicator, _VALIDATING_SHADES
+
+    def spark_color(w):
+        t = w._render_text()
+        return next(str(s.style) for s in t.spans if "✦" in t.plain[s.start:s.end])
+
+    w = ThinkingIndicator(state="validating")
+    w._frame = 0
+    rendered = str(w.render())
+    assert "✦" in rendered and "✧" not in rendered   # форма не меняется
+    c0 = spark_color(w)
+    w._frame = 5
+    c5 = spark_color(w)
+    assert c0 != c5                                   # цвет «дышит» между кадрами
+    assert c0 in _VALIDATING_SHADES and c5 in _VALIDATING_SHADES
+
+
 def test_set_state_ignores_unknown_value():
     """set_state с неизвестным state — no-op."""
     pytest.importorskip("textual")
@@ -166,7 +190,10 @@ from pathlib import Path
 
 
 @pytest.mark.asyncio
-async def test_indicator_shows_when_running_and_hides_on_stop(tmp_path):
+async def test_indicator_shows_when_running_and_stays_on_stop(tmp_path):
+    """После прямой остановки runner-а (runner.stop() без /stop → last_stop_requested
+    не выставляется, но runner._stop_requested=True) индикатор не уничтожается,
+    а переходит в состояние «cancelled» — прямой stop не «completed»."""
     pytest.importorskip("textual")
     from tui.app import TuiApp
     from tui.widgets.thinking_indicator import ThinkingIndicator
@@ -193,17 +220,21 @@ async def test_indicator_shows_when_running_and_hides_on_stop(tmp_path):
 
         assert len(pilot.app.query(ThinkingIndicator)) == 1
 
-        # Остановим runner — индикатор пропадает.
+        # Прямой stop (в обход _cmd_stop → last_stop_requested не выставляется,
+        # но runner._stop_requested=True) → outcome должен быть «stopped» → «cancelled».
         pilot.app.active_runner.stop()
         await pilot.pause(0.5)
 
-        assert len(pilot.app.query(ThinkingIndicator)) == 0
+        assert len(pilot.app.query(ThinkingIndicator)) == 1
+        ind = pilot.app.query_one(ThinkingIndicator)
+        assert ind._state == "cancelled"  # прямой stop → stopped → cancelled
 
 
 @pytest.mark.asyncio
-async def test_indicator_hides_after_agent_event_with_pause(tmp_path):
-    """Эвристика: после event kind=agent и паузы ≥1.5с индикатор скрыт (.hidden),
-    но не уничтожен — runner ещё работает (intent_guard/policy продолжает)."""
+async def test_indicator_shows_processing_after_agent_event_with_pause(tmp_path):
+    """После event kind=agent и паузы ≥1.5с, пока runner ещё работает
+    (intent_guard/policy продолжает), индикатор НЕ прячется, а показывает
+    «сверяюсь…» — объясняет статус [running] (опция A)."""
     pytest.importorskip("textual")
     from tui.app import TuiApp
     from tui.widgets.thinking_indicator import ThinkingIndicator
@@ -232,19 +263,40 @@ async def test_indicator_hides_after_agent_event_with_pause(tmp_path):
     app._executor_factory = lambda: _Fake()
     async with app.run_test() as pilot:
         inp = pilot.app.query_one("#cmdinput")
+        import time as _time
         inp.text = "что нового?"
         await pilot.press("enter")
-        # Polling tick прочитает agent-event → _last_event_kind = "agent".
-        # Через 1.5+ сек эвристика должна скрыть индикатор.
-        await pilot.pause(2.0)
+        scr = pilot.app.screen
+        await pilot.pause(0.5)   # дать прогону смонтировать индикатор
+        # Пиним «живой» runner (убираем зависимость от тайминга реального прогона на
+        # момент проверки) и симулируем agent-ответ + тишину ≥1.5с.
+        class _LiveRunner:
+            def is_running(self):
+                return True
+            def stop(self):
+                pass
+        pilot.app.active_runner = _LiveRunner()
+        scr._confirm_active = False
+        scr._last_event_kind = "agent"
+        scr._last_event_at = _time.monotonic() - 5
+        scr._poll_active()
+        ind = scr._thinking
+        assert ind is not None
+        assert not ind.has_class("hidden")
+        assert "сверяюсь…" in str(ind._render_text().plain)
 
-        indicators = pilot.app.query(ThinkingIndicator)
-        # Виджет существует (не destroy), но имеет .hidden класс.
-        assert len(indicators) == 1
-        assert indicators[0].has_class("hidden")
 
-        # Runner ещё работает.
-        assert pilot.app.active_runner.is_running()
+def test_done_state_renders_vypolnil_dim_and_frozen():
+    import tui.widgets.thinking_indicator as ti
+    clock = {"t": 100.0}
+    ind = ti.ThinkingIndicator(started_at=0.0, clock=lambda: clock["t"])
+    ind.set_state("done")          # заморозить на 100с
+    clock["t"] = 999.0             # время идёт дальше
+    txt = ind._render_text()
+    s = txt.plain
+    assert s.startswith("✓") and "Выполнил за" in s
+    # длительность заморожена (≈100с от started_at), не 999
+    assert "1м 40с" in s or "100" in s
 
 
 @pytest.mark.asyncio

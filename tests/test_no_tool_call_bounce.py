@@ -144,3 +144,14 @@ def test_bounce_keeps_robustness_signal():
         assert "finaliz" in msg.lower()
     assert "<<<\nX\n>>>" in inlined
     assert "VERBATIM" in inlined
+
+
+def test_bounce_messages_forbid_acting_on_unreceived_reply():
+    """Обе формы bounce запрещают действовать по неполученному ответу пользователя."""
+    for msg in (
+        NO_TOOL_CALL_BOUNCE_MESSAGE,
+        format_no_tool_call_bounce("Одобряешь? Напиши 'ок' — начну делать."),
+    ):
+        assert "their reply has NOT arrived" in msg
+        assert "Do not assume, invent, or act on" in msg
+        assert "not standing approval" in msg

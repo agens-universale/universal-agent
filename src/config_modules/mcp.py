@@ -17,9 +17,15 @@ class McpServerConfig(BaseModel):
     env: dict[str, str] = Field(default_factory=dict)
     persistent_session: bool = False
     persistent_session_close_tool: str | None = None
+    # mTLS / TLS для http-транспортов: значения читает рантайм utils/ssl_config.py
+    # (get_verify_ssl / get_client_cert) через config_dict["mcp-servers"].
+    verify_ssl: bool | str = Field(default=True, alias="verify-ssl")
+    client_cert: str | None = Field(default=None, alias="client-cert")
+    client_key: str | None = Field(default=None, alias="client-key")
 
     @field_validator(
-        "url", "token", "server_name", "description", "command", "cwd", mode="before"
+        "url", "token", "server_name", "description", "command", "cwd",
+        "client_cert", "client_key", mode="before"
     )
     @classmethod
     def normalize_optional_text(cls, value: object) -> str | None:

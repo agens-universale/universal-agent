@@ -11,6 +11,7 @@ from utils.file_text import (
 from tools.schema_optional import coalesce_optional_string
 from tools.simple_tool_base import AbstractSimpleTool
 from utils.tool_report_paths import tool_report_abspath
+from utils.atomic_io import atomic_replace
 
 
 class ApplyFileEdits(AbstractSimpleTool):

@@ -11,8 +11,9 @@ async def test_app_starts_and_renders_empty_state():
         left = pilot.app.query_one("#header-left")
         right = pilot.app.query_one("#header-right")
         header_text = str(left.render()) + " " + str(right.render())
+        # Хедер-слева в empty-state — welcome-строка (модель уехала в мету).
         assert "GigaCode" in header_text
-        assert "модель:" in header_text
+        assert "Добро пожаловать" in header_text
         inp = pilot.app.query_one("#cmdinput")
         assert inp.has_focus
 

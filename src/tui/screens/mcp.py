@@ -7,17 +7,15 @@ from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import Screen
 from textual.widgets import Static
 from tui.palette import TOOL_NAME as _TOOL_NAME
-from tui import branding
+from tui.palette import OK as _OK
+from tui.palette import ERR as _ERR
+from tui.palette import DIM as _DIM
+from tui.palette import DEEP_DIM as _DEEP_DIM
 
-_HEADER_RIGHT = branding.HEADER_RIGHT
 _FOOTER = "[Enter] раскрыть  [↑↓] серверы  [PgUp PgDn] прокрутка  [Esc] back"
 
-# Палитра — в тон styles.tcss (держать синхронно с токенами там).
-# Принцип: цвет — редкий сигнал (глиф + статус), тело монохромно/приглушённо.
-_OK = "#5FAE7F"        # $ok
-_ERR = "#C75C54"       # $err
-_DIM = "#8b949e"       # $dim
-_DEEP_DIM = "#7a8290"  # $deep-dim
+# Цвета — из tui.palette (единый источник). Принцип: цвет — редкий сигнал
+# (глиф + статус), тело монохромно/приглушённо.
 
 
 def _truncate(text: str, limit: int = 80) -> str:
@@ -186,7 +184,6 @@ class McpScreen(Screen):
         with Vertical(id="root"):
             with Horizontal(id="header"):
                 yield Static("mcp · серверы и тулы", id="header-left", markup=False)
-                yield Static(_HEADER_RIGHT, id="header-right", markup=False)
             trace = VerticalScroll(id="trace")
             trace.can_focus = False  # фокус живёт на карточках; глобальный
             # #trace:focus-outline рисуется поверх контента — здесь не нужен

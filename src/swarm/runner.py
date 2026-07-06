@@ -9,6 +9,7 @@ from typing import Any, Dict, Optional, Tuple
 import yaml
 
 import swarm.storage as storage
+from config import _project_local_config_path, resolve_base_config_path
 from config_modules import env_vars
 from config_modules.merge import deep_merge
 
@@ -133,7 +134,6 @@ def _materialize_runtime_config(
     # `project_path != host_config_path` обходит самомерж когда base file
     # лежит в <cwd>/.gc/ (это бывает, если сервер запущен из проектной директории).
     try:
-        from config import _project_local_config_path  # noqa: PLC0415
         project_path = _project_local_config_path()
     except Exception:  # noqa: BLE001
         project_path = None
@@ -212,7 +212,6 @@ def _resolve_host_config_path(swarm_cfg: Dict[str, Any]) -> Optional[str]:
     if isinstance(explicit, str) and explicit.strip():
         return explicit.strip()
     try:
-        from config import resolve_base_config_path  # noqa: PLC0415
         return resolve_base_config_path()
     except Exception:  # noqa: BLE001
         logger.warning("could not resolve host config path", exc_info=True)

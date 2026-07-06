@@ -72,7 +72,7 @@ def apply_summary_state_patch(
 ) -> str:
     shared = getattr(state, "shared", None)
     if shared is None:
-        from states import SharedStateData
+        from states import SharedStateData  # nested: cycle with tools → summarize
 
         shared = SharedStateData()
         state.shared = shared

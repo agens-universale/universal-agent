@@ -27,7 +27,7 @@ non-negotiable evidence.
   `AttributeError: function not defined`, not an unrelated import error).
 - If the test passes immediately — STOP. Either the feature already works
   (you didn't need this change), or your test isn't exercising what you think.
-  See `skills_load_reference("test-driven-development", "testing-anti-patterns")`.
+  See `skills_read_reference("test-driven-development", "testing-anti-patterns")`.
 
 ### 2. GREEN — minimal code to pass
 
@@ -65,7 +65,7 @@ non-negotiable evidence.
 For common mistakes that defeat TDD:
 
 ```
-skills_load_reference("test-driven-development", "testing-anti-patterns")
+skills_read_reference("test-driven-development", "testing-anti-patterns")
 ```
 
 ## Next step

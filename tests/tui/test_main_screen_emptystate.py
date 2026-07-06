@@ -57,16 +57,16 @@ async def test_footer_switches_to_main_text_on_attach_active_task(tmp_path):
         assert "/help" in rendered
         assert "/sessions" in rendered
         assert "/config" in rendered
-        assert "/mcp" in rendered
+        assert "/mcp" not in rendered
         assert "/skills" not in rendered
         assert "/stop" not in rendered
         assert "/export" not in rendered
         assert "Esc" not in rendered
         assert "выход" not in rendered
         footer_right = pilot.app.query_one("#footer-right")
-        # Рабочая папка сессии (Path.cwd() при отсутствии задачи и pending_cwd).
-        from pathlib import Path
-        assert str(Path.cwd()) in str(footer_right.render())
+        # footer-right показывает модель·контекст (gc-ua удалено в Task 3).
+        assert "gc-ua" not in str(footer_right.render())
+        assert "M" in str(footer_right.render())
 
         # Attach task → idle (нет active_runner) → тот же набор команд, /stop НЕТ.
         pilot.app.screen.attach_active_task(tid)
@@ -77,15 +77,16 @@ async def test_footer_switches_to_main_text_on_attach_active_task(tmp_path):
         assert "/sessions" in rendered
         assert "/help" in rendered
         assert "/config" in rendered
-        assert "/mcp" in rendered
+        assert "/mcp" not in rendered
         assert "/skills" not in rendered
         assert "/export" not in rendered
         assert "/stop" not in rendered
         assert "Esc" not in rendered
         assert "back" not in rendered
-        # Right side shows the session working directory chip.
+        # footer-right показывает модель (gc-ua удалено в Task 3).
         footer_right = pilot.app.query_one("#footer-right")
-        assert str(Path.cwd()) in str(footer_right.render())
+        assert "gc-ua" not in str(footer_right.render())
+        assert "M" in str(footer_right.render())
 
 
 @pytest.mark.asyncio

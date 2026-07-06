@@ -21,9 +21,9 @@ def _default_manifest_path(root: Path) -> Path:
 
 
 def _gc_config_recommended_dir() -> Path:
-    from config_modules.env_vars import gc_paths
+    from config_modules.env_vars import effective_config_dir
 
-    return gc_paths()["config"] / "recommended_mcp"
+    return effective_config_dir() / "recommended_mcp"
 
 
 def resolve_agent_manifest_path(
@@ -47,9 +47,9 @@ def resolve_agent_manifest_path(
     if raw:
         path = Path(str(raw)).expanduser()
         if not path.is_absolute():
-            from config_modules.env_vars import gc_paths
+            from config_modules.env_vars import effective_config_dir
 
-            path = gc_paths()["config"] / path
+            path = effective_config_dir() / path
         resolved = path.resolve()
         return resolved if resolved.is_file() else None
 

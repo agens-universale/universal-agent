@@ -20,6 +20,8 @@ class AgentReplyLine(Static):
     передаёт focusable=True первому виджету события (Tab-стоп) — в т.ч. когда
     это AgentReplyLine (событие начинается с code-block или таблицы)."""
 
+    FOCUS_ON_CLICK = False   # клик не фокусирует строку; навигация — только Tab/Shift+Tab
+
     def __init__(self, content, *, event_no: int,
                  focusable: bool = False, **kwargs) -> None:
         super().__init__(content, **kwargs)

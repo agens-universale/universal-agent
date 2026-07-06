@@ -10,6 +10,7 @@ import json
 import logging
 from typing import Any, Dict, Optional
 
+from tools.schema_optional import coalesce_optional_string
 from tools.skills.registry import AmbiguousSkillId, SkillsRegistry
 from utils.arg_decorators import parse_json_object_argument
 from utils.json_arg_parser import JsonArgParseError
@@ -60,8 +61,6 @@ class SkillsListTool:
         self._registry = registry
 
     def __call__(self, pack: Optional[str] = None, **kwargs: Any) -> Dict[str, Any]:
-        from tools.schema_optional import coalesce_optional_string
-
         pack = coalesce_optional_string(pack)
         try:
             skills = self._registry.list_skills(pack=pack)
@@ -212,7 +211,7 @@ class LoadReferenceTool:
         try:
             res = self._registry.load_reference(skill_id=skill_id, slug=slug)
             return _wrap(
-                tool="skills_load_reference",
+                tool="skills_read_reference",
                 ok=True,
                 skill_id=skill_id,
                 slug=slug,
@@ -220,7 +219,7 @@ class LoadReferenceTool:
             )
         except AmbiguousSkillId as exc:
             return _wrap(
-                tool="skills_load_reference",
+                tool="skills_read_reference",
                 ok=False,
                 skill_id=skill_id,
                 slug=slug,
@@ -233,7 +232,7 @@ class LoadReferenceTool:
             )
         except KeyError as exc:
             return _wrap(
-                tool="skills_load_reference",
+                tool="skills_read_reference",
                 ok=False,
                 skill_id=skill_id,
                 slug=slug,
@@ -241,14 +240,14 @@ class LoadReferenceTool:
                 error={"code": "RESOURCE_NOT_FOUND", "message": str(exc)},
             )
         except Exception as exc:  # noqa: BLE001
-            logger.error("skills_load_reference failed: %s", exc, exc_info=True)
+            logger.error("skills_read_reference failed: %s", exc, exc_info=True)
             return _wrap(
-                tool="skills_load_reference",
+                tool="skills_read_reference",
                 ok=False,
                 skill_id=skill_id,
                 slug=slug,
                 result=None,
-                error={"code": "INTERNAL_ERROR", "message": f"skills_load_reference failed: {exc}"},
+                error={"code": "INTERNAL_ERROR", "message": f"skills_read_reference failed: {exc}"},
             )
 
 
@@ -260,7 +259,7 @@ class LoadAssetTool:
         try:
             res = self._registry.load_asset(skill_id=skill_id, slug=slug)
             return _wrap(
-                tool="skills_load_asset",
+                tool="skills_read_asset",
                 ok=True,
                 skill_id=skill_id,
                 slug=slug,
@@ -268,7 +267,7 @@ class LoadAssetTool:
             )
         except AmbiguousSkillId as exc:
             return _wrap(
-                tool="skills_load_asset",
+                tool="skills_read_asset",
                 ok=False,
                 skill_id=skill_id,
                 slug=slug,
@@ -281,7 +280,7 @@ class LoadAssetTool:
             )
         except KeyError as exc:
             return _wrap(
-                tool="skills_load_asset",
+                tool="skills_read_asset",
                 ok=False,
                 skill_id=skill_id,
                 slug=slug,
@@ -289,14 +288,14 @@ class LoadAssetTool:
                 error={"code": "RESOURCE_NOT_FOUND", "message": str(exc)},
             )
         except Exception as exc:  # noqa: BLE001
-            logger.error("skills_load_asset failed: %s", exc, exc_info=True)
+            logger.error("skills_read_asset failed: %s", exc, exc_info=True)
             return _wrap(
-                tool="skills_load_asset",
+                tool="skills_read_asset",
                 ok=False,
                 skill_id=skill_id,
                 slug=slug,
                 result=None,
-                error={"code": "INTERNAL_ERROR", "message": f"skills_load_asset failed: {exc}"},
+                error={"code": "INTERNAL_ERROR", "message": f"skills_read_asset failed: {exc}"},
             )
 
 
@@ -358,8 +357,9 @@ def get_skills_tools_data(skills_registry: SkillsRegistry) -> Dict[str, Dict[str
                 "type": "function",
                 "name": "skills_load",
                 "description": (
-                    "Load a specific skill by its id. Returns metadata, instructions, "
-                    "and lists of available references and assets. "
+                    "Load a specific skill by its id — the FIRST step for any skill, before "
+                    "skills_read_reference or skills_read_asset. Returns metadata, instructions, "
+                    "and lists of available references and assets (load those by name afterwards if needed). "
                     "Returns a JSON string envelope: {tool, ok, skill_id, error, result}. On success, result.skill contains the skill detail."
                 ),
                 "parameters": {
@@ -382,9 +382,9 @@ def get_skills_tools_data(skills_registry: SkillsRegistry) -> Dict[str, Dict[str
                 "\"required\": [\"skill_id\"], \"additionalProperties\": false}\n"
                 "\n"
                 "Usage:\n"
-                "- Use this tool after skills_list to inspect a particular skill.\n"
+                "- This is the FIRST tool to call for a skill — before any skills_read_reference or skills_read_asset.\n"
                 "- The result contains the instructions text you should follow when using this skill.\n"
-                "- It also returns which references and assets are available for this skill."
+                "- It also returns which references and assets are available — load those by name afterwards if needed."
             ),
         },
         "skills_run_script": {
@@ -449,13 +449,16 @@ def get_skills_tools_data(skills_registry: SkillsRegistry) -> Dict[str, Dict[str
                 "- The result includes stdout, stderr, exit_code, and script_ok (false when exit_code != 0)."
             ),
         },
-        "skills_load_reference": {
+        "skills_read_reference": {
             "tool_fabric": _make_fabric(LoadReferenceTool),
             "spec": {
                 "type": "function",
-                "name": "skills_load_reference",
+                "name": "skills_read_reference",
                 "description": (
-                    "Load a reference document for a given skill by slug. "
+                    "Load ONE supplementary reference file of a skill by slug. "
+                    "This does NOT load the skill itself — call skills_load(skill_id) FIRST to get "
+                    "the skill's instructions and the exact reference names. "
+                    "Use only slug values listed by skills_load (or returned in this tool's error); never invent a slug. "
                     "References live under the skill's references/ directory. "
                     "Returns a JSON string envelope: {tool, ok, skill_id, slug, error, result}. "
                     "On success, the reference content is inside result."
@@ -481,25 +484,31 @@ def get_skills_tools_data(skills_registry: SkillsRegistry) -> Dict[str, Dict[str
                 "strict": True,
             },
             "description": (
-                "Tool name: skills_load_reference\n"
+                "Tool name: skills_read_reference\n"
                 "Tool description: Loads a reference document for a skill by slug.\n"
                 "Input schema: {\"type\": \"object\", \"properties\": {\"skill_id\": {\"type\": \"string\"}, "
                 "\"slug\": {\"type\": \"string\"}}, \"required\": [\"skill_id\", \"slug\"], "
                 "\"additionalProperties\": false}\n"
                 "\n"
                 "Usage:\n"
-                "- Use this tool to fetch additional documentation or examples for a skill.\n"
+                "- Prerequisite: call skills_load(skill_id) FIRST. This tool does NOT load the skill; "
+                "it fetches one supplementary reference named in skills_load's result.\n"
+                "- Use only slug values from skills_load's available references (or from this tool's error message); "
+                "do not guess or invent slugs.\n"
                 "- Slug corresponds to the relative path under references/ without file extension.\n"
                 "- The result includes filename, content_type and textual content."
             ),
         },
-        "skills_load_asset": {
+        "skills_read_asset": {
             "tool_fabric": _make_fabric(LoadAssetTool),
             "spec": {
                 "type": "function",
-                "name": "skills_load_asset",
+                "name": "skills_read_asset",
                 "description": (
-                    "Load an asset file for a given skill by slug. "
+                    "Load ONE supplementary asset file of a skill by slug. "
+                    "This does NOT load the skill itself — call skills_load(skill_id) FIRST to get "
+                    "the skill's instructions and the exact asset names. "
+                    "Use only slug values listed by skills_load (or returned in this tool's error); never invent a slug. "
                     "Assets live under the skill's assets/ directory. "
                     "Returns a JSON string envelope: {tool, ok, skill_id, slug, error, result}. "
                     "On success, the asset content is inside result."
@@ -525,14 +534,17 @@ def get_skills_tools_data(skills_registry: SkillsRegistry) -> Dict[str, Dict[str
                 "strict": True,
             },
             "description": (
-                "Tool name: skills_load_asset\n"
+                "Tool name: skills_read_asset\n"
                 "Tool description: Loads an asset file for a skill by slug.\n"
                 "Input schema: {\"type\": \"object\", \"properties\": {\"skill_id\": {\"type\": \"string\"}, "
                 "\"slug\": {\"type\": \"string\"}}, \"required\": [\"skill_id\", \"slug\"], "
                 "\"additionalProperties\": false}\n"
                 "\n"
                 "Usage:\n"
-                "- Use this tool to fetch templates, prompts or other text assets for a skill.\n"
+                "- Prerequisite: call skills_load(skill_id) FIRST. This tool does NOT load the skill; "
+                "it fetches one supplementary asset named in skills_load's result.\n"
+                "- Use only slug values from skills_load's available assets (or from this tool's error message); "
+                "do not guess or invent slugs.\n"
                 "- Slug corresponds to the relative path under assets/ without file extension.\n"
                 "- In this minimal version all assets are treated as text."
             ),

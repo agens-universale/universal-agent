@@ -124,6 +124,22 @@ def _xdg_or(env_name: str, fallback: Path) -> Path:
     return Path(raw) if raw else fallback
 
 
+def _config_dir_usable(p: Path) -> bool:
+    """True, если в config-каталог можно писать (без создания каталога — чтобы не плодить
+    побочные эффекты на каждом вызове).
+
+    Корп-Mac/Linux иногда лочат ~/.config (Permission denied, либо каталог root-owned).
+    Идём вверх до первого существующего предка и проверяем его на запись. Если ни один
+    не writable → False, и effective_config_dir уводит config в ~/.gc.
+    """
+    probe = p
+    while not probe.exists():
+        if probe.parent == probe:   # дошли до корня — дальше некуда
+            return False
+        probe = probe.parent
+    return os.access(probe, os.W_OK)
+
+
 def gc_paths() -> dict[str, Path]:
     """Вернуть {'state': ..., 'config': ..., 'cache': ..., 'data': ...} с per-OS логикой.
 
@@ -168,6 +184,20 @@ def gc_paths() -> dict[str, Path]:
     }
 
 
+def effective_config_dir() -> Path:
+    """Writable config-каталог для пользовательского config.yml и managed config.local.yml.
+
+    Обычно = gc_paths()['config']. Но корп-Mac/Linux иногда лочат ~/.config
+    (mkdir → Permission denied). Тогда, если нет явного override (GC_HOME/GC_CONFIG_DIR),
+    уводим config в ~/.gc (домашняя папка writable). Единый источник для bootstrap и
+    MCP-wiring → оба согласованно уезжают в ~/.gc при залоченном ~/.config.
+    """
+    config_dir = gc_paths()["config"]
+    if env.gc_config_dir is None and env.gc_home is None and not _config_dir_usable(config_dir):
+        return Path.home() / ".gc"
+    return config_dir
+
+
 def project_gc_dir(cwd: str | None = None) -> Path:
     """Папка project-local артефактов: <cwd>/.gc/.
 
@@ -176,3 +206,16 @@ def project_gc_dir(cwd: str | None = None) -> Path:
     с инлайн `os.path.join(os.getcwd(), '.gc', ...)`, который этот хелпер заменяет.
     """
     return Path(cwd or os.getcwd()) / ".gc"
+
+
+def ensure_project_gc_dir(cwd: str | None = None) -> None:
+    """Создать <cwd>/.gc/ (идемпотентно, exist_ok=True). Подпапку skills/ НЕ
+    создаёт — её добавляет пользователь по необходимости. На PermissionError/
+    OSError тихо пропускает: не блокируем запуск из-за прав на запись в cwd.
+
+    Общий стартовый хелпер для gc-cli и gc-ua (project-local слой: config overlay,
+    project skills, long memory)."""
+    try:
+        os.makedirs(project_gc_dir(cwd), exist_ok=True)
+    except (PermissionError, OSError):
+        pass

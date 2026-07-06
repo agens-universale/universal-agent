@@ -4,6 +4,7 @@ import os
 
 from tools.simple_tool_base import AbstractSimpleTool
 from utils.tool_report_paths import tool_report_abspath
+from utils.atomic_io import atomic_replace
 
 
 class SaveBase64File(AbstractSimpleTool):

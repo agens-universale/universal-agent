@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from typing import Any, Mapping
 
 from intent_log.record import (
+    ACTION_FINAL_ANSWER,
     ACTION_TOOL_AGGREGATED,
     ACTION_TOOL_RAW,
     ACTION_USER_ASK,
@@ -102,6 +103,28 @@ def append_tool_raw(
             action=ACTION_TOOL_RAW,
             tool_name=name,
             content=content,
+        )
+    )
+    return [*current, record]
+
+
+def append_final_answer(
+    current: list[IntentRecord],
+    content: str,
+    *,
+    user_turn_seq: int,
+    ts: str | None = None,
+) -> list[IntentRecord]:
+    body = str(content or "").strip()
+    if not body:
+        return list(current)
+    record = validate_record(
+        IntentRecord(
+            turn=_open_turn(user_turn_seq),
+            ts=ts or utc_now_ts(),
+            action=ACTION_FINAL_ANSWER,
+            tool_name=None,
+            content=body,
         )
     )
     return [*current, record]

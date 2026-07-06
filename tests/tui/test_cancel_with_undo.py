@@ -104,10 +104,10 @@ async def test_cancel_with_undo_removes_user_widget_and_restores_input():
         assert input_field.text == "исходный запрос"
         # курсор стоит в самом конце восстановленной строки (готов к продолжению)
         assert input_field.cursor_location == input_field.document.end
-        # никакой [stopped] не появился
+        # никакой системной «·»-строки не появилось
         from tui.widgets.trace_row import TraceRow
         meta_rows = [r for r in scr.query(TraceRow) if r.has_class("line-meta")]
-        assert not any("[stopped]" in str(r.query_one(".trace-prefix").render())
+        assert not any("·" in str(r.query_one(".trace-prefix").render())
                        for r in meta_rows)
 
 
@@ -281,10 +281,10 @@ async def test_orphan_cleanup_deferred_while_thread_busy(tmp_path):
 
 @pytest.mark.asyncio
 async def test_cancel_with_undo_skipped_when_events_present():
-    """≥1 agent event → НЕ cancel-with-undo, normal [stopped]."""
+    """≥1 agent event → НЕ cancel-with-undo, нормальная отмена: индикатор → cancelled."""
     pytest.importorskip("textual")
     from tui.app import TuiApp
-    from tui.widgets.trace_row import TraceRow
+    from tui.widgets.thinking_indicator import ThinkingIndicator
 
     class _FakeRunner:
         def is_running(self) -> bool: return True
@@ -295,20 +295,23 @@ async def test_cancel_with_undo_skipped_when_events_present():
         pilot.app.active_runner = _FakeRunner()
         scr._on_user_text_submitted("запрос")
         scr._events_since_last_user_send = 2  # агент уже что-то выдал
+        scr._show_thinking_indicator(state="thinking")
+        await pilot.pause()
 
         scr._cmd_stop()
         await pilot.pause()
-        meta_rows = [r for r in scr.query(TraceRow) if r.has_class("line-meta")]
-        assert any("[stopped]" in str(r.query_one(".trace-prefix").render())
-                   for r in meta_rows)
+        # Индикатор остаётся в терминальном состоянии cancelled.
+        ind = scr._thinking
+        assert ind is not None
+        assert ind._state == "cancelled"
 
 
 @pytest.mark.asyncio
 async def test_cancel_with_undo_skipped_when_input_not_empty():
-    """input.text != "" → НЕ cancel-with-undo (юзер начал новую печать)."""
+    """input.text != "" → НЕ cancel-with-undo, нормальная отмена: индикатор → cancelled."""
     pytest.importorskip("textual")
     from tui.app import TuiApp
-    from tui.widgets.trace_row import TraceRow
+    from tui.widgets.thinking_indicator import ThinkingIndicator
 
     class _FakeRunner:
         def is_running(self) -> bool: return True
@@ -320,9 +323,12 @@ async def test_cancel_with_undo_skipped_when_input_not_empty():
         scr._on_user_text_submitted("первый запрос")
         scr._events_since_last_user_send = 0
         scr.query_one("#cmdinput").text = "новая печать"
+        scr._show_thinking_indicator(state="thinking")
+        await pilot.pause()
 
         scr._cmd_stop()
         await pilot.pause()
-        meta_rows = [r for r in scr.query(TraceRow) if r.has_class("line-meta")]
-        assert any("[stopped]" in str(r.query_one(".trace-prefix").render())
-                   for r in meta_rows)
+        # Индикатор остаётся в терминальном состоянии cancelled.
+        ind = scr._thinking
+        assert ind is not None
+        assert ind._state == "cancelled"

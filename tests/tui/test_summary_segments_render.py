@@ -1,4 +1,7 @@
-"""TUI: при ≥2 сжатиях сырьём только 2 последних сегмента + маркеры #K для всех сжатий."""
+"""TUI: при ≥2 сжатиях все сегменты рендерятся сырьём + маркеры #K между ними.
+
+Поведение зафиксировано в 30657a9 (полный трейс, старые сегменты не схлопываются):
+показываются ВСЕ сегменты, а маркер сжатия ставится между ними."""
 import json
 
 import pytest
@@ -19,7 +22,7 @@ def _write(d, name, payloads):
 
 
 @pytest.mark.asyncio
-async def test_two_segments_raw_plus_markers(tmp_path):
+async def test_all_segments_raw_plus_markers(tmp_path):
     pytest.importorskip("textual")
     from tui.app import TuiApp
     from tui.widgets.trace_row import SummaryMarker
@@ -40,8 +43,7 @@ async def test_two_segments_raw_plus_markers(tmp_path):
         # 2 маркера сжатий (#1, #2).
         markers = [w for w in screen.query(SummaryMarker) if w.has_class("summary-marker")]
         assert len(markers) == 2
-        # сырьём — только сег1 и сег2 (сег0 свёрнут, не показан).
+        # сырьём — ВСЕ сегменты (сег0, сег1, сег2); полный трейс, маркеры между ними.
         texts = [r._text for r in screen.query(UserReplyContainer)]
         joined = " ".join(texts)
-        assert "сег1" in joined and "сег2" in joined
-        assert "сег0" not in joined
+        assert "сег0" in joined and "сег1" in joined and "сег2" in joined

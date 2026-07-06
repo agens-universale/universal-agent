@@ -8,6 +8,7 @@ from config_modules.message_notice import (
     tool_usage_notice_policy_enabled,
 )
 from message_policy.user_message_policy import wrap_technical_user_content, TECHNICAL_TYPE_CURRENT_CONTEXT
+from utils.generate_message_id import generate_msg_id_sha256 as generate_message_id
 
 
 def batch_used_tool(step_messages: list[dict[str, Any]], tool_name: str) -> bool:
@@ -157,8 +158,6 @@ def wrap_thread_memory_technical_user_message(
     *,
     message_id_suffix: str = "mem_gate",
 ) -> dict[str, Any]:
-    from utils.generate_message_id import generate_msg_id_sha256 as generate_message_id
-
     return {
         "role": "user",
         "content": wrap_technical_user_content(

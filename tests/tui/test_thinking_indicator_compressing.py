@@ -6,7 +6,7 @@ def test_compressing_state_renders_fixed_text():
     ind = ThinkingIndicator(state="compressing")
     txt = ind._render_text().plain
     assert "сжимаю контекст" in txt
-    assert "s)" in txt  # elapsed присутствует
+    assert "с)" in txt  # elapsed присутствует
 
 
 def test_set_state_accepts_compressing():

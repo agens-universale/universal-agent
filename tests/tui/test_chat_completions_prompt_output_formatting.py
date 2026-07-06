@@ -63,3 +63,14 @@ def test_base_prompt_has_no_asking_block():
     body = _read_prompt("chat_completions_system_prompt.md")
     assert "designated channel" not in body
     assert "invisible to the user" not in body
+
+
+def test_tui_file_hides_tool_machinery_from_user():
+    """TUI-инструкция запрещает нарративить имена тулов / runtime contract юзеру,
+    но разрешает описывать действия в естественной речи."""
+    body = _read_prompt("chat_completions_tui_special_instructions.md")
+    assert "don't name the specific tools" in body
+    assert "not which tool performed it" in body
+    # tool-agnostic: в инструкции нет литеральных имён тулов
+    assert "turn_ask_human" not in body
+    assert "session_memory" not in body

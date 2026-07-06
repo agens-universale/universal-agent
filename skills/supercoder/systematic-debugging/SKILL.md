@@ -36,7 +36,7 @@ Stop guessing. Find the root cause, not a symptom. Four phases, in order.
   observed state?" Walk up the chain.
 - Stop at the boundary you can change. Don't blame "the framework" / "the OS"
   unless you've actually traced through and the boundary is real.
-- See `skills_load_reference("systematic-debugging", "root-cause-tracing")`
+- See `skills_read_reference("systematic-debugging", "root-cause-tracing")`
   for the chain-of-cause technique.
 
 ## Phase 4 — Fix at root cause
@@ -61,11 +61,11 @@ Stop guessing. Find the root cause, not a symptom. Four phases, in order.
 
 ## References
 
-- `skills_load_reference("systematic-debugging", "root-cause-tracing")` —
+- `skills_read_reference("systematic-debugging", "root-cause-tracing")` —
   chain-of-cause technique.
-- `skills_load_reference("systematic-debugging", "defense-in-depth")` — where
+- `skills_read_reference("systematic-debugging", "defense-in-depth")` — where
   to validate inputs without masking bugs.
-- `skills_load_reference("systematic-debugging", "condition-based-waiting")` —
+- `skills_read_reference("systematic-debugging", "condition-based-waiting")` —
   fixing flaky async/timing bugs without sleep-based hacks.
 
 ## Next step

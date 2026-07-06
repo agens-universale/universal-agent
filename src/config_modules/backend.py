@@ -43,6 +43,7 @@ class BackendConfig(BaseModel):
     openai_strict_tools_schema: bool = False
     use_ssl: bool = True
     use_retry: bool = False
+    stream: bool = True
 
     @field_validator("api_mode")
     @classmethod

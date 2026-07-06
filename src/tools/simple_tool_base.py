@@ -1,3 +1,4 @@
+import json
 from abc import ABC, abstractmethod
 from types import SimpleNamespace
 from typing import Any, Dict, Optional
@@ -86,5 +87,4 @@ class AbstractSimpleTool(ABC):
             "error": None,
             "synthetic": True,
         }
-        import json
         return json.dumps(payload, ensure_ascii=False)

@@ -1,0 +1,26 @@
+from typing import Literal, Optional
+
+from pydantic import BaseModel, ConfigDict
+
+
+class TuiConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    # Мастер-свитч live-стриминга в TUI (chat_completions). На CLI/server/swarm
+    # НЕ влияет — там всегда non-stream (стрим гейтится наличием on_stream_delta,
+    # который ставит только TUI). None = не задан → legacy-фолбэк на backend.stream.
+    stream: Optional[bool] = None
+    # Что рендерить во время стрима (только chat_completions + stream:true;
+    # на счётчик токенов/индикатор не влияет — только контент):
+    #   minimal (default) — индикатор + счётчик, без текста стрима;
+    #   answer            — прогрессивный ответ, дорастающий до финала;
+    #   answer_reasoning  — + однострочный «глазок» рассуждения «⠇ …».
+    stream_display: Literal["minimal", "answer", "answer_reasoning"] = "minimal"
+    # adaptive bounce: как поступать с текст-ответом без тула.
+    # deny — всегда bounce (как CLI); judge — судья intent_guard решает;
+    # allow — всегда принять текст (ни bounce, ни судьи).
+    text_answer_mode: Literal["deny", "judge", "allow"] = "judge"
+    # Только TUI: оставить лишь корневой AGENTS.md (L3), отбросив global
+    # (~/.config/gc) и .gc/AGENTS.md. Игнорируется, если задан
+    # paths.agent_md_path (путь главнее флага).
+    agentsmd_override: bool = False

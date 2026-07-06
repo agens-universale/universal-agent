@@ -14,15 +14,22 @@ class ChatCompletionsPromptConfigTest(unittest.TestCase):
             with open(cfg_path, "w", encoding="utf-8") as fd:
                 fd.write("backend:\n  api_mode: chat_completions\n")
 
+            # prompts/ рядом с конфигом → дефолты резолвятся config_dir-relative
+            prompts_dir = os.path.join(tmp_dir, "prompts")
+            os.makedirs(prompts_dir, exist_ok=True)
+            for name in ("chat_completions_system_prompt.md",
+                         "chat_completions_summary_prompt.md"):
+                with open(os.path.join(prompts_dir, name), "w", encoding="utf-8") as fd:
+                    fd.write("x")
+
             cfg = load_config(cfg_path)
             self.assertEqual(
                 cfg["chat_completions_system_prompt_path"],
                 os.path.join(tmp_dir, "prompts", "chat_completions_system_prompt.md"),
             )
-            self.assertTrue(
-                cfg["summary_params"]["chat_completions_summary_prompt_path"].endswith(
-                    "prompts/chat_completions_summary_prompt.md"
-                )
+            self.assertEqual(
+                cfg["summary_params"]["chat_completions_summary_prompt_path"],
+                os.path.join(tmp_dir, "prompts", "chat_completions_summary_prompt.md"),
             )
 
     def test_relative_prompt_path_resolved_from_config_dir(self):

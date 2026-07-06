@@ -2,7 +2,7 @@ import json
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from config_modules.intent_scope import IntentScopeConfig, intent_scope_from_config_dict
 from config_modules.chat_completions import (
@@ -50,6 +50,7 @@ class RunContext:
     mcp_status: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     project_gc_dir: Path = field(default_factory=lambda: Path("."))
     environment: Optional[Any] = None
+    on_stream_delta: Optional[Callable[[str, str], None]] = None
 
 
 def create_run_context(
@@ -61,6 +62,7 @@ def create_run_context(
     environment: Optional[Any] = None,
     loop: Optional[Any] = None,
     os_backend: Optional[FsBackend] = None,
+    on_stream_delta=None,
 ) -> RunContext:
     """
     Создать RunContext для одного запуска агента.
@@ -108,6 +110,7 @@ def create_run_context(
         project_gc_dir=_resolve_project_gc_dir(),
         environment=environment,
         os_backend=backend,
+        on_stream_delta=on_stream_delta,
     )
 
     run_logger.debug(

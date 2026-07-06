@@ -57,6 +57,9 @@ class TraceRow(Widget):
     }
     """
     can_focus = True
+    # Клик НЕ фокусирует строку трейса (навигация — только Tab/Shift+Tab, как в
+    # PowerShell). Tab-фокус идёт через set_focus и этим флагом не затрагивается.
+    FOCUS_ON_CLICK = False
 
     def __init__(
         self,
@@ -81,6 +84,22 @@ class TraceRow(Widget):
         # Tab-цикл = «1 событие = 1 Tab-стоп»; continuation prose, `* note:`,
         # code-block-панели после первой — focusable=False.
         self.can_focus = focusable
+
+    def set_prefix(self, prefix: str) -> None:
+        """Обновить prefix-колонку после монтирования (напр. стрелка ▸/▾)."""
+        self._prefix = prefix
+        try:
+            self.query_one(".trace-prefix", Static).update(prefix)
+        except Exception:
+            pass
+
+    def set_content(self, content) -> None:
+        """Обновить content-колонку после монтирования (пер-тик апдейт стрим-прозы)."""
+        self._content = content
+        try:
+            self.query_one(".trace-content", Static).update(content)
+        except Exception:
+            pass
 
     def compose(self) -> ComposeResult:
         with Horizontal():

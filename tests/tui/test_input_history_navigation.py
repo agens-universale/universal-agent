@@ -159,6 +159,89 @@ async def test_up_arrow_triggers_history_prev_on_first_line(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_cursor_visual_line_helpers_with_soft_wrap():
+    """CommandTextArea знает свою ВИЗУАЛЬНУЮ геометрию (soft-wrap): длинная строка
+    переносится → курсор логически в row 0, но визуально может быть на нижней
+    строке. first/last_visual_line отражают визуальный ряд, а не логический."""
+    pytest.importorskip("textual")
+    from textual.app import App, ComposeResult
+    from tui.widgets.command_input import CommandTextArea
+
+    class _Host(App):
+        def compose(self) -> ComposeResult:
+            yield CommandTextArea(id="cmdinput")
+
+    async with _Host().run_test(size=(20, 8)) as pilot:
+        ta = pilot.app.query_one(CommandTextArea)
+        ta.text = "aaaa bbbb cccc dddd eeee ffff gggg"
+        await pilot.pause()
+        assert ta.wrapped_document.height > 1   # предусловие: реально перенеслось
+
+        ta.move_cursor((0, 0))
+        assert ta.cursor_on_first_visual_line() is True
+        assert ta.cursor_on_last_visual_line() is False
+
+        ta.move_cursor((0, len(ta.text)))
+        assert ta.cursor_on_first_visual_line() is False
+        assert ta.cursor_on_last_visual_line() is True
+
+
+@pytest.mark.asyncio
+async def test_up_on_wrapped_lower_visual_line_does_not_trigger_history(tmp_path):
+    """↑ при курсоре на нижней ВИЗУАЛЬНОЙ строке переноса → курсор вверх, история
+    не трогается (раньше логич. row 0 ложно звал history_prev — баг soft-wrap)."""
+    pytest.importorskip("textual")
+    from tui.app import TuiApp
+    from tui.widgets.command_input import CommandTextArea
+
+    async with TuiApp(threads_dir=str(tmp_path / "threads")).run_test(size=(24, 12)) as pilot:
+        scr = pilot.app.screen
+        scr.attach_active_task("task-1")
+        await pilot.pause()
+        scr._history.append("история")
+
+        inp = scr.query_one("#cmdinput", CommandTextArea)
+        inp.focus()
+        long_line = "aaaa bbbb cccc dddd eeee ffff gggg hhhh"
+        inp.text = long_line
+        await pilot.pause()
+        assert inp.wrapped_document.height > 1          # перенос случился
+        inp.move_cursor((0, len(long_line)))
+        assert not inp.cursor_on_first_visual_line()    # есть куда вверх
+        await pilot.press("up")
+        await pilot.pause()
+        assert inp.text == long_line                    # история НЕ подменила текст
+
+
+@pytest.mark.asyncio
+async def test_down_on_wrapped_upper_visual_line_moves_cursor_not_history(tmp_path):
+    """↓ при курсоре на верхней визуальной строке переноса → курсор спускается на
+    строку ниже (history_next не перехватывает)."""
+    pytest.importorskip("textual")
+    from tui.app import TuiApp
+    from tui.widgets.command_input import CommandTextArea
+
+    async with TuiApp(threads_dir=str(tmp_path / "threads")).run_test(size=(24, 12)) as pilot:
+        scr = pilot.app.screen
+        scr.attach_active_task("task-1")
+        await pilot.pause()
+
+        inp = scr.query_one("#cmdinput", CommandTextArea)
+        inp.focus()
+        long_line = "aaaa bbbb cccc dddd eeee ffff gggg hhhh"
+        inp.text = long_line
+        await pilot.pause()
+        assert inp.wrapped_document.height > 1
+        inp.move_cursor((0, 0))
+        assert not inp.cursor_on_last_visual_line()     # есть куда вниз
+        before_y = inp.wrapped_document.location_to_offset(inp.cursor_location).y
+        await pilot.press("down")
+        await pilot.pause()
+        after_y = inp.wrapped_document.location_to_offset(inp.cursor_location).y
+        assert after_y > before_y                       # курсор спустился визуально
+
+
+@pytest.mark.asyncio
 async def test_send_appends_to_history_and_resets_state(tmp_path):
     """user-send append'ит в history + reset navigation state."""
     pytest.importorskip("textual")

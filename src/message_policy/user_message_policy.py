@@ -2,6 +2,8 @@ import json
 import re
 from typing import Any, Dict, List
 
+from constants.tool_names import FS_APPEND_FILE_NAME, FS_WRITE_FILE_NAME
+
 TECHNICAL_TYPE_TECHNICAL = "technical"
 TECHNICAL_TYPE_ERROR_MESSAGE = "error_message"
 TECHNICAL_TYPE_DIALOG_SUMMARY = "dialog_summary"
@@ -108,11 +110,28 @@ def user_content_to_text(content: Any) -> str:
     return str(content)
 
 
+def user_display_text(message: Any) -> str | None:
+    """Человеко-текст user-сообщения для показа: display_content если ключ есть
+    (включая ""), иначе content. None — если это не user-сообщение."""
+    if not isinstance(message, dict):
+        return None
+    if str(message.get("role", "")).strip().lower() != "user":
+        return None
+    disp = message.get("display_content")
+    if disp is not None:
+        return str(disp)
+    return user_content_to_text(message.get("content"))
+
+
 def extract_real_user_message_text(message: Any) -> str:
     if not isinstance(message, dict):
         return ""
     if str(message.get("role", "")).strip().lower() != "user":
         return ""
+    disp = message.get("display_content")
+    if disp is not None:
+        # Чистый человеко-текст (skill-инжект): "" = доставка без промпта → пусто.
+        return str(disp).strip()
     content = user_content_to_text(message.get("content")).strip()
     if not content:
         return ""
@@ -179,11 +198,11 @@ def build_invalid_tool_call_feedback_message(message: dict) -> dict:
         error_text = f"invalid JSON in tool arguments: {exc}"
 
     mitigation = ""
-    if tool_name in ("write_to_file", "append_to_file"):
+    if tool_name in (FS_WRITE_FILE_NAME, FS_APPEND_FILE_NAME):
         mitigation = (
             "\n\nRegenerate with valid JSON. For large file bodies, follow the tool "
-            "descriptions: brief `write_to_file` then multiple `append_to_file` calls "
-            "with moderate chunks-not one oversized `arguments` payload."
+            f"descriptions: brief `{FS_WRITE_FILE_NAME}` then multiple `{FS_APPEND_FILE_NAME}` "
+            "calls with moderate chunks-not one oversized `arguments` payload."
         )
 
     feedback = (
