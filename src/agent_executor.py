@@ -33,11 +33,9 @@ from usage.account import UsageAccount
 from usage.report import build_run_usage_report
 from thread_store import (
     ThreadSession,
-    load_thread_meta,
     make_message_key,
     reset_thread_files,
     resolve_threads_dir,
-    save_thread_meta,
     update_tui_meta,
 )
 from tools.connect_mcp.persistent_stdio import PersistentStdioRegistry

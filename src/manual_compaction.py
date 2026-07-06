@@ -19,7 +19,13 @@ from thread_store import ThreadSession, save_thread_meta, load_thread_meta
 from usage.account import UsageAccount
 
 
-def compact_thread(ctx: Any, thread_id: str,  _lock: Lock, self_state: State, system: str | None = None,) -> bool:
+def compact_thread(
+    ctx: Any,
+    thread_id: str,
+    _lock: Lock | None = None,
+    self_state: State | None = None,
+    system: str | None = None,
+) -> bool:
     """chat_completions + непустой thread_id → сжатие выполнено (True); иначе False."""
     config_dict = ctx.config_dict
     backend_api_mode = str(config_dict.get("backend_api_mode", "responses")).strip().lower()
@@ -84,7 +90,14 @@ def compact_thread(ctx: Any, thread_id: str,  _lock: Lock, self_state: State, sy
         save_thread_meta(threads_dir, system_id, thread_id, persisted_meta)
     except Exception:
         pass
-    with _lock:
-        if self_state is not None and getattr(self_state, "thread_id", None) == thread_id:
+    # Обновляем live-state (что читает TUI-футер) только когда он передан и это тот
+    # же тред — под замком executor'а. Для программного/standalone вызова (_lock или
+    # self_state = None) шаг пропускается.
+    if (
+        _lock is not None
+        and self_state is not None
+        and getattr(self_state, "thread_id", None) == thread_id
+    ):
+        with _lock:
             self_state.usage = UsageAccount.from_meta(state.usage.to_meta())
     return True

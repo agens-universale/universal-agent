@@ -1,4 +1,4 @@
-"""inline /skill <id> <prompt>: префикс «Используй skill …» в самой реплике.
+"""inline /skill <id> <prompt>: префикс «Use skill …» в самой реплике.
 
 Та же форма, что у pending-пути (_consume_pending_prefix) — единственная,
 доказанно работающая на слабых моделях. Technical-обёртка НЕ используется:
@@ -38,7 +38,7 @@ async def test_skill_inline_prompt_prefixes_single_message(tmp_path):
         await pilot.pause(0.3)
         msgs = captured["messages"]
         assert len(msgs) == 1                  # одно сообщение, не пара
-        assert msgs[0].startswith("Используй skill `coder`.")
+        assert msgs[0].startswith("Use skill `coder`.")
         assert "почини баг в парсере" in msgs[0]
         assert "<technical" not in msgs[0]
         assert app.tui_state.pending_skill_id is None
@@ -75,7 +75,7 @@ async def test_skill_inline_prompt_during_run_single_add_message(tmp_path):
         scr._handle_command("skill coder добавь логирование")
         await pilot.pause(0.3)
         assert len(added) == 1
-        assert added[0]["content"].startswith("Используй skill `coder`.")
+        assert added[0]["content"].startswith("Use skill `coder`.")
         assert "добавь логирование" in added[0]["content"]
         assert "<technical" not in added[0]["content"]
 
