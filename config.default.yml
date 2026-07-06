@@ -96,10 +96,64 @@ security:
     enabled: true
     mode: ask
     allowed_schemes: ["http", "https"]
-    url_blacklist: []
+    # Blacklist хостов / URL-паттернов.
+    # Матчинг: fnmatch по host и по полному URL (case-insensitive);
+    # "*.suffix" матчит любой ПОДДОМЕН (apex без поддомена не матчится).
+    # Примеры правил:
+    #   "host"           — точный хост;
+    #   "*.suffix"       — любой поддомен suffix;
+    #   "10.*"           — fnmatch wildcard;
+    #   "172.1[6-9].*"   — fnmatch character class.
+    # SSRF-blacklist: cloud metadata, loopback/link-local, RFC1918.
+    # Расширить — .gc/config.yml (merge добавляет, не сбрасывает).
+    url_blacklist:
+      # --- Cloud metadata endpoints ---
+      - "169.254.169.254"            # AWS / GCP / OpenStack IMDS
+      - "metadata.google.internal"   # GCP metadata (apex)
+      - "*.metadata.google.internal" # GCP metadata (поддомены)
+      - "metadata.azure.com"         # Azure metadata (apex)
+      - "*.metadata.azure.com"       # Azure metadata (поддомены)
+      # --- Loopback / link-local ---
+      - "localhost"
+      - "127.*"                      # весь loopback-блок 127.0.0.0/8
+      - "::1"                        # IPv6 loopback
+      - "0.0.0.0"
+      - "169.254.*"                  # link-local (включая IMDS-подсеть)
+      # --- RFC1918 private networks ---
+      - "10.*"                       # 10.0.0.0/8
+      - "192.168.*"                  # 192.168.0.0/16
+      - "172.1[6-9].*"               # 172.16-19 (часть 172.16.0.0/12)
+      - "172.2[0-9].*"               # 172.20-29
+      - "172.3[0-1].*"               # 172.30-31
   read_guard:
     enabled: true
     mode: ask
+    allowed_read_roots: []
+    allowed_read_paths:
+      - "~/.local/share/gc/skills"
+      - "<launch_root>/.gc/skills"
+    denied_read_paths:
+      - "~/.ssh"
+      - "~/.aws"
+      - "~/.config/gcloud"
+      - "~/.gnupg"
+      - "/etc/ssl/private"
+      - "/proc"
+      - "/sys"
+      - "~/.local/state/gc"
+      - "<launch_root>/.gc"
+    denied_file_patterns:
+      - ".env"
+      - ".env.*"
+      - "*id_rsa*"
+      - "*id_ed25519*"
+      - "*.pem"
+      - "*credentials*.json"
+      - "*.sqlite"
+    denied_extensions:
+      - ".key"
+      - ".pfx"
+      - ".jks"
   protected_paths:
     enabled: true
     extra: []

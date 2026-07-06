@@ -99,7 +99,7 @@ security:
 
 Симметричен `write_guard`, но для чтения.
 
-**Рекомендованный продакшен-конфиг** (защита системных секретов; в дефолтном `config.yml` пустой):
+**Дефолт в shipped `config.yml` / `config.default.yml`** (защита системных секретов; в pydantic-дефолтах кода списки пустые):
 
 ```yaml
 security:
@@ -108,8 +108,8 @@ security:
     mode: deny
     allowed_read_roots: []             # = [launch_root]
     allowed_read_paths:
-      - "~/.local/state/gc/skills"     # exceptions для скиллов внутри gc/
-      - "<launch_root>/.gc/skills"
+      - "~/.local/share/gc/skills"    # user-layer skills
+      - "<launch_root>/.gc/skills"    # project-layer skills (внутри denied .gc)
     denied_read_paths:
       - "~/.ssh"
       - "~/.aws"
@@ -148,7 +148,7 @@ security:
 
 - Плейсхолдеры `~`, `%USERPROFILE%`, `<launch_root>` резолвятся в путях `denied_*` / `allowed_*`.
 - Symlink защита: путь нормализуется через `realpath` до проверки.
-- Скиллы (`<launch_root>/skills/`, `<launch_root>/.gc/skills/`, `~/.local/state/gc/skills/`) автоматически readable через `_resolve_skills_root`, даже если они вне `allowed_read_roots`.
+- Скиллы (`<launch_root>/.gc/skills/`, `~/.local/share/gc/skills/`) — через `allowed_read_paths`; bundled system skills — через `_resolve_skills_root` в `extra_allowed_paths`.
 
 ## `url_policy` — schema + SSRF-blacklist
 
@@ -201,13 +201,13 @@ security:
 
 Запись в `download_dir` дополнительно проходит `write_guard` (если `enabled: true`): абсолютный каталог вне периметра нужно добавить в `write_guard.extra_paths`.
 
-### Рекомендованный SSRF-blacklist
+### SSRF-blacklist
 
-> ⚠️ `url_blacklist` по умолчанию **пустой** — встроенного дефолта в коде нет.
-> Чтобы получить базовую SSRF-защиту, добавьте набор ниже вручную (например,
-> в global `config.yml` или per-project `.gc/config.yml`). Списки в security
-> мерджатся конкатенацией с dedup, поэтому проектные правила его расширяют,
-> а не сбрасывают.
+> В shipped `config.yml` / `demo_config.yml` уже задан базовый SSRF-blacklist
+> (metadata, loopback/link-local, RFC1918). В pydantic-дефолтах кода список
+> пустой (`[]`) — для тестов и bench-конфигов. Списки в security мерджатся
+> конкатенацией с dedup: per-project `.gc/config.yml` может только **расширить**
+> blacklist, не сбросить global.
 
 Набор закрывает три класса internal-таргетов, к которым агента нельзя
 пускать через `fetch_url` / `simple_fetch_url`:

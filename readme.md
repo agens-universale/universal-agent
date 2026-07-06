@@ -29,7 +29,7 @@ Background и CLI-клиент для работы с агентом GigaCode: �
 > 📄 **Наглядная инструкция по установке (HTML):** [docs/gc-ua-install.html](docs/gc-ua-install.html) — пошаговая страница, откройте локально в браузере.
 
 ```bash
-uv tool install -e .   # gc-cli + gc-ua (TUI по умолчанию)
+uv tool install -e .   # gc-cli + gc-ua (TUI по умолчанию). При реинсталле добавьте --force
 gc-mcp install duckduckgo_search   # поставить один MCP + авто-подключить в ~/.gc/config.local.yml
 # gc-mcp install   # поставить все MCP из манифеста
 ```
