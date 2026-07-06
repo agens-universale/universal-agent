@@ -1,13 +1,17 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from pathlib import Path
 
 from instructions.layers import instruction_layer_specs
 
 _PREAMBLE = (
     "Precedence: when instructions conflict, more specific instructions override "
-    "more general ones; specificity increases down this list — project-personal "
-    "overrides project-team, which overrides global."
+    "more general ones; specificity increases down this list."
+)
+_L0_TITLE = "Launch role instructions"
+AGENTSMD_OVERRIDE_IGNORED_WARNING = (
+    "agentsmd_override не применён: задан agent_md_path (путь главнее флага)"
 )
 
 
@@ -15,6 +19,7 @@ _PREAMBLE = (
 class LoadedInstructions:
     text: str
     loaded_ids: list[str]
+    warnings: list[str] = field(default_factory=list)
 
 
 def _read(path) -> str | None:
@@ -24,24 +29,44 @@ def _read(path) -> str | None:
         return None
 
 
+def _wrap(sections: list[str]) -> str:
+    return _PREAMBLE + "\n\n" + "\n\n".join(sections)
+
+
 def build_instructions(
-    *, agent_md_path: str | None, cwd: str | None = None, overwrite: bool = False
+    *,
+    agent_md_path: str | None,
+    is_tui: bool,
+    agentsmd_override: bool = False,
+    cwd: str | None = None,
 ) -> LoadedInstructions:
-    specs = instruction_layer_specs(agent_md_path=agent_md_path, cwd=cwd)
-    if overwrite:
-        specs = [s for s in specs if s.scope == "project"]
-
-    sections: list[str] = []
-    loaded: list[str] = []
-    for spec in specs:
-        body = _read(spec.path)
+    # 1. agent_md_path задан → ТОЛЬКО L0 (замена), в любом режиме. Путь > флаг.
+    if agent_md_path:
+        warnings: list[str] = []
+        if is_tui and agentsmd_override:
+            warnings.append(AGENTSMD_OVERRIDE_IGNORED_WARNING)
+        body = _read(Path(agent_md_path))
         if body is None:
-            continue
-        loaded.append(spec.id)
-        sections.append(f"## {spec.title}\n{body.rstrip()}")
+            return LoadedInstructions(text="", loaded_ids=[], warnings=warnings)
+        text = _wrap([f"## {_L0_TITLE}\n{body.rstrip()}"])
+        return LoadedInstructions(text=text, loaded_ids=["L0"], warnings=warnings)
 
-    if not sections:
-        return LoadedInstructions(text="", loaded_ids=[])
+    # 2. TUI без L0 → собрать L1–L3 (или только L3 при override).
+    if is_tui:
+        specs = instruction_layer_specs(cwd=cwd)
+        if agentsmd_override:
+            specs = [s for s in specs if s.id == "L3"]
+        sections: list[str] = []
+        loaded: list[str] = []
+        for spec in specs:
+            body = _read(spec.path)
+            if body is None:
+                continue
+            loaded.append(spec.id)
+            sections.append(f"## {spec.title}\n{body.rstrip()}")
+        if not sections:
+            return LoadedInstructions(text="", loaded_ids=[], warnings=[])
+        return LoadedInstructions(text=_wrap(sections), loaded_ids=loaded, warnings=[])
 
-    text = _PREAMBLE + "\n\n" + "\n\n".join(sections)
-    return LoadedInstructions(text=text, loaded_ids=loaded)
+    # 3. CLI/server/swarm без L0 → пусто.
+    return LoadedInstructions(text="", loaded_ids=[], warnings=[])

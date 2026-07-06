@@ -150,9 +150,10 @@ def resolve_tool_context(*args: Any, **kwargs: Any) -> ToolSecurityContext:
         or (project_data or {}).get("projectDir")
         or os.getcwd()
     )
-    # Safe-by-default-OFF: каждый security-слой включается ТОЛЬКО явным
-    # `enabled: true`. Если ключа верхнего уровня (write_guard / url_policy)
-    # нет в конфиге — слой выключен.
+    # Runtime-fallback при отсутствии блока — OFF. На нормальном пути load_config
+    # кладёт write_guard/url_policy/command_moderation из pydantic (secure-by-default:
+    # enabled=True, mode=ask), поэтому эти fallback'и достижимы лишь в обход
+    # load_config (bespoke/тест-конфиги), а не в проде.
     moderation = config_dict.get("command_moderation") or {}
     write_guard_cfg = config_dict.get("write_guard") or {}
     url_policy_cfg = config_dict.get("url_policy") or {}
@@ -199,8 +200,8 @@ def enforce_write_guard(
             except ValueError:
                 candidate_path = None
             if candidate_path is not None:
-                from security.protected_paths import protected_decision, protection_enabled
-                from security.confirm_port import request_confirm
+                from security.protected_paths import protected_decision, protection_enabled  # nested: cycle with path_policy
+                from security.confirm_port import request_confirm  # nested: cycle with path_policy
                 _cfg = getattr(context.ctx, "config_dict", None) or {}
                 if protection_enabled(_cfg):
                     _decision = protected_decision(candidate_path, cwd=context.launch_root)
@@ -478,7 +479,7 @@ def _ask_user_confirmation_for_write(
     ctx: Any = None,
     decision_key: str | None = None,
 ) -> bool:
-    from security.confirm_port import request_confirm
+    from security.confirm_port import request_confirm  # nested: cycle with path_policy
     return request_confirm(
         title="Защита записи",
         question=f"Разрешить запись вне периметра проекта в {path}?",

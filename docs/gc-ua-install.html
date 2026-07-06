@@ -172,6 +172,19 @@
       </table>
     </li>
 
+    <li class="step">
+      <div class="step-h"><span class="num">7</span><h3>Обновление и удаление <span style="color:var(--mut2);font-weight:400;font-size:14px">— когда понадобится</span></h3></div>
+      <p><b style="color:#cfd6e2">Обновить</b> до свежей версии — та же команда, что установка, но с <span class="inl">--reinstall</span> (подтягивает последний код с ветки):</p>
+      <div class="code"><button class="cp" onclick="cp(this)">⧉</button><span class="tok-cmd">uv</span> tool install --reinstall "git+https://gitverse.ru/gigacode-ai/background-agent"</div>
+      <div class="note warn"><span class="ic">!</span><div>В <b>корпоративной сети Сбера</b> так же добавьте <span class="inl">--system-certs</span>.</div></div>
+      <p><b style="color:#cfd6e2">Удалить</b> — сначала MCP, затем сам агент (иначе <span class="inl">gc-mcp</span> исчезнет вместе с ним):</p>
+      <div class="code"><button class="cp" onclick="cp(this)">⧉</button><span class="tok-cmd">gc-mcp</span> remove --all        <span class="tok-cmt"># если ставили MCP-серверы</span>
+<span class="tok-cmd">uv</span> tool uninstall gc-ua</div>
+      <p style="color:var(--mut2);font-size:14px;margin:10px 0 0">Полностью стереть конфиг, токены и данные <b>— необязательно:</b></p>
+      <div class="code" data-os="win"><button class="cp" onclick="cp(this)">⧉</button><span class="tok-cmd">Remove-Item</span> -Recurse -Force "$env:USERPROFILE\.gc"</div>
+      <div class="code" data-os="nix"><button class="cp" onclick="cp(this)">⧉</button><span class="tok-cmd">rm</span> -rf ~/.config/gc ~/.local/share/gc ~/.local/state/gc ~/.cache/gc</div>
+    </li>
+
   </ol>
 
   <div class="note info"><span class="ic">i</span><div><b>Если не работает.</b>

@@ -12,7 +12,9 @@ import re
 import shlex
 from typing import Any, Callable
 
-from security.protected_paths import classify_path, protected_paths
+from security.command_moderation import effective_command_cwd
+from security.path_policy import resolve_tool_context, _extract_config_dict
+from security.protected_paths import classify_path, protected_paths, protection_enabled
 
 _TOKEN_RE = re.compile(r"[\s=;&|()<>]+")
 
@@ -56,12 +58,6 @@ def enforce_command_guard(
     def decorator(func: Callable[..., str]) -> Callable[..., str]:
         @functools.wraps(func)
         def wrapper(*args: Any, **kwargs: Any) -> str:
-            # Local imports to avoid import cycles (command_guard ← protected_paths OK;
-            # confirm_port imports path_policy which is fine; path_policy ← no guard).
-            from security.path_policy import resolve_tool_context, _extract_config_dict
-            from security.protected_paths import protection_enabled
-            from security.command_moderation import effective_command_cwd
-
             self_obj = args[0] if args else None
             ctx_obj = kwargs.get("ctx") or getattr(self_obj, "_ctx", None)
             cfg = _extract_config_dict(self_obj, ctx_obj, kwargs)

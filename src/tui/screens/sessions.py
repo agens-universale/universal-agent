@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
@@ -328,7 +329,6 @@ class SessionsScreen(Screen):
         self._reload()
 
     def _open_mass_delete(self) -> None:
-        from datetime import datetime
         tasks = self._store.list_tasks(limit=10000)  # весь проект, не страница
         if not tasks:
             return

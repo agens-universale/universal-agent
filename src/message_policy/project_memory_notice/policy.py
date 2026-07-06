@@ -12,6 +12,7 @@ from message_policy.tool_usage_notice.state import (
     set_project_memory_check_cnt,
 )
 from message_policy.user_message_policy import wrap_technical_user_content, TECHNICAL_TYPE_CURRENT_CONTEXT
+from utils.generate_message_id import generate_msg_id_sha256 as generate_message_id
 
 
 def tool_project_memory_enabled(config_dict: dict[str, Any] | None) -> bool:
@@ -44,8 +45,7 @@ def touch_project_memory_baseline(
 ) -> str | None:
     """Обновить baseline после read/write/append project_memory tool."""
     if get_hash_fn is None:
-        from project_memory import get_hash
-
+        from project_memory import get_hash  # nested: tests monkeypatch project_memory.get_hash; runtime lookup required
         get_hash_fn = get_hash
     current = get_hash_fn(ctx)
     state.project_memory_content_hash = current
@@ -79,8 +79,7 @@ def collect_project_memory_hints(
     if not project_memory_hints_enabled(config_dict):
         return []
     if get_hash_fn is None:
-        from project_memory import get_hash
-
+        from project_memory import get_hash  # nested: tests monkeypatch project_memory.get_hash; runtime lookup required
         get_hash_fn = get_hash
 
     cfg = project_memory_notice_from_config_dict(config_dict)
@@ -107,8 +106,6 @@ def collect_project_memory_hints(
 
 
 def wrap_project_memory_hint_user_message(text: str, *, suffix: str = "mem_project") -> dict[str, Any]:
-    from utils.generate_message_id import generate_msg_id_sha256 as generate_message_id
-
     return {
         "role": "user",
         "content": wrap_technical_user_content(

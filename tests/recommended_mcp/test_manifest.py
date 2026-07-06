@@ -415,6 +415,26 @@ def test_every_source_entry_declares_dist():
             assert e.install.dist, f"{e.name}: source-запись обязана иметь install.dist"
 
 
+def test_manifest_parses_optional_flag(tmp_path):
+    from recommended_mcp.manifest import load_manifest
+    p = tmp_path / "config.yml"
+    p.write_text(
+        "mcps:\n"
+        "  - name: a\n"
+        "    path: ./a\n"
+        "    optional: true\n"
+        "    install: {type: source, source: ../x, dist: x}\n"
+        "  - name: b\n"
+        "    path: ./b\n"
+        "    install: {type: source, source: ../y, dist: y}\n",
+        encoding="utf-8",
+    )
+    entries = load_manifest(p)
+    by = {e.name: e for e in entries}
+    assert by["a"].optional is True
+    assert by["b"].optional is False
+
+
 def test_manifest_dist_matches_pyproject_when_source_present():
     """Где source-папка на диске есть — install.dist == [project].name из pyproject."""
     import dataclasses

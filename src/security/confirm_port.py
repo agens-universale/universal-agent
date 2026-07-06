@@ -3,6 +3,7 @@ from __future__ import annotations
 import sys
 from typing import Any
 
+from constants.tool_names import ASK_HUMAN_TOOL_NAME
 from security.path_policy import prompt_user_confirmation_choice
 
 CONFIRM_ONCE = "once"
@@ -14,7 +15,7 @@ _VALID_CHOICES = {CONFIRM_ONCE, CONFIRM_SESSION, CONFIRM_DENY}
 def _ask_human_enabled(ctx: Any) -> bool:
     cfg = getattr(ctx, "config_dict", None) or {}
     stop = cfg.get("stop_tools") or []
-    return "ask_human" not in stop
+    return ASK_HUMAN_TOOL_NAME not in stop
 
 
 def confirm_available(ctx: Any) -> bool:

@@ -59,16 +59,22 @@ def format_mcp_progress(servers: dict) -> str:
     return "\n".join(lines)
 
 
+def _server_ok(st) -> bool:
+    # Статус сервера: {"status", "reason", "tool_count", "elapsed_ms"};
+    # OK ⟺ status == "connected" (иначе "failed" или None=ещё коннектится).
+    return isinstance(st, dict) and st.get("status") == "connected"
+
+
 def format_mcp_settle(servers: dict) -> str:
-    """Итог boot-проверки (остаётся записью в шапке): строка статуса MCP
-    (предупреждение о недоступных либо «все подключены») + строка готовности."""
-    failed = [name for name, st in servers.items()
-              if not (st and st.get("status") == "connected")]
-    if failed:
-        word = "недоступен" if len(failed) == 1 else "недоступны"
-        status = f"⚠  MCP: {', '.join(failed)} {word} — подробности в /mcp (F3)"
-    else:
-        status = "✓ MCP: все подключены"
-    # Пустая строка-отступ: «готов к работе» всегда отделён от статуса MCP
-    # (особенно когда предупреждение о недоступных переносится на неск. строк).
-    return f"{status}\n\n✓ готов к работе"
+    """Итог boot-проверки (строка MCP в карточке): статус по реальному состоянию
+    (✓ все / ⚠ N/M) + хинт «/mcp (F3)». Глиф отделён пробелом («⚠ MCP»).
+
+    Строки уведомлений и готовности сюда НЕ добавляем: их собирает экран
+    (_compose_card_lines) по осевшему mcp_status. См. main.py::_settle_mcp_row."""
+    total = len(servers)
+    connected = sum(1 for st in servers.values() if _server_ok(st))
+    if connected == total:
+        return "✓ MCP: все подключены · /mcp (F3)"
+    if connected == 0:
+        return f"⚠ MCP: 0/{total} — ни один не подключился · /mcp (F3)"
+    return f"⚠ MCP: {connected}/{total} подключены · /mcp (F3)"

@@ -161,6 +161,9 @@ def request_backend_chat_completions(
 
     url передаётся явно вызывающим кодом (как правило, из ctx.config_dict).
     """
+    # Стриминг задействован ТОЛЬКО когда caller передал on_delta (его ставит
+    # лишь TUI через ctx.on_stream_delta). CLI/server/swarm → on_delta=None →
+    # всегда non-stream, независимо от cfg["stream"]. Флаг stream — TUI-only.
     if on_delta is not None:
         stream_data = dict(data)
         stream_data["stream"] = True

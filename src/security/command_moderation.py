@@ -15,9 +15,11 @@ from constants.tool_names import EXEC_PYTHON_NAME
 from security.confirm_port import confirm_available, request_confirm
 from security.path_policy import (
     ToolSecurityContext,
+    _extract_config_dict,
     audit_policy_decision,
     resolve_tool_context,
 )
+from security.protected_paths import protected_paths
 from utils.project_data import os_label
 from bundled_assets import bundled_root
 
@@ -96,7 +98,6 @@ class JudgeUnavailable(RuntimeError):
 
 
 def _get_protected_paths(cwd: str | None):
-    from security.protected_paths import protected_paths
     return protected_paths(cwd=cwd)
 
 
@@ -324,7 +325,6 @@ def moderate_command_execution(
             # Если в config_dict отсутствует блок command_moderation вообще —
             # модерация не сконфигурирована, пропускаем (legacy / unit-test поведение,
             # симметрично write_guard.enabled default'у).
-            from security.path_policy import _extract_config_dict
             _cfg = _extract_config_dict(
                 args[0] if args else None,
                 getattr(context, "ctx", None),
@@ -333,7 +333,10 @@ def moderate_command_execution(
             cm_cfg = _cfg.get("command_moderation")
             if not isinstance(cm_cfg, dict):
                 return func(*args, **kwargs)
-            # Safe-by-default-OFF: если слой не включён явно — судья не вызывается.
+            # Runtime-fallback при отсутствии enabled — OFF (судья не вызывается).
+            # На нормальном пути load_config кладёт command_moderation из pydantic
+            # (secure-by-default enabled=True), поэтому fallback достижим лишь в
+            # обход load_config (bespoke/тест-конфиги), а не в проде.
             if not bool(cm_cfg.get("enabled", False)):
                 return func(*args, **kwargs)
             try:

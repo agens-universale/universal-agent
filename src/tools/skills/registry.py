@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import subprocess
 import sys
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
@@ -37,7 +38,7 @@ def _system_skills_root() -> str:
     editable → <repo>/skills, wheel → site-packages/skills. Завязка на ../../..
     ломалась в wheel, где src/ схлопнут и уровень тот же промахивался мимо skills/.
     """
-    return str(bundled_root() / "skills")
+    return os.path.join(str(bundled_root()), "skills")
 
 
 def _user_skills_root() -> str:
@@ -690,8 +691,6 @@ class SkillsRegistry:
         - Если script_name не указан — пробуем scripts/main.py.
         - Аргументы передаются в stdin как JSON.
         """
-        import subprocess
-
         skill = self._get_skill(skill_id)
         scripts_dir = os.path.join(skill.root_path, "scripts")
 

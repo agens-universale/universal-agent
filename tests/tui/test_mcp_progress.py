@@ -48,23 +48,21 @@ def test_format_progress_no_cap_at_threshold():
 
 
 def test_format_settle_all_ok():
+    # Контракт: только строка статуса MCP + «/mcp (F3)» (готовность — в карточке).
     text = format_mcp_settle({"a": {"status": "connected"}})
-    # пустая строка-отступ перед «готов к работе»
-    assert text.splitlines() == ["✓ MCP: все подключены", "", "✓ готов к работе"]
+    assert text == "✓ MCP: все подключены · /mcp (F3)"
+    assert "готов" not in text
 
 
 def test_format_settle_failed():
     text = format_mcp_settle({"a": {"status": "connected"}, "office": {"status": "failed"}})
-    lines = text.splitlines()
-    status, ready = lines[0], lines[-1]
-    assert "office" in status and "/mcp" in status
-    assert "(F3)" in status   # подсказка хоткея экрана /mcp
-    assert "" in lines[1:-1]  # отступ-строка между статусом и готовностью
-    assert ready == "✓ готов к работе"
+    # счётчик N/M вместо имён серверов, хинт /mcp, без строки готовности
+    assert "⚠" in text and "1/2" in text and "/mcp" in text
+    assert "готов" not in text
 
 
-def test_format_settle_singular_vs_plural():
-    one = format_mcp_settle({"office": {"status": "failed"}})
-    assert "недоступен" in one and "недоступны" not in one
-    two = format_mcp_settle({"office": {"status": "failed"}, "computer": {"status": "failed"}})
-    assert "недоступны" in two
+def test_format_settle_zero_connected():
+    # все упали — специальная фраза «ни один не подключился»
+    text = format_mcp_settle({"office": {"status": "failed"}, "computer": {"status": "failed"}})
+    assert "⚠" in text and "0/2" in text and "/mcp" in text
+    assert "ни один" in text

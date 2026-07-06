@@ -44,6 +44,7 @@ from tui.widgets.command_palette import CommandPalette
 from tui.widgets.tool_call_row import ToolCallRow
 from tui import branding
 from tui.services.terminal_title import format_terminal_title, set_terminal_title
+from tui.services.reasoning_clock import COGNITIVE_TOOLS, ReasoningClock
 
 
 def resolve_terminal_outcome(*, runner_error, stop_requested, terminal_outcome):
@@ -109,9 +110,10 @@ def select_active_substate(*, summarizing, finalizing, last_event_kind, since_la
 
 
 # Один набор команд в футере; /stop добавляется только при активном run.
-# (/skills, /export доступны через палитру — в футере лишние.)
-_FOOTER_LEFT = "/sessions  /help  /config  /mcp"
-_FOOTER_RUNNING_LEFT = "/stop  /sessions  /help  /config  /mcp"
+# (/skills, /export доступны через палитру — в футере лишние. /mcp не дублируем —
+# подсказка «/mcp (F3)» уже в бренд-карточке.)
+_FOOTER_LEFT = "/sessions  /help  /config"
+_FOOTER_RUNNING_LEFT = "/stop  /sessions  /help  /config"
 _PLACEHOLDER_READY = "опишите задачу или /команда"
 _HINT_TEXT = {
     "clear": "Esc ещё раз, чтобы очистить",
@@ -143,6 +145,7 @@ class TraceScreen(Screen):
         self._mcp_status_done = False
         # Phase 2: tool-row mutation state
         self._active_calls: dict[str, ToolCallRow] = {}
+        self._reasoning_clock = ReasoningClock()
         self._submit_solution_call_ids: set[str] = set()
         # Track submit_solution agent-line widgets, чтобы при повторе свернуть предыдущие.
         # list of (event_no, main_static, note_widget_or_None)
@@ -475,6 +478,7 @@ class TraceScreen(Screen):
     def on_mount(self) -> None:
         self.query_one("#cmdinput", CommandTextArea).focus()
         self._show_brand()
+        self._render_startup_notices()
         # Per-project история input-реплик: project_dir известен со старта
         # (threads_dir.parent), attach не нужен — ↑/↓ работают уже в empty-state.
         from tui.services.input_history import InputHistory
@@ -761,6 +765,7 @@ class TraceScreen(Screen):
             started_at=self._thinking_started_at, state=state,
             sink=getattr(self.app, "_stream_sink", None),
             reasoning_tag=_cfg.get("tui_stream_display", "minimal") != "answer_reasoning",
+            reasoning_clock=self._reasoning_clock,
         )
         self._thinking = indicator
         self.query_one("#indicator-bar", Vertical).mount(indicator)
@@ -1004,6 +1009,7 @@ class TraceScreen(Screen):
         self._thinking_started_at = now
         self._last_event_at = now
         self._last_event_kind = None
+        self._reasoning_clock.reset()
         self._destroy_thinking_indicator()
 
     def _render_event(self, ev, *, live: bool = False) -> None:
@@ -1125,6 +1131,14 @@ class TraceScreen(Screen):
             return
 
         if ev.kind == "call":
+            if ev.tool_name in COGNITIVE_TOOLS:
+                # Когнитивный тул продолжает эпизод (без call_id — просто no-op,
+                # НЕ рвёт эпизод и не попадает в interrupt).
+                if ev.call_id:
+                    self._reasoning_clock.start(ev.call_id)
+            elif ev.tool_name:
+                # Не-когнитивный тул = действие в мире → рвёт эпизод раздумья.
+                self._reasoning_clock.interrupt()
             from tui.services.trace_render import args_portion, is_tool_group_start
             row = ToolCallRow(
                 call_id=ev.call_id or f"_anon_{ev.no}",
@@ -1141,6 +1155,8 @@ class TraceScreen(Screen):
             return
 
         if ev.kind in ("result", "error"):
+            if ev.call_id:
+                self._reasoning_clock.stop(ev.call_id)
             # Suppress output of submit_solution (no `|- ok` after final answer)
             if ev.call_id and ev.call_id in self._submit_solution_call_ids:
                 self._submit_solution_call_ids.discard(ev.call_id)
@@ -1557,14 +1573,16 @@ class TraceScreen(Screen):
             self._mcp_status_done = True
             self.app._mcp_progress = None
             row = self._mcp_status_row
-            self.set_timer(
-                1.0, lambda: self._settle_mcp_row(row, format_mcp_settle(servers))
-            )
+            mcp_line = format_mcp_settle(servers)
+            self.set_timer(1.0, lambda: self._settle_mcp_row(row, mcp_line))
 
-    def _settle_mcp_row(self, row, final: str) -> None:
-        """Схлопнуть финальный блок в итог-запись (статус + готовность)."""
+    def _settle_mcp_row(self, row, mcp_line: str) -> None:
+        """Схлопнуть MCP-прогресс в итог-запись карточки: статус MCP + строка
+        уведомлений + готовность. Считается ЗДЕСЬ, а не на boot: к моменту settle
+        mcp_status осел → карточка и /notices согласованы (иначе счётчик уведомлений
+        недосчитывал бы MCP-фейлы)."""
         try:
-            row.update(final)
+            row.update(self._compose_card_lines(mcp_line))
         except Exception:
             pass
 
@@ -1595,6 +1613,19 @@ class TraceScreen(Screen):
             return False
         return cached.strip() == polled_content.strip()
 
+    def _pump_reasoning_stream_source(self) -> None:
+        """Stream-think как источник reasoning-часов: пока sink в 'thinking' —
+        источник 'stream' активен. start/stop идемпотентны → просто вызываем
+        каждый тик по текущему состоянию сink."""
+        sink = getattr(self.app, "_stream_sink", None)
+        if sink is None:
+            return
+        r_state, _dur = sink.reasoning_state()
+        if r_state == "thinking":
+            self._reasoning_clock.start("stream")
+        else:
+            self._reasoning_clock.stop("stream")
+
     def _poll_active(self) -> None:
         # Потолок #trace = экран минус хром. Зависит только от стабильных высот
         # (header/indicator-bar[зарезервирован]/input/footer) → пересчёт синхронный и
@@ -1608,6 +1639,7 @@ class TraceScreen(Screen):
         self._run_orphan_cleanups()
         # Индикатор загрузки MCP — на старте (до появления активной задачи) тоже.
         self._update_mcp_indicator()
+        self._pump_reasoning_stream_source()
         err = getattr(self.app, "last_runner_error", None)
         if err and not self._error_shown:
             self._mount_trace_row(
@@ -1858,6 +1890,59 @@ class TraceScreen(Screen):
         brand = Vertical(inner, id="brand-block")
         trace.mount(brand)
         self._brand = brand
+
+    def _collect_startup_notices(self):
+        """Собрать стартовые уведомления через канал startup_notices."""
+        from startup_notices import collect_startup_notices
+        from tools.registry import all_builtin_tool_names
+        cfg = getattr(self.app, "_config", None) or {}
+        mcp_status = getattr(self.app, "_mcp_status", None)
+        return collect_startup_notices(
+            cfg, all_builtin_tool_names(cfg), mcp_status, is_tui=True,
+            deprecated_keys_used=cfg.get("deprecated_keys_used"),
+        )
+
+    def _has_mcp_servers(self) -> bool:
+        """Заданы ли MCP-серверы в конфиге. При них mcp_status осядет только на
+        MCP-settle — карточку досбираем тогда; без них — сразу на boot."""
+        cfg = getattr(self.app, "_config", None) or {}
+        return bool(cfg.get("mcp-servers"))
+
+    def _compose_card_lines(self, mcp_line: "Optional[str]") -> str:
+        """Итог-содержимое правой колонки карточки: до трёх строк через пустую строку.
+
+            ⚠ MCP: 3/5 подключены · /mcp (F3)      (только если заданы MCP-серверы)
+
+            уведомления: ⚠ 2 · ℹ 1 · /notices (F4)  (только если есть уведомления)
+
+            ✓ готов к работе                         (всегда)
+
+        Детали уведомлений — на экране /notices (F4); трейс держим чистым."""
+        notices = self._collect_startup_notices()
+        lines = []
+        if mcp_line:
+            lines.append(mcp_line)
+        if notices:
+            warns = sum(1 for n in notices if n.level == "warning")
+            infos = sum(1 for n in notices if n.level == "info")
+            parts = []
+            if warns:
+                parts.append(f"⚠ {warns}")
+            if infos:
+                parts.append(f"ℹ {infos}")
+            parts.append("/notices (F4)")
+            lines.append(f"уведомления: {' · '.join(parts)}")
+        lines.append("✓ готов к работе")
+        return "\n\n".join(lines)
+
+    def _render_startup_notices(self) -> None:
+        """Boot-оркестрация карточки. Без MCP-серверов данные полны сразу →
+        выставляем карточку. С MCP-серверами откладываем до settle
+        (см. _settle_mcp_row), где mcp_status уже осел."""
+        if self._has_mcp_servers():
+            return
+        if self._mcp_status_row is not None:
+            self._mcp_status_row.update(self._compose_card_lines(None))
 
     # Шапка трейса: переживает пересборку (#brand-block — бренд,
     # MCP-статус живёт внутри карточки как #brand-mcp).
@@ -3049,6 +3134,9 @@ class TraceScreen(Screen):
             return
         if name == "mcp":
             self._cmd_mcp()
+            return
+        if name == "notices":
+            self.app.action_notices()
             return
         if name == "stop":
             self._cmd_stop()
