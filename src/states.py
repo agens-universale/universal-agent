@@ -7,6 +7,7 @@ from tools.session.stored_outputs.tool_call_outputs_store import ToolCallOutputs
 from message_policy.tool_usage_notice.state import hydrate_tool_usage_notice_state
 from tools.skills.skills_policy import render_skills_catalog
 from intent_log import IntentRecord, deserialize_list, flush
+from usage.account import UsageAccount
 from instructions.loader import build_instructions
 
 
@@ -94,6 +95,16 @@ class State:
         self.project_memory_content_hash: Optional[str] = None
         self.tool_usage_notice_cnt: dict[str, int] = {}
         self.tool_call_outputs_store = ToolCallOutputsStore()
+        # Учёт токенов прогона по категориям (main/summary/finish_gate/.../subagent).
+        # ``usage`` — кумулятив по треду (гидрируется из meta на resume).
+        # ``last_run_usage`` — дельта именно последнего run() (заполняется в его конце);
+        # None, пока прогон не завершился. Оба доступны in-memory через get_state().
+        self.usage = UsageAccount()
+        self.last_run_usage: Optional[UsageAccount] = None
+        # Снимок кумулятива на старте текущего прогона (meta-dict, JSON-safe).
+        # По нему футер считает live-«запрос» текущего хода (usage − baseline),
+        # пока last_run_usage ещё не выставлен. Транзиентный (per-run), не биллится.
+        self.run_start_usage_meta: Optional[dict] = None
 
     def set_call_metadata(self):
         metadata: Dict[str, Any] = dict()

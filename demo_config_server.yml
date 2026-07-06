@@ -56,7 +56,7 @@ swarm:
   # (это делает сам swarm-код, lifecycle, а не тест-оркестратор). Абсолютный путь
   # как есть / относительный от корня репо; пусто → дефолт
   # swarm_threads_dir/<swarm_id>/agent_logs/. Сохраняются даже при timeout/kill.
-  # swarm_logs_dir: "/var/lib/gc-cli/swarm/agent_logs"
+  #swarm_logs_dir: "/var/lib/gc-cli/swarm/agent_logs"
   max_concurrent: 10
   ttl_seconds: 86400
   limits:

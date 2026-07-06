@@ -27,6 +27,13 @@ def _is_command(text: str) -> bool:
     return text.lstrip().startswith("/")
 
 
+def _is_command(text: str) -> bool:
+    """Слэш-команда (`/init`, `/status`, …) — не пользовательский запрос.
+    Команды НЕ участвуют в истории ↑/↓: иначе их восстановление в инпут
+    открывает палитру, та перехватывает ↑/↓ и навигация по истории «застревает»."""
+    return text.lstrip().startswith("/")
+
+
 class InputHistory:
     """Per-project история input-реплик с навигацией ↑/↓."""
 

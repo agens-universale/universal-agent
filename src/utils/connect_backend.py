@@ -11,6 +11,7 @@ from message_policy.chat_completions import prepare_chat_completion_messages_for
 from utils.convertations import output_chat_completion_to_response
 from utils.format_messages import format_message_chat_completions_to_send_backend
 from utils.retry import retry_with_backoff
+from usage.context import record_usage
 from utils.chat_completions_stream import iter_sse_data_lines, assemble_streamed_completion, OnDelta, BackendStreamError
 from utils.backend_errors import is_empty_completion
 
@@ -134,7 +135,10 @@ def request_backend_responses(
     if result_type != "response.completed":
         raise ValueError(f'wrong stream finish: {chunks[-1].decode("utf-8")}')
 
-    return result["response"], r_headers
+    response_obj = result["response"]
+    if isinstance(response_obj, dict):
+        record_usage(response_obj.get("usage"))
+    return response_obj, r_headers
 
 
 @retry_with_backoff(
@@ -163,6 +167,10 @@ def request_backend_chat_completions(
     if on_delta is not None:
         stream_data = dict(data)
         stream_data["stream"] = True
+        # OpenAI-совместимые провайдеры отдают usage в стриме только по явному
+        # запросу — иначе финального usage-чанка нет и токены основного цикла
+        # (он всегда стримится) не учитываются.
+        stream_data["stream_options"] = {"include_usage": True}
         if logger is not None:
             try:
                 logger.debug(
@@ -198,6 +206,7 @@ def request_backend_chat_completions(
                 )
                 raise
             on_delta("reset", "")
+
             assembled = assemble_streamed_completion(
                 iter_sse_data_lines(r.iter_lines()), on_delta=on_delta
             )
@@ -207,6 +216,9 @@ def request_backend_chat_completions(
                     "finish_reason, or error)",
                     status_code=None,
                 )
+                        # основного цикла терялся — фиксировался только non-stream aux-вызов).
+            if isinstance(assembled, dict):
+                record_usage(assembled.get("usage"))
             return assembled
 
     if logger is not None:
@@ -283,7 +295,10 @@ def request_backend_chat_completions(
             print(f"request messages summary={messages_summary}")
         raise
 
-    return r.json()
+    data = r.json()
+    if isinstance(data, dict):
+        record_usage(data.get("usage"))
+    return data
 
 
 def create_call_headers(state, ctx) -> Dict[str, str]:

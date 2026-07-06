@@ -5,6 +5,8 @@ from typing import Any, Dict, List, Optional
 
 from request_backend_policy import request_chat_completions_with_policy
 from utils.connect_backend import create_call_headers
+from usage.account import category_for_request_label
+from usage.context import usage_scope
 
 _PROTECTED_CHAT_COMPLETION_KEYS = frozenset(
     {
@@ -188,16 +190,18 @@ def request_chat_completion_text(
         default=1024,
     )
     headers = create_call_headers(state, ctx)
-    res, _call_data = request_chat_completions_with_policy(
-        payload_factory=_payload_factory,
-        initial_max_tokens=max_tokens,
-        min_response_tokens=min_response_tokens,
-        headers=headers,
-        url=cfg["completions_url"],
-        verify=cfg.get("use_ssl", True),
-        use_retry=cfg.get("use_retry", False),
-        logger=getattr(ctx, "logger", None),
-    )
+    usage_category = category_for_request_label(request_label)
+    with usage_scope(getattr(state, "usage", None), usage_category, "chat_completions"):
+        res, _call_data = request_chat_completions_with_policy(
+            payload_factory=_payload_factory,
+            initial_max_tokens=max_tokens,
+            min_response_tokens=min_response_tokens,
+            headers=headers,
+            url=cfg["completions_url"],
+            verify=cfg.get("use_ssl", True),
+            use_retry=cfg.get("use_retry", False),
+            logger=getattr(ctx, "logger", None),
+        )
     logger = getattr(ctx, "logger", None)
     if logger is not None and full_log_backend:
         _log_completion_response_meta(logger=logger, label=request_label, res=res)

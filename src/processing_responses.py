@@ -42,6 +42,8 @@ from utils.format_messages import format_message_responses
 from utils.generate_message_id import generate_msg_id_sha256 as generate_message_id_func
 
 from states import State
+from usage.account import CATEGORY_MAIN as USAGE_CATEGORY_MAIN
+from usage.context import usage_scope
 from typing import List, Dict, Union, Tuple, Any, Callable, Optional
 from message_policy.no_tool_call_bounce import (
     NO_TOOL_CALL_BOUNCE_MESSAGE,
@@ -214,14 +216,15 @@ def _request_backend_canonical_once(
             state,
             set_previous_response_id=set_previous_response_id,
         )
-        res, res_headers = request_backend(
-            call_data,
-            call_headers,
-            url=url,
-            verify=verify,
-            use_retry=use_retry,
-            logger=getattr(ctx, "logger", None),
-        )
+        with usage_scope(getattr(state, "usage", None), USAGE_CATEGORY_MAIN, backend_mode):
+            res, res_headers = request_backend(
+                call_data,
+                call_headers,
+                url=url,
+                verify=verify,
+                use_retry=use_retry,
+                logger=getattr(ctx, "logger", None),
+            )
         resp_messages = res["output"]
         response_id = str(res["id"])
         return resp_messages, response_id, res_headers
@@ -258,17 +261,18 @@ def _request_backend_canonical_once(
     _stream_on = resolve_tui_stream_enabled(cfg)
     _on_delta = getattr(ctx, "on_stream_delta", None) if _stream_on else None
 
-    res, call_data = request_chat_completions_with_policy(
-        payload_factory=_create_payload,
-        initial_max_tokens=completions_max_tokens,
-        min_response_tokens=min_response_tokens,
-        headers=call_headers,
-        url=url,
-        verify=verify,
-        use_retry=use_retry,
-        logger=getattr(ctx, "logger", None),
-        on_delta=_on_delta,
-    )
+    with usage_scope(getattr(state, "usage", None), USAGE_CATEGORY_MAIN, backend_mode):
+        res, call_data = request_chat_completions_with_policy(
+            payload_factory=_create_payload,
+            initial_max_tokens=completions_max_tokens,
+            min_response_tokens=min_response_tokens,
+            headers=call_headers,
+            url=url,
+            verify=verify,
+            use_retry=use_retry,
+            logger=getattr(ctx, "logger", None),
+            on_delta=_on_delta,
+        )
     if not isinstance(res, dict):
         raise ValueError("chat/completions backend response must be an object")
     _run_log = getattr(ctx, "logger", None) or _fallback_logger

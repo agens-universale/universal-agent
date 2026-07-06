@@ -118,6 +118,11 @@ tests/tui/__snapshots__/**/*.svg
 # (доки TUI живут в docs/tui/{specs,plans,visual})
 docs/superpowers/
 
+# Локальные заметки агента Claude Code (не для репозитория)
+CLAUDE.md
+
+# История ввода TUI (gc-ua) — локальная per-user, как shell history
+input_history.jsonl
 # Внутренние рабочие доки — не в PR/master (спеки, планы, TUI-дизайн, corp-mirror overlay)
 docs/specs/
 docs/tui/

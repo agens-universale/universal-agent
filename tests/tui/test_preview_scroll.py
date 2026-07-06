@@ -44,11 +44,11 @@ async def test_main_trace_still_follows_content(tmp_path):
     (Path(tmp_path) / f"data_cli_{tid}.jsonl").write_text("", encoding="utf-8")
     app = TuiApp(threads_dir=str(tmp_path), system="cli",
                  config={"model": "M", "backend_api_mode": "chat_completions"})
-    async with app.run_test(size=(80, 24)) as pilot:
+    async with app.run_test(size=(80, 40)) as pilot:  # выше — короткий контент влезает под бренд-карточку
         scr = pilot.app.screen
         scr.attach_active_task(tid)
         scr._render_record({"payload": {"id": "a1", "role": "assistant",
                                         "content": "короткий"}}, live=True)
         await pilot.pause(0.4)
         footer = pilot.app.query_one("#footer")
-        assert footer.region.bottom < 24       # хром следует за коротким контентом
+        assert footer.region.bottom < pilot.app.size.height  # хром следует за коротким контентом

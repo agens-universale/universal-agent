@@ -16,6 +16,7 @@ Background и CLI-клиент для работы с агентом GigaCode: �
 - Защита файловой системы: `write_guard` ограничивает запись в `launch_root`, `security.protected_paths` включена по умолчанию.
 - Серверный режим: REST-обёртка на FastAPI.
 - Swarm-режим (только Linux): изолированные песочницы (bubblewrap).
+- Подсчёт токенов и стоимости прогона (с учётом prompt-кэша).
 
 ## Связь с разработчиками и поддержка
 
@@ -80,4 +81,5 @@ gc-ua -a
 - [Серверный режим](docs/server.md) — REST-обёртка (FastAPI), конфиги сервера, эндпоинты, Swarm-режим (Linux).
 - [Swarm-режим](docs/swarm.md) — изолированные bubblewrap-песочницы для каждой задачи, pipeline запроса, эндпоинты, AR-1..AR-9, troubleshooting.
 - [TUI режим (gc-ua)](docs/tui.md) — кроссплатформенный TUI поверх агента: установка, запуск, основные команды и экраны.
-- [RootBox режим](docs/rootbox.md) — конфиги защиты: `command_moderation`, `read_guard`, `write_guard` (бывший `root_box`), `url_policy`
+- [RootBox режим](docs/rootbox.md) — Roox box режим, конфиги (command_moderation, read_guard, root_box (write_guard), url_policy)
+- [Токены и стоимость](docs/usage_pricing.md) — подсчёт токенов по категориям, секция `pricing`, учёт prompt-кэша, хранение в meta треда.

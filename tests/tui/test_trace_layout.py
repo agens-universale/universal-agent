@@ -77,12 +77,11 @@ async def test_agent_prose_first_block_has_bullet_prefix():
         await pilot.pause()
         rows = list(scr.query(TraceRow))
         agent_rows = [r for r in rows if r.has_class("line-agent")]
-        assert len(agent_rows) >= 2
+        # Проза, разделённая только пустыми строками, теперь рисуется ОДНИМ prose-
+        # блоком (пустые строки сохранены внутри) — сплит только на code/table (0ff36ad8).
+        assert len(agent_rows) == 1
         assert agent_rows[0]._prefix == "● "
-        # continuation prose-блок — prefix без bullet (2 пробела)
-        cont_rows = [r for r in agent_rows if r.has_class("line-agent-cont")]
-        assert len(cont_rows) >= 1
-        assert cont_rows[0]._prefix == "  "
+        assert not agent_rows[0].has_class("line-agent-cont")   # cont — только за code/table
 
 
 @pytest.mark.asyncio

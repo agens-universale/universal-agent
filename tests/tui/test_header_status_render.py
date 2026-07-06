@@ -63,12 +63,13 @@ async def test_meter_hidden_in_header_responses_mode(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_badge_failed_is_err_colored_in_meta(tmp_path):
-    """Статус [failed] корректно читается через _task_status_badge; цвет — ERR (без мета-полосы)."""
+async def test_badge_failed_read_via_task_status_badge(tmp_path):
+    """Статус [failed] корректно читается через _task_status_badge.
+
+    Раскраска бейджа (status_badge_color) и мета-полоса удалены вместе с
+    переездом «модель·контекст» в футер — здесь проверяем только чтение статуса."""
     pytest.importorskip("textual")
     from tui.app import TuiApp
-    from tui.services.status_badge import status_badge_color
-    from tui.palette import ERR
     tid = "hdr00000000000000000000000000004a"
     _write_task(tmp_path, tid, status_tui="failed")
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
@@ -76,7 +77,6 @@ async def test_badge_failed_is_err_colored_in_meta(tmp_path):
         scr = pilot.app.screen
         scr.attach_active_task(tid)
         assert scr._task_status_badge() == "[failed]"
-        assert status_badge_color("[failed]") == ERR
 
 
 @pytest.mark.asyncio

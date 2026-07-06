@@ -493,6 +493,10 @@ class ThreadSession:
             )
         if "user_turn_seq" in self.meta:
             base_meta["user_turn_seq"] = int(self.meta.get("user_turn_seq") or 0)
+        if "dialog_steps_offset" in self.meta:
+            base_meta["dialog_steps_offset"] = int(self.meta.get("dialog_steps_offset") or 0)
+        if isinstance(self.meta.get("token_usage"), dict):
+            base_meta["token_usage"] = self.meta["token_usage"]
         # Persist rendered chat/completions system prompt for transparency/debugging.
         # Must stay identical to актуальным данным: when we are in `responses`
         # mode, there is no system prompt in messages, so it must not be present in meta.

@@ -33,6 +33,7 @@ from config_modules.project_memory import (
     normalize_project_memory_config,
 )
 from config_modules.chat_completions import ChatCompletionsConfig
+from config_modules.pricing import PricingConfig
 from config_modules.tui import TuiConfig
 from config_modules.summary import (
     DEFAULT_INCREMENTAL_BATCH_MULTIPLIER,
@@ -67,6 +68,7 @@ class AppConfig(BaseModel):
     paths: PathsConfig = Field(default_factory=PathsConfig)
     agent: AgentConfig = Field(default_factory=AgentConfig)
     mcp: McpConfig = Field(default_factory=McpConfig)
+    pricing: PricingConfig = Field(default_factory=PricingConfig)
     tui: TuiConfig = Field(default_factory=TuiConfig)
     agent_auth: AgentAuthConfig | None = None
 

@@ -31,6 +31,7 @@ from tui.palette import DIM as _DIM
 from tui.palette import ERR as _ERR_RED
 from tui.palette import INK as _INK
 from tui.services.context_meter import render_context_meter
+from tui.services.usage_meter import compose_adaptive_footer_right, usage_segments
 from tui.services.export import export_thread
 from tui.services.path_display import truncate_path
 from message_format import calc_history_chars_for_trigger
@@ -282,6 +283,7 @@ class TraceScreen(Screen):
 
     def on_resize(self, event) -> None:
         self._refresh_header()   # пересчитать усечение пути под новую ширину
+        self._refresh_footer()   # адаптивная вёрстка usage (стек сессии) под новую ширину
         self._sync_trace_max_height()   # потолок #trace под новую высоту экрана
 
     def on_click(self, event: events.Click) -> None:
@@ -297,16 +299,64 @@ class TraceScreen(Screen):
             trace.focus()
 
     def _compose_footer_right(self) -> "Text":
-        """Правый край футера: модель · контекст (метр — только chat_completions)."""
+        """Правый край футера: модель · контекст · запрос · сессия.
+
+        Адаптивно: если по ширине не влезает, «сессия» уезжает на 2-ю строку
+        под «запрос» (футер height:2) — чтобы команды слева не вытеснялись."""
         cfg = getattr(self.app, "_config", None) or {}
         model = cfg.get("model", "?")
-        text = Text()
-        text.append(str(model), style=_INK)
+        head = Text()
+        head.append(str(model), style=_INK)
         meter = self._context_meter()
         if meter is not None:
-            text.append("  ·  ", style=_DIM)
-            text.append_text(meter)
-        return text
+            head.append("  ·  ", style=_DIM)
+            head.append_text(meter)
+        request_seg, session_seg = self._usage_segments()
+        if request_seg is None and session_seg is None:
+            return head
+        return compose_adaptive_footer_right(
+            head, request_seg, session_seg, self._footer_right_available_width()
+        )
+
+    def _footer_right_available_width(self) -> int:
+        """Сколько ширины остаётся футер-right'у, чтобы команды слева (footer-left)
+        остались видны. total − длина активной строки команд − небольшой запас."""
+        try:
+            total = self.app.size.width
+        except Exception:
+            total = 80
+        runner = getattr(self.app, "active_runner", None)
+        is_running_fn = getattr(runner, "is_running", None)
+        try:
+            is_running = bool(is_running_fn()) if callable(is_running_fn) else False
+        except Exception:
+            is_running = False
+        left = _FOOTER_RUNNING_LEFT if is_running else _FOOTER_LEFT
+        return max(10, total - len(left) - 3)   # −3: padding-right + зазор
+
+    def _usage_segments(self) -> "tuple[Text | None, Text | None]":
+        """Раздельные сегменты («запрос», «сессия») для адаптивной вёрстки, или
+        (None, None) если показывать нечего.
+
+        Источник — in-memory state исполнителя (не meta-файл): числа появляются
+        с первым прогоном сессии, у только что открытой старой сессии их нет.
+        Исполнитель сам считает «запрос»: live-дельта текущего хода, пока агент
+        работает (сбрасывается с новым вопросом, растёт по мере работы), и итог
+        хода, когда он завершён. Оба backend-режима — usage снимается везде."""
+        runner = getattr(self.app, "active_runner", None)
+        snapshot_fn = getattr(runner, "usage_snapshot", None)
+        # Футер не должен ронять экран: нет runner'а / метода / любая ошибка → скрыть.
+        try:
+            snapshot = snapshot_fn() if callable(snapshot_fn) else None
+        except Exception:
+            snapshot = None
+        if not snapshot:
+            return (None, None)
+        session_meta, request_meta = snapshot
+        cfg = getattr(self.app, "_config", None) or {}
+        return usage_segments(
+            session_meta, request_meta, cfg.get("pricing"), cfg.get("model")
+        )
 
     def _context_meter(self) -> "Text | None":
         """Rich-Text индикатора контекста или None (скрыт)."""

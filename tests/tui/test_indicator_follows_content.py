@@ -31,8 +31,8 @@ async def test_short_content_chrome_follows_content(tmp_path):
     pytest.importorskip("textual")
     from textual.containers import VerticalScroll
     tid = "fc1"; _write_task(tmp_path, tid)
-    # Высота 40: постоянная бренд-карточка #brand-block (~13 строк) + короткий
-    # контент должны оставлять запас, чтобы #trace сжался, а футер «плавал».
+    # 80x40: бренд-карточка (после редизайна 06-28 стала выше) + короткий ответ
+    # умещаются под потолком #trace, поэтому follows-content не скроллит.
     async with _app(tmp_path).run_test(size=(80, 40)) as pilot:
         scr = pilot.app.screen
         scr.attach_active_task(tid)
@@ -42,7 +42,7 @@ async def test_short_content_chrome_follows_content(tmp_path):
         trace = pilot.app.query_one("#trace", VerticalScroll)
         footer = pilot.app.query_one("#footer")
         assert trace.max_scroll_y == 0          # контент влез — нет скролла
-        assert footer.region.bottom < 40        # хром следует за контентом → пустота снизу
+        assert footer.region.bottom < pilot.app.size.height  # хром следует за контентом → пустота снизу
 
 
 @pytest.mark.asyncio
@@ -71,9 +71,7 @@ async def test_chrome_follows_as_content_grows(tmp_path):
     нативно, без замера высоты контента в коде."""
     pytest.importorskip("textual")
     tid = "fc3"; _write_task(tmp_path, tid)
-    # Высота 40: бренд-карточка (~13 строк) + короткий контент оставляют запас,
-    # рост контента двигает футер вниз (следует), не упираясь в потолок.
-    async with _app(tmp_path).run_test(size=(80, 40)) as pilot:
+    async with _app(tmp_path).run_test(size=(80, 40)) as pilot:  # выше — короткий контент влезает под бренд-карточку
         scr = pilot.app.screen
         scr.attach_active_task(tid)
         scr._render_record({"payload": {"id": "a1", "role": "assistant",
@@ -86,7 +84,7 @@ async def test_chrome_follows_as_content_grows(tmp_path):
                            live=True)
         await pilot.pause(0.4)
         b2 = footer.region.bottom
-        assert b1 < 40                           # короткий контент → футер не у низа
+        assert b1 < pilot.app.size.height        # короткий контент → футер не у низа
         assert b2 > b1                           # контент вырос → футер поехал вниз (следует)
 
 

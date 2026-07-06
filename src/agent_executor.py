@@ -29,6 +29,8 @@ from persistence.thread_meta_mapper import ThreadMetaMapper
 from intent_log.user_turn import append_user_ask_deduped, append_user_asks_from_messages
 from message_policy.user_message_policy import extract_real_user_message_text
 from states import State, SharedStateData
+from usage.account import UsageAccount
+from usage.report import build_run_usage_report
 from thread_store import (
     ThreadSession,
     make_message_key,
@@ -202,6 +204,7 @@ class AgentExecutor:
             state.infer_user_turn_seq_if_missing()
             state.init_tool_usage_notice_from_meta(meta)
             state.dialog_steps_offset = int(meta.get("dialog_steps_offset", 0) or 0)
+            state.usage = UsageAccount.from_meta(meta.get("token_usage"))
         if (
             backend_api_mode == "chat_completions"
             and isinstance(chat_completions_system_prompt, str)
@@ -388,6 +391,12 @@ class AgentExecutor:
         def check_stop() -> bool:
             with self._lock:
                 return self._state.stop_requested if self._state is not None else False
+
+        # Снимок usage до прогона: для resume треда state.usage гидрирован кумулятивом,
+        # отчёт же показывает токены именно этого прогона (дельту). Тот же baseline
+        # кладём на state — по нему TUI-футер считает live-«запрос» текущего хода.
+        run_start_usage = UsageAccount.from_meta(state.usage.to_meta())
+        state.run_start_usage_meta = run_start_usage.to_meta()
         try:
             response = run_agent(
                 messages,
@@ -436,6 +445,25 @@ class AgentExecutor:
             cur_dir = config_dict.get("logs_dump_dir") or os.getcwd()
             dump_storage(cur_dir, indent=2)
 
+        # Отчёт по токенам/стоимости за этот прогон (дельта от снимка до старта).
+        try:
+            run_usage = state.usage.delta_from(run_start_usage)
+            # Доступно in-memory: get_state().usage (кумулятив) и .last_run_usage (этот прогон).
+            state.last_run_usage = run_usage
+            usage_text = build_run_usage_report(
+                run_usage,
+                config_dict.get("pricing"),
+                config_dict.get("model"),
+            )
+            if usage_text:
+                if logger is not None:
+                    logger.info("\n<run_usage>\n%s\n</run_usage>\n", usage_text)
+                if config_dict.get("console_trace", True):
+                    print(f"\n{usage_text}\n")
+        except Exception as usage_exc:  # отчёт не должен ронять прогон
+            if logger is not None:
+                logger.warning("run usage report failed: %s", usage_exc, exc_info=True)
+
         if config_dict.get("console_trace", True):
             print(f"\nПуть к файлу с логами: {self._ctx.logging_path}\n")
         return response
@@ -459,6 +487,37 @@ class AgentExecutor:
         Изменения state — только под этим замком.
         """
         return self._lock
+
+    def usage_meta_snapshot(self) -> Optional[tuple[dict, Optional[dict]]]:
+        """Снимок usage для TUI-футера: ``(session_meta, request_meta | None)``.
+
+        ``session_meta`` — кумулятив треда (``state.usage``), тикает вживую.
+        ``request_meta`` — «запрос»:
+        - ход идёт (``last_run_usage`` ещё None) → **live-дельта** ``usage − baseline``,
+          где baseline (``run_start_usage_meta``) снят на старте хода: число
+          сбрасывается с новым вопросом и растёт по мере работы агента;
+        - ход завершён (``last_run_usage`` выставлен) → итог этого хода;
+        - прогонов ещё не было → None.
+        Всё через ``to_meta()`` под замком — против гонки «dictionary changed size»
+        с живым ``UsageAccount.add()`` в agent-потоке. None, если state не создан.
+        """
+        with self._lock:
+            state = self._state
+            if state is None:
+                return None
+            usage = getattr(state, "usage", None)
+            session_meta = usage.to_meta() if usage is not None else {}
+            last_run = getattr(state, "last_run_usage", None)
+            if last_run is not None:
+                request_meta: Optional[dict] = last_run.to_meta()
+            else:
+                baseline_meta = getattr(state, "run_start_usage_meta", None)
+                if baseline_meta is not None and usage is not None:
+                    baseline = UsageAccount.from_meta(baseline_meta)
+                    request_meta = usage.delta_from(baseline).to_meta()
+                else:
+                    request_meta = None
+            return (session_meta, request_meta)
 
     @staticmethod
     def _build_user_messages(user_bodies, *, message_ids, display_contents,
@@ -498,4 +557,10 @@ class AgentExecutor:
         """Форс-сжатие треда (ручной /compact) — делегат в manual_compaction
         (оркестрация суммаризации, вне run-loop)."""
         from manual_compaction import compact_thread as _compact_thread
-        return _compact_thread(self._ctx, thread_id, system)
+        return _compact_thread(
+            ctx=self._ctx,
+            _lock=self._lock,
+            self_state=self._state,
+            thread_id=thread_id,
+            system=system
+        )
