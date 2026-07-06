@@ -1,7 +1,6 @@
 import json
 import functools
 import os
-import stat
 from typing import List, Dict, Any, Optional
 from tools.schema_optional import coalesce_optional_string
 from tools.simple_tool_base import AbstractSimpleTool
@@ -15,6 +14,7 @@ from security.read_guard import (
     _resolve_skills_root,
 )
 from security.path_policy import resolve_tool_context, _extract_config_dict
+from tools.fs.agent_hidden import is_agent_hidden
 
 
 class ListFiles(AbstractSimpleTool):
@@ -217,18 +217,12 @@ List deeper files (example):
                 error={"type": "invalid_argument", "field": "max_entries"},
             )
 
-        path = os.path.normpath(path)
+        path = self._backend.normpath(path)
 
-        if not os.path.exists(path):
-            return _result(
-                ok=False,
-                error={"type": "not_found"},
-            )
-        if not os.path.isdir(path):
-            return _result(
-                ok=False,
-                error={"type": "not_a_directory"},
-            )
+        if not self._backend.exists(path):
+            return _result(ok=False, error={"type": "not_found"})
+        if not self._backend.is_dir(path):
+            return _result(ok=False, error={"type": "not_a_directory"})
 
         file_matcher = None
         if glob:
@@ -279,47 +273,11 @@ List deeper files (example):
 
         return _result(ok=True, entries=result, truncated=hit_limit)
 
-    def _is_hidden_unix(self, name: str) -> bool:
-        """Check if file is hidden on Unix-like systems (starts with .)."""
-        return name.startswith('.')
-
-    def _is_hidden_windows(self, filepath: str) -> bool:
-        """Check if file is marked as hidden on Windows via file attributes."""
-        try:
-            attrs = os.stat(filepath).st_file_attributes  # Windows-specific
-            return bool(attrs & stat.FILE_ATTRIBUTE_HIDDEN)
-        except AttributeError:
-            # Fallback for non-Windows platforms
-            basename = os.path.basename(filepath)
-            return basename.startswith('.')
-        except Exception:
-            # If we can't read attributes, assume not hidden
-            return False
-
-    def _is_hidden(self, filepath: str) -> bool:
-        """Cross-platform check for hidden files."""
-        if os.name == 'nt':
-            return self._is_hidden_windows(filepath)
-        else:
-            basename = os.path.basename(filepath)
-            return self._is_hidden_unix(basename)
-
-    def _get_entry_info(self, filepath: str) -> Dict[str, Any]:
-        """Build metadata for a single file or directory."""
-        try:
-            st = os.lstat(filepath)  # Follow symlinks? No — use lstat
-            is_dir = stat.S_ISDIR(st.st_mode)
-            entry_type = "directory" if is_dir else "file"
-            is_hidden = self._is_hidden(filepath)
-        except OSError:
-            # If file becomes inaccessible during listing (rare but possible)
-            entry_type = "file"
-            is_hidden = self._is_hidden(filepath)
-
+    def _entry(self, filepath: str, is_dir: bool) -> Dict[str, Any]:
         return {
             "path": tool_report_abspath(filepath),
-            "type": entry_type,
-            "is_hidden": is_hidden
+            "type": "directory" if is_dir else "file",
+            "is_hidden": self._backend.is_hidden(filepath),
         }
 
     @staticmethod
@@ -353,14 +311,16 @@ List deeper files (example):
     ):
         """List only immediate children of the directory."""
         try:
-            names = os.listdir(root_path)
+            entries = self._backend.listdir(root_path)
         except PermissionError as e:
             raise PermissionError(f"Permission denied: cannot list contents of '{root_path}'")
         except Exception as e:
             raise RuntimeError(f"Failed to list directory '{root_path}': {str(e)}")
 
-        for name in sorted(names):  # Sort for deterministic output
-            filepath = os.path.join(root_path, name)
+        for name, is_dir in entries:  # backend.listdir already returns sorted (name, is_dir)
+            if is_agent_hidden(name):
+                continue
+            filepath = self._backend.join(root_path, name)
             if file_matcher is not None:
                 rel = os.path.relpath(filepath, root_path)
                 if not file_matcher(rel):
@@ -369,8 +329,7 @@ List deeper files (example):
             # в denied paths (включая symlink escape наружу launch_root).
             if not self._read_guard_pass(filepath, rg_cfg, rg_root, rg_extra):
                 continue
-            entry = self._get_entry_info(filepath)
-            result.append(entry)
+            result.append(self._entry(filepath, is_dir))
             if max_entries is not None and len(result) >= max_entries:
                 return True
 
@@ -388,56 +347,35 @@ List deeper files (example):
         rg_root=None,
         rg_extra=None,
     ):
-        """Recursively walk through directory and list all entries."""
-        for dirpath, dirnames, filenames in os.walk(root_path, followlinks=False):
-            rel_dir = os.path.relpath(dirpath, root_path)
-            current_depth = 0 if rel_dir == "." else len(rel_dir.split(os.sep))
+        """Walk (max_depth>=1) via backend.iter_walk (os.walk on local)."""
+        def _should_descend(abs_path: str) -> bool:
+            if is_agent_hidden(os.path.basename(abs_path)):
+                return False
+            if not self._read_guard_pass(abs_path, rg_cfg, rg_root, rg_extra):
+                return False
+            if max_depth is not None:
+                rel = os.path.relpath(abs_path, root_path).replace(os.sep, "/")
+                if rel.count("/") >= max_depth:
+                    return False
+            return True
 
-            # Sort for consistent ordering
-            dirnames.sort()
-            filenames.sort()
+        try:
+            walk_iter = self._backend.iter_walk(root_path, should_descend=_should_descend)
+        except FileNotFoundError:
+            raise
+        except OSError as e:
+            raise RuntimeError(f"Failed to walk directory '{root_path}': {e}") from e
 
-            # If current directory depth reached the limit, we can still list its
-            # immediate children, but must not descend further.
-            prune_children = max_depth is not None and current_depth >= max_depth
-
-            # Prune dirnames in-place чтобы os.walk не заходил в denied поддиректории
-            # (per-entry guard ниже не помог бы для самих children этих dir'ов).
-            if rg_cfg is not None:
-                dirnames[:] = [
-                    d for d in dirnames
-                    if self._read_guard_pass(
-                        os.path.join(dirpath, d), rg_cfg, rg_root, rg_extra,
-                    )
-                ]
-
-            # Add directories first
-            for dirname in dirnames:
-                dpath = os.path.join(dirpath, dirname)
-                if file_matcher is not None:
-                    rel = os.path.relpath(dpath, root_path)
-                    if not file_matcher(rel):
-                        continue
-                result.append(self._get_entry_info(dpath))
-                if max_entries is not None and len(result) >= max_entries:
-                    return True
-
-            # Then add files
-            for filename in filenames:
-                fpath = os.path.join(dirpath, filename)
-                if file_matcher is not None:
-                    rel = os.path.relpath(fpath, root_path)
-                    if not file_matcher(rel):
-                        continue
-                # Per-entry read_guard: пропускаем denied файлы (включая symlinks).
-                if not self._read_guard_pass(fpath, rg_cfg, rg_root, rg_extra):
-                    continue
-                result.append(self._get_entry_info(fpath))
-                if max_entries is not None and len(result) >= max_entries:
-                    return True
-
-            if prune_children:
-                # Stop os.walk recursion into subdirectories beyond current depth.
-                dirnames[:] = []
+        for rel, is_d in walk_iter:
+            if is_agent_hidden(os.path.basename(rel)):
+                continue
+            if file_matcher is not None and not file_matcher(rel):
+                continue
+            abs_path = self._backend.join(root_path, rel)
+            if not self._read_guard_pass(abs_path, rg_cfg, rg_root, rg_extra):
+                continue
+            result.append(self._entry(abs_path, is_d))
+            if max_entries is not None and len(result) >= max_entries:
+                return True
 
         return False

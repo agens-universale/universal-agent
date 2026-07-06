@@ -3,7 +3,7 @@ from typing import Any, Dict, Optional
 import os
 import json
 
-from utils.file_text import read_text_for_edit, sha256_hex_of_text
+from utils.file_text import sha256_hex_of_text
 from utils.tool_report_paths import tool_report_abspath
 from security.read_guard import enforce_read_guard
 
@@ -19,15 +19,6 @@ def _default_char_limit(config: Optional[Dict[str, Any]]) -> int:
     except (TypeError, ValueError):
         return DEFAULT_READ_FILE_CHAR_LIMIT
     return value if value > 0 else DEFAULT_READ_FILE_CHAR_LIMIT
-
-
-def _lookup_file_size_bytes(path: str) -> Optional[int]:
-    try:
-        if os.path.isfile(path):
-            return os.path.getsize(path)
-    except OSError:
-        return None
-    return None
 
 
 def _max_file_bytes(config: Optional[Dict[str, Any]]) -> int:
@@ -127,6 +118,14 @@ class ReadFile(AbstractSimpleTool):
         if char_limit < 1:
             return 1
         return char_limit
+
+    def _lookup_file_size_bytes(self, path: str) -> Optional[int]:
+        try:
+            if self._backend.is_file(path):
+                return self._backend.getsize(path)
+        except OSError:
+            return None
+        return None
 
     @classmethod
     def tool_description(cls):
@@ -257,7 +256,7 @@ Usage:
                 file_size_bytes=None,
             )
 
-        file_size_bytes = _lookup_file_size_bytes(path)
+        file_size_bytes = self._lookup_file_size_bytes(path)
 
         if offset is not None and not isinstance(offset, int):
             return self._error_result(
@@ -319,7 +318,7 @@ Usage:
                 file_size_bytes=file_size_bytes,
             )
 
-        if not os.path.exists(path):
+        if not self._backend.exists(path):
             return self._error_result(
                 path=path,
                 error_type="not_found",
@@ -327,7 +326,7 @@ Usage:
                 file_size_bytes=None,
             )
 
-        if os.path.isdir(path):
+        if self._backend.is_dir(path):
             return self._error_result(
                 path=path,
                 error_type="not_a_file",
@@ -336,7 +335,7 @@ Usage:
             )
 
         max_bytes = _max_file_bytes(self._config_dict)
-        if file_size_bytes is None and os.path.exists(path):
+        if file_size_bytes is None and self._backend.exists(path):
             return self._error_result(
                 path=path,
                 error_type="io_error",
@@ -361,7 +360,7 @@ Usage:
         resolved_char_offset = 0 if char_offset is None else char_offset
 
         try:
-            full_text = read_text_for_edit(path)
+            full_text = self._backend.read(path)
         except OSError as e:
             return self._error_result(
                 path=path,

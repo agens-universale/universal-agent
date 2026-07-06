@@ -193,7 +193,7 @@ Usage:
                 },
             )
 
-        exists = os.path.exists(path)
+        exists = self._backend.exists(path)
         if mode == "create_only" and exists:
             return self._result(
                 ok=False, path=path, mode=mode, error={"type": "already_exists"}
@@ -204,10 +204,10 @@ Usage:
             )
 
         parent = os.path.dirname(path) or "."
-        if not os.path.exists(parent):
+        if not self._backend.is_dir(parent):
             if make_dirs:
                 try:
-                    os.makedirs(parent, exist_ok=True)
+                    self._backend.makedirs(parent)
                 except Exception as e:
                     return self._result(
                         ok=False,
@@ -233,8 +233,7 @@ Usage:
         if backup and exists:
             backup_path = f"{path}.bak"
             try:
-                with open(path, "rb") as src, open(backup_path, "wb") as dst:
-                    dst.write(src.read())
+                self._backend.copy(path, backup_path)
             except Exception as e:
                 return self._result(
                     ok=False,
@@ -243,17 +242,9 @@ Usage:
                     error={"type": "backup_failed", "message": str(e)},
                 )
 
-        tmp_path = f"{path}.tmp"
         try:
-            with open(tmp_path, "w", encoding=encoding, errors="replace") as fd:
-                fd.write(normalized)
-            atomic_replace(tmp_path, path)
+            self._backend.write(path, normalized, encoding=encoding)
         except Exception as e:
-            try:
-                if os.path.exists(tmp_path):
-                    os.remove(tmp_path)
-            except Exception:
-                pass
             return self._result(
                 ok=False,
                 path=path,
@@ -262,7 +253,7 @@ Usage:
             )
 
         try:
-            bytes_written = os.path.getsize(path)
+            bytes_written = self._backend.getsize(path)
         except Exception:
             bytes_written = 0
 

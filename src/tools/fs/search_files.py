@@ -7,6 +7,7 @@ from tools.schema_optional import coalesce_optional_string
 from tools.simple_tool_base import AbstractSimpleTool
 from utils.glob_to_regex import compile_glob
 from utils.tool_report_paths import tool_report_abspath
+from tools.fs.agent_hidden import is_agent_hidden
 from security.read_guard import (
     enforce_read_guard,
     parse_read_guard_config,
@@ -139,7 +140,7 @@ Search for error logs in Rust source files:
                 literals.append(word)
         return tuple(literals)
 
-    def _search_in_file(self, file_path: str, regex: str, context_num=5) -> List[Dict[str, Any]]:
+    def _search_lines(self, file_path: str, lines, regex: str, context_num=5) -> List[Dict[str, Any]]:
         try:
             compiled_regex = re.compile(regex)
         except re.error as e:
@@ -154,43 +155,42 @@ Search for error logs in Rust source files:
         line_context_window = 500
 
         try:
-            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-                for line_num, line in enumerate(f, start=1):
-                    line_cutted = line[:max_line_length] + f'...[line_cutted. Show first {max_line_length}, cut last {len(line) - max_line_length}]\n' if len(line) > max_line_length else line
-                    buffer.append(line_cutted)
-                    if found_data is not None:
-                        found_data['context'] = ''.join(buffer)
-                        results.append(found_data)
-                        found_data = None
-
-                    if literal_hints and not any(hint in line for hint in literal_hints):
-                        buffer = buffer[-context_num:]
-                        continue
-
-                    res = compiled_regex.search(line)
-                    if res:
-                        span = res.span()
-                        left = max(0,span[0] - line_context_window)
-                        right = min(len(line), span[1] + line_context_window)
-                        found_content = line[left:right]
-                        if left > 0 :
-                            found_content = f'[...cutted first {left}]' + found_content
-                        if right < len(line):
-                            found_content += f'[cutted last {len(line) - right}...]'
-                        if left > 0 or right < len(line):
-                            found_content += f'(shown from {left} to {right} symbols)'
-                        else:
-                            found_content = found_content.strip()
-                        found_data = {
-                            "file": tool_report_abspath(file_path),
-                            "line": line_num,
-                            "line_content": found_content
-                        }
-                    buffer = buffer[-context_num:]
+            for line_num, line in enumerate(lines, start=1):
+                line_cutted = line[:max_line_length] + f'...[line_cutted. Show first {max_line_length}, cut last {len(line) - max_line_length}]\n' if len(line) > max_line_length else line
+                buffer.append(line_cutted)
                 if found_data is not None:
                     found_data['context'] = ''.join(buffer)
                     results.append(found_data)
                     found_data = None
+
+                if literal_hints and not any(hint in line for hint in literal_hints):
+                    buffer = buffer[-context_num:]
+                    continue
+
+                res = compiled_regex.search(line)
+                if res:
+                    span = res.span()
+                    left = max(0,span[0] - line_context_window)
+                    right = min(len(line), span[1] + line_context_window)
+                    found_content = line[left:right]
+                    if left > 0 :
+                        found_content = f'[...cutted first {left}]' + found_content
+                    if right < len(line):
+                        found_content += f'[cutted last {len(line) - right}...]'
+                    if left > 0 or right < len(line):
+                        found_content += f'(shown from {left} to {right} symbols)'
+                    else:
+                        found_content = found_content.strip()
+                    found_data = {
+                        "file": tool_report_abspath(file_path),
+                        "line": line_num,
+                        "line_content": found_content
+                    }
+                buffer = buffer[-context_num:]
+            if found_data is not None:
+                found_data['context'] = ''.join(buffer)
+                results.append(found_data)
+                found_data = None
         except Exception:
             pass
 
@@ -293,9 +293,9 @@ Search for error logs in Rust source files:
         if limit is not None and not isinstance(limit, int):
             return _result(ok=False, error={"type": "invalid_argument", "field": "limit"})
 
-        if not os.path.exists(path):
+        if not self._backend.exists(path):
             return _result(ok=False, error={"type": "not_found"})
-        if not os.path.isdir(path):
+        if not self._backend.is_dir(path):
             return _result(ok=False, error={"type": "not_a_directory"})
 
         file_matcher = self._create_file_matcher(file_pattern, base_path=path)
@@ -316,6 +316,8 @@ Search for error logs in Rust source files:
                 _rg_extra = [_skills_root]
 
         def _rg_pass(p: str) -> bool:
+            if is_agent_hidden(os.path.basename(os.path.normpath(p))):
+                return False
             if not _rg_active:
                 return True
             try:
@@ -329,20 +331,24 @@ Search for error logs in Rust source files:
                 return False
             return True
 
-        for root, dirnames, files in os.walk(path, followlinks=False):
-            # Prune denied subdirs in-place чтобы os.walk туда не спускался.
-            if _rg_active:
-                dirnames[:] = [d for d in dirnames if _rg_pass(os.path.join(root, d))]
-            for filename in files:
-                file_path = os.path.join(root, filename)
-                if file_pattern and not file_matcher(file_path, path):
-                    continue
-                # Per-file guard перед открытием.
-                if not _rg_pass(file_path):
-                    continue
-                file_result = self._search_in_file(file_path, regex, context_num=5)
-                if len(file_result) > 0:
-                    results += file_result
+        # --- Walk files via backend.iter_files (streaming os.walk on local) ---
+        try:
+            file_iter = self._backend.iter_files(path, should_descend=_rg_pass)
+        except FileNotFoundError:
+            return _result(ok=False, error={"type": "not_found"})
+
+        for relpath in file_iter:
+            abs_path = self._backend.join(path, relpath)
+            if file_pattern and not file_matcher(abs_path, path):
+                continue
+            if not _rg_pass(abs_path):
+                continue
+            try:
+                file_result = self._search_lines(abs_path, self._backend.iter_lines(abs_path), regex)
+            except (OSError, FileNotFoundError):
+                continue
+            if len(file_result) > 0:
+                results += file_result
 
         total_matches = len(results)
         slice_ok, slice_err, start_0, lim_eff, off_eff = self._resolve_slice(

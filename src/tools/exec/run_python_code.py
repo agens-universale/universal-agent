@@ -1,7 +1,5 @@
 import json
 import os
-import subprocess
-import sys
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -11,7 +9,6 @@ from security.command_moderation import effective_command_cwd, moderate_command_
 from security.path_policy import resolve_tool_context
 from tools.simple_tool_base import AbstractSimpleTool
 from utils.directory_write_access import directory_allows_probe_write
-from utils.win_console import preserve_console_mode
 
 
 def _dedupe_abs_paths_ordered(paths: list[str]) -> list[str]:
@@ -236,41 +233,63 @@ Return format (JSON string):
                 error={"type": "invalid_argument", "field": "cwd"},
             )
 
-        security_context = resolve_tool_context(self, **kwargs)
-        cwd_used = effective_command_cwd(EXEC_PYTHON_NAME, {"cwd": cwd}, security_context)
+        if self._backend.is_sandbox:
+            cwd_used = cwd  # None → container default workdir
+            if cwd_used is not None and not self._backend.is_dir(cwd_used):
+                return self._result(
+                    ok=False,
+                    return_code=None,
+                    timed_out=False,
+                    truncated=False,
+                    stdout="",
+                    stderr="",
+                    error={
+                        "type": "cwd_invalid",
+                        "message": f"Working directory is not an existing directory: {cwd_used}",
+                        "cwd": cwd_used,
+                        "allowed_write_paths": [],
+                        "hint": (
+                            "Pass cwd pointing to an existing directory. If allowed_write_paths is present above, "
+                            "use one of those paths — they are the writable locations allowed for this agent run."
+                        ),
+                    },
+                )
+        else:
+            security_context = resolve_tool_context(self, **kwargs)
+            cwd_used = effective_command_cwd(EXEC_PYTHON_NAME, {"cwd": cwd}, security_context)
 
-        if not Path(cwd_used).is_dir():
-            launch_abs = os.path.abspath(str(security_context.launch_root))
-            candidate_roots = _dedupe_abs_paths_ordered(
-                [
-                    launch_abs,
-                    *[
-                        os.path.abspath(str(extra))
-                        for extra in (security_context.write_guard.extra_paths or [])
-                    ],
+            if not Path(cwd_used).is_dir():
+                launch_abs = os.path.abspath(str(security_context.launch_root))
+                candidate_roots = _dedupe_abs_paths_ordered(
+                    [
+                        launch_abs,
+                        *[
+                            os.path.abspath(str(extra))
+                            for extra in (security_context.write_guard.extra_paths or [])
+                        ],
+                    ]
+                )
+                allowed_write_paths = [
+                    p for p in candidate_roots if Path(p).is_dir() and directory_allows_probe_write(p)
                 ]
-            )
-            allowed_write_paths = [
-                p for p in candidate_roots if Path(p).is_dir() and directory_allows_probe_write(p)
-            ]
-            return self._result(
-                ok=False,
-                return_code=None,
-                timed_out=False,
-                truncated=False,
-                stdout="",
-                stderr="",
-                error={
-                    "type": "cwd_invalid",
-                    "message": f"Working directory is not an existing directory: {cwd_used}",
-                    "cwd": cwd_used,
-                    "allowed_write_paths": allowed_write_paths,
-                    "hint": (
-                        "Pass cwd pointing to an existing directory. If allowed_write_paths is present above, "
-                        "use one of those paths — they are the writable locations allowed for this agent run."
-                    ),
-                },
-            )
+                return self._result(
+                    ok=False,
+                    return_code=None,
+                    timed_out=False,
+                    truncated=False,
+                    stdout="",
+                    stderr="",
+                    error={
+                        "type": "cwd_invalid",
+                        "message": f"Working directory is not an existing directory: {cwd_used}",
+                        "cwd": cwd_used,
+                        "allowed_write_paths": allowed_write_paths,
+                        "hint": (
+                            "Pass cwd pointing to an existing directory. If allowed_write_paths is present above, "
+                            "use one of those paths — they are the writable locations allowed for this agent run."
+                        ),
+                    },
+                )
 
         env_map: Optional[Dict[str, str]] = None
         if env_vars is not None:
@@ -330,27 +349,8 @@ Return format (JSON string):
             env_map = parsed
 
         try:
-            # На Windows subprocess гасит ENABLE_MOUSE_INPUT родительской консоли
-            # → TUI теряет мышь до перезапуска. Возвращаем режим после команды.
-            with preserve_console_mode():
-                result = subprocess.run(
-                    [sys.executable, "-"],
-                    capture_output=True,
-                    text=True,
-                    timeout=effective_timeout,
-                    env=_sanitize_env(env_map),
-                    cwd=cwd_used,
-                    input=code,
-                )
-        except subprocess.TimeoutExpired:
-            return self._result(
-                ok=False,
-                return_code=None,
-                timed_out=True,
-                truncated=False,
-                stdout="",
-                stderr="",
-                error={"type": "timeout", "message": f"Execution timed out after {effective_timeout} seconds"},
+            res = self._backend.run_python(
+                code, cwd=cwd_used, timeout=effective_timeout, env=env_map
             )
         except Exception as e:
             return self._result(
@@ -362,14 +362,24 @@ Return format (JSON string):
                 stderr="",
                 error={"type": "execution_failed", "message": str(e)},
             )
+        if res.timed_out:
+            return self._result(
+                ok=False,
+                return_code=None,
+                timed_out=True,
+                truncated=False,
+                stdout="",
+                stderr="",
+                error={"type": "timeout", "message": f"Execution timed out after {effective_timeout} seconds"},
+            )
 
-        stdout_raw = result.stdout or ""
-        stderr_raw = result.stderr or ""
+        stdout_raw = res.stdout or ""
+        stderr_raw = res.stderr or ""
         stdout, stdout_trunc = self._truncate_text(stdout_raw.rstrip(), max_output_chars)
         stderr, stderr_trunc = self._truncate_text(stderr_raw.rstrip(), max_output_chars)
         truncated = stdout_trunc or stderr_trunc
 
-        return_code = result.returncode
+        return_code = res.return_code
         ok = return_code == 0
 
         error = None
@@ -385,87 +395,4 @@ Return format (JSON string):
             stderr=stderr,
             error=error,
         )
-
-
-_CHILD_ENV_ALLOWLIST = frozenset(
-    {
-        "HOME",
-        "LOGNAME",
-        "USER",
-        "USERNAME",
-        "HOMEDRIVE",
-        "HOMEPATH",
-        "USERPROFILE",
-        "SHELL",
-        "TERM",
-        "LANG",
-        "LANGUAGE",
-        "LC_ALL",
-        "LC_CTYPE",
-        "LC_MESSAGES",
-        "LC_NUMERIC",
-        "LC_TIME",
-        "TZ",
-        "PATH",
-        "PATHEXT",
-        "TMPDIR",
-        "TMP",
-        "TEMP",
-        "SSL_CERT_FILE",
-        "SSL_CERT_DIR",
-        "REQUESTS_CA_BUNDLE",
-        "CURL_CA_BUNDLE",
-        "NODE_EXTRA_CA_CERTS",
-        "HTTP_PROXY",
-        "HTTPS_PROXY",
-        "ALL_PROXY",
-        "FTP_PROXY",
-        "NO_PROXY",
-        "http_proxy",
-        "https_proxy",
-        "all_proxy",
-        "ftp_proxy",
-        "no_proxy",
-        "PYTHONUTF8",
-        "PYTHONIOENCODING",
-        "SYSTEMROOT",
-        "WINDIR",
-        "PROGRAMFILES",
-        "PROGRAMFILES(X86)",
-        "PROGRAMDATA",
-        "APPDATA",
-        "LOCALAPPDATA",
-        "PUBLIC",
-    }
-)
-
-
-def _child_env_from_parent() -> Dict[str, str]:
-    return {
-        k: v
-        for k, v in os.environ.items()
-        if k in _CHILD_ENV_ALLOWLIST and isinstance(v, str)
-    }
-
-
-def _sanitize_env(env: Optional[Dict[str, Any]]) -> Dict[str, str]:
-    base_env = {**_child_env_from_parent(), "PYTHONPATH": ""}
-    if env is None:
-        return base_env
-    if not isinstance(env, dict):
-        return base_env
-    sanitized: Dict[str, str] = {}
-    for k, v in env.items():
-        if k is None:
-            continue
-        key = k if isinstance(k, str) else str(k)
-        if v is None:
-            sanitized[key] = ""
-        elif isinstance(v, str):
-            sanitized[key] = v
-        else:
-            sanitized[key] = str(v)
-    merged = {**base_env, **sanitized}
-    merged["PYTHONPATH"] = ""
-    return merged
 

@@ -80,20 +80,12 @@ class SaveBase64File(AbstractSimpleTool):
             return self._result(ok=False, path=path, error={"type": "decode_failed", "message": str(e)})
 
         parent = os.path.dirname(path) or "."
-        if not os.path.exists(parent):
+        if not self._backend.is_dir(parent):
             return self._result(ok=False, path=path, error={"type": "parent_not_found"})
 
-        tmp_path = f"{path}.tmp"
         try:
-            with open(tmp_path, "wb") as fd:
-                fd.write(raw)
-            atomic_replace(tmp_path, path)
+            self._backend.write_bytes(path, raw)
         except Exception as e:
-            try:
-                if os.path.exists(tmp_path):
-                    os.remove(tmp_path)
-            except Exception:
-                pass
             return self._result(ok=False, path=path, error={"type": "write_failed", "message": str(e)})
 
         return self._result(ok=True, path=path, bytes_written=len(raw))

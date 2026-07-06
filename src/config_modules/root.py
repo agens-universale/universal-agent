@@ -112,6 +112,9 @@ def resolve_paths(cfg: AppConfig, config_dir: str) -> None:
     cfg.paths.chat_completions_system_prompt_path = to_abs(
         cfg.paths.chat_completions_system_prompt_path
     ) or _prompt_default(config_dir, "chat_completions_system_prompt.md")
+    cfg.paths.chat_completions_intent_guard_prompt_path = to_abs(
+        cfg.paths.chat_completions_intent_guard_prompt_path
+    ) or _prompt_default(config_dir, "chat_completions_intent_guard_prompt.md")
     cfg.paths.threads_data_path = (
         to_abs(cfg.paths.threads_data_path) or str(project_state / "threads")
     )

@@ -94,3 +94,14 @@ def test_search_validation_and_directory_error(tmp_path):
     f.write_text("x", encoding="utf-8")
     not_dir = json.loads(tool(path=str(f), regex="x"))
     assert not_dir["ok"] is False and not_dir["error"]["type"] == "not_a_directory"
+
+
+def test_search_binary_file_does_not_crash(tmp_path):
+    (tmp_path / "bin.dat").write_bytes(b"\x00\xff\xfeMATCH\xfe")
+    (tmp_path / "text.txt").write_text("MATCH here\n", encoding="utf-8")
+    res = json.loads(SearchFiles()(path=str(tmp_path), regex="MATCH"))
+    assert res["ok"] is True
+    assert res["total_matches"] >= 1
+    files = {m["file"] for m in res["matches"]}
+    assert any("text.txt" in f for f in files)
+
