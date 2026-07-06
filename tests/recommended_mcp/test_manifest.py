@@ -334,6 +334,24 @@ def test_source_field_ignored_for_non_source_types(tmp_path: Path) -> None:
     assert entry.install.source == Path("../whatever")
 
 
+def test_install_spec_parses_npm_package(tmp_path):
+    from recommended_mcp.manifest import load_manifest
+    root = tmp_path / "recommended_mcp"
+    root.mkdir()
+    (root / "config.yml").write_text(
+        "mcps:\n"
+        "  - name: pw\n"
+        "    path: ./pw\n"
+        "    install:\n"
+        "      type: npx\n"
+        "      npm_package: '@playwright/mcp'\n"
+        "      commands: [[npm, install, -g, '@playwright/mcp@1.0.0']]\n",
+        encoding="utf-8",
+    )
+    entries = load_manifest(root / "config.yml")
+    assert entries[0].install.npm_package == "@playwright/mcp"
+
+
 def test_npx_mcp_parses_install_commands(tmp_path: Path) -> None:
     # Баг-регрессия: install.commands (warmup npx/npm) раньше терялись в парсере.
     f = _write(tmp_path, """
@@ -352,3 +370,84 @@ def test_npx_mcp_parses_install_commands(tmp_path: Path) -> None:
         ("npm", "install", "-g", "@playwright/mcp@0.0.70"),
         ("npx", "-y", "playwright", "install", "chromium"),
     )
+
+
+def test_load_repo_url(tmp_path):
+    from recommended_mcp.manifest import load_repo_url
+    cfg = tmp_path / "config.yml"
+    cfg.write_text("repo_url: https://example.org/repo\nrepo_ref: v1\nmcps: []\n", encoding="utf-8")
+    assert load_repo_url(cfg) == ("https://example.org/repo", "v1")
+    cfg2 = tmp_path / "c2.yml"
+    cfg2.write_text("mcps: []\n", encoding="utf-8")
+    assert load_repo_url(cfg2) == (None, None)
+
+
+def test_source_mcp_with_dist(tmp_path):
+    f = _write(tmp_path, """
+        mcps:
+          - name: office
+            path: ./office
+            install:
+              type: source
+              source: ../external/office-mcp
+              dist: office-mcp
+    """)
+    assert load_manifest(f)[0].install.dist == "office-mcp"
+
+
+def test_install_dist_defaults_none(tmp_path):
+    f = _write(tmp_path, """
+        mcps:
+          - name: science
+            path: ./science
+            install: {type: source, source: ../external/science-mcp}
+    """)
+    assert load_manifest(f)[0].install.dist is None
+
+
+def test_every_source_entry_declares_dist():
+    """Каждая source-запись бандл-манифеста обязана нести install.dist."""
+    from recommended_mcp.manifest import default_manifest_path, load_manifest
+    from mcp_runtime.paths import recipe_root
+    entries = load_manifest(default_manifest_path(recipe_root()))
+    for e in entries:
+        if e.install.type == "source":
+            assert e.install.dist, f"{e.name}: source-запись обязана иметь install.dist"
+
+
+def test_manifest_parses_optional_flag(tmp_path):
+    from recommended_mcp.manifest import load_manifest
+    p = tmp_path / "config.yml"
+    p.write_text(
+        "mcps:\n"
+        "  - name: a\n"
+        "    path: ./a\n"
+        "    optional: true\n"
+        "    install: {type: source, source: ../x, dist: x}\n"
+        "  - name: b\n"
+        "    path: ./b\n"
+        "    install: {type: source, source: ../y, dist: y}\n",
+        encoding="utf-8",
+    )
+    entries = load_manifest(p)
+    by = {e.name: e for e in entries}
+    assert by["a"].optional is True
+    assert by["b"].optional is False
+
+
+def test_manifest_dist_matches_pyproject_when_source_present():
+    """Где source-папка на диске есть — install.dist == [project].name из pyproject."""
+    import dataclasses
+    from recommended_mcp import install as inst
+    from recommended_mcp.manifest import default_manifest_path, load_manifest
+    from mcp_runtime.paths import recipe_root
+    root = recipe_root()
+    for e in load_manifest(default_manifest_path(root)):
+        if e.install.type == "source" and e.install.dist and e.install.source:
+            pp = (root / e.install.source).resolve() / "pyproject.toml"
+            if not pp.is_file():
+                continue
+            no_dist = dataclasses.replace(
+                e, install=dataclasses.replace(e.install, dist=None))
+            assert e.install.dist == inst._dist_name(no_dist, root), \
+                f"{e.name}: install.dist={e.install.dist} != имя из pyproject"

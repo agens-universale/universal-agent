@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
@@ -30,7 +31,7 @@ _FOOTER_NOGIT = ("↑↓/Home/End · PgUp/PgDn страница · Enter отк�
                  " · Ctrl+R переименовать · Del удалить · Ctrl+D массовое · Esc")
 
 _STATUS_COLOR = {
-    "running": RUN_COLOR, "stopped": DEEP_DIM, "done": OK, "error": ERR,
+    "running": RUN_COLOR, "stopped": DIM, "completed": OK, "failed": ERR,
 }
 
 
@@ -81,7 +82,11 @@ class SessionsScreen(Screen):
     # ---- data ---------------------------------------------------------
 
     def _all_tasks(self) -> list:
-        return self._store.list_tasks(limit=200)
+        # Кап высокий (не 200) — чтобы счётчик «из N» показывал реальное число
+        # сессий, а не вводил в заблуждение. Дефолтный вид читает только мету (дёшево)
+        # + first-prompt лишь для 25 строк страницы; фильтр-по-названию ограничен этим
+        # же капом. 10000 — как в mass-delete ниже.
+        return self._store.list_tasks(limit=10000)
 
     def _visible_tasks(self) -> list:
         f = self._filter.lower()
@@ -179,10 +184,19 @@ class SessionsScreen(Screen):
             t.append(branch, style=CODE)
         t.append(" · ", style=MUTED)
         t.append(f"{task.messages_count} сообщ.", style=DIM)
-        t.append(" · ", style=MUTED)
-        t.append(f"[{task.status}]", style=_STATUS_COLOR.get(task.status, DEEP_DIM))
+        if task.status:   # None — исход не записан → бейдж не показываем (без пустых «[]»)
+            t.append(" · ", style=MUTED)
+            t.append(f"[{task.status}]", style=_STATUS_COLOR.get(task.status, DEEP_DIM))
         t.append(" · ", style=MUTED)
         t.append(_short_id(task.thread_id), style=MUTED)
+        return t
+
+    def _card_text(self, task, *, selected: bool) -> Text:
+        """Карточка сессии одним 2-строчным виджетом: заголовок + мета."""
+        t = Text(no_wrap=True, overflow="ellipsis")
+        t.append_text(self._title_line(task, selected=selected))
+        t.append("\n")
+        t.append_text(self._meta_line(task))
         return t
 
     def _render_list(self) -> None:
@@ -192,19 +206,18 @@ class SessionsScreen(Screen):
         if not page:
             listview.mount(Static("(нет сессий)", classes="line-meta", markup=False))
             return
-        selected_widget: Optional[Static] = None
+        selected_card: Optional[Static] = None
         for idx, task in enumerate(page):
             suffix = " selected" if idx == self._selected_idx else ""
-            title_w = Static(self._title_line(task, selected=bool(suffix)),
-                             classes="card-title" + suffix, markup=False)
-            meta_w = Static(self._meta_line(task),
-                            classes="card-meta" + suffix, markup=False)
+            card = Static(self._card_text(task, selected=bool(suffix)),
+                          classes="card" + suffix, markup=False)
             if suffix:
-                selected_widget = title_w
-            listview.mount(title_w)
-            listview.mount(meta_w)
-        if selected_widget is not None:
-            self.call_after_refresh(selected_widget.scroll_visible, animate=False)
+                selected_card = card
+            listview.mount(card)
+        if selected_card is not None:
+            # Элемент — ОДИН виджет (2 строки): scroll_visible тащит его целиком в
+            # обе стороны кругового перехода (как карточка MCP).
+            self.call_after_refresh(selected_card.scroll_visible, animate=False)
 
     def _change_page(self, delta: int) -> None:
         new_page = max(0, min(self._page + delta, self._page_count() - 1))
@@ -230,13 +243,13 @@ class SessionsScreen(Screen):
     def on_key(self, event: events.Key) -> None:
         page_len = len(self._page_items())
         if event.key == "up":
-            if page_len and self._selected_idx > 0:
-                self._selected_idx -= 1
+            if page_len:   # круговой в пределах страницы: с первой ↑ → на последнюю
+                self._selected_idx = (self._selected_idx - 1) % page_len
                 self._render_list()
             event.stop()
         elif event.key == "down":
-            if page_len and self._selected_idx < page_len - 1:
-                self._selected_idx += 1
+            if page_len:   # круговой: с последней ↓ → на первую
+                self._selected_idx = (self._selected_idx + 1) % page_len
                 self._render_list()
             event.stop()
         elif event.key in ("home", "end"):
@@ -292,7 +305,7 @@ class SessionsScreen(Screen):
         from tui.screens.main import TraceScreen
         scr = self.app.screen
         if isinstance(scr, TraceScreen):
-            scr.attach_active_task(thread_id)
+            scr.attach_active_task(thread_id, is_resume=True)   # промпт заголовка — из стора
 
     def _delete_selected(self) -> None:
         task = self._selected_task()
@@ -316,7 +329,6 @@ class SessionsScreen(Screen):
         self._reload()
 
     def _open_mass_delete(self) -> None:
-        from datetime import datetime
         tasks = self._store.list_tasks(limit=10000)  # весь проект, не страница
         if not tasks:
             return

@@ -4,7 +4,7 @@ Skills describe *roles* (filesystem write, human clarification, finish handoff,
 delegated subagent, MCP literature search on science-mcp, …). They must NOT
 hardcode runtime builtin tool names (as-is or to-be), except the skills
 mechanism itself: ``skills_list``, ``skills_load``, ``skills_run_script``,
-``skills_load_reference``, ``skills_load_asset``.
+``skills_read_reference``, ``skills_read_asset``.
 """
 
 import re

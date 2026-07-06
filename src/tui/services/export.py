@@ -144,6 +144,11 @@ def _render_record(n: int, payload: dict, name_by_call: dict) -> list[str]:
         return [f"[{n}] THINK", *_indent(_as_text(text))]
 
     if role == "user":
+        if "display_content" in payload:
+            disp = (payload.get("display_content") or "").strip()
+            if not disp:
+                return []                        # mid-run доставка — не выводим как USER
+            return [f"[{n}] USER", *_indent(disp)]
         content = user_content_to_text(payload.get("content"))
         if is_technical_user_message_text(content):
             ttype = resolve_technical_user_content_type(content)

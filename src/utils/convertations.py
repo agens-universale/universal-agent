@@ -3,6 +3,8 @@ import hashlib
 from copy import deepcopy
 from typing import Callable, Dict, List, Optional
 
+from utils.backend_errors import normalize_finish_reason
+
 _MAX_BACKEND_LOG_CHARS = 8000
 
 
@@ -72,14 +74,30 @@ def get_output_list(dct, logger_override=None):
                 "Chat completion provider returned choice error: "
                 f"code={err_code!r} message={err_message!r} metadata={err_metadata!r}"
             )
-        if dct_choice['finish_reason'] not in ("stop", "tool_calls", "length"):
+        fr = dct_choice.get("finish_reason")
+        msg_obj = dct_choice.get("message") or {}
+        _decision = normalize_finish_reason(
+            fr,
+            has_content=bool(msg_obj.get("content")),
+            has_tool_calls=bool(msg_obj.get("tool_calls")),
+        )
+        if not _decision.accept:
             if logger_override is not None:
                 logger_override.error(
-                    "Unknown finish reason in chat/completions payload: payload=%s",
-                    _safe_json_for_log(dct),
+                    "Empty/unusable chat/completions response (finish_reason=%r, "
+                    "no content/tool_calls): payload=%s",
+                    fr, _safe_json_for_log(dct),
                 )
-            raise ValueError("Unknown finish reason")
-        if dct_choice["finish_reason"] == "length" and logger_override is not None:
+            raise ValueError(
+                f"Backend returned empty/unusable response (finish_reason={fr!r})"
+            )
+        if _decision.unknown and logger_override is not None:
+            logger_override.warning(
+                "Unknown finish_reason=%r accepted permissively (content/tool_calls "
+                "present): payload=%s",
+                fr, _safe_json_for_log(dct),
+            )
+        if fr == "length" and logger_override is not None:
             logger_override.warning(
                 "chat/completions choice finished with length (output may be truncated; "
                 "tool JSON may be incomplete). payload=%s",

@@ -132,10 +132,12 @@ def _build_chat_completion_payload(
     payload_overrides: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     cfg = getattr(ctx, "config_dict", {}) or {}
+    # tools НЕ отправляем: этот клиент text-only (судья команд, суммаризация,
+    # finish-gate, компакция памяти) — инструменты не использует. Пустой
+    # "tools": [] — бессмысленный шум; для plain-completion ключ опускаем.
     payload: Dict[str, Any] = {
         "model": getattr(state, "default_model", None) or cfg.get("model"),
         "messages": messages,
-        "tools": [],
     }
     if bool(cfg.get("use_max_tokens_param", False)):
         payload["max_tokens"] = max_tokens

@@ -70,15 +70,23 @@ async def test_preview_summary_marker_collapsed_then_toggles():
         scr = pilot.app.screen
         body = next(w for w in scr.query(SummaryMarker) if w.has_class("summary-body"))
         marker = next(w for w in scr.query(SummaryMarker) if w.has_class("summary-marker"))
-        # свёрнут по умолчанию
+        prefix = lambda: str(marker.query_one(".trace-prefix").render())
+        # свёрнут по умолчанию — стрелка вправо
         assert body.has_class("hidden")
-        # клик по маркеру → раскрыт
+        assert "▸" in prefix() and "▾" not in prefix()
+        # клик по маркеру → раскрыт, стрелка вниз
         class _Click:
             chain = 1
             def stop(self): pass
         marker.on_click(_Click())
         await pilot.pause()
         assert not body.has_class("hidden")
+        assert "▾" in prefix(), "раскрыт → стрелка вниз"
+        # повторный клик → свёрнут, стрелка снова вправо
+        marker.on_click(_Click())
+        await pilot.pause()
+        assert body.has_class("hidden")
+        assert "▸" in prefix(), "свёрнут → стрелка вправо"
 
 
 @pytest.mark.asyncio

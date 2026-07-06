@@ -5,12 +5,18 @@
 # Куда install.py разворачивает изолированную Node.js (для type: npx).
 # По умолчанию — gc_paths()['data']: Linux ~/.local/share/gc, Windows ~/.gc.
 # Переопределение (опционально): agent_dep_dir: /custom/path
+# Репо для установки source-MCP из git в method-2 (без клона):
+#   pip install "git+<repo_url>[@repo_ref]#subdirectory=external/<name>"
+# Публичный https → ставится анонимно, в т.ч. через корп-прокси.
+repo_url: https://gitverse.ru/gigacode-ai/background-agent
+# repo_ref:   # опц. пин ветки/тега; пусто = дефолтная ветка
 mcps:
   - name: computer
     path: ./computer
     install:
       type: source
       source: ../external/computer-mcp
+      dist: computer-mcp
       platforms: [win32]
     # run-блок отсутствует: MCP спавнится агентом через stdio.
 
@@ -19,12 +25,14 @@ mcps:
     install:
       type: source
       source: ../external/office-mcp
+      dist: office-mcp
 
   - name: science
     path: ./science
     install:
       type: source
       source: ../external/science-mcp
+      dist: science-mcp
     run:
       type: command
       command: science-mcp
@@ -33,14 +41,17 @@ mcps:
   - name: duckduckgo_search
     path: ./duckduckgo_search
     install:
-      type: pypi
-      package: ddgs-mcp==0.1.0
+      type: source
+      source: ../external/ddgs-mcp
+      dist: ddgs-mcp
     # run-блок отсутствует: агент спавнит ddgs-mcp по stdio.
 
   - name: browser_playwright
     path: ./browser_playwright
+    optional: true
     install:
       type: npx
+      npm_package: "@playwright/mcp"
       commands:
         # Прогреваем npm-кэш (иначе первый запуск агента тянет пакет по сети).
         - [npm, "install", "-g", "@playwright/mcp@0.0.70"]

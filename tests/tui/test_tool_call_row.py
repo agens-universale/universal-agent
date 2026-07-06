@@ -20,10 +20,12 @@ async def test_tool_call_row_initial_state():
 
     async with _App().run_test() as pilot:
         row = pilot.app.query_one(ToolCallRow)
-        text = str(row.query_one(".trace-content").render())
-        assert "read_file" in text
-        assert "src/x.py" in text
-        assert "[..]" in text or "running" in text
+        content = str(row.query_one(".trace-content").render())
+        prefix = str(row.query_one(".trace-prefix").render())
+        assert "read_file" in content
+        assert "src/x.py" in content
+        assert "▸" in prefix                 # running-глиф ведёт строку (prefix)
+        assert "running" not in content       # слово убрано
 
 
 @pytest.mark.asyncio
@@ -41,10 +43,11 @@ async def test_tool_call_row_mutate_to_ok():
         row = pilot.app.query_one(ToolCallRow)
         row.set_result(summary="312 строк", error=False)
         await pilot.pause()
-        text = str(row.query_one(".trace-content").render())
-        assert "[ok]" in text
-        assert "312 строк" in text
-        assert "[..]" not in text and "running" not in text
+        content = str(row.query_one(".trace-content").render())
+        prefix = str(row.query_one(".trace-prefix").render())
+        assert "✓" in prefix
+        assert "312 строк" in content
+        assert "▸" not in prefix and "running" not in content
 
 
 @pytest.mark.asyncio
@@ -62,9 +65,38 @@ async def test_tool_call_row_mutate_to_error():
         row = pilot.app.query_one(ToolCallRow)
         row.set_result(summary="ENOENT: нет файла", error=True)
         await pilot.pause()
-        text = str(row.query_one(".trace-content").render())
-        assert "[!]" in text
-        assert "ENOENT" in text
+        content = str(row.query_one(".trace-content").render())
+        prefix = str(row.query_one(".trace-prefix").render())
+        assert "✗" in prefix
+        assert "ENOENT" in content
+        assert "-> ENOENT: нет файла" in content   # симметрично ok
+
+
+@pytest.mark.asyncio
+async def test_tool_call_row_error_text_is_dim():
+    pytest.importorskip("textual")
+    from textual.app import App, ComposeResult
+    from tui.widgets.tool_call_row import ToolCallRow
+    from tui.palette import DIM, ERR
+
+    class _App(App):
+        def compose(self) -> ComposeResult:
+            yield ToolCallRow(call_id="c2", tool_name="exec",
+                              args_summary="cmd='rm'")
+
+    async with _App().run_test() as pilot:
+        row = pilot.app.query_one(ToolCallRow)
+        row.set_result(summary="permission denied", error=True)
+        await pilot.pause()
+        rendered = row._render_content()
+        # Сегмент с текстом ошибки покрашен DIM, не ERR.
+        plain = rendered.plain
+        dim_segs = [plain[s.start:s.end] for s in rendered.spans
+                    if str(s.style).lower() == DIM.lower()]
+        err_segs = [plain[s.start:s.end] for s in rendered.spans
+                    if str(s.style).lower() == ERR.lower()]
+        assert any("permission denied" in seg for seg in dim_segs)
+        assert not any("permission denied" in seg for seg in err_segs)
 
 
 @pytest.mark.asyncio
@@ -100,7 +132,6 @@ def test_tool_call_row_exposes_call_id():
 
 @pytest.mark.asyncio
 async def test_tool_call_row_ok_with_empty_summary_omits_arrow():
-    """Result с пустым summary рендерится как `name(args) [ok]` без `-> `."""
     pytest.importorskip("textual")
     from textual.app import App, ComposeResult
     from tui.widgets.tool_call_row import ToolCallRow
@@ -114,15 +145,16 @@ async def test_tool_call_row_ok_with_empty_summary_omits_arrow():
         row = pilot.app.query_one(ToolCallRow)
         row.set_result(summary="", error=False)
         await pilot.pause()
-        text = str(row.query_one(".trace-content").render())
-        assert "[ok]" in text
-        assert "-> " not in text  # стрелки нет при пустом summary
-        assert "skills_load" in text
+        content = str(row.query_one(".trace-content").render())
+        prefix = str(row.query_one(".trace-prefix").render())
+        assert "✓" in prefix
+        assert "-> " not in content   # стрелки нет при пустом summary
+        assert "skills_load" in content
 
 
 @pytest.mark.asyncio
 async def test_tool_call_row_ok_state_uses_styled_text():
-    """OK state renders as rich.text.Text with colored span for `[ok]` (canon §3.1)."""
+    """OK: prefix содержит зелёный span с глифом ✓; content — dim args."""
     pytest.importorskip("textual")
     from textual.app import App, ComposeResult
     from rich.text import Text
@@ -137,23 +169,12 @@ async def test_tool_call_row_ok_state_uses_styled_text():
         row = pilot.app.query_one(ToolCallRow)
         row.set_result(summary="100 строк", error=False)
         await pilot.pause()
-        rendered = row._render_content()
-
-        assert isinstance(rendered, Text)
-        # Должны быть отдельные стилизованные сегменты (dim args + green [ok])
-        assert len(rendered.spans) >= 2
-
-        # Найти span со стилем ok-green (#5FAE7F) и убедиться что он покрывает "[ok]"
+        prefix = row._render_prefix()
+        assert isinstance(prefix, Text)
         ok_color = "#5FAE7F"
-        plain = rendered.plain
-        green_segments = [
-            plain[s.start:s.end]
-            for s in rendered.spans
-            if str(s.style).lower() == ok_color.lower()
-        ]
-        assert any("[ok]" in seg for seg in green_segments), (
-            f"No green span containing [ok]; spans={rendered.spans}"
-        )
+        green = [prefix.plain[s.start:s.end] for s in prefix.spans
+                 if str(s.style).lower() == ok_color.lower()]
+        assert any("✓" in seg for seg in green), f"spans={prefix.spans}"
 
 
 @pytest.mark.asyncio
@@ -189,7 +210,6 @@ async def test_tool_call_row_tool_name_uses_tool_name_color():
 
 @pytest.mark.asyncio
 async def test_tool_call_row_set_result_twice_overwrites():
-    """Second set_result replaces the first state (matters for stream_reset re-stream)."""
     pytest.importorskip("textual")
     from textual.app import App, ComposeResult
     from tui.widgets.tool_call_row import ToolCallRow
@@ -205,12 +225,12 @@ async def test_tool_call_row_set_result_twice_overwrites():
         await pilot.pause()
         row.set_result(summary="updated", error=True)
         await pilot.pause()
-
-        text = str(row.query_one(".trace-content").render())
-        assert "updated" in text
-        assert "[!]" in text
-        assert "initial" not in text
-        assert "[ok]" not in text
+        content = str(row.query_one(".trace-content").render())
+        prefix = str(row.query_one(".trace-prefix").render())
+        assert "updated" in content
+        assert "✗" in prefix
+        assert "initial" not in content
+        assert "✓" not in prefix
 
 
 @pytest.mark.asyncio
@@ -278,23 +298,16 @@ async def test_focus_change_posts_tool_call_focus_changed():
 
 
 @pytest.mark.asyncio
-async def test_focus_renders_event_number_prefix():
-    """Regression: f750f3f (ToolCallRow compose-рефактор) инвертировал `[N]`-on-focus.
-
-    compose-based widget читал has_focus синхронно в _on_focus ДО того, как
-    Widget._on_focus (parent в MRO) ставил has_focus=True → `[N]` не появлялся
-    при фокусе и оставался после blur. Этот тест ловит обе ветки симптома.
-    """
+async def test_focus_does_not_render_event_number_prefix():
+    """`[N]`-префикс на фокусе убран: он дёргал строку по горизонтали и мешал
+    выделению/копированию. Фокус теперь показывается фоном (:focus background).
+    Регрессия: на фокусе `[N]` не должен появляться ни до, ни после."""
     pytest.importorskip("textual")
     from textual.app import App, ComposeResult
     from textual.widgets import Static
     from tui.widgets.tool_call_row import ToolCallRow
 
     class _App(App):
-        # AUTO_FOCUS=None — обходим Screen._update_auto_focus, который ставит
-        # has_focus=True напрямую (textual/screen.py:1498) и маскирует баг
-        # инверсии. Фокус идёт ТОЛЬКО через post_message(Focus) → dispatcher,
-        # то есть тот самый buggy путь, на котором живёт production-симптом.
         AUTO_FOCUS = None
 
         def compose(self) -> ComposeResult:
@@ -306,18 +319,11 @@ async def test_focus_renders_event_number_prefix():
         row = pilot.app.query_one(ToolCallRow)
         content = row.query_one(".trace-content")
 
-        # До фокуса — [42] нет.
         assert "[42]" not in str(content.render())
-
         row.focus()
         await pilot.pause(0.05)
         assert row.has_focus
-        # На фокусе — [42] есть.
-        assert "[42]" in str(content.render())
-
-        pilot.app.set_focus(None)
-        await pilot.pause(0.05)
-        # После blur — [42] нет.
+        # На фокусе [N] больше НЕ появляется.
         assert "[42]" not in str(content.render())
 
 
@@ -357,8 +363,8 @@ def test_running_row_shows_elapsed_seconds():
     row = ToolCallRow(call_id="c1", tool_name="subagent_planner", args_summary="task=x")
     row._start_monotonic = time.monotonic() - 47.0
     r = str(row._render_content())
-    assert "running · 47с" in r
-    assert "running..." not in r
+    assert "· 47с" in r
+    assert "running" not in r
 
 
 def test_running_row_elapsed_same_for_any_tool():
@@ -366,33 +372,128 @@ def test_running_row_elapsed_same_for_any_tool():
     from tui.widgets.tool_call_row import ToolCallRow
     row = ToolCallRow(call_id="c2", tool_name="read_file", args_summary="path=a")
     row._start_monotonic = time.monotonic() - 3.0
-    assert "running · 3с" in str(row._render_content())
+    assert "· 3с" in str(row._render_content())
+
+
+def test_running_row_elapsed_minutes_format():
+    import time
+    from tui.widgets.tool_call_row import ToolCallRow
+    row = ToolCallRow(call_id="c1", tool_name="t", args_summary="")
+    row._start_monotonic = time.monotonic() - 125  # 2м 5с
+    assert "· 2м 5с" in str(row._render_content())
+
+
+def test_elapsed_excludes_paused_interval(monkeypatch):
+    """confirm/ask_human: время ожидания решения юзера не входит в elapsed тула."""
+    import tui.widgets.tool_call_row as tcr
+    from tui.widgets.tool_call_row import ToolCallRow
+    clock = {"t": 100.0}
+    monkeypatch.setattr(tcr.time, "monotonic", lambda: clock["t"])
+    row = ToolCallRow(call_id="c1", tool_name="t", args_summary="")  # _start=100
+    clock["t"] = 105.0
+    assert row._elapsed_s() == 5
+    row.pause()                 # заморозка на 105
+    clock["t"] = 130.0          # 25с раздумья юзера над баннером
+    assert row._elapsed_s() == 5, "во время паузы elapsed заморожен"
+    row.resume()
+    clock["t"] = 132.0
+    assert row._elapsed_s() == 7, "25с ожидания исключены (105..132 минус 25 = 7)"
+
+
+def test_pause_resume_idempotent(monkeypatch):
+    import tui.widgets.tool_call_row as tcr
+    from tui.widgets.tool_call_row import ToolCallRow
+    clock = {"t": 100.0}
+    monkeypatch.setattr(tcr.time, "monotonic", lambda: clock["t"])
+    row = ToolCallRow(call_id="c1", tool_name="t", args_summary="")
+    row.resume()                # resume без pause — no-op
+    clock["t"] = 110.0
+    assert row._elapsed_s() == 10
+    row.pause()                 # заморозка на 110
+    clock["t"] = 120.0
+    row.pause()                 # повторный pause не двигает точку заморозки
+    clock["t"] = 130.0
+    assert row._elapsed_s() == 10
+
+
+def test_running_glyph_pulses_color():
+    """▸ статичен по форме, но цвет глифа в prefix меняется между кадрами пульса."""
+    from tui.widgets.tool_call_row import ToolCallRow
+    row = ToolCallRow(call_id="c1", tool_name="t", args_summary="")
+    row._pulse_frame = 0
+    p0 = row._render_prefix()
+    row._pulse_frame = 3
+    p3 = row._render_prefix()
+    assert "▸" in p0.plain and "▸" in p3.plain
+    assert [str(s.style) for s in p0.spans] != [str(s.style) for s in p3.spans]
+
+
+def test_pulse_cycle_length_is_ten():
+    """Цикл пульса ▸ = 10 кадров на 0.1с-тике (плавное дыхание ≈1.0с, 10fps):
+    frame10 возвращается к frame0, frame5 (пик) внутри цикла отличается."""
+    from tui.widgets.tool_call_row import ToolCallRow
+    row = ToolCallRow(call_id="c1", tool_name="t", args_summary="")
+
+    def glyph_color(frame: int) -> str:
+        row._pulse_frame = frame
+        p = row._render_prefix()
+        return next(str(s.style) for s in p.spans if "▸" in p.plain[s.start:s.end])
+
+    c0 = glyph_color(0)
+    assert glyph_color(10) == c0     # цикл = 10 → frame10 == frame0
+    assert glyph_color(5) != c0      # пик цикла отличается
+
+
+def test_pulse_tick_advances_pulse_while_running():
+    """Пульс ▸ двигается на собственном 0.1с-тике (_pulse_tick), пока running."""
+    from tui.widgets.tool_call_row import ToolCallRow
+    row = ToolCallRow(call_id="c1", tool_name="t", args_summary="")
+    f0 = row._pulse_frame
+    row._pulse_tick()
+    assert row._pulse_frame == f0 + 1
+
+
+def test_pulse_tick_noop_after_completion():
+    """После завершения строки _pulse_tick не двигает кадр (тик гасится)."""
+    from tui.widgets.tool_call_row import ToolCallRow
+    row = ToolCallRow(call_id="c1", tool_name="t", args_summary="")
+    row.set_result(summary="ok", error=False)
+    f = row._pulse_frame
+    row._pulse_tick()
+    assert row._pulse_frame == f
+
+
+def test_refresh_running_elapsed_does_not_advance_pulse():
+    """Секундный поллер больше НЕ двигает пульс (он на собственном тике)."""
+    from tui.widgets.tool_call_row import ToolCallRow
+    row = ToolCallRow(call_id="c1", tool_name="t", args_summary="")
+    f0 = row._pulse_frame
+    row.refresh_running_elapsed()
+    assert row._pulse_frame == f0
 
 
 def test_completed_ok_row_has_no_elapsed():
     from tui.widgets.tool_call_row import ToolCallRow
     row = ToolCallRow(call_id="c3", tool_name="subagent_planner", args_summary="x")
     row.set_result(summary="ok", error=False)
-    r = str(row._render_content())
-    assert "[ok]" in r
-    assert "running" not in r
+    assert "✓" in str(row._render_prefix())
+    assert "running" not in str(row._render_content())
 
 
 def test_completed_error_row_has_no_elapsed():
     from tui.widgets.tool_call_row import ToolCallRow
     row = ToolCallRow(call_id="c4", tool_name="subagent_planner", args_summary="x")
     row.set_result(summary="boom", error=True)
-    r = str(row._render_content())
-    assert "[!]" in r
-    assert "running" not in r
+    assert "✗" in str(row._render_prefix())
+    assert "running" not in str(row._render_content())
 
 
 def test_refresh_running_elapsed_noop_after_completion():
     from tui.widgets.tool_call_row import ToolCallRow
     row = ToolCallRow(call_id="c5", tool_name="subagent_planner", args_summary="x")
     row.set_result(summary="ok", error=False)
-    row.refresh_running_elapsed()  # не падает, не возвращает в running
-    assert "[ok]" in str(row._render_content())
+    row.refresh_running_elapsed()  # не возвращает в running
+    assert "✓" in str(row._render_prefix())
 
 
 @pytest.mark.asyncio
@@ -417,7 +518,7 @@ async def test_poll_active_ticks_running_rows():
         row._start_monotonic = time.monotonic() - 5.0
         scr._poll_active()                        # должен дёрнуть refresh у running-строк
         await pilot.pause()
-        assert "running · 5с" in str(row._content_static.render())
+        assert "· 5с" in str(row._content_static.render())
 
 
 # ---- mark_interrupted: терминальное состояние «прервано» (spec 2026-06-10) ----
@@ -426,10 +527,10 @@ def test_mark_interrupted_renders_dim_terminal_state():
     from tui.widgets.tool_call_row import ToolCallRow
     row = ToolCallRow(call_id="c6", tool_name="subagent_critic", args_summary="t")
     row.mark_interrupted()
-    r = str(row._render_content())
-    assert "прервано" in r
-    assert "running" not in r and "[..]" not in r
-    assert "[ok]" not in r and "[!]" not in r
+    assert "·" in str(row._render_prefix())
+    content = str(row._render_content())
+    assert "прервано" in content
+    assert "running" not in content
 
 
 def test_mark_interrupted_noop_after_result_and_idempotent():
@@ -437,7 +538,7 @@ def test_mark_interrupted_noop_after_result_and_idempotent():
     row = ToolCallRow(call_id="c7", tool_name="read_file", args_summary="p")
     row.set_result(summary="312 строк", error=False)
     row.mark_interrupted()                      # после результата — no-op
-    assert "[ok]" in str(row._render_content())
+    assert "✓" in str(row._render_prefix())
     row2 = ToolCallRow(call_id="c8", tool_name="read_file", args_summary="p")
     row2.mark_interrupted()
     row2.mark_interrupted()                     # повторный вызов — no-op
@@ -449,5 +550,5 @@ def test_refresh_running_elapsed_noop_after_interrupted():
     row = ToolCallRow(call_id="c9", tool_name="exec", args_summary="")
     row.mark_interrupted()
     row.refresh_running_elapsed()               # не возвращает в running
-    r = str(row._render_content())
-    assert "прервано" in r and "running" not in r
+    content = str(row._render_content())
+    assert "прервано" in content and "running" not in content

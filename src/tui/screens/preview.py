@@ -58,9 +58,22 @@ class PreviewScreen(Screen[bool]):
         """Клик по маркеру сжатия → раскрыть/свернуть тело сводки (маркер
         non-focusable — Enter отдан резюму треда). Тело находим по event_no."""
         from tui.widgets.trace_row import SummaryMarker
+        body = marker = None
         for w in self.query(SummaryMarker):
-            if w.has_class("summary-body") and getattr(w, "_event_no", None) == message.event_no:
-                if w.has_class("hidden"):
-                    w.remove_class("hidden")
-                else:
-                    w.add_class("hidden")
+            if getattr(w, "_event_no", None) != message.event_no:
+                continue
+            if w.has_class("summary-body"):
+                body = w
+            elif w.has_class("summary-marker"):
+                marker = w
+        if body is None:
+            return
+        if body.has_class("hidden"):
+            body.remove_class("hidden")
+            if marker is not None:
+                marker.set_prefix("▾ ")
+            self.call_after_refresh(body.scroll_visible, animate=False)
+        else:
+            body.add_class("hidden")
+            if marker is not None:
+                marker.set_prefix("▸ ")

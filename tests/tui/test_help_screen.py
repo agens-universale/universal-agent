@@ -1,5 +1,4 @@
 import pytest
-from tui import branding
 
 
 @pytest.mark.asyncio
@@ -15,13 +14,17 @@ async def test_help_header_and_hotkeys():
 
     async with _A().run_test() as pilot:
         scr = pilot.app.screen
-        assert "Справка" in str(scr.query_one("#header-left", Static).render())
-        right = str(scr.query_one("#header-right", Static).render())
-        assert right == branding.HEADER_RIGHT_PLAIN
+        assert "справка" in str(scr.query_one("#header-left", Static).render())
+        # правый бренд-блок убран со всех подэкранов
+        assert len(scr.query("#header-right")) == 0
         keys = " ".join(str(s.render()) for s in scr.query(".help-row-key"))
         assert "Ctrl+S" in keys and "F1" in keys and "Ctrl+N" in keys
         assert "Ctrl+E" not in keys
         assert str(scr.query_one("#footer", Static).render()) == "[Esc] назад"
+        # блок «Связь с разработчиками / Телеграм / Сберчат» убран
+        body = " ".join(str(s.render()) for s in scr.query(Static))
+        assert "Сберчат" not in body and "Телеграм" not in body
+        assert "Связь с разработчиками" not in body
 
 
 @pytest.mark.asyncio

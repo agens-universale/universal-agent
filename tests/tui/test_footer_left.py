@@ -1,9 +1,10 @@
 """Footer-left контекстно зависит от наличия задачи и активного run.
 
 2 вариации:
-- Нет активного run (empty state / task idle): /sessions  /help  /config  /mcp
-- Task active + active run: /stop  /sessions  /help  /config  /mcp
-(/skills и /export из футера убраны — доступны через палитру.)
+- Нет активного run (empty state / task idle): /sessions  /help  /config
+- Task active + active run: /stop  /sessions  /help  /config
+(/skills и /export из футера убраны — доступны через палитру; /mcp не дублируем —
+подсказка /mcp (F3) в бренд-карточке.)
 
 [Esc] back/выход убраны — на main Esc контекстуален (clear/exit/stop),
 поведение досказывается confirm-hint в footer-right.
@@ -25,7 +26,7 @@ def _write_task(tmp_path, tid):
 
 @pytest.mark.asyncio
 async def test_footer_left_empty_state_no_back_no_stop_no_export():
-    """Empty state: /sessions /help /config /mcp; без [Esc], /stop, /export."""
+    """Empty state: /sessions /help /config; без /mcp, [Esc], /stop, /export."""
     pytest.importorskip("textual")
     from textual.widgets import Static
     from tui.app import TuiApp
@@ -35,7 +36,7 @@ async def test_footer_left_empty_state_no_back_no_stop_no_export():
         assert "/sessions" in rendered
         assert "/help" in rendered
         assert "/config" in rendered
-        assert "/mcp" in rendered
+        assert "/mcp" not in rendered
         assert "/skills" not in rendered
         assert "/stop" not in rendered
         assert "/export" not in rendered
@@ -63,7 +64,7 @@ async def test_footer_left_task_idle_no_stop(tmp_path):
         assert "/sessions" in rendered
         assert "/help" in rendered
         assert "/config" in rendered
-        assert "/mcp" in rendered
+        assert "/mcp" not in rendered
         assert "/skills" not in rendered
         assert "/export" not in rendered
         assert "/stop" not in rendered
@@ -96,7 +97,7 @@ async def test_footer_left_task_running_shows_stop(tmp_path):
         assert "/sessions" in rendered
         assert "/help" in rendered
         assert "/config" in rendered
-        assert "/mcp" in rendered
+        assert "/mcp" not in rendered
         assert "/skills" not in rendered
         assert "/export" not in rendered
         assert "Esc" not in rendered

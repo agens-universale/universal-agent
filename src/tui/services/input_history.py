@@ -17,6 +17,15 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 
+from utils.atomic_io import atomic_replace
+
+
+def _is_command(text: str) -> bool:
+    """Слэш-команда (`/init`, `/status`, …) — не пользовательский запрос.
+    Команды НЕ участвуют в истории ↑/↓: иначе их восстановление в инпут
+    открывает палитру, та перехватывает ↑/↓ и навигация по истории «застревает»."""
+    return text.lstrip().startswith("/")
+
 
 class InputHistory:
     """Per-project история input-реплик с навигацией ↑/↓."""
@@ -53,11 +62,11 @@ class InputHistory:
             except json.JSONDecodeError:
                 continue
             text = entry.get("text")
-            if isinstance(text, str):
-                self._entries.append(text)
+            if isinstance(text, str) and not _is_command(text):
+                self._entries.append(text)   # старые command-записи отсеиваем
 
     def append(self, text: str) -> None:
-        if not text:
+        if not text or _is_command(text):
             return
         if self._entries and self._entries[-1] == text:
             return
@@ -86,7 +95,7 @@ class InputHistory:
                 ts = datetime.now(timezone.utc).isoformat()
                 for text in self._entries:
                     f.write(json.dumps({"ts": ts, "text": text}, ensure_ascii=False) + "\n")
-            tmp.replace(self._file)
+            atomic_replace(tmp, self._file)
             self._appends_since_rewrite = 0
         except OSError:
             pass

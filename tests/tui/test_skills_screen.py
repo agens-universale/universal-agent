@@ -117,13 +117,12 @@ async def test_two_line_card_structure_and_count():
         await pilot.pause()
         scr = pilot.app.screen
         listview = scr.query_one("#skills-list", VerticalScroll)
-        assert len(listview.query("Static")) == 2 * len(_SKILLS)
-        titles = list(listview.query(".card-title"))
-        metas = list(listview.query(".card-meta"))
-        assert len(titles) == len(_SKILLS)
-        assert len(metas) == len(_SKILLS)
-        assert "articles:article-creator" in str(titles[0].render())
-        assert "системный" in str(metas[0].render())
+        # один виджет .card (2 строки) на скилл — а не два отдельных Static
+        cards = list(listview.query(".card"))
+        assert len(cards) == len(_SKILLS)
+        first = str(cards[0].render())
+        assert "articles:article-creator" in first    # строка id
+        assert "системный" in first                   # строка типа
         header = str(scr.query_one("#header-left", Static).render())
         assert "доступные навыки · 3" in header
 

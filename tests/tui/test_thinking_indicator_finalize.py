@@ -412,8 +412,10 @@ async def test_ask_human_active_hides_thinking_indicator(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_runner_not_running_destroys_regardless_of_finalized(tmp_path):
-    """Если runner.is_running() == False — стандартная ветка destroy.
+async def test_runner_not_running_shows_terminal_state_after_finalized(tmp_path):
+    """Если runner.is_running() == False — индикатор не уничтожается, а
+    переходит в состояние «done» (store сообщает status=completed, runner
+    не был остановлен напрямую).
 
     Sentinel не должен мешать (path-coverage / defensive)."""
     pytest.importorskip("textual")
@@ -435,8 +437,33 @@ async def test_runner_not_running_destroys_regardless_of_finalized(tmp_path):
         screen = _screen(pilot)
         assert screen._last_event_kind == "_finalized"
 
-        # Симулируем выход runner-треда.
-        pilot.app.active_runner.stop()
-        await pilot.pause(0.5)
+        # Заменяем store двойником, который возвращает status=completed,
+        # чтобы idle-ветка гарантированно выдала state="done".
+        class _CompletedStore:
+            def get_task_meta(self, tid):
+                return {"tui": {"status": "completed"}}
+            def read_live_messages(self, tid):
+                return []
+            def update_tui_meta(self, tid, patch):
+                pass
+        screen._store = _CompletedStore()
+        screen._cursor = None   # skip tail_events — стор двойник не реализует его
 
-        assert len(pilot.app.query(ThinkingIndicator)) == 0
+        # Симулируем выход runner-треда (без _stop_requested → outcome=completed→done).
+        class _StoppedRunner:
+            def is_running(self): return False
+            _stop_requested = False
+            _thread_kind = "run"
+        pilot.app.active_runner = _StoppedRunner()
+        pilot.app.last_runner_error = None
+        pilot.app.last_stop_requested = False
+        screen._was_running = True
+
+        screen._poll_active()
+        await pilot.pause(0.3)
+
+        # Индикатор присутствует и в состоянии «done» (store вернул completed,
+        # runner._stop_requested=False → не переопределяется).
+        inds = pilot.app.query(ThinkingIndicator)
+        assert len(inds) == 1
+        assert inds[0]._state == "done"

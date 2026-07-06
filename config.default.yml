@@ -1,0 +1,105 @@
+# =============================================================================
+# Дефолт-конфиг GigaCode Universal Agent (gc-ua).
+# Авто-копируется в пользовательский config.yml при первом запуске
+# (Windows: ~/.gc/, macOS/Linux: ~/.config/gc/).
+# Полный документированный пример со всеми опциями — demo_config.yml.
+#
+# ПЕРЕД ПЕРВЫМ ЗАПРОСОМ впишите:
+#   1) backend.completions_url — endpoint OpenAI-совместимого провайдера;
+#   2) backend.chat_completion_headers.Authorization — токен доступа.
+# =============================================================================
+
+backend:
+  api_mode: chat_completions
+  # Впишите endpoint (OpenAI-совместимый chat/completions), напр.:
+  #   https://routerai.ru/api/v1/chat/completions  (тогда use_ssl: true)
+  completions_url: "http://your-backend:PORT/v1/chat/completions"
+  chat_completions_max_tokens: 8096
+  use_ssl: false
+  use_max_tokens_param: true
+  openai_strict_tools_schema: false
+  use_retry: true
+  chat_completion_headers:
+    Authorization: "Bearer <ВПИШИТЕ_ТОКЕН>"
+
+agent:
+  model: "gigacode_agent_v1.6_rc"
+  system_prompt_id: v1
+  use_server_subagents: true
+  use_local_subagents: true
+  subagent_max_steps: 500
+  client_name: gc_ua_agent
+  x_cl_id: "12345"
+  verbose: true
+  stop_tools: []
+  server_tool_prefix: system
+  max_steps: 1000
+  no_tool_call_max_count: 3
+  strict_turn_finish_validation: true
+
+# TUI: что рендерить во время стриминга (действует только при backend.stream: true;
+# на счётчик токенов и индикатор не влияет — только контент).
+tui:
+  # Мастер-свитч live-стриминга в TUI (chat_completions). На CLI/server/swarm НЕ
+  # влияет — там всегда non-stream (гейтится on_stream_delta, ставит только TUI).
+  # Не задан → legacy backend.stream.
+  stream: true
+  # minimal (default) — только индикатор + счётчик; answer — прогрессивный ответ;
+  # answer_reasoning — + строка-мысль «⠇ …».
+  stream_display: minimal
+  # adaptive bounce (только TUI): как поступать с текст-ответом без тула.
+  #   deny  — всегда требовать tool-call (как CLI/server/swarm);
+  #   judge — судья решает, полный ли это ответ (привет/объяснение → принять);
+  #   allow — всегда принимать текст (ни bounce, ни судьи).
+  text_answer_mode: judge
+  # Только TUI: оставить лишь корневой AGENTS.md (L3), отбросив global (~/.config/gc)
+  # и .gc/AGENTS.md. Игнорируется, если задан paths.agent_md_path (путь главнее).
+  agentsmd_override: false
+
+logging:
+  full_log_backend: false
+  console_trace: true
+  dump_storage: false
+  save_logs: true
+
+paths:
+  # Промпт роли запуска (agent_md). Пусто = ролевого промпта нет.
+  # В CLI/server/swarm это единственный источник инструкций; задан → замещает всё.
+  agent_md_path: ""
+
+summary:
+  # ~67–80k токенов истории — рассчитано на контекст моделей ~131k (под меньшие
+  # модели снижай; под 262k — поднимай ~2× до ~360–400k). batch (×1.4) и
+  # turn-end-trigger (×0.6) выводятся отсюда.
+  chat_completions_summary_trigger_chars: 200000
+  max_message_chars: 50000
+  max_dialogue_chars: 1000000
+  max_accumulated_summary_chars: 20000
+  last_dialog_steps_count: 5
+  last_dialog_step_message_max_chars: 1500
+
+intent_scope:
+  # Финальная проза, закрывающая ход, пишется в intent log:
+  # <= порога — как есть (raw); > порога — LLM-саммари (кап max_summary_chars).
+  max_final_answer_raw_chars: 2000
+
+security:
+  command_moderation:
+    enabled: true
+    mode: ask
+    allowed_command_examples: []
+  write_guard:
+    enabled: true
+    mode: ask
+    extra_paths: []
+  url_policy:
+    enabled: true
+    mode: ask
+    allowed_schemes: ["http", "https"]
+    url_blacklist: []
+  read_guard:
+    enabled: true
+    mode: ask
+  protected_paths:
+    enabled: true
+    extra: []

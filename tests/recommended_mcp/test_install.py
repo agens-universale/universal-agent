@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import sys
+import types
 from pathlib import Path
 from unittest.mock import patch
 
@@ -189,7 +190,7 @@ def test_source_missing_pyproject_raises(tmp_path: Path) -> None:
     (tmp_path / "external" / "x").mkdir(parents=True)
     # pyproject.toml не создаём
     entry = _source_entry(source="external/x")
-    with pytest.raises(install_mod.InstallError, match="pyproject.toml not found"):
+    with pytest.raises(install_mod.InstallError, match="pyproject.toml не найден"):
         install_mod.install_entry(entry, root=tmp_path)
 
 
@@ -203,3 +204,27 @@ def test_source_missing_source_raises(tmp_path: Path) -> None:
     )
     with pytest.raises(install_mod.InstallError, match="install.source"):
         install_mod.install_entry(entry, root=Path("."))
+
+
+def test_npm_global_has_missing_npm(tmp_path, monkeypatch):
+    monkeypatch.setattr(install_mod, "_node_install_paths",
+                        lambda dep: {"npm": tmp_path / "nope"})
+    assert install_mod.npm_global_has("@playwright/mcp", tmp_path) is None
+
+
+def test_npm_global_has_present(tmp_path, monkeypatch):
+    npm = tmp_path / "npm"
+    npm.write_text("", encoding="utf-8")
+    monkeypatch.setattr(install_mod, "_node_install_paths", lambda dep: {"npm": npm})
+    monkeypatch.setattr(install_mod.subprocess, "run",
+                        lambda argv, **kw: types.SimpleNamespace(returncode=0, stdout="", stderr=""))
+    assert install_mod.npm_global_has("@playwright/mcp", tmp_path) is True
+
+
+def test_npm_global_has_absent(tmp_path, monkeypatch):
+    npm = tmp_path / "npm"
+    npm.write_text("", encoding="utf-8")
+    monkeypatch.setattr(install_mod, "_node_install_paths", lambda dep: {"npm": npm})
+    monkeypatch.setattr(install_mod.subprocess, "run",
+                        lambda argv, **kw: types.SimpleNamespace(returncode=1, stdout="", stderr=""))
+    assert install_mod.npm_global_has("@playwright/mcp", tmp_path) is False

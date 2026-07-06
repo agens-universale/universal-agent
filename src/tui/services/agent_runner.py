@@ -22,6 +22,7 @@ class AgentRunner:
         *,
         executor_factory: Optional[Callable[[], Any]] = None,
         on_error: Optional[Callable[[BaseException], None]] = None,
+        on_complete: Optional[Callable[[Optional[str]], None]] = None,
     ) -> None:
         # executor задан напрямую (тесты) ИЛИ строится лениво из factory в
         # worker-потоке (прод): сборка executor включает MCP-дискавери с сетевыми
@@ -32,9 +33,16 @@ class AgentRunner:
         self._lock = threading.Lock()
         self._build_lock = threading.Lock()
         self._on_error = on_error
+        self._on_complete = on_complete
         self._stdin_queue: "queue.Queue[str]" = queue.Queue()
         self._prebuild_messages: list[dict] = []
         self._stop_requested = False
+        # Вид последней работы воркера: "run" | "compact" | "". Falling-edge
+        # стампа терминального статуса (main._poll_active) пропускает "compact",
+        # чтобы ручной /compact не перетирал прежний терминал-статус на completed.
+        self._thread_kind: str = ""
+        self._confirm_event = threading.Event()
+        self._confirm_choice: str = "deny"
 
     def _ensure_executor(self) -> Any:
         with self._build_lock:
@@ -72,6 +80,48 @@ class AgentRunner:
             t = self._thread
         return t is not None and t.is_alive()
 
+    def compact_now(self, thread_id: str, system: str) -> bool:
+        """Off-thread форс-сжатие треда. False если worker занят."""
+        with self._lock:
+            if self._thread is not None and self._thread.is_alive():
+                return False
+            self._thread_kind = "compact"
+
+            def _target() -> None:
+                try:
+                    executor = self._ensure_executor()
+                    executor.compact_thread(thread_id, system=system)
+                except Exception as exc:
+                    if self._on_error is not None:
+                        try:
+                            self._on_error(exc)
+                        except Exception:
+                            pass
+
+            t = threading.Thread(target=_target, name="gc-ua-compact", daemon=True)
+            self._thread = t
+        t.start()
+        return True
+
+    @staticmethod
+    def _run_args(*, query, technical, message_id, display_query, skill_loaded):
+        """Построить параллельные списки аргументов для executor.run.
+
+        Технический хвост (technical) получает None в display_contents/skills_loaded,
+        чтобы executor не добавлял display-поля к служебным сообщениям."""
+        if technical is None:
+            msgs = [query]
+            display_contents = [display_query]
+            skills_loaded = [skill_loaded]
+            mids = [message_id] if message_id else None
+        else:
+            msgs = [query, technical]
+            display_contents = [display_query, None]
+            skills_loaded = [skill_loaded, None]
+            mids = [message_id, None] if message_id else None
+        return {"msgs": msgs, "display_contents": display_contents,
+                "skills_loaded": skills_loaded, "message_ids": mids}
+
     def start(
         self,
         *,
@@ -81,15 +131,20 @@ class AgentRunner:
         system: str = "cli",
         message_id: Optional[str] = None,
         technical: Optional[str] = None,
+        display_query: Optional[str] = None,
+        skill_loaded: Optional[str] = None,
     ) -> bool:
         """Запустить run. Возвращает False если уже работает.
 
         message_id — id user-сообщения (TUI задаёт свой, чтобы потом точечно
-        откатить осиротевшую реплику при быстрой отмене)."""
+        откатить осиротевшую реплику при быстрой отмене).
+        display_query / skill_loaded — чистые display-поля; передаются в executor.run
+        параллельными списками (технический хвост получает None)."""
         with self._lock:
             if self._thread is not None and self._thread.is_alive():
                 return False
             self._stop_requested = False
+            self._thread_kind = "run"
 
             def _target() -> None:
                 with redirect_stdin(self._stdin_queue):
@@ -102,19 +157,26 @@ class AgentRunner:
                         self._prebuild_messages.clear()
                         if self._stop_requested:
                             return
-                        msgs = [query] if technical is None else [query, technical]
-                        if message_id:
-                            mids = [message_id] if technical is None else [message_id, None]
-                        else:
-                            mids = None
+                        a = self._run_args(
+                            query=query, technical=technical, message_id=message_id,
+                            display_query=display_query, skill_loaded=skill_loaded,
+                        )
                         executor.run(
-                            msgs,
+                            a["msgs"],
                             thread_id=thread_id,
                             start_new_thread=start_new_thread,
                             system=system,
                             discard_writes_after_stop=True,
-                            message_ids=mids,
+                            message_ids=a["message_ids"],
+                            display_contents=a["display_contents"],
+                            skills_loaded=a["skills_loaded"],
                         )
+                        outcome = getattr(executor, "last_terminal_outcome", None)
+                        if self._on_complete is not None:
+                            try:
+                                self._on_complete(outcome)
+                            except Exception:
+                                pass
                     except Exception as exc:
                         if self._on_error is not None:
                             try:
@@ -131,11 +193,13 @@ class AgentRunner:
         """Кооперативная остановка — флаг на executor; run сам выйдет.
 
         Если executor ещё строится (фабрика не отработала) — ставим флаг, и
-        worker-поток не запустит run после сборки."""
+        worker-поток не запустит run после сборки.
+        Также разблокирует агент-поток, зависший в confirm (fail-closed → False)."""
         self._stop_requested = True
         ex = self._executor
         if ex is not None:
             ex.stop_run()
+        self.cancel_confirm()
 
     def add_message(self, message: dict) -> None:
         # executor может ещё строиться — тогда буферизуем; worker-поток дольёт
@@ -151,6 +215,39 @@ class AgentRunner:
         поэтому шлём ответ + завершающую пустую строку (иначе read-loop виснет)."""
         self._stdin_queue.put(text + "\n")
         self._stdin_queue.put("\n")  # терминатор read-loop в ask_human
+
+    def make_tui_confirm(
+        self,
+        present: Callable[[str, str, list], None],
+    ) -> Callable[..., str]:
+        """Вернуть замыкание tui_confirm для передачи в ctx.
+
+        Замыкание вызывается на агент-потоке и блокирует его до ответа юзера.
+        present(title, question, fields) — инжектированный UI-presenter; он
+        отвечает за маршаллинг в UI-поток и показ баннера.
+        Возвращает ConfirmChoice: 'once'|'session'|'deny'.
+        """
+
+        def _tui_confirm(*, title: str, question: str, fields: list) -> str:
+            self._confirm_event.clear()
+            self._confirm_choice = "deny"
+            present(title, question, fields)
+            self._confirm_event.wait()
+            return self._confirm_choice
+
+        return _tui_confirm
+
+    def submit_confirm_reply(self, choice: str) -> None:
+        """UI кладёт выбор: once|session|deny. Разблокирует агент-поток."""
+        self._confirm_choice = choice
+        self._confirm_event.set()
+
+    def cancel_confirm(self) -> None:
+        """Fail-closed разблокировка confirm (выбор 'deny').
+
+        Используется в stop() и в тестах; симметрично cancel_ask_human."""
+        self._confirm_choice = "deny"
+        self._confirm_event.set()
 
     def cancel_ask_human(self) -> None:
         """Положить пустую строку в stdin-queue — разблокирует agent-thread,

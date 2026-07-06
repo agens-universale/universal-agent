@@ -13,7 +13,7 @@ async def test_show_esc_hint_clear_swaps_footer_left():
         scr._show_esc_hint("clear")
         await pilot.pause()
         text = str(pilot.app.query_one("#footer-left").render())
-        assert "Esc ещё раз — очистить" in text
+        assert "Esc ещё раз, чтобы очистить" in text
         assert scr._esc_confirm_kind == "clear"
 
 
@@ -26,7 +26,7 @@ async def test_show_esc_hint_stop_swaps_footer_left():
         scr = pilot.app.screen
         scr._show_esc_hint("stop")
         await pilot.pause()
-        assert "Esc ещё раз — остановить" in str(pilot.app.query_one("#footer-left").render())
+        assert "Esc ещё раз, чтобы остановить" in str(pilot.app.query_one("#footer-left").render())
         assert scr._esc_confirm_kind == "stop"
 
 

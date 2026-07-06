@@ -14,7 +14,6 @@ from textual.widgets import Static
 
 from tui.models import TraceEvent
 from tui.services.json_payload import render_payload
-from tui import branding
 
 
 def _section_header(label: str) -> Horizontal:
@@ -57,8 +56,7 @@ class ToolCallDetailScreen(Screen):
         short_args = ev.summary or ""
         if "(" in short_args:
             short_args = short_args.split("(", 1)[1].rstrip(")")
-        return (f"Viewer: {tool}({short_args}) · #{ev.no}        "
-                f"{branding.HEADER_RIGHT}")
+        return f"Viewer: {tool}({short_args}) · #{ev.no}"
 
     def _output_widget(self):
         if self._result_event is None:

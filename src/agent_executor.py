@@ -9,13 +9,17 @@ State создаётся заново при каждом run(). Возвращ�
 import os
 import threading
 from copy import copy as _shallow_copy_msg
-from typing import Any
+from typing import Any, Optional
 
 from processing_responses import run_agent
 from run_context import RunContext
 from config_modules.stored_outputs import get_stored_tool_outputs_max_entries
 from message_policy.chat_completions import repair_tool_call_pairing
-from run_summary_coordinator import RunSummaryCoordinator, reset_stale_summarizing_flag
+from run_summary_coordinator import (
+    RunSummaryCoordinator,
+    reset_stale_summarizing_flag,
+    set_tui_finalizing,
+)
 from summarize.config import (
     parse_summary_trigger_chars,
     parse_summary_turn_end_trigger_chars,
@@ -38,6 +42,7 @@ from tools.skills.registry import get_skills_registry
 from message_policy.tool_usage_notice.state import persist_tool_usage_notice_state
 from utils.generate_message_id import generate_msg_id_sha256 as generate_message_id_func
 from utils.local_render_system_prompt import render_system_prompt
+from security.permission_store import PermissionStore
 
 ORCHESTRATOR_SPECIFIC_ROLE = (
     "You are an orchestrator agent. You may execute work yourself or delegate to subagents when that clearly pays off.\n"
@@ -64,6 +69,7 @@ class AgentExecutor:
         # stop_run() до создания state (run() ещё в setup-фазе): запоминаем, и
         # run() применит флаг сразу при создании state, до первого persist.
         self._stop_pending: bool = False
+        self.last_terminal_outcome: Optional[str] = None
 
     def run(
         self,
@@ -75,6 +81,8 @@ class AgentExecutor:
         verbose: bool | None = None,
         discard_writes_after_stop: bool = False,
         message_ids: list[str] | None = None,
+        display_contents: list[str | None] | None = None,
+        skills_loaded: list[str | None] | None = None,
     ) -> Any:
         """Запускает агента. При каждом вызове state создаётся заново.
 
@@ -115,6 +123,8 @@ class AgentExecutor:
         # Снять протухший флаг компакции от прерванного прошлого run'а: на старте
         # компакция не идёт, иначе TUI вечно показывает «сжимаю контекст».
         reset_stale_summarizing_flag(thread_session)
+        # Снять протухший флаг финализации от прерванного прошлого run'а.
+        set_tui_finalizing(thread_session, False)
 
         # Снимок MCP «сервер→тулы» для TUI-экрана /mcp (необязателен — не валим run).
         if thread_id is not None and config_dict.get("mcp-servers"):
@@ -170,6 +180,8 @@ class AgentExecutor:
             "chat_completions_system_prompt": chat_completions_system_prompt,
             "use_server_subagents": config_dict.get("use_server_subagents", False),
             "agent_md_path": config_dict.get("agent_md_path"),
+            "is_tui": bool(getattr(self._ctx, "is_tui", False)),
+            "agentsmd_override": bool(config_dict.get("agentsmd_override", False)),
             "thread_id": thread_id,
             "shared": thread_shared,
             "workspace_config": config_dict,
@@ -224,6 +236,13 @@ class AgentExecutor:
                 self._stop_pending = False
             self._pending_messages = []
 
+        # Permission memory: store оборачивает state.shared.confirm_rules ПО ССЫЛКЕ —
+        # session-правила пишутся прямо в shared и сохраняются обычной персистентностью.
+        setattr(
+            self._ctx, "permission_store",
+            PermissionStore(session_rules=state.shared.confirm_rules),
+        )
+
         if (
             thread_session is not None
             and backend_api_mode == "chat_completions"
@@ -259,18 +278,11 @@ class AgentExecutor:
         user_bodies = [str(x) for x in messages]
         # id можно задать снаружи (TUI пробрасывает свой, чтобы потом точечно
         # откатить осиротевшую реплику при быстрой отмене); иначе генерим.
-        new_user_messages = [
-            {
-                "role": "user",
-                "content": body,
-                "id": (
-                    message_ids[i]
-                    if message_ids and i < len(message_ids) and message_ids[i]
-                    else generate_message_id_func("m")
-                ),
-            }
-            for i, body in enumerate(user_bodies)
-        ]
+        new_user_messages = self._build_user_messages(
+            user_bodies, message_ids=message_ids,
+            display_contents=display_contents, skills_loaded=skills_loaded,
+            gen_id=generate_message_id_func,
+        )
         # На старте user turn дописываем текущий CLI-запрос в current_user_intent
         # (только реальные user-сообщения, не technical). user_intent_log — только
         # user_intent_log — только после flush при accept turn_finish.
@@ -385,6 +397,7 @@ class AgentExecutor:
                 persist_messages_callback=persist_messages_callback,
                 pre_backend_compaction_hook=summary.pre_backend_compaction_hook,
                 turn_end_compaction_hook=summary.turn_end_compact_if_needed,
+                force_compact_hook=summary.force_compact_once,
                 get_pending_messages=get_pending_messages,
                 check_stop=check_stop,
                 session_meta=(
@@ -392,7 +405,11 @@ class AgentExecutor:
                     if thread_session is not None
                     else None
                 ),
+                mark_finalizing=(
+                    lambda active: set_tui_finalizing(thread_session, active)
+                ),
             )
+            self.last_terminal_outcome = getattr(state, "terminal_outcome", None)
             if thread_session is not None and not (
                 state.discard_writes_after_stop and state.stop_requested
             ):
@@ -443,6 +460,29 @@ class AgentExecutor:
         """
         return self._lock
 
+    @staticmethod
+    def _build_user_messages(user_bodies, *, message_ids, display_contents,
+                             skills_loaded, gen_id):
+        """Собрать user-сообщения с опциональными display_content/skill_loaded.
+        display_content ставится только при отличии от content; skill_loaded — если задан."""
+        out = []
+        for i, body in enumerate(user_bodies):
+            body = str(body)
+            msg = {
+                "role": "user",
+                "content": body,
+                "id": (message_ids[i] if message_ids and i < len(message_ids)
+                       and message_ids[i] else gen_id("m")),
+            }
+            disp = display_contents[i] if display_contents and i < len(display_contents) else None
+            if disp is not None and disp != body:
+                msg["display_content"] = disp
+            sk = skills_loaded[i] if skills_loaded and i < len(skills_loaded) else None
+            if sk:
+                msg["skill_loaded"] = sk
+            out.append(msg)
+        return out
+
     def stop_run(self) -> None:
         """Выставляет флаг остановки; агент завершит текущую итерацию и выйдет.
 
@@ -453,3 +493,9 @@ class AgentExecutor:
                 self._state.stop_requested = True
             else:
                 self._stop_pending = True
+
+    def compact_thread(self, thread_id: str, system: str | None = None) -> bool:
+        """Форс-сжатие треда (ручной /compact) — делегат в manual_compaction
+        (оркестрация суммаризации, вне run-loop)."""
+        from manual_compaction import compact_thread as _compact_thread
+        return _compact_thread(self._ctx, thread_id, system)

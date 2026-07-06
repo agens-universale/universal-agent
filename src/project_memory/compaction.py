@@ -6,20 +6,17 @@ Used only from the append-overflow path in the project_memory tool.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any, Optional
 
 from utils.llm_chat_client import request_chat_completion_text
+from bundled_assets import bundled_root
 
 from config_modules.project_memory import DEFAULT_PROJECT_MEMORY_MAX_APPEND_CHARS
 
 SOFT_APPEND_INPUT_LIMIT_CHARS: int = DEFAULT_PROJECT_MEMORY_MAX_APPEND_CHARS
 
-_COMPACTION_PROMPT_PATH = (
-    Path(__file__).resolve().parent.parent.parent
-    / "prompts"
-    / "project_memory_compaction_prompt.md"
-)
+# bundled_root() — единый резолвер ассетов (editable → repo, wheel → site-packages).
+_COMPACTION_PROMPT_PATH = bundled_root() / "prompts" / "project_memory_compaction_prompt.md"
 
 _COMPACTION_MAX_TOKENS: int = 4_000  # roughly enough for compressed project_memory.md.
 

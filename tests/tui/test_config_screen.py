@@ -152,3 +152,62 @@ def test_quiet_focus_and_panel_rules_in_tcss():
     assert "#trace.quiet-focus:focus" in tcss
     assert "outline: none" in tcss
     assert ".config-panel" in tcss
+
+
+# ---- фильтр по ключам конфига (2026-06-26) ----
+
+def test_filter_config_by_key_matches_key_keeps_subtree():
+    from tui.screens.config import _filter_config_by_key
+    cfg = {"model": "M", "mcp-servers": {"srv": {"transport": "http"}}}
+    assert _filter_config_by_key(cfg, "mcp") == {
+        "mcp-servers": {"srv": {"transport": "http"}}}
+
+
+def test_filter_config_by_key_nested_keeps_path():
+    from tui.screens.config import _filter_config_by_key
+    cfg = {"a": {"chat_token": 1, "b": 2}, "x": 9}
+    assert _filter_config_by_key(cfg, "token") == {"a": {"chat_token": 1}}
+
+
+def test_filter_config_by_key_no_match_empty():
+    from tui.screens.config import _filter_config_by_key
+    assert _filter_config_by_key({"model": "M"}, "zzz") == {}
+
+
+def test_filter_config_by_key_case_insensitive():
+    from tui.screens.config import _filter_config_by_key
+    assert _filter_config_by_key({"Model": "M"}, "model") == {"Model": "M"}
+
+
+def test_filtered_yaml_text_filters_full_and_no_match():
+    from tui.screens.config import ConfigScreen
+    scr = ConfigScreen(config={"model": "M", "mcp-servers": {"s": {}}})
+    scr._filter = "mcp"
+    txt = scr._filtered_yaml_text()
+    assert "mcp-servers" in txt and "model" not in txt
+    scr._filter = "zzz"
+    assert scr._filtered_yaml_text() == "(нет совпадений)"
+    scr._filter = ""
+    assert "model" in scr._filtered_yaml_text()           # пустой → полный конфиг
+
+
+@pytest.mark.asyncio
+async def test_config_filter_input_focused_and_filters(tmp_path):
+    pytest.importorskip("textual")
+    from textual.widgets import Input
+    from tui.app import TuiApp
+    from tui.screens.config import ConfigScreen
+    cfg = {"model": "M", "mcp-servers": {"srv": {"transport": "http"}}}
+    app = TuiApp(threads_dir=str(tmp_path), system="cli", config=cfg)
+    app._config_path = "/p/config.yml"
+    async with app.run_test() as pilot:
+        scr = ConfigScreen(config=app._config, config_path=app._config_path)
+        await app.push_screen(scr)
+        await pilot.pause()
+        flt = scr.query_one("#config-filter", Input)
+        assert flt.has_focus                              # автофокус (конвенция со скиллами)
+        flt.value = "mcp"
+        await pilot.pause()
+        assert scr._filter == "mcp"
+        # блок путей остаётся при активном фильтре (фильтруем только YAML-панель)
+        assert any(p.border_title == "пути" for p in scr.query(".config-panel"))

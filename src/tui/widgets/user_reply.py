@@ -30,6 +30,7 @@ class UserReplyContainer(Widget):
 
     DEFAULT_CSS = ""  # стили — .user-band / .user-reply-pending / .user-reply-failed в styles.tcss
     can_focus = True
+    FOCUS_ON_CLICK = False   # клик не фокусирует реплику; навигация — только Tab/Shift+Tab
 
     def __init__(
         self,
@@ -66,8 +67,6 @@ class UserReplyContainer(Widget):
         self.refresh()
 
     def render(self) -> Text:
-        prefix = f"[{self._event_no}] " if self.has_focus and self._event_no else ""
-        pad = " " * len(prefix)
         lines = self._text.split("\n")
 
         text = Text()
@@ -75,26 +74,14 @@ class UserReplyContainer(Widget):
             if i > 0:
                 text.append("\n")
             if i == 0:
-                if prefix:
-                    text.append(prefix)
                 if self._state == "failed":
                     text.append("[!] ", style=_ERR_RED)
                 text.append(f"> {line}")
             else:
-                text.append(f"{pad}  {line}")
+                # продолжение многострочной реплики выравнивается под текстом
+                # после маркера "> " (2 пробела).
+                text.append(f"  {line}")
         return text
-
-    def _on_focus(self, event) -> None:  # noqa: ANN001
-        # super() ПЕРВЫМ: Widget._on_focus ставит self.has_focus = True.
-        # render() здесь работает корректно даже без super() (refresh откладывает
-        # вызов до конца обработки события), но явный контракт — для устойчивости
-        # к будущим compose-миграциям.
-        super()._on_focus(event)
-        self.refresh()
-
-    def _on_blur(self, event) -> None:  # noqa: ANN001
-        super()._on_blur(event)
-        self.refresh()
 
     def on_click(self, event: events.Click) -> None:
         if event.chain == 2 and self._event_no:

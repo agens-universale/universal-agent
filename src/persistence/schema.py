@@ -104,8 +104,11 @@ def serialize_shared_block(shared: Any) -> dict[str, Any]:
     cache: dict[str, Any] = {}
     if isinstance(fetch_url_cache, Mapping):
         cache = dict(fetch_url_cache)
+    confirm_rules = getattr(shared, "confirm_rules", None)
+    rules: dict[str, Any] = dict(confirm_rules) if isinstance(confirm_rules, Mapping) else {}
     return {
         "working_memory": working_memory,
         "notes_md": notes_md,
         "fetch_url_cache": cache,
+        "confirm_rules": rules,
     }

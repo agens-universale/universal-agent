@@ -2,30 +2,14 @@ import logging
 import time
 from typing import Any, Callable, Dict, Tuple
 
-import requests
-
 from utils.connect_backend import request_backend_chat_completions
+from utils.backend_errors import is_retriable_backend_error
 
 _CHAT_COMPLETIONS_HTTP_RETRY_DELAY_SEC = 3.0
 _CHAT_COMPLETIONS_HTTP_RETRY_FACTOR = 0.5
 # До 5 попыток с понижением max_tokens после HTTP-ошибки (один HTTP-запрос
 # на шаг, без transport-ретраев — сеть уже отработала на первой попытке).
 _CHAT_COMPLETIONS_ADAPTIVE_MAX_TOKEN_STEPS = 5
-_CHAT_COMPLETIONS_HTTP_RETRY_SKIP_STATUSES = {401, 403, 404}
-
-
-def _is_http_backend_error(exc: Exception) -> bool:
-    if not isinstance(exc, requests.exceptions.HTTPError):
-        return False
-    status_code = getattr(getattr(exc, "response", None), "status_code", None)
-    if status_code in _CHAT_COMPLETIONS_HTTP_RETRY_SKIP_STATUSES:
-        return False
-    if status_code is None:
-        return True
-    try:
-        return int(status_code) >= 400
-    except (TypeError, ValueError):
-        return False
 
 
 def _reduced_chat_completions_max_tokens(*, configured: int, minimum: int) -> int:
@@ -43,6 +27,7 @@ def request_chat_completions_with_policy(
     verify: bool,
     use_retry: bool,
     logger: logging.Logger | None = None,
+    on_delta=None,
 ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     """
     Execute chat/completions request with the minimal adaptive max_tokens policy.
@@ -64,13 +49,14 @@ def request_chat_completions_with_policy(
             verify=verify,
             use_retry=transport_use_retry,
             logger=logger,
+            on_delta=on_delta,
         )
         return response, payload
 
     try:
         return _send_once(initial_max_tokens, transport_use_retry=use_retry)
     except Exception as first_exc:
-        if not _is_http_backend_error(first_exc):
+        if not is_retriable_backend_error(first_exc):
             raise
 
         run_logger = logger or logging.getLogger(__name__)
@@ -97,7 +83,7 @@ def request_chat_completions_with_policy(
                 return _send_once(reduced_max_tokens, transport_use_retry=False)
             except Exception as retry_exc:
                 current_max_tokens = reduced_max_tokens
-                if not _is_http_backend_error(retry_exc):
+                if not is_retriable_backend_error(retry_exc):
                     break
 
         run_logger.error(

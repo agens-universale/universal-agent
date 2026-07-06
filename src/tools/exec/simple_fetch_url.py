@@ -4,6 +4,7 @@ import json
 import re
 import time
 from typing import Any, Dict, Optional
+from urllib.parse import urljoin
 
 import requests
 
@@ -447,7 +448,6 @@ class SimpleFetchUrl(AbstractSimpleTool):
                 if not next_url:
                     return resp
                 # Абсолютизируем относительный Location.
-                from urllib.parse import urljoin
                 next_abs = urljoin(current, next_url)
                 # ВАЛИДИРУЕМ КАЖДЫЙ HOP. AS-IS spec говорил «redirect не перепроверяется» —
                 # это и было дырой. Теперь перепроверяется.

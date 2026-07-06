@@ -18,12 +18,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
+from security.confirm_port import request_confirm
 from security.path_policy import (
     audit_policy_decision,
     resolve_tool_context,
     _extract_named_value,
     _tool_name,
 )
+from security.protected_paths import classify_path, protected_paths, protection_enabled
 
 
 _GLOB_WILDCARD_MARKERS = {"*", "all"}
@@ -94,9 +96,11 @@ def parse_read_guard_config(config_dict: dict[str, Any]) -> ReadGuardConfig:
     """
     Достаёт read_guard блок из top-level `config_dict["read_guard"]`.
 
-    Safe-by-default-OFF: read_guard включается ТОЛЬКО явным `enabled: true`.
-    Если ключа `read_guard` нет вообще — слой выключен. Это симметрично с
-    `write_guard` и `url_policy` (см. resolve_tool_context в path_policy.py).
+    Runtime-fallback при отсутствии блока/ключей — OFF (enabled=False). НО на
+    нормальном пути load_config всегда кладёт read_guard из pydantic
+    (secure-by-default: enabled=True, mode=ask), поэтому этот fallback достижим
+    лишь в bespoke/тест-конфигах в обход load_config. Симметрично write_guard/
+    url_policy (resolve_tool_context) и command_moderation.
     """
     raw = config_dict.get("read_guard") or {}
     if not isinstance(raw, dict):
@@ -338,6 +342,33 @@ def enforce_read_guard(
             config_dict = _config_from_context(context)
             cfg = parse_read_guard_config(config_dict)
 
+            # Floor carve-out (Spec B §6): runs BEFORE cfg.enabled check so
+            # operational .gc reads are denied even when read_guard is off.
+            # skills/instructions/none fall through to the normal flow.
+            if protection_enabled(config_dict):
+                try:
+                    cand = _extract_named_value(func, args, kwargs, path_arg, path_extractor, "path")
+                    ps = protected_paths(cwd=context.launch_root)
+                    if classify_path(cand, ps) == "operational":
+                        err = {
+                            "type": "protected_path_denied",
+                            "path": cand,
+                            "operation": "read",
+                            "message": "Operational .gc is read-protected.",
+                        }
+                        audit_policy_decision(
+                            context,
+                            tool_name=_tool_name(func, args),
+                            decision="blocked",
+                            reason_code="protected_read_deny",
+                        )
+                        return _read_guard_blocked_result(
+                            func, err, args, kwargs,
+                            blocked_result_factory=blocked_result_factory,
+                        )
+                except ValueError:
+                    pass
+
             if not cfg.enabled:
                 audit_policy_decision(
                     context,
@@ -379,16 +410,18 @@ def enforce_read_guard(
                     )
                     return func(*args, **kwargs)
                 if mode == "ask":
-                    from security.path_policy import prompt_user_confirmation
-                    confirmed = prompt_user_confirmation(
-                        title="Read guard",
+                    _rg_path = exc.error.get("path", candidate_path)
+                    confirmed = request_confirm(
+                        title="Защита чтения",
+                        question=f"Разрешить чтение вне периметра проекта: {_rg_path}?",
                         fields=[
                             ("Tool", _tool_name(func, args)),
                             ("Operation", "read"),
-                            ("Path", exc.error.get("path", candidate_path)),
+                            ("Path", _rg_path),
                             ("Reason", exc.error.get("reason", "")),
                         ],
-                        question="Allow read outside perimeter?",
+                        ctx=context.ctx,
+                        decision_key=f"read:{_rg_path}",
                     )
                     if confirmed:
                         audit_policy_decision(
@@ -400,6 +433,10 @@ def enforce_read_guard(
                         )
                         return func(*args, **kwargs)
                     exc.error["type"] = "read_guard_cancelled_by_user"
+                    exc.error["message"] = (
+                        f"User declined the read of '{_rg_path}'. Do NOT retry the same "
+                        "read, and do NOT silently read a different file — ask the user or stop."
+                    )
                 audit_policy_decision(
                     context,
                     tool_name=_tool_name(func, args),

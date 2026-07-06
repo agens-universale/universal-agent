@@ -17,9 +17,10 @@ from utils.llm_chat_client import (
     log_llm_prompt_and_result,
     shorten_for_log,
 )
+from bundled_assets import bundled_root
 
-_BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-_PROJECT_ROOT = os.path.abspath(os.path.join(_BASE_DIR, "..", ".."))
+# bundled_root() — единый резолвер ассетов (editable → repo, wheel → site-packages).
+_PROJECT_ROOT = str(bundled_root())
 DEFAULT_MEMORY_PATCH_APPEND_PROMPT_PATH = os.path.abspath(
     os.path.join(_PROJECT_ROOT, "prompts", "chat_completions_memory_patch_append.md")
 )

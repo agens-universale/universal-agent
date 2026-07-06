@@ -440,7 +440,7 @@ wheels = [
 ]
 
 [[package]]
-name = "gc-cli-pub"
+name = "gc-ua"
 version = "0.0.1"
 source = { editable = "." }
 dependencies = [

@@ -1,4 +1,5 @@
-"""На фокусе строки события появляется deep-dim [N] префикс."""
+"""На фокусе строки события [N]-префикс НЕ появляется (убран — дёргал ленту и
+мешал выделению; фокус показывается фоном :focus)."""
 import json
 from pathlib import Path
 
@@ -6,7 +7,7 @@ import pytest
 
 
 @pytest.mark.asyncio
-async def test_event_number_shown_on_focus(tmp_path):
+async def test_event_number_not_shown_on_focus(tmp_path):
     pytest.importorskip("textual")
     from tui.app import TuiApp
     from tui.widgets.user_reply import UserReplyContainer
@@ -34,4 +35,5 @@ async def test_event_number_shown_on_focus(tmp_path):
         await pilot.pause(0.1)
 
         assert pilot.app.focused is reply
-        assert "[1]" in str(reply.render())
+        # На фокусе [N] больше НЕ появляется (фокус — через :focus background).
+        assert "[1]" not in str(reply.render())

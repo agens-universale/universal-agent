@@ -3,11 +3,14 @@ import sys
 from typing import Any
 
 import arg_parser
+import onboarding
 from agent_executor import AgentExecutor
 from config import (
     apply_cli_overrides,
     build_auth_connector,
     load_config,
+    user_config_path,
+    _bootstrap_user_config,
 )
 from config_modules.env_vars import project_gc_dir
 from message_policy.user_message_policy import (
@@ -20,17 +23,10 @@ from utils.json_text import format_json_for_display
 
 
 def _ensure_project_gc_dir() -> None:
-    """
-    Создаёт <cwd>/.gc/ при старте gc-cli (идемпотентно через exist_ok=True).
-    Подпапка skills/ НЕ создаётся — её добавляет пользователь по необходимости
-    (project-скиллы опциональны, не каждый проект их использует).
-    На PermissionError/OSError тихо пропускает — не блокируем запуск
-    из-за отсутствия прав на запись в cwd.
-    """
-    try:
-        os.makedirs(project_gc_dir(), exist_ok=True)
-    except (PermissionError, OSError):
-        pass
+    """Создаёт <cwd>/.gc/ при старте gc-cli. Делегирует общему хелперу
+    (тот же вызывает gc-ua) — см. env_vars.ensure_project_gc_dir."""
+    from config_modules.env_vars import ensure_project_gc_dir
+    ensure_project_gc_dir()
 
 
 def _ensure_user_skills_dir() -> None:
@@ -112,6 +108,34 @@ def _resolve_forced_skill(skill_name: str, config_dict: dict) -> str | None:
     return res.canonical_id
 
 
+def _run_init() -> int:
+    """`gc-cli --init-config`: создать ~/.gc/config.yml из шаблона и выйти, агент не
+    запускается. Существующий конфиг не перетираем."""
+    path = user_config_path()
+    created = _bootstrap_user_config()
+    if created:
+        config_dict = load_config(None)
+        print(onboarding.setup_guide(str(path), config_dict), file=sys.stderr)
+    else:
+        print(f"[gc] конфиг уже есть: {path} — не меняю", file=sys.stderr)
+    return 0
+
+
+def _run_init_agents_md() -> int:
+    """`gc-cli --init`: агент сам сканирует репозиторий и пишет AGENTS.md."""
+    from instructions.init_agents_md import build_init_prompt
+    from security.confirm_port import confirm_available
+
+    config_dict = load_config(arg_parser.run_args.config)
+    auth_connector = build_auth_connector(config_dict)
+    ctx = create_run_context(config_dict, auth_connector=auth_connector)
+
+    prompt = build_init_prompt(cwd=os.getcwd(), can_ask=confirm_available(ctx))
+    AgentExecutor(ctx).run([prompt])  # агент пишет AGENTS.md сам (write_to_file)
+    print("[gc] --init: генерация AGENTS.md завершена", file=sys.stderr)
+    return 0
+
+
 def main() -> int:
     """
     Входная точка CLI: парсинг аргументов, загрузка конфига,
@@ -122,6 +146,12 @@ def main() -> int:
     """
     _ensure_project_gc_dir()
     _ensure_user_skills_dir()
+
+    if getattr(arg_parser.run_args, "init_config", False):
+        return _run_init()
+
+    if getattr(arg_parser.run_args, "init", False):
+        return _run_init_agents_md()
 
     config_dict = load_config(arg_parser.run_args.config)
 
@@ -135,7 +165,17 @@ def main() -> int:
         read_guard_enabled=getattr(arg_parser.run_args, "read_guard", None),
         no_read_guard=getattr(arg_parser.run_args, "no_read_guard", False),
         read_guard_mode=getattr(arg_parser.run_args, "read_guard_mode", None),
+        agentsmd_override=getattr(arg_parser.run_args, "agentsmd_override", False),
     )
+
+    # Онбординг: дефолтный путь (без --config) и конфиг ещё не настроен
+    # (остался плейсхолдер) → показать гайд и выйти, бэкенд не дёргаем.
+    if arg_parser.run_args.config is None and onboarding.is_unconfigured(config_dict):
+        print(
+            onboarding.setup_guide(str(user_config_path()), config_dict),
+            file=sys.stderr,
+        )
+        return 0
     forced_skill_id = _resolve_forced_skill(
         arg_parser.run_args.skill, config_dict
     )
@@ -145,6 +185,19 @@ def main() -> int:
     if auto_mcp:
         ensure_mcp_daemons(config_dict)
     ctx = create_run_context(config_dict, auth_connector=auth_connector)
+
+    # Стартовые уведомления → stderr (не-блокирующие; онбординг остаётся выше).
+    from startup_notices import collect_startup_notices, render_notices_for_cli
+    from tools.registry import all_builtin_tool_names
+    _notices = collect_startup_notices(
+        config_dict,
+        all_builtin_tool_names(config_dict),
+        getattr(ctx, "mcp_status", None),
+        is_tui=False,
+        deprecated_keys_used=config_dict.get("deprecated_keys_used"),
+    )
+    if _notices:
+        print(render_notices_for_cli(_notices), file=sys.stderr)
 
     user_parts: list[str] = [arg_parser.run_args.query]
     if arg_parser.run_args.wrap_technical:

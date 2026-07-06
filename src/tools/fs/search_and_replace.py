@@ -8,6 +8,7 @@ from utils.tool_report_paths import tool_report_abspath
 from security.path_policy import enforce_write_guard
 from tools.schema_optional import coalesce_optional_string
 from utils.file_text import check_expected_file_sha256, is_valid_sha256_hex, read_text_for_edit
+from utils.atomic_io import atomic_replace
 
 
 class SearchAndReplace(AbstractSimpleTool):
@@ -848,7 +849,7 @@ Update version string:
         try:
             with open(tmp_path, 'w', encoding='utf-8', errors='replace') as f:
                 f.write(new_content)
-            os.replace(tmp_path, path)
+            atomic_replace(tmp_path, path)
         except Exception as e:
             try:
                 if os.path.exists(tmp_path):

@@ -6,10 +6,12 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from constants.tool_names import EXEC_PYTHON_NAME
+from security.command_guard import enforce_command_guard
 from security.command_moderation import effective_command_cwd, moderate_command_execution
 from security.path_policy import resolve_tool_context
 from tools.simple_tool_base import AbstractSimpleTool
 from utils.directory_write_access import directory_allows_probe_write
+from utils.win_console import preserve_console_mode
 
 
 def _dedupe_abs_paths_ordered(paths: list[str]) -> list[str]:
@@ -167,6 +169,7 @@ Return format (JSON string):
             error=error,
         )
 
+    @enforce_command_guard(payload_arg="code", tool_name=EXEC_PYTHON_NAME)
     @moderate_command_execution(payload_arg="code", tool_name=EXEC_PYTHON_NAME)
     def __call__(
         self,
@@ -329,7 +332,6 @@ Return format (JSON string):
         try:
             # На Windows subprocess гасит ENABLE_MOUSE_INPUT родительской консоли
             # → TUI теряет мышь до перезапуска. Возвращаем режим после команды.
-            from utils.win_console import preserve_console_mode
             with preserve_console_mode():
                 result = subprocess.run(
                     [sys.executable, "-"],

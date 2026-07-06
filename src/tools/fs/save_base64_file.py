@@ -4,6 +4,7 @@ import os
 
 from tools.simple_tool_base import AbstractSimpleTool
 from utils.tool_report_paths import tool_report_abspath
+from utils.atomic_io import atomic_replace
 
 
 class SaveBase64File(AbstractSimpleTool):
@@ -86,7 +87,7 @@ class SaveBase64File(AbstractSimpleTool):
         try:
             with open(tmp_path, "wb") as fd:
                 fd.write(raw)
-            os.replace(tmp_path, path)
+            atomic_replace(tmp_path, path)
         except Exception as e:
             try:
                 if os.path.exists(tmp_path):

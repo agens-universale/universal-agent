@@ -1,21 +1,16 @@
 """os_ops: macOS/Linux/Windows адаптер."""
 from unittest.mock import patch, MagicMock
 
+from tui.services import os_ops
 from tui.services.os_ops import read_clipboard
 
 
-def test_read_clipboard_windows_uses_get_clipboard(monkeypatch):
+def test_read_clipboard_windows_uses_winapi(monkeypatch):
+    # Win32 — через ctypes (_win_read_clipboard), без subprocess: PowerShell сбивал
+    # кодовую страницу/мышь консоли. rstrip \r\n сохраняется.
     monkeypatch.setattr("sys.platform", "win32")
-    result = MagicMock()
-    result.stdout = "hello\r\n".encode("utf-8")
-    with patch("subprocess.run", return_value=result) as mock_run:
-        text = read_clipboard()
-        cmd = mock_run.call_args.args[0]
-        assert cmd[0] == "powershell"
-        # UTF-8 форсируется перед Get-Clipboard, иначе кириллица ломается.
-        assert "Get-Clipboard -Raw" in cmd[-1]
-        assert "UTF8" in cmd[-1]
-    assert text == "hello"
+    monkeypatch.setattr(os_ops, "_win_read_clipboard", lambda: "hello\r\n")
+    assert read_clipboard() == "hello"
 
 
 def test_read_clipboard_macos_uses_pbpaste(monkeypatch):
