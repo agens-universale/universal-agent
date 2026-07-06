@@ -7,6 +7,7 @@ from tools.schema_optional import coalesce_optional_string
 from tools.simple_tool_base import AbstractSimpleTool
 from utils.glob_to_regex import compile_glob
 from utils.tool_report_paths import tool_report_abspath
+from tools.fs.agent_hidden import is_agent_hidden
 from security.read_guard import (
     enforce_read_guard,
     parse_read_guard_config,
@@ -315,6 +316,8 @@ Search for error logs in Rust source files:
                 _rg_extra = [_skills_root]
 
         def _rg_pass(p: str) -> bool:
+            if is_agent_hidden(os.path.basename(os.path.normpath(p))):
+                return False
             if not _rg_active:
                 return True
             try:

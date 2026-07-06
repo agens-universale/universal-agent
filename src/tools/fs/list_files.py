@@ -14,6 +14,7 @@ from security.read_guard import (
     _resolve_skills_root,
 )
 from security.path_policy import resolve_tool_context, _extract_config_dict
+from tools.fs.agent_hidden import is_agent_hidden
 
 
 class ListFiles(AbstractSimpleTool):
@@ -317,6 +318,8 @@ List deeper files (example):
             raise RuntimeError(f"Failed to list directory '{root_path}': {str(e)}")
 
         for name, is_dir in entries:  # backend.listdir already returns sorted (name, is_dir)
+            if is_agent_hidden(name):
+                continue
             filepath = self._backend.join(root_path, name)
             if file_matcher is not None:
                 rel = os.path.relpath(filepath, root_path)
@@ -346,6 +349,8 @@ List deeper files (example):
     ):
         """Walk (max_depth>=1) via backend.iter_walk (os.walk on local)."""
         def _should_descend(abs_path: str) -> bool:
+            if is_agent_hidden(os.path.basename(abs_path)):
+                return False
             if not self._read_guard_pass(abs_path, rg_cfg, rg_root, rg_extra):
                 return False
             if max_depth is not None:
@@ -362,6 +367,8 @@ List deeper files (example):
             raise RuntimeError(f"Failed to walk directory '{root_path}': {e}") from e
 
         for rel, is_d in walk_iter:
+            if is_agent_hidden(os.path.basename(rel)):
+                continue
             if file_matcher is not None and not file_matcher(rel):
                 continue
             abs_path = self._backend.join(root_path, rel)
