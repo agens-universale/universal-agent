@@ -61,6 +61,19 @@ backend:
   # key_path:  "/path/client.key"
   use_retry: true
 
+# Динамическая авторизация GigaCode (альтернатива статическому Bearer в
+# backend.chat_completion_headers). Токен запрашивается у auth_endpoint и
+# подставляется в Authorization при каждом вызове chat/completions.
+# Раскомментируйте, если используете GigaCode API без статического токена.
+# agent_auth:
+#   auth_endpoint: "https://gigacode.ru/api/v2/config"
+#   env_name: surface_cli
+#   env_version: "0.0.1"
+#   plugin_name: surf-cli-plugin
+#   plugin_version: "0.0.1"
+#   device_code: "mini-cli-pub - надо получить у разработчиков или взять свой в GitVerse"
+#   login: login
+
 # Вспомогательные LLM (summary, finish gate, intent scope) — без thinking.
 chat_completions:
   llm:
