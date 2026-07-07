@@ -83,8 +83,45 @@ def _extract_assistant_text(content: Any) -> str:
     return cleaned
 
 
-def map_message(msg: dict, *, no: int, ts: str) -> Optional[TraceEvent]:
-    """Превращает payload-сообщение thread_store в TraceEvent."""
+def _output_marked_skipped(output: Any) -> bool:
+    """True, если output тула — synthetic skip штатно пропущенного финализатора
+    (processing_responses.split_at_first_finalizer): верхнеуровневый
+    ``"skipped": true`` в JSON-выводе. Единственный источник такого маркера в
+    tool-output'ах — skip-путь; логи finish-gate и вложенная метка суммаризатора
+    сюда не попадают (не function_call_output / не верхний уровень)."""
+    if not isinstance(output, str):
+        return False
+    try:
+        data = json.loads(output)
+    except json.JSONDecodeError:
+        return False
+    return isinstance(data, dict) and data.get("skipped") is True
+
+
+def collect_skipped_call_ids(messages) -> set:
+    """call_id'ы штатно пропущенных финализаторов — по их synthetic skip-output'ам.
+    Вызывающие делают pre-pass по батчу записей и передают набор в map_message,
+    чтобы подавить и парный `function_call` (иначе turn_finish рисует фантомную
+    прозу-«ответ», а второй turn_ask_human — фантомный баннер)."""
+    ids: set = set()
+    for m in messages:
+        if not isinstance(m, dict) or m.get("type") != "function_call_output":
+            continue
+        if _output_marked_skipped(m.get("output")):
+            cid = m.get("call_id")
+            if isinstance(cid, str):
+                ids.add(cid)
+    return ids
+
+
+def map_message(
+    msg: dict, *, no: int, ts: str, skipped_call_ids: Optional[set] = None
+) -> Optional[TraceEvent]:
+    """Превращает payload-сообщение thread_store в TraceEvent.
+
+    ``skipped_call_ids`` — набор call_id штатно пропущенных финализаторов (см.
+    collect_skipped_call_ids). Их `function_call` не рендерим (парный skip-output
+    подавляется отдельно по маркеру `skipped: true`)."""
     if not isinstance(msg, dict):
         return None
     role = msg.get("role")
@@ -172,6 +209,16 @@ def map_message(msg: dict, *, no: int, ts: str) -> Optional[TraceEvent]:
     name = msg.get("name") if isinstance(msg.get("name"), str) else None
     name = tool_id(name)
     call_id = msg.get("call_id") if isinstance(msg.get("call_id"), str) else None
+
+    # SKIPPED финализатор (processing_responses.split_at_first_finalizer): ход уже
+    # закрыт первым финализатором, второй в той же пачке пропущен. Ни его
+    # synthetic skip-output (маркер `skipped: true`), ни парный `function_call`
+    # (call_id в наборе) не рендерим — это служебный статус для модели/логов, не
+    # ошибка и не результат. В data_*.jsonl и raw-payload всё остаётся.
+    if typ == "function_call_output" and _output_marked_skipped(msg.get("output")):
+        return None
+    if typ == "function_call" and skipped_call_ids and call_id in skipped_call_ids:
+        return None
 
     # ASK_HUMAN — kind=ask_human, summary=question (TraceScreen mounts banner).
     if typ == "function_call" and name == "ask_human":

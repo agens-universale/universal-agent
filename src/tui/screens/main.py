@@ -37,7 +37,7 @@ from tui.services.path_display import truncate_path
 from message_format import calc_history_chars_for_trigger
 from tui.services.git_info import current_branch
 from tui.services.stores.file_store import FileTaskStore
-from tui.services.trace_mapper import map_message
+from tui.services.trace_mapper import collect_skipped_call_ids, map_message
 from tui.services.trace_render import build_compaction_label
 from tui.widgets.command_input import CommandTextArea
 from tui.widgets.command_palette import CommandPalette
@@ -684,6 +684,12 @@ class TraceScreen(Screen):
         (build_preserved_batch), поэтому лежит и в архивном сегменте, и в live —
         в соседних сегментах это дало бы дубль реплики вокруг маркера."""
         from tui.models import TraceEvent
+        skipped = collect_skipped_call_ids(
+            rec.get("payload")
+            for seg in segments
+            for rec in seg["messages"]
+            if isinstance(rec, dict)
+        )
         seen_ids: set[str] = set()
         for i, seg in enumerate(segments):
             for rec in seg["messages"]:
@@ -693,7 +699,7 @@ class TraceScreen(Screen):
                     if mid in seen_ids:
                         continue
                     seen_ids.add(mid)
-                self._render_record(rec)
+                self._render_record(rec, skipped_call_ids=skipped)
             comp = seg["compacted_by"]
             if comp is not None:
                 ev = TraceEvent(
@@ -707,14 +713,20 @@ class TraceScreen(Screen):
                 self._render_event(ev)
 
     def _render_records(self, records: list[dict], *, live: bool = False) -> None:
+        skipped = collect_skipped_call_ids(
+            rec.get("payload") for rec in records if isinstance(rec, dict)
+        )
         for rec in records:
-            self._render_record(rec, live=live)
+            self._render_record(rec, live=live, skipped_call_ids=skipped)
 
-    def _render_record(self, rec: dict, *, live: bool = False) -> None:
+    def _render_record(
+        self, rec: dict, *, live: bool = False, skipped_call_ids: set | None = None
+    ) -> None:
         payload = rec.get("payload")
         if not isinstance(payload, dict):
             return
-        ev = map_message(payload, no=self._next_no, ts=rec.get("ts", ""))
+        ev = map_message(payload, no=self._next_no, ts=rec.get("ts", ""),
+                         skipped_call_ids=skipped_call_ids)
         # skill_loaded извлекаем ДО early-return: mid-run доставка (display_content="")
         # даёт ev=None, но маркер [skill] всё равно нужен на resume-пути.
         sk = payload.get("skill_loaded")
