@@ -450,7 +450,7 @@ class AgentExecutor:
 
         if config_dict.get("dump_storage"):
             cur_dir = config_dict.get("logs_dump_dir") or os.getcwd()
-            dump_storage(cur_dir, indent=2, logger=logger)
+            dump_storage(cur_dir, indent=2, logger=logger, console=human_console_enabled(config_dict))
 
         # Отчёт по токенам/стоимости за этот прогон (дельта от снимка до старта).
         try:

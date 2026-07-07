@@ -37,9 +37,10 @@ def save_state(state: State) -> None:
     state_storage.add_state(state)
 
 
-def dump_storage(cur_dir: str, *, logger=None, **kwargs) -> None:
+def dump_storage(cur_dir: str, *, logger=None, console: bool = True, **kwargs) -> None:
     fp = os.path.join(cur_dir, f"session_storage_{int(time.time())}.json")
     state_storage.save_to_file(fp, **kwargs)
-    print(f"\n\nStorage dumped in file {fp}\n\n")
+    if console:
+        print(f"\n\nStorage dumped in file {fp}\n\n")
     if logger is not None:
         logger.info("storage_dumped", extra={"event": "storage_dumped", "path": fp})
