@@ -7,6 +7,27 @@ from typing import Callable
 
 import pytest
 
+_TUI_DIR = Path(__file__).parent.resolve()
+
+
+def pytest_collection_modifyitems(items):
+    """Mark every TUI test as known-flaky → auto-rerun via pytest-rerunfailures.
+
+    Textual async-pilot tests are green in their own process (``pytest tests/tui``)
+    but time-flake when mixed into the full ~4600-test run: a *different* TUI test
+    fails per run due to cumulative process load/scheduler timing, not a fixable
+    leak (a deterministic thread-leak hunt found none). Reruns are scoped to
+    tests/tui only, so the rest of the suite is untouched.
+    """
+    flaky = pytest.mark.flaky(reruns=2, reruns_delay=0)
+    for item in items:
+        try:
+            path = Path(str(item.fspath)).resolve()
+        except Exception:
+            continue
+        if _TUI_DIR == path or _TUI_DIR in path.parents:
+            item.add_marker(flaky)
+
 
 async def wait_until(
     pilot,

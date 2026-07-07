@@ -52,6 +52,7 @@ only-include = ["src", "recommended_mcp"]
 [dependency-groups]
 dev = [
     "httpie>=3.2.4",
+    "pytest-rerunfailures>=16.4",
     { include-group = "test" },
 ]
 test = [
