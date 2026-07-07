@@ -23,6 +23,13 @@ import pytest
 pytest.importorskip("fastapi", reason="server-side dep, install via server_requirements.txt")
 pytest.importorskip("starlette", reason="server-side dep, install via server_requirements.txt")
 
+# Swarm runs the CLI inside a bubblewrap (bwrap) sandbox — Linux-only. Off Linux
+# (e.g. macOS dev) these endpoint tests can't exercise real swarm behavior, so skip.
+pytestmark = pytest.mark.skipif(
+    sys.platform != "linux",
+    reason="swarm is Linux-only (bubblewrap sandbox)",
+)
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 
