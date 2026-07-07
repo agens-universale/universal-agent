@@ -212,6 +212,7 @@ def test_agent_md_read_failed_event(tmp_path, monkeypatch):
     missing_path = tmp_path / "does_not_exist.md"
     build_instructions(
         agent_md_path=str(missing_path),
+        is_tui=False,
         cwd=str(tmp_path / "proj"),
         logger=logger,
         verbose=True,
@@ -235,6 +236,7 @@ def test_agent_md_read_failed_event_not_emitted_when_not_verbose(tmp_path, monke
     missing_path = tmp_path / "does_not_exist.md"
     build_instructions(
         agent_md_path=str(missing_path),
+        is_tui=False,
         cwd=str(tmp_path / "proj"),
         logger=logger,
         verbose=False,

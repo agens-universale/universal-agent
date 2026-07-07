@@ -45,17 +45,20 @@
   - `-n/--new` можно использовать только вместе с `-t/--thread-id`.
   - в директории для тредов создаются файлы `data_<thread_id>.jsonl` (сообщения) и `meta_<thread_id>.json` (метаданные, включая `previous_response_id`).
 - По умолчанию логи будут сохраняться в той папке, из которой запущена команда.
-- **Стриминг**: `backend.stream` (по умолчанию `true`) — мастер-переключатель SSE-стриминга ответа.
-  При `false` ответ ждётся целиком; при `true` — чанки поступают по мере генерации.
 - **TUI**: секция `tui` управляет поведением интерфейса:
+  - `tui.stream` (по умолчанию `true`) — мастер-переключатель live-стриминга ответа в TUI.
+    При `false` ответ ждётся целиком; при `true` — чанки поступают по мере генерации.
+    **Флаг задействован ТОЛЬКО в TUI:** на CLI/server/swarm не влияет — там всегда
+    non-stream (стрим гейтится наличием `on_stream_delta`, который ставит только TUI).
+    Legacy: если `tui.stream` не задан, читается старый `backend.stream` (backward-compat).
   - `tui.stream_display` (`minimal | answer | answer_reasoning`, по умолчанию `minimal`) —
     что показывать во время стриминга (`minimal` — только индикатор, `answer` — прогрессивный
     текст ответа, `answer_reasoning` — + однострочный «глазок» рассуждения).
-    Актуально только при `backend_api_mode: chat_completions` и `backend.stream: true`.
-  - `tui.text_answer_mode` (`strict | judge | always`, по умолчанию `judge`) — как поступать
+    Актуально только при `backend_api_mode: chat_completions` и `tui.stream: true`.
+  - `tui.text_answer_mode` (`deny | judge | allow`, по умолчанию `judge`) — как поступать
     с текстовым ответом агента без вызова инструмента:
-    `strict` — всегда bounce (как CLI), `judge` — intent_guard решает, `always` — принять текст.
-- **Слои инструкций** (`paths.agent_md_path`, `paths.instructions_overwrite`) — см. раздел
+    `deny` — всегда bounce (как CLI), `judge` — intent_guard решает, `allow` — принять текст.
+- **Слои инструкций** (`paths.agent_md_path`, `tui.agentsmd_override`) — см. раздел
   [«Слои инструкций (AGENTS.md)»](#слои-инструкций-agentsmd) ниже.
 
 ## Слои инструкций (AGENTS.md)
@@ -72,70 +75,83 @@
 
 - `paths.agent_md_path` (по умолчанию — shipped `prompts/demo_cli_agent.md`) задаёт L0.
   Укажите свой файл, если хотите заменить базовые инструкции.
-- `paths.instructions_overwrite` (`false` по умолчанию) — при `true` загружаются только
-  проектные слои (L2 + L3), глобальный (L1) и shipped (L0) отбрасываются.
-  Из CLI: `--instructions-overwrite`.
+- `tui.agentsmd_override` (`false` по умолчанию) — только TUI; при `true` оставить лишь
+  корневой `AGENTS.md` (L3), отбросив глобальный (L1) и `.gc/AGENTS.md` слои.
+  Игнорируется, если задан `paths.agent_md_path` (путь главнее флага).
+  Из CLI: `--agentsmd-override`.
 - Файл `AGENTS.md` генерируется командой `gc-cli --init` (агент сканирует репозиторий и
   создаёт/обновляет `AGENTS.md` через `write_to_file`).
 
 ## Security policy
 
-Клиент поддерживает несколько независимых слоев безопасности для файловых изменений,
-чтения файлов, запуска команд/кода и сетевых запросов. Все слои safe-by-default-OFF,
-**кроме `protected_paths`** — он включён по умолчанию.
+Клиент поддерживает несколько независимых слоёв безопасности для файловых изменений,
+чтения файлов, запуска команд/кода и сетевых запросов. Все слои включены по умолчанию
+с режимом `ask` (secure-by-default), **кроме `protected_paths`** — он включён с режимом
+deny (floor-защита без подтверждения).
 
 ```yaml
 security:
   command_moderation:
-    enabled: false       # safe-by-default-OFF
-    mode: allow          # allow | ask | deny
+    enabled: true        # on/ask по дефолту
+    mode: ask            # allow | ask | deny
     allowed_command_examples: []
   write_guard:
-    enabled: false       # safe-by-default-OFF (бывший root_box)
-    mode: deny           # allow | ask | deny
+    enabled: true        # on/ask по дефолту
+    mode: ask            # allow | ask | deny
     extra_paths: []
   read_guard:
-    enabled: false       # safe-by-default-OFF
-    mode: deny           # allow | ask | deny
+    enabled: true        # on/ask по дефолту
+    mode: ask            # allow | ask | deny
   url_policy:
-    enabled: false       # safe-by-default-OFF
-    mode: deny
+    enabled: true        # on/ask по дефолту
+    mode: ask            # allow | ask | deny
     allowed_schemes: ["http", "https"]
     url_blacklist: []
   protected_paths:
-    enabled: true        # единственный слой ON-by-default
+    enabled: true        # floor-защита — всегда on
     extra: []
 ```
 
+**Контракт режимов:**
+
+- `ask` (дефолт) — при нарушении периметра (out-of-perimeter операция):
+  - **TUI** — показывает confirm-баннер; пользователь подтверждает или отменяет.
+  - **Headless** (CLI/server/swarm без интерактивного confirmer) — fail-closed **deny**
+    с инструктивным сообщением агенту: операция заблокирована, нужно выбрать другой путь.
+  - In-perimeter операции (запись/чтение внутри `launch_root`) проходят молча в любом режиме.
+- `deny` — всегда блокировать, без запроса подтверждения.
+- `allow` — всегда пропускать, записать в audit log как `out_of_perimeter`.
+
+**Escape-hatch:** `mode: allow` или `enabled: false` — отключают enforcement для конкретного слоя.
+
 ### `security.write_guard` (файловый периметр)
 
-- `enabled` (по умолчанию `false`) — включает периметр на запись. При `enabled: true` агент
-  может писать только в директорию запуска `gc-cli` (`launch_root`) и в `extra_paths`.
+- `enabled` (по умолчанию `true`) — при `false` периметр выключен, запись в любой путь разрешена.
 - `extra_paths` — дополнительные директории, куда разрешена запись помимо `launch_root`.
   Относительные пути разрешаются от директории `config.yml`.
-- `mode` (`allow | ask | deny`, по умолчанию `deny`) — реакция на нарушение периметра:
-  - `deny` — блокировать (ошибка `write_guard_violation`);
-  - `ask` — запрос подтверждения у пользователя;
-  - `allow` — пропустить, пометить в audit log как `out_of_perimeter`.
+- `mode` (`allow | ask | deny`, по умолчанию `ask`) — реакция на нарушение периметра.
 
 Включить/выключить из CLI: `--write-guard true|false` или `--no-write-guard`.
 
 ### `security.command_moderation` (LLM judge для команд)
 
-- `enabled` (по умолчанию `false`) — при `false` judge не вызывается, все команды проходят.
-- `mode` (`allow | ask | deny`, по умолчанию `allow`) — управляет только `execute_command` и `run_python_code`:
-  - `allow` — выполнять без judge;
-  - `ask` — опасные команды выполнять только после подтверждения пользователя;
-  - `deny` — опасные команды блокировать.
+- `enabled` (по умолчанию `true`) — при `false` judge не вызывается, все команды проходят.
+- `mode` (`allow | ask | deny`, по умолчанию `ask`) — управляет только `execute_command` и `run_python_code`:
+  - `allow` — выполнять без judge (эквивалент `enabled: false`);
+  - `ask` — опасные команды: TUI → confirm-баннер; headless → fail-closed deny с сообщением;
+  - `deny` — опасные команды блокировать без запроса.
 - `allowed_command_examples` — positive examples для LLM judge; не строгий allowlist,
   а ориентир безопасного профиля команд проекта.
+- **Трейдофф:** LLM-судья вызывается на каждую команду — добавляет задержку. При недоступности
+  судьи: `deny` → fail-CLOSED; `ask` → headless deny, TUI → confirm-баннер.
+  Отключить: `enabled: false`.
 
 Переключить режим из CLI: `--command-moderation allow|ask|deny`.
 
 ### `security.read_guard` (периметр на чтение)
 
-- `enabled` (по умолчанию `false`) — при `false` чтение файлов не ограничивается.
-- `mode` (`allow | ask | deny`, по умолчанию `deny`) — реакция на нарушение.
+- `enabled` (по умолчанию `true`) — при `false` чтение файлов не ограничивается.
+- `mode` (`allow | ask | deny`, по умолчанию `ask`) — реакция на нарушение.
 - Дополнительные поля: `allowed_read_roots`, `allowed_read_paths`, `denied_read_paths`,
   `denied_file_patterns`, `denied_extensions`.
 
@@ -144,11 +160,12 @@ security:
 
 ### `security.url_policy` (URL-политика)
 
-- `enabled` (по умолчанию `false`) — при `false` проверки URL не выполняются.
+- `enabled` (по умолчанию `true`) — при `false` проверки URL не выполняются.
+- `mode` (`allow | ask | deny`, по умолчанию `ask`) — реакция на нарушение.
 - `allowed_schemes` и `url_blacklist` проверяются для исходного URL
   в `fetch_url`/`simple_fetch_url` до сетевого запроса. Redirect targets повторно не проверяются.
 
-### `security.protected_paths` (floor-защита — единственный ON-by-default слой)
+### `security.protected_paths` (floor-защита)
 
 - `enabled` (по умолчанию `true`) — защищает операционный каталог `.gc` от записи и чтения
   даже когда остальные guard'ы выключены. Также ставит детерминированный tripwire:

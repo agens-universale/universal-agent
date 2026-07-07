@@ -47,6 +47,7 @@ class MCPEntry:
     path: Path
     install: InstallSpec
     run: RunSpec | None = None
+    optional: bool = False
 
 
 def default_manifest_path(root: Path) -> Path:
@@ -189,4 +190,7 @@ def _parse_entry(raw: dict[str, Any], source: Path) -> MCPEntry:
                 f"mcp '{name}' run.type=command requires run.command in {source}"
             )
 
-    return MCPEntry(name=name, path=Path(path_str), install=install, run=run)
+    return MCPEntry(
+        name=name, path=Path(path_str), install=install, run=run,
+        optional=bool(raw.get("optional", False)),
+    )

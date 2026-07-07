@@ -108,3 +108,41 @@ async def test_indicator_all_ok_settles_to_ready(tmp_path):
         body = _content(scr._mcp_status_row)
         assert "все подключены" in body
         assert "готов к работе" in body
+
+
+@pytest.mark.asyncio
+async def test_settle_card_reflects_mcp_fail_trace_clean(tmp_path):
+    """После MCP-settle карточка несёт статус MCP + строку «уведомления: … /notices»
+    (учтён упавший MCP) + одну «готов»; трейс чистый (нет блока «Уведомления»)."""
+    pytest.importorskip("textual")
+    from textual.widgets import Static
+    from tui.app import TuiApp
+    from tui.services.mcp_progress import McpProgress
+    app = TuiApp(threads_dir=str(tmp_path), system="cli",
+                 config={"model": "M", "mcp-servers": {"office": {}}})
+    _stub_factory(app)
+    async with app.run_test() as pilot:
+        scr = pilot.app.screen
+        trace = pilot.app.query_one("#trace")
+        # mcp_status оседает к settle — эмулируем упавший office.
+        app._mcp_status = {"office": {"status": "failed", "reason": "timeout"}}
+        prog = McpProgress()
+        prog.begin(["office"])
+        app._mcp_progress = prog
+        scr._update_mcp_indicator()
+        prog.update("office", {"status": "failed", "reason": "timeout"})
+        scr._update_mcp_indicator()
+        await pilot.pause(1.2)   # лингер → settle
+        card = _content(scr._mcp_status_row)
+        # Точный формат карточки: три строки через пустую (MCP · уведомления · готовность).
+        assert card == (
+            "⚠ MCP: 0/1 — ни один не подключился · /mcp (F3)\n\n"
+            "уведомления: ⚠ 1 · /notices (F4)\n\n"
+            "✓ готов к работе"
+        ), f"Формат карточки разошёлся: {card!r}"
+        # Ровно одна «готов» во всём трейсе (готовность только в карточке).
+        texts = [str(s.render()) for s in trace.query(Static)]
+        ready_lines = [t for t in texts if "готов" in t]
+        assert len(ready_lines) == 1, f"Ожидалась одна строка готовности: {ready_lines}"
+        # Трейс чистый: блока-заголовка «Уведомления · N» нет.
+        assert not any("Уведомления ·" in t for t in texts)

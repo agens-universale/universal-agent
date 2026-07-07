@@ -7,18 +7,18 @@ from config import apply_cli_command_moderation_overrides, apply_cli_overrides, 
 
 class CommandModerationConfigTest(unittest.TestCase):
     def test_defaults_are_applied(self):
-        """Safe-by-default-OFF: при отсутствии security блока — все слои выключены."""
+        """On/ask по дефолту (secure-by-default): при отсутствии security блока — все слои включены."""
         with tempfile.TemporaryDirectory() as tmp_dir:
             cfg_path = os.path.join(tmp_dir, "config.yml")
             with open(cfg_path, "w", encoding="utf-8") as fd:
                 fd.write("backend:\n  api_mode: chat_completions\n")
 
             cfg = load_config(cfg_path)
-            self.assertEqual(cfg["command_moderation"]["mode"], "allow")
-            self.assertFalse(cfg["write_guard"]["enabled"])
+            self.assertEqual(cfg["command_moderation"]["mode"], "ask")
+            self.assertTrue(cfg["write_guard"]["enabled"])
             self.assertEqual(cfg["write_guard"]["extra_paths"], [])
             self.assertEqual(cfg["command_moderation"]["allowed_command_examples"], [])
-            self.assertFalse(cfg["url_policy"]["enabled"])
+            self.assertTrue(cfg["url_policy"]["enabled"])
             self.assertEqual(cfg["url_policy"]["allowed_schemes"], ["http", "https"])
             self.assertEqual(cfg["url_policy"]["url_blacklist"], [])
 

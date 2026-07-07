@@ -78,7 +78,7 @@ def _prompt_default(config_dir: str, name: str) -> str:
     local = os.path.join(config_dir, "prompts", name)
     if os.path.isfile(local):
         return local
-    return str(bundled_root() / "prompts" / name)
+    return os.path.join(str(bundled_root()), "prompts", name)
 
 
 def _asset_default(config_dir: str, rel_path: str) -> str:
@@ -89,7 +89,7 @@ def _asset_default(config_dir: str, rel_path: str) -> str:
     local = os.path.abspath(os.path.join(config_dir, rel_path))
     if os.path.isfile(local):
         return local
-    bundled = str(bundled_root() / rel_path)
+    bundled = os.path.normpath(os.path.join(str(bundled_root()), rel_path))
     if os.path.isfile(bundled):
         return bundled
     return local

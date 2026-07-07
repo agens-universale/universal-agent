@@ -18,12 +18,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
+from security.confirm_port import request_confirm
 from security.path_policy import (
     audit_policy_decision,
     resolve_tool_context,
     _extract_named_value,
     _tool_name,
 )
+from security.protected_paths import classify_path, protected_paths, protection_enabled
 
 
 _GLOB_WILDCARD_MARKERS = {"*", "all"}
@@ -94,9 +96,11 @@ def parse_read_guard_config(config_dict: dict[str, Any]) -> ReadGuardConfig:
     """
     Достаёт read_guard блок из top-level `config_dict["read_guard"]`.
 
-    Safe-by-default-OFF: read_guard включается ТОЛЬКО явным `enabled: true`.
-    Если ключа `read_guard` нет вообще — слой выключен. Это симметрично с
-    `write_guard` и `url_policy` (см. resolve_tool_context в path_policy.py).
+    Runtime-fallback при отсутствии блока/ключей — OFF (enabled=False). НО на
+    нормальном пути load_config всегда кладёт read_guard из pydantic
+    (secure-by-default: enabled=True, mode=ask), поэтому этот fallback достижим
+    лишь в bespoke/тест-конфигах в обход load_config. Симметрично write_guard/
+    url_policy (resolve_tool_context) и command_moderation.
     """
     raw = config_dict.get("read_guard") or {}
     if not isinstance(raw, dict):
@@ -341,7 +345,6 @@ def enforce_read_guard(
             # Floor carve-out (Spec B §6): runs BEFORE cfg.enabled check so
             # operational .gc reads are denied even when read_guard is off.
             # skills/instructions/none fall through to the normal flow.
-            from security.protected_paths import classify_path, protected_paths, protection_enabled
             if protection_enabled(config_dict):
                 try:
                     cand = _extract_named_value(func, args, kwargs, path_arg, path_extractor, "path")
@@ -407,7 +410,6 @@ def enforce_read_guard(
                     )
                     return func(*args, **kwargs)
                 if mode == "ask":
-                    from security.confirm_port import request_confirm
                     _rg_path = exc.error.get("path", candidate_path)
                     confirmed = request_confirm(
                         title="Защита чтения",

@@ -46,6 +46,7 @@ from tools.skills.registry import get_skills_registry
 from message_policy.tool_usage_notice.state import persist_tool_usage_notice_state
 from utils.generate_message_id import generate_msg_id_sha256 as generate_message_id_func
 from utils.local_render_system_prompt import render_system_prompt
+from security.permission_store import PermissionStore
 
 ORCHESTRATOR_SPECIFIC_ROLE = (
     "You are an orchestrator agent. You may execute work yourself or delegate to subagents when that clearly pays off.\n"
@@ -188,7 +189,8 @@ class AgentExecutor:
             "chat_completions_system_prompt": chat_completions_system_prompt,
             "use_server_subagents": config_dict.get("use_server_subagents", False),
             "agent_md_path": config_dict.get("agent_md_path"),
-            "instructions_overwrite": bool(config_dict.get("instructions_overwrite", False)),
+            "is_tui": bool(getattr(self._ctx, "is_tui", False)),
+            "agentsmd_override": bool(config_dict.get("agentsmd_override", False)),
             "thread_id": thread_id,
             "shared": thread_shared,
             "workspace_config": config_dict,
@@ -247,7 +249,6 @@ class AgentExecutor:
 
         # Permission memory: store оборачивает state.shared.confirm_rules ПО ССЫЛКЕ —
         # session-правила пишутся прямо в shared и сохраняются обычной персистентностью.
-        from security.permission_store import PermissionStore
         setattr(
             self._ctx, "permission_store",
             PermissionStore(session_rules=state.shared.confirm_rules),
@@ -577,76 +578,7 @@ class AgentExecutor:
                 self._stop_pending = True
 
     def compact_thread(self, thread_id: str, system: str | None = None) -> bool:
-        """Принудительное сжатие треда (ручной /compact) — вне run-loop.
-
-        Грузит тред, строит минимальный state (только нужное сжатию) + координатор,
-        зовёт force_compact_once. True если сжатие выполнено (chat-режим + есть тред)."""
-        config_dict = self._ctx.config_dict
-        backend_api_mode = str(config_dict.get("backend_api_mode", "responses")).strip().lower()
-        if backend_api_mode != "chat_completions" or not thread_id:
-            return False
-        system_id = system or "cli"
-        thread_session = ThreadSession.from_config(
-            config_dict=config_dict, system_id=system_id, thread_id=thread_id,
-        )
-        thread_session.history_messages = repair_tool_call_pairing(
-            thread_session.history_messages, keep_latest_unanswered=False,
-        )
-        meta = getattr(thread_session, "meta", None) or {}
-        thread_shared = ThreadMetaMapper.shared_from_meta(meta)
-
-        state = State(
-            verbose=bool(config_dict.get("verbose", False)),
-            model=config_dict["model"],
-            tools_spec=self._ctx.tools_spec,
-            tools_descr=self._ctx.tools_description,
-            skills_list=[],
-            max_steps=int(config_dict.get("max_steps", 30) or 30),
-            system_prompt_id=config_dict.get("system_prompt_id", ""),
-            use_server_subagents=bool(config_dict.get("use_server_subagents", False)),
-            thread_id=thread_id,
-            shared=thread_shared,
-            workspace_config=config_dict,
-            logger=getattr(self._ctx, "logger", None),
-        )
-        state.backend_api_mode = "chat_completions"
-        # Гидрируем кумулятив токенов треда, чтобы summary-вызов компакции лёг
-        # ПОВЕРХ него (иначе транзиентный state.usage пуст и дельта теряется).
-        state.usage = UsageAccount.from_meta(meta.get("token_usage"))
-        state.dialog_steps_offset = int(meta.get("dialog_steps_offset", 0) or 0)
-        state.init_user_intent_log(meta.get("user_intent_log"))
-        state.init_current_user_intent(meta.get("current_user_intent"))
-        state.init_user_turn_seq(meta.get("user_turn_seq"))
-        state.infer_user_turn_seq_if_missing()
-        state.messages = [
-            _shallow_copy_msg(m)
-            for m in thread_session.history_messages
-            if isinstance(m, dict)
-        ]
-
-        coord = RunSummaryCoordinator(
-            ctx=self._ctx, state=state, thread_session=thread_session,
-            summary_trigger_chars=parse_summary_trigger_chars(config_dict),
-            is_cli_mode=(system_id == "cli"),
-            pre_backend_trigger_reason="pre_backend", logger=getattr(self._ctx, "logger", None),
-        )
-        setattr(self._ctx, "on_summary_applied", coord.on_summary_applied)
-        coord.force_compact_once(trigger_reason="manual")
-
-        # Компакция сохраняет thread meta из ts.meta (старый token_usage переносится
-        # как есть) — поэтому обновлённый кумулятив (baseline + summary) персистим
-        # отдельно и обновляем live-state, чтобы TUI-футер сразу увидел рост.
-        # ВАЖНО: пишем в TOP-LEVEL ``token_usage`` (его гидрирует run()), НЕ через
-        # update_tui_meta — тот кладёт под вложенный meta["tui"], откуда run() не читает
-        # → на следующем прогоне summary «пропадал» (откат кумулятива).
-        try:
-            threads_dir = thread_session.threads_dir
-            persisted_meta = load_thread_meta(threads_dir, system_id, thread_id) or {}
-            persisted_meta["token_usage"] = state.usage.to_meta()
-            save_thread_meta(threads_dir, system_id, thread_id, persisted_meta)
-        except Exception:
-            pass
-        with self._lock:
-            if self._state is not None and getattr(self._state, "thread_id", None) == thread_id:
-                self._state.usage = UsageAccount.from_meta(state.usage.to_meta())
-        return True
+        """Форс-сжатие треда (ручной /compact) — делегат в manual_compaction
+        (оркестрация суммаризации, вне run-loop)."""
+        from manual_compaction import compact_thread as _compact_thread
+        return _compact_thread(self._ctx, thread_id, system)

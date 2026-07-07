@@ -165,7 +165,7 @@ def main() -> int:
         read_guard_enabled=getattr(arg_parser.run_args, "read_guard", None),
         no_read_guard=getattr(arg_parser.run_args, "no_read_guard", False),
         read_guard_mode=getattr(arg_parser.run_args, "read_guard_mode", None),
-        instructions_overwrite=getattr(arg_parser.run_args, "instructions_overwrite", False),
+        agentsmd_override=getattr(arg_parser.run_args, "agentsmd_override", False),
     )
 
     # Онбординг: дефолтный путь (без --config) и конфиг ещё не настроен
@@ -185,6 +185,19 @@ def main() -> int:
     if auto_mcp:
         ensure_mcp_daemons(config_dict)
     ctx = create_run_context(config_dict, auth_connector=auth_connector)
+
+    # Стартовые уведомления → stderr (не-блокирующие; онбординг остаётся выше).
+    from startup_notices import collect_startup_notices, render_notices_for_cli
+    from tools.registry import all_builtin_tool_names
+    _notices = collect_startup_notices(
+        config_dict,
+        all_builtin_tool_names(config_dict),
+        getattr(ctx, "mcp_status", None),
+        is_tui=False,
+        deprecated_keys_used=config_dict.get("deprecated_keys_used"),
+    )
+    if _notices:
+        print(render_notices_for_cli(_notices), file=sys.stderr)
 
     user_parts: list[str] = [arg_parser.run_args.query]
     if arg_parser.run_args.wrap_technical:

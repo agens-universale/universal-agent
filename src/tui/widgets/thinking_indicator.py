@@ -146,11 +146,13 @@ class ThinkingIndicator(Static):
         clock=time.monotonic,
         sink=None,
         reasoning_tag: bool = False,
+        reasoning_clock=None,
         frozen_elapsed: int | None = None,
     ) -> None:
         self._clock = clock
         self._sink = sink
         self._reasoning_tag = reasoning_tag
+        self._reasoning_clock = reasoning_clock
         self._started_at: float = (
             started_at if started_at is not None else clock()
         )
@@ -257,15 +259,21 @@ class ThinkingIndicator(Static):
             text.append(f"{self._rotator.current()}…", style=_ACCENT)
         elapsed = int(self._clock() - self._started_at)
         parens = f" ({format_duration(elapsed)}"
-        if self._state == _STATE_THINKING and self._sink is not None:
-            units = self._sink.progress_units()
+        if self._state == _STATE_THINKING:
+            units = self._sink.progress_units() if self._sink is not None else 0
             if units > 0:
                 parens += f" · ↓ {format_compact_int(units)} токенов"
-            _r_state, dur = self._sink.reasoning_state()
-            if _r_state == "thinking" and self._reasoning_tag:
-                parens += " · размышление"
-            elif _r_state == "done":
-                parens += f" · обдумал за {format_duration(round(dur))}"
+            clk = self._reasoning_clock
+            if clk is not None:
+                if clk.live() and self._reasoning_tag:
+                    parens += " · размышление"
+                elif not clk.live():
+                    secs = clk.episode()
+                    if secs > 0:
+                        if round(secs) == 0:
+                            parens += " · обдумал"            # <0.5с → без «за 0с»
+                        else:
+                            parens += f" · обдумал за {format_duration(round(secs))}"
         parens += ")"
         text.append(parens)
         return text

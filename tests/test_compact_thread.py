@@ -2,6 +2,7 @@
 import types
 
 import agent_executor as ae
+import manual_compaction as mc
 
 
 def test_compact_thread_calls_force_compact(monkeypatch, tmp_path):
@@ -36,11 +37,11 @@ def test_compact_thread_calls_force_compact(monkeypatch, tmp_path):
         def init_user_turn_seq(self, v): pass
         def infer_user_turn_seq_if_missing(self): pass
 
-    monkeypatch.setattr(ae, "ThreadSession", types.SimpleNamespace(from_config=lambda **kw: _TS()))
-    monkeypatch.setattr(ae, "repair_tool_call_pairing", lambda m, **kw: m)
-    monkeypatch.setattr(ae, "RunSummaryCoordinator", _Coord)
-    monkeypatch.setattr(ae, "parse_summary_trigger_chars", lambda c: 5000)
-    monkeypatch.setattr(ae, "State", _FakeState)
+    monkeypatch.setattr(mc, "ThreadSession", types.SimpleNamespace(from_config=lambda **kw: _TS()))
+    monkeypatch.setattr(mc, "repair_tool_call_pairing", lambda m, **kw: m)
+    monkeypatch.setattr(mc, "RunSummaryCoordinator", _Coord)
+    monkeypatch.setattr(mc, "parse_summary_trigger_chars", lambda c: 5000)
+    monkeypatch.setattr(mc, "State", _FakeState)
 
     ex = ae.AgentExecutor.__new__(ae.AgentExecutor)
     ex._ctx = types.SimpleNamespace(

@@ -11,6 +11,7 @@ from security.command_moderation import effective_command_cwd, moderate_command_
 from security.path_policy import resolve_tool_context
 from tools.simple_tool_base import AbstractSimpleTool
 from utils.directory_write_access import directory_allows_probe_write
+from utils.win_console import preserve_console_mode
 
 
 def _dedupe_abs_paths_ordered(paths: list[str]) -> list[str]:
@@ -331,7 +332,6 @@ Return format (JSON string):
         try:
             # На Windows subprocess гасит ENABLE_MOUSE_INPUT родительской консоли
             # → TUI теряет мышь до перезапуска. Возвращаем режим после команды.
-            from utils.win_console import preserve_console_mode
             with preserve_console_mode():
                 result = subprocess.run(
                     [sys.executable, "-"],

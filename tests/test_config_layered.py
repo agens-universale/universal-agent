@@ -320,19 +320,19 @@ def test_empty_project_config_falls_back_to_global(global_config_file, isolated_
     assert cfg["max_steps"] == 50
 
 
-def test_apply_cli_overrides_sets_instructions_overwrite():
-    """apply_cli_overrides(instructions_overwrite=True) sets config_dict key to True."""
+def test_apply_cli_overrides_sets_agentsmd_override():
+    """apply_cli_overrides(agentsmd_override=True) sets config_dict key to True."""
     from config import apply_cli_overrides
 
-    cfg: dict = {"instructions_overwrite": False}
-    apply_cli_overrides(cfg, instructions_overwrite=True)
-    assert cfg["instructions_overwrite"] is True
+    cfg: dict = {"agentsmd_override": False}
+    apply_cli_overrides(cfg, agentsmd_override=True)
+    assert cfg["agentsmd_override"] is True
 
 
-def test_apply_cli_overrides_leaves_instructions_overwrite_false_by_default():
-    """apply_cli_overrides() without flag does NOT override instructions_overwrite."""
+def test_apply_cli_overrides_leaves_agentsmd_override_false_by_default():
+    """apply_cli_overrides() without flag does NOT override agentsmd_override."""
     from config import apply_cli_overrides
 
-    cfg: dict = {"instructions_overwrite": False}
+    cfg: dict = {"agentsmd_override": False}
     apply_cli_overrides(cfg)
-    assert cfg["instructions_overwrite"] is False
+    assert cfg["agentsmd_override"] is False

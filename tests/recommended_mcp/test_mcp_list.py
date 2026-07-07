@@ -46,3 +46,23 @@ def test_status_npx_not_installed(monkeypatch):
     e = MCPEntry(name="pw", path=Path("."),
                  install=InstallSpec(type="npx", npm_package="@playwright/mcp"))
     assert cli._installed_status(e, Path("."), Path(".")) == "—"
+
+
+def test_install_all_skips_optional(monkeypatch):
+    import mcp_runtime.cli as cli_mod
+    from recommended_mcp.manifest import MCPEntry, InstallSpec
+    from pathlib import Path
+
+    entries = [
+        MCPEntry("keep", Path("./keep"), InstallSpec(type="source", source=Path("../x")), optional=False),
+        MCPEntry("skip", Path("./skip"), InstallSpec(type="source", source=Path("../y")), optional=True),
+    ]
+    monkeypatch.setattr(cli_mod, "_load_manifest_entries", lambda config=None: (entries, Path(".")))
+    monkeypatch.setattr(cli_mod, "_agent_dep_dir", lambda: Path("."))
+    monkeypatch.setattr(cli_mod, "_load_repo_url", lambda config=None: (None, None))
+    installed = []
+    monkeypatch.setattr(cli_mod, "_install_one", lambda e, *a, **k: (installed.append(e.name) or True))
+    monkeypatch.setattr(cli_mod, "_wire_one", lambda *a, **k: None)
+
+    cli_mod._cmd_install(None)   # install-all
+    assert installed == ["keep"]   # optional 'skip' пропущен

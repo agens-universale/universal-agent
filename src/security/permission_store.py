@@ -15,20 +15,20 @@ class PermissionStore:
     """
 
     def __init__(self, session_rules: Optional[dict] = None) -> None:
-        self._session: dict[str, bool] = session_rules if session_rules is not None else {}
-        self._run: dict[str, bool] = {}
+        self._session_rules: dict[str, bool] = session_rules if session_rules is not None else {}
+        self._run_rules: dict[str, bool] = {}
 
     def decision_for(self, key: str) -> Optional[bool]:
-        if key in self._session:
-            return bool(self._session[key])
-        if key in self._run:
-            return self._run[key]
+        if key in self._session_rules:
+            return bool(self._session_rules[key])
+        if key in self._run_rules:
+            return self._run_rules[key]
         return None
 
     def record(self, key: str, allow: bool, *, session: bool) -> None:
-        self._run[key] = allow
+        self._run_rules[key] = allow
         if session:
-            self._session[key] = allow
+            self._session_rules[key] = allow
 
     def session_rules(self) -> dict:
-        return self._session
+        return self._session_rules

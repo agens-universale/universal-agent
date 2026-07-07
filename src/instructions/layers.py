@@ -26,20 +26,15 @@ def instruction_file_paths(*, cwd: str | None = None) -> dict[str, Path]:
     proj = Path(cwd) if cwd else Path(os.getcwd())
     return {
         "L1": _global_instruction_path(),
-        "L2": proj / "AGENTS.md",
-        "L3": project_gc_dir(str(proj)) / _BRAND,
+        "L2": project_gc_dir(str(proj)) / _BRAND,
+        "L3": proj / "AGENTS.md",
     }
 
 
-def instruction_layer_specs(
-    *, agent_md_path: str | None, cwd: str | None = None
-) -> list[LayerSpec]:
+def instruction_layer_specs(*, cwd: str | None = None) -> list[LayerSpec]:
     files = instruction_file_paths(cwd=cwd)
-    l0 = Path(agent_md_path) if agent_md_path else None
-    specs: list[LayerSpec] = []
-    if l0 is not None:
-        specs.append(LayerSpec("L0", "Base instructions (shipped defaults)", l0, "shipped"))
-    specs.append(LayerSpec("L1", f"Global instructions ({files['L1']})", files["L1"], "global"))
-    specs.append(LayerSpec("L2", "Project instructions (AGENTS.md)", files["L2"], "project"))
-    specs.append(LayerSpec("L3", "Project instructions (.gc/AGENTS.md)", files["L3"], "project"))
-    return specs
+    return [
+        LayerSpec("L1", f"Global instructions ({files['L1']})", files["L1"], "global"),
+        LayerSpec("L2", "Project instructions (.gc/AGENTS.md)", files["L2"], "project"),
+        LayerSpec("L3", "Project instructions (AGENTS.md)", files["L3"], "project"),
+    ]
