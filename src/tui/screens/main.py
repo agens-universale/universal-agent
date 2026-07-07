@@ -41,6 +41,11 @@ from tui.services.trace_mapper import map_message
 from tui.services.trace_render import build_compaction_label
 from tui.widgets.command_input import CommandTextArea
 from tui.widgets.command_palette import CommandPalette
+from tui.widgets.thinking_indicator import (
+    TERMINAL_INDICATOR_STATES,
+    ThinkingIndicator,
+    is_terminal_indicator_state,
+)
 from tui.widgets.tool_call_row import ToolCallRow
 from tui import branding
 from tui.services.terminal_title import format_terminal_title, set_terminal_title
@@ -760,7 +765,6 @@ class TraceScreen(Screen):
             self._thinking.set_state(state)
             return
         _cfg = getattr(self.app, "_config", None) or {}
-        from tui.widgets.thinking_indicator import ThinkingIndicator
         indicator = ThinkingIndicator(
             started_at=self._thinking_started_at, state=state,
             sink=getattr(self.app, "_stream_sink", None),
@@ -785,9 +789,7 @@ class TraceScreen(Screen):
             return
         tui = self._store.get_task_meta(self._active_task_id).get("tui") or {}
         last = tui.get("last_indicator")
-        if isinstance(last, dict) and last.get("kind") in (
-            "done", "cancelled", "failed", "stopped_steps", "stopped_errors"
-        ):
+        if isinstance(last, dict) and last.get("kind") in TERMINAL_INDICATOR_STATES:
             kind = last["kind"]
             elapsed = last.get("elapsed")
         else:
@@ -798,7 +800,6 @@ class TraceScreen(Screen):
             if kind is None:
                 return
             elapsed = None
-        from tui.widgets.thinking_indicator import ThinkingIndicator
         ind = ThinkingIndicator(
             state=kind,
             frozen_elapsed=elapsed if isinstance(elapsed, int) else None,
@@ -1734,11 +1735,12 @@ class TraceScreen(Screen):
             )
         self._was_summarizing = summarizing
 
-        # Инвариант: нет активной задачи (пустое состояние) → никакого статус-индикатора.
-        # Ни один протухший глобальный флаг (last_runner_error и пр.) не должен
-        # репейнтить индикатор поверх чистого старта.
+        # Инвариант: нет активной задачи (пустое состояние) → никакого активного
+        # индикатора. Терминальные исходы персистентны до следующего user-send —
+        # не гасим их здесь (/_stop, Esc в ask_human).
         if self._active_task_id is None:
-            self._destroy_thinking_indicator()
+            if self._thinking is None or not is_terminal_indicator_state(self._thinking._state):
+                self._destroy_thinking_indicator()
             self._clear_stream_block()
             self._refresh_footer()
             self._update_terminal_title()

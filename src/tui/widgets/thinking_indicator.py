@@ -126,6 +126,20 @@ _STATE_FAILED = "failed"
 _STATE_STOPPED_STEPS = "stopped_steps"
 _STATE_STOPPED_ERRORS = "stopped_errors"
 
+# Исходы, которые персистентны как строка-итог (done / cancelled / …) до
+# следующего user-send. Единый список для poll, resume и meta.last_indicator.
+TERMINAL_INDICATOR_STATES = frozenset({
+    _STATE_DONE,
+    _STATE_CANCELLED,
+    _STATE_FAILED,
+    _STATE_STOPPED_STEPS,
+    _STATE_STOPPED_ERRORS,
+})
+
+
+def is_terminal_indicator_state(state: str) -> bool:
+    return state in TERMINAL_INDICATOR_STATES
+
 
 class ThinkingIndicator(Static):
     """Индикатор активности агента (thinking / validating / compressing).
