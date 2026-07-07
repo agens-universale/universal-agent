@@ -77,3 +77,32 @@ def test_file_info_binary_hash_by_bytes(tmp_path):
     assert res["sha256"] == sha256_hex_of_file_bytes(str(path))
     assert res["hash_skipped_reason"] is None
 
+
+def test_file_info_broken_symlink_reports_symlink(tmp_path):
+    broken = tmp_path / "broken_link"
+    broken.symlink_to(str(tmp_path / "does_not_exist"))
+    res = json.loads(FileInfo()(path=str(broken), follow_symlinks=False))
+    assert res["ok"] is True
+    assert res["exists"] is True
+    assert res["is_symlink"] is True
+    assert res["type"] == "symlink"
+
+
+def test_file_info_broken_symlink_follow_fails_stat(tmp_path):
+    broken = tmp_path / "broken_link"
+    broken.symlink_to(str(tmp_path / "does_not_exist"))
+    res = json.loads(FileInfo()(path=str(broken), follow_symlinks=True))
+    assert res["ok"] is False
+    assert res["error"]["type"] == "stat_failed"
+
+
+def test_file_info_symlink_to_file_follow(tmp_path):
+    real = tmp_path / "real.txt"
+    real.write_text("payload", encoding="utf-8")
+    link = tmp_path / "via_link"
+    link.symlink_to(real)
+    res = json.loads(FileInfo()(path=str(link), follow_symlinks=True, include_hash=True))
+    assert res["ok"] is True
+    assert res["type"] == "file"
+    assert res["size_bytes"] == len("payload")
+

@@ -31,7 +31,8 @@ _FOOTER_NOGIT = ("↑↓/Home/End · PgUp/PgDn страница · Enter отк�
                  " · Ctrl+R переименовать · Del удалить · Ctrl+D массовое · Esc")
 
 _STATUS_COLOR = {
-    "running": RUN_COLOR, "stopped": DIM, "completed": OK, "failed": ERR,
+    "running": RUN_COLOR, "asking": RUN_COLOR,
+    "stopped": DIM, "completed": OK, "failed": ERR,
 }
 
 
@@ -169,6 +170,22 @@ class SessionsScreen(Screen):
         self.query_one("#sessions-header-right", Static).update(
             truncate_path_left(self._project_path(), _PATH_MAXLEN))
 
+    def _task_display_status(self, task) -> Optional[str]:
+        """Статус для карточки: live-состояние активной сессии важнее meta.tui.status.
+
+        Как TraceScreen._session_status_word — иначе после повторного старта в том же
+        треде meta ещё «completed», хотя runner уже работает."""
+        tui_state = getattr(self.app, "tui_state", None)
+        active_tid = getattr(tui_state, "active_task_id", None) if tui_state else None
+        if not active_tid or task.thread_id != active_tid:
+            return task.status
+        if tui_state.ask_human_state is not None:
+            return "asking"
+        runner = getattr(self.app, "active_runner", None)
+        if runner is not None and runner.is_running():
+            return "running"
+        return task.status
+
     def _title_line(self, task, *, selected: bool) -> Text:
         title = self._title_of(task) or "(без заголовка)"
         t = Text(no_wrap=True, overflow="ellipsis")
@@ -184,9 +201,10 @@ class SessionsScreen(Screen):
             t.append(branch, style=CODE)
         t.append(" · ", style=MUTED)
         t.append(f"{task.messages_count} сообщ.", style=DIM)
-        if task.status:   # None — исход не записан → бейдж не показываем (без пустых «[]»)
+        status = self._task_display_status(task)
+        if status:   # None — исход не записан → бейдж не показываем (без пустых «[]»)
             t.append(" · ", style=MUTED)
-            t.append(f"[{task.status}]", style=_STATUS_COLOR.get(task.status, DEEP_DIM))
+            t.append(f"[{status}]", style=_STATUS_COLOR.get(status, DEEP_DIM))
         t.append(" · ", style=MUTED)
         t.append(_short_id(task.thread_id), style=MUTED)
         return t

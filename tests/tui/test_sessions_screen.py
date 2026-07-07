@@ -32,6 +32,33 @@ def _rows_text(pilot):
 
 
 @pytest.mark.asyncio
+async def test_active_running_session_shows_running_not_completed(tmp_path):
+    """Активная сессия с живым runner — [running], даже если meta.tui.status=completed."""
+    pytest.importorskip("textual")
+    tid = "run00001"
+    (Path(tmp_path) / f"meta_cli_{tid}.json").write_text(
+        json.dumps({"thread_id": tid, "updated_at": "2026-05-30T10:00:00+00:00",
+                    "messages_count": 5, "tui": {"status": "completed"}}),
+        encoding="utf-8",
+    )
+
+    class _FakeRunner:
+        def is_running(self):
+            return True
+
+    from tui.screens.sessions import SessionsScreen
+    from tui.app import TuiApp
+    async with TuiApp(threads_dir=str(tmp_path), system="cli").run_test() as pilot:
+        pilot.app.tui_state.active_task_id = tid
+        pilot.app.active_runner = _FakeRunner()
+        await pilot.app.push_screen(SessionsScreen(threads_dir=str(tmp_path), system="cli"))
+        await pilot.pause()
+        text = _rows_text(pilot)
+        assert "[running]" in text
+        assert "[completed]" not in text
+
+
+@pytest.mark.asyncio
 async def test_long_prompt_card_stays_two_lines(tmp_path):
     """Длинный (в т.ч. skill-) промпт: карточка остаётся РОВНО 2 строки —
     заголовок усечён `…`, а не растёт под весь промпт. Регресс: при height:auto

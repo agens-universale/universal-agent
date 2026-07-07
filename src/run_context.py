@@ -13,6 +13,8 @@ from utils.prod_auth import AuthConnector
 from utils.logging_module import create_run_logger
 from utils.logging_module import generate_run_id
 from tools import build_tools_data
+from tools.backends.factory import resolve_os_backend
+from tools.backends.protocol import FsBackend
 from config_modules.env_vars import project_gc_dir as _resolve_project_gc_dir
 
 
@@ -29,7 +31,8 @@ class RunContext:
     - chat_completions_llm — LLM-профиль (chat_completions.llm): summary, finish gate, intent scope;
     - intent_scope — параметры intent-scope hook (из intent_scope в config);
     - tools_data / tools_spec / tools_description — подготовленные данные о тулах;
-    - project_gc_dir — папка project-local артефактов (<cwd>/.gc/).
+    - project_gc_dir — папка project-local артефактов (<cwd>/.gc/);
+    - os_backend — физический I/O порт (local FS или Harbor container).
     """
 
     config_dict: Dict[str, Any]
@@ -43,8 +46,10 @@ class RunContext:
     tools_data: Dict[str, Dict[str, Any]]
     tools_spec: List[Dict[str, Any]]
     tools_description: List[str]
+    os_backend: FsBackend
     mcp_status: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     project_gc_dir: Path = field(default_factory=lambda: Path("."))
+    environment: Optional[Any] = None
     on_stream_delta: Optional[Callable[[str, str], None]] = None
 
 
@@ -54,6 +59,9 @@ def create_run_context(
     auth_connector: Optional[AuthConnector] = None,
     run_id: Optional[str] = None,
     on_progress=None,
+    environment: Optional[Any] = None,
+    loop: Optional[Any] = None,
+    os_backend: Optional[FsBackend] = None,
     on_stream_delta=None,
 ) -> RunContext:
     """
@@ -63,6 +71,8 @@ def create_run_context(
       от config_dict, чтобы не пересобирать реестры при каждом запуске
       с одним и тем же конфигом.
     - Логгер создаётся заново для каждого запуска (своё имя файла логов).
+    - ``os_backend`` собирается фабрикой из ``config_dict['os_backend']`` (default: local).
+      Для ``harbor`` нужны ``environment`` и ``loop``; тесты могут передать ``os_backend=``.
     """
     effective_run_id = run_id or generate_run_id()
     tools_data, tools_spec, tools_description, mcp_status = build_tools_data(config_dict, on_progress=on_progress)
@@ -94,6 +104,12 @@ def create_run_context(
     )
 
     chat_completions_llm = chat_completions_llm_from_config_dict(config_dict)
+    backend = resolve_os_backend(
+        config_dict,
+        environment=environment,
+        loop=loop,
+        override=os_backend,
+    )
 
     ctx = RunContext(
         config_dict=config_dict,
@@ -109,11 +125,16 @@ def create_run_context(
         tools_description=tools_description,
         mcp_status=mcp_status,
         project_gc_dir=_resolve_project_gc_dir(),
+        environment=environment,
+        os_backend=backend,
         on_stream_delta=on_stream_delta,
     )
 
     run_logger.debug(
-        "Created RunContext (run_id=%s, logging_path=%s)", effective_run_id, logging_path
+        "Created RunContext (run_id=%s, logging_path=%s, os_backend=%s)",
+        effective_run_id,
+        logging_path,
+        type(backend).__name__,
     )
 
     return ctx
@@ -123,4 +144,3 @@ __all__ = [
     "RunContext",
     "create_run_context",
 ]
-

@@ -63,6 +63,35 @@ def test_warnings_before_infos():
     assert levels == sorted(levels, key=lambda l: 0 if l == "warning" else 1)
 
 
+def test_pricing_zero_rates_info_when_enabled():
+    cfg = {
+        "model": "gpt-5.5",
+        "pricing": {"enabled": True, "input": 0, "output": 0, "currency": "₽", "per_tokens": 1_000_000},
+    }
+    ns = collect_startup_notices(cfg, _BUILTIN, None, is_tui=False)
+    zero = [n for n in ns if n.code == "pricing_zero_rates"]
+    assert len(zero) == 1 and zero[0].level == "info"
+    assert "input" in zero[0].message and "output" in zero[0].message
+
+
+def test_pricing_zero_rates_no_notice_when_disabled():
+    cfg = {"pricing": {"enabled": False, "input": 0, "output": 0}}
+    ns = collect_startup_notices(cfg, _BUILTIN, None, is_tui=False)
+    assert "pricing_zero_rates" not in _codes(ns)
+
+
+def test_pricing_zero_rates_no_notice_when_rates_set():
+    cfg = {"pricing": {"enabled": True, "input": 1.0, "output": 2.0}}
+    ns = collect_startup_notices(cfg, _BUILTIN, None, is_tui=False)
+    assert "pricing_zero_rates" not in _codes(ns)
+
+
+def test_pricing_zero_rates_no_notice_without_tariff():
+    cfg = {"pricing": {"enabled": True}}
+    ns = collect_startup_notices(cfg, _BUILTIN, None, is_tui=False)
+    assert "pricing_zero_rates" not in _codes(ns)
+
+
 def test_cli_render_lines():
     ns = [Notice("warning", "x", "проблема A"), Notice("info", "y", "инфо B")]
     out = render_notices_for_cli(ns)

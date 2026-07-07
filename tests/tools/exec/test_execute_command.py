@@ -65,3 +65,15 @@ def test_execute_env_vars_validation():
     bad_value = json.loads(tool(command="echo 1", env_vars=[{"name": "X", "value": 1}]))  # type: ignore[list-item]
     assert bad_value["ok"] is False
     assert bad_value["error"]["field"] == "env_vars[0].value"
+
+
+def test_execute_empty_env_vars_list_inherits_parent_environ():
+    """env_vars=[] must not wipe the process environment (same as omitting env_vars)."""
+    tool = ExecuteCommand()
+    cmd = f'"{sys.executable}" -c "import os; print(os.getenv(\'PATH\', \'\')[:20])"'
+    with_vars = json.loads(tool(command=cmd, env_vars=[]))
+    without = json.loads(tool(command=cmd))
+    assert with_vars["ok"] is True
+    assert without["ok"] is True
+    assert with_vars["stdout"] == without["stdout"]
+    assert with_vars["stdout"].strip() != ""

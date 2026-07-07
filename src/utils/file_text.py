@@ -204,19 +204,23 @@ def _try_classify_text_extension(path: str) -> FileContentClassification | None:
     )
 
 
-def classify_file_content(path: str, sample_size: int = BINARY_SAMPLE_BYTES) -> FileContentClassification:
-    try:
-        with open(path, "rb") as f:
-            chunk = f.read(sample_size)
-    except OSError:
-        raise
-
-    classification = _classify_bytes_sample(chunk)
+def classify_content_from_sample(path: str, sample: bytes) -> FileContentClassification:
+    """Pure classification: byte-sample analysis first; the text-extension
+    full-file re-check only kicks in as a fallback when the sample looks like
+    a truncated UTF-8 boundary (``utf8_decode_error``) — same precedence as
+    the previous inline ``classify_file_content`` body."""
+    classification = _classify_bytes_sample(sample)
     if classification.is_binary and classification.binary_detection_reason == "utf8_decode_error":
         text_extension = _try_classify_text_extension(path)
         if text_extension is not None:
             return text_extension
     return classification
+
+
+def classify_file_content(path: str, sample_size: int = BINARY_SAMPLE_BYTES) -> FileContentClassification:
+    with open(path, "rb") as f:
+        chunk = f.read(sample_size)
+    return classify_content_from_sample(path, chunk)
 
 
 def guess_is_binary(path: str, sample_size: int = BINARY_SAMPLE_BYTES) -> bool:

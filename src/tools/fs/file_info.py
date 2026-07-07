@@ -1,15 +1,13 @@
 import json
-import os
 import stat as stat_module
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
 from utils.file_text import (
-    classify_file_content,
+    BINARY_SAMPLE_BYTES,
+    classify_content_from_sample,
     count_lines_in_text,
-    read_text_for_edit,
-    sha256_hex_of_file,
-    sha256_hex_of_file_bytes,
+    sha256_hex_of_text,
 )
 from tools.simple_tool_base import AbstractSimpleTool
 from utils.tool_report_paths import tool_report_abspath
@@ -83,10 +81,6 @@ class FileInfo(AbstractSimpleTool):
 
         return triplet(stat_module.S_IRUSR) + triplet(stat_module.S_IRGRP) + triplet(stat_module.S_IROTH)
 
-    @staticmethod
-    def _mtime_iso(st: os.stat_result) -> str:
-        return datetime.fromtimestamp(st.st_mtime, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-
     def __call__(
         self,
         path: str,
@@ -128,7 +122,7 @@ class FileInfo(AbstractSimpleTool):
             )
 
         report_path = tool_report_abspath(path)
-        if not os.path.lexists(path):
+        if not self._backend.lexists(path):
             return self._result(
                 ok=True,
                 path=report_path,
@@ -152,10 +146,10 @@ class FileInfo(AbstractSimpleTool):
                 message="Path does not exist.",
             )
 
-        is_symlink = os.path.islink(path)
-        stat_path = os.path.realpath(path) if follow_symlinks and is_symlink else path
+        is_symlink = self._backend.is_symlink(path)
+        stat_path = self._backend.realpath(path) if follow_symlinks and is_symlink else path
         try:
-            st = os.stat(stat_path, follow_symlinks=follow_symlinks)
+            info = self._backend.stat_info(stat_path, follow_symlinks=follow_symlinks)
         except OSError as e:
             return self._error(
                 path=path,
@@ -163,8 +157,8 @@ class FileInfo(AbstractSimpleTool):
                 message="Failed to stat path.",
             )
 
-        is_dir = stat_module.S_ISDIR(st.st_mode)
-        is_file = stat_module.S_ISREG(st.st_mode)
+        is_dir = info["is_dir"]
+        is_file = info["is_file"]
         if is_symlink and not follow_symlinks:
             entry_type = "symlink"
         elif is_dir:
@@ -174,11 +168,14 @@ class FileInfo(AbstractSimpleTool):
         else:
             entry_type = "other"
 
-        readable = os.access(stat_path, os.R_OK)
-        writable = os.access(stat_path, os.W_OK)
-        size_bytes = st.st_size
-        permissions = self._format_permissions(st.st_mode)
-        modified_time = self._mtime_iso(st)
+        readable = self._backend.readable(stat_path)
+        writable = self._backend.writable(stat_path)
+        size_bytes = info["size"]
+        permissions = self._format_permissions(info["mode"]) if info["mode"] is not None else None
+        modified_time = (
+            datetime.fromtimestamp(info["mtime"], tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            if info["mtime"] is not None else None
+        )
 
         line_count: Optional[int] = None
         encoding_guess: Optional[str] = None
@@ -189,14 +186,15 @@ class FileInfo(AbstractSimpleTool):
         hash_skipped_reason: Optional[str] = None
 
         if is_file and readable:
-            classification = classify_file_content(stat_path)
+            sample = self._backend.read_head_bytes(stat_path, BINARY_SAMPLE_BYTES)
+            classification = classify_content_from_sample(stat_path, sample)
             is_binary = classification.is_binary
             encoding_guess = classification.encoding_guess
             binary_detection_reason = classification.binary_detection_reason
 
             if include_line_count and not is_binary:
                 try:
-                    line_count = count_lines_in_text(read_text_for_edit(stat_path))
+                    line_count = count_lines_in_text(self._backend.read(stat_path))
                 except OSError as e:
                     return self._error(
                         path=path,
@@ -210,10 +208,12 @@ class FileInfo(AbstractSimpleTool):
                 else:
                     try:
                         if is_binary:
-                            sha256 = sha256_hex_of_file_bytes(stat_path)
+                            sha256 = self._backend.sha256_bytes(stat_path)
                             hash_mode = "bytes"
                         else:
-                            sha256 = sha256_hex_of_file(stat_path)
+                            content = self._backend.read(stat_path)
+                            normalized = content.replace("\r\n", "\n").replace("\r", "\n")
+                            sha256 = sha256_hex_of_text(normalized)
                             hash_mode = "text"
                     except OSError as e:
                         return self._error(

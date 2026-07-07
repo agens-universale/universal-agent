@@ -33,11 +33,9 @@ from usage.account import UsageAccount
 from usage.report import build_run_usage_report, build_run_usage_dict
 from thread_store import (
     ThreadSession,
-    load_thread_meta,
     make_message_key,
     reset_thread_files,
     resolve_threads_dir,
-    save_thread_meta,
     update_tui_meta,
 )
 from tools.connect_mcp.persistent_stdio import PersistentStdioRegistry
@@ -581,4 +579,10 @@ class AgentExecutor:
         """Форс-сжатие треда (ручной /compact) — делегат в manual_compaction
         (оркестрация суммаризации, вне run-loop)."""
         from manual_compaction import compact_thread as _compact_thread
-        return _compact_thread(self._ctx, thread_id, system)
+        return _compact_thread(
+            ctx=self._ctx,
+            _lock=self._lock,
+            self_state=self._state,
+            thread_id=thread_id,
+            system=system
+        )

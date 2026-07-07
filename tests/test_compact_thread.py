@@ -62,18 +62,20 @@ def test_compact_thread_calls_force_compact(monkeypatch, tmp_path):
 
 def _make_compact_executor(monkeypatch, tmp_path, *, baseline_meta, coord_cls, state_cls):
     import threading
+    # Логика compact_thread живёт в manual_compaction (mc) — патчим ЕГО namespace,
+    # а не agent_executor (тот лишь делегирует).
     monkeypatch.setattr(
-        ae, "ThreadSession",
+        mc, "ThreadSession",
         types.SimpleNamespace(from_config=lambda **kw: types.SimpleNamespace(
             history_messages=[{"role": "user", "content": "hi", "id": "u1"}],
             meta=baseline_meta, thread_id="t1", system_id="cli",
             threads_dir=str(tmp_path),
         )),
     )
-    monkeypatch.setattr(ae, "repair_tool_call_pairing", lambda m, **kw: m)
-    monkeypatch.setattr(ae, "RunSummaryCoordinator", coord_cls)
-    monkeypatch.setattr(ae, "parse_summary_trigger_chars", lambda c: 5000)
-    monkeypatch.setattr(ae, "State", state_cls)
+    monkeypatch.setattr(mc, "repair_tool_call_pairing", lambda m, **kw: m)
+    monkeypatch.setattr(mc, "RunSummaryCoordinator", coord_cls)
+    monkeypatch.setattr(mc, "parse_summary_trigger_chars", lambda c: 5000)
+    monkeypatch.setattr(mc, "State", state_cls)
 
     ex = ae.AgentExecutor.__new__(ae.AgentExecutor)
     ex._ctx = types.SimpleNamespace(
@@ -163,4 +165,5 @@ def test_compact_thread_noop_in_responses(monkeypatch, tmp_path):
         tools_spec=[], tools_description=[],
     )
     ex._lock = __import__("threading").Lock()
+    ex._state = None
     assert ex.compact_thread("t1", system="cli") is False

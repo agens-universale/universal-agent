@@ -1,5 +1,8 @@
 import json
+import os
 from pathlib import Path
+
+import pytest
 
 from tools.fs.list_files import ListFiles
 
@@ -48,3 +51,41 @@ def test_list_extra_validation_and_not_a_directory(tmp_path):
     f.write_text("x", encoding="utf-8")
     not_dir = json.loads(tool(path=str(f)))
     assert not_dir["ok"] is False and not_dir["error"]["type"] == "not_a_directory"
+
+
+def test_list_symlink_to_dir_depth0_and_depth1(tmp_path):
+    sub = tmp_path / "sub"
+    sub.mkdir()
+    link = tmp_path / "linkdir"
+    link.symlink_to(sub)
+    tool = ListFiles()
+
+    depth0 = json.loads(tool(path=str(tmp_path), max_depth=0))
+    assert depth0["ok"] is True
+    by_name = {Path(e["path"]).name: e for e in depth0["entries"]}
+    assert by_name["linkdir"]["type"] == "file"
+
+    depth1 = json.loads(tool(path=str(tmp_path), max_depth=1))
+    assert depth1["ok"] is True
+    by_name1 = {Path(e["path"]).name: e for e in depth1["entries"]}
+    assert by_name1["linkdir"]["type"] == "file"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX chmod 000")
+def test_list_depth0_includes_unreadable_subdir_name(tmp_path):
+    open_dir = tmp_path / "open"
+    open_dir.mkdir()
+    (open_dir / "a.txt").write_text("x", encoding="utf-8")
+    secret = tmp_path / "secret"
+    secret.mkdir()
+    (secret / "hidden.txt").write_text("y", encoding="utf-8")
+    old_mode = secret.stat().st_mode
+    try:
+        secret.chmod(0o000)
+        res = json.loads(ListFiles()(path=str(tmp_path), max_depth=0))
+        assert res["ok"] is True
+        names = {Path(e["path"]).name for e in res["entries"]}
+        assert "secret" in names
+        assert "open" in names
+    finally:
+        secret.chmod(old_mode)

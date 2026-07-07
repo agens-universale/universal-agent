@@ -1,14 +1,12 @@
 import difflib
 import functools
 import json
-import os
 from typing import Any, Dict, List, Tuple
 
 from security.path_policy import enforce_write_guard
 from utils.file_text import (
     check_expected_file_sha256,
     is_valid_sha256_hex,
-    read_text_for_edit,
 )
 from tools.schema_optional import coalesce_optional_string
 from tools.simple_tool_base import AbstractSimpleTool
@@ -333,19 +331,19 @@ class ApplyFileEdits(AbstractSimpleTool):
             if not isinstance(expected_file_sha256, str) or not is_valid_sha256_hex(expected_file_sha256):
                 return _result(ok=False, applied=False, edits_would_apply=0, total_would_replace=0, edits_applied=0, total_replaced=0, edit_results=[], message="Argument 'expected_file_sha256' must be a 64-character hex SHA-256 digest.", error={"type": "invalid_argument", "field": "expected_file_sha256"})
 
-        if not os.path.exists(path):
+        if not self._backend.exists(path):
             return _result(ok=False, applied=False, edits_would_apply=0, total_would_replace=0, edits_applied=0, total_replaced=0, edit_results=[], message="File not found.", error={"type": "not_found"})
-        if not os.path.isfile(path):
+        if not self._backend.is_file(path):
             return _result(ok=False, applied=False, edits_would_apply=0, total_would_replace=0, edits_applied=0, total_replaced=0, edit_results=[], message="Path is not a file.", error={"type": "not_a_file"})
         try:
-            file_size = os.path.getsize(path)
+            file_size = self._backend.getsize(path)
         except Exception as e:
             return _result(ok=False, applied=False, edits_would_apply=0, total_would_replace=0, edits_applied=0, total_replaced=0, edit_results=[], message="Failed to get file size.", error={"type": "stat_failed", "message": str(e)})
         if file_size > self.max_file_size_bytes:
             return _result(ok=False, applied=False, edits_would_apply=0, total_would_replace=0, edits_applied=0, total_replaced=0, edit_results=[], message=f"File is too large for apply_file_edits: {file_size} bytes (max {self.max_file_size_bytes} bytes).", error={"type": "file_too_large", "actual_bytes": file_size, "max_bytes": self.max_file_size_bytes})
 
         try:
-            original = read_text_for_edit(path)
+            original = self._backend.read(path)
         except Exception as e:
             return _result(ok=False, applied=False, edits_would_apply=0, total_would_replace=0, edits_applied=0, total_replaced=0, edit_results=[], message="Failed to read file.", error={"type": "read_failed", "message": str(e)})
 
@@ -442,8 +440,7 @@ class ApplyFileEdits(AbstractSimpleTool):
         if backup:
             backup_path = f"{path}.bak"
             try:
-                with open(path, "rb") as src, open(backup_path, "wb") as dst:
-                    dst.write(src.read())
+                self._backend.copy(path, backup_path)
             except Exception as e:
                 return _result(
                     ok=False,
@@ -457,17 +454,9 @@ class ApplyFileEdits(AbstractSimpleTool):
                     error={"type": "backup_failed", "message": str(e)},
                 )
 
-        tmp_path = f"{path}.tmp"
         try:
-            with open(tmp_path, "w", encoding="utf-8", errors="replace") as f:
-                f.write(current)
-            atomic_replace(tmp_path, path)
+            self._backend.write(path, current, encoding="utf-8")
         except Exception as e:
-            try:
-                if os.path.exists(tmp_path):
-                    os.remove(tmp_path)
-            except Exception:
-                pass
             return _result(
                 ok=False,
                 applied=False,
