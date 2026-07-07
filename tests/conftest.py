@@ -144,3 +144,12 @@ def _restore_real_tools_package_after_test():
     yield
     if _mcp_runtime_available():
         ensure_real_tools_package()
+
+
+@pytest.fixture(autouse=True)
+def _clear_runtime_notices_between_tests():
+    from runtime_notices import clear_runtime_notices
+
+    clear_runtime_notices(listeners=True)
+    yield
+    clear_runtime_notices(listeners=True)

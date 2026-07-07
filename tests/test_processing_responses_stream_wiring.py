@@ -23,6 +23,9 @@ def _patch_policy(monkeypatch):
         use_retry,
         logger=None,
         on_delta=None,
+        request_label=None,
+        runtime_notices_enabled=False,
+        notice_url=None,
     ):
         seen["on_delta"] = on_delta
         return (
