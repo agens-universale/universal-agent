@@ -43,6 +43,7 @@ from tools.connect_mcp.stream_client import _SESSION_MANAGER as _STREAM_SESSION_
 from tools.skills.registry import get_skills_registry
 from message_policy.tool_usage_notice.state import persist_tool_usage_notice_state
 from utils.generate_message_id import generate_msg_id_sha256 as generate_message_id_func
+from utils.logging_module import human_console_enabled
 from utils.local_render_system_prompt import render_system_prompt
 from security.permission_store import PermissionStore
 
@@ -464,7 +465,7 @@ class AgentExecutor:
             if usage_text:
                 if logger is not None:
                     logger.info("\n<run_usage>\n%s\n</run_usage>\n", usage_text)
-                if config_dict.get("console_trace", True):
+                if human_console_enabled(config_dict):
                     print(f"\n{usage_text}\n")
             if logger is not None:
                 usage_dict = build_run_usage_dict(
@@ -481,7 +482,7 @@ class AgentExecutor:
             if logger is not None:
                 logger.warning("run usage report failed: %s", usage_exc, exc_info=True)
 
-        if config_dict.get("console_trace", True):
+        if human_console_enabled(config_dict):
             print(f"\nПуть к файлу с логами: {self._ctx.logging_path}\n")
         if logger is not None:
             logger.info(

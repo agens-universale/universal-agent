@@ -28,6 +28,7 @@ from tools.session.stored_outputs.wrapping import maybe_store_and_wrap_tool_outp
 from utils.connect_backend import create_call_headers
 from utils.connect_backend import request_backend_responses as request_backend
 from utils.ssl_config import get_backend_client_cert
+from utils.logging_module import human_console_enabled
 from utils.backend_errors import is_auth_error, is_context_overflow_error
 
 # Переполнение контекста → force-компакция + повтор запроса; лимит на случай,
@@ -521,7 +522,7 @@ def run_agent(
     context_overflow_retries = 0
     run_logger = getattr(ctx, "logger", None) or _fallback_logger
     cfg = getattr(ctx, "config_dict", {}) or {}
-    console_trace = cfg.get("console_trace", True)
+    console_human = human_console_enabled(cfg)
     max_tool_errors = cfg.get("no_tool_call_max_count", 0)
     while True:
         if check_stop is not None and check_stop():
@@ -551,7 +552,7 @@ def run_agent(
         try:
             for m in messages:
                 m_formatted = format_message_responses(m)
-                if console_trace and len(m_formatted) > 0:
+                if console_human and len(m_formatted) > 0:
                     print(m_formatted)
                 run_logger.info(
                     "\n<message>\n%s\n</message>\n",

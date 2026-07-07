@@ -105,6 +105,18 @@ def resolve_log_level(name: Optional[str]) -> int:
     return _LOG_LEVELS.get(str(name or "info").strip().lower(), logging.INFO)
 
 
+def human_console_enabled(config_dict: Dict[str, Any]) -> bool:
+    """Печатать ли человекочитаемый рендер (>>>>>>>>>> …) в консоль.
+
+    Только при ``console_trace`` И текстовом формате логов: в jsonl-режиме на
+    stdout уже идёт структурный event-поток, и дублировать его человекочитаемым
+    рендером не нужно (иначе jsonl-потребитель получает мусор пополам с JSON).
+    """
+    if not config_dict.get("console_trace", True):
+        return False
+    return str(config_dict.get("logging_format", "text")).strip().lower() != "jsonl"
+
+
 def _normalize_agent_kind(agent_kind: Optional[str]) -> str:
     value = (agent_kind or "main").strip().lower()
     if not value:
@@ -224,4 +236,5 @@ __all__ = [
     "build_run_log_paths",
     "generate_run_id",
     "resolve_log_level",
+    "human_console_enabled",
 ]
