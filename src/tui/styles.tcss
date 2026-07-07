@@ -285,6 +285,8 @@ TextArea.ask-human-mode { border: solid $run-color; }
 #sessions-header-left  { width: 1fr; color: $deep-dim; }
 #sessions-header-right { width: auto; color: $deep-dim; text-align: right; padding-right: 1; }
 #sessions-footer { height: 1; padding: 0 1; }
+#sessions-footer-left  { width: 1fr; color: $dim; }
+#sessions-footer-right { width: auto; color: $deep-dim; text-align: right; padding-right: 1; }
 #sessions-list { height: 1fr; }
 #sessions-list Static { padding: 0 1; }
 #sessions-list .card { height: auto; margin-bottom: 1; text-wrap: nowrap; text-overflow: ellipsis; }

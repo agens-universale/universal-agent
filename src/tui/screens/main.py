@@ -34,6 +34,7 @@ from tui.palette import DIM as _DIM
 from tui.palette import ERR as _ERR_RED
 from tui.palette import INK as _INK
 from tui.services.context_meter import render_context_meter
+from tui.services.notices_ui import format_notices_badge, format_notices_footer_suffix
 from tui.services.usage_meter import compose_adaptive_footer_right, usage_segments
 from tui.services.export import export_thread
 from tui.services.path_display import truncate_path
@@ -429,6 +430,31 @@ class TraceScreen(Screen):
         except Exception:
             pass
 
+    def _footer_left_commands(self) -> str:
+        """Базовые команды footer-left без суффикса уведомлений."""
+        if self.app.tui_state.ask_human_state is not None:
+            return "[Esc] /stop  [Enter] ответить"
+        if self.app.tui_state.active_task_id is None:
+            return _FOOTER_LEFT
+        runner = getattr(self.app, "active_runner", None)
+        is_running = runner is not None and runner.is_running()
+        return _FOOTER_RUNNING_LEFT if is_running else _FOOTER_LEFT
+
+    def _footer_left_text(self) -> str:
+        """Команды footer-left + счётчик уведомлений (если есть)."""
+        base = self._footer_left_commands()
+        suffix = format_notices_footer_suffix(self._collect_notices())
+        return base + suffix if suffix else base
+
+    def _refresh_notices_footer(self) -> None:
+        """Обновить счётчик уведомлений в footer-left (без затрагивания footer-right)."""
+        if self._footer_hint_active:
+            return
+        try:
+            self.query_one("#footer-left", Static).update(self._footer_left_text())
+        except Exception:
+            pass
+
     def _refresh_footer(self) -> None:
         """Switch footer text between empty-state and main-screen based on active task.
 
@@ -445,18 +471,13 @@ class TraceScreen(Screen):
             left = self.query_one("#footer-left", Static)
         except Exception:
             return
-        suppress_left = self._footer_hint_active
-        if self.app.tui_state.ask_human_state is not None:
-            if not suppress_left:
-                left.update("[Esc] /stop  [Enter] ответить")
-        elif self.app.tui_state.active_task_id is None:
-            if not suppress_left:
-                left.update(_FOOTER_LEFT)
-        else:
-            runner = getattr(self.app, "active_runner", None)
-            is_running = runner is not None and runner.is_running()
-            if not suppress_left:
-                left.update(_FOOTER_RUNNING_LEFT if is_running else _FOOTER_LEFT)
+        if not self._footer_hint_active:
+            left.update(self._footer_left_text())
+
+    def on_screen_resume(self) -> None:
+        """После возврата с под-экрана — освежить карточку и футер уведомлений."""
+        self._refresh_notices_card()
+        self._refresh_footer()
 
     def _current_cwd(self) -> str:
         """Рабочая папка сессии — фиксирована = папка запуска процесса."""
@@ -1908,6 +1929,9 @@ class TraceScreen(Screen):
 
     def _collect_notices(self):
         """Стартовые + runtime (ошибки LLM в текущей сессии, только в памяти)."""
+        collect = getattr(self.app, "collect_notices", None)
+        if callable(collect):
+            return collect()
         return self._collect_startup_notices() + collect_runtime_notices()
 
     def _has_mcp_servers(self) -> bool:
@@ -1930,16 +1954,9 @@ class TraceScreen(Screen):
         lines = []
         if mcp_line:
             lines.append(mcp_line)
-        if notices:
-            warns = sum(1 for n in notices if n.level == "warning")
-            infos = sum(1 for n in notices if n.level == "info")
-            parts = []
-            if warns:
-                parts.append(f"⚠ {warns}")
-            if infos:
-                parts.append(f"ℹ {infos}")
-            parts.append("/notices (F4)")
-            lines.append(f"уведомления: {' · '.join(parts)}")
+        badge = format_notices_badge(notices)
+        if badge:
+            lines.append(f"уведомления: {badge}")
         lines.append("✓ готов к работе")
         return "\n\n".join(lines)
 

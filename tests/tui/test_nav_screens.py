@@ -1,5 +1,5 @@
-"""Навигация по экранам: без задвоения (F1/F4), F2/F3/F4 — только с главного,
-F1 (справка) — с любого экрана, кроме самой справки."""
+"""Навигация по экранам: без задвоения (F1/F4), F2/F3 — с главного и notices,
+F4 (уведомления) — с любого экрана, F1 (справка) — с любого, кроме самой справки."""
 import pytest
 
 
@@ -38,8 +38,8 @@ async def test_f1_help_opens_once_no_stack(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_f4_notices_noop_from_subscreen(tmp_path):
-    """F4 (уведомления) — только с главного; с под-экрана (mcp) не открывается."""
+async def test_f4_notices_opens_from_subscreen(tmp_path):
+    """F4 (уведомления) — с любого экрана (тут — mcp)."""
     pytest.importorskip("textual")
     from tui.app import TuiApp
     from tui.screens.mcp import McpScreen
@@ -48,8 +48,8 @@ async def test_f4_notices_noop_from_subscreen(tmp_path):
         pilot.app.screen._handle_command("mcp"); await pilot.pause()
         assert isinstance(pilot.app.screen, McpScreen)
         await pilot.press("f4"); await pilot.pause()
-        assert _count(pilot.app, NoticesScreen) == 0
-        assert isinstance(pilot.app.screen, McpScreen)
+        assert _count(pilot.app, NoticesScreen) == 1
+        assert isinstance(pilot.app.screen, NoticesScreen)
 
 
 @pytest.mark.asyncio

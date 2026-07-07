@@ -43,11 +43,18 @@ class NoticesScreen(Screen):
 
     def __init__(self, notices: List[Notice] | None = None) -> None:
         super().__init__()
-        self._notices: List[Notice] = notices if notices is not None else []
+        # notices в конструкторе — для тестов; в проде список собирается в on_mount.
+        self._initial_notices = notices
 
-    def _header_text(self) -> str:
-        warns = sum(1 for n in self._notices if n.level == "warning")
-        infos = sum(1 for n in self._notices if n.level == "info")
+    def _load_notices(self) -> List[Notice]:
+        collect = getattr(self.app, "collect_notices", None)
+        if callable(collect):
+            return collect()
+        return list(self._initial_notices or [])
+
+    def _header_text(self, notices: List[Notice]) -> str:
+        warns = sum(1 for n in notices if n.level == "warning")
+        infos = sum(1 for n in notices if n.level == "info")
         parts = []
         if warns:
             parts.append(f"{_WARN_GLYPH} {warns}")
@@ -58,19 +65,25 @@ class NoticesScreen(Screen):
     def compose(self) -> ComposeResult:
         with Vertical(id="root"):
             with Horizontal(id="header"):
-                yield Static(self._header_text(), id="header-left", markup=False)
-            trace = VerticalScroll(id="trace")
-            trace.can_focus = False
-            with trace:
-                if not self._notices:
-                    yield Static("Уведомлений нет", markup=False)
-                else:
-                    # Пустая строка-разделитель между уведомлениями (не после последнего).
-                    for i, n in enumerate(self._notices):
-                        if i:
-                            yield Static("")
-                        yield Static(_notice_text(n))
+                yield Static("уведомления", id="header-left", markup=False)
+            yield VerticalScroll(id="trace")
             yield Static(_FOOTER, id="footer", markup=False)
+
+    def on_mount(self) -> None:
+        self._render_notices()
+
+    def _render_notices(self) -> None:
+        notices = self._load_notices()
+        self.query_one("#header-left", Static).update(self._header_text(notices))
+        trace = self.query_one("#trace", VerticalScroll)
+        trace.remove_children()
+        if not notices:
+            trace.mount(Static("Уведомлений нет", markup=False))
+            return
+        for i, n in enumerate(notices):
+            if i:
+                trace.mount(Static(""))
+            trace.mount(Static(_notice_text(n)))
 
     def on_key(self, event: events.Key) -> None:
         if event.key == "escape":

@@ -1,4 +1,4 @@
-"""TUI: runtime LLM error → счётчик в карточке и /notices."""
+"""TUI: runtime LLM error → счётчик в карточке, футере и /notices."""
 from __future__ import annotations
 
 import pytest
@@ -23,10 +23,42 @@ async def test_runtime_notice_appears_in_card(tmp_path):
             "warning", "llm_error_400",
             "Ошибка LLM (судья): HTTP 400. reasoning_effort invalid",
         ))
-        scr._refresh_notices_card()
+        pilot.app.refresh_notices_indicators()
         card = str(scr._mcp_status_row.render())
         assert "уведомления:" in card
         assert "/notices (F4)" in card
+        footer = str(scr.query_one("#footer-left").render())
+        assert "⚠ 1" in footer
+        assert "/notices (F4)" in footer
 
         notices = scr._collect_notices()
         assert any(n.code == "llm_error_400" for n in notices)
+
+
+@pytest.mark.asyncio
+async def test_runtime_notice_footer_on_sessions_and_persists_after_view(tmp_path):
+    pytest.importorskip("textual")
+    from tui.app import TuiApp
+    from tui.screens.notices import NoticesScreen
+    from tui.screens.sessions import SessionsScreen
+
+    clear_runtime_notices()
+    async with TuiApp(threads_dir=str(tmp_path / "t"), config={"model": "M"}).run_test() as pilot:
+        push_runtime_notice(Notice("warning", "w1", "тест"))
+        await pilot.press("ctrl+s")
+        await pilot.pause()
+        assert isinstance(pilot.app.screen, SessionsScreen)
+        footer_right = str(pilot.app.screen.query_one("#sessions-footer-right").render())
+        assert "⚠ 1" in footer_right
+
+        await pilot.press("f4")
+        await pilot.pause()
+        assert isinstance(pilot.app.screen, NoticesScreen)
+
+        await pilot.press("escape")
+        await pilot.pause()
+        assert isinstance(pilot.app.screen, SessionsScreen)
+        footer_right = str(pilot.app.screen.query_one("#sessions-footer-right").render())
+        assert "⚠ 1" in footer_right
+        assert len(pilot.app.collect_notices()) == 1
+

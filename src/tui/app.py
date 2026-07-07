@@ -2,16 +2,18 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional
 
 from textual.app import App
 from textual.binding import Binding
 from textual.screen import Screen
 
-from runtime_notices import register_runtime_notices_listener
+from runtime_notices import collect_runtime_notices, register_runtime_notices_listener
+from startup_notices import Notice, collect_startup_notices
 from tui import branding, palette
 from tui.screens.main import TraceScreen
 from tui.services.stream_sink import StreamSink
+from tools.registry import all_builtin_tool_names
 
 
 class TuiApp(App):
@@ -163,9 +165,20 @@ class TuiApp(App):
             self.exit()
 
     def _on_main(self) -> bool:
-        """Текущий экран — главный (TraceScreen). notices/sessions открываются
-        только отсюда и не стекаются."""
+        """Текущий экран — главный (TraceScreen). sessions открываются только отсюда."""
         return isinstance(self.screen, TraceScreen)
+
+    def collect_notices(self) -> List[Notice]:
+        """Стартовые + runtime-уведомления (эфемерные, не сбрасываются при просмотре)."""
+        cfg = self._config or {}
+        startup = collect_startup_notices(
+            cfg,
+            all_builtin_tool_names(cfg),
+            self._mcp_status,
+            is_tui=True,
+            deprecated_keys_used=cfg.get("deprecated_keys_used"),
+        )
+        return startup + collect_runtime_notices()
 
     def _main_screen(self):
         """Базовый (главный) экран — низ стека; None если это не TraceScreen."""
@@ -210,19 +223,22 @@ class TuiApp(App):
 
     def action_notices(self) -> None:
         from tui.screens.notices import NoticesScreen
-        if not self._on_main():
+        if isinstance(self.screen, NoticesScreen):
             return
-        scr = self.screen
-        notices = scr._collect_notices() if hasattr(scr, "_collect_notices") else []
-        self.push_screen(NoticesScreen(notices=notices))
+        self.push_screen(NoticesScreen())
+
+    def refresh_notices_indicators(self) -> None:
+        """Обновить счётчики уведомлений в карточке главного экрана и футере активного."""
+        main = self._main_screen()
+        if main is not None and hasattr(main, "_refresh_notices_card"):
+            main._refresh_notices_card()
+        fn = getattr(self.screen, "_refresh_notices_footer", None)
+        if callable(fn):
+            fn()
 
     def _on_runtime_notice(self) -> None:
-        """Callback из worker-потока: обновить счётчик уведомлений в карточке."""
-        def _refresh() -> None:
-            scr = self.screen
-            if isinstance(scr, TraceScreen) and hasattr(scr, "_refresh_notices_card"):
-                scr._refresh_notices_card()
-        self.call_from_thread(_refresh)
+        """Callback из worker-потока: обновить счётчики уведомлений."""
+        self.call_from_thread(self.refresh_notices_indicators)
 
     def action_new(self) -> None:
         scr = self.screen

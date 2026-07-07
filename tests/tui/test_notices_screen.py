@@ -17,18 +17,23 @@ async def test_notices_screen_lists_all(tmp_path):
 
 
 def test_header_text_counts_in_header():
+    pytest.importorskip("textual")
     # Счётчики ⚠/ℹ — в шапке через «·» (как «mcp · серверы и тулы»), нули опущены.
     from tui.screens.notices import NoticesScreen
     from startup_notices import Notice
-    scr = NoticesScreen(notices=[
+    notices = [
         Notice("warning", "a", "x"), Notice("warning", "b", "y"), Notice("info", "c", "z"),
-    ])
-    assert scr._header_text() == "уведомления · ⚠ 2 · ℹ 1"
-    assert NoticesScreen(notices=[Notice("warning", "a", "x")])._header_text() == "уведомления · ⚠ 1"
-    assert NoticesScreen(notices=[])._header_text() == "уведомления"
+    ]
+    scr = NoticesScreen(notices=notices)
+    assert scr._header_text(notices) == "уведомления · ⚠ 2 · ℹ 1"
+    assert NoticesScreen(notices=[Notice("warning", "a", "x")])._header_text(
+        [Notice("warning", "a", "x")]
+    ) == "уведомления · ⚠ 1"
+    assert NoticesScreen(notices=[])._header_text([]) == "уведомления"
 
 
 def test_notice_text_highlights_technical_names():
+    pytest.importorskip("textual")
     # Имена из highlights выделяются стилем имени; прочий текст — нет.
     from tui.screens.notices import _notice_text, _NAME_STYLE
     from startup_notices import Notice

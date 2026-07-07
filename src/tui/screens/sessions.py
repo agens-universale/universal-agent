@@ -18,6 +18,7 @@ from tui.palette import (
     BRIGHT, CODE, DEEP_DIM, DIM, ERR, INK, MUTED, OK, RUN_COLOR,
 )
 from tui.services.git_info import current_branch
+from tui.services.notices_ui import format_notices_badge
 from tui.services.relative_time import format_relative_local
 from tui.services.skill_view import truncate_path_left
 from tui.services.stores.file_store import FileTaskStore
@@ -71,6 +72,7 @@ class SessionsScreen(Screen):
                 yield Input(placeholder="поиск (id или текст)", id="sessions-filter")
             with Horizontal(id="sessions-footer"):
                 yield Static("", id="sessions-footer-left", markup=False)
+                yield Static("", id="sessions-footer-right", markup=False)
 
     def on_mount(self) -> None:
         self._current_branch = current_branch(str(Path.cwd()))
@@ -78,7 +80,20 @@ class SessionsScreen(Screen):
         footer = _FOOTER if self._current_branch else _FOOTER_NOGIT
         self.query_one("#sessions-footer-left", Static).update(footer)
         self._reload()
+        self._refresh_notices_footer()
         self.query_one("#sessions-filter", Input).focus()
+
+    def _refresh_notices_footer(self) -> None:
+        """Счётчик уведомлений в footer-right (виден, пока юзер в picker сессий)."""
+        collect = getattr(self.app, "collect_notices", None)
+        badge = format_notices_badge(collect()) if callable(collect) else ""
+        try:
+            self.query_one("#sessions-footer-right", Static).update(badge)
+        except Exception:
+            pass
+
+    def on_screen_resume(self) -> None:
+        self._refresh_notices_footer()
 
     # ---- data ---------------------------------------------------------
 
