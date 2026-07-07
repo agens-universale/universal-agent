@@ -61,6 +61,54 @@
 - **Слои инструкций** (`paths.agent_md_path`, `tui.agentsmd_override`) — см. раздел
   [«Слои инструкций (AGENTS.md)»](#слои-инструкций-agentsmd) ниже.
 
+## Секреты и env-интерполяция (`${ENV:VAR}`)
+
+В любом строковом значении конфига можно использовать плейсхолдер `${ENV:VAR}` — он
+подставляется из переменной окружения **до валидации** (и в file-конфиге, и в CLI-override).
+Удобно, чтобы не держать секрет в файле:
+
+```yaml
+backend:
+  chat_completion_headers:
+    Authorization: "Bearer ${ENV:GC_API_KEY}"   # затем: export GC_API_KEY=sk-...
+mcp:
+  servers:
+    github:
+      token: "${ENV:GITHUB_TOKEN}"
+```
+
+- Поддерживается несколько плейсхолдеров в одной строке (`"Bearer ${ENV:A}/${ENV:B}"`).
+- Отсутствующая переменная → пустая строка + один warning с именем переменной (само значение не логируется).
+- Переменная, заданная пустой строкой, подставляется как есть, без warning.
+
+## Логи: формат, уровень, редакция секретов
+
+- `logging.format` (`text | jsonl`, по умолчанию `text`):
+  - `text` — человекочитаемый вывод (историческое поведение);
+  - `jsonl` — один JSON-объект на строку (`{"event": ...}`): `agent_start`,
+    `backend_request/response`, `dialog_message`, `final_answer`, `run_usage`, `summary_*` и др.
+    В jsonl-режиме человекочитаемый рендер в консоль **подавляется** — на stdout идёт только
+    event-поток (удобно для парсеров/оркестраторов, напр. Task2PR-врапера).
+- `logging.log_level` (`debug | info | warning | error`, по умолчанию `info`) — уровень per-run
+  логгера (актуален для jsonl). На `debug` добавляются объёмные события
+  `backend_request` / `backend_response` / `agent_tools`.
+- `logging.redact_secrets` — маскировка секретов (Bearer/JWT/`sk-`/PEM/AWS/GCP/GitLab/npm/Slack)
+  перед записью в лог и stdout → `***REDACTED***`. По умолчанию **выключено** (поведение как раньше):
+  - `enabled: true|false`;
+  - `extra_keys: []` — доп. подстроки имён чувствительных ключей (к встроенным);
+  - `extra_patterns: []` — доп. value-regex (к встроенным).
+
+  Счётчики токенов (`prompt_tokens`, `completion_tokens`, `max_tokens`) не маскируются;
+  одиночное слово-ключ `token` / `*_token` — маскируется.
+
+## Backend TLS / mTLS
+
+- `backend.use_ssl` — `true | false | "/path/ca-bundle.pem"`. Строка трактуется как путь к
+  CA-bundle (self-signed / корпоративный CA); `bool` — как раньше (обратно совместимо).
+- `backend.cert_path` / `backend.key_path` — клиентский сертификат (mTLS). Заданы **оба** →
+  клиент предъявляет `(cert, key)`; ни одного → без клиентского сертификата (дефолт). Пути
+  раскрывают `~` и env-переменные. (Опционально; не обязательны для работы бэкенда.)
+
 ## Слои инструкций (AGENTS.md)
 
 Системные инструкции агента формируются из нескольких файлов, мерджимых в порядке broad→narrow
@@ -142,6 +190,10 @@ security:
   - `deny` — опасные команды блокировать без запроса.
 - `allowed_command_examples` — positive examples для LLM judge; не строгий allowlist,
   а ориентир безопасного профиля команд проекта.
+- `denied_command_examples` — negative examples (операторный deny-list). Явное совпадение
+  (или тривиальная вариация: флаги/пути/кавычки/пробелы) → verdict `potentially_dangerous`
+  + risk-флаг `operator_denied`, даже если команда сама по себе выглядит безобидно.
+  Операторный интент главнее собственной оценки судьи. Работает при `mode: ask|deny`.
 - **Трейдофф:** LLM-судья вызывается на каждую команду — добавляет задержку. При недоступности
   судьи: `deny` → fail-CLOSED; `ask` → headless deny, TUI → confirm-баннер.
   Отключить: `enabled: false`.
