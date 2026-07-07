@@ -91,6 +91,20 @@ def test_state_from_snapshot_roundtrip_preserves_runtime_fields():
     assert restored.dialog_steps_offset == 7
     assert restored.tool_call_outputs_store.peek("ref1") is not None
     assert restored.tool_call_outputs_store.peek("ref1").text == "data"
+    # serialize() pops "logger" from the snapshot; restore must default it back
+    # to None rather than leaving state.__dict__ without the key (AttributeError).
+    assert restored.logger is None
+
+
+def test_load_state_from_snapshot_defaults_logger_to_none():
+    state = _make_state()
+    state.logger = SimpleNamespace(warning=lambda *a, **kw: None)
+
+    payload = StateSerializer.serialize(state)
+    assert "logger" not in payload
+
+    restored = StateSerializer.deserialize(json.loads(json.dumps(payload)))
+    assert restored.logger is None
 
 
 def test_state_serializer_roundtrip_has_v2_schema_and_working_memory():

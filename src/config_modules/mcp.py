@@ -1,6 +1,6 @@
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
 
 
 class McpServerConfig(BaseModel):
@@ -19,7 +19,13 @@ class McpServerConfig(BaseModel):
     persistent_session_close_tool: str | None = None
     # mTLS / TLS для http-транспортов: значения читает рантайм utils/ssl_config.py
     # (get_verify_ssl / get_client_cert) через config_dict["mcp-servers"].
-    verify_ssl: bool | str = Field(default=True, alias="verify-ssl")
+    # Унифицировано с backend: на входе принимаются use-ssl / use_ssl / verify-ssl,
+    # в config_dict дампится как verify-ssl (его читает get_verify_ssl).
+    verify_ssl: bool | str = Field(
+        default=True,
+        validation_alias=AliasChoices("verify_ssl", "verify-ssl", "use_ssl", "use-ssl"),
+        serialization_alias="verify-ssl",
+    )
     client_cert: str | None = Field(default=None, alias="client-cert")
     client_key: str | None = Field(default=None, alias="client-key")
 

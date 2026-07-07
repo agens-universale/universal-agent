@@ -14,6 +14,7 @@ from config_modules.common import (
     apply_swarm_env_overrides,
 )
 from config_modules.merge import deep_merge
+from config_modules.env_interpolation import resolve_env_placeholders
 from config_modules.root import AppConfig, resolve_paths
 from config_modules.security import (
     apply_cli_command_moderation_overrides,
@@ -33,6 +34,8 @@ _LOGGING_SYNC_KEYS = (
     "console_trace",
     "dump_storage",
     "save_logs",
+    "logging_format",
+    "log_level",
 )
 
 
@@ -144,7 +147,7 @@ def apply_cli_overrides(
     agentsmd_override: bool = False,
 ) -> None:
     if extra_overrides:
-        config_dict.update(extra_overrides)
+        config_dict.update(resolve_env_placeholders(extra_overrides))
     effective_write_guard_override = False if no_write_guard else write_guard_enabled
     effective_read_guard_override = False if no_read_guard else read_guard_enabled
     apply_cli_command_moderation_overrides(
@@ -188,6 +191,9 @@ def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
             project_raw = yaml.safe_load(file) or {}
         raw_config = deep_merge(raw_config, project_raw)
 
+    # Резолв ${ENV:VAR} после всех merge-слоёв, до валидации — креды модели/MCP из окружения.
+    raw_config = resolve_env_placeholders(raw_config)
+
     app_cfg = AppConfig.model_validate(raw_config)
     resolve_paths(app_cfg, config_dir)
 
@@ -207,6 +213,8 @@ def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
         "use_max_tokens_param": app_cfg.backend.use_max_tokens_param,
         "openai_strict_tools_schema": app_cfg.backend.openai_strict_tools_schema,
         "use_ssl": app_cfg.backend.use_ssl,
+        "cert_path": app_cfg.backend.cert_path,
+        "key_path": app_cfg.backend.key_path,
         "use_retry": app_cfg.backend.use_retry,
         "stream": app_cfg.backend.stream,  # legacy: канонический ключ — tui.stream
         "deprecated_keys_used": _deprecated_keys_used,
@@ -217,6 +225,7 @@ def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
             "enabled": app_cfg.security.command_moderation.enabled,
             "mode": app_cfg.security.command_moderation.mode,
             "allowed_command_examples": app_cfg.security.command_moderation.allowed_command_examples,
+            "denied_command_examples": app_cfg.security.command_moderation.denied_command_examples,
         },
         "write_guard": {
             "enabled": app_cfg.security.write_guard.enabled,
@@ -284,6 +293,9 @@ def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
         "console_trace": app_cfg.logging.console_trace,
         "dump_storage": app_cfg.logging.dump_storage,
         "save_logs": app_cfg.logging.save_logs,
+        "logging_format": app_cfg.logging.format,
+        "log_level": app_cfg.logging.log_level,
+        "redact_secrets": app_cfg.logging.redact_secrets.model_dump(),
         "limit_project_metadata": app_cfg.agent.limit_project_metadata,
         "tool_output_inline_max_chars": app_cfg.agent.tool_output_inline_max_chars,
         "stored_tool_outputs_max_entries": app_cfg.agent.stored_tool_outputs_max_entries,

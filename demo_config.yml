@@ -47,7 +47,18 @@ backend:
   #   HTTP-Referer: "https://your-app.example"
   #   X-OpenRouter-Title: "mini-cli-pub"
   #   X-Custom-Header: "value"
+  #
+  # env-интерполяция ${ENV:VAR}: работает в ЛЮБОМ строковом значении конфига,
+  # подставляется из окружения перед валидацией. Удобно, чтобы не держать секрет
+  # в файле. Отсутствующая переменная → пустая строка + warning (без значения).
+  #   Authorization: "Bearer ${ENV:GC_API_KEY}"     # затем: export GC_API_KEY=sk-...
+  #
+  # use_ssl: bool ИЛИ строка-путь к CA-bundle (self-signed / корп-CA):
+  #   true | false | "/path/ca-bundle.pem"
   use_ssl: false
+  # backend mTLS (клиентский сертификат): оба ключа → mTLS; ни одного → без клиент-серта.
+  # cert_path: "/path/client.crt"
+  # key_path:  "/path/client.key"
   use_retry: true
 
 # Вспомогательные LLM (summary, finish gate, intent scope) — без thinking.
@@ -122,6 +133,22 @@ logging:
   console_trace: true
   dump_storage: true
   save_logs: true
+  # Формат per-run логов:
+  #   text  — человекочитаемо (дефолт, историческое поведение);
+  #   jsonl — структурный поток событий {"event": ...}: agent_start,
+  #           backend_request/response, dialog_message, final_answer, run_usage,
+  #           summary_* и т.д. В jsonl-режиме человекочитаемый рендер в консоль
+  #           подавляется — на stdout идёт чистый event-поток (удобно для парсеров).
+  format: text
+  # Уровень per-run логгера (актуален для jsonl): debug | info | warning | error.
+  # На debug добавляются объёмные события backend_request/backend_response/agent_tools.
+  log_level: info
+  # Маскировка секретов (Bearer/JWT/sk-/PEM/AWS/...) перед записью в лог и stdout →
+  # ***REDACTED***. По умолчанию ВЫКЛ (поведение как раньше).
+  redact_secrets:
+    enabled: false
+    extra_keys: []       # доп. имена-подстроки чувствительных ключей (к встроенным)
+    extra_patterns: []   # доп. value-regex (к встроенным)
 
 paths:
   # Относительные пути резолвятся от каталога config.yml.
@@ -236,6 +263,13 @@ security:
     #   - "ls -la"
     #   - "git status"
     #   - "pytest tests/"
+    # Negative examples — операторный deny-list. Явное совпадение (или тривиальная
+    # вариация) → verdict "potentially_dangerous" + risk-флаг "operator_denied",
+    # даже если команда сама по себе выглядит безобидно. Работает при mode: ask|deny.
+    denied_command_examples: []
+    # denied_command_examples:
+    #   - "rm -rf /"
+    #   - "curl * | sh"
 
   write_guard:
     # Write-периметр. Применяется к:

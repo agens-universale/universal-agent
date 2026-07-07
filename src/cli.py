@@ -20,6 +20,7 @@ from message_policy.user_message_policy import (
 from run_context import RunContext, create_run_context
 from mcp_daemon_autostart import ensure_mcp_daemons, shutdown_mcp_daemons
 from utils.json_text import format_json_for_display
+from utils.logging_module import human_console_enabled
 
 
 def _ensure_project_gc_dir() -> None:
@@ -222,10 +223,15 @@ def main() -> int:
     finally:
         if auto_mcp:
             shutdown_mcp_daemons()
-    if config_dict.get("console_trace", True):
-        formatted = format_json_for_display(response)
+    formatted = format_json_for_display(response)
+    if human_console_enabled(config_dict):
         if formatted:
             print(formatted)
+    if formatted:
+        ctx.logger.info(
+            "final_answer",
+            extra={"event": "final_answer", "answer": formatted},
+        )
     return 0
 
 

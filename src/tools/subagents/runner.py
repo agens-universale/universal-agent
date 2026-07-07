@@ -268,6 +268,7 @@ class SubagentRunner:
             agent_md_path=parent.agent_md_path,
             shared=parent.shared,
             workspace_config=child_config,
+            logger=parent.logger,
         )
         child_state.tool_call_outputs_store.set_max_entries(
             get_stored_tool_outputs_max_entries(child_config)

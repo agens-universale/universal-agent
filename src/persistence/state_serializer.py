@@ -34,6 +34,7 @@ def load_state_from_snapshot(payload: Mapping[str, Any]) -> State:
     validate_state_snapshot_for_load(snapshot)
 
     state = State.__new__(State)
+    snapshot.setdefault("logger", None)
     state.__dict__ = snapshot
 
     shared_raw = state.__dict__.get("shared")
@@ -86,6 +87,10 @@ class StateSerializer:
     @staticmethod
     def serialize(state: State) -> Dict[str, Any]:
         raw = vars(state).copy()
+        # Per-run logger: transient runtime handle, not persisted state.
+        # State() defaults logger=None on reconstruction, which is correct —
+        # a fresh logger is threaded back in by the caller when it resumes.
+        raw.pop("logger", None)
 
         shared = raw.get("shared")
         if isinstance(shared, SharedStateData) or (
