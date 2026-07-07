@@ -89,3 +89,17 @@ def test_backend_cert_defaults_none_backward_compat():
         )
     assert post.call_args.kwargs["cert"] is None
     assert post.call_args.kwargs["verify"] is True
+
+
+def test_mcp_use_ssl_alias_unified():
+    """MCP verify_ssl принимает унифицированные ключи use-ssl/use_ssl (как backend),
+    а также verify-ssl (обратная совместимость); в config_dict дампится verify-ssl."""
+    from config_modules.mcp import McpServerConfig
+    for key in ("use-ssl", "use_ssl", "verify-ssl", "verify_ssl"):
+        c = McpServerConfig(**{"transport": "http", "url": "https://x", key: "/ca.pem"})
+        assert c.verify_ssl == "/ca.pem", key
+    assert McpServerConfig(transport="http", url="https://x").verify_ssl is True
+    dumped = McpServerConfig(
+        **{"transport": "http", "url": "https://x", "use-ssl": False}
+    ).model_dump(by_alias=True)
+    assert dumped["verify-ssl"] is False   # get_verify_ssl читает ключ verify-ssl
