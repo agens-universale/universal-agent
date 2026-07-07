@@ -277,6 +277,9 @@ def _request_backend_canonical_once(
             use_retry=use_retry,
             logger=getattr(ctx, "logger", None),
             on_delta=_on_delta,
+            request_label="main_agent",
+            runtime_notices_enabled=bool(getattr(ctx, "is_tui", False)),
+            notice_url=url,
         )
     if not isinstance(res, dict):
         raise ValueError("chat/completions backend response must be an object")

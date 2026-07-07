@@ -203,6 +203,9 @@ def request_chat_completion_text(
             cert=get_backend_client_cert(cfg),
             use_retry=cfg.get("use_retry", False),
             logger=getattr(ctx, "logger", None),
+            request_label=request_label,
+            runtime_notices_enabled=bool(getattr(ctx, "is_tui", False)),
+            notice_url=cfg.get("completions_url"),
         )
     logger = getattr(ctx, "logger", None)
     if logger is not None and full_log_backend:

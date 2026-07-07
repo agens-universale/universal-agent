@@ -1,4 +1,4 @@
-"""NoticesScreen — полный список стартовых уведомлений (read-only, F4)."""
+"""NoticesScreen — список уведомлений: стартовые + runtime (read-only, F4)."""
 from __future__ import annotations
 
 from typing import List
@@ -39,7 +39,7 @@ def _notice_text(n: Notice) -> Text:
 
 
 class NoticesScreen(Screen):
-    """Экран стартовых уведомлений — зеркало McpScreen (header/footer/Esc/scroll)."""
+    """Экран уведомлений — зеркало McpScreen (header/footer/Esc/scroll)."""
 
     def __init__(self, notices: List[Notice] | None = None) -> None:
         super().__init__()

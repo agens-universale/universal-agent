@@ -23,6 +23,9 @@ from textual.widgets import Static, TextArea
 
 from intent_log.record import ACTION_USER_ASK
 from intent_log.serialize import deserialize_list
+from runtime_notices import collect_runtime_notices
+from startup_notices import collect_startup_notices
+from tools.registry import all_builtin_tool_names
 from tui.commands import build_default_registry, closest_command
 from tui.models import TaskCursor
 from rich.text import Text
@@ -148,6 +151,7 @@ class TraceScreen(Screen):
         self._error_shown: bool = False
         self._mcp_status_row = None   # Optional[Static] — live MCP-loading индикатор
         self._mcp_status_done = False
+        self._last_mcp_card_line: Optional[str] = None
         # Phase 2: tool-row mutation state
         self._active_calls: dict[str, ToolCallRow] = {}
         self._reasoning_clock = ReasoningClock()
@@ -1583,7 +1587,7 @@ class TraceScreen(Screen):
         mcp_status осел → карточка и /notices согласованы (иначе счётчик уведомлений
         недосчитывал бы MCP-фейлы)."""
         try:
-            row.update(self._compose_card_lines(mcp_line))
+            self._refresh_notices_card(mcp_line=mcp_line)
         except Exception:
             pass
 
@@ -1895,14 +1899,16 @@ class TraceScreen(Screen):
 
     def _collect_startup_notices(self):
         """Собрать стартовые уведомления через канал startup_notices."""
-        from startup_notices import collect_startup_notices
-        from tools.registry import all_builtin_tool_names
         cfg = getattr(self.app, "_config", None) or {}
         mcp_status = getattr(self.app, "_mcp_status", None)
         return collect_startup_notices(
             cfg, all_builtin_tool_names(cfg), mcp_status, is_tui=True,
             deprecated_keys_used=cfg.get("deprecated_keys_used"),
         )
+
+    def _collect_notices(self):
+        """Стартовые + runtime (ошибки LLM в текущей сессии, только в памяти)."""
+        return self._collect_startup_notices() + collect_runtime_notices()
 
     def _has_mcp_servers(self) -> bool:
         """Заданы ли MCP-серверы в конфиге. При них mcp_status осядет только на
@@ -1920,7 +1926,7 @@ class TraceScreen(Screen):
             ✓ готов к работе                         (всегда)
 
         Детали уведомлений — на экране /notices (F4); трейс держим чистым."""
-        notices = self._collect_startup_notices()
+        notices = self._collect_notices()
         lines = []
         if mcp_line:
             lines.append(mcp_line)
@@ -1943,8 +1949,15 @@ class TraceScreen(Screen):
         (см. _settle_mcp_row), где mcp_status уже осел."""
         if self._has_mcp_servers():
             return
-        if self._mcp_status_row is not None:
-            self._mcp_status_row.update(self._compose_card_lines(None))
+        self._refresh_notices_card(mcp_line=None)
+
+    def _refresh_notices_card(self, *, mcp_line: "Optional[str]" = None) -> None:
+        """Обновить правую колонку карточки: MCP + счётчик уведомлений + готовность."""
+        if self._mcp_status_row is None:
+            return
+        if mcp_line is not None:
+            self._last_mcp_card_line = mcp_line
+        self._mcp_status_row.update(self._compose_card_lines(self._last_mcp_card_line))
 
     # Шапка трейса: переживает пересборку (#brand-block — бренд,
     # MCP-статус живёт внутри карточки как #brand-mcp).
