@@ -36,7 +36,7 @@ async def test_runtime_notice_appears_in_card(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_runtime_notice_footer_on_sessions_and_persists_after_view(tmp_path):
+async def test_runtime_notice_footer_on_sessions_disappears_after_view(tmp_path):
     pytest.importorskip("textual")
     from tui.app import TuiApp
     from tui.screens.notices import NoticesScreen
@@ -59,6 +59,11 @@ async def test_runtime_notice_footer_on_sessions_and_persists_after_view(tmp_pat
         await pilot.pause()
         assert isinstance(pilot.app.screen, SessionsScreen)
         footer_right = str(pilot.app.screen.query_one("#sessions-footer-right").render())
-        assert "⚠ 1" in footer_right
+        assert "⚠" not in footer_right
         assert len(pilot.app.collect_notices()) == 1
+
+        push_runtime_notice(Notice("warning", "w2", "тест2"))
+        pilot.app.refresh_notices_indicators()
+        footer_right = str(pilot.app.screen.query_one("#sessions-footer-right").render())
+        assert "⚠ 1" in footer_right
 

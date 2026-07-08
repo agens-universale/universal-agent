@@ -8,7 +8,11 @@ from textual.app import App
 from textual.binding import Binding
 from textual.screen import Screen
 
-from runtime_notices import collect_runtime_notices, register_runtime_notices_listener
+from runtime_notices import (
+    collect_runtime_notices,
+    collect_unread_runtime_notices,
+    register_runtime_notices_listener,
+)
 from startup_notices import Notice, collect_startup_notices
 from tui import branding, palette
 from tui.screens.main import TraceScreen
@@ -179,6 +183,18 @@ class TuiApp(App):
             deprecated_keys_used=cfg.get("deprecated_keys_used"),
         )
         return startup + collect_runtime_notices()
+
+    def collect_unread_notices(self) -> List[Notice]:
+        """Стартовые + unread runtime-уведомления (для бейджей в футере/карточке)."""
+        cfg = self._config or {}
+        startup = collect_startup_notices(
+            cfg,
+            all_builtin_tool_names(cfg),
+            self._mcp_status,
+            is_tui=True,
+            deprecated_keys_used=cfg.get("deprecated_keys_used"),
+        )
+        return startup + collect_unread_runtime_notices()
 
     def _main_screen(self):
         """Базовый (главный) экран — низ стека; None если это не TraceScreen."""

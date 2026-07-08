@@ -17,6 +17,10 @@ from utils.chat_completions_stream import BackendStreamError
 _MAX_NOTICES = 50
 _lock = threading.Lock()
 _notices: List[Notice] = []
+# Индекс в `_notices`, с которого начинаются непрочитанные runtime-уведомления.
+# После просмотра `/notices` индекс продвигается в конец списка, делая
+# непрочитанные пустыми (бейджи гаснут).
+_unread_from_index: int = 0
 _listeners: List[Callable[[], None]] = []
 
 _REQUEST_LABEL_RU = {
@@ -51,6 +55,8 @@ def clear_runtime_notices(*, listeners: bool = False) -> None:
     """Сброс (тесты / новая сессия). listeners=True — снять подписки TUI."""
     with _lock:
         _notices.clear()
+        global _unread_from_index
+        _unread_from_index = 0
         if listeners:
             _listeners.clear()
 
@@ -60,6 +66,39 @@ def collect_runtime_notices() -> List[Notice]:
         return list(_notices)
 
 
+def collect_unread_runtime_notices() -> List[Notice]:
+    with _lock:
+        if _unread_from_index <= 0:
+            return list(_notices)
+        if _unread_from_index >= len(_notices):
+            return []
+        return list(_notices[_unread_from_index:])
+
+
+def mark_runtime_notices_seen() -> None:
+    """Пометить текущие runtime-уведомления как просмотренные.
+
+    Это гасит бейджи (счётчики) в footer-left/footer-right и карточке TUI,
+    но сами уведомления остаются доступными на экране `/notices`.
+    """
+    global _unread_from_index
+    listeners: List[Callable[[], None]] = []
+    changed = False
+    with _lock:
+        unread_now = len(_notices) - _unread_from_index
+        if unread_now <= 0:
+            return
+        _unread_from_index = len(_notices)
+        changed = True
+        listeners = list(_listeners)
+    if changed:
+        for cb in listeners:
+            try:
+                cb()
+            except Exception:
+                pass
+
+
 def push_runtime_notice(notice: Notice) -> None:
     with _lock:
         for existing in _notices:
@@ -67,7 +106,11 @@ def push_runtime_notice(notice: Notice) -> None:
                 return
         _notices.append(notice)
         if len(_notices) > _MAX_NOTICES:
-            del _notices[: len(_notices) - _MAX_NOTICES]
+            removed = len(_notices) - _MAX_NOTICES
+            del _notices[:removed]
+            # Сдвигаем точку “последнего просмотра”, т.к. начало списка обрезали.
+            global _unread_from_index
+            _unread_from_index = max(0, _unread_from_index - removed)
         listeners = list(_listeners)
     for cb in listeners:
         try:

@@ -23,7 +23,7 @@ from textual.widgets import Static, TextArea
 
 from intent_log.record import ACTION_USER_ASK
 from intent_log.serialize import deserialize_list
-from runtime_notices import collect_runtime_notices
+from runtime_notices import collect_unread_runtime_notices
 from startup_notices import collect_startup_notices
 from tools.registry import all_builtin_tool_names
 from tui.commands import build_default_registry, closest_command
@@ -1928,11 +1928,15 @@ class TraceScreen(Screen):
         )
 
     def _collect_notices(self):
-        """Стартовые + runtime (ошибки LLM в текущей сессии, только в памяти)."""
-        collect = getattr(self.app, "collect_notices", None)
+        """Стартовые + unread runtime (для бейджей в футере/карточке)."""
+        collect = getattr(self.app, "collect_unread_notices", None)
         if callable(collect):
             return collect()
-        return self._collect_startup_notices() + collect_runtime_notices()
+        # Fallback (напр. если app даёт только collect_notices).
+        collect_all = getattr(self.app, "collect_notices", None)
+        if callable(collect_all):
+            return collect_all()
+        return self._collect_startup_notices() + collect_unread_runtime_notices()
 
     def _has_mcp_servers(self) -> bool:
         """Заданы ли MCP-серверы в конфиге. При них mcp_status осядет только на

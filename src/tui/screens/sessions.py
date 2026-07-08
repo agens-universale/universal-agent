@@ -84,8 +84,10 @@ class SessionsScreen(Screen):
         self.query_one("#sessions-filter", Input).focus()
 
     def _refresh_notices_footer(self) -> None:
-        """Счётчик уведомлений в footer-right (виден, пока юзер в picker сессий)."""
-        collect = getattr(self.app, "collect_notices", None)
+        """Счётчик уведомлений в footer-right (только unread runtime)."""
+        collect_unread = getattr(self.app, "collect_unread_notices", None)
+        collect_all = getattr(self.app, "collect_notices", None)
+        collect = collect_unread if callable(collect_unread) else collect_all
         badge = format_notices_badge(collect()) if callable(collect) else ""
         try:
             self.query_one("#sessions-footer-right", Static).update(badge)

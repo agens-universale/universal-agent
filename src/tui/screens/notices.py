@@ -11,6 +11,7 @@ from textual.screen import Screen
 from textual.widgets import Static
 
 from startup_notices import Notice
+from runtime_notices import mark_runtime_notices_seen
 from tui import palette
 
 _FOOTER = "/config · /mcp  [Esc] назад"
@@ -70,6 +71,8 @@ class NoticesScreen(Screen):
             yield Static(_FOOTER, id="footer", markup=False)
 
     def on_mount(self) -> None:
+        # После просмотра гасим бейджи "новых" runtime-уведомлений.
+        mark_runtime_notices_seen()
         self._render_notices()
 
     def _render_notices(self) -> None:
