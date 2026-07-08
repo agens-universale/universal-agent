@@ -27,6 +27,31 @@ _VALUE = INK
 _SEP = "  ·  "
 
 
+def format_nonzero_cost(meta: Any, pricing: Any, model: str | None) -> Optional[str]:
+    """Стоимость сессии («35.1 ₽») или None, если тарифа нет / 0 / multi-currency.
+
+    Для списка /sessions: показываем только ненулевую цену (после округления
+    format_money до 1 знака). Источник — персистентный ``meta.token_usage``.
+    """
+    account = UsageAccount.from_meta(meta)
+    if account.is_empty():
+        return None
+    report: CostReport = compute_cost(account, pricing, model)
+    if not report.has_pricing or report.multi_currency or not report.by_currency:
+        return None
+    currency, amount = next(iter(report.by_currency.items()))
+    money = format_money(amount, currency)
+    # format_money half-up до 0.1 — «0.0 ₽» не считаем ненулевой.
+    num_str = money.rsplit(" ", 1)[0] if currency and money.endswith(currency) else money
+    try:
+        if float(num_str) <= 0:
+            return None
+    except ValueError:
+        if amount <= 0:
+            return None
+    return money
+
+
 def _segment(label: str, meta: Any, pricing: Any, model: str | None) -> Optional[tuple[str, str]]:
     """(label, «<tok>» либо «<tok>/<cost>») или None, если в meta нет вызовов."""
     account = UsageAccount.from_meta(meta)

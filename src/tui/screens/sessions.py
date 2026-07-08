@@ -22,6 +22,7 @@ from tui.services.notices_ui import format_notices_badge
 from tui.services.relative_time import format_relative_local
 from tui.services.skill_view import truncate_path_left
 from tui.services.stores.file_store import FileTaskStore
+from tui.services.usage_meter import format_nonzero_cost
 
 _PAGE_SIZE = 25
 _PATH_MAXLEN = 48
@@ -209,6 +210,14 @@ class SessionsScreen(Screen):
         t.append(title, style=BRIGHT if selected else INK)
         return t
 
+    def _session_cost_label(self, task) -> Optional[str]:
+        """Ненулевая стоимость сессии из meta.token_usage, или None."""
+        usage = getattr(task, "token_usage", None)
+        if not usage:
+            return None
+        cfg = getattr(self.app, "_config", None) or {}
+        return format_nonzero_cost(usage, cfg.get("pricing"), cfg.get("model"))
+
     def _meta_line(self, task) -> Text:
         t = Text(no_wrap=True, overflow="ellipsis")
         t.append(format_relative_local(task.updated_at), style=DIM)
@@ -218,6 +227,10 @@ class SessionsScreen(Screen):
             t.append(branch, style=CODE)
         t.append(" · ", style=MUTED)
         t.append(f"{task.messages_count} сообщ.", style=DIM)
+        cost = self._session_cost_label(task)
+        if cost:
+            t.append(" · ", style=MUTED)
+            t.append(cost, style=DIM)
         status = self._task_display_status(task)
         if status:   # None — исход не записан → бейдж не показываем (без пустых «[]»)
             t.append(" · ", style=MUTED)

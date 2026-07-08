@@ -40,6 +40,7 @@ class TaskSummary:
     unread_count: int
     last_error: Optional[str]
     tui_meta: Optional[dict] = None
+    token_usage: Optional[dict] = None  # meta.token_usage (UsageAccount.to_meta)
 
 
 @dataclass

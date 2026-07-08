@@ -70,6 +70,22 @@ def test_file_store_list_tasks_reads_core_meta(tmp_path):
     assert t.skill_id is None
 
 
+def test_file_store_list_tasks_reads_token_usage(tmp_path):
+    """list_tasks() прокидывает meta.token_usage в TaskSummary."""
+    threads_dir = str(tmp_path)
+    usage = {"by_category": {"main": {"input": 100, "output": 20, "cached": 0,
+                                      "calls": 1, "missing_usage_calls": 0}}}
+    save_thread_meta(threads_dir, _SYSTEM, _TID, {
+        "thread_id": _TID,
+        "messages_count": 1,
+        "token_usage": usage,
+    })
+    store = FileTaskStore(threads_dir=threads_dir, system=_SYSTEM)
+    tasks = store.list_tasks()
+    assert len(tasks) == 1
+    assert tasks[0].token_usage == usage
+
+
 # ---------------------------------------------------------------------------
 # 2. read_all_events — envelope полей (type, seq, payload)
 # ---------------------------------------------------------------------------

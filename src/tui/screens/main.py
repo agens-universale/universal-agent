@@ -1764,8 +1764,20 @@ class TraceScreen(Screen):
         # индикатора. Терминальные исходы персистентны до следующего user-send —
         # не гасим их здесь (/_stop, Esc в ask_human).
         if self._active_task_id is None:
-            if self._thinking is None or not is_terminal_indicator_state(self._thinking._state):
-                self._destroy_thinking_indicator()
+            ask_human_active = (
+                getattr(self.app, "tui_state", None) is not None
+                and self.app.tui_state.ask_human_state is not None
+            )
+            # При живом ask_human индикатор может быть смонтирован до появления
+            # active_task_id (или после unmount task-switch), поэтому в этой
+            # ветке не уничтожаем его, а даём _stop_for_ask_human перевести
+            # в terminal-state (cancelled).
+            if not ask_human_active:
+                if (
+                    self._thinking is None
+                    or not is_terminal_indicator_state(self._thinking._state)
+                ):
+                    self._destroy_thinking_indicator()
             self._clear_stream_block()
             self._refresh_footer()
             self._update_terminal_title()
@@ -2706,6 +2718,11 @@ class TraceScreen(Screen):
         runner = getattr(self.app, "active_runner", None)
         is_running = runner is not None and runner.is_running()
         if not is_running:
+            # В прежнем run executor мог оставить in-memory usage-метрики
+            # (футер берёт их через runner.usage_snapshot()).
+            # Для новой сессии нужен clean executor — иначе футер показывает
+            # токены/стоимость прошлой сессии.
+            self._stop_and_replace_runner()
             self._switch_to_empty_state()
             return
         from tui.screens.confirm import ConfirmScreen

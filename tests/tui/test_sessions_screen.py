@@ -9,7 +9,7 @@ from tui.services.stores.file_store import FileTaskStore
 
 
 def _seed(threads_dir, tid, prompt, *, branch=None, title=None,
-          updated_at="2026-05-30T10:00:00+00:00", msgs=1):
+          updated_at="2026-05-30T10:00:00+00:00", msgs=1, token_usage=None):
     """Сессия = data-файл (реальный writer) + meta с messages_count/updated_at
     (как пишет thread_store), плюс tui.branch/title при необходимости."""
     append_new_thread_messages(str(threads_dir), "cli", tid,
@@ -23,6 +23,8 @@ def _seed(threads_dir, tid, prompt, *, branch=None, title=None,
         tui["title"] = title
     if tui:
         meta["tui"] = tui
+    if token_usage is not None:
+        meta["token_usage"] = token_usage
     (Path(threads_dir) / f"meta_cli_{tid}.json").write_text(
         json.dumps(meta, ensure_ascii=False), encoding="utf-8")
 
@@ -93,6 +95,50 @@ async def test_card_shows_title_branch_msgs(tmp_path):
         assert "feat/x" in text
         assert "1 сообщ." in text
         assert "aaaaaaaa" in text  # id8
+
+
+@pytest.mark.asyncio
+async def test_card_shows_nonzero_session_cost(tmp_path):
+    """Ненулевая стоимость из meta.token_usage — в meta-строке карточки."""
+    pytest.importorskip("textual")
+    from usage.account import CATEGORY_MAIN, UsageAccount
+    acc = UsageAccount()
+    acc.add(CATEGORY_MAIN, 2_000_000, 0)  # при input=1.0 → 2.0 ₽
+    _seed(tmp_path, "cccccccc", "с ценой", token_usage=acc.to_meta())
+    from tui.screens.sessions import SessionsScreen
+    from tui.app import TuiApp
+    pricing = {
+        "enabled": True, "input": 1.0, "output": 2.0,
+        "currency": "₽", "per_tokens": 1_000_000,
+    }
+    app = TuiApp(threads_dir=str(tmp_path), system="cli",
+                 config={"pricing": pricing, "model": "m"})
+    async with app.run_test() as pilot:
+        await pilot.app.push_screen(SessionsScreen(threads_dir=str(tmp_path), system="cli"))
+        await pilot.pause()
+        text = _rows_text(pilot)
+        assert "2.0 ₽" in text
+        assert "1 сообщ." in text
+
+
+@pytest.mark.asyncio
+async def test_card_hides_zero_or_disabled_cost(tmp_path):
+    """Без тарифа / пустой usage — стоимость в карточке не показываем."""
+    pytest.importorskip("textual")
+    from usage.account import CATEGORY_MAIN, UsageAccount
+    acc = UsageAccount()
+    acc.add(CATEGORY_MAIN, 2_000_000, 0)
+    _seed(tmp_path, "dddddddd", "без цены", token_usage=acc.to_meta())
+    from tui.screens.sessions import SessionsScreen
+    from tui.app import TuiApp
+    app = TuiApp(threads_dir=str(tmp_path), system="cli",
+                 config={"pricing": {"enabled": False}, "model": "m"})
+    async with app.run_test() as pilot:
+        await pilot.app.push_screen(SessionsScreen(threads_dir=str(tmp_path), system="cli"))
+        await pilot.pause()
+        text = _rows_text(pilot)
+        assert "₽" not in text
+        assert "$" not in text
 
 
 @pytest.mark.asyncio

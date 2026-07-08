@@ -56,6 +56,9 @@ class FileTaskStore:
             skill_id = tui_meta.get("skill_id")
             unread = int(meta.get("unread_count", 0))
             last_err = meta.get("last_error")
+            token_usage = meta.get("token_usage")
+            if not isinstance(token_usage, dict):
+                token_usage = None
             items.append(TaskSummary(
                 thread_id=tid,
                 status=status,
@@ -65,6 +68,7 @@ class FileTaskStore:
                 unread_count=unread,
                 last_error=last_err,
                 tui_meta=tui_meta,
+                token_usage=token_usage,
             ))
         items.sort(key=lambda s: s.updated_at, reverse=True)
         return items[offset:offset + limit]

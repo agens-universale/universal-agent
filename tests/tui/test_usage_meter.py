@@ -7,7 +7,7 @@
 """
 from usage.account import CATEGORY_MAIN, UsageAccount
 
-from tui.services.usage_meter import render_usage_meter
+from tui.services.usage_meter import format_nonzero_cost, render_usage_meter
 
 _PRICING_ON = {
     "enabled": True,
@@ -62,3 +62,14 @@ def test_session_only_when_request_meta_empty():
     m = render_usage_meter(session, UsageAccount().to_meta(), _PRICING_ON, _MODEL)
     assert m is not None
     assert m.plain == "сессия 2.0M/2.0₽"
+
+
+def test_format_nonzero_cost_shows_money():
+    assert format_nonzero_cost(_meta(2_000_000, 0), _PRICING_ON, _MODEL) == "2.0 ₽"
+
+
+def test_format_nonzero_cost_hidden_when_zero_or_no_pricing():
+    assert format_nonzero_cost(UsageAccount().to_meta(), _PRICING_ON, _MODEL) is None
+    assert format_nonzero_cost(_meta(2_000_000, 0), _PRICING_OFF, _MODEL) is None
+    # крошечный usage → после half-up до 0.1 всё ещё 0.0
+    assert format_nonzero_cost(_meta(1, 0), _PRICING_ON, _MODEL) is None
