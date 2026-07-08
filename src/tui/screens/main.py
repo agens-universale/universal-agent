@@ -3243,28 +3243,73 @@ class TraceScreen(Screen):
 
     def _cmd_export(self, arg: str) -> None:
         fmt = (arg or "").strip() or "txt"
-        if fmt not in ("txt", "json"):
+        if fmt not in ("txt", "json", "log-txt", "log-json"):
             self._mount_trace_row(
                 prefix="[!] ", content=f"/export: формат {fmt!r} не поддерживается",
                 kind_class="line-error",
             )
             return
         tid = self._active_task_id
-        if not tid or self._store is None:
+        if not tid:
             self._mount_trace_row(
                 prefix="[!] ", content="/export: нет активной задачи",
                 kind_class="line-error",
+            )
+            return
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
+        if fmt == "log-txt":
+            self._export_log_txt(tid, stamp)
+            return
+        if self._store is None:
+            self._mount_trace_row(
+                prefix="[!] ", content="/export: нет активной задачи",
+                kind_class="line-error",
+            )
+            return
+        if fmt == "log-json":
+            raw = self._store.read_raw_thread_jsonl(tid)
+            path = Path.cwd() / f"export-{tid}-{stamp}-log.jsonl"
+            path.write_text(raw, encoding="utf-8")
+            self._mount_trace_row(
+                prefix="[exported] ", content=str(path), kind_class="line-meta",
             )
             return
         segments = self._store.read_segments(tid)
         meta = self._store.get_task_meta(tid)
         text = export_thread(segments, fmt=fmt, meta=meta,
                              thread_id=tid, system=self.app._system)
-        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
         path = Path.cwd() / f"export-{tid}-{stamp}.{fmt}"
         path.write_text(text, encoding="utf-8")
         self._mount_trace_row(
             prefix="[exported] ", content=str(path), kind_class="line-meta",
+        )
+
+    def _export_log_txt(self, tid: str, stamp: str) -> None:
+        log_path = getattr(self.app, "_session_log_path", None)
+        if not log_path:
+            self._mount_trace_row(
+                prefix="[!] ",
+                content="/export: лог сессии ещё не создан — сначала сделайте запрос",
+                kind_class="line-error",
+            )
+            return
+        if str(log_path).startswith("Null"):
+            self._mount_trace_row(
+                prefix="[!] ", content="/export: логи отключены (save_logs: false)",
+                kind_class="line-error",
+            )
+            return
+        src = Path(log_path)
+        if not src.exists():
+            self._mount_trace_row(
+                prefix="[!] ", content=f"/export: файл лога не найден: {src}",
+                kind_class="line-error",
+            )
+            return
+        dst = Path.cwd() / f"export-{tid}-{stamp}-{src.name}"
+        dst.write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
+        self._mount_trace_row(
+            prefix="[exported] ", content=str(dst), kind_class="line-meta",
         )
 
     def _cmd_status(self, arg: str) -> None:

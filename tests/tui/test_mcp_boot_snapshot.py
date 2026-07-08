@@ -39,6 +39,7 @@ def test_build_real_executor_stores_mcp_snapshot(tmp_path, monkeypatch):
         tools_data = {"mcp_office_read": {"description": "read"}}
         mcp_status = {"office": {"status": "connected", "reason": None,
                                  "tool_count": 1, "elapsed_ms": 1}}
+        logging_path = "/tmp/agent_main_test.log"
 
     class _Ex:
         def __init__(self, ctx): pass
