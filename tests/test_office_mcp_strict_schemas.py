@@ -92,7 +92,8 @@ def test_all_office_mcp_tools_normalize_for_openai_strict() -> None:
                 "name": f"mcp_office_{name}",
                 "description": tool.description or "office tool",
                 "parameters": params,
-            }
+            },
+            openai_strict=True,
         )
         params = normalized["parameters"]
         errors.extend(_strict_schema_errors(params, (name,)))

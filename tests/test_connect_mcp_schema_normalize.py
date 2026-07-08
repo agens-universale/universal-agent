@@ -226,7 +226,7 @@ def test_nested_object_required_includes_all_properties_for_openai_strict() -> N
             "required": ["path", "workbook"],
         },
     }
-    normalized = normalize_tool_spec_for_agent(tool_spec)
+    normalized = normalize_tool_spec_for_agent(tool_spec, openai_strict=True)
     cell_items = (
         normalized["parameters"]["properties"]["workbook"]["properties"]["sheets"]["items"]
         ["properties"]["cell_styles"]["items"]
@@ -363,3 +363,37 @@ def test_anyof_array_object_items_get_additional_properties_false() -> None:
     normalized = normalize_tool_spec_for_agent(tool_spec)
     items = normalized["parameters"]["properties"]["sort"]["anyOf"][0]["items"]
     assert items["additionalProperties"] is False
+
+
+def test_non_strict_preserves_server_required_default() -> None:
+    """Default (openai_strict=False) keeps the MCP server's own `required`.
+
+    Regression: gc-cli used to force EVERY MCP-tool property into `required`
+    (OpenAI strict mode) unconditionally, ignoring backend.openai_strict_tools_schema.
+    Non-strict models (e.g. deepseek) then omitted "optional" params like
+    base/page/per_page -> WrongFunctionArgumentsException. With the flag off,
+    optional params must stay optional.
+    """
+    tool_spec = {
+        "type": "function",
+        "name": "mcp_gitverse_list_pull_requests",
+        "description": "List PRs.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "owner": {"type": "string"},
+                "repo": {"type": "string"},
+                "base": {"type": "string", "description": "Filter (optional)"},
+                "page": {"type": "integer", "default": 1},
+                "per_page": {"type": "integer", "default": 30},
+            },
+            "required": ["owner", "repo"],
+        },
+    }
+    ns = normalize_tool_spec_for_agent(tool_spec)  # default: openai_strict=False
+    assert ns["parameters"]["required"] == ["owner", "repo"]
+    assert ns.get("strict") is False
+
+    s = normalize_tool_spec_for_agent(tool_spec, openai_strict=True)
+    assert set(s["parameters"]["required"]) == {"owner", "repo", "base", "page", "per_page"}
+    assert s.get("strict") is True

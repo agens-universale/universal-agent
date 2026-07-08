@@ -156,10 +156,17 @@ def _bare_schema_ref(schema: dict[str, Any]) -> dict[str, str] | None:
     return None
 
 
-def _normalize_schema_recursive(schema: Any, param_name: str = "") -> Any:
+def _normalize_schema_recursive(
+    schema: Any, param_name: str = "", *, openai_strict: bool = False
+) -> Any:
     """
     Рекурсивная нормализация фрагмента JSON Schema.
     Поддерживает объекты, массивы и простые типы.
+
+    openai_strict: применять OpenAI strict-mode (все поля -> required). Управляется
+    флагом backend.openai_strict_tools_schema; при False сохраняем исходный `required`
+    MCP-сервера (иначе не-strict модели вроде deepseek опускают "опциональные"
+    поля -> WrongFunctionArgumentsException).
     """
     if not isinstance(schema, dict):
         return {
@@ -175,7 +182,9 @@ def _normalize_schema_recursive(schema: Any, param_name: str = "") -> Any:
         branches = schema.get(comb_key)
         if isinstance(branches, list):
             schema[comb_key] = [
-                _normalize_schema_recursive(branch, param_name=param_name)
+                _normalize_schema_recursive(
+                    branch, param_name=param_name, openai_strict=openai_strict
+                )
                 if isinstance(branch, dict)
                 else branch
                 for branch in branches
@@ -212,7 +221,9 @@ def _normalize_schema_recursive(schema: Any, param_name: str = "") -> Any:
             schema["required"] = required
 
         for name, subschema in list(props.items()):
-            normalized_subschema = _normalize_schema_recursive(subschema, param_name=name)
+            normalized_subschema = _normalize_schema_recursive(
+                subschema, param_name=name, openai_strict=openai_strict
+            )
             if not isinstance(normalized_subschema, dict):
                 normalized_subschema = {
                     "type": "string",
@@ -224,12 +235,15 @@ def _normalize_schema_recursive(schema: Any, param_name: str = "") -> Any:
         if schema.get("additionalProperties") is not False:
             schema["additionalProperties"] = False
 
-        apply_openai_strict_object(schema)
+        if openai_strict:
+            apply_openai_strict_object(schema)
 
     elif schema_type == "array":
         items = schema.get("items")
         if items is not None:
-            schema["items"] = _normalize_schema_recursive(items, param_name=f"{param_name}_item")
+            schema["items"] = _normalize_schema_recursive(
+                items, param_name=f"{param_name}_item", openai_strict=openai_strict
+            )
 
     else:
         _ensure_param_description(schema, param_name or "value")
@@ -237,7 +251,9 @@ def _normalize_schema_recursive(schema: Any, param_name: str = "") -> Any:
     return schema
 
 
-def normalize_tool_spec_for_agent(tool_spec: Dict[str, Any]) -> Dict[str, Any]:
+def normalize_tool_spec_for_agent(
+    tool_spec: Dict[str, Any], *, openai_strict: bool = False
+) -> Dict[str, Any]:
     """
     Привести произвольную сигнатуру MCP-инструмента к стандарту агента.
     Гарантируются:
@@ -281,7 +297,9 @@ def normalize_tool_spec_for_agent(tool_spec: Dict[str, Any]) -> Dict[str, Any]:
         parameters = {
             "type": "object",
             "properties": {
-                "value": _normalize_schema_recursive(parameters, param_name="value"),
+                "value": _normalize_schema_recursive(
+                    parameters, param_name="value", openai_strict=openai_strict
+                ),
             },
             "required": ["value"],
             "additionalProperties": False,
@@ -300,7 +318,9 @@ def normalize_tool_spec_for_agent(tool_spec: Dict[str, Any]) -> Dict[str, Any]:
         parameters["required"] = required
 
     for name, param_schema in list(props.items()):
-        normalized = _normalize_schema_recursive(param_schema, param_name=name)
+        normalized = _normalize_schema_recursive(
+            param_schema, param_name=name, openai_strict=openai_strict
+        )
         if not isinstance(normalized, dict):
             normalized = {
                 "type": "string",
@@ -312,16 +332,19 @@ def normalize_tool_spec_for_agent(tool_spec: Dict[str, Any]) -> Dict[str, Any]:
     if "additionalProperties" not in parameters:
         parameters["additionalProperties"] = False
 
-    apply_openai_strict_object(parameters)
+    if openai_strict:
+        apply_openai_strict_object(parameters)
 
     defs = parameters.get("$defs")
     if isinstance(defs, dict):
         for def_name, def_schema in list(defs.items()):
             if isinstance(def_schema, dict):
-                defs[def_name] = _normalize_schema_recursive(def_schema, param_name=def_name)
+                defs[def_name] = _normalize_schema_recursive(
+                    def_schema, param_name=def_name, openai_strict=openai_strict
+                )
 
     spec["parameters"] = parameters
-    spec.setdefault("strict", True)
+    spec.setdefault("strict", openai_strict)
 
     return spec
 
@@ -362,6 +385,7 @@ def get_mcp_tools_data_for_config(
     )
 
     default_use_retry = bool(config_dict.get("use_retry", False))
+    openai_strict = bool(config_dict.get("openai_strict_tools_schema", False))
 
     def make_fabric(full_tool_name: str):
         def fabric(**_kwargs: Any) -> MCPToolWrapper:
@@ -385,7 +409,9 @@ def get_mcp_tools_data_for_config(
         if not isinstance(tool_entry, dict):
             continue
 
-        normalized_spec = normalize_tool_spec_for_agent(tool_entry)
+        normalized_spec = normalize_tool_spec_for_agent(
+            tool_entry, openai_strict=openai_strict
+        )
 
         result[full_name] = {
             "tool_fabric": make_fabric(full_name),
