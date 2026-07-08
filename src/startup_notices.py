@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, NamedTuple, Optional, Set, Tuple
 
+from config_modules.pricing import resolve_model_tariff
+
 
 class Notice(NamedTuple):
     level: str    # "warning" | "info"
@@ -62,6 +64,23 @@ def _deprecated(deprecated_keys_used: Optional[List[str]]) -> List[Notice]:
     return out
 
 
+def _pricing_zero_rates(config_dict: Dict[str, Any]) -> List[Notice]:
+    pricing = config_dict.get("pricing")
+    if not isinstance(pricing, dict) or not pricing.get("enabled"):
+        return []
+    tariff = resolve_model_tariff(pricing, config_dict.get("model"))
+    if tariff is None:
+        return []
+    if tariff.input != 0 or tariff.output != 0:
+        return []
+    return [Notice(
+        "info", "pricing_zero_rates",
+        "pricing: тариф включён, но ставки input и output равны 0 — "
+        "стоимость в футере и отчётах будет 0.0. Задайте реальные цены в секции pricing в конфиге агента (см. /config).",
+        highlights=("pricing", "input", "output"),
+    )]
+
+
 def _agentsmd(config_dict: Dict[str, Any], *, is_tui: bool) -> List[Notice]:
     override = bool(config_dict.get("agentsmd_override"))
     if not override:
@@ -96,6 +115,7 @@ def collect_startup_notices(
         _stop_tools_unknown(config_dict, builtin_tool_names)
         + _mcp_failed(mcp_status)
         + _agentsmd(config_dict, is_tui=is_tui)
+        + _pricing_zero_rates(config_dict)
         + _deprecated(deprecated_keys_used)
     ):
         (warns if n.level == "warning" else infos).append(n)

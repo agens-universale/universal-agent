@@ -44,9 +44,12 @@ class State:
         thread_id: Optional[str] = None,
         shared: Optional["SharedStateData"] = None,
         workspace_config: Optional[Dict[str, Any]] = None,
+        instructions_overwrite: bool = False,
+        logger: Optional[Any] = None,
         is_tui: bool = False,
         agentsmd_override: bool = False,
     ):
+        self.logger = logger
         self.parent_state_id = parent_state_id
         self.x_target = None
         self.state_id = str(uuid4())
@@ -123,6 +126,8 @@ class State:
             agent_md_path=agent_md_path,
             is_tui=bool(getattr(self, "is_tui", False)),
             agentsmd_override=bool(getattr(self, "agentsmd_override", False)),
+            logger=self.logger,
+            verbose=self.verbose,
         )
         self.instruction_warnings = list(getattr(loaded, "warnings", []) or [])
         if loaded.text:

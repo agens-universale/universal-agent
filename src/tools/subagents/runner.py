@@ -82,7 +82,11 @@ class SubagentRunner:
             with usage_scope(self._orchestrator_state.usage, USAGE_CATEGORY_SUBAGENT):
                 instance = asyncio.run(
                     subagent_cls.create_instance(
-                        task=task, model=model, config_dict=self._config, **extra,
+                        task=task,
+                        model=model,
+                        config_dict=self._config,
+                        runtime_notices_enabled=bool(getattr(self._ctx, "is_tui", False)),
+                        **extra,
                     )
                 )
         except Exception as exc:
@@ -268,6 +272,7 @@ class SubagentRunner:
             agent_md_path=parent.agent_md_path,
             shared=parent.shared,
             workspace_config=child_config,
+            logger=parent.logger,
         )
         child_state.tool_call_outputs_store.set_max_entries(
             get_stored_tool_outputs_max_entries(child_config)
@@ -350,7 +355,7 @@ class SubagentRunner:
         if parent_backend is None:
             parent_backend = resolve_os_backend(child_config)
 
-        return RunContext(
+        child_ctx = RunContext(
             config_dict=child_config,
             run_id=child_run_id,
             auth_connector=getattr(self._ctx, "auth_connector", None),
@@ -366,6 +371,8 @@ class SubagentRunner:
             environment=getattr(self._ctx, "environment", None),
             project_gc_dir=getattr(self._ctx, "project_gc_dir", Path(".")),
         )
+        child_ctx.is_tui = bool(getattr(self._ctx, "is_tui", False))
+        return child_ctx
 
     def _success_response(
         self,

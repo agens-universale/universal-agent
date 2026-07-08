@@ -4,7 +4,7 @@ import request_backend_policy as policy
 def test_policy_forwards_on_delta(monkeypatch):
     seen = {}
 
-    def fake_req(payload, headers, *, url, verify, use_retry, logger, on_delta=None):
+    def fake_req(payload, headers, *, url, verify, use_retry, logger, on_delta=None, cert=None):
         seen["on_delta"] = on_delta
         return {"choices": [{"message": {"content": "ok"}}]}
 

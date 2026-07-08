@@ -30,7 +30,7 @@ from intent_log.user_turn import append_user_ask_deduped, append_user_asks_from_
 from message_policy.user_message_policy import extract_real_user_message_text
 from states import State, SharedStateData
 from usage.account import UsageAccount
-from usage.report import build_run_usage_report
+from usage.report import build_run_usage_report, build_run_usage_dict
 from thread_store import (
     ThreadSession,
     make_message_key,
@@ -43,6 +43,7 @@ from tools.connect_mcp.stream_client import _SESSION_MANAGER as _STREAM_SESSION_
 from tools.skills.registry import get_skills_registry
 from message_policy.tool_usage_notice.state import persist_tool_usage_notice_state
 from utils.generate_message_id import generate_msg_id_sha256 as generate_message_id_func
+from utils.logging_module import human_console_enabled
 from utils.local_render_system_prompt import render_system_prompt
 from security.permission_store import PermissionStore
 
@@ -157,6 +158,11 @@ class AgentExecutor:
                         print(
                             f"Не удалось прочитать chat_completions system prompt: {prompt_path}"
                         )
+                    if logger is not None:
+                        logger.warning(
+                            "system_prompt_read_failed",
+                            extra={"event": "system_prompt_read_failed", "path": prompt_path},
+                        )
                     raise e
 
             # Клиент-специфичные инструкции (напр. TUI) — отсутствие/нечитаемость
@@ -187,6 +193,7 @@ class AgentExecutor:
             "thread_id": thread_id,
             "shared": thread_shared,
             "workspace_config": config_dict,
+            "logger": logger,
         }
         if config_dict.get("use_local_subagents", False):
             state_data["specific_role"] = ORCHESTRATOR_SPECIFIC_ROLE
@@ -443,7 +450,7 @@ class AgentExecutor:
 
         if config_dict.get("dump_storage"):
             cur_dir = config_dict.get("logs_dump_dir") or os.getcwd()
-            dump_storage(cur_dir, indent=2)
+            dump_storage(cur_dir, indent=2, logger=logger, console=human_console_enabled(config_dict))
 
         # Отчёт по токенам/стоимости за этот прогон (дельта от снимка до старта).
         try:
@@ -458,14 +465,30 @@ class AgentExecutor:
             if usage_text:
                 if logger is not None:
                     logger.info("\n<run_usage>\n%s\n</run_usage>\n", usage_text)
-                if config_dict.get("console_trace", True):
+                if human_console_enabled(config_dict):
                     print(f"\n{usage_text}\n")
+            if logger is not None:
+                usage_dict = build_run_usage_dict(
+                    run_usage,
+                    config_dict.get("pricing"),
+                    config_dict.get("model"),
+                )
+                if usage_dict:
+                    logger.info(
+                        "run_usage",
+                        extra={"event": "run_usage", "usage": usage_dict},
+                    )
         except Exception as usage_exc:  # отчёт не должен ронять прогон
             if logger is not None:
                 logger.warning("run usage report failed: %s", usage_exc, exc_info=True)
 
-        if config_dict.get("console_trace", True):
+        if human_console_enabled(config_dict):
             print(f"\nПуть к файлу с логами: {self._ctx.logging_path}\n")
+        if logger is not None:
+            logger.info(
+                "log_path",
+                extra={"event": "log_path", "path": getattr(self._ctx, "logging_path", None)},
+            )
         return response
 
     def add_message(self, message: dict) -> None:

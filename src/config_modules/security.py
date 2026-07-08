@@ -150,6 +150,7 @@ class CommandModerationConfig(BaseModel):
     enabled: bool = True
     mode: str = "ask"
     allowed_command_examples: list[str] = Field(default_factory=list)
+    denied_command_examples: list[str] = Field(default_factory=list)
 
     @field_validator("mode")
     @classmethod

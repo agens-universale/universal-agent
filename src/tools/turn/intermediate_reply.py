@@ -1,8 +1,11 @@
 import json
+import logging
 import sys
 from typing import Any, Dict, Optional
 
 from tools.simple_tool_base import AbstractSimpleTool
+
+_logger = logging.getLogger(__name__)
 
 _MAX_REPLY_CHARS = 4096
 
@@ -35,6 +38,12 @@ class IntermediateReply(AbstractSimpleTool):
         if artifact_path is not None:
             out["artifact_path"] = artifact_path
         return json.dumps(out, ensure_ascii=False)
+
+    def _run_logger(self) -> logging.Logger:
+        """Prefer the per-run logger from RunContext; fall back to the module logger."""
+        ctx = getattr(self, "_ctx", None)
+        logger = getattr(ctx, "logger", None) if ctx is not None else None
+        return logger or _logger
 
     @classmethod
     def tool_description(cls) -> Dict[str, Any]:
@@ -151,6 +160,15 @@ Usage:
         if normalized_artifact:
             print(f"\nDetailed artifact: {normalized_artifact}", file=sys.stderr)
         print("=" * 60 + "\n", file=sys.stderr)
+
+        self._run_logger().info(
+            "intermediate_reply",
+            extra={
+                "event": "intermediate_reply",
+                "answer": answer,
+                "artifact_path": normalized_artifact,
+            },
+        )
 
         return self._result(
             ok=True,

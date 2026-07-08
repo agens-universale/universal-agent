@@ -23,6 +23,13 @@ import pytest
 pytest.importorskip("fastapi", reason="server-side dep, install via server_requirements.txt")
 pytest.importorskip("starlette", reason="server-side dep, install via server_requirements.txt")
 
+# Swarm runs the CLI inside a bubblewrap (bwrap) sandbox — Linux-only. Off Linux
+# (e.g. macOS dev) these endpoint tests can't exercise real swarm behavior, so skip.
+pytestmark = pytest.mark.skipif(
+    sys.platform != "linux",
+    reason="swarm is Linux-only (bubblewrap sandbox)",
+)
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 
@@ -88,11 +95,18 @@ def make_server(tmp_path):
     return factory
 
 
-def _seed_meta(threads_dir, sid, status, **extra):
+def _swarm_sid(system: str, task_id: str) -> str:
+    return f"swarm_{system}_{task_id}"
+
+
+def _seed_meta(threads_dir, sid, status, *, system="g", task_id=None, **extra):
+    if task_id is None:
+        rest = sid.removeprefix("swarm_")
+        system, task_id = rest.split("_", 1) if "_" in rest else (system, rest)
     import swarm.storage as storage
     storage.save_swarm_meta(
         threads_dir, sid,
-        base_meta={"system": "g", "task_id": sid.split("_", 1)[-1]},
+        base_meta={"system": system, "task_id": task_id},
         swarm_meta_patch={"id": sid, "status": status, **extra},
     )
 
@@ -145,7 +159,7 @@ def test_status_400_when_system_empty(make_server):
 
 def test_status_returns_running_when_pid_alive(make_server, monkeypatch):
     server_mod, threads, sandbox = make_server(enabled=True)
-    _seed_meta(threads, "g_t1", "running", pid=99999)
+    _seed_meta(threads, _swarm_sid("g", "t1"), "running", pid=99999)
 
     # Мокаем os.kill как успешный (PID жив).
     monkeypatch.setattr("os.kill", lambda pid, sig: None)
@@ -163,8 +177,9 @@ def test_status_returns_running_when_pid_alive(make_server, monkeypatch):
 def test_status_lazy_finalizes_via_completion_json(make_server):
     """Если есть completion.json — lazy-чек обновляет meta на completed."""
     server_mod, threads, sandbox = make_server(enabled=True)
-    _seed_meta(threads, "g_t2", "running", pid=1)
-    _write_completion(threads, "g_t2", {
+    sid = _swarm_sid("g", "t2")
+    _seed_meta(threads, sid, "running", pid=1)
+    _write_completion(threads, sid, {
         "exit_code": 0, "finished_at": "2026-06-04T12:00:00Z",
         "error_type": "", "error_message": "",
     })
@@ -182,7 +197,7 @@ def test_status_lazy_finalizes_via_completion_json(make_server):
 def test_status_lazy_finalizes_dead_pid(make_server, monkeypatch):
     """PID мёртв + нет completion.json → status = unknown_failed."""
     server_mod, threads, sandbox = make_server(enabled=True)
-    _seed_meta(threads, "g_t3", "running", pid=99999)
+    _seed_meta(threads, _swarm_sid("g", "t3"), "running", pid=99999)
     # PID мёртв.
     def kill_dead(pid, sig):
         raise ProcessLookupError
@@ -199,7 +214,7 @@ def test_status_lazy_finalizes_dead_pid(make_server, monkeypatch):
 
 def test_status_normalizes_system_lowercase(make_server, monkeypatch):
     server_mod, threads, sandbox = make_server(enabled=True)
-    _seed_meta(threads, "ci_build", "running", pid=99999)
+    _seed_meta(threads, _swarm_sid("ci", "build"), "running", pid=99999)
     monkeypatch.setattr("os.kill", lambda pid, sig: None)
 
     from starlette.testclient import TestClient
@@ -212,7 +227,7 @@ def test_status_normalizes_system_lowercase(make_server, monkeypatch):
 def test_status_already_final_returns_as_is(make_server):
     """Финальный статус — никакой повторной финализации, возврат как есть."""
     server_mod, threads, sandbox = make_server(enabled=True)
-    _seed_meta(threads, "g_t4", "completed", exit_code=0, pid=99999)
+    _seed_meta(threads, _swarm_sid("g", "t4"), "completed", exit_code=0, pid=99999)
 
     from starlette.testclient import TestClient
     client = TestClient(server_mod.app)
@@ -225,8 +240,9 @@ def test_status_already_final_returns_as_is(make_server):
 def test_status_unregisters_from_monitor_when_finalized(make_server):
     """После lazy-финализации sworm должен быть снят с monitor.active_ids."""
     server_mod, threads, sandbox = make_server(enabled=True)
-    _seed_meta(threads, "g_t5", "running", pid=1)
-    _write_completion(threads, "g_t5", {
+    sid = _swarm_sid("g", "t5")
+    _seed_meta(threads, sid, "running", pid=1)
+    _write_completion(threads, sid, {
         "exit_code": 0, "finished_at": "x", "error_type": "", "error_message": "",
     })
 
@@ -239,7 +255,7 @@ def test_status_unregisters_from_monitor_when_finalized(make_server):
     assert resp.status_code == 200
     assert resp.json()["status"] == "completed"
 
-    mock_monitor.unregister_active.assert_called_once_with("g_t5")
+    mock_monitor.unregister_active.assert_called_once_with(_swarm_sid("g", "t5"))
 
 
 # ===========================================================================
@@ -253,7 +269,7 @@ def stub_runner(monkeypatch):
     calls = []
 
     def fake_start(swarm_cfg, *, system, task_id, payload):
-        sid = f"{system}_{task_id}"
+        sid = _swarm_sid(system, task_id)
         calls.append((sid, payload))
         # Симулируем, что start_swarm_process пишет meta (как реальный runner).
         import swarm.storage as storage
@@ -308,13 +324,13 @@ def test_run_starts_new_sworm_returns_started(make_server, stub_runner):
     assert body["system"] == "generic"
     assert body["task_id"] == "build-42"
     assert len(stub_runner) == 1
-    assert stub_runner[0][0] == "generic_build-42"
+    assert stub_runner[0][0] == _swarm_sid("generic", "build-42")
 
 
 def test_run_409_when_swarm_id_active(make_server, stub_runner):
     """Повторный POST с тем же task_id когда sworm в running → 409."""
     server_mod, threads, _ = make_server(enabled=True)
-    _seed_meta(threads, "generic_t1", "running", pid=99999)
+    _seed_meta(threads, _swarm_sid("generic", "t1"), "running", pid=99999)
 
     from starlette.testclient import TestClient
     client = TestClient(server_mod.app)
@@ -330,7 +346,7 @@ def test_run_409_when_swarm_id_active(make_server, stub_runner):
 
 def test_run_409_when_status_queued(make_server, stub_runner):
     server_mod, threads, _ = make_server(enabled=True)
-    _seed_meta(threads, "generic_t2", "queued")
+    _seed_meta(threads, _swarm_sid("generic", "t2"), "queued")
 
     from starlette.testclient import TestClient
     client = TestClient(server_mod.app)
@@ -343,7 +359,7 @@ def test_run_409_when_status_queued(make_server, stub_runner):
 def test_run_409_when_swarm_id_finalized(make_server, stub_runner):
     """POST с task_id который уже завершился → 409 swarm_id_already_finalized (AR-3 default)."""
     server_mod, threads, _ = make_server(enabled=True)
-    _seed_meta(threads, "generic_t3", "completed", exit_code=0)
+    _seed_meta(threads, _swarm_sid("generic", "t3"), "completed", exit_code=0)
 
     from starlette.testclient import TestClient
     client = TestClient(server_mod.app)
@@ -410,7 +426,7 @@ def test_run_concurrent_posts_only_one_starts(make_server, stub_runner):
     started_event = threading.Event()
 
     def fake_start(swarm_cfg, *, system, task_id, payload):
-        sid = f"{system}_{task_id}"
+        sid = _swarm_sid(system, task_id)
         # Симулируем меdленный старт — записываем meta как running.
         import swarm.storage as storage
         storage.save_swarm_meta(
@@ -482,7 +498,7 @@ def test_run_normalizes_system_lowercase(make_server, stub_runner):
     resp = client.post("/swarm/run", json={"system": "CI", "task_id": "t"})
     assert resp.status_code == 200
     assert resp.json()["system"] == "ci"
-    assert stub_runner[0][0] == "ci_t"
+    assert stub_runner[0][0] == _swarm_sid("ci", "t")
 
 
 def test_run_registers_with_monitor(make_server, stub_runner):
@@ -496,7 +512,7 @@ def test_run_registers_with_monitor(make_server, stub_runner):
     client = TestClient(server_mod.app)
     resp = client.post("/swarm/run", json={"task_id": "x"})
     assert resp.status_code == 200
-    mock_monitor.register_active.assert_called_once_with("generic_x")
+    mock_monitor.register_active.assert_called_once_with(_swarm_sid("generic", "x"))
 
 
 # ===========================================================================
@@ -507,10 +523,11 @@ def test_run_registers_with_monitor(make_server, stub_runner):
 def test_logs_reads_messages_from_sandbox(make_server):
     """messages.jsonl лежит в sandbox-каталоге → endpoint должен его прочитать."""
     server_mod, threads, sandbox = make_server(enabled=True)
-    _seed_meta(threads, "g_t", "completed", exit_code=0)
+    sid = _swarm_sid("g", "t")
+    _seed_meta(threads, sid, "completed", exit_code=0)
 
     # Создаём message в sandbox-side канале E.
-    sandbox_msgs_dir = os.path.join(sandbox, "g_t", ".gc", "threads", "g_t")
+    sandbox_msgs_dir = os.path.join(sandbox, sid, ".gc", "threads", sid)
     os.makedirs(sandbox_msgs_dir)
     with open(os.path.join(sandbox_msgs_dir, "messages.jsonl"), "w") as f:
         f.write('{"ts":"x","stream":"stdout","message":"from sandbox"}\n')
@@ -553,11 +570,12 @@ def test_shutdown_kills_active_sworms(make_server, monkeypatch):
     """
     import asyncio
     server_mod, threads, _ = make_server(enabled=True)
-    _seed_meta(threads, "g_alive", "running", pid=12345)
+    sid = _swarm_sid("g", "alive")
+    _seed_meta(threads, sid, "running", pid=12345)
 
     # Мок monitor с одним active sworm.
     mock_monitor = MagicMock()
-    mock_monitor.get_active_ids_copy.return_value = {"g_alive"}
+    mock_monitor.get_active_ids_copy.return_value = {sid}
     server_mod._swarm_monitor = mock_monitor
 
     monkeypatch.setattr("os.kill", lambda pid, sig: None)  # все PID живые
@@ -582,10 +600,10 @@ def test_shutdown_kills_active_sworms(make_server, monkeypatch):
 
     assert sigterm_calls == [12345]
     import swarm.storage as storage
-    meta = storage.load_swarm_meta(threads, "g_alive")
+    meta = storage.load_swarm_meta(threads, sid)
     assert meta["swarm_meta"]["status"] == "unknown_failed"
     assert meta["swarm_meta"]["error_type"] == "server_shutdown"
-    mock_monitor.unregister_active.assert_called_once_with("g_alive")
+    mock_monitor.unregister_active.assert_called_once_with(sid)
     mock_monitor.stop.assert_called_once()
 
 
@@ -613,10 +631,11 @@ def test_shutdown_sigkill_after_grace_if_still_alive(make_server, monkeypatch):
     """Если процесс жив после grace period — SIGKILL."""
     import asyncio
     server_mod, threads, _ = make_server(enabled=True)
-    _seed_meta(threads, "g_stuck", "running", pid=12345)
+    sid = _swarm_sid("g", "stuck")
+    _seed_meta(threads, sid, "running", pid=12345)
 
     mock_monitor = MagicMock()
-    mock_monitor.get_active_ids_copy.return_value = {"g_stuck"}
+    mock_monitor.get_active_ids_copy.return_value = {sid}
     server_mod._swarm_monitor = mock_monitor
 
     monkeypatch.setattr("os.kill", lambda pid, sig: None)

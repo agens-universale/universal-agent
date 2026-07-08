@@ -41,7 +41,9 @@ class BackendConfig(BaseModel):
     chat_completion_kwargs: dict[str, Any] = {}
     use_max_tokens_param: bool = False
     openai_strict_tools_schema: bool = False
-    use_ssl: bool = True
+    use_ssl: bool | str = True
+    cert_path: str | None = None
+    key_path: str | None = None
     use_retry: bool = False
     stream: bool = True
 

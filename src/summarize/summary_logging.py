@@ -113,6 +113,19 @@ def log_compaction_started(
             log_ctx.trigger_volume,
             _threshold_log_suffix(log_ctx.trigger_threshold_chars),
         )
+        logger.info(
+            "summary_started",
+            extra={
+                "event": "summary_started",
+                "reason": log_ctx.trigger_reason,
+                "rule": log_ctx.rule_label,
+                "thread_id": log_ctx.thread_id,
+                "trigger_volume": log_ctx.trigger_volume,
+                "serialized_chars": serialized_chars,
+                "history_messages": history_messages_count,
+                "threshold": log_ctx.trigger_threshold_chars,
+            },
+        )
     if not log_ctx.is_cli_mode:
         return
     _cli_print(
@@ -143,6 +156,18 @@ def log_compaction_precheck(
         serialized_chars,
         threshold,
     )
+    logger.info(
+        "summary_precheck",
+        extra={
+            "event": "summary_precheck",
+            "reason": trigger_reason,
+            "thread_id": thread_id,
+            "history_messages": history_messages_count,
+            "trigger_volume": trigger_volume,
+            "serialized_chars": serialized_chars,
+            "threshold": threshold,
+        },
+    )
 
 
 def log_summary_raw_text(
@@ -157,6 +182,15 @@ def log_summary_raw_text(
             log_ctx.trigger_reason,
             log_ctx.thread_id,
             text,
+        )
+        logger.info(
+            "summary_raw_text",
+            extra={
+                "event": "summary_raw_text",
+                "reason": log_ctx.trigger_reason,
+                "thread_id": log_ctx.thread_id,
+                "text": text,
+            },
         )
     if log_ctx.is_cli_mode:
         _cli_print("Полный текст сводки:")
@@ -175,6 +209,15 @@ def log_summary_message_body(
             log_ctx.trigger_reason,
             log_ctx.thread_id,
             text,
+        )
+        logger.info(
+            "summary_message_body",
+            extra={
+                "event": "summary_message_body",
+                "reason": log_ctx.trigger_reason,
+                "thread_id": log_ctx.thread_id,
+                "text": text,
+            },
         )
     if log_ctx.is_cli_mode:
         _cli_print("Тело сообщения dialog_summary:")
@@ -224,6 +267,23 @@ def log_compaction_completed(
             serialized_after,
             compression_ratio,
         )
+        logger.info(
+            "summary_completed",
+            extra={
+                "event": "summary_completed",
+                "reason": log_ctx.trigger_reason,
+                "rule": log_ctx.rule_label,
+                "thread_id": log_ctx.thread_id,
+                "trigger_volume": log_ctx.trigger_volume,
+                "serialized_before": serialized_before,
+                "serialized_after": serialized_after,
+                "compression_ratio": compression_ratio,
+                "num_batches": num_batches,
+                "memory_delta_chars": memory_delta_chars,
+                "threshold": log_ctx.trigger_threshold_chars,
+                "archive_suffix": f"__pre_summary__{archive}" if archive else None,
+            },
+        )
     if not log_ctx.is_cli_mode:
         return
     _cli_print(f"Сжатие завершено: {log_ctx.rule_label}")
@@ -250,6 +310,17 @@ def log_compaction_failed(
             log_ctx.thread_id,
             error,
             exc_info=exc_info,
+        )
+        logger.warning(
+            "summary_failed",
+            exc_info=exc_info,
+            extra={
+                "event": "summary_failed",
+                "reason": log_ctx.trigger_reason,
+                "rule": log_ctx.rule_label,
+                "thread_id": log_ctx.thread_id,
+                "error": str(error),
+            },
         )
     if log_ctx.is_cli_mode:
         _cli_print(

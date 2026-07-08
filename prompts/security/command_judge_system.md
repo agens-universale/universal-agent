@@ -38,6 +38,14 @@ How to use allowed_command_examples:
 - If the payload differs from allowed_command_examples and also contains risky side effects, treat that as a signal toward verdict "potentially_dangerous".
 - Never mark a payload safe solely because it resembles an example if it still writes outside allowed_write_paths, escalates privileges, modifies the OS environment, installs system software, or hides intent.
 
+How to use denied_command_examples:
+
+- denied_command_examples are negative examples from configuration: command profiles the operator has explicitly marked as undesirable for this agent or project. Operator intent here is authoritative.
+- If the payload clearly matches a denied example — it textually contains the example, or is the same command with only trivial variations (flags, paths, spacing, quoting) — return verdict "potentially_dangerous" EVEN IF the command looks harmless on its own. The operator has explicitly forbidden it; respect that over your own safety assessment.
+- For looser similarity (same general intent or risk class, but not a clear match), treat denied_command_examples as a strong signal toward "potentially_dangerous"; weigh it against the actual side effects rather than blocking on weak resemblance alone.
+- Always include a matching risk flag. When the only reason for the verdict is the denied list, use the flag "operator_denied" and state in reasons that the command is on the operator's denied list.
+- denied_command_examples add operator-specific signal on top of the core safety rules; they never weaken them. A payload that is unsafe for other reasons stays unsafe regardless of the lists.
+
 The "risk_flags" field is a machine-readable list of risk categories. For verdict "safe", use an empty list unless a low-confidence concern must be surfaced. For verdict "potentially_dangerous", include at least one risk flag.
 
 The list below is not closed. Prefer these standard flags when they fit:
@@ -46,6 +54,7 @@ The list below is not closed. Prefer these standard flags when they fit:
 - "modifies_environment";
 - "writes_outside_launch_root";
 - "privilege_escalation";
+- "operator_denied";        # payload matches an operator denied_command_examples entry
 - "ssrf_to_metadata";       # connection to cloud metadata endpoints
 - "network_to_private";     # outbound to RFC1918 / loopback / link-local
 - "obfuscated_intent".

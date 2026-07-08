@@ -67,12 +67,16 @@ def _mock_llm_response(content="You are an expert Python developer."):
     return {"choices": [{"message": {"content": content}}]}
 
 
+def _mock_llm_policy_response(content="You are an expert Python developer."):
+    return _mock_llm_response(content), {"max_tokens": 4096}
+
+
 class TestSpecialAgentCreateInstance:
     def test_create_instance_calls_generate_role(self):
         """create_instance generates agent_role via LLM call."""
         with patch.object(
-            special_agent_module, "request_backend_chat_completions",
-            return_value=_mock_llm_response("Generated role prompt"),
+            special_agent_module, "request_chat_completions_with_policy",
+            return_value=_mock_llm_policy_response("Generated role prompt"),
         ):
             instance = asyncio.run(
                 SpecialAgent.create_instance(
@@ -89,8 +93,8 @@ class TestSpecialAgentCreateInstance:
 
     def test_get_initial_data_returns_generated_role_and_task(self):
         with patch.object(
-            special_agent_module, "request_backend_chat_completions",
-            return_value=_mock_llm_response("Custom role"),
+            special_agent_module, "request_chat_completions_with_policy",
+            return_value=_mock_llm_policy_response("Custom role"),
         ):
             instance = asyncio.run(
                 SpecialAgent.create_instance(
@@ -109,8 +113,8 @@ class TestSpecialAgentCreateInstance:
     def test_llm_receives_role_in_prompt(self):
         """The LLM prompt should contain role name and description."""
         with patch.object(
-            special_agent_module, "request_backend_chat_completions",
-            return_value=_mock_llm_response(),
+            special_agent_module, "request_chat_completions_with_policy",
+            return_value=_mock_llm_policy_response(),
         ) as mock_llm:
             asyncio.run(
                 SpecialAgent.create_instance(
@@ -122,7 +126,7 @@ class TestSpecialAgentCreateInstance:
                 )
             )
 
-        call_data = mock_llm.call_args[0][0]
+        call_data = mock_llm.call_args.kwargs["payload_factory"](4096)
         user_msg = call_data["messages"][1]["content"]
         assert "Security Expert" in user_msg
         assert "Specializes in web security" in user_msg
@@ -130,8 +134,8 @@ class TestSpecialAgentCreateInstance:
     def test_model_passed_to_llm_call(self):
         """The model used for role generation should be the orchestrator's model."""
         with patch.object(
-            special_agent_module, "request_backend_chat_completions",
-            return_value=_mock_llm_response(),
+            special_agent_module, "request_chat_completions_with_policy",
+            return_value=_mock_llm_policy_response(),
         ) as mock_llm:
             asyncio.run(
                 SpecialAgent.create_instance(
@@ -143,7 +147,7 @@ class TestSpecialAgentCreateInstance:
                 )
             )
 
-        call_data = mock_llm.call_args[0][0]
+        call_data = mock_llm.call_args.kwargs["payload_factory"](4096)
         assert call_data["model"] == "gpt-4o-mini"
 
     def test_chat_completion_kwargs_merged_into_role_generation(self):
@@ -152,8 +156,8 @@ class TestSpecialAgentCreateInstance:
             chat_completion_kwargs={"temperature": 1.0, "top_p": 1.0},
         )
         with patch.object(
-            special_agent_module, "request_backend_chat_completions",
-            return_value=_mock_llm_response(),
+            special_agent_module, "request_chat_completions_with_policy",
+            return_value=_mock_llm_policy_response(),
         ) as mock_llm:
             asyncio.run(
                 SpecialAgent.create_instance(
@@ -165,7 +169,7 @@ class TestSpecialAgentCreateInstance:
                 )
             )
 
-        call_data = mock_llm.call_args[0][0]
+        call_data = mock_llm.call_args.kwargs["payload_factory"](4096)
         assert call_data["temperature"] == 1.0
         assert call_data["top_p"] == 1.0
 
@@ -177,8 +181,8 @@ class TestSpecialAgentCreateInstance:
             use_ssl=False,
         )
         with patch.object(
-            special_agent_module, "request_backend_chat_completions",
-            return_value=_mock_llm_response(),
+            special_agent_module, "request_chat_completions_with_policy",
+            return_value=_mock_llm_policy_response(),
         ) as mock_llm:
             asyncio.run(
                 SpecialAgent.create_instance(
@@ -190,15 +194,33 @@ class TestSpecialAgentCreateInstance:
                 )
             )
 
-        _, headers = mock_llm.call_args[0]
-        kwargs = mock_llm.call_args[1]
-        assert headers.get("Authorization") == "Bearer my-secret-token"
+        kwargs = mock_llm.call_args.kwargs
+        assert kwargs["headers"].get("Authorization") == "Bearer my-secret-token"
         assert kwargs.get("url") == "http://custom-url/v1/chat/completions"
+        assert kwargs.get("request_label") == "subagent_special_agent"
+
+    def test_runtime_notices_enabled_when_requested(self):
+        with patch.object(
+            special_agent_module, "request_chat_completions_with_policy",
+            return_value=_mock_llm_policy_response(),
+        ) as mock_llm:
+            asyncio.run(
+                SpecialAgent.create_instance(
+                    role="Dev",
+                    role_description="desc",
+                    task="task",
+                    model="m",
+                    config_dict=_make_config(),
+                    runtime_notices_enabled=True,
+                )
+            )
+
+        assert mock_llm.call_args.kwargs["runtime_notices_enabled"] is True
 
     def test_generate_role_failure_propagates(self):
         """If LLM call fails, create_instance should raise."""
         with patch.object(
-            special_agent_module, "request_backend_chat_completions",
+            special_agent_module, "request_chat_completions_with_policy",
             side_effect=ConnectionError("Network error"),
         ):
             with pytest.raises(ConnectionError):
@@ -225,8 +247,8 @@ class TestSpecialAgentWithRunner:
 
         with (
             patch.object(
-                special_agent_module, "request_backend_chat_completions",
-                return_value=_mock_llm_response("You are a security auditor."),
+                special_agent_module, "request_chat_completions_with_policy",
+                return_value=_mock_llm_policy_response("You are a security auditor."),
             ),
             patch.object(runner, "_build_child_ctx", return_value=SimpleNamespace()),
         ):

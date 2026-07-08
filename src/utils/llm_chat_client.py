@@ -4,6 +4,7 @@ import json
 from typing import Any, Dict, List, Optional
 
 from request_backend_policy import request_chat_completions_with_policy
+from utils.ssl_config import get_backend_client_cert
 from utils.connect_backend import create_call_headers
 from usage.account import category_for_request_label
 from usage.context import usage_scope
@@ -199,8 +200,12 @@ def request_chat_completion_text(
             headers=headers,
             url=cfg["completions_url"],
             verify=cfg.get("use_ssl", True),
+            cert=get_backend_client_cert(cfg),
             use_retry=cfg.get("use_retry", False),
             logger=getattr(ctx, "logger", None),
+            request_label=request_label,
+            runtime_notices_enabled=bool(getattr(ctx, "is_tui", False)),
+            notice_url=cfg.get("completions_url"),
         )
     logger = getattr(ctx, "logger", None)
     if logger is not None and full_log_backend:

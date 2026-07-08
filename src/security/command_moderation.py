@@ -72,6 +72,7 @@ class ModerationContext:
     shell: str = ""
     has_venv: bool = False
     allowed_command_examples: list[str] = field(default_factory=list)
+    denied_command_examples: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -128,6 +129,7 @@ def build_judge_payload(
             "has_venv": context.has_venv,
         },
         "allowed_command_examples": context.allowed_command_examples,
+        "denied_command_examples": context.denied_command_examples,
         "never_touch_paths": never_touch,
     }
 
@@ -462,6 +464,7 @@ def _build_context(
         shell=os.environ.get("SHELL") or os.environ.get("COMSPEC") or "",
         has_venv=bool(os.environ.get("VIRTUAL_ENV")),
         allowed_command_examples=context.allowed_command_examples,
+        denied_command_examples=context.denied_command_examples,
     )
 
 

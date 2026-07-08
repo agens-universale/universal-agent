@@ -69,6 +69,28 @@ def test_build_child_ctx_creates_dedicated_subagent_run_log(tmp_path):
     assert f"agent_worker_{child_ctx.run_id}.log" in child_ctx.logging_path
 
 
+def test_build_child_ctx_inherits_is_tui_from_parent(tmp_path):
+    orch = _make_orchestrator_state()
+    cfg = _make_config(tmp_path)
+    parent_ctx = SimpleNamespace(
+        config_dict=cfg,
+        run_id="parent_run_1",
+        auth_connector=None,
+        logger=None,
+        logging_path=str(tmp_path / "agent_main_parent_run_1.log"),
+        summary_trace_path=str(tmp_path / "summary_trace_main_parent_run_1.jsonl"),
+        tools_data={},
+        tools_spec=[],
+        tools_description=[],
+        is_tui=True,
+    )
+    runner = SubagentRunner(parent_ctx, orch, cfg)
+
+    child_ctx = runner._build_child_ctx(tool_name="subagent_worker")
+
+    assert child_ctx.is_tui is True
+
+
 def test_lifecycle_payload_contains_parent_and_child_run_ids(tmp_path):
     orch = _make_orchestrator_state()
     cfg = _make_config(tmp_path)

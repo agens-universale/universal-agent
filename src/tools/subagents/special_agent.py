@@ -1,7 +1,11 @@
 from typing import Any, Dict
 
+from config_modules.backend import parse_chat_completions_max_tokens
+from request_backend_policy import request_chat_completions_with_policy
 from tools.subagents.abstract_subagent import AbstractSubagent
-from utils.connect_backend import request_backend_chat_completions
+from utils.ssl_config import get_backend_client_cert
+
+_ROLE_GENERATION_MAX_TOKENS = 4096
 
 
 _ROLE_GENERATE_PROMPT = """Write prompt for AI assistant by role name and short role descriptions. Please make prompt as good as possible according with some examples.
@@ -153,6 +157,8 @@ class SpecialAgent(AbstractSubagent):
         reason: str,
         model: str,
         config_dict: Dict[str, Any],
+        *,
+        runtime_notices_enabled: bool = False,
     ):
         self.role = role
         self.role_description = role_description
@@ -160,6 +166,7 @@ class SpecialAgent(AbstractSubagent):
         self.reason = reason
         self.model = model
         self.config_dict = config_dict
+        self._runtime_notices_enabled = runtime_notices_enabled
         self.agent_role: str | None = None
 
     @classmethod
@@ -175,6 +182,7 @@ class SpecialAgent(AbstractSubagent):
             reason,
             model,
             config_dict or {},
+            runtime_notices_enabled=bool(kwargs.get("runtime_notices_enabled", False)),
         )
         instance.agent_role = instance._generate_role(role, role_description, model)
         return instance
@@ -193,6 +201,7 @@ class SpecialAgent(AbstractSubagent):
 
         url = self.config_dict.get("completions_url", "")
         verify = self.config_dict.get("use_ssl", True)
+        cert = get_backend_client_cert(self.config_dict)
         headers: Dict[str, str] = {}
         raw_headers = self.config_dict.get("chat_completion_headers")
         if isinstance(raw_headers, dict):
@@ -209,25 +218,42 @@ class SpecialAgent(AbstractSubagent):
                     continue
                 headers[k] = v
 
-        call_data: Dict[str, Any] = {
-            "model": model,
-            "messages": messages,
-        }
-        if bool(self.config_dict.get("use_max_tokens_param", False)):
-            call_data["max_tokens"] = 4096
-        else:
-            call_data["max_completion_tokens"] = 4096
-
         protected = {"model", "messages", "max_tokens", "max_completion_tokens"}
         extra = self.config_dict.get("chat_completion_kwargs")
-        if isinstance(extra, dict) and extra:
-            for key, value in extra.items():
-                if key in protected:
-                    continue
-                call_data[key] = value
+        use_max_tokens_param = bool(self.config_dict.get("use_max_tokens_param", False))
 
-        res_data = request_backend_chat_completions(
-            call_data, headers, url=url, verify=verify,
+        def payload_factory(max_tokens: int) -> Dict[str, Any]:
+            call_data: Dict[str, Any] = {
+                "model": model,
+                "messages": messages,
+            }
+            if use_max_tokens_param:
+                call_data["max_tokens"] = max_tokens
+            else:
+                call_data["max_completion_tokens"] = max_tokens
+            if isinstance(extra, dict) and extra:
+                for key, value in extra.items():
+                    if key in protected:
+                        continue
+                    call_data[key] = value
+            return call_data
+
+        min_response_tokens = parse_chat_completions_max_tokens(
+            self.config_dict.get("chat_completions_min_response_tokens", 1024),
+            default=1024,
+        )
+        res_data, _call_data = request_chat_completions_with_policy(
+            payload_factory=payload_factory,
+            initial_max_tokens=_ROLE_GENERATION_MAX_TOKENS,
+            min_response_tokens=min_response_tokens,
+            headers=headers,
+            url=url,
+            verify=verify,
+            cert=cert,
+            use_retry=bool(self.config_dict.get("use_retry", False)),
+            request_label="subagent_special_agent",
+            runtime_notices_enabled=self._runtime_notices_enabled,
+            notice_url=url,
         )
         return res_data["choices"][0]["message"]["content"]
 

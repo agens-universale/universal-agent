@@ -8,6 +8,7 @@ from textual.app import App
 from textual.binding import Binding
 from textual.screen import Screen
 
+from runtime_notices import register_runtime_notices_listener
 from tui import branding, palette
 from tui.screens.main import TraceScreen
 from tui.services.stream_sink import StreamSink
@@ -137,6 +138,7 @@ class TuiApp(App):
         if runner is not None and hasattr(runner, "make_tui_confirm"):
             ctx.is_tui = True
             ctx.tui_confirm = runner.make_tui_confirm(self._present_confirm)
+        register_runtime_notices_listener(self._on_runtime_notice)
         return AgentExecutor(ctx)
 
     def _stream_signal(self) -> None:
@@ -212,7 +214,17 @@ class TuiApp(App):
         from tui.screens.notices import NoticesScreen
         if not self._on_main():
             return
-        self.push_screen(NoticesScreen(notices=self.screen._collect_startup_notices()))
+        scr = self.screen
+        notices = scr._collect_notices() if hasattr(scr, "_collect_notices") else []
+        self.push_screen(NoticesScreen(notices=notices))
+
+    def _on_runtime_notice(self) -> None:
+        """Callback из worker-потока: обновить счётчик уведомлений в карточке."""
+        def _refresh() -> None:
+            scr = self.screen
+            if isinstance(scr, TraceScreen) and hasattr(scr, "_refresh_notices_card"):
+                scr._refresh_notices_card()
+        self.call_from_thread(_refresh)
 
     def action_new(self) -> None:
         scr = self.screen

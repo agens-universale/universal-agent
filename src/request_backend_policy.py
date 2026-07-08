@@ -1,7 +1,8 @@
 import logging
 import time
-from typing import Any, Callable, Dict, Tuple
+from typing import Any, Callable, Dict, Optional, Tuple
 
+from runtime_notices import maybe_push_llm_failure_notice
 from utils.connect_backend import request_backend_chat_completions
 from utils.backend_errors import is_retriable_backend_error
 
@@ -25,9 +26,13 @@ def request_chat_completions_with_policy(
     headers: Dict[str, str],
     url: str,
     verify: bool,
+    cert: Optional[Tuple[str, str]] = None,
     use_retry: bool,
     logger: logging.Logger | None = None,
     on_delta=None,
+    request_label: Optional[str] = None,
+    runtime_notices_enabled: bool = False,
+    notice_url: Optional[str] = None,
 ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     """
     Execute chat/completions request with the minimal adaptive max_tokens policy.
@@ -47,6 +52,7 @@ def request_chat_completions_with_policy(
             headers,
             url=url,
             verify=verify,
+            cert=cert,
             use_retry=transport_use_retry,
             logger=logger,
             on_delta=on_delta,
@@ -57,6 +63,12 @@ def request_chat_completions_with_policy(
         return _send_once(initial_max_tokens, transport_use_retry=use_retry)
     except Exception as first_exc:
         if not is_retriable_backend_error(first_exc):
+            maybe_push_llm_failure_notice(
+                first_exc,
+                request_label=request_label,
+                url=notice_url,
+                enabled=runtime_notices_enabled,
+            )
             raise
 
         run_logger = logger or logging.getLogger(__name__)
@@ -90,5 +102,11 @@ def request_chat_completions_with_policy(
             "chat/completions adaptive max_tokens retries failed; "
             "raising original backend error",
             exc_info=True,
+        )
+        maybe_push_llm_failure_notice(
+            first_exc,
+            request_label=request_label,
+            url=notice_url,
+            enabled=runtime_notices_enabled,
         )
         raise first_exc

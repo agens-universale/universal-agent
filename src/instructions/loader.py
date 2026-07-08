@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 from instructions.layers import instruction_layer_specs
 
@@ -39,6 +40,8 @@ def build_instructions(
     is_tui: bool,
     agentsmd_override: bool = False,
     cwd: str | None = None,
+    logger: Any | None = None,
+    verbose: bool = False,
 ) -> LoadedInstructions:
     # 1. agent_md_path задан → ТОЛЬКО L0 (замена), в любом режиме. Путь > флаг.
     if agent_md_path:
@@ -47,6 +50,14 @@ def build_instructions(
             warnings.append(AGENTSMD_OVERRIDE_IGNORED_WARNING)
         body = _read(Path(agent_md_path))
         if body is None:
+            # agent_md_path is the caller-supplied override — unlike the optional
+            # global/project layers, its absence/unreadability is worth surfacing
+            # (verbose only), since the caller explicitly asked for it.
+            if logger is not None and verbose:
+                logger.warning(
+                    "agent_md_read_failed",
+                    extra={"event": "agent_md_read_failed", "path": str(agent_md_path)},
+                )
             return LoadedInstructions(text="", loaded_ids=[], warnings=warnings)
         text = _wrap([f"## {_L0_TITLE}\n{body.rstrip()}"])
         return LoadedInstructions(text=text, loaded_ids=["L0"], warnings=warnings)
