@@ -1,7 +1,16 @@
 """Маскировка секрет-подобных значений конфига для показа на экране."""
 from typing import Any
 
-_SECRET_SUBSTRINGS = ("token", "api_key", "secret", "password")
+# Важно: под ключи конфига, отображаемые в TUI.
+# Содержит фрагменты, которые должны совпадать без учёта регистра.
+_SECRET_SUBSTRINGS = (
+    "token",
+    "api_key",
+    "api-key",
+    "authorization",
+    "secret",
+    "password",
+)
 _MASK = "***"
 
 

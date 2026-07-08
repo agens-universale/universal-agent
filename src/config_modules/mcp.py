@@ -9,6 +9,10 @@ class McpServerConfig(BaseModel):
     transport: Literal["http", "sse", "stdio", "stream_sse", "stream_http", "stream_stdio"]
     url: str | None = None
     token: str | None = None
+    # Дополнительные HTTP-headers для MCP HTTP/SSE транспортов.
+    # Применяются для транспортов: http, sse, stream_http, stream_sse.
+    # Если задан `headers.Authorization`, он переопределяет Authorization из `token`.
+    headers: dict[str, str] = Field(default_factory=dict)
     server_name: str | None = Field(default=None, alias="server-name")
     description: str | None = None
     command: str | None = None
@@ -56,6 +60,15 @@ class McpServerConfig(BaseModel):
             return {}
         if not isinstance(value, dict):
             raise ValueError("mcp.servers.<name>.env должен быть объектом key/value")
+        return {str(k): str(v) for k, v in value.items()}
+
+    @field_validator("headers", mode="before")
+    @classmethod
+    def normalize_headers(cls, value: object) -> dict[str, str]:
+        if value is None:
+            return {}
+        if not isinstance(value, dict):
+            raise ValueError("mcp.servers.<name>.headers должен быть объектом key/value")
         return {str(k): str(v) for k, v in value.items()}
 
 

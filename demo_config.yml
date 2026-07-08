@@ -452,6 +452,18 @@ mcp:
       url: http://127.0.0.1:8765/mcp
       server-name: science
       description: Unified scientific literature search across 10 public APIs
+      # HTTP-headers для MCP (для transport: http/sse и stream_http/stream_sse).
+      # Удобно хранить секреты в ENV и подставлять через ${ENV:...}.
+      #
+      # Примечание по приоритету:
+      #   - если задан token, то он превращается в `Authorization: Bearer <token>`
+      #   - если задан headers.Authorization, он переопределяет Authorization из token
+      #
+      # Пример с token (старый/короткий способ):
+      # token: "${ENV:SCIENCE_MCP_TOKEN}"
+      # headers:
+      #   Authorization: "Bearer ${ENV:SCIENCE_MCP_TOKEN}"
+      #   X-API-Key: "${ENV:SCIENCE_MCP_X_API_KEY}"
     duckduckgo_search:
       transport: stdio
       command: ddgs-mcp

@@ -177,6 +177,26 @@ def _trust_env_for_url(url: str) -> bool:
     return not _is_loopback_url(url)
 
 
+def _merge_mcp_headers(
+    token: Optional[str],
+    extra_headers: Optional[Dict[str, str]] = None,
+) -> Dict[str, str]:
+    """
+    Собрать финальные HTTP headers для MCP запросов.
+
+    Правило приоритета:
+    - Authorization из `token` добавляется первой (если задан `token`)
+    - затем накладываются `extra_headers` (они могут переопределить Authorization).
+    """
+    headers: Dict[str, str] = {}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    if extra_headers:
+        for k, v in extra_headers.items():
+            headers[str(k)] = str(v)
+    return headers
+
+
 def _make_httpx_factory(
     verify: Union[bool, str],
     cert: Optional[Tuple[str, str]] = None,
@@ -205,6 +225,7 @@ def _make_httpx_factory(
 
 def _make_stream_http_client(
     token: Optional[str],
+    extra_headers: Optional[Dict[str, str]],
     timeout: float,
     verify: Union[bool, str],
     cert: Optional[Tuple[str, str]] = None,
@@ -216,9 +237,7 @@ def _make_stream_http_client(
     В этой версии streamable_http_client принимает http_client и
     не принимает headers/timeout/httpx_client_factory напрямую.
     """
-    headers: Dict[str, str] = {}
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
+    headers = _merge_mcp_headers(token=token, extra_headers=extra_headers)
 
     kwargs: Dict[str, Any] = dict(
         headers=headers or None,
@@ -268,6 +287,7 @@ def _stream_http_endpoints(base_url: str) -> List[str]:
 async def _list_tools_stream_sse_async(
     base_url: str,
     token: Optional[str],
+    extra_headers: Optional[Dict[str, str]],
     timeout: float,
     verify: Union[bool, str],
     cert: Optional[Tuple[str, str]] = None,
@@ -280,9 +300,7 @@ async def _list_tools_stream_sse_async(
     """
     endpoint = _build_endpoint(base_url, "/sse")
 
-    headers: Dict[str, str] = {}
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
+    headers = _merge_mcp_headers(token=token, extra_headers=extra_headers)
 
     httpx_factory = _make_httpx_factory(
         verify,
@@ -333,10 +351,12 @@ def list_tools_stream_sse(
     """
     verify = get_verify_ssl(server_cfg)
     cert = get_client_cert(server_cfg)
+    extra_headers = server_cfg.get("headers") or None
     return _run_coro(
         _list_tools_stream_sse_async(
             base_url=url,
             token=token,
+            extra_headers=extra_headers,
             timeout=timeout,
             verify=verify,
             cert=cert,
@@ -347,6 +367,7 @@ def list_tools_stream_sse(
 async def _call_tool_stream_sse_async(
     base_url: str,
     token: Optional[str],
+    extra_headers: Optional[Dict[str, str]],
     timeout: float,
     verify: Union[bool, str],
     tool_name: str,
@@ -361,9 +382,7 @@ async def _call_tool_stream_sse_async(
     """
     endpoint = _build_endpoint(base_url, "/sse")
 
-    headers: Dict[str, str] = {}
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
+    headers = _merge_mcp_headers(token=token, extra_headers=extra_headers)
 
     httpx_factory = _make_httpx_factory(
         verify,
@@ -404,6 +423,7 @@ async def _call_tool_stream_sse_persistent(
     server_key: str,
     base_url: str,
     token: Optional[str],
+    extra_headers: Optional[Dict[str, str]],
     timeout: float,
     verify: Union[bool, str],
     tool_name: str,
@@ -418,9 +438,7 @@ async def _call_tool_stream_sse_persistent(
 
     async def _open_session() -> ClientSession:
         endpoint = _build_endpoint(base_url, "/sse")
-        headers: Dict[str, str] = {}
-        if token:
-            headers["Authorization"] = f"Bearer {token}"
+        headers = _merge_mcp_headers(token=token, extra_headers=extra_headers)
         httpx_factory = _make_httpx_factory(
             verify,
             cert=cert,
@@ -478,6 +496,7 @@ def call_tool_stream_sse(
     """
     verify = get_verify_ssl(server_cfg)
     cert = get_client_cert(server_cfg)
+    extra_headers = server_cfg.get("headers") or None
 
     if bool(server_cfg.get("persistent_session")):
         server_key = f"stream_sse::{url}"
@@ -487,6 +506,7 @@ def call_tool_stream_sse(
                     server_key=server_key,
                     base_url=url,
                     token=token,
+                    extra_headers=extra_headers,
                     timeout=timeout,
                     verify=verify,
                     tool_name=tool_name,
@@ -501,6 +521,7 @@ def call_tool_stream_sse(
         _call_tool_stream_sse_async(
             base_url=url,
             token=token,
+            extra_headers=extra_headers,
             timeout=timeout,
             verify=verify,
             tool_name=tool_name,
@@ -513,6 +534,7 @@ def call_tool_stream_sse(
 async def _list_tools_stream_http_async(
     base_url: str,
     token: Optional[str],
+    extra_headers: Optional[Dict[str, str]],
     timeout: float,
     verify: Union[bool, str],
     cert: Optional[Tuple[str, str]] = None,
@@ -528,6 +550,7 @@ async def _list_tools_stream_http_async(
             async with (
                 _make_stream_http_client(
                     token=token,
+                    extra_headers=extra_headers,
                     timeout=timeout,
                     verify=verify,
                     cert=cert,
@@ -582,10 +605,12 @@ def list_tools_stream_http(
     """
     verify = get_verify_ssl(server_cfg)
     cert = get_client_cert(server_cfg)
+    extra_headers = server_cfg.get("headers") or None
     return _run_coro(
         _list_tools_stream_http_async(
             base_url=url,
             token=token,
+            extra_headers=extra_headers,
             timeout=timeout,
             verify=verify,
             cert=cert,
@@ -596,6 +621,7 @@ def list_tools_stream_http(
 async def _call_tool_stream_http_async(
     base_url: str,
     token: Optional[str],
+    extra_headers: Optional[Dict[str, str]],
     timeout: float,
     verify: Union[bool, str],
     tool_name: str,
@@ -613,6 +639,7 @@ async def _call_tool_stream_http_async(
             async with (
                 _make_stream_http_client(
                     token=token,
+                    extra_headers=extra_headers,
                     timeout=timeout,
                     verify=verify,
                     cert=cert,
@@ -658,6 +685,7 @@ async def _call_tool_stream_http_persistent(
     server_key: str,
     base_url: str,
     token: Optional[str],
+    extra_headers: Optional[Dict[str, str]],
     timeout: float,
     verify: Union[bool, str],
     tool_name: str,
@@ -673,6 +701,7 @@ async def _call_tool_stream_http_persistent(
     async def _open_session(endpoint: str) -> ClientSession:
         http_client = _make_stream_http_client(
             token=token,
+            extra_headers=extra_headers,
             timeout=timeout,
             verify=verify,
             cert=cert,
@@ -745,6 +774,7 @@ def call_tool_stream_http(
     """
     verify = get_verify_ssl(server_cfg)
     cert = get_client_cert(server_cfg)
+    extra_headers = server_cfg.get("headers") or None
     server_key = f"stream_http::{url}"
 
     persistent = bool(server_cfg.get("persistent_session"))
@@ -753,6 +783,7 @@ def call_tool_stream_http(
             _call_tool_stream_http_async(
                 base_url=url,
                 token=token,
+                extra_headers=extra_headers,
                 timeout=timeout,
                 verify=verify,
                 tool_name=tool_name,
@@ -767,6 +798,7 @@ def call_tool_stream_http(
                 server_key=server_key,
                 base_url=url,
                 token=token,
+                extra_headers=extra_headers,
                 timeout=timeout,
                 verify=verify,
                 tool_name=tool_name,
@@ -780,6 +812,7 @@ def call_tool_stream_http(
             _call_tool_stream_http_async(
                 base_url=url,
                 token=token,
+                extra_headers=extra_headers,
                 timeout=timeout,
                 verify=verify,
                 tool_name=tool_name,

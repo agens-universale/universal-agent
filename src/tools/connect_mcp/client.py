@@ -8,6 +8,27 @@ from tools.connect_mcp.transport import get_transport
 _MCP_SESSIONS: Dict[str, str] = {}
 
 
+def _merge_mcp_headers(
+    *,
+    token: Optional[str],
+    extra_headers: Optional[Dict[str, str]] = None,
+) -> Dict[str, str]:
+    """
+    Собрать финальные HTTP headers для MCP запросов.
+
+    Правило приоритета:
+    - Authorization из `token` добавляется первой (если `token` задан)
+    - затем накладываются `extra_headers` (они могут переопределить Authorization).
+    """
+    headers: Dict[str, str] = {}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    if extra_headers:
+        for k, v in extra_headers.items():
+            headers[str(k)] = str(v)
+    return headers
+
+
 def _normalize_url(url: str) -> str:
     """
     Убедиться, что в URL есть схема (http/https).
@@ -37,8 +58,8 @@ def _send_initialized_notification(
         "Accept": "application/json",
         "mcp-session-id": session_id,
     }
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
+    extra_headers: Dict[str, str] = server_cfg.get("headers") or {}
+    headers.update(_merge_mcp_headers(token=token, extra_headers=extra_headers))
 
     request_fn = get_transport(server_cfg)
     _headers, _body = request_fn(url, headers, payload, timeout)
@@ -78,8 +99,8 @@ def _init_mcp_session(
         "Content-Type": "application/json",
         "Accept": "application/json",
     }
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
+    extra_headers: Dict[str, str] = server_cfg.get("headers") or {}
+    headers.update(_merge_mcp_headers(token=token, extra_headers=extra_headers))
 
     request_fn = get_transport(server_cfg)
     resp_headers, _body = request_fn(url, headers, payload, timeout)
@@ -110,8 +131,8 @@ def _tools_list_request(
         "Content-Type": "application/json",
         "mcp-session-id": session_id,
     }
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
+    extra_headers: Dict[str, str] = server_cfg.get("headers") or {}
+    headers.update(_merge_mcp_headers(token=token, extra_headers=extra_headers))
 
     payload: Dict[str, Any] = {
         "jsonrpc": "2.0",
@@ -158,8 +179,8 @@ def _call_mcp_tool(
         "Content-Type": "application/json",
         "mcp-session-id": session_id,
     }
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
+    extra_headers: Dict[str, str] = server_cfg.get("headers") or {}
+    headers.update(_merge_mcp_headers(token=token, extra_headers=extra_headers))
 
     payload: Dict[str, Any] = {
         "jsonrpc": "2.0",
