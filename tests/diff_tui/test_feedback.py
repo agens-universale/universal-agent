@@ -51,6 +51,16 @@ def test_format_approve_ack_and_cta():
     assert format_pending_cta(0) is None
 
 
+def test_format_undo_noop_ack():
+    from diff_tui.feedback import format_undo_noop_ack
+
+    assert "удалите файл вручную" in (
+        format_undo_noop_ack("diff-test.txt", "created_no_approve") or ""
+    )
+    assert format_undo_noop_ack("x", "other") is None
+    assert format_undo_noop_ack("", "created_no_approve") is None
+
+
 def test_build_undo_feedback_message_wraps_technical():
     msg = build_undo_feedback_message(["src/foo.py", "src/bar.py"])
     assert msg is not None

@@ -36,6 +36,17 @@ def format_undo_ack(undone_keys: Sequence[str]) -> str | None:
     return f"Отменено {len(keys)} {files_word(len(keys))}"
 
 
+def format_undo_noop_ack(key: str, reason: str) -> str | None:
+    """Ack когда undo не применился (created / untracked)."""
+    if not key:
+        return None
+    if reason == "created_no_approve":
+        return f"{key}: отмена невозможна — удалите файл вручную"
+    if reason == "untracked":
+        return f"{key}: отмена невозможна — удалите файл вручную"
+    return None
+
+
 def format_approve_ack(count: int, key: str | None = None) -> str | None:
     """Короткий ack после approve (одного или all)."""
     if count <= 0:

@@ -3,22 +3,24 @@ from __future__ import annotations
 
 from typing import Any, Callable, Optional, Sequence
 
+from rich.text import Text
 from textual import events
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import Screen
 from textual.widgets import Static
 
-from diff_tui.feedback import format_approve_ack, format_undo_ack
-from diff_tui.service import DiffFileEntry, DiffService
+from diff_tui.feedback import format_approve_ack, format_undo_ack, format_undo_noop_ack
+from diff_tui.service import DiffFileEntry, DiffService, OpResult
+from tui.palette import ACCENT, ERR, OK, MUTED, INK
 from tui.services.json_payload import render_payload
 
 _FOOTER = (
-    "[↑↓] выбрать  [Enter] diff  [a] approve  [r] undo  "
-    "[Ctrl+a] all  [Ctrl+r] undo all  [Esc] назад"
+    "[↑↓] выбрать  [Enter] дифф  [a] принять  [r] откатить  "
+    "[Ctrl+a] все  [Ctrl+r] откатить все  [Esc] назад"
 )
 _VIEWER_FOOTER = (
-    "[a] approve  [r] undo  [Ctrl+a] all  [Ctrl+r] undo all  "
+    "[a] принять  [r] откатить  [Ctrl+a] все  [Ctrl+r] откатить все  "
     "[↑↓ / PgUp PgDn] прокрутка  [Esc] назад"
 )
 
@@ -49,6 +51,26 @@ _KEY_ALIASES = {
 
 def _norm_key(key: str) -> str:
     return _KEY_ALIASES.get(key, key)
+
+
+_KIND_RU = {
+    "modified": "изменено",
+    "created": "создано",
+    "deleted": "удалено",
+}
+_KIND_STYLE = {
+    "modified": ACCENT,
+    "created": OK,
+    "deleted": ERR,
+}
+
+
+def _kind_label(entry: DiffFileEntry) -> str:
+    return _KIND_RU.get(entry.kind, entry.mark)
+
+
+def _kind_badge(entry: DiffFileEntry) -> str:
+    return f"[{_kind_label(entry)}]"
 
 
 def _service_from_config(launch_root: str, config: dict) -> DiffService:
@@ -143,7 +165,7 @@ class DiffScreen(Screen):
     def compose(self) -> ComposeResult:
         with Vertical(id="root"):
             with Horizontal(id="header"):
-                yield Static("diff", id="header-left", markup=False)
+                yield Static("дифф", id="header-left", markup=False)
             yield VerticalScroll(id="trace")
             yield Static("", id="diff-status", markup=False)
             yield Static(_FOOTER, id="footer", markup=False)
@@ -171,11 +193,23 @@ class DiffScreen(Screen):
     def _header_text(self) -> str:
         n = len(self._entries)
         mode = self._svc.mode
-        return f"diff · {n} pending · {mode}"
+        if n == 0:
+            return f"дифф · нет изменений · {mode}"
+        from diff_tui.feedback import files_word
 
-    def _row_label(self, entry: DiffFileEntry, *, selected: bool) -> str:
+        return f"дифф · {n} {files_word(n)} · {mode}"
+
+    def _row_label(self, entry: DiffFileEntry, *, selected: bool) -> Text:
         cursor = ">" if selected else " "
-        return f"{cursor} {entry.mark} {entry.key}  {entry.state}"
+        state = "ожидает" if entry.state == "pending" else "принято"
+        badge = _kind_badge(entry)
+        style = _KIND_STYLE.get(entry.kind, ACCENT)
+        t = Text(no_wrap=True)
+        t.append(f"{cursor} ")
+        t.append(f"{badge:<10}", style=style)
+        t.append(f" {entry.key}", style=INK)
+        t.append(f"  {state}", style=MUTED)
+        return t
 
     def _render_list(self) -> None:
         self.query_one("#header-left", Static).update(self._header_text())
@@ -187,7 +221,7 @@ class DiffScreen(Screen):
         trace.remove_children()
         if not self._entries:
             trace.mount(
-                Static("Нет pending-изменений", classes="line-meta", markup=False)
+                Static("Нет изменений", classes="line-meta", markup=False)
             )
             return
         selected_row: Optional[Static] = None
@@ -254,6 +288,19 @@ class DiffScreen(Screen):
         if undone_keys and self._on_undo_feedback is not None:
             self._on_undo_feedback(undone_keys)
 
+    def _apply_undo_result(self, result: OpResult) -> None:
+        """Показать ack успеха или явный no-op (created/untracked)."""
+        if result.undone_keys:
+            self._emit_undo_feedback(result.undone_keys)
+            return
+        noop = format_undo_noop_ack(result.key or "", result.reason)
+        if noop:
+            self._set_status(noop)
+            return
+        # Неуспех без понятного reason — не оставляем чужой stale-статус.
+        if not result.ok:
+            self._set_status("Отмена не выполнена")
+
     def _approve_selected(self) -> None:
         entry = self._selected()
         if entry is None:
@@ -270,7 +317,7 @@ class DiffScreen(Screen):
         if entry is None:
             return
         result = self._svc.undo(entry.key)
-        self._emit_undo_feedback(result.undone_keys)
+        self._apply_undo_result(result)
         self._reload()
 
     def _approve_all(self) -> None:
@@ -282,8 +329,29 @@ class DiffScreen(Screen):
         self._reload()
 
     def _undo_all(self) -> None:
+        created_keys = [e.key for e in self._entries if e.kind == "created"]
         result = self._svc.undo_all()
-        self._emit_undo_feedback(result.undone_keys)
+        if result.undone_keys:
+            self._emit_undo_feedback(result.undone_keys)
+            if created_keys:
+                n = len(created_keys)
+                base = format_undo_ack(result.undone_keys) or ""
+                self._set_status(
+                    f"{base}; {n} созданн"
+                    f"{'ый' if n == 1 else 'ых'} — удалите вручную"
+                )
+        elif created_keys:
+            if len(created_keys) == 1:
+                self._set_status(
+                    f"{created_keys[0]}: отмена невозможна — удалите файл вручную"
+                )
+            else:
+                self._set_status(
+                    f"Отмена невозможна для {len(created_keys)} созданных — "
+                    "удалите вручную"
+                )
+        elif not result.ok:
+            self._set_status("Отмена не выполнена")
         self._reload()
 
     def _run_from_viewer(self, fn: ActionFn) -> None:
@@ -304,13 +372,13 @@ class DiffScreen(Screen):
 
         self.app.push_screen(
             DiffViewerScreen(
-                title=f"diff · {entry.mark} {entry.key}",
+                title=f"дифф · {_kind_badge(entry)} · {entry.key}",
                 content=body,
                 on_approve=lambda: self._run_from_viewer(
                     lambda: self._approve_key(key)
                 ),
                 on_undo=lambda: self._run_from_viewer(
-                    lambda: self._emit_undo_feedback(self._svc.undo(key).undone_keys)
+                    lambda: self._apply_undo_result(self._svc.undo(key))
                 ),
                 on_approve_all=lambda: self._run_from_viewer(self._approve_all),
                 on_undo_all=lambda: self._run_from_viewer(self._undo_all),

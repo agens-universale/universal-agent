@@ -1,7 +1,7 @@
 """Footer-left контекстно зависит от наличия задачи и активного run.
 
 2 вариации:
-- Нет активного run (empty state / task idle): /sessions  /help  /config
+- Нет активного run (empty state / task idle): /sessions  /help  /config  [Ctrl+a] принять все
 - Task active + active run: /stop  /sessions  /help  /config
 (/skills и /export из футера убраны — доступны через палитру; /mcp не дублируем —
 подсказка /mcp (F3) в бренд-карточке.)
@@ -26,7 +26,7 @@ def _write_task(tmp_path, tid):
 
 @pytest.mark.asyncio
 async def test_footer_left_empty_state_no_back_no_stop_no_export():
-    """Empty state: /sessions /help /config; без /mcp, [Esc], /stop, /export."""
+    """Empty state: /sessions /help /config + Ctrl+a; без /mcp, [Esc], /stop, /export."""
     pytest.importorskip("textual")
     from textual.widgets import Static
     from tui.app import TuiApp
@@ -36,6 +36,7 @@ async def test_footer_left_empty_state_no_back_no_stop_no_export():
         assert "/sessions" in rendered
         assert "/help" in rendered
         assert "/config" in rendered
+        assert "[Ctrl+a] принять все" in rendered
         assert "/mcp" not in rendered
         assert "/skills" not in rendered
         assert "/stop" not in rendered
@@ -64,6 +65,7 @@ async def test_footer_left_task_idle_no_stop(tmp_path):
         assert "/sessions" in rendered
         assert "/help" in rendered
         assert "/config" in rendered
+        assert "[Ctrl+a] принять все" in rendered
         assert "/mcp" not in rendered
         assert "/skills" not in rendered
         assert "/export" not in rendered
@@ -133,3 +135,4 @@ async def test_footer_left_drops_stop_after_runner_finishes(tmp_path):
         rendered = str(pilot.app.query_one("#footer-left", Static).render())
         assert "/stop" not in rendered
         assert "/sessions" in rendered
+        assert "[Ctrl+a] принять все" in rendered

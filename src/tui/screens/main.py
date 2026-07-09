@@ -16,6 +16,7 @@ if TYPE_CHECKING:
 
 from textual import events
 from textual.app import ComposeResult
+from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import Screen
 from textual.widget import Widget
@@ -121,7 +122,8 @@ def select_active_substate(*, summarizing, finalizing, last_event_kind, since_la
 # Один набор команд в футере; /stop добавляется только при активном run.
 # (/skills, /export доступны через палитру — в футере лишние. /mcp не дублируем —
 # подсказка «/mcp (F3)» уже в бренд-карточке.)
-_FOOTER_LEFT = "/sessions  /help  /config"
+# Ctrl+a — принять все pending (частый кейс с экрана сессии; поштучно — только /diff).
+_FOOTER_LEFT = "/sessions  /help  /config  [Ctrl+a] принять все"
 _FOOTER_RUNNING_LEFT = "/stop  /sessions  /help  /config"
 _PLACEHOLDER_READY = "опишите задачу или /команда"
 _HINT_TEXT = {
@@ -137,6 +139,14 @@ _PREVIEW_PREFIX = "     "
 
 class TraceScreen(Screen):
     """Главный экран: трейс, ввод пользователя, команды и сопровождение run'а."""
+
+    # priority: перебить select-all у TextArea (#cmdinput).
+    BINDINGS = [
+        Binding("ctrl+a", "diff_approve_all", "принять все", show=False, priority=True),
+        Binding("ctrl+ф", "diff_approve_all", "принять все", show=False, priority=True),
+        Binding("ctrl+A", "diff_approve_all", "принять все", show=False, priority=True),
+        Binding("ctrl+Ф", "diff_approve_all", "принять все", show=False, priority=True),
+    ]
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
@@ -1767,7 +1777,8 @@ class TraceScreen(Screen):
         # /skill. Открытие пикера/набор по клавишам диск не трогают.
         if self._was_running and not is_running:
             self._skills_cache = None
-            # CTA про pending-диффы — после turn (не compact).
+            # CTA про pending-диффы — после turn (не compact). Монтаж отложен
+            # до конца poll / после stream_reset: иначе compaction стирает строку.
             if getattr(runner, "_thread_kind", "run") != "compact":
                 self._diff_pending_cta_pending = True
         # Спадающий фронт прогона True→False → зафиксировать терминальный статус
@@ -1797,9 +1808,6 @@ class TraceScreen(Screen):
             )
             self.app.last_stop_requested = False
             self._update_terminal_title()
-        if self._diff_pending_cta_pending and not is_running:
-            self._diff_pending_cta_pending = False
-            self._maybe_mount_diff_pending_cta()
         self._was_running = is_running
         # Активный ask_human — агент НЕ работает, он ждёт ответ юзера.
         # Индикатор активности здесь обманывает; банер ask_human уже
@@ -1960,6 +1968,7 @@ class TraceScreen(Screen):
         self._refresh_footer()
         self._update_terminal_title()   # статус живой в табе: [running]→[completed] и т.д.
         if self._store is None or self._active_task_id is None or self._cursor is None:
+            self._flush_diff_pending_cta()
             return
         tail = self._store.tail_events(self._active_task_id, self._cursor)
         if tail.stream_reset:
@@ -1976,10 +1985,13 @@ class TraceScreen(Screen):
             self._reconcile_ask_human_after_render(allow_remnant=False)
             self._refresh_header()
             self._refresh_footer()
+            # CTA после rebuild: falling-edge мог смонтировать строку до wipe.
+            self._flush_diff_pending_cta()
             return
         self._cursor = tail.next_cursor
         self._render_records(tail.new_records, live=True)
         self._refresh_header()
+        self._flush_diff_pending_cta()
 
     _BRAND_WIDE_MIN = 84  # ниже — MCP под логотип (адаптив A2)
 
@@ -2813,6 +2825,49 @@ class TraceScreen(Screen):
             )
         )
 
+    def action_diff_approve_all(self) -> None:
+        """С экрана сессии: принять все pending (поштучно — только /diff)."""
+        from diff_tui.feedback import format_approve_ack
+
+        svc = self._diff_service_for_preview()
+        if svc is None:
+            self._mount_trace_row(
+                prefix="· ",
+                content="принять все: launch_root не задан",
+                kind_class="line-meta",
+            )
+            return
+        try:
+            pending = svc.list_entries(pending_only=True)
+        except Exception:
+            self._mount_trace_row(
+                prefix="· ",
+                content="принять все: не удалось прочитать pending",
+                kind_class="line-meta",
+            )
+            return
+        n = len(pending)
+        if n == 0:
+            self._mount_trace_row(
+                prefix="· ",
+                content="Нет изменений для принятия",
+                kind_class="line-meta",
+            )
+            return
+        try:
+            svc.approve_all()
+        except Exception:
+            self._mount_trace_row(
+                prefix="· ",
+                content="принять все: ошибка",
+                kind_class="line-meta",
+            )
+            return
+        ack = format_approve_ack(n) or f"Принято {n}"
+        self._mount_trace_row(
+            prefix="", content=ack, kind_class="line-meta", focusable=False,
+        )
+
     def _on_diff_undo_feedback(self, undone_keys) -> None:
         """T15: после undo — technical user message + видимая строка в трейсе."""
         from diff_tui.feedback import build_undo_feedback_message, format_undo_ack
@@ -2827,9 +2882,20 @@ class TraceScreen(Screen):
             return
         self._append_technical_to_thread(msg)
 
+    def _flush_diff_pending_cta(self) -> None:
+        """Смонтировать post-turn CTA, если флаг выставлен и runner idle."""
+        if not self._diff_pending_cta_pending:
+            return
+        runner = getattr(self.app, "active_runner", None)
+        if runner is not None and runner.is_running():
+            return
+        self._diff_pending_cta_pending = False
+        self._maybe_mount_diff_pending_cta()
+
     def _maybe_mount_diff_pending_cta(self) -> None:
         """После turn: если есть pending — строка «Изменено N. /diff»."""
         from diff_tui.feedback import format_pending_cta
+        from tui.widgets.trace_row import TraceRow
 
         svc = self._diff_service_for_preview()
         if svc is None:
@@ -2841,6 +2907,10 @@ class TraceScreen(Screen):
         text = format_pending_cta(n)
         if not text:
             return
+        # Не дублировать, если уже есть такая строка (повторный flush / rebuild).
+        for row in self.query(TraceRow):
+            if str(getattr(row, "_content", "")) == text:
+                return
         self._mount_trace_row(
             prefix="", content=text, kind_class="line-meta", focusable=False,
         )

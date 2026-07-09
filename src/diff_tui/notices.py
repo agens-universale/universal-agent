@@ -5,10 +5,10 @@ from startup_notices import Notice
 
 
 NOTICE_UNDO_CREATED = (
-    "файл не откатывается; удалите вручную, если не нужен"
+    "отмена невозможна — удалите файл вручную"
 )
 NOTICE_UNDO_UNTRACKED = (
-    "undo не применяется к untracked; удалите вручную или добавьте в .gitignore"
+    "отмена невозможна для untracked — удалите вручную или добавьте в .gitignore"
 )
 
 
