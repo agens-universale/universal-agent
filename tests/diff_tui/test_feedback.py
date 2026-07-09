@@ -47,7 +47,9 @@ def test_format_approve_ack_and_cta():
     assert format_approve_ack(1, "src/a.py") == "Принято: src/a.py"
     assert format_approve_ack(3) == "Принято 3 файла"
     assert format_approve_ack(0) is None
-    assert format_pending_cta(1) == "Изменено 1 файл. /diff для просмотра"
+    assert format_pending_cta(1) == (
+        "Изменено 1 файл. diff [F5] · Ctrl+A принять все"
+    )
     assert format_pending_cta(0) is None
 
 
@@ -147,6 +149,7 @@ async def test_t15_diff_undo_appends_technical_to_thread(tmp_path, cache_proj):
             launch_root=str(cache_proj),
             config=cfg,
             on_undo_feedback=_capture,
+            on_ui_ack=trace._on_diff_ui_ack,
         )
         await pilot.app.push_screen(scr)
         await pilot.pause()

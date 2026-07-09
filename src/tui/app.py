@@ -36,6 +36,7 @@ class TuiApp(App):
         Binding("f2", "config", "/config"),
         Binding("f3", "mcp", "/mcp"),
         Binding("f4", "notices", "/notices"),
+        Binding("f5", "diff", "/diff"),
         Binding("ctrl+n", "new", "/new"),
         Binding("ctrl+s", "sessions", "/sessions"),
         # Ctrl+C: есть выделение → копировать; нет → отменить текущий run.
@@ -244,6 +245,16 @@ class TuiApp(App):
         if isinstance(self.screen, NoticesScreen):
             return
         self.push_screen(NoticesScreen())
+
+    def action_diff(self) -> None:
+        from tui.screens.diff import DiffScreen
+
+        if isinstance(self.screen, DiffScreen):
+            return
+        main = self._main_screen()
+        if main is None or not self._can_open_tool():
+            return
+        main._cmd_diff()
 
     def refresh_notices_indicators(self) -> None:
         """Обновить счётчики уведомлений в карточке главного экрана и футере активного."""

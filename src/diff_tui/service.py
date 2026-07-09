@@ -17,6 +17,7 @@ from diff_tui.notices import notice_undo_created, notice_undo_untracked
 from diff_tui.paths import canonical_path_key, orig_key
 from diff_tui.store import (
     STATUS_CREATED,
+    STATUS_DELETED,
     DiffStore,
     UndoResult,
 )
@@ -151,10 +152,15 @@ class DiffService:
     def _list_cache(self, *, pending_only: bool) -> list[DiffFileEntry]:
         out: list[DiffFileEntry] = []
         for e in self._store.list_entries(cleanup_stale=True):
+            disk = self._store._disk_path(e.key)
+            orig = self._store._orig_path(e.key)
             kind: FileKind
-            if e.status == STATUS_CREATED:
+            if e.status == STATUS_CREATED and not e.baseline_exists:
                 kind = "created"
-            elif e.status == "deleted":
+            elif e.status == STATUS_DELETED or (
+                not disk.is_file() and orig.is_file()
+            ):
+                # STATUS_DELETED или внешнее удаление (rm) при живом .orig.
                 kind = "deleted"
             else:
                 kind = "modified"
@@ -354,12 +360,22 @@ class DiffService:
         meta = index.get(key) or {}
         if meta.get("status") == STATUS_CREATED and not meta.get("baseline_exists"):
             if not disk.is_file():
-                return ""
+                return "(файл был создан, затем удалён с диска)"
             return build_unified_diff(
                 "",
                 disk.read_text(encoding="utf-8"),
                 fromfile="/dev/null",
                 tofile=key,
+                context_lines=self.preview_context_lines,
+                max_diff_chars=self.max_diff_chars,
+            )
+        # Удаление: .orig есть, файла на диске нет (в т.ч. внешний rm).
+        if orig.is_file() and not disk.is_file():
+            return build_unified_diff(
+                orig.read_text(encoding="utf-8"),
+                "",
+                fromfile=f"a/{key}",
+                tofile="/dev/null",
                 context_lines=self.preview_context_lines,
                 max_diff_chars=self.max_diff_chars,
             )

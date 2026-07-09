@@ -127,7 +127,7 @@ async def test_diff_screen_enter_opens_viewer(tmp_path, launch_root):
         footer = str(pilot.app.screen.query_one("#footer", Static).render())
         assert "[a] принять" in footer
         assert "[r] откатить" in footer
-        assert "[Ctrl+a] все" in footer
+        assert "[Ctrl+a] принять все" in footer
 
 
 @pytest.mark.asyncio
@@ -315,18 +315,62 @@ async def test_diff_screen_approve_shows_status(tmp_path, launch_root):
     pytest.importorskip("textual")
     from tui.app import TuiApp
     from tui.screens.diff import DiffScreen
+    from tui.widgets.trace_row import TraceRow
 
     _seed_pending(launch_root)
     cfg = _cfg(launch_root)
     async with TuiApp(
         threads_dir=str(tmp_path / "threads"), system="cli", config=cfg
     ).run_test() as pilot:
-        scr = DiffScreen(launch_root=str(launch_root), config=cfg)
+        scr = DiffScreen(
+            launch_root=str(launch_root),
+            config=cfg,
+            on_ui_ack=pilot.app.screen._on_diff_ui_ack,
+        )
         await pilot.app.push_screen(scr)
         await pilot.pause()
         await pilot.press("a")
         await pilot.pause()
         assert scr._status == "Принято: src/foo.py"
+        # Esc назад — ack уже в трейсе под DiffScreen stack; после pop виден на TraceScreen
+        await pilot.press("escape")
+        await pilot.pause()
+        found = any(
+            "Принято: src/foo.py" in str(row._content)
+            for row in pilot.app.screen.query(TraceRow)
+        )
+        assert found
+
+
+@pytest.mark.asyncio
+async def test_diff_screen_undo_shows_trace_ack(tmp_path, launch_root):
+    pytest.importorskip("textual")
+    from tui.app import TuiApp
+    from tui.screens.diff import DiffScreen
+    from tui.widgets.trace_row import TraceRow
+
+    _seed_pending(launch_root)
+    cfg = _cfg(launch_root)
+    async with TuiApp(
+        threads_dir=str(tmp_path / "threads"), system="cli", config=cfg
+    ).run_test() as pilot:
+        scr = DiffScreen(
+            launch_root=str(launch_root),
+            config=cfg,
+            on_ui_ack=pilot.app.screen._on_diff_ui_ack,
+        )
+        await pilot.app.push_screen(scr)
+        await pilot.pause()
+        await pilot.press("r")
+        await pilot.pause()
+        assert scr._status == "Отменено: src/foo.py"
+        await pilot.press("escape")
+        await pilot.pause()
+        found = any(
+            "Отменено: src/foo.py" in str(row._content)
+            for row in pilot.app.screen.query(TraceRow)
+        )
+        assert found
 
 
 @pytest.mark.asyncio
@@ -346,7 +390,7 @@ async def test_trace_mounts_pending_cta(tmp_path, launch_root):
         pilot.app.screen._maybe_mount_diff_pending_cta()
         await pilot.pause()
         found = any(
-            "Изменено" in str(row._content) and "/diff" in str(row._content)
+            "Изменено" in str(row._content) and "diff [F5]" in str(row._content)
             for row in pilot.app.screen.query(TraceRow)
         )
         assert found, "expected pending CTA in trace"
@@ -380,10 +424,37 @@ async def test_flush_cta_survives_after_clear_trace(tmp_path, launch_root):
         scr._flush_diff_pending_cta()
         await pilot.pause()
         found = any(
-            "Изменено" in str(row._content) and "/diff" in str(row._content)
+            "Изменено" in str(row._content) and "diff [F5]" in str(row._content)
             for row in scr.query(TraceRow)
         )
         assert found
+
+
+@pytest.mark.asyncio
+async def test_cta_always_shows_when_pending(tmp_path, launch_root):
+    """После каждого turn при pending>0 — CTA, без дедупа по тексту."""
+    pytest.importorskip("textual")
+    from tui.app import TuiApp
+    from tui.screens.main import TraceScreen
+    from tui.widgets.trace_row import TraceRow
+
+    _seed_pending(launch_root)
+    cfg = _cfg(launch_root)
+    cfg["launch_root"] = str(launch_root)
+    async with TuiApp(
+        threads_dir=str(tmp_path / "threads"), system="cli", config=cfg
+    ).run_test() as pilot:
+        scr = pilot.app.screen
+        assert isinstance(scr, TraceScreen)
+        scr._maybe_mount_diff_pending_cta()
+        scr._maybe_mount_diff_pending_cta()
+        await pilot.pause()
+        ctas = [
+            row
+            for row in scr.query(TraceRow)
+            if "Изменено" in str(row._content) and "diff [F5]" in str(row._content)
+        ]
+        assert len(ctas) == 2
 
 
 @pytest.mark.asyncio
@@ -449,6 +520,28 @@ async def test_trace_ctrl_a_approves_all(tmp_path, launch_root):
 
         svc = _service_from_config(str(launch_root), cfg)
         assert svc.list_entries(pending_only=True) == []
+
+
+@pytest.mark.asyncio
+async def test_f5_opens_diff(tmp_path, launch_root):
+    pytest.importorskip("textual")
+    from tui.app import TuiApp
+    from tui.screens.diff import DiffScreen
+    from tui.screens.main import TraceScreen
+
+    _seed_pending(launch_root)
+    cfg = _cfg(launch_root)
+    cfg["launch_root"] = str(launch_root)
+    async with TuiApp(
+        threads_dir=str(tmp_path / "threads"), system="cli", config=cfg
+    ).run_test() as pilot:
+        assert isinstance(pilot.app.screen, TraceScreen)
+        await pilot.press("f5")
+        await pilot.pause()
+        assert isinstance(pilot.app.screen, DiffScreen)
+        await pilot.press("f5")
+        await pilot.pause()
+        assert sum(1 for s in pilot.app.screen_stack if isinstance(s, DiffScreen)) == 1
 
 
 @pytest.mark.asyncio

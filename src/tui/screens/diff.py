@@ -17,14 +17,15 @@ from tui.services.json_payload import render_payload
 
 _FOOTER = (
     "[↑↓] выбрать  [Enter] дифф  [a] принять  [r] откатить  "
-    "[Ctrl+a] все  [Ctrl+r] откатить все  [Esc] назад"
+    "[Ctrl+a] принять все  [Ctrl+r] откатить все  [Esc] назад"
 )
 _VIEWER_FOOTER = (
-    "[a] принять  [r] откатить  [Ctrl+a] все  [Ctrl+r] откатить все  "
+    "[a] принять  [r] откатить  [Ctrl+a] принять все  [Ctrl+r] откатить все  "
     "[↑↓ / PgUp PgDn] прокрутка  [Esc] назад"
 )
 
 UndoFeedbackFn = Callable[[Sequence[str]], None]
+UiAckFn = Callable[[str], None]
 ActionFn = Callable[[], None]
 
 # ЙЦУКЕН / Caps Lock: регистр не должен менять смысл a/r.
@@ -149,11 +150,13 @@ class DiffScreen(Screen):
         config: Optional[dict] = None,
         service: Optional[DiffService] = None,
         on_undo_feedback: Optional[UndoFeedbackFn] = None,
+        on_ui_ack: Optional[UiAckFn] = None,
     ) -> None:
         super().__init__()
         self._config = config or {}
         self._svc = service or _service_from_config(launch_root, self._config)
         self._on_undo_feedback = on_undo_feedback
+        self._on_ui_ack = on_ui_ack
         self._entries: list[DiffFileEntry] = []
         self._selected_idx = -1
         self._status: str = ""
@@ -161,6 +164,14 @@ class DiffScreen(Screen):
     @property
     def service(self) -> DiffService:
         return self._svc
+
+    def _emit_ui_ack(self, text: str) -> None:
+        """Статус на DiffScreen + строка в трейсе (только UX, не в thread модели)."""
+        if not text:
+            return
+        self._set_status(text)
+        if self._on_ui_ack is not None:
+            self._on_ui_ack(text)
 
     def compose(self) -> ComposeResult:
         with Vertical(id="root"):
@@ -284,7 +295,7 @@ class DiffScreen(Screen):
     def _emit_undo_feedback(self, undone_keys: Sequence[str]) -> None:
         ack = format_undo_ack(undone_keys)
         if ack:
-            self._set_status(ack)
+            self._emit_ui_ack(ack)
         if undone_keys and self._on_undo_feedback is not None:
             self._on_undo_feedback(undone_keys)
 
@@ -295,11 +306,10 @@ class DiffScreen(Screen):
             return
         noop = format_undo_noop_ack(result.key or "", result.reason)
         if noop:
-            self._set_status(noop)
+            self._emit_ui_ack(noop)
             return
-        # Неуспех без понятного reason — не оставляем чужой stale-статус.
         if not result.ok:
-            self._set_status("Отмена не выполнена")
+            self._emit_ui_ack("Отмена не выполнена")
 
     def _approve_selected(self) -> None:
         entry = self._selected()
@@ -309,7 +319,7 @@ class DiffScreen(Screen):
         self._svc.approve(key)
         ack = format_approve_ack(1, key)
         if ack:
-            self._set_status(ack)
+            self._emit_ui_ack(ack)
         self._reload()
 
     def _undo_selected(self) -> None:
@@ -325,33 +335,36 @@ class DiffScreen(Screen):
         self._svc.approve_all()
         ack = format_approve_ack(n)
         if ack:
-            self._set_status(ack)
+            self._emit_ui_ack(ack)
         self._reload()
 
     def _undo_all(self) -> None:
         created_keys = [e.key for e in self._entries if e.kind == "created"]
         result = self._svc.undo_all()
         if result.undone_keys:
-            self._emit_undo_feedback(result.undone_keys)
             if created_keys:
                 n = len(created_keys)
                 base = format_undo_ack(result.undone_keys) or ""
-                self._set_status(
+                self._emit_ui_ack(
                     f"{base}; {n} созданн"
                     f"{'ый' if n == 1 else 'ых'} — удалите вручную"
                 )
+                if self._on_undo_feedback is not None:
+                    self._on_undo_feedback(result.undone_keys)
+            else:
+                self._emit_undo_feedback(result.undone_keys)
         elif created_keys:
             if len(created_keys) == 1:
-                self._set_status(
+                self._emit_ui_ack(
                     f"{created_keys[0]}: отмена невозможна — удалите файл вручную"
                 )
             else:
-                self._set_status(
+                self._emit_ui_ack(
                     f"Отмена невозможна для {len(created_keys)} созданных — "
                     "удалите вручную"
                 )
         elif not result.ok:
-            self._set_status("Отмена не выполнена")
+            self._emit_ui_ack("Отмена не выполнена")
         self._reload()
 
     def _run_from_viewer(self, fn: ActionFn) -> None:
@@ -368,7 +381,7 @@ class DiffScreen(Screen):
         key = entry.key
         body = self._svc.visual_diff(key)
         if not body.strip():
-            body = "(нет pending-диффа)"
+            body = "(нет содержимого диффа — файл вне учёта или baseline недоступен)"
 
         self.app.push_screen(
             DiffViewerScreen(
@@ -389,4 +402,4 @@ class DiffScreen(Screen):
         self._svc.approve(key)
         ack = format_approve_ack(1, key)
         if ack:
-            self._set_status(ack)
+            self._emit_ui_ack(ack)

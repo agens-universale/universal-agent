@@ -60,7 +60,10 @@ def format_pending_cta(count: int) -> str | None:
     """Post-turn CTA в трейсе, если есть pending."""
     if count <= 0:
         return None
-    return f"Изменено {count} {files_word(count)}. /diff для просмотра"
+    return (
+        f"Изменено {count} {files_word(count)}. "
+        "diff [F5] · Ctrl+A принять все"
+    )
 
 
 def build_undo_feedback_body(undone_keys: Sequence[str]) -> str:

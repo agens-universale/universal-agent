@@ -69,7 +69,7 @@ def build_default_registry() -> CommandRegistry:
         Command("config", (), "", "конфиг сессии + пути к файлам", hotkey="F2"),
         Command("mcp", (), "", "MCP-серверы и их тулы", hotkey="F3"),
         Command("notices", (), "", "уведомления (старт + runtime)", hotkey="F4"),
-        Command("diff", (), "", "просмотр pending-диффов, approve/undo"),
+        Command("diff", (), "", "просмотр pending-диффов, принять/откатить", hotkey="F5"),
         Command("export", (), "[txt|json|log-txt|log-json]", "экспорт сессии",
                 arg_options=(("txt", "вся сессия в читаемом виде"),
                              ("json", "структурированные данные сессии"),

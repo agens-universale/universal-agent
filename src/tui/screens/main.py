@@ -122,8 +122,8 @@ def select_active_substate(*, summarizing, finalizing, last_event_kind, since_la
 # Один набор команд в футере; /stop добавляется только при активном run.
 # (/skills, /export доступны через палитру — в футере лишние. /mcp не дублируем —
 # подсказка «/mcp (F3)» уже в бренд-карточке.)
-# Ctrl+a — принять все pending (частый кейс с экрана сессии; поштучно — только /diff).
-_FOOTER_LEFT = "/sessions  /help  /config  [Ctrl+a] принять все"
+# Diff: F5 / Ctrl+A — в CTA трейса и футере /diff, не в базовом хроме сессии.
+_FOOTER_LEFT = "/sessions  /help  /config"
 _FOOTER_RUNNING_LEFT = "/stop  /sessions  /help  /config"
 _PLACEHOLDER_READY = "опишите задачу или /команда"
 _HINT_TEXT = {
@@ -1985,7 +1985,9 @@ class TraceScreen(Screen):
             self._reconcile_ask_human_after_render(allow_remnant=False)
             self._refresh_header()
             self._refresh_footer()
-            # CTA после rebuild: falling-edge мог смонтировать строку до wipe.
+            # Wipe стёр CTA: если idle и есть pending — показать снова.
+            if not is_running:
+                self._diff_pending_cta_pending = True
             self._flush_diff_pending_cta()
             return
         self._cursor = tail.next_cursor
@@ -2822,6 +2824,7 @@ class TraceScreen(Screen):
                 launch_root=str(launch_root),
                 config=cfg,
                 on_undo_feedback=self._on_diff_undo_feedback,
+                on_ui_ack=self._on_diff_ui_ack,
             )
         )
 
@@ -2864,19 +2867,20 @@ class TraceScreen(Screen):
             )
             return
         ack = format_approve_ack(n) or f"Принято {n}"
+        self._on_diff_ui_ack(ack)
+
+    def _on_diff_ui_ack(self, text: str) -> None:
+        """TUI-only строка в трейсе после принять/откатить (не в thread модели)."""
+        if not text:
+            return
         self._mount_trace_row(
-            prefix="", content=ack, kind_class="line-meta", focusable=False,
+            prefix="", content=text, kind_class="line-meta", focusable=False,
         )
 
     def _on_diff_undo_feedback(self, undone_keys) -> None:
-        """T15: после undo — technical user message + видимая строка в трейсе."""
-        from diff_tui.feedback import build_undo_feedback_message, format_undo_ack
+        """T15: после undo — technical user message агенту (визуал — через on_ui_ack)."""
+        from diff_tui.feedback import build_undo_feedback_message
 
-        ack = format_undo_ack(undone_keys)
-        if ack:
-            self._mount_trace_row(
-                prefix="", content=ack, kind_class="line-meta", focusable=False,
-            )
         msg = build_undo_feedback_message(undone_keys)
         if msg is None:
             return
@@ -2893,9 +2897,8 @@ class TraceScreen(Screen):
         self._maybe_mount_diff_pending_cta()
 
     def _maybe_mount_diff_pending_cta(self) -> None:
-        """После turn: если есть pending — строка «Изменено N. /diff»."""
+        """После turn: если есть незаапрувленные диффы — строка «Изменено N. /diff»."""
         from diff_tui.feedback import format_pending_cta
-        from tui.widgets.trace_row import TraceRow
 
         svc = self._diff_service_for_preview()
         if svc is None:
@@ -2907,10 +2910,6 @@ class TraceScreen(Screen):
         text = format_pending_cta(n)
         if not text:
             return
-        # Не дублировать, если уже есть такая строка (повторный flush / rebuild).
-        for row in self.query(TraceRow):
-            if str(getattr(row, "_content", "")) == text:
-                return
         self._mount_trace_row(
             prefix="", content=text, kind_class="line-meta", focusable=False,
         )
@@ -3431,7 +3430,7 @@ class TraceScreen(Screen):
             self._cmd_mcp()
             return
         if name == "diff":
-            self._cmd_diff()
+            self.app.action_diff()
             return
         if name == "notices":
             self.app.action_notices()

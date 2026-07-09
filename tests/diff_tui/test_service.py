@@ -106,6 +106,24 @@ def test_t5_cache_undo_created_noop_notice(cache_proj):
     assert any(n.code == "diff_tui_undo_created" for n in notices)
 
 
+def test_cache_external_delete_shows_deleted_diff(cache_proj):
+    """Файл удалён с диска (rm), .orig жив → kind=deleted и visual_diff не пустой."""
+    target = cache_proj / "src" / "gone.py"
+    target.write_text("keep-me\n", encoding="utf-8")
+    DiffStore(str(cache_proj)).register_mutation(str(target))
+    target.write_text("changed\n", encoding="utf-8")
+    target.unlink()
+
+    svc = DiffService(str(cache_proj), emit_notices=False)
+    entries = {e.key: e for e in svc.list_entries(pending_only=True)}
+    assert "src/gone.py" in entries
+    assert entries["src/gone.py"].kind == "deleted"
+    body = svc.visual_diff("src/gone.py")
+    assert body.strip()
+    assert "/dev/null" in body
+    assert "keep-me" in body or "-keep-me" in body or "changed" in body
+
+
 # --- git T11–T12 ---
 
 
