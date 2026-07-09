@@ -45,7 +45,7 @@ def test_default_registry_is_exactly_keep_set():
     names = sorted(c.name for c in reg.list_commands())
     assert names == sorted([
         "sessions", "new", "stop", "skill", "skills",
-        "status", "config", "mcp", "notices", "export", "help", "init", "compact", "quit",
+        "status", "config", "mcp", "notices", "diff", "export", "help", "init", "compact", "quit",
     ])
 
 

@@ -35,6 +35,7 @@ def test_loopback_client_ignores_socks_proxy_env(monkeypatch: pytest.MonkeyPatch
 
     client = _make_stream_http_client(
         token=None,
+        extra_headers=None,
         timeout=1.0,
         verify=True,
         base_url="http://127.0.0.1:8765/mcp",

@@ -9,6 +9,7 @@ import argparse
 import importlib
 import os
 import sys
+from pathlib import Path
 from typing import Optional, Sequence
 
 
@@ -100,6 +101,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return 0
 
     config_dict["console_trace"] = False  # TUI owns alt-screen output.
+    # Snapshot cwd на старте TUI — источник launch_root для Diff-TUI / perimeter.
+    # Не подменять live Path.cwd() после возможных cd внутри сессии.
+    config_dict["launch_root"] = str(Path.cwd().resolve())
 
     from thread_store import resolve_threads_dir
     threads_dir = resolve_threads_dir(config_dict)

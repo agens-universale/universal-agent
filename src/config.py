@@ -306,6 +306,7 @@ def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
         "mcp-meta": app_cfg.mcp.meta.model_dump(by_alias=True),
         "pricing": app_cfg.pricing.model_dump(),
         "agent_auth": app_cfg.agent_auth.model_dump() if app_cfg.agent_auth else {},
+        "diff_tui": app_cfg.diff_tui.model_dump(),
     }
 
     apply_swarm_env_overrides(config_dict, config_dir)

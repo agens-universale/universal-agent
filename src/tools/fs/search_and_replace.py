@@ -7,6 +7,7 @@ from utils.tool_report_paths import tool_report_abspath
 from security.path_policy import enforce_write_guard
 from tools.schema_optional import coalesce_optional_string
 from utils.file_text import check_expected_file_sha256, is_valid_sha256_hex
+from diff_tui.tracking import snapshot_before_text_mutation
 
 
 class SearchAndReplace(AbstractSimpleTool):
@@ -843,6 +844,7 @@ Update version string:
                 )
 
         try:
+            snapshot_before_text_mutation(self, path)
             self._backend.write(path, new_content, encoding="utf-8")
         except Exception as e:
             return _result(

@@ -232,6 +232,8 @@ class TraceScreen(Screen):
         # Флаг состояния runner на предыдущем тике — для детекта спадающего фронта.
         self._was_running: bool = False
         self._was_summarizing: bool = False   # для baseline last_compact_msg_count
+        # Post-turn CTA «Изменено N · /diff» — один раз на falling-edge прогона.
+        self._diff_pending_cta_pending: bool = False
         # Транзиентная подсказка в footer-left (esc-confirm и paste-hint делят слот).
         self._esc_confirm_kind: Optional[str] = None  # "clear" | "stop" | None
         self._footer_hint_timer = None                # textual.Timer
@@ -1277,11 +1279,13 @@ class TraceScreen(Screen):
         if ev.kind == "error":
             return  # error виден inline в row, preview не нужен
         from tui.services.trace_render import raw_output
-        raw = raw_output(ev)
-        if not raw:
-            return
         from tui.services.tool_preview import extract_preview_lines
-        lines, remaining = extract_preview_lines(raw)
+
+        raw = raw_output(ev) or ""
+        lines, remaining = extract_preview_lines(raw) if raw else ([], 0)
+        # Write-tools часто без content-ключей → fallback: DiffService visual_diff.
+        if not lines:
+            lines, remaining = self._diff_preview_lines(ev)
         if not lines:
             return
         # Формат preview: каждая строка с префиксом `_PREVIEW_PREFIX`, маркер `... +N more` в конце.
@@ -1292,6 +1296,61 @@ class TraceScreen(Screen):
         trace = self.query_one("#trace", VerticalScroll)
         trace.mount(preview, after=row)
         self._tool_call_preview_widgets[ev.call_id] = preview
+
+    def _diff_service_for_preview(self):
+        cfg = getattr(self.app, "_config", None) or {}
+        launch_root = cfg.get("launch_root")
+        if not launch_root:
+            return None
+        from tui.screens.diff import _service_from_config
+
+        return _service_from_config(str(launch_root), cfg)
+
+    def _tool_mutation_path(self, ev) -> Optional[str]:
+        """path из result output или call arguments (fs text-мутации)."""
+        from tui.services.tool_preview import unwrap_tool_output_dict
+        from tui.services.trace_render import raw_output
+
+        raw = raw_output(ev) or ""
+        data = unwrap_tool_output_dict(raw) if raw else None
+        if isinstance(data, dict):
+            path = data.get("path")
+            if isinstance(path, str) and path:
+                return path
+        call_id = getattr(ev, "call_id", None)
+        if not call_id:
+            return None
+        for call_ev in self._task_events:
+            if getattr(call_ev, "call_id", None) != call_id:
+                continue
+            if getattr(call_ev, "kind", None) != "call":
+                continue
+            payload = getattr(call_ev, "full_payload", None) or {}
+            args = payload.get("arguments")
+            if isinstance(args, dict):
+                path = args.get("path")
+                if isinstance(path, str) and path:
+                    return path
+            break
+        return None
+
+    def _diff_preview_lines(self, ev) -> tuple[list[str], int]:
+        """Краткий pending-diff из DiffService (не tool-output ``diff``)."""
+        path = self._tool_mutation_path(ev)
+        if not path:
+            return [], 0
+        svc = self._diff_service_for_preview()
+        if svc is None:
+            return [], 0
+        try:
+            body = svc.visual_diff(path)
+        except Exception:
+            return [], 0
+        if not body or not body.strip():
+            return [], 0
+        all_lines = [ln for ln in body.splitlines() if ln != ""]
+        head = all_lines[:3]
+        return head, max(0, len(all_lines) - 3)
 
     def _on_ask_human_event(self, ev, *, live: bool = False) -> None:
         from tui.widgets.ask_human_banner import AskHumanBanner
@@ -1708,6 +1767,9 @@ class TraceScreen(Screen):
         # /skill. Открытие пикера/набор по клавишам диск не трогают.
         if self._was_running and not is_running:
             self._skills_cache = None
+            # CTA про pending-диффы — после turn (не compact).
+            if getattr(runner, "_thread_kind", "run") != "compact":
+                self._diff_pending_cta_pending = True
         # Спадающий фронт прогона True→False → зафиксировать терминальный статус
         # в meta.tui.status (TUI-owned), чтобы бейдж пережил переоткрытие сессии.
         if self._was_running and not is_running and self._store is not None \
@@ -1735,6 +1797,9 @@ class TraceScreen(Screen):
             )
             self.app.last_stop_requested = False
             self._update_terminal_title()
+        if self._diff_pending_cta_pending and not is_running:
+            self._diff_pending_cta_pending = False
+            self._maybe_mount_diff_pending_cta()
         self._was_running = is_running
         # Активный ask_human — агент НЕ работает, он ждёт ответ юзера.
         # Индикатор активности здесь обманывает; банер ask_human уже
@@ -2569,9 +2634,15 @@ class TraceScreen(Screen):
                 # Живой in-run диалог: владелец вопроса тот же и работает → stdin.
                 client_id = self._track_pending(display_text=text, wire_content=text)
                 self._mount_user_reply(text, state="pending", client_id=client_id)
+                target.submit_ask_human_reply(text)
+                # Optimistic: снимаем баннер сразу после ответа, не ждём
+                # function_call_output в полле (иначе 5–10с «висящего» вопроса
+                # и hide индикатора, пока агент уже работает). Cleanup B-2
+                # в _render_event остаётся страховкой для replay/cancel.
+                self._unmount_ask_human_banner()
                 self._reset_thinking_timer()
                 self._on_user_text_submitted(text)
-                target.submit_ask_human_reply(text)
+                self._show_thinking_indicator(state="thinking")
                 return
             # Владельца нет / сменился / завис → отвечаем новым ходом.
             self._unmount_ask_human_banner()
@@ -2722,6 +2793,95 @@ class TraceScreen(Screen):
             config=getattr(self.app, "_config", None) or {},
             tools_snapshot=self._mcp_screen_snapshot(),
         ))
+
+    def _cmd_diff(self) -> None:
+        from tui.screens.diff import DiffScreen
+        cfg = getattr(self.app, "_config", None) or {}
+        launch_root = cfg.get("launch_root")
+        if not launch_root:
+            self._mount_trace_row(
+                prefix="· ",
+                content="diff: launch_root не задан",
+                kind_class="line-meta",
+            )
+            return
+        self.app.push_screen(
+            DiffScreen(
+                launch_root=str(launch_root),
+                config=cfg,
+                on_undo_feedback=self._on_diff_undo_feedback,
+            )
+        )
+
+    def _on_diff_undo_feedback(self, undone_keys) -> None:
+        """T15: после undo — technical user message + видимая строка в трейсе."""
+        from diff_tui.feedback import build_undo_feedback_message, format_undo_ack
+
+        ack = format_undo_ack(undone_keys)
+        if ack:
+            self._mount_trace_row(
+                prefix="", content=ack, kind_class="line-meta", focusable=False,
+            )
+        msg = build_undo_feedback_message(undone_keys)
+        if msg is None:
+            return
+        self._append_technical_to_thread(msg)
+
+    def _maybe_mount_diff_pending_cta(self) -> None:
+        """После turn: если есть pending — строка «Изменено N. /diff»."""
+        from diff_tui.feedback import format_pending_cta
+
+        svc = self._diff_service_for_preview()
+        if svc is None:
+            return
+        try:
+            n = len(svc.list_entries(pending_only=True))
+        except Exception:
+            return
+        text = format_pending_cta(n)
+        if not text:
+            return
+        self._mount_trace_row(
+            prefix="", content=text, kind_class="line-meta", focusable=False,
+        )
+
+    def _append_technical_to_thread(self, msg: dict) -> None:
+        tid = self._active_task_id or getattr(
+            getattr(self.app, "tui_state", None), "active_task_id", None
+        )
+        if not tid:
+            return
+        runner = getattr(self.app, "active_runner", None)
+        if runner is not None and runner.is_running():
+            runner.add_message(msg)
+            return
+        threads_dir = getattr(self.app, "_threads_dir", None)
+        system = getattr(self.app, "_system", "cli")
+        if not threads_dir:
+            return
+        from thread_store import (
+            append_new_thread_messages,
+            load_thread_messages,
+            load_thread_meta,
+            save_thread_meta,
+        )
+
+        _msgs, keys, max_seq = load_thread_messages(threads_dir, system, tid)
+        written = append_new_thread_messages(
+            threads_dir,
+            system,
+            tid,
+            [msg],
+            keys,
+            start_seq=max_seq,
+        )
+        if written and self._store is not None:
+            meta = load_thread_meta(threads_dir, system, tid) or {}
+            try:
+                meta["messages_count"] = int(meta.get("messages_count", 0)) + written
+            except (TypeError, ValueError):
+                meta["messages_count"] = written
+            save_thread_meta(threads_dir, system, tid, meta)
 
     def _cmd_new(self) -> None:
         self._resumed_prompt = None                      # новая сессия — без resume-промпта
@@ -3199,6 +3359,9 @@ class TraceScreen(Screen):
             return
         if name == "mcp":
             self._cmd_mcp()
+            return
+        if name == "diff":
+            self._cmd_diff()
             return
         if name == "notices":
             self.app.action_notices()

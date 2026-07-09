@@ -302,8 +302,8 @@ async def test_replay_empty_response_shows_meta_and_unmounts_banner(tmp_path):
 
 @pytest.mark.asyncio
 async def test_live_submit_mounts_pending_user_reply(tmp_path):
-    """В live-ask_human submit Enter-ом монтирует pending user-реплику
-    + дёргает runner.submit_ask_human_reply."""
+    """В live-ask_human submit Enter-ом монтирует pending user-реплику,
+    сразу снимает баннер и показывает thinking-индикатор."""
     app = TuiApp(threads_dir=str(tmp_path / "threads"), system="cli", config={})
     async with app.run_test() as pilot:
         screen = app.screen
@@ -337,11 +337,20 @@ async def test_live_submit_mounts_pending_user_reply(tmp_path):
         await pilot.pause()
         # Runner получил текст.
         assert runner.submitted == ["да, поехали"]
+        # Баннер снят сразу (не ждём function_call_output).
+        assert screen._ask_human_banner is None
+        assert app.tui_state.ask_human_state is None
         # В трассе есть pending user-реплика.
         from tui.widgets.user_reply import UserReplyContainer
         replies = list(screen.query(UserReplyContainer))
         assert replies, "user-reply виджет должен быть смонтирован"
         assert replies[-1]._state == "pending"
+        # Филлер «думаю…» уже виден — агент снова работает, ответа юзера не ждём.
+        from tui.widgets.thinking_indicator import ThinkingIndicator
+        indicators = list(screen.query(ThinkingIndicator))
+        assert indicators, "thinking-индикатор должен появиться сразу после ответа"
+        assert not indicators[0].has_class("hidden")
+        assert indicators[0]._state == "thinking"
 
 
 @pytest.mark.asyncio

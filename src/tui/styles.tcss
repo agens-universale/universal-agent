@@ -18,6 +18,8 @@ Screen {
 #header-right { width: auto; color: $deep-dim; text-align: right; padding-right: 1; }
 #footer { height: 2; background: $bg; color: $dim;
           padding: 0 1; }
+#diff-status { height: 1; background: $bg; color: $accent;
+               content-align: left middle; padding: 0 1; }
 #footer-left  { width: 1fr; color: $dim; }
 #footer-right { width: auto; color: $deep-dim; text-align: right; padding-right: 1; }
 

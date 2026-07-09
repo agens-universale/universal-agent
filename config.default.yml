@@ -56,6 +56,12 @@ tui:
   # и .gc/AGENTS.md. Игнорируется, если задан paths.agent_md_path (путь главнее).
   agentsmd_override: false
 
+# Diff-TUI: visual review/approve/undo правок агента (не параметры fs return_diff).
+diff_tui:
+  cache_max_orig: 500          # LRU лимит .orig в cache-mode
+  preview_context_lines: 3     # контекст в TUI visual diff / trace-preview
+  max_diff_chars: 8000         # усечение больших visual diff (0 = без лимита)
+
 logging:
   full_log_backend: false
   console_trace: true
