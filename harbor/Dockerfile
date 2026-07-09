@@ -51,7 +51,7 @@ RUN uv pip install --system "polar @ git+https://github.com/NVIDIA-NeMo/ProRL-Ag
 # gc-cli ставится рядом с harbor → harbor может импортить и фреймворк, и gc-cli.
 RUN --mount=type=ssh \
     uv tool install harbor \
-      --with "gc-cli-pub @ git+ssh://git@gitverse.ru/gigacode-ai/background-agent@master"
+      --with "gc-ua @ git+ssh://git@gitverse.ru/gigacode-ai/background-agent@master"
 
 # Адаптер запекаем в образ: клонируем ветку, кладём harbor/adapters на PYTHONPATH.
 # PYTHONPATH наследуется и venv-питоном harbor → harbor видит

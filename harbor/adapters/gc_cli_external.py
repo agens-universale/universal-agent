@@ -34,7 +34,7 @@ from harbor.models.trajectories import (
 from harbor.utils.trajectory_utils import format_trajectory_json
 
 # gc-cli is installed as a package into the harbor runner env
-# (`uv pip install gc-cli-pub`), so it imports directly — no source-dir / PYTHONPATH.
+# (`uv pip install gc-ua`), so it imports directly — no source-dir / PYTHONPATH.
 #
 # No hardcoded backend URL / model: runner (api_base / --model) → env → profile
 # gc_cli_config, else fail fast. The loop runs on the HOST → local backends via
