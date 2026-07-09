@@ -61,6 +61,7 @@ class TuiApp(App):
         self._mcp_status = None        # per-server status dict — для startup_notices
         self.active_runner = None      # AgentRunner | None
         self.last_runner_error: Optional[str] = None
+        self._session_log_path: Optional[str] = None
         self.last_terminal_outcome: Optional[str] = None
         self.last_stop_requested: bool = False   # юзер /stop по живому прогону → терминал «stopped»
         from tui.state import TuiState
@@ -132,6 +133,7 @@ class TuiApp(App):
             cfg, auth_connector=auth, on_progress=progress.update,
             on_stream_delta=self._stream_pump.on_delta,
         )
+        self._session_log_path = ctx.logging_path
         # Снапшот MCP «сервер→статус/тулы» app-уровнево — чтобы /mcp показывал
         # результат boot-дискавери сразу, не дожидаясь первого сообщения.
         from tools.mcp_snapshot import build_mcp_tools_snapshot

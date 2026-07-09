@@ -17,6 +17,8 @@ def test_export_command_has_arg_options():
     assert export.arg_options == (
         ("txt", "вся сессия в читаемом виде"),
         ("json", "структурированные данные сессии"),
+        ("log-txt", "лог-файл агента, текущий запуск (.log)"),
+        ("log-json", "jsonl-файл треда (вся сессия)"),
     )
 
 

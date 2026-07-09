@@ -181,6 +181,24 @@ class FileTaskStore:
             user_content_to_text(payload.get("content"))
         )
 
+    def read_raw_thread_jsonl(
+        self, task_id: str, system: Optional[str] = None
+    ) -> str:
+        """Дословная конкатенация всех файлов треда (архивы __pre_summary__ +
+        live) в порядке имён — сырьё для /export log-json. В отличие от
+        read_segments НЕ отбрасывает лидирующие dialog_summary-строки архивов:
+        цель — точная копия того, что на диске."""
+        sys_ = system or self._system
+        archives = sorted(
+            self._dir.glob(f"data_{sys_}_{task_id}__pre_summary__*.jsonl"),
+            key=lambda p: p.name,
+        )
+        files = list(archives)
+        live = self._data_path(task_id, sys_)
+        if live.exists():
+            files.append(live)
+        return "".join(f.read_text(encoding="utf-8") for f in files)
+
     def read_segments(self, task_id: str, system: Optional[str] = None) -> list[dict]:
         """Тред → сегменты (части между сжатиями). Read-only реконструкция.
 
