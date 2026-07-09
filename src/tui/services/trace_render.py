@@ -263,7 +263,9 @@ def _mount_skill_marker_readonly(mount_target, skill_id: str, event_no: int) -> 
     mount_target.mount(row)
 
 
-def _render_record_readonly(mount_target, rec: dict, no: int, calls: dict) -> int:
+def _render_record_readonly(
+    mount_target, rec: dict, no: int, calls: dict, skipped_call_ids: set | None = None
+) -> int:
     """Одна envelope-запись → виджеты. Возвращает следующий no.
     hidden-события (policy/bounce/context) считаем, но в трейс не рендерим —
     как _render_event на основном экране."""
@@ -271,7 +273,8 @@ def _render_record_readonly(mount_target, rec: dict, no: int, calls: dict) -> in
     payload = rec.get("payload")
     if not isinstance(payload, dict):
         return no
-    ev = map_message(payload, no=no, ts=rec.get("ts", ""))
+    ev = map_message(payload, no=no, ts=rec.get("ts", ""),
+                     skipped_call_ids=skipped_call_ids)
     # skill_loaded извлекаем ДО early-return: mid-run доставка (display_content="")
     # даёт ev=None, но маркер [skill] всё равно нужен в превью.
     sk = payload.get("skill_loaded")
@@ -292,18 +295,29 @@ def render_thread_readonly(mount_target, records: list) -> None:
     """Построить и смонтировать виджеты трейса из плоских записей в mount_target —
     read-only (без pending/баннеров/submit-collapse/индикатора/tool-preview).
     submit_solution-output отфильтрован уже в map_message (→ None)."""
+    from tui.services.trace_mapper import collect_skipped_call_ids
     no = 1
     calls: dict = {}
+    skipped = collect_skipped_call_ids(
+        rec.get("payload") for rec in records if isinstance(rec, dict)
+    )
     for rec in records:
-        no = _render_record_readonly(mount_target, rec, no, calls)
+        no = _render_record_readonly(mount_target, rec, no, calls, skipped)
 
 
 def render_segments_readonly(mount_target, segments: list) -> None:
     """Read-only превью из сегментов: полная история (все сегменты сырьём) +
     нумерованные маркеры сжатий #K между ними. Паритет рендера с основным
     трейсом (hidden/policy скрыто, summary/error_msg/intermediate как там)."""
+    from tui.services.trace_mapper import collect_skipped_call_ids
     no = 1
     calls: dict = {}
+    skipped = collect_skipped_call_ids(
+        rec.get("payload")
+        for seg in segments
+        for rec in seg.get("messages", [])
+        if isinstance(rec, dict)
+    )
     # Дедуп по id: preserved last-user-message лежит в двух соседних сегментах
     # (архив + live) — иначе реплика дублируется вокруг маркера сжатия.
     seen_ids: set = set()
@@ -315,7 +329,7 @@ def render_segments_readonly(mount_target, segments: list) -> None:
                 if mid in seen_ids:
                     continue
                 seen_ids.add(mid)
-            no = _render_record_readonly(mount_target, rec, no, calls)
+            no = _render_record_readonly(mount_target, rec, no, calls, skipped)
         comp = seg.get("compacted_by")
         if comp:
             label = build_compaction_label(seg.get("index", 0) + 1, comp)
