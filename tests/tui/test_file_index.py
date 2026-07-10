@@ -59,6 +59,121 @@ def test_rank_prefix_of_basename_first():
     out = rank("agent", paths)
     assert out[0] in ("agents/agent.py",)
 
+
+def test_fuzzy_filters_by_segment_prefix_not_char_subsequence(tmp_path):
+    """Короткий ввод — префикс/подстрока сегмента, не разрозненные буквы по path."""
+    (tmp_path / "demo_config.yml").write_text("x", encoding="utf-8")
+    (tmp_path / "readme.md").write_text("x", encoding="utf-8")
+    (tmp_path / "config.default.yml").write_text("x", encoding="utf-8")
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "main.py").write_text("x", encoding="utf-8")
+    # char-subsequence «dem» ложно цеплял бы readme/config; префикс — нет.
+    out = fuzzy_search(str(tmp_path), "dem")
+    assert out == ["demo_config.yml"]
+    # префикс сегмента: «sr» → src/, «mai» → main.py
+    assert "src/" in fuzzy_search(str(tmp_path), "sr")
+    assert "src/main.py" in fuzzy_search(str(tmp_path), "mai")
+    # навигация с '/'
+    assert "src/main.py" in fuzzy_search(str(tmp_path), "src/ma")
+
+
+def test_fuzzy_substring_inside_segment(tmp_path):
+    """Поиск внутри сегмента: query как непрерывная подстрока имени, не только префикс."""
+    (tmp_path / "demo_config.yml").write_text("x", encoding="utf-8")
+    (tmp_path / "config.default.yml").write_text("x", encoding="utf-8")
+    (tmp_path / "readme.md").write_text("x", encoding="utf-8")
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "tui").mkdir()
+    (tmp_path / "src" / "tui" / "file_index.py").write_text("x", encoding="utf-8")
+    (tmp_path / "src" / "tui" / "main_screen.py").write_text("x", encoding="utf-8")
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "test_file_index.py").write_text("x", encoding="utf-8")
+    (tmp_path / "docs_md").mkdir()
+    (tmp_path / "docs_md" / "strict-optional-validation.md").write_text("x", encoding="utf-8")
+
+    # «config» внутри demo_config.yml и как префикс config.default.yml
+    out = fuzzy_search(str(tmp_path), "config")
+    assert "demo_config.yml" in out
+    assert "config.default.yml" in out
+    assert "readme.md" not in out
+
+    # середина имени файла
+    assert "src/tui/file_index.py" in fuzzy_search(str(tmp_path), "index")
+    assert "tests/test_file_index.py" in fuzzy_search(str(tmp_path), "file_index")
+    assert "src/tui/main_screen.py" in fuzzy_search(str(tmp_path), "screen")
+
+    # середина имени папки / сегмента пути
+    assert "src/tui/" in fuzzy_search(str(tmp_path), "tui")
+    assert any(p.startswith("docs_md/") for p in fuzzy_search(str(tmp_path), "optional"))
+
+    # дефис/подстрока в длинном имени
+    assert "docs_md/strict-optional-validation.md" in fuzzy_search(
+        str(tmp_path), "optional-validation"
+    )
+    assert "docs_md/strict-optional-validation.md" in fuzzy_search(str(tmp_path), "strict")
+
+    # регистр не важен
+    assert "demo_config.yml" in fuzzy_search(str(tmp_path), "CONFIG")
+    assert "src/tui/file_index.py" in fuzzy_search(str(tmp_path), "File_Index")
+
+    # char-subsequence по-прежнему не матчит: «fidx» ≠ непрерывная подстрока
+    assert fuzzy_search(str(tmp_path), "fidx") == []
+    # «rdm» не цепляет readme через разрозненные буквы
+    assert fuzzy_search(str(tmp_path), "rdm") == []
+
+
+def test_fuzzy_slash_navigation_and_nested(tmp_path):
+    """Query с '/' — startswith или подстрока всего path; вложенные пути."""
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "tui").mkdir()
+    (tmp_path / "src" / "tui" / "screens").mkdir()
+    (tmp_path / "src" / "tui" / "screens" / "main.py").write_text("x", encoding="utf-8")
+    (tmp_path / "src" / "tui" / "services").mkdir()
+    (tmp_path / "src" / "tui" / "services" / "file_index.py").write_text("x", encoding="utf-8")
+    (tmp_path / "src" / "tools").mkdir()
+    (tmp_path / "src" / "tools" / "schema_optional.py").write_text("x", encoding="utf-8")
+    (tmp_path / "tests" / "tui").mkdir(parents=True)
+    (tmp_path / "tests" / "tui" / "test_file_index.py").write_text("x", encoding="utf-8")
+
+    # префикс пути
+    out = fuzzy_search(str(tmp_path), "src/tui/")
+    assert "src/tui/screens/" in out
+    assert "src/tui/services/" in out
+    assert "src/tui/screens/main.py" in out
+    assert "src/tools/schema_optional.py" not in out
+
+    # частичный сегмент после '/'
+    assert "src/tui/screens/main.py" in fuzzy_search(str(tmp_path), "src/tui/sc")
+    assert "src/tui/services/file_index.py" in fuzzy_search(str(tmp_path), "src/tui/se")
+
+    # подстрока path не с корня: «tui/serv»
+    assert "src/tui/services/file_index.py" in fuzzy_search(str(tmp_path), "tui/serv")
+    assert "src/tui/screens/main.py" not in fuzzy_search(str(tmp_path), "tui/serv")
+
+    # другой корень с тем же хвостом не путается с src/tui при узком префиксе
+    only_tests = fuzzy_search(str(tmp_path), "tests/tui/")
+    assert "tests/tui/test_file_index.py" in only_tests
+    assert all(p.startswith("tests/") for p in only_tests)
+
+
+def test_fuzzy_rank_prefix_basename_over_deeper_hit(tmp_path):
+    """Префикс basename выше глубокого совпадения; папки с '/' тоже ранжируются."""
+    (tmp_path / "agent.py").write_text("x", encoding="utf-8")
+    (tmp_path / "agents").mkdir()
+    (tmp_path / "agents" / "core").mkdir()
+    (tmp_path / "agents" / "core" / "runner.py").write_text("x", encoding="utf-8")
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "my_agent_utils.py").write_text("x", encoding="utf-8")
+
+    out = fuzzy_search(str(tmp_path), "agent")
+    assert out[0] in ("agent.py", "agents/")
+    assert "agent.py" in out
+    assert "agents/" in out
+    assert "src/my_agent_utils.py" in out
+    # basename-префикс agent.py раньше mid-name my_agent_utils
+    assert out.index("agent.py") < out.index("src/my_agent_utils.py")
+
+
 def test_fuzzy_non_git_fallback_walk(tmp_path):
     (tmp_path / "agents").mkdir()
     (tmp_path / "agents" / "agent.py").write_text("x", encoding="utf-8")
@@ -67,6 +182,8 @@ def test_fuzzy_non_git_fallback_walk(tmp_path):
     out = fuzzy_search(str(tmp_path), "agent")
     assert "agents/agent.py" in out
     assert all(".venv" not in p for p in out)
+    # поиск внутри имени вложенного файла
+    assert "agents/agent.py" in fuzzy_search(str(tmp_path), "gent")
 
 def test_fuzzy_git_respects_gitignore(tmp_path):
     (tmp_path / "agents").mkdir()

@@ -1,7 +1,8 @@
 """Индекс файлов проекта для @-аттача (технический слой, без Textual/бизнес-логики).
 
 Чистые функции: парс активного @-сегмента в вводе, листинг папки, рекурсивный
-fuzzy-поиск (git ls-files + fallback walk), резолв @-упоминаний в абсолютные пути,
+поиск по префиксу/подстроке сегмента (git ls-files + fallback walk), резолв
+@-упоминаний в абсолютные пути,
 сборка технического футера. Корень всегда передаётся явно (cwd проекта)."""
 from __future__ import annotations
 
@@ -64,10 +65,21 @@ _IGNORE_DIRS = {
 }
 
 
-def _subseq_match(query: str, path: str) -> bool:
-    """query — подпоследовательность path (оба lower)."""
-    it = iter(path)
-    return all(c in it for c in query)
+def _path_match(query: str, path: str) -> bool:
+    """Непрерывное совпадение query с path (оба уже lower).
+
+    Не char-subsequence: иначе «dem» цепляет readme/config через разрозненные
+    буквы и короткий ввод почти не фильтрует список.
+
+    - query с '/' → path.startswith(query) или query как подстрока path
+      (навигация «src/tu» → src/tui/…);
+    - иначе → какой-то сегмент path начинается с query или содержит query
+      («sr»→src/, «mai»→main.py, «tui»→…/tui/…).
+    """
+    if "/" in query:
+        return path.startswith(query) or query in path
+    return any(seg.startswith(query) or query in seg
+               for seg in path.rstrip("/").split("/"))
 
 
 def rank(query: str, paths: list[str]) -> list[str]:
@@ -120,11 +132,11 @@ def _all_paths(root: str) -> list[str]:
 
 
 def fuzzy_search(root: str, query: str, *, limit: int = 50) -> list[str]:
-    """Пустой query → верхний уровень (list_dir). Иначе — рекурсивный fuzzy по файлам."""
+    """Пустой query → верхний уровень (list_dir). Иначе — рекурсивный поиск по файлам."""
     if not query:
         return list_dir(root, "")
     q = query.lower().replace("\\", "/")
-    matched = [p for p in _all_paths(root) if _subseq_match(q, p.lower())]
+    matched = [p for p in _all_paths(root) if _path_match(q, p.lower())]
     return rank(query, matched)[:limit]
 
 
