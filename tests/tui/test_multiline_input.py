@@ -1,4 +1,4 @@
-"""Multi-line input: Ctrl+J inserts newline, Enter submits."""
+"""Multi-line input: Ctrl+J / Shift+Enter / Ctrl+Enter / shift+\\r insert newline; Enter submits."""
 import pytest
 
 
@@ -19,6 +19,26 @@ async def test_ctrl_j_inserts_newline(tmp_path):
         await pilot.pause()
         # newline inserted, not submitted
         assert "\n" in ta.text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("key", ["shift+enter", "ctrl+enter", "shift+\r", "ctrl+\r"])
+async def test_modified_enter_inserts_newline(tmp_path, key):
+    """Shift/Ctrl+Enter (Kitty) и shift/ctrl+\\r (modifyOtherKeys) — перенос, не submit."""
+    pytest.importorskip("textual")
+    from tui.app import TuiApp
+    from tui.widgets.command_input import CommandTextArea
+
+    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    async with app.run_test() as pilot:
+        ta = pilot.app.query_one("#cmdinput", CommandTextArea)
+        ta.focus()
+        await pilot.pause()
+        ta.text = "line1"
+        ta.move_cursor(ta.document.end)
+        await pilot.press(key)
+        await pilot.pause()
+        assert ta.text == "line1\n"
 
 
 @pytest.mark.asyncio

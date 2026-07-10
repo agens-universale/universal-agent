@@ -32,6 +32,11 @@ async def test_help_header_and_hotkeys():
         mains = "\n".join(str(s.render()) for s in scr.query(".help-row-main"))
         assert "/notices" in mains and "/diff" in mains and "/compact" in mains
         assert "log-txt" in mains and "log-json" in mains
+        assert "упомянуть файл" in mains
+        assert "вложить файл" not in mains
+        assert "Ctrl+J" in keys
+        assert "Ctrl+Enter" not in keys
+        assert "история ввода" in mains
 
 
 @pytest.mark.asyncio

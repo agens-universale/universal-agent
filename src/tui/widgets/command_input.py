@@ -1,4 +1,4 @@
-"""CommandTextArea — многострочный ввод: Enter отправляет, Ctrl+Enter/Shift+Enter/Ctrl+J — новая строка."""
+"""CommandTextArea — многострочный ввод: Enter отправляет, Ctrl+J / Shift+Enter / Ctrl+Enter — новая строка."""
 from __future__ import annotations
 
 from textual import events
@@ -11,7 +11,7 @@ from tui.services.paste_chips import (
 
 
 class CommandTextArea(TextArea):
-    """Multi-line input. Enter submits; Ctrl+Enter/Shift+Enter/Ctrl+J insert newline.
+    """Multi-line input. Enter submits; Ctrl+J / Shift+Enter / Ctrl+Enter insert newline.
 
     Использует нативное сообщение ``TextArea.Changed`` для live-фильтра палитры;
     собственное ``Submitted`` постится по Enter (без newline-модификатора).
@@ -27,8 +27,17 @@ class CommandTextArea(TextArea):
     class PasteCollapsed(Message):
         """Posted when a large paste was collapsed into a chip (screen shows a hint)."""
 
-    # keys that insert a newline instead of submitting
-    _NEWLINE_KEYS = {"ctrl+j", "shift+enter", "ctrl+enter"}
+    # keys that insert a newline instead of submitting.
+    # ctrl+j — надёжно во всех терминалах (LF).
+    # shift/ctrl+enter — Kitty keyboard protocol.
+    # shift/ctrl+\r — xterm modifyOtherKeys / fixterms (Windows Terminal и др.).
+    _NEWLINE_KEYS = {
+        "ctrl+j",
+        "shift+enter",
+        "ctrl+enter",
+        "shift+\r",
+        "ctrl+\r",
+    }
 
     def __init__(self, *args, **kwargs) -> None:
         # Плоский ввод без gutter с номерами строк, как обычный Input.
