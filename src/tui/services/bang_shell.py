@@ -92,6 +92,33 @@ def parse_body(text: str) -> Optional[str]:
     return body if body else None
 
 
+@dataclass(frozen=True)
+class ClearMeta:
+    """Meta `! clear` / `! clear N`: count=None — все блоки, иначе последние N."""
+
+    count: Optional[int]  # None = all
+
+
+def parse_clear_meta(body: str) -> tuple[Optional[ClearMeta], Optional[str]]:
+    """Разобрать meta-clear. (None, None) — не clear; (meta, None) — ок; (None, err) — синтаксис."""
+    parts = body.split()
+    if not parts or parts[0].lower() != "clear":
+        return None, None
+    if len(parts) == 1:
+        return ClearMeta(count=None), None
+    if len(parts) != 2:
+        return None, "использование: ! clear [N]"
+    raw = parts[1]
+    if raw.startswith("-") and len(raw) > 1 and raw[1:].isdigit():
+        raw = raw[1:]
+    if not raw.isdigit():
+        return None, "использование: ! clear [N]"
+    n = int(raw)
+    if n < 1:
+        return None, "N должно быть ≥ 1"
+    return ClearMeta(count=n), None
+
+
 def normalize_output(text: str) -> str:
     return text.replace("\r\n", "\n").replace("\r", "\n")
 

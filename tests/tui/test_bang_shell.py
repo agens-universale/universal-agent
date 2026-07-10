@@ -9,8 +9,10 @@ import pytest
 from tui.services.bang_shell import (
     BangShellController,
     BangShellSettings,
+    ClearMeta,
     normalize_output,
     parse_body,
+    parse_clear_meta,
     preflight,
     truncate_output,
 )
@@ -34,6 +36,35 @@ def test_parse_body_double_bang_is_command():
 
 def test_parse_body_multiline_kept():
     assert parse_body("!echo a\necho b") == "echo a\necho b"
+
+
+def test_parse_clear_meta_all():
+    meta, err = parse_clear_meta("clear")
+    assert err is None
+    assert meta == ClearMeta(count=None)
+    meta, err = parse_clear_meta("CLEAR")
+    assert err is None and meta == ClearMeta(count=None)
+
+
+def test_parse_clear_meta_n():
+    meta, err = parse_clear_meta("clear 3")
+    assert err is None and meta == ClearMeta(count=3)
+    meta, err = parse_clear_meta("clear -2")
+    assert err is None and meta == ClearMeta(count=2)
+
+
+def test_parse_clear_meta_not_clear():
+    assert parse_clear_meta("echo clear") == (None, None)
+    assert parse_clear_meta("git status") == (None, None)
+
+
+def test_parse_clear_meta_invalid():
+    meta, err = parse_clear_meta("clear x")
+    assert meta is None and err is not None
+    meta, err = parse_clear_meta("clear 0")
+    assert meta is None and err is not None
+    meta, err = parse_clear_meta("clear 1 2")
+    assert meta is None and err is not None
 
 
 def test_normalize_crlf():

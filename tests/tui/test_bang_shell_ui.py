@@ -96,3 +96,81 @@ async def test_bang_preflight_vim(tmp_path):
         text = _trace_text(scr)
         assert "$ vim x" in text
         assert "интерактив" in text.lower()
+
+
+async def _await_bang_done(pilot, scr, needle: str, *, rounds: int = 50) -> None:
+    await pilot.pause()
+    for _ in range(rounds):
+        if needle in _trace_text(scr):
+            return
+        await pilot.pause(0.05)
+    pytest.fail(f"{needle!r} not in trace: {_trace_text(scr)!r}")
+
+
+@pytest.mark.asyncio
+async def test_bang_clear_all(tmp_path, monkeypatch):
+    pytest.importorskip("textual")
+    from tui.app import TuiApp
+    from tui.widgets.command_input import CommandTextArea
+
+    class _FakeRunner:
+        def is_running(self):
+            return False
+
+        def start(self, **kwargs):
+            pass
+
+        def stop(self):
+            pass
+
+    app = TuiApp(threads_dir=str(tmp_path), config={"tui_bang_shell": {"enabled": True}})
+    async with app.run_test() as pilot:
+        scr = pilot.app.screen
+        monkeypatch.setattr(pilot.app, "get_runner", lambda: _FakeRunner())
+        scr.on_command_text_area_submitted(CommandTextArea.Submitted(value="! echo one"))
+        await _await_bang_done(pilot, scr, "one")
+        scr.on_command_text_area_submitted(CommandTextArea.Submitted(value="! echo two"))
+        await _await_bang_done(pilot, scr, "two")
+        assert "one" in _trace_text(scr) and "two" in _trace_text(scr)
+
+        scr.on_command_text_area_submitted(CommandTextArea.Submitted(value="! clear"))
+        await pilot.pause()
+        text = _trace_text(scr)
+        assert "one" not in text
+        assert "two" not in text
+        assert "$ clear" not in text
+        assert _trace_kinds(scr) == []
+
+
+@pytest.mark.asyncio
+async def test_bang_clear_last_n(tmp_path, monkeypatch):
+    pytest.importorskip("textual")
+    from tui.app import TuiApp
+    from tui.widgets.command_input import CommandTextArea
+
+    class _FakeRunner:
+        def is_running(self):
+            return False
+
+        def start(self, **kwargs):
+            pass
+
+        def stop(self):
+            pass
+
+    app = TuiApp(threads_dir=str(tmp_path), config={"tui_bang_shell": {"enabled": True}})
+    async with app.run_test() as pilot:
+        scr = pilot.app.screen
+        monkeypatch.setattr(pilot.app, "get_runner", lambda: _FakeRunner())
+        for word in ("alpha", "beta", "gamma"):
+            scr.on_command_text_area_submitted(
+                CommandTextArea.Submitted(value=f"! echo {word}")
+            )
+            await _await_bang_done(pilot, scr, word)
+
+        scr.on_command_text_area_submitted(CommandTextArea.Submitted(value="! clear 2"))
+        await pilot.pause()
+        text = _trace_text(scr)
+        assert "alpha" in text
+        assert "beta" not in text
+        assert "gamma" not in text

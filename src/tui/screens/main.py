@@ -226,6 +226,9 @@ class TraceScreen(Screen):
         # Bang-shell (`!cmd`): один concurrent job; эфемерно в трейсе, не в thread.
         self._bang = None  # type: Optional["BangShellController"]
         self._bang_timeout_sec: Optional[float] = None
+        # Блоки bang в трейсе (header + result) для `! clear` / `! clear N`.
+        self._bang_blocks: list[list] = []
+        self._bang_open_block: Optional[list] = None
         # Заголовок терминала: кэш промпта возобновлённой сессии (читается из стора
         # 1 раз на attach, не на каждый poll-тик) + дедуп последнего записанного
         # заголовка (poll зовёт обновление каждый тик — пишем OSC только при смене).
@@ -558,6 +561,8 @@ class TraceScreen(Screen):
         self._summary_marker_widgets.clear()
         self._pending_user_widgets.clear()  # spec 2026-05-26
         self._pending_wire_cache.clear()
+        self._bang_blocks.clear()
+        self._bang_open_block = None
         # clear ask_human state (banner lives in #root, not #trace)
         if self._ask_human_banner is not None:
             try:
@@ -3400,59 +3405,72 @@ class TraceScreen(Screen):
             BangShellController,
             BangShellSettings,
             parse_body,
+            parse_clear_meta,
             preflight,
         )
 
         body = parse_body(text)
         if body is None:
-            self._mount_trace_row(
+            self._mount_bang_row(
                 prefix="[!] ",
                 content="пустая команда",
                 kind_class="line-bang-fail",
-                focusable=False,
             )
+            self._close_bang_block()
+            return
+
+        clear_meta, clear_err = parse_clear_meta(body)
+        if clear_err is not None:
+            self._mount_bang_row(
+                prefix="[!] ",
+                content=clear_err,
+                kind_class="line-bang-fail",
+            )
+            self._close_bang_block()
+            return
+        if clear_meta is not None:
+            self._clear_bang_blocks(clear_meta.count)
             return
 
         cfg = getattr(self.app, "_config", None) or {}
         settings = BangShellSettings.from_mapping(cfg.get("tui_bang_shell"))
         self._bang_timeout_sec = settings.timeout_sec
 
-        self._mount_trace_row(
+        self._mount_bang_row(
             prefix="[!] ",
             content=f"$ {body}",
             kind_class="line-bang",
-            focusable=False,
         )
 
         if not settings.enabled:
-            self._mount_trace_row(
+            self._mount_bang_row(
                 prefix="   ",
                 content="bang-shell выключен",
                 kind_class="line-bang-fail",
-                focusable=False,
             )
+            self._close_bang_block()
             return
 
         if self._bang is None:
             self._bang = BangShellController()
 
         if self._bang.is_running:
-            self._mount_trace_row(
+            self._mount_bang_row(
                 prefix="   ",
                 content="дождитесь завершения предыдущей !",
                 kind_class="line-bang-fail",
-                focusable=False,
             )
+            self._close_bang_block()
             return
 
         reason = preflight(body)
         if reason is not None:
-            self._mount_trace_row(
+            self._mount_bang_row(
                 prefix="   ",
                 content=reason,
                 kind_class="line-bang-fail",
-                focusable=False,
             )
+            self._close_bang_block()
             return
 
         bang = self._bang
@@ -3467,33 +3485,82 @@ class TraceScreen(Screen):
 
         threading.Thread(target=_work, daemon=True).start()
 
+    def _mount_bang_row(
+        self,
+        *,
+        prefix: str,
+        content: str,
+        kind_class: str,
+    ):
+        """Смонтировать bang-строку и учесть её в текущем блоке для `! clear`."""
+        row = self._mount_trace_row(
+            prefix=prefix,
+            content=content,
+            kind_class=kind_class,
+            focusable=False,
+        )
+        if self._bang_open_block is None:
+            self._bang_open_block = []
+            self._bang_blocks.append(self._bang_open_block)
+        self._bang_open_block.append(row)
+        return row
+
+    def _close_bang_block(self) -> None:
+        self._bang_open_block = None
+
+    def _clear_bang_blocks(self, count: Optional[int]) -> None:
+        """Удалить bang-блоки из трейса. count=None — все; иначе последние N."""
+        if self._bang is not None and self._bang.is_running:
+            self._mount_bang_row(
+                prefix="[!] ",
+                content="дождитесь завершения предыдущей !",
+                kind_class="line-bang-fail",
+            )
+            self._close_bang_block()
+            return
+        if not self._bang_blocks:
+            return
+        if count is None or count >= len(self._bang_blocks):
+            to_remove = self._bang_blocks[:]
+            self._bang_blocks.clear()
+        else:
+            to_remove = self._bang_blocks[-count:]
+            del self._bang_blocks[-count:]
+        self._bang_open_block = None
+        for block in to_remove:
+            for row in block:
+                try:
+                    row.remove()
+                except Exception:
+                    pass
+
     def _on_bang_done(self, result) -> None:
         """Смонтировать результат bang-shell в трейс (UI-поток)."""
         if result.rejected:
-            self._mount_trace_row(
+            self._mount_bang_row(
                 prefix="   ",
                 content=result.rejected,
                 kind_class="line-bang-fail",
-                focusable=False,
             )
+            self._close_bang_block()
             return
         if result.cancelled:
-            self._mount_trace_row(
+            self._mount_bang_row(
                 prefix="   ",
                 content="[!] cancelled",
                 kind_class="line-bang-fail",
-                focusable=False,
             )
+            self._close_bang_block()
             return
         if result.timed_out:
             n = self._bang_timeout_sec
             label = f"[!] timeout after {int(n)}s" if n else "[!] timeout"
-            self._mount_trace_row(
+            self._mount_bang_row(
                 prefix="   ",
                 content=label,
                 kind_class="line-bang-fail",
-                focusable=False,
             )
+            self._close_bang_block()
             return
 
         out = (result.output or "").rstrip("\n")
@@ -3507,12 +3574,12 @@ class TraceScreen(Screen):
         else:
             content = body or "(нет вывода)"
         kind = "line-bang-out" if result.ok else "line-bang-fail"
-        self._mount_trace_row(
+        self._mount_bang_row(
             prefix="   ",
             content=content,
             kind_class=kind,
-            focusable=False,
         )
+        self._close_bang_block()
 
     def _handle_command(self, raw: str) -> None:
         """Диспетчеризовать команду и, если она что-то дописала в трейс,

@@ -22,6 +22,7 @@ _EXTRA_HOTKEYS: tuple[tuple[str, str], ...] = (
 # Shell (`!`) — не slash-команда; отдельная секция в /help.
 _SHELL_HELP: tuple[tuple[str, str], ...] = (
     ("! git status", "локальный shell (sh/cmd), cwd TUI; Esc/Ctrl+C — отмена"),
+    ("! clear [N]", "убрать bang-вывод из трейса (все или последние N)"),
     ("", "без sudo/интерактива (vim, docker -it); вывод только в трейсе"),
 )
 

@@ -39,6 +39,7 @@ async def test_help_header_and_hotkeys():
         assert "история ввода" in mains
         assert "Shell (!)" in body
         assert "! git status" in mains
+        assert "! clear" in mains
         assert "локальный shell" in mains
 
 
