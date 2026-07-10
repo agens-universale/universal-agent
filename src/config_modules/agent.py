@@ -23,6 +23,7 @@ class AgentConfig(BaseModel):
     server_tool_prefix: str = "system"
     max_steps: int = 1000
     no_tool_call_max_count: int = 5
+    max_unknown_tool_repeats: int = 5
     strict_turn_finish_validation: bool = True
     finish_gate_max_iterations: int = DEFAULT_FINISH_GATE_MAX_ITERATIONS
     subagent_finish_gate_max_iterations: int = DEFAULT_SUBAGENT_FINISH_GATE_MAX_ITERATIONS

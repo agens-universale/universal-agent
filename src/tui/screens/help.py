@@ -1,4 +1,4 @@
-"""HelpScreen — справка из реестра команд."""
+"""HelpScreen — справка из реестра команд + доп. хоткеи."""
 from __future__ import annotations
 
 from textual.app import ComposeResult
@@ -8,9 +8,18 @@ from textual.widgets import Static
 
 from tui.commands import build_default_registry
 
+# Хоткеи, которых нет у отдельной /команды (F1–F5 / Ctrl+N / … уже в реестре).
+_EXTRA_HOTKEYS: tuple[tuple[str, str], ...] = (
+    ("Enter", "отправить сообщение"),
+    ("Ctrl+Enter / Shift+Enter", "перенос строки"),
+    ("Ctrl+A", "принять все pending-диффы"),
+    ("↑ / ↓", "история ввода"),
+    ("@", "вложить файл в сообщение"),
+)
+
 
 class HelpScreen(Screen):
-    """Справочный экран — все команды из реестра (с хоткеями справа)."""
+    """Справочный экран — команды из реестра + доп. хоткеи (с хоткеями справа)."""
 
     def compose(self) -> ComposeResult:
         with Vertical(id="root"):
@@ -27,15 +36,34 @@ class HelpScreen(Screen):
     def on_mount(self) -> None:
         reg = build_default_registry()
         trace = self.query_one("#trace", VerticalScroll)
-        for i, cmd in enumerate(reg.list_commands()):
+        row_i = 0
+        for cmd in reg.list_commands():
             args_str = f" {cmd.args}" if cmd.args else ""
-            # зебра: нечётные строки — с чуть более светлым фоном (читаемость)
-            classes = "help-row help-row-alt" if i % 2 else "help-row"
-            row = Horizontal(classes=classes)
-            trace.mount(row)
-            row.mount(Static(
+            self._mount_row(
+                trace,
+                row_i,
                 f"/{cmd.name}{args_str}   {cmd.description}",
-                classes="help-row-main", markup=False,
-            ))
-            if cmd.hotkey:
-                row.mount(Static(cmd.hotkey, classes="help-row-key", markup=False))
+                cmd.hotkey,
+            )
+            row_i += 1
+
+        trace.mount(Static(""))
+        trace.mount(Static("хоткеи", classes="help-section", markup=False))
+        for key, desc in _EXTRA_HOTKEYS:
+            self._mount_row(trace, row_i, desc, key)
+            row_i += 1
+
+    @staticmethod
+    def _mount_row(
+        trace: VerticalScroll,
+        index: int,
+        main: str,
+        hotkey: str = "",
+    ) -> None:
+        # зебра: нечётные строки — с чуть более светлым фоном (читаемость)
+        classes = "help-row help-row-alt" if index % 2 else "help-row"
+        row = Horizontal(classes=classes)
+        trace.mount(row)
+        row.mount(Static(main, classes="help-row-main", markup=False))
+        if hotkey:
+            row.mount(Static(hotkey, classes="help-row-key", markup=False))

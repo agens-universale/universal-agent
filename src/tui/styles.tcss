@@ -237,7 +237,8 @@ ToolCallRow.tool-group-start { margin-top: 1; }
 .palette-row.selected { background: $band-bg; color: $bright; }
 .palette-hint  { color: $deep-dim; padding: 0 1; }
 
-/* Строки HelpScreen — реестр команд */
+/* Строки HelpScreen — реестр команд + доп. хоткеи */
+.help-section  { color: $deep-dim; padding: 0 1; }
 .help-row      { height: auto; width: 1fr; color: $ink; }
 .help-row.help-row-alt { background: #181c26; }  /* зебра: чуть светлее фона для читаемости */
 .help-row-main { width: 1fr; padding-left: 1; }

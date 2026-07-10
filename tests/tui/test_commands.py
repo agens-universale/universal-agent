@@ -90,7 +90,9 @@ def test_status_has_no_raw_arg():
 
 def test_command_hotkeys():
     expected = {
-        "help": "F1", "new": "Ctrl+N", "sessions": "Ctrl+S",
+        "help": "F1", "config": "F2", "mcp": "F3",
+        "notices": "F4", "diff": "F5",
+        "new": "Ctrl+N", "sessions": "Ctrl+S",
         "export": "", "stop": "Ctrl+C", "quit": "Esc",
         "skill": "", "skills": "", "status": "",
     }

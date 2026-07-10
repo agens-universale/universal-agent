@@ -23,7 +23,7 @@ from intent_scope.hook import maybe_update_intent_scope_from_tool
 from intent_scope.final_answer import maybe_record_final_answer_intent
 from message_policy.cycle_stop import append_cycle_stop_tool_outputs_for_batch
 from request_backend_policy import request_chat_completions_with_policy
-from tools import apply_tool, WrongFunctionArgumentsException
+from tools import apply_tool, WrongFunctionArgumentsException, is_unknown_tool_output
 from tools.session.stored_outputs.wrapping import maybe_store_and_wrap_tool_output
 from utils.connect_backend import create_call_headers
 from utils.connect_backend import request_backend_responses as request_backend
@@ -406,6 +406,7 @@ def process_tool_calls(
     state.session_compact_applied = False
 
     tools_outputs = []
+    unknown_in_batch = 0
     executed, skipped = split_at_first_finalizer(grouped_messages["tool_calls"])
     # Skip-output'ы синтетические — считаем заранее, чтобы сфлашить ВМЕСТЕ с
     # executed-output'ами до блокирующего turn_ask_human (иначе пропущенный тул
@@ -447,6 +448,18 @@ def process_tool_calls(
             if getattr(exc, "call_id", None) is None:
                 exc.call_id = m.get("call_id")
             raise
+        if is_unknown_tool_output(tool_res_raw):
+            unknown_in_batch += 1
+            if tool_name == getattr(state, "last_unknown_tool_name", None):
+                state.unknown_tool_repeat_count = (
+                    int(getattr(state, "unknown_tool_repeat_count", 0) or 0) + 1
+                )
+            else:
+                state.last_unknown_tool_name = tool_name
+                state.unknown_tool_repeat_count = 1
+        else:
+            state.last_unknown_tool_name = None
+            state.unknown_tool_repeat_count = 0
         tool_res = maybe_store_and_wrap_tool_output(
             tool_res_raw,
             call_id=m["call_id"],
@@ -471,6 +484,8 @@ def process_tool_calls(
         }
 
         tools_outputs.append(new_message)
+
+    state.last_batch_unknown_tool_count = unknown_in_batch
 
     # Skip-output'ы уже посчитаны выше и сфлашены перед блокировкой — добавляем в
     # возврат (тред/state дедупят повторный персист по make_message_key).
@@ -527,6 +542,10 @@ def run_agent(
     cfg = getattr(ctx, "config_dict", {}) or {}
     console_human = human_console_enabled(cfg)
     max_tool_errors = cfg.get("no_tool_call_max_count", 0)
+    max_unknown_tool_repeats = int(cfg.get("max_unknown_tool_repeats", 5) or 5)
+    state.last_unknown_tool_name = None
+    state.unknown_tool_repeat_count = 0
+    state.last_batch_unknown_tool_count = 0
     while True:
         if check_stop is not None and check_stop():
             return None
@@ -786,7 +805,24 @@ def run_agent(
                         messages, state, ctx, run_agent_func=run_agent,
                         persist_messages_callback=persist_messages_callback,
                     )
-                    tool_error_cnt = 0
+                    n_unknown = int(
+                        getattr(state, "last_batch_unknown_tool_count", 0) or 0
+                    )
+                    if n_unknown > 0:
+                        tool_error_cnt += n_unknown
+                    else:
+                        tool_error_cnt = 0
+                    if (
+                        int(getattr(state, "unknown_tool_repeat_count", 0) or 0)
+                        >= max_unknown_tool_repeats
+                    ):
+                        unknown_name = (
+                            getattr(state, "last_unknown_tool_name", None) or "unknown"
+                        )
+                        state.terminal_outcome = "tool_errors"
+                        return (
+                            f"Agent stopped: repeated unknown tool '{unknown_name}'."
+                        )
                 elif mode == "function_call_output":
                     messages, response_id = process_tool_outputs(messages, state, ctx)
                     if backend_mode == "responses":

@@ -286,6 +286,7 @@ def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
         "server_tool_prefix": app_cfg.agent.server_tool_prefix,
         "max_steps": app_cfg.agent.max_steps,
         "no_tool_call_max_count": app_cfg.agent.no_tool_call_max_count,
+        "max_unknown_tool_repeats": app_cfg.agent.max_unknown_tool_repeats,
         "strict_turn_finish_validation": app_cfg.agent.strict_turn_finish_validation,
         "finish_gate_max_iterations": app_cfg.agent.finish_gate_max_iterations,
         "subagent_finish_gate_max_iterations": app_cfg.agent.subagent_finish_gate_max_iterations,

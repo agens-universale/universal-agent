@@ -19,12 +19,19 @@ async def test_help_header_and_hotkeys():
         assert len(scr.query("#header-right")) == 0
         keys = " ".join(str(s.render()) for s in scr.query(".help-row-key"))
         assert "Ctrl+S" in keys and "F1" in keys and "Ctrl+N" in keys
-        assert "Ctrl+E" not in keys
+        assert "F2" in keys and "F3" in keys and "F4" in keys and "F5" in keys
+        assert "Ctrl+A" in keys
+        key_tokens = set(keys.split())
+        assert "Ctrl+E" not in key_tokens
         assert str(scr.query_one("#footer", Static).render()) == "[Esc] назад"
         # блок «Связь с разработчиками / Телеграм / Сберчат» убран
         body = " ".join(str(s.render()) for s in scr.query(Static))
         assert "Сберчат" not in body and "Телеграм" not in body
         assert "Связь с разработчиками" not in body
+        assert "хоткеи" in body
+        mains = "\n".join(str(s.render()) for s in scr.query(".help-row-main"))
+        assert "/notices" in mains and "/diff" in mains and "/compact" in mains
+        assert "log-txt" in mains and "log-json" in mains
 
 
 @pytest.mark.asyncio

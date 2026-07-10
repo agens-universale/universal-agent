@@ -1,8 +1,9 @@
+import difflib
 import json
 import traceback
 import sys
 import logging
-from typing import Any, Dict, Tuple, Optional
+from typing import Any, Dict, Iterable, Tuple, Optional
 
 from tools.connect_mcp import get_mcp_tools_data
 from tools.arguments_validation import (
@@ -25,6 +26,51 @@ from tools.schema_optional import (
 )
 
 _fallback_logger = logging.getLogger(__name__)
+_LEGACY_UNKNOWN_TOOL_MARKER = "there is not such tool"
+
+
+def format_unknown_tool_output(tool_name: str, available_names: Iterable[str]) -> str:
+    suggestions = difflib.get_close_matches(
+        tool_name, list(available_names), n=5, cutoff=0.3
+    )
+    error_message = f"No tool named '{tool_name}' on client."
+    use_only = (
+        "Use only tools from the provided tool list "
+        "in section <tools> in system prompt."
+    )
+    if suggestions:
+        message = (
+            f"Unknown tool '{tool_name}'. Maybe you mean tools: "
+            f"{', '.join(suggestions)}. {use_only}"
+        )
+    else:
+        message = f"Unknown tool '{tool_name}'. {use_only}"
+    payload = {
+        "ok": False,
+        "error": {
+            "type": "unknown_tool",
+            "message": error_message,
+            "requested": tool_name,
+            "suggestions": suggestions,
+        },
+        "message": message,
+    }
+    return json.dumps(payload, ensure_ascii=False)
+
+
+def is_unknown_tool_output(output: str) -> bool:
+    if not isinstance(output, str) or not output:
+        return False
+    if _LEGACY_UNKNOWN_TOOL_MARKER in output:
+        return True
+    try:
+        parsed = json.loads(output)
+    except (json.JSONDecodeError, TypeError, ValueError):
+        return False
+    if not isinstance(parsed, dict):
+        return False
+    error = parsed.get("error")
+    return isinstance(error, dict) and error.get("type") == "unknown_tool"
 
 
 def _ensure_spec_has_required(spec: Dict[str, Any]) -> None:
@@ -200,7 +246,7 @@ def apply_tool(
             kwargs,
             arguments,
         )
-        return f"{tool_name} - there is not such tool on client"
+        return format_unknown_tool_output(tool_name, tools_data_.keys())
 
     # Определяем, ожидает ли инструмент пустую схему (нет параметров)
     spec = tools_data_[tool_name].get("spec", {}) or {}
@@ -263,4 +309,6 @@ __all__ = [
     "WrongFunctionArgumentsException",
     "build_tools_data",
     "apply_tool",
+    "format_unknown_tool_output",
+    "is_unknown_tool_output",
 ]

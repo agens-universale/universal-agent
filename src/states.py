@@ -95,6 +95,9 @@ class State:
         self.user_turn_seq: int = 0
         self.finish_gate_rejection_count: int = 0
         self.terminal_outcome: Optional[str] = None  # None | "step_limit" | "tool_errors"
+        self.last_unknown_tool_name: Optional[str] = None
+        self.unknown_tool_repeat_count: int = 0
+        self.last_batch_unknown_tool_count: int = 0
         self.project_memory_content_hash: Optional[str] = None
         self.tool_usage_notice_cnt: dict[str, int] = {}
         self.tool_call_outputs_store = ToolCallOutputsStore()
