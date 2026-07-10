@@ -526,8 +526,36 @@ async def test_cta_always_shows_when_pending(tmp_path, launch_root):
 
 
 @pytest.mark.asyncio
-async def test_diff_viewer_undo_created_shows_noop(tmp_path, launch_root):
-    """Созданный файл: undo no-op → явный статус, файл остаётся в списке."""
+async def test_diff_viewer_created_shows_file_content(tmp_path, launch_root):
+    """Cache-mode created: viewer показывает содержимое файла как addition."""
+    pytest.importorskip("textual")
+    from tui.app import TuiApp
+    from tui.screens.diff import DiffScreen, DiffViewerScreen
+    from textual.widgets import Static
+    from diff_tui.store import DiffStore
+
+    created = launch_root / "diff-test.txt"
+    DiffStore(str(launch_root)).register_mutation(str(created))
+    created.write_text("hello created body\n", encoding="utf-8")
+
+    cfg = _cfg(launch_root)
+    async with TuiApp(
+        threads_dir=str(tmp_path / "threads"), system="cli", config=cfg
+    ).run_test() as pilot:
+        scr = DiffScreen(launch_root=str(launch_root), config=cfg)
+        await pilot.app.push_screen(scr)
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+        assert isinstance(pilot.app.screen, DiffViewerScreen)
+        body = "\n".join(str(st.render()) for st in pilot.app.screen.query(Static))
+        assert "+hello created body" in body
+        assert "нет содержимого диффа" not in body
+
+
+@pytest.mark.asyncio
+async def test_diff_viewer_undo_created_deletes_file(tmp_path, launch_root):
+    """Созданный файл: undo удаляет с диска и убирает из списка."""
     pytest.importorskip("textual")
     from tui.app import TuiApp
     from tui.screens.diff import DiffScreen, DiffViewerScreen
@@ -551,10 +579,9 @@ async def test_diff_viewer_undo_created_shows_noop(tmp_path, launch_root):
         await pilot.press("r")
         await pilot.pause()
         assert isinstance(pilot.app.screen, DiffScreen)
-        assert any(e.key == "diff-test.txt" for e in scr._entries)
-        assert "diff-test.txt" in scr._status
-        assert "удалите файл вручную" in scr._status
-        assert created.is_file()
+        assert all(e.key != "diff-test.txt" for e in scr._entries)
+        assert scr._status == "Отменено: diff-test.txt"
+        assert not created.exists()
 
 
 @pytest.mark.asyncio

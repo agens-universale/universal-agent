@@ -8,7 +8,7 @@ from intent_guard.validation_result import (
     fail_open_validation_result,
     parse_validator_response,
 )
-from summarize.llm import auxiliary_llm_completion_kwargs
+from summarize.llm import auxiliary_llm_completion_kwargs, auxiliary_llm_judge_max_tokens
 from utils.llm_chat_client import log_llm_prompt_and_result, request_chat_completion_text
 from bundled_assets import bundled_root
 
@@ -18,9 +18,6 @@ DEFAULT_INTENT_GUARD_PROMPT_PATH = os.path.abspath(
     os.path.join(_PROJECT_ROOT, "prompts", "chat_completions_intent_guard_prompt.md")
 )
 
-# Models with mandatory CoT (e.g. reasoning_effort=low) burn budget on <think>;
-# keep headroom so the JSON verdict still fits after reasoning.
-_FINISH_GATE_MAX_TOKENS = 10000
 _FINISH_GATE_RETRY_DRAFT_MAX_CHARS = 6000
 
 
@@ -158,7 +155,7 @@ def _request_finish_gate_once(
         ctx=ctx,
         state=state,
         messages=request_messages,
-        max_tokens=_FINISH_GATE_MAX_TOKENS,
+        max_tokens=auxiliary_llm_judge_max_tokens(ctx),
         request_label=request_label,
         payload_overrides=auxiliary_llm_completion_kwargs(ctx),
     )

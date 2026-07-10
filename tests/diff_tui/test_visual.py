@@ -42,3 +42,31 @@ def test_build_unified_diff_truncates(tmp_path):
     )
     assert "[diff truncated]" in out
     assert len(out) <= 80 + len("\n... [diff truncated]\n")
+
+
+def test_build_created_file_diff_shows_content():
+    from diff_tui.visual import build_created_file_diff
+
+    out = build_created_file_diff("hello\n", tofile="new.py")
+    assert "--- /dev/null" in out
+    assert "+++ new.py" in out
+    assert "+hello" in out
+
+
+def test_build_created_file_diff_empty_file_not_blank():
+    from diff_tui.visual import build_created_file_diff
+
+    out = build_created_file_diff("", tofile="empty.txt")
+    assert out.strip()
+    assert "--- /dev/null" in out
+    assert "+++ empty.txt" in out
+
+
+def test_preview_change_lines_skips_headers_for_created():
+    from diff_tui.visual import build_created_file_diff, preview_change_lines
+
+    body = build_created_file_diff("a\nb\nc\n", tofile="f.py")
+    head, remaining = preview_change_lines(body, limit=3)
+    assert head == ["+a", "+b", "+c"]
+    assert remaining == 0
+    assert all(not ln.startswith(("---", "+++", "@@")) for ln in head)

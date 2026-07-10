@@ -28,7 +28,7 @@ class RunContext:
     - auth_connector — коннектор авторизации для бэкенда;
     - logger / logging_path — логгер и путь к файлу логов для этого запуска;
     - summary_trace_path — отдельный файл trace для суммаризации;
-    - chat_completions_llm — LLM-профиль (chat_completions.llm): summary, finish gate, intent scope;
+    - chat_completions_llm — LLM-профиль (chat_completions.llm): summary, finish gate, intent scope, judges;
     - intent_scope — параметры intent-scope hook (из intent_scope в config);
     - tools_data / tools_spec / tools_description — подготовленные данные о тулах;
     - project_gc_dir — папка project-local артефактов (<cwd>/.gc/);

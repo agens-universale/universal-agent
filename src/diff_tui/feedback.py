@@ -37,13 +37,9 @@ def format_undo_ack(undone_keys: Sequence[str]) -> str | None:
 
 
 def format_undo_noop_ack(key: str, reason: str) -> str | None:
-    """Ack когда undo не применился (created / untracked)."""
-    if not key:
+    """Ack когда undo не применился (редкий fallback)."""
+    if not key or not reason:
         return None
-    if reason == "created_no_approve":
-        return f"{key}: отмена невозможна — удалите файл вручную"
-    if reason == "untracked":
-        return f"{key}: отмена невозможна — удалите файл вручную"
     return None
 
 
@@ -95,24 +91,44 @@ def format_pending_cta(count: int) -> str | None:
     )
 
 
-def build_undo_feedback_body(undone_keys: Sequence[str]) -> str:
-    lines = "\n".join(f"- {k}" for k in undone_keys)
-    return (
-        "User reverted pending file changes via Diff-UI undo.\n"
-        f"Files restored to the previous on-disk baseline:\n{lines}\n"
-        "Re-read these files from disk before assuming their contents."
-    )
+def build_undo_feedback_body(
+    restored_keys: Sequence[str] = (),
+    deleted_keys: Sequence[str] = (),
+) -> str | None:
+    restored = [k for k in restored_keys if k]
+    deleted = [k for k in deleted_keys if k]
+    if not restored and not deleted:
+        return None
+
+    parts = ["User reverted pending file changes via Diff-UI undo."]
+    if restored:
+        lines = "\n".join(f"- {k}" for k in restored)
+        parts.append(
+            "Changes reverted — re-read these files from disk "
+            "before assuming their contents:\n"
+            f"{lines}"
+        )
+    if deleted:
+        lines = "\n".join(f"- {k}" for k in deleted)
+        parts.append(
+            "Deleted previously created files:\n"
+            f"{lines}"
+        )
+    return "\n\n".join(parts) + "\n"
 
 
-def build_undo_feedback_message(undone_keys: Sequence[str]) -> dict | None:
+def build_undo_feedback_message(
+    restored_keys: Sequence[str] = (),
+    deleted_keys: Sequence[str] = (),
+) -> dict | None:
     """``role:user`` technical message или ``None``, если ключей нет."""
-    keys = [k for k in undone_keys if k]
-    if not keys:
+    body = build_undo_feedback_body(restored_keys, deleted_keys)
+    if body is None:
         return None
     return {
         "role": "user",
         "content": wrap_technical_user_content(
-            build_undo_feedback_body(keys),
+            body,
             technical_type=TECHNICAL_TYPE_TECHNICAL,
         ),
         "id": generate_message_id_func("m_diff_undo"),

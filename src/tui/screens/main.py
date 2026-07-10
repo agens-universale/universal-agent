@@ -1376,9 +1376,10 @@ class TraceScreen(Screen):
             return [], 0
         if not body or not body.strip():
             return [], 0
-        all_lines = [ln for ln in body.splitlines() if ln != ""]
-        head = all_lines[:3]
-        return head, max(0, len(all_lines) - 3)
+        from diff_tui.visual import preview_change_lines
+
+        # Для created первые строки — ---/+++/@@; берём +/- с содержимым.
+        return preview_change_lines(body, limit=3)
 
     def _on_ask_human_event(self, ev, *, live: bool = False) -> None:
         from tui.widgets.ask_human_banner import AskHumanBanner
@@ -2909,11 +2910,14 @@ class TraceScreen(Screen):
             prefix="", content=text, kind_class="line-meta", focusable=False,
         )
 
-    def _on_diff_undo_feedback(self, undone_keys) -> None:
+    def _on_diff_undo_feedback(self, restored_keys, deleted_keys=()) -> None:
         """T15: после undo — technical user message агенту (визуал — через on_ui_ack)."""
         from diff_tui.feedback import build_undo_feedback_message
 
-        msg = build_undo_feedback_message(undone_keys)
+        msg = build_undo_feedback_message(
+            restored_keys=restored_keys,
+            deleted_keys=deleted_keys,
+        )
         if msg is None:
             return
         self._append_technical_to_thread(msg)

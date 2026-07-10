@@ -27,6 +27,19 @@ class HarborBackend(FsBackend):
     def _await(self, coro):
         return asyncio.run_coroutine_threadsafe(coro, self._loop).result()
 
+    @staticmethod
+    def _is_exec_timeout(exc: BaseException) -> bool:
+        # Harbor Docker/Apple envs raise RuntimeError("Command timed out after N seconds");
+        # also accept bare TimeoutError / asyncio.TimeoutError.
+        if isinstance(exc, TimeoutError):
+            return True
+        return "Command timed out after" in str(exc)
+
+    @staticmethod
+    def _partial_stream(exc: BaseException, name: str) -> str:
+        val = getattr(exc, name, None)
+        return val if isinstance(val, str) else ""
+
     # --- shell ---
     def exec(self, command: str, *, cwd: Optional[str] = None, timeout: Optional[int] = None,
               env: Optional[dict] = None) -> ExecResult:
@@ -35,7 +48,17 @@ class HarborBackend(FsBackend):
             prefix = "env " + " ".join(f"{k}={shlex.quote(str(v))}" for k, v in env.items())
             command = f"{prefix} {command}"
         full = f"cd {shlex.quote(cwd)} && {command}" if cwd else command
-        res = self._await(self._env.exec(full, timeout_sec=timeout))
+        try:
+            res = self._await(self._env.exec(full, timeout_sec=timeout))
+        except Exception as exc:
+            if not self._is_exec_timeout(exc):
+                raise
+            return ExecResult(
+                stdout=self._partial_stream(exc, "stdout"),
+                stderr=self._partial_stream(exc, "stderr"),
+                return_code=None,
+                timed_out=True,
+            )
         return ExecResult(
             stdout=res.stdout or "", stderr=res.stderr or "", return_code=res.return_code,
             timed_out=bool(getattr(res, "timed_out", False)),

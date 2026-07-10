@@ -17,6 +17,20 @@ def test_auxiliary_llm_completion_kwargs_matches_chat_completions_llm():
     }
 
 
+def test_auxiliary_llm_judge_max_tokens_from_chat_completions_llm():
+    ctx = SimpleNamespace(
+        chat_completions_llm=SimpleNamespace(judge_max_tokens=12345)
+    )
+    assert summary_llm.auxiliary_llm_judge_max_tokens(ctx) == 12345
+
+
+def test_auxiliary_llm_judge_max_tokens_falls_back_to_default():
+    from config_modules.chat_completions import DEFAULT_JUDGE_MAX_TOKENS
+
+    ctx = SimpleNamespace(chat_completions_llm=SimpleNamespace())
+    assert summary_llm.auxiliary_llm_judge_max_tokens(ctx) == DEFAULT_JUDGE_MAX_TOKENS
+
+
 def test_request_summary_text_uses_ctx_chat_completions_llm(monkeypatch):
     captured = {}
 

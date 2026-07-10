@@ -22,10 +22,11 @@ backend:
   use_ssl: true
   use_retry: true
 
-# Вспомогательные LLM (summary, finish gate, intent scope).
+# Вспомогательные LLM (summary, finish gate, intent scope, judges).
 chat_completions:
   llm:
     max_tokens: 8192
+    judge_max_tokens: 10000
     completion_kwargs:
       reasoning_effort: none
 

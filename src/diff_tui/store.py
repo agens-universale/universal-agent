@@ -199,7 +199,13 @@ class DiffStore:
 
         status = entry.get("status")
         if status == STATUS_CREATED and not entry.get("baseline_exists", False):
-            return UndoResult(ok=False, reason="created_no_approve")
+            # Новый файл без baseline → undo = удалить с диска и из index.
+            disk = self._disk_path(key)
+            if disk.is_file() or disk.is_symlink():
+                disk.unlink()
+            del index[key]
+            self.save_index(index)
+            return UndoResult(ok=True, reason="deleted_created")
 
         orig = self._orig_path(key)
         if not orig.is_file():
@@ -211,7 +217,7 @@ class DiffStore:
         tmp = disk.with_suffix(disk.suffix + ".tmp")
         tmp.write_text(content, encoding="utf-8")
         atomic_replace(tmp, disk)
-        return UndoResult(ok=True)
+        return UndoResult(ok=True, reason="restored")
 
     # --- list / cleanup ---
 

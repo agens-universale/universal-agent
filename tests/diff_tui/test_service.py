@@ -10,7 +10,7 @@ from config_modules import env_vars
 from diff_tui.paths import orig_key
 from diff_tui.service import DiffService
 from diff_tui.store import DiffStore
-from runtime_notices import clear_runtime_notices, collect_runtime_notices
+from runtime_notices import clear_runtime_notices
 
 
 def _has_git() -> bool:
@@ -92,18 +92,19 @@ def test_t4_cache_undo_via_service(cache_proj):
     assert target.read_text(encoding="utf-8") == "base\n"
 
 
-def test_t5_cache_undo_created_noop_notice(cache_proj):
+def test_t5_cache_undo_created_deletes_file(cache_proj):
     target = cache_proj / "src" / "new.py"
     DiffStore(str(cache_proj)).register_mutation(str(target))
     target.write_text("brand\n", encoding="utf-8")
 
-    svc = DiffService(str(cache_proj), emit_notices=True)
+    svc = DiffService(str(cache_proj), emit_notices=False)
     result = svc.undo(str(target))
-    assert result.ok is False
-    assert result.reason == "created_no_approve"
-    assert target.read_text(encoding="utf-8") == "brand\n"
-    notices = collect_runtime_notices()
-    assert any(n.code == "diff_tui_undo_created" for n in notices)
+    assert result.ok
+    assert result.undone_keys == ("src/new.py",)
+    assert result.deleted_keys == ("src/new.py",)
+    assert result.restored_keys == ()
+    assert not target.exists()
+    assert all(e.key != "src/new.py" for e in svc.list_entries())
 
 
 def test_cache_external_delete_shows_deleted_diff(cache_proj):
@@ -144,15 +145,52 @@ def test_t11_git_approve_and_undo_keeps_staging(git_repo):
     assert all(e.key != "a.txt" for e in pending)
 
 
-def test_t11_git_untracked_undo_noop_notice(git_repo):
+def test_t11_git_untracked_undo_deletes_file(git_repo):
     (git_repo / "new.txt").write_text("x\n", encoding="utf-8")
-    svc = DiffService(str(git_repo), emit_notices=True)
+    svc = DiffService(str(git_repo), emit_notices=False)
     result = svc.undo("new.txt")
-    assert result.ok is False
-    assert result.reason == "untracked"
-    assert (git_repo / "new.txt").exists()
-    notices = collect_runtime_notices()
-    assert any(n.code == "diff_tui_undo_untracked" for n in notices)
+    assert result.ok
+    assert result.undone_keys == ("new.txt",)
+    assert result.deleted_keys == ("new.txt",)
+    assert result.restored_keys == ()
+    assert not (git_repo / "new.txt").exists()
+
+
+def test_git_untracked_visual_diff_shows_file_content(git_repo):
+    """``git diff`` пуст для ``??`` — visual_diff показывает содержимое как addition."""
+    (git_repo / "fresh.py").write_text("hello created\n", encoding="utf-8")
+    svc = DiffService(str(git_repo), emit_notices=False)
+    entries = {e.key: e for e in svc.list_entries(pending_only=True)}
+    assert entries["fresh.py"].kind == "created"
+    body = svc.visual_diff("fresh.py")
+    assert body.strip()
+    assert "/dev/null" in body
+    assert "+++ fresh.py" in body
+    assert "+hello created" in body
+
+
+def test_cache_created_visual_diff_shows_file_content(cache_proj):
+    target = cache_proj / "src" / "new.py"
+    DiffStore(str(cache_proj)).register_mutation(str(target))
+    target.write_text("brand new\n", encoding="utf-8")
+
+    svc = DiffService(str(cache_proj), emit_notices=False)
+    body = svc.visual_diff("src/new.py")
+    assert body.strip()
+    assert "/dev/null" in body
+    assert "+brand new" in body
+
+
+def test_cache_created_empty_file_visual_diff_not_blank(cache_proj):
+    target = cache_proj / "src" / "empty.py"
+    DiffStore(str(cache_proj)).register_mutation(str(target))
+    target.write_text("", encoding="utf-8")
+
+    svc = DiffService(str(cache_proj), emit_notices=False)
+    body = svc.visual_diff("src/empty.py")
+    assert body.strip()
+    assert "/dev/null" in body
+    assert "+++ src/empty.py" in body
 
 
 def test_t12_git_deleted_unstaged_undo_restores(git_repo):

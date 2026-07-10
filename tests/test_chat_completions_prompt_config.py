@@ -128,6 +128,7 @@ class ChatCompletionsPromptConfigTest(unittest.TestCase):
 
             self.assertIsInstance(cfg["chat_completions_llm"], ChatCompletionsLlmConfig)
             self.assertEqual(cfg["chat_completions_llm"].max_tokens, 8192)
+            self.assertEqual(cfg["chat_completions_llm"].judge_max_tokens, 10000)
             self.assertEqual(cfg["chat_completions_llm"].completion_kwargs, {})
 
     def test_summary_params_normalization(self):

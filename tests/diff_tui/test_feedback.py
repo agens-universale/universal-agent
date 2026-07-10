@@ -69,26 +69,55 @@ def test_format_bulk_dual_layer_acks():
 def test_format_undo_noop_ack():
     from diff_tui.feedback import format_undo_noop_ack
 
-    assert "удалите файл вручную" in (
-        format_undo_noop_ack("diff-test.txt", "created_no_approve") or ""
-    )
     assert format_undo_noop_ack("x", "other") is None
     assert format_undo_noop_ack("", "created_no_approve") is None
+    assert format_undo_noop_ack("diff-test.txt", "") is None
 
 
 def test_build_undo_feedback_message_wraps_technical():
-    msg = build_undo_feedback_message(["src/foo.py", "src/bar.py"])
+    msg = build_undo_feedback_message(
+        restored_keys=["src/foo.py", "src/bar.py"],
+    )
     assert msg is not None
     assert msg["role"] == "user"
     assert is_technical_user_message_text(msg["content"])
     assert "src/foo.py" in msg["content"]
     assert "src/bar.py" in msg["content"]
-    assert "Re-read" in msg["content"]
+    assert "Changes reverted" in msg["content"]
+    assert "Deleted previously created" not in msg["content"]
+
+
+def test_build_undo_feedback_splits_restored_and_deleted():
+    body = build_undo_feedback_body(
+        restored_keys=["a.py"],
+        deleted_keys=["new.py", "fresh.txt"],
+    )
+    assert body is not None
+    assert "Changes reverted" in body
+    assert "- a.py" in body
+    assert "Deleted previously created files:" in body
+    assert "- new.py" in body
+    assert "- fresh.txt" in body
+    msg = build_undo_feedback_message(
+        restored_keys=["a.py"],
+        deleted_keys=["new.py"],
+    )
+    assert msg is not None
+    assert "Deleted previously created files:" in msg["content"]
+
+
+def test_build_undo_feedback_deleted_only():
+    body = build_undo_feedback_body(deleted_keys=["new.py"])
+    assert body is not None
+    assert "Changes reverted" not in body
+    assert "Deleted previously created files:" in body
+    assert "- new.py" in body
 
 
 def test_build_undo_feedback_empty_keys():
-    assert build_undo_feedback_message([]) is None
-    assert "src/a.py" in build_undo_feedback_body(["src/a.py"])
+    assert build_undo_feedback_message() is None
+    assert build_undo_feedback_body() is None
+    assert "src/a.py" in (build_undo_feedback_body(restored_keys=["src/a.py"]) or "")
 
 
 def test_service_undo_returns_undone_keys(cache_proj):
@@ -101,16 +130,21 @@ def test_service_undo_returns_undone_keys(cache_proj):
     result = svc.undo(str(target))
     assert result.ok
     assert result.undone_keys == ("src/foo.py",)
+    assert result.restored_keys == ("src/foo.py",)
+    assert result.deleted_keys == ()
 
 
-def test_service_undo_created_no_undone_keys(cache_proj):
+def test_service_undo_created_returns_deleted_keys(cache_proj):
     target = cache_proj / "src" / "new.py"
     DiffStore(str(cache_proj)).register_mutation(str(target))
     target.write_text("x\n", encoding="utf-8")
     svc = DiffService(str(cache_proj), emit_notices=False)
     result = svc.undo(str(target))
-    assert result.ok is False
-    assert result.undone_keys == ()
+    assert result.ok
+    assert result.undone_keys == ("src/new.py",)
+    assert result.restored_keys == ()
+    assert result.deleted_keys == ("src/new.py",)
+    assert not target.exists()
 
 
 @pytest.mark.asyncio
@@ -154,9 +188,9 @@ async def test_t15_diff_undo_appends_technical_to_thread(tmp_path, cache_proj):
         feedback: list = []
         trace = pilot.app.screen
 
-        def _capture(keys):
-            feedback.append(list(keys))
-            trace._on_diff_undo_feedback(keys)
+        def _capture(restored, deleted):
+            feedback.append((list(restored), list(deleted)))
+            trace._on_diff_undo_feedback(restored, deleted)
 
         scr = DiffScreen(
             launch_root=str(cache_proj),
@@ -169,7 +203,7 @@ async def test_t15_diff_undo_appends_technical_to_thread(tmp_path, cache_proj):
         await pilot.press("r")
         await pilot.pause()
 
-        assert feedback == [["src/foo.py"]]
+        assert feedback == [(["src/foo.py"], [])]
         assert scr._status == "Отменено: src/foo.py"
         msgs, _keys, _seq = load_thread_messages(str(threads_dir), "cli", tid)
         technical = [
@@ -177,3 +211,4 @@ async def test_t15_diff_undo_appends_technical_to_thread(tmp_path, cache_proj):
         ]
         assert len(technical) == 1
         assert "src/foo.py" in technical[0]["content"]
+        assert "Changes reverted" in technical[0]["content"]

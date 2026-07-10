@@ -42,6 +42,7 @@ def _ctx_state_digest(*, digest_handoff: dict | None = None):
         logger=None,
         chat_completions_llm=SimpleNamespace(
             max_tokens=8192,
+            judge_max_tokens=10000,
             completion_kwargs={"reasoning_effort": "none"},
         ),
     )

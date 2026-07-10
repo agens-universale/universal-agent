@@ -27,6 +27,7 @@ class ValidateFinalReportConsistencyTest(unittest.TestCase):
             logger=None,
             chat_completions_llm=SimpleNamespace(
                 max_tokens=8192,
+                judge_max_tokens=10000,
                 completion_kwargs={"reasoning_effort": "none"},
             ),
         )

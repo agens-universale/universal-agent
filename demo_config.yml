@@ -74,10 +74,12 @@ backend:
 #   device_code: "mini-cli-pub - надо получить у разработчиков или взять свой в GitVerse"
 #   login: login
 
-# Вспомогательные LLM (summary, finish gate, intent scope) — без thinking.
+# Вспомогательные LLM (summary, finish gate, intent scope, judges).
 chat_completions:
   llm:
     max_tokens: 8192
+    # Судьи (command_moderation, finish_gate / text_answer): запас под обязательный CoT/<think>.
+    judge_max_tokens: 10000
     completion_kwargs:
       separate_reasoning: false
       chat_template_kwargs:

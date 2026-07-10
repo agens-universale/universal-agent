@@ -39,3 +39,51 @@ def build_unified_diff(
         )
     )
     return truncate_diff(text, max_diff_chars)
+
+
+def build_created_file_diff(
+    content: str,
+    *,
+    tofile: str,
+    context_lines: int = DEFAULT_PREVIEW_CONTEXT_LINES,
+    max_diff_chars: int = DEFAULT_MAX_DIFF_CHARS,
+) -> str:
+    """Unified diff ``/dev/null`` → новый файл.
+
+    ``difflib`` для пустого файла даёт пустую строку — тогда всё равно
+    возвращаем заголовок addition, чтобы viewer/preview не были пустыми.
+    """
+    text = build_unified_diff(
+        "",
+        content,
+        fromfile="/dev/null",
+        tofile=tofile,
+        context_lines=context_lines,
+        max_diff_chars=max_diff_chars,
+    )
+    if text.strip():
+        return text
+    return truncate_diff(
+        f"--- /dev/null\n+++ {tofile}\n@@ -0,0 +0,0 @@\n",
+        max_diff_chars,
+    )
+
+
+def preview_change_lines(diff_text: str, *, limit: int = 3) -> tuple[list[str], int]:
+    """Первые ``limit`` строк изменения для trace-preview.
+
+    Пропускаем ``---`` / ``+++`` / ``@@``: для created они занимают весь
+    3-строчный preview и содержимое файла не видно.
+    """
+    if not diff_text or not diff_text.strip():
+        return [], 0
+    all_lines = [ln for ln in diff_text.splitlines() if ln != ""]
+    change_lines = [
+        ln
+        for ln in all_lines
+        if ln.startswith(("+", "-"))
+        and not ln.startswith(("+++", "---"))
+    ]
+    chosen = change_lines if change_lines else all_lines
+    head = chosen[: max(0, int(limit))]
+    return head, max(0, len(chosen) - len(head))

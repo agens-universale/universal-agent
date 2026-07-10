@@ -16,7 +16,6 @@ from config_modules.diff_tui import (
 )
 from diff_tui import git_ops
 from diff_tui.mode import evict_stale_cache, resolve_mode
-from diff_tui.notices import notice_undo_created, notice_undo_untracked
 from diff_tui.paths import canonical_path_key, orig_key
 from diff_tui.store import (
     STATUS_CREATED,
@@ -24,8 +23,11 @@ from diff_tui.store import (
     DiffStore,
     UndoResult,
 )
-from diff_tui.visual import build_unified_diff, truncate_diff
-from runtime_notices import push_runtime_notice
+from diff_tui.visual import (
+    build_created_file_diff,
+    build_unified_diff,
+    truncate_diff,
+)
 
 PathLike = Union[str, Path]
 
@@ -49,6 +51,8 @@ class OpResult:
     reason: str = ""
     key: str = ""
     undone_keys: tuple[str, ...] = ()
+    restored_keys: tuple[str, ...] = ()
+    deleted_keys: tuple[str, ...] = ()
     backend: FileBackend | Literal[""] = ""
     git_count: int = 0
     cache_count: int = 0
@@ -339,17 +343,22 @@ class DiffService:
     def undo_all(self) -> OpResult:
         self.ensure_mode_ready()
         if self.mode == "cache-mode":
-            undone: list[str] = []
+            restored: list[str] = []
+            deleted: list[str] = []
             for entry in list(self.list_entries(pending_only=True)):
-                if entry.kind == "created":
-                    self._emit_created_notice(entry.key)
-                    continue
                 r = self._undo_cache(entry.key)
-                if r.ok and r.key:
-                    undone.append(r.key)
+                if not r.ok or not r.key:
+                    continue
+                if r.reason == "deleted_created":
+                    deleted.append(r.key)
+                else:
+                    restored.append(r.key)
+            undone = tuple(restored) + tuple(deleted)
             return OpResult(
                 ok=bool(undone),
-                undone_keys=tuple(undone),
+                undone_keys=undone,
+                restored_keys=tuple(restored),
+                deleted_keys=tuple(deleted),
                 cache_count=len(undone),
             )
 
@@ -357,48 +366,61 @@ class DiffService:
         git_pending = [e for e in pending if e.backend == "git"]
         cache_pending = [e for e in pending if e.backend == "cache"]
 
-        # untracked restore не трогает — в feedback не включаем
         status = {e.path: e for e in git_ops.git_status(self.launch_root)}
-        git_undone = [
+        untracked = [
             e.key
             for e in git_pending
-            if status.get(e.key) is None or status[e.key].xy != "??"
+            if status.get(e.key) is not None and status[e.key].xy == "??"
         ]
-        git_n = 0
-        if git_pending:
+        tracked = [e.key for e in git_pending if e.key not in set(untracked)]
+        for rel in untracked:
+            self._delete_path(Path(self.launch_root) / rel)
+
+        git_n = len(untracked)
+        if tracked:
             result = git_ops.git_restore_worktree_all(self.launch_root)
             if not result.ok:
                 return OpResult(ok=False, reason=result.stderr)
-            git_n = len(git_undone)
+            git_n += len(tracked)
 
-        cache_undone: list[str] = []
+        cache_restored: list[str] = []
+        cache_deleted: list[str] = []
         for entry in cache_pending:
-            if entry.kind == "created":
-                self._emit_created_notice(entry.key)
-                continue
             r = self._undo_cache(entry.key)
-            if r.ok and r.key:
-                cache_undone.append(r.key)
+            if not r.ok or not r.key:
+                continue
+            if r.reason == "deleted_created":
+                cache_deleted.append(r.key)
+            else:
+                cache_restored.append(r.key)
 
-        all_undone = tuple(git_undone) + tuple(cache_undone)
+        restored = tuple(tracked) + tuple(cache_restored)
+        deleted = tuple(untracked) + tuple(cache_deleted)
+        all_undone = restored + deleted
         return OpResult(
             ok=bool(all_undone) or (not git_pending and not cache_pending),
             undone_keys=all_undone,
+            restored_keys=restored,
+            deleted_keys=deleted,
             git_count=git_n,
-            cache_count=len(cache_undone),
+            cache_count=len(cache_restored) + len(cache_deleted),
         )
 
     def _with_undone_keys(self, result: OpResult) -> OpResult:
-        """Успешный undo с реальным эффектом → ``undone_keys`` для thread feedback."""
+        """Успешный undo с реальным эффектом → ключи для thread feedback."""
         if not result.ok or not result.key:
             return result
         if result.reason in ("already_deleted_in_index",):
             return result
+        key = result.key
+        deleted = result.reason in ("deleted_created", "deleted_untracked")
         return OpResult(
             ok=True,
             reason=result.reason,
-            key=result.key,
-            undone_keys=(result.key,),
+            key=key,
+            undone_keys=(key,),
+            restored_keys=() if deleted else (key,),
+            deleted_keys=(key,) if deleted else (),
             backend=result.backend,
         )
 
@@ -410,8 +432,13 @@ class DiffService:
             entries = {e.path: e for e in git_ops.git_status(self.launch_root)}
             entry = entries.get(rel)
             if entry is not None and entry.xy == "??":
-                self._emit_untracked_notice(rel)
-                return OpResult(ok=False, reason="untracked", key=rel, backend="git")
+                self._delete_path(Path(self.launch_root) / rel)
+                return OpResult(
+                    ok=True,
+                    reason="deleted_untracked",
+                    key=rel,
+                    backend="git",
+                )
             if (
                 entry is not None
                 and entry.kind == "deleted"
@@ -426,7 +453,7 @@ class DiffService:
             result = git_ops.git_restore_worktree(self.launch_root, rel)
             return OpResult(
                 ok=result.ok,
-                reason=result.stderr if not result.ok else "",
+                reason=result.stderr if not result.ok else "restored",
                 key=rel,
                 backend="git",
             )
@@ -437,8 +464,6 @@ class DiffService:
             return OpResult(ok=False, reason="not_trackable")
         with self._lock_for(key):
             result: UndoResult = self._store.undo(path)
-            if result.reason == "created_no_approve":
-                self._emit_created_notice(key)
             return OpResult(
                 ok=result.ok,
                 reason=result.reason,
@@ -446,13 +471,11 @@ class DiffService:
                 backend="cache",
             )
 
-    def _emit_created_notice(self, key: str) -> None:
-        if self.emit_notices:
-            push_runtime_notice(notice_undo_created(key))
-
-    def _emit_untracked_notice(self, key: str) -> None:
-        if self.emit_notices:
-            push_runtime_notice(notice_undo_untracked(key))
+    @staticmethod
+    def _delete_path(path: Path) -> None:
+        """Удалить created/untracked файл (или symlink) с диска."""
+        if path.is_file() or path.is_symlink():
+            path.unlink()
 
     # --- maintenance ---
 
@@ -466,18 +489,44 @@ class DiffService:
         """Pending visual diff; пустая строка если не pending / ошибка.
 
         Context/truncation — из ``diff_tui.preview_context_lines`` / ``max_diff_chars``.
+        Для created/untracked (``git diff`` пуст) — unified diff содержимого файла.
         """
         self.ensure_mode_ready()
         backend = self.backend_for(path)
         if backend == "git":
-            rel = self._git_rel(path)
-            if rel is None:
-                return ""
-            raw = git_ops.git_diff_worktree(self.launch_root, rel).stdout
-            return truncate_diff(raw, self.max_diff_chars)
+            return self._visual_diff_git(path)
         if backend != "cache":
             return ""
         return self._visual_diff_cache(path)
+
+    def _visual_diff_git(self, path: PathLike) -> str:
+        rel = self._git_rel(path)
+        if rel is None:
+            return ""
+        raw = git_ops.git_diff_worktree(self.launch_root, rel).stdout
+        if raw.strip():
+            return truncate_diff(raw, self.max_diff_chars)
+        # Untracked / created: ``git diff`` не видит ``??`` — показываем файл как addition
+        by_path = {e.path: e for e in git_ops.git_status(self.launch_root)}
+        entry = by_path.get(rel)
+        if entry is None or entry.kind != "created":
+            return ""
+        return self._visual_diff_as_created(rel, Path(self.launch_root) / rel)
+
+    def _visual_diff_as_created(self, key: str, disk: Path) -> str:
+        """Unified diff ``/dev/null`` → содержимое нового файла на диске."""
+        if not disk.is_file():
+            return "(файл был создан, затем удалён с диска)"
+        try:
+            content = disk.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            return ""
+        return build_created_file_diff(
+            content,
+            tofile=key,
+            context_lines=self.preview_context_lines,
+            max_diff_chars=self.max_diff_chars,
+        )
 
     def _visual_diff_cache(self, path: PathLike) -> str:
         key = self._cache_key(path)
@@ -488,16 +537,7 @@ class DiffService:
         index = self._store.load_index()
         meta = index.get(key) or {}
         if meta.get("status") == STATUS_CREATED and not meta.get("baseline_exists"):
-            if not disk.is_file():
-                return "(файл был создан, затем удалён с диска)"
-            return build_unified_diff(
-                "",
-                disk.read_text(encoding="utf-8"),
-                fromfile="/dev/null",
-                tofile=key,
-                context_lines=self.preview_context_lines,
-                max_diff_chars=self.max_diff_chars,
-            )
+            return self._visual_diff_as_created(key, disk)
         if orig.is_file() and not disk.is_file():
             return build_unified_diff(
                 orig.read_text(encoding="utf-8"),

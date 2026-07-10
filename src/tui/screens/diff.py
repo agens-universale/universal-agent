@@ -1,6 +1,7 @@
 """DiffScreen — список pending-диффов, approve/undo, Enter → viewer."""
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any, Callable, Optional, Sequence
 
 from rich.text import Text
@@ -18,6 +19,7 @@ from diff_tui.feedback import (
     format_undo_noop_ack,
 )
 from diff_tui.service import DiffFileEntry, DiffService, OpResult
+from diff_tui.visual import build_created_file_diff
 from tui.palette import ACCENT, ERR, OK, MUTED, INK
 from tui.services.diff_render import render_unified_diff_widget
 
@@ -30,7 +32,7 @@ _VIEWER_FOOTER = (
     "[↑↓ / PgUp PgDn] прокрутка  [Esc] назад"
 )
 
-UndoFeedbackFn = Callable[[Sequence[str]], None]
+UndoFeedbackFn = Callable[[Sequence[str], Sequence[str]], None]  # restored, deleted
 UiAckFn = Callable[[str], None]
 ActionFn = Callable[[], None]
 
@@ -303,17 +305,17 @@ class DiffScreen(Screen):
             return None
         return self._entries[self._selected_idx]
 
-    def _emit_undo_feedback(self, undone_keys: Sequence[str]) -> None:
-        ack = format_undo_ack(undone_keys)
+    def _emit_undo_feedback(self, result: OpResult) -> None:
+        ack = format_undo_ack(result.undone_keys)
         if ack:
             self._emit_ui_ack(ack)
-        if undone_keys and self._on_undo_feedback is not None:
-            self._on_undo_feedback(undone_keys)
+        if result.undone_keys and self._on_undo_feedback is not None:
+            self._on_undo_feedback(result.restored_keys, result.deleted_keys)
 
     def _apply_undo_result(self, result: OpResult) -> None:
-        """Показать ack успеха или явный no-op (created/untracked)."""
+        """Показать ack успеха или явный no-op."""
         if result.undone_keys:
-            self._emit_undo_feedback(result.undone_keys)
+            self._emit_undo_feedback(result)
             return
         noop = format_undo_noop_ack(result.key or "", result.reason)
         if noop:
@@ -355,46 +357,19 @@ class DiffScreen(Screen):
         self._reload()
 
     def _undo_all(self) -> None:
-        created_keys = [e.key for e in self._entries if e.kind == "created"]
         result = self._svc.undo_all()
         if (
             self._svc.mode == "git-mode"
             and (result.git_count or result.cache_count)
             and result.undone_keys
         ):
-            base = format_bulk_undo_ack(result.git_count, result.cache_count) or ""
-            if created_keys:
-                n = len(created_keys)
-                self._emit_ui_ack(
-                    f"{base}; {n} созданн"
-                    f"{'ый' if n == 1 else 'ых'} — удалите вручную"
-                )
-            else:
-                self._emit_ui_ack(base)
+            ack = format_bulk_undo_ack(result.git_count, result.cache_count)
+            if ack:
+                self._emit_ui_ack(ack)
             if self._on_undo_feedback is not None:
-                self._on_undo_feedback(result.undone_keys)
+                self._on_undo_feedback(result.restored_keys, result.deleted_keys)
         elif result.undone_keys:
-            if created_keys:
-                n = len(created_keys)
-                base = format_undo_ack(result.undone_keys) or ""
-                self._emit_ui_ack(
-                    f"{base}; {n} созданн"
-                    f"{'ый' if n == 1 else 'ых'} — удалите вручную"
-                )
-                if self._on_undo_feedback is not None:
-                    self._on_undo_feedback(result.undone_keys)
-            else:
-                self._emit_undo_feedback(result.undone_keys)
-        elif created_keys:
-            if len(created_keys) == 1:
-                self._emit_ui_ack(
-                    f"{created_keys[0]}: отмена невозможна — удалите файл вручную"
-                )
-            else:
-                self._emit_ui_ack(
-                    f"Отмена невозможна для {len(created_keys)} созданных — "
-                    "удалите вручную"
-                )
+            self._emit_undo_feedback(result)
         elif not result.ok:
             self._emit_ui_ack("Отмена не выполнена")
         self._reload()
@@ -412,6 +387,19 @@ class DiffScreen(Screen):
             return
         key = entry.key
         body = self._svc.visual_diff(key)
+        if not body.strip() and entry.kind == "created":
+            # Страховка: created всегда показываем как addition с диска
+            disk = Path(key) if key.startswith("/") else Path(self._svc.launch_root) / key
+            if disk.is_file():
+                try:
+                    body = build_created_file_diff(
+                        disk.read_text(encoding="utf-8"),
+                        tofile=key,
+                        context_lines=self._svc.preview_context_lines,
+                        max_diff_chars=self._svc.max_diff_chars,
+                    )
+                except (OSError, UnicodeDecodeError):
+                    body = ""
         if not body.strip():
             body = "(нет содержимого диффа — файл вне учёта или baseline недоступен)"
 

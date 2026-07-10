@@ -6,22 +6,42 @@ from config_modules.merge import deep_merge
 from utils.llm_chat_client import request_chat_completion_text
 
 
-def auxiliary_llm_completion_kwargs(ctx: Any) -> Dict[str, Any]:
-    """
-    Единый профиль chat/completions для вспомогательных LLM-вызовов:
-    thread summary, finish gate, intent scope (см. ``chat_completions.llm`` в config).
-    """
+def _require_chat_completions_llm(ctx: Any) -> Any:
     chat_completions_llm = getattr(ctx, "chat_completions_llm", None)
     if chat_completions_llm is None:
         raise RuntimeError(
             "RunContext.chat_completions_llm обязателен; создавайте контекст через create_run_context."
         )
+    return chat_completions_llm
+
+
+def auxiliary_llm_completion_kwargs(ctx: Any) -> Dict[str, Any]:
+    """
+    Единый профиль chat/completions для вспомогательных LLM-вызовов:
+    thread summary, finish gate, intent scope (см. ``chat_completions.llm`` в config).
+    """
+    chat_completions_llm = _require_chat_completions_llm(ctx)
     completion_kwargs = getattr(chat_completions_llm, "completion_kwargs", None)
     if not isinstance(completion_kwargs, dict):
         raise RuntimeError(
             "RunContext.chat_completions_llm.completion_kwargs must be a dict"
         )
     return dict(completion_kwargs)
+
+
+def auxiliary_llm_judge_max_tokens(ctx: Any) -> int:
+    """
+    Лимит ответа для LLM-судей (command_moderation, finish gate / text_answer).
+
+    Читает ``chat_completions.llm.judge_max_tokens`` (отдельно от summary ``max_tokens``).
+    """
+    from config_modules.chat_completions import DEFAULT_JUDGE_MAX_TOKENS
+
+    chat_completions_llm = _require_chat_completions_llm(ctx)
+    value = getattr(chat_completions_llm, "judge_max_tokens", None)
+    if isinstance(value, int) and value >= 1:
+        return value
+    return DEFAULT_JUDGE_MAX_TOKENS
 
 
 def request_summary_text(

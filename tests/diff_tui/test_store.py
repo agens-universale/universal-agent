@@ -127,6 +127,18 @@ def test_t4_undo_modified_restores_disk(proj):
     assert target.read_text(encoding="utf-8") == "base\n"
 
 
+def test_t4b_undo_created_deletes_file(proj):
+    target = proj / "src" / "new.py"
+    store = _store(proj)
+    store.register_mutation(str(target))
+    target.write_text("brand new\n", encoding="utf-8")
+
+    result = store.undo(str(target))
+    assert result.ok is True
+    assert not target.exists()
+    assert "src/new.py" not in store.load_index()
+
+
 # --- T6: вне perimeter → не в index ---
 
 

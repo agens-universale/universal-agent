@@ -7,14 +7,18 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from config_modules.backend import parse_chat_completions_max_tokens
 
 DEFAULT_AUXILIARY_LLM_MAX_TOKENS = 8192
+# Judges (command_moderation, finish_gate / text_answer) often burn budget on
+# mandatory CoT / <think> before JSON; keep a separate higher ceiling.
+DEFAULT_JUDGE_MAX_TOKENS = 10000
 
 
 class ChatCompletionsLlmConfig(BaseModel):
-    """LLM-профиль вспомогательных chat/completions-вызовов (summary, finish gate, intent scope)."""
+    """LLM-профиль вспомогательных chat/completions-вызовов (summary, finish gate, intent scope, judges)."""
 
     model_config = ConfigDict(extra="forbid")
 
     max_tokens: int = DEFAULT_AUXILIARY_LLM_MAX_TOKENS
+    judge_max_tokens: int = DEFAULT_JUDGE_MAX_TOKENS
     completion_kwargs: dict[str, Any] = {}
 
     @field_validator("max_tokens", mode="before")
@@ -22,6 +26,13 @@ class ChatCompletionsLlmConfig(BaseModel):
     def normalize_max_tokens(cls, value: Any) -> int:
         return parse_chat_completions_max_tokens(
             value, default=DEFAULT_AUXILIARY_LLM_MAX_TOKENS
+        )
+
+    @field_validator("judge_max_tokens", mode="before")
+    @classmethod
+    def normalize_judge_max_tokens(cls, value: Any) -> int:
+        return parse_chat_completions_max_tokens(
+            value, default=DEFAULT_JUDGE_MAX_TOKENS
         )
 
     @field_validator("completion_kwargs", mode="before")
