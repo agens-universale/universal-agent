@@ -223,6 +223,9 @@ class TraceScreen(Screen):
         # Если == 0 при Esc-stop → агент ещё ничего не сгенерировал → rollback.
         self._events_since_last_user_send: int = 0
         self._last_user_send_text: str = ""
+        # Bang-shell (`!cmd`): один concurrent job; эфемерно в трейсе, не в thread.
+        self._bang = None  # type: Optional["BangShellController"]
+        self._bang_timeout_sec: Optional[float] = None
         # Заголовок терминала: кэш промпта возобновлённой сессии (читается из стора
         # 1 раз на attach, не на каждый poll-тик) + дедуп последнего записанного
         # заголовка (poll зовёт обновление каждый тик — пишем OSC только при смене).
@@ -1293,15 +1296,25 @@ class TraceScreen(Screen):
 
         raw = raw_output(ev) or ""
         lines, remaining = extract_preview_lines(raw) if raw else ([], 0)
+        from_diff = False
         # Write-tools часто без content-ключей → fallback: DiffService visual_diff.
         if not lines:
             lines, remaining = self._diff_preview_lines(ev)
+            from_diff = bool(lines)
         if not lines:
             return
-        # Формат preview: каждая строка с префиксом `_PREVIEW_PREFIX`, маркер `... +N more` в конце.
-        body = "\n".join(f"{_PREVIEW_PREFIX}{ln}" for ln in lines)
-        if remaining > 0:
-            body += f"\n{_PREVIEW_PREFIX}... +{remaining} more"
+        if from_diff:
+            from tui.services.diff_render import style_diff_preview_lines
+
+            body = style_diff_preview_lines(
+                lines, remaining=remaining, prefix=_PREVIEW_PREFIX
+            )
+        else:
+            # Формат preview: каждая строка с префиксом `_PREVIEW_PREFIX`,
+            # маркер `... +N more` в конце.
+            body = "\n".join(f"{_PREVIEW_PREFIX}{ln}" for ln in lines)
+            if remaining > 0:
+                body += f"\n{_PREVIEW_PREFIX}... +{remaining} more"
         preview = Static(body, classes="tool-result-preview hidden", markup=False)
         trace = self.query_one("#trace", VerticalScroll)
         trace.mount(preview, after=row)
@@ -2175,11 +2188,18 @@ class TraceScreen(Screen):
                 pass
 
         # Esc — единая лестница приоритетов: оверлей (Esc-блоки пикеров ниже) →
-        # 2-й-Esc-confirm → текст в инпуте (двухшаговая очистка) → ask_human →
-        # running (undo-cancel / stop-hint) → выход. Esc всегда разбирает самый
-        # локальный контекст; безусловный стоп — /stop или Ctrl+C.
+        # bang-shell cancel → 2-й-Esc-confirm → текст в инпуте (двухшаговая
+        # очистка) → ask_human → running (undo-cancel / stop-hint) → выход.
+        # Esc всегда разбирает самый локальный контекст; безусловный стоп —
+        # /stop или Ctrl+C.
         if event.key == "escape" and len(self.app.screen_stack) == 1 \
                 and not self._any_picker_open:
+            # Пока идёт `!` — cancel bang, не quit / не Esc-лестница выхода.
+            if self._bang is not None and self._bang.is_running:
+                self._bang.cancel()
+                event.stop()
+                event.prevent_default()
+                return
             # 2-й Esc в окне 2s — выполнить отложенный action.
             if self._esc_confirm_kind is not None:
                 kind = self._esc_confirm_kind
@@ -2671,6 +2691,10 @@ class TraceScreen(Screen):
             self._handle_command(text[1:])
             return
 
+        if text.startswith("!"):
+            self._handle_bang_shell(text)
+            return
+
         runner = self.app.get_runner()
 
         # id user-сообщения этого хода: пробрасываем в run, чтобы при быстрой
@@ -2983,6 +3007,11 @@ class TraceScreen(Screen):
         )
 
     def _cmd_stop(self) -> None:
+        # Bang-shell: сначала cancel `!`; повторный Ctrl+C / /stop — stop агента.
+        if self._bang is not None and self._bang.is_running:
+            self._bang.cancel()
+            return
+
         if self._confirm_active:
             runner = self.app.active_runner
             if runner is not None and hasattr(runner, "cancel_confirm"):
@@ -3361,6 +3390,126 @@ class TraceScreen(Screen):
         except Exception:
             return
         bar.styles.height = 3 if self._active_task_id is not None else 2
+
+    def _handle_bang_shell(self, text: str) -> None:
+        """`!command` → локальный shell в cwd TUI; результат только в трейсе."""
+        from tui.services.bang_shell import (
+            BangShellController,
+            BangShellSettings,
+            parse_body,
+            preflight,
+        )
+
+        body = parse_body(text)
+        if body is None:
+            self._mount_trace_row(
+                prefix="[!] ",
+                content="пустая команда",
+                kind_class="line-bang-fail",
+                focusable=False,
+            )
+            return
+
+        cfg = getattr(self.app, "_config", None) or {}
+        settings = BangShellSettings.from_mapping(cfg.get("tui_bang_shell"))
+        self._bang_timeout_sec = settings.timeout_sec
+
+        self._mount_trace_row(
+            prefix="[!] ",
+            content=f"$ {body}",
+            kind_class="line-bang",
+            focusable=False,
+        )
+
+        if not settings.enabled:
+            self._mount_trace_row(
+                prefix="   ",
+                content="bang-shell выключен",
+                kind_class="line-bang-fail",
+                focusable=False,
+            )
+            return
+
+        if self._bang is None:
+            self._bang = BangShellController()
+
+        if self._bang.is_running:
+            self._mount_trace_row(
+                prefix="   ",
+                content="дождитесь завершения предыдущей !",
+                kind_class="line-bang-fail",
+                focusable=False,
+            )
+            return
+
+        reason = preflight(body)
+        if reason is not None:
+            self._mount_trace_row(
+                prefix="   ",
+                content=reason,
+                kind_class="line-bang-fail",
+                focusable=False,
+            )
+            return
+
+        bang = self._bang
+        cwd = self._current_cwd()
+
+        def _work() -> None:
+            result = bang.run(body, cwd=cwd, settings=settings)
+            try:
+                self.app.call_from_thread(self._on_bang_done, result)
+            except Exception:
+                pass
+
+        threading.Thread(target=_work, daemon=True).start()
+
+    def _on_bang_done(self, result) -> None:
+        """Смонтировать результат bang-shell в трейс (UI-поток)."""
+        if result.rejected:
+            self._mount_trace_row(
+                prefix="   ",
+                content=result.rejected,
+                kind_class="line-bang-fail",
+                focusable=False,
+            )
+            return
+        if result.cancelled:
+            self._mount_trace_row(
+                prefix="   ",
+                content="[!] cancelled",
+                kind_class="line-bang-fail",
+                focusable=False,
+            )
+            return
+        if result.timed_out:
+            n = self._bang_timeout_sec
+            label = f"[!] timeout after {int(n)}s" if n else "[!] timeout"
+            self._mount_trace_row(
+                prefix="   ",
+                content=label,
+                kind_class="line-bang-fail",
+                focusable=False,
+            )
+            return
+
+        out = (result.output or "").rstrip("\n")
+        if not out and result.exit_code == 0:
+            body = "(нет вывода)"
+        else:
+            body = out
+        code = result.exit_code
+        if code is not None:
+            content = f"{body}\n[exit {code}]" if body else f"[exit {code}]"
+        else:
+            content = body or "(нет вывода)"
+        kind = "line-bang-out" if result.ok else "line-bang-fail"
+        self._mount_trace_row(
+            prefix="   ",
+            content=content,
+            kind_class=kind,
+            focusable=False,
+        )
 
     def _handle_command(self, raw: str) -> None:
         """Диспетчеризовать команду и, если она что-то дописала в трейс,

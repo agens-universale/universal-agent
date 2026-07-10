@@ -13,7 +13,7 @@ from textual.widgets import Static
 from diff_tui.feedback import format_approve_ack, format_undo_ack, format_undo_noop_ack
 from diff_tui.service import DiffFileEntry, DiffService, OpResult
 from tui.palette import ACCENT, ERR, OK, MUTED, INK
-from tui.services.json_payload import render_payload
+from tui.services.diff_render import render_unified_diff_widget
 
 _FOOTER = (
     "[↑↓] выбрать  [Enter] дифф  [a] принять  [r] откатить  "
@@ -115,7 +115,9 @@ class DiffViewerScreen(Screen):
             with Horizontal(id="header"):
                 yield Static(self._title, id="header-left", markup=False)
             with VerticalScroll(id="trace"):
-                body = render_payload(self._content)
+                body = render_unified_diff_widget(
+                    self._content if isinstance(self._content, str) else str(self._content)
+                )
                 body.add_class("viewer-body")
                 yield body
             yield Static(_VIEWER_FOOTER, id="footer", markup=False)

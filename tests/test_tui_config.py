@@ -35,3 +35,30 @@ def test_flatten_exposes_tui_stream_display(tmp_path, monkeypatch):
     conf.write_text("tui:\n  stream_display: minimal\n", encoding="utf-8")
     cfg = cfgmod.load_config(str(conf))
     assert cfg["tui_stream_display"] == "minimal"
+
+
+def test_tui_bang_shell_defaults():
+    from config_modules.tui import BangShellConfig, TuiConfig
+
+    assert TuiConfig().bang_shell == BangShellConfig()
+    assert TuiConfig().bang_shell.enabled is True
+    assert TuiConfig().bang_shell.timeout_sec is None
+    assert TuiConfig().bang_shell.max_output_bytes == 32768
+    assert TuiConfig().bang_shell.max_output_lines == 200
+
+
+def test_flatten_exposes_tui_bang_shell(tmp_path, monkeypatch):
+    import config as cfgmod
+    import mcp_runtime.paths as mpaths
+
+    monkeypatch.setattr(cfgmod, "_project_local_config_path", lambda: None)
+    monkeypatch.setattr(mpaths, "managed_config_path", lambda: tmp_path / "none.yml")
+
+    conf = tmp_path / "config.yml"
+    conf.write_text(
+        "tui:\n  bang_shell:\n    enabled: false\n    timeout_sec: 30\n",
+        encoding="utf-8",
+    )
+    cfg = cfgmod.load_config(str(conf))
+    assert cfg["tui_bang_shell"]["enabled"] is False
+    assert cfg["tui_bang_shell"]["timeout_sec"] == 30

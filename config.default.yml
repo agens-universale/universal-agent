@@ -55,6 +55,13 @@ tui:
   # Только TUI: оставить лишь корневой AGENTS.md (L3), отбросив global (~/.config/gc)
   # и .gc/AGENTS.md. Игнорируется, если задан paths.agent_md_path (путь главнее).
   agentsmd_override: false
+  # Bang-shell: префикс `!` в поле ввода → локальная shell-команда (не агент).
+  bang_shell:
+    enabled: true
+    # null / omit / 0 = без лимита. Положительное N = авто-kill через N секунд.
+    # timeout_sec: null
+    max_output_bytes: 32768
+    max_output_lines: 200
 
 # Diff-TUI: visual review/approve/undo правок агента (не параметры fs return_diff).
 diff_tui:

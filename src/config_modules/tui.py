@@ -1,6 +1,18 @@
 from typing import Literal, Optional
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
+
+
+class BangShellConfig(BaseModel):
+    """Yaml ``tui.bang_shell`` — локальный `!command` в TUI (не агент)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = True
+    # None / omit / <=0 = без лимита. Положительное N = авто-kill через N секунд.
+    timeout_sec: Optional[float] = None
+    max_output_bytes: int = 32768
+    max_output_lines: int = 200
 
 
 class TuiConfig(BaseModel):
@@ -24,3 +36,4 @@ class TuiConfig(BaseModel):
     # (~/.config/gc) и .gc/AGENTS.md. Игнорируется, если задан
     # paths.agent_md_path (путь главнее флага).
     agentsmd_override: bool = False
+    bang_shell: BangShellConfig = Field(default_factory=BangShellConfig)

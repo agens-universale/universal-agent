@@ -37,6 +37,9 @@ async def test_help_header_and_hotkeys():
         assert "Ctrl+J" in keys
         assert "Ctrl+Enter" not in keys
         assert "история ввода" in mains
+        assert "Shell (!)" in body
+        assert "! git status" in mains
+        assert "локальный shell" in mains
 
 
 @pytest.mark.asyncio

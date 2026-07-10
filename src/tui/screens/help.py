@@ -19,6 +19,12 @@ _EXTRA_HOTKEYS: tuple[tuple[str, str], ...] = (
     ("@", "упомянуть файл в сообщении"),
 )
 
+# Shell (`!`) — не slash-команда; отдельная секция в /help.
+_SHELL_HELP: tuple[tuple[str, str], ...] = (
+    ("! git status", "локальный shell (sh/cmd), cwd TUI; Esc/Ctrl+C — отмена"),
+    ("", "без sudo/интерактива (vim, docker -it); вывод только в трейсе"),
+)
+
 
 class HelpScreen(Screen):
     """Справочный экран — команды из реестра + доп. хоткеи (с хоткеями справа)."""
@@ -47,6 +53,13 @@ class HelpScreen(Screen):
                 f"/{cmd.name}{args_str}   {cmd.description}",
                 cmd.hotkey,
             )
+            row_i += 1
+
+        trace.mount(Static(""))
+        trace.mount(Static("Shell (!)", classes="help-section", markup=False))
+        for example, desc in _SHELL_HELP:
+            main = f"{example}   {desc}" if example else desc
+            self._mount_row(trace, row_i, main, "")
             row_i += 1
 
         trace.mount(Static(""))

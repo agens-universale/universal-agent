@@ -221,6 +221,7 @@ def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
         "tui_stream": app_cfg.tui.stream,
         "tui_stream_display": app_cfg.tui.stream_display,
         "tui_text_answer_mode": app_cfg.tui.text_answer_mode,
+        "tui_bang_shell": app_cfg.tui.bang_shell.model_dump(),
         "command_moderation": {
             "enabled": app_cfg.security.command_moderation.enabled,
             "mode": app_cfg.security.command_moderation.mode,
