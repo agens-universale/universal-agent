@@ -458,7 +458,7 @@ async def test_trace_mounts_pending_cta(tmp_path, launch_root):
         pilot.app.screen._maybe_mount_diff_pending_cta()
         await pilot.pause()
         found = any(
-            "Изменено" in str(row._content) and "diff [F5]" in str(row._content)
+            "Изменено" in str(row._content) and "diff [F3]" in str(row._content)
             for row in pilot.app.screen.query(TraceRow)
         )
         assert found, "expected pending CTA in trace"
@@ -492,7 +492,7 @@ async def test_flush_cta_survives_after_clear_trace(tmp_path, launch_root):
         scr._flush_diff_pending_cta()
         await pilot.pause()
         found = any(
-            "Изменено" in str(row._content) and "diff [F5]" in str(row._content)
+            "Изменено" in str(row._content) and "diff [F3]" in str(row._content)
             for row in scr.query(TraceRow)
         )
         assert found
@@ -520,7 +520,7 @@ async def test_cta_always_shows_when_pending(tmp_path, launch_root):
         ctas = [
             row
             for row in scr.query(TraceRow)
-            if "Изменено" in str(row._content) and "diff [F5]" in str(row._content)
+            if "Изменено" in str(row._content) and "diff [F3]" in str(row._content)
         ]
         assert len(ctas) == 2
 
@@ -618,7 +618,7 @@ async def test_trace_ctrl_a_approves_all(tmp_path, launch_root):
 
 
 @pytest.mark.asyncio
-async def test_f5_opens_diff(tmp_path, launch_root):
+async def test_f3_opens_diff(tmp_path, launch_root):
     pytest.importorskip("textual")
     from tui.app import TuiApp
     from tui.screens.diff import DiffScreen
@@ -631,10 +631,10 @@ async def test_f5_opens_diff(tmp_path, launch_root):
         threads_dir=str(tmp_path / "threads"), system="cli", config=cfg
     ).run_test() as pilot:
         assert isinstance(pilot.app.screen, TraceScreen)
-        await pilot.press("f5")
+        await pilot.press("f3")
         await pilot.pause()
         assert isinstance(pilot.app.screen, DiffScreen)
-        await pilot.press("f5")
+        await pilot.press("f3")
         await pilot.pause()
         assert sum(1 for s in pilot.app.screen_stack if isinstance(s, DiffScreen)) == 1
 

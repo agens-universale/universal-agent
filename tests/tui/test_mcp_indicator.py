@@ -136,7 +136,7 @@ async def test_settle_card_reflects_mcp_fail_trace_clean(tmp_path):
         card = _content(scr._mcp_status_row)
         # Точный формат карточки: три строки через пустую (MCP · уведомления · готовность).
         assert card == (
-            "⚠ MCP: 0/1 — ни один не подключился · /mcp (F3)\n\n"
+            "⚠ MCP: 0/1 — ни один не подключился · /mcp\n\n"
             "уведомления: ⚠ 1 · /notices (F4)\n\n"
             "✓ готов к работе"
         ), f"Формат карточки разошёлся: {card!r}"

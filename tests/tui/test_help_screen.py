@@ -18,11 +18,15 @@ async def test_help_header_and_hotkeys():
         # правый бренд-блок убран со всех подэкранов
         assert len(scr.query("#header-right")) == 0
         keys = " ".join(str(s.render()) for s in scr.query(".help-row-key"))
-        assert "Ctrl+S" in keys and "F1" in keys and "Ctrl+N" in keys
-        assert "F2" in keys and "F3" in keys and "F4" in keys and "F5" in keys
-        assert "Ctrl+A" in keys
+        assert "F1" in keys and "F2" in keys and "F3" in keys
+        assert "F4" in keys and "F5" in keys and "F6" in keys
         key_tokens = set(keys.split())
+        assert "F7" not in key_tokens and "F12" not in key_tokens
+        assert "Ctrl+C" in keys and "Esc" in keys
+        assert "Ctrl+A" in keys
         assert "Ctrl+E" not in key_tokens
+        assert "Ctrl+N" not in key_tokens  # алиас, не в /help
+        assert "Ctrl+S" not in key_tokens
         assert str(scr.query_one("#footer", Static).render()) == "[Esc] назад"
         # блок «Связь с разработчиками / Телеграм / Сберчат» убран
         body = " ".join(str(s.render()) for s in scr.query(Static))
@@ -31,6 +35,8 @@ async def test_help_header_and_hotkeys():
         assert "хоткеи" in body
         mains = "\n".join(str(s.render()) for s in scr.query(".help-row-main"))
         assert "/notices" in mains and "/diff" in mains and "/compact" in mains
+        # порядок по частоте: help раньше sessions раньше diff
+        assert mains.index("/help") < mains.index("/sessions") < mains.index("/diff")
         assert "log-txt" in mains and "log-json" in mains
         assert "упомянуть файл" in mains
         assert "вложить файл" not in mains

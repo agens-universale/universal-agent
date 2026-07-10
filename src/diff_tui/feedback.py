@@ -87,7 +87,7 @@ def format_pending_cta(count: int) -> str | None:
         return None
     return (
         f"Изменено {count} {files_word(count)}. "
-        "diff [F5] · Ctrl+A принять все"
+        "diff [F3] · Ctrl+A принять все"
     )
 
 

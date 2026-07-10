@@ -50,7 +50,7 @@ def test_format_approve_ack_and_cta():
     assert format_approve_ack(3) == "Принято 3 файла"
     assert format_approve_ack(0) is None
     assert format_pending_cta(1) == (
-        "Изменено 1 файл. diff [F5] · Ctrl+A принять все"
+        "Изменено 1 файл. diff [F3] · Ctrl+A принять все"
     )
     assert format_pending_cta(0) is None
 

@@ -67,14 +67,14 @@ def _server_ok(st) -> bool:
 
 def format_mcp_settle(servers: dict) -> str:
     """Итог boot-проверки (строка MCP в карточке): статус по реальному состоянию
-    (✓ все / ⚠ N/M) + хинт «/mcp (F3)». Глиф отделён пробелом («⚠ MCP»).
+    (✓ все / ⚠ N/M) + хинт «/mcp». Глиф отделён пробелом («⚠ MCP»).
 
     Строки уведомлений и готовности сюда НЕ добавляем: их собирает экран
     (_compose_card_lines) по осевшему mcp_status. См. main.py::_settle_mcp_row."""
     total = len(servers)
     connected = sum(1 for st in servers.values() if _server_ok(st))
     if connected == total:
-        return "✓ MCP: все подключены · /mcp (F3)"
+        return "✓ MCP: все подключены · /mcp"
     if connected == 0:
-        return f"⚠ MCP: 0/{total} — ни один не подключился · /mcp (F3)"
-    return f"⚠ MCP: {connected}/{total} подключены · /mcp (F3)"
+        return f"⚠ MCP: 0/{total} — ни один не подключился · /mcp"
+    return f"⚠ MCP: {connected}/{total} подключены · /mcp"

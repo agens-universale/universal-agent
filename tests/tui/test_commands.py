@@ -77,7 +77,7 @@ def test_list_commands_returns_canonical_only():
     reg.register(Command(name="tasks", aliases=("history",), args="", description=""))
     reg.register(Command(name="stop", aliases=(), args="", description=""))
     names = [c.name for c in reg.list_commands()]
-    assert names == ["stop", "tasks"]  # alphabetical, no aliases
+    assert names == ["tasks", "stop"]  # порядок регистрации, без aliases
 
 
 def _cmd(name):
@@ -90,15 +90,24 @@ def test_status_has_no_raw_arg():
 
 def test_command_hotkeys():
     expected = {
-        "help": "F1", "config": "F2", "mcp": "F3",
-        "notices": "F4", "diff": "F5",
-        "new": "Ctrl+N", "sessions": "Ctrl+S",
-        "export": "", "stop": "Ctrl+C", "quit": "Esc",
-        "skill": "", "skills": "", "status": "",
+        "help": "F1", "sessions": "F2", "diff": "F3",
+        "notices": "F4", "new": "F5", "config": "F6",
+        "export": "", "compact": "", "init": "",
+        "skills": "", "skill": "", "status": "",
+        "stop": "Ctrl+C", "mcp": "", "quit": "Esc",
     }
     reg = build_default_registry()
     for name, key in expected.items():
         assert reg.lookup(name).hotkey == key, name
+
+
+def test_default_registry_frequency_order():
+    names = [c.name for c in build_default_registry().list_commands()]
+    assert names == [
+        "help", "sessions", "diff", "notices", "new", "config",
+        "export", "compact", "init", "skills", "skill", "status",
+        "stop", "mcp", "quit",
+    ]
 
 
 def test_hotkeys_match_app_bindings():

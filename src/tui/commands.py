@@ -43,7 +43,8 @@ class CommandRegistry:
         return None
 
     def list_commands(self) -> list[Command]:
-        return sorted(self._by_name.values(), key=lambda c: c.name)
+        """Порядок регистрации = частота использования (help / палитра)."""
+        return list(self._by_name.values())
 
     def all_names(self) -> list[str]:
         return list(self._by_name) + list(self._alias_to_canonical)
@@ -57,27 +58,27 @@ def closest_command(name: str, registry: CommandRegistry) -> Optional[str]:
 
 
 def build_default_registry() -> CommandRegistry:
-    """Каноничный набор MVP-команд (§4 спеки)."""
+    """Каноничный набор MVP-команд (§4 спеки), по убыванию частоты."""
     reg = CommandRegistry()
     cmds = [
-        Command("sessions", (), "", "список сессий — выбрать и продолжить", hotkey="Ctrl+S"),
-        Command("new", (), "", "новая сессия в этом окне", hotkey="Ctrl+N"),
-        Command("stop", (), "", "остановить активную задачу", hotkey="Ctrl+C"),
-        Command("skill", (), "<id>", "использовать навык"),
-        Command("skills", (), "", "обзор навыков"),
-        Command("status", (), "", "состояние текущей сессии"),
-        Command("config", (), "", "конфиг сессии + пути к файлам", hotkey="F2"),
-        Command("mcp", (), "", "MCP-серверы и их тулы", hotkey="F3"),
+        Command("help", (), "", "справка по командам", hotkey="F1"),
+        Command("sessions", (), "", "список сессий — выбрать и продолжить", hotkey="F2"),
+        Command("diff", (), "", "просмотр pending-диффов, принять/откатить", hotkey="F3"),
         Command("notices", (), "", "уведомления (старт + runtime)", hotkey="F4"),
-        Command("diff", (), "", "просмотр pending-диффов, принять/откатить", hotkey="F5"),
+        Command("new", (), "", "новая сессия в этом окне", hotkey="F5"),
+        Command("config", (), "", "конфиг сессии + пути к файлам", hotkey="F6"),
         Command("export", (), "[txt|json|log-txt|log-json]", "экспорт сессии",
                 arg_options=(("txt", "вся сессия в читаемом виде"),
                              ("json", "структурированные данные сессии"),
                              ("log-txt", "лог-файл агента, текущий запуск (.log)"),
                              ("log-json", "jsonl-файл треда (вся сессия)"))),
-        Command("help", (), "", "справка по командам", hotkey="F1"),
-        Command("init", (), "", "анализ проекта и генерация AGENTS.md"),
         Command("compact", ("сжать",), "", "сжать контекст сессии сейчас"),
+        Command("init", (), "", "анализ проекта и генерация AGENTS.md"),
+        Command("skills", (), "", "обзор навыков"),
+        Command("skill", (), "<id>", "использовать навык"),
+        Command("status", (), "", "состояние текущей сессии"),
+        Command("stop", (), "", "остановить активную задачу", hotkey="Ctrl+C"),
+        Command("mcp", (), "", "MCP-серверы и их тулы"),
         Command("quit", (), "", "выход", hotkey="Esc"),
     ]
     for c in cmds:

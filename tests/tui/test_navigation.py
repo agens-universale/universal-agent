@@ -40,25 +40,48 @@ async def test_f1_opens_help():
 
 
 @pytest.mark.asyncio
-async def test_f2_opens_config():
+async def test_f2_opens_sessions(tmp_path):
+    pytest.importorskip("textual")
+    from tui.app import TuiApp
+    async with TuiApp(threads_dir=str(tmp_path)).run_test() as pilot:
+        await pilot.press("f2")
+        await pilot.pause()
+        from tui.screens.sessions import SessionsScreen
+        assert isinstance(pilot.app.screen, SessionsScreen)
+
+
+@pytest.mark.asyncio
+async def test_f5_opens_new(tmp_path):
+    pytest.importorskip("textual")
+    from tui.app import TuiApp
+    async with TuiApp(threads_dir=str(tmp_path)).run_test() as pilot:
+        await pilot.press("f5")
+        await pilot.pause()
+        # /new остаётся на главном экране (новая сессия в том же окне)
+        from tui.screens.main import TraceScreen
+        assert isinstance(pilot.app.screen, TraceScreen)
+
+
+@pytest.mark.asyncio
+async def test_f6_opens_config():
     pytest.importorskip("textual")
     from tui.app import TuiApp
     async with TuiApp().run_test() as pilot:
-        await pilot.press("f2")
+        await pilot.press("f6")
         await pilot.pause()
         from tui.screens.config import ConfigScreen
         assert isinstance(pilot.app.screen, ConfigScreen)
 
 
 @pytest.mark.asyncio
-async def test_f3_opens_mcp():
+async def test_f3_opens_diff(tmp_path):
     pytest.importorskip("textual")
     from tui.app import TuiApp
-    async with TuiApp().run_test() as pilot:
+    async with TuiApp(config={"launch_root": str(tmp_path)}).run_test() as pilot:
         await pilot.press("f3")
         await pilot.pause()
-        from tui.screens.mcp import McpScreen
-        assert isinstance(pilot.app.screen, McpScreen)
+        from tui.screens.diff import DiffScreen
+        assert isinstance(pilot.app.screen, DiffScreen)
 
 
 @pytest.mark.asyncio

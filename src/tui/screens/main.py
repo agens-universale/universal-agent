@@ -121,8 +121,8 @@ def select_active_substate(*, summarizing, finalizing, last_event_kind, since_la
 
 # Один набор команд в футере; /stop добавляется только при активном run.
 # (/skills, /export доступны через палитру — в футере лишние. /mcp не дублируем —
-# подсказка «/mcp (F3)» уже в бренд-карточке.)
-# Diff: F5 / Ctrl+A — в CTA трейса и футере /diff, не в базовом хроме сессии.
+# подсказка «/mcp» уже в бренд-карточке.)
+# Diff: F3 / Ctrl+A — в CTA трейса и футере /diff, не в базовом хроме сессии.
 _FOOTER_LEFT = "/sessions  /help  /config"
 _FOOTER_RUNNING_LEFT = "/stop  /sessions  /help  /config"
 _PLACEHOLDER_READY = "опишите задачу или /команда"
@@ -2069,7 +2069,7 @@ class TraceScreen(Screen):
     def _compose_card_lines(self, mcp_line: "Optional[str]") -> str:
         """Итог-содержимое правой колонки карточки: до трёх строк через пустую строку.
 
-            ⚠ MCP: 3/5 подключены · /mcp (F3)      (только если заданы MCP-серверы)
+            ⚠ MCP: 3/5 подключены · /mcp      (только если заданы MCP-серверы)
 
             уведомления: ⚠ 2 · ℹ 1 · /notices (F4)  (только если есть уведомления)
 

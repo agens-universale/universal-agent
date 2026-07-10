@@ -4,8 +4,8 @@
 - Нет активного run (empty state / task idle): /sessions  /help  /config
 - Task active + active run: /stop  /sessions  /help  /config
 (/skills и /export из футера убраны — доступны через палитру; /mcp не дублируем —
-подсказка /mcp (F3) в бренд-карточке.)
-Diff (F5 / Ctrl+A) — в CTA трейса и футере /diff, не в базовом хроме сессии.
+подсказка /mcp в бренд-карточке.)
+Diff (F3 / Ctrl+A) — в CTA трейса и футере /diff, не в базовом хроме сессии.
 
 [Esc] back/выход убраны — на main Esc контекстуален (clear/exit/stop),
 поведение досказывается confirm-hint в footer-right.

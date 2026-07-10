@@ -48,9 +48,9 @@ def test_format_progress_no_cap_at_threshold():
 
 
 def test_format_settle_all_ok():
-    # Контракт: только строка статуса MCP + «/mcp (F3)» (готовность — в карточке).
+    # Контракт: только строка статуса MCP + «/mcp» (готовность — в карточке).
     text = format_mcp_settle({"a": {"status": "connected"}})
-    assert text == "✓ MCP: все подключены · /mcp (F3)"
+    assert text == "✓ MCP: все подключены · /mcp"
     assert "готов" not in text
 
 

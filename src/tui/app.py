@@ -33,12 +33,15 @@ class TuiApp(App):
     BINDINGS = [
         Binding("escape", "back", "Назад", show=False),
         Binding("f1", "help", "Help"),
-        Binding("f2", "config", "/config"),
-        Binding("f3", "mcp", "/mcp"),
+        Binding("f2", "sessions", "/sessions"),
+        Binding("f3", "diff", "/diff"),
         Binding("f4", "notices", "/notices"),
-        Binding("f5", "diff", "/diff"),
-        Binding("ctrl+n", "new", "/new"),
-        Binding("ctrl+s", "sessions", "/sessions"),
+        Binding("f5", "new", "/new"),
+        # priority: TextArea перехватывает F6 как «select line».
+        Binding("f6", "config", "/config", priority=True),
+        # Доп. алиасы (не в /help): привычные Ctrl+N / Ctrl+S.
+        Binding("ctrl+n", "new", "/new", show=False),
+        Binding("ctrl+s", "sessions", "/sessions", show=False),
         # Ctrl+C: есть выделение → копировать; нет → отменить текущий run.
         # priority — перебивает копирование TextArea и системный help_quit.
         Binding("ctrl+c", "interrupt", "копировать/стоп", show=False, priority=True),
@@ -205,8 +208,8 @@ class TuiApp(App):
         return base if isinstance(base, TraceScreen) else None
 
     def _can_open_tool(self) -> bool:
-        """config/mcp открываются с главного экрана И с экрана уведомлений. Сами
-        config/mcp/справка — конечные: с них только F1-справка и Esc назад."""
+        """config/diff открываются с главного экрана И с экрана уведомлений. Сами
+        config/diff/справка — конечные: с них только F1-справка и Esc назад."""
         from tui.screens.notices import NoticesScreen
         return isinstance(self.screen, (TraceScreen, NoticesScreen))
 
@@ -233,12 +236,6 @@ class TuiApp(App):
         if main is None or not self._can_open_tool():
             return
         main._cmd_config()
-
-    def action_mcp(self) -> None:
-        main = self._main_screen()
-        if main is None or not self._can_open_tool():
-            return
-        main._cmd_mcp()
 
     def action_notices(self) -> None:
         from tui.screens.notices import NoticesScreen
@@ -270,9 +267,9 @@ class TuiApp(App):
         self.call_from_thread(self.refresh_notices_indicators)
 
     def action_new(self) -> None:
-        scr = self.screen
-        if hasattr(scr, "_cmd_new"):
-            scr._cmd_new()
+        if not self._on_main():
+            return
+        self.screen._cmd_new()
 
     def _current_selection(self) -> str:
         """Текст текущего выделения: сначала клавиатурное в фокусном вводе,
