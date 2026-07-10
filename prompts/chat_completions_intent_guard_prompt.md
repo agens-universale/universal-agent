@@ -90,9 +90,10 @@ After fixing `trace_ok` and `report_ok`, **`action` must match** this table (fou
 ## Output rules
 
 1. **Format:** Single raw JSON object only. **No** markdown fences. **No** preamble or postscript.
-2. **Required keys:** `action`, `trace_ok`, `report_ok`. On reject, prefer non-empty `trace_gaps` and/or `report_mismatches`.
-3. **`coverage_score`:** Float 0.0–1.0 — (user-facing requirements with structural evidence in digest) / (total user-facing requirements in `current_user_requests`).
-4. **`feedback_for_agent`:** Short technical notes for **logs only**; the downstream system may overwrite the agent-facing message. You may leave it empty.
+2. **No reasoning in the reply:** Do **not** write chain-of-thought, analysis prose, `<think>…</think>`, or step-by-step commentary. Decide silently, then emit **only** the JSON object. Any non-JSON text before/after the object is a hard failure.
+3. **Required keys:** `action`, `trace_ok`, `report_ok`. On reject, prefer non-empty `trace_gaps` and/or `report_mismatches`.
+4. **`coverage_score`:** Float 0.0–1.0 — (user-facing requirements with structural evidence in digest) / (total user-facing requirements in `current_user_requests`).
+5. **`feedback_for_agent`:** Short technical notes for **logs only**; the downstream system may overwrite the agent-facing message. You may leave it empty. Keep this field brief — do not dump reasoning here.
 
 ## Output schema
 

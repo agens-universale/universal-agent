@@ -27,6 +27,7 @@ _REQUEST_LABEL_RU = {
     "main_agent": "основной агент",
     "chat_completion": "вспомогательный LLM",
     "intent_guard_finish_gate": "судья (finish gate)",
+    "intent_guard_finish_gate_retry": "судья (finish gate, retry)",
     "subagent_special_agent": "special agent (генерация роли)",
 }
 

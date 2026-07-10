@@ -18,7 +18,10 @@ DEFAULT_INTENT_GUARD_PROMPT_PATH = os.path.abspath(
     os.path.join(_PROJECT_ROOT, "prompts", "chat_completions_intent_guard_prompt.md")
 )
 
-_FINISH_GATE_MAX_TOKENS = 1400
+# Models with mandatory CoT (e.g. reasoning_effort=low) burn budget on <think>;
+# keep headroom so the JSON verdict still fits after reasoning.
+_FINISH_GATE_MAX_TOKENS = 10000
+_FINISH_GATE_RETRY_DRAFT_MAX_CHARS = 6000
 
 
 def _to_text(value: Any) -> str:
@@ -94,6 +97,80 @@ def _wrap_trace_digest_text(trace_digest_text: str) -> str:
     return f"<dialog_history>\n{body}\n</dialog_history>"
 
 
+def _clip_retry_draft(raw: str, *, max_chars: int = _FINISH_GATE_RETRY_DRAFT_MAX_CHARS) -> str:
+    text = (raw or "").strip()
+    if len(text) <= max_chars:
+        return text
+    head = max_chars // 2
+    tail = max_chars - head
+    return (
+        text[:head]
+        + "\n... [TRUNCATED FOR RETRY PROMPT] ...\n"
+        + text[-tail:]
+    )
+
+
+def _build_finish_gate_user_prompt(payload: Dict[str, Any]) -> str:
+    return (
+        "Run the two-axis finish gate on the input below.\n"
+        "Do NOT reason out loud. Do NOT write <think> or analysis prose.\n"
+        "Return ONLY a single raw JSON object with required keys from the system prompt "
+        "(action, trace_ok, report_ok; lists on reject).\n\n"
+        f"Input:\n{json.dumps(payload, ensure_ascii=False, indent=2)}"
+    )
+
+
+def _build_finish_gate_retry_user_prompt(
+    *,
+    payload: Dict[str, Any],
+    previous_raw: str,
+) -> str:
+    draft = _clip_retry_draft(previous_raw)
+    return (
+        "Your previous finish-gate reply was INVALID: it was not parseable JSON with "
+        "required keys (action, trace_ok, report_ok), or it was truncated mid-reasoning.\n\n"
+        "STRICT RETRY RULES:\n"
+        "- Do NOT reason. Do NOT write <think>…</think>, commentary, or step-by-step text.\n"
+        "- Return ONLY the raw JSON verdict object (no markdown fences, no preamble).\n"
+        "- You may use your previous incomplete output below as scratch notes, then emit JSON only.\n\n"
+        "Previous incomplete output:\n"
+        "-----\n"
+        f"{draft}\n"
+        "-----\n\n"
+        "Original input (unchanged):\n"
+        f"{json.dumps(payload, ensure_ascii=False, indent=2)}"
+    )
+
+
+def _request_finish_gate_once(
+    *,
+    ctx: Any,
+    state: Any,
+    system_prompt: str,
+    user_prompt: str,
+    request_label: str,
+) -> str:
+    request_messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_prompt},
+    ]
+    raw = request_chat_completion_text(
+        ctx=ctx,
+        state=state,
+        messages=request_messages,
+        max_tokens=_FINISH_GATE_MAX_TOKENS,
+        request_label=request_label,
+        payload_overrides=auxiliary_llm_completion_kwargs(ctx),
+    )
+    log_llm_prompt_and_result(
+        logger=getattr(ctx, "logger", None),
+        label=request_label,
+        messages=request_messages,
+        output_text=raw,
+    )
+    return raw
+
+
 def validate_final_report_vs_user_intent(
     *,
     ctx: Any,
@@ -107,6 +184,9 @@ def validate_final_report_vs_user_intent(
 
     ``current_user_requests`` and ``context_user_messages`` are JSONL lines
     (one ``IntentRecord`` per line, §2.1) via ``records_to_jsonl_lines(deserialize_list(...))``.
+
+    On unparseable / truncated first reply, retries once with a stricter JSON-only
+    prompt that includes the previous incomplete output. Still fail-open if retry fails.
     """
     args = _normalize_handoff_in_finish_args(
         _parse_finish_handoff_args(finish_handoff_arguments)
@@ -136,31 +216,37 @@ def validate_final_report_vs_user_intent(
         "finish_handoff_arguments": args if args else _to_text(finish_handoff_arguments),
         "agent_kind": "subagent" if is_subagent else "main",
     }
-    user_prompt = (
-        "Run the two-axis finish gate on the input below.\n"
-        "Return ONLY JSON with required keys from the system prompt "
-        "(action, trace_ok, report_ok; lists on reject).\n\n"
-        f"Input:\n{json.dumps(payload, ensure_ascii=False, indent=2)}"
-    )
-    request_messages = [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": user_prompt},
-    ]
-    raw = request_chat_completion_text(
+
+    raw = _request_finish_gate_once(
         ctx=ctx,
         state=state,
-        messages=request_messages,
-        max_tokens=_FINISH_GATE_MAX_TOKENS,
+        system_prompt=system_prompt,
+        user_prompt=_build_finish_gate_user_prompt(payload),
         request_label="intent_guard_finish_gate",
-        payload_overrides=auxiliary_llm_completion_kwargs(ctx),
-    )
-    log_llm_prompt_and_result(
-        logger=getattr(ctx, "logger", None),
-        label="intent_guard_finish_gate",
-        messages=request_messages,
-        output_text=raw,
     )
     parsed = parse_validator_response(raw)
-    if parsed is None:
-        return fail_open_validation_result()
-    return parsed
+    if parsed is not None:
+        return parsed
+
+    logger = getattr(ctx, "logger", None)
+    if logger is not None:
+        logger.warning(
+            "finish_gate first reply unparseable; retrying with JSON-only prompt "
+            "previous_chars=%s",
+            len(raw or ""),
+        )
+
+    raw_retry = _request_finish_gate_once(
+        ctx=ctx,
+        state=state,
+        system_prompt=system_prompt,
+        user_prompt=_build_finish_gate_retry_user_prompt(
+            payload=payload,
+            previous_raw=raw,
+        ),
+        request_label="intent_guard_finish_gate_retry",
+    )
+    parsed_retry = parse_validator_response(raw_retry)
+    if parsed_retry is not None:
+        return parsed_retry
+    return fail_open_validation_result()

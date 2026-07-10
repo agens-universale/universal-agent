@@ -72,7 +72,7 @@ class ValidateFinalReportConsistencyTest(unittest.TestCase):
         self.assertFalse(result.report_ok)
 
     @patch("intent_guard.final_report_consistency.request_chat_completion_text")
-    def test_broken_llm_json_fails_open(self, mock_llm) -> None:
+    def test_broken_llm_json_retries_then_fails_open(self, mock_llm) -> None:
         mock_llm.return_value = "not json"
         result = validate_final_report_vs_user_intent(
             ctx=self.ctx,
@@ -83,6 +83,66 @@ class ValidateFinalReportConsistencyTest(unittest.TestCase):
         )
         self.assertTrue(result.ok)
         self.assertEqual(result.action, "accept")
+        self.assertEqual(mock_llm.call_count, 2)
+        self.assertEqual(
+            mock_llm.call_args_list[0].kwargs["request_label"],
+            "intent_guard_finish_gate",
+        )
+        self.assertEqual(
+            mock_llm.call_args_list[1].kwargs["request_label"],
+            "intent_guard_finish_gate_retry",
+        )
+        retry_user = mock_llm.call_args_list[1].kwargs["messages"][1]["content"]
+        self.assertIn("STRICT RETRY RULES", retry_user)
+        self.assertIn("not json", retry_user)
+        self.assertIn("Do NOT reason", retry_user)
+
+    @patch("intent_guard.final_report_consistency.request_chat_completion_text")
+    def test_unparseable_first_reply_retry_recovers(self, mock_llm) -> None:
+        mock_llm.side_effect = [
+            "<think>\nlong truncated reasoning without json\n",
+            _validator_json(
+                action="continue_work",
+                trace_ok=False,
+                report_ok=True,
+                trace_gaps=["missing fs_write_file"],
+            ),
+        ]
+        result = validate_final_report_vs_user_intent(
+            ctx=self.ctx,
+            state=self.state,
+            current_user_requests=["x"],
+            finish_handoff_arguments={},
+            trace_digest=self.digest,
+        )
+        self.assertEqual(mock_llm.call_count, 2)
+        self.assertFalse(result.ok)
+        self.assertEqual(result.action, "continue_work")
+        self.assertFalse(result.trace_ok)
+        retry_user = mock_llm.call_args_list[1].kwargs["messages"][1]["content"]
+        self.assertIn("long truncated reasoning without json", retry_user)
+        self.assertEqual(
+            mock_llm.call_args_list[0].kwargs["max_tokens"],
+            10000,
+        )
+        self.assertEqual(
+            mock_llm.call_args_list[1].kwargs["max_tokens"],
+            10000,
+        )
+
+    @patch("intent_guard.final_report_consistency.request_chat_completion_text")
+    def test_first_prompt_forbids_reasoning_out_loud(self, mock_llm) -> None:
+        mock_llm.return_value = _validator_json()
+        validate_final_report_vs_user_intent(
+            ctx=self.ctx,
+            state=self.state,
+            current_user_requests=["x"],
+            finish_handoff_arguments={},
+            trace_digest=self.digest,
+        )
+        user_content = mock_llm.call_args.kwargs["messages"][1]["content"]
+        self.assertIn("Do NOT reason out loud", user_content)
+        self.assertIn("Return ONLY a single raw JSON object", user_content)
 
     @patch("intent_guard.final_report_consistency.request_chat_completion_text")
     def test_uses_chat_completions_llm_completion_kwargs(self, mock_llm) -> None:
@@ -109,6 +169,7 @@ class ValidateFinalReportConsistencyTest(unittest.TestCase):
             finish_handoff_arguments={},
             trace_digest=self.digest,
         )
+        self.assertEqual(mock_llm.call_count, 1)
         self.assertEqual(
             mock_llm.call_args.kwargs["request_label"],
             "intent_guard_finish_gate",
@@ -171,6 +232,14 @@ def test_guard_prompt_accepts_confirmation_before_action():
 
     prompt = _load_guard_prompt()
     assert "explicit confirmation or approval **before** a consequential" in prompt
+
+
+def test_guard_prompt_forbids_reasoning_in_reply():
+    from intent_guard.final_report_consistency import _load_guard_prompt
+
+    prompt = _load_guard_prompt()
+    assert "No reasoning in the reply" in prompt
+    assert "Do **not** write chain-of-thought" in prompt
 
 
 if __name__ == "__main__":
