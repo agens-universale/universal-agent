@@ -98,3 +98,31 @@ def test_deleted_staged_status_approved(repo):
     # raw restore на staged-delete pathspec падает — семантика в DiffService
     assert not git_ops.git_restore_worktree(repo, "tracked.txt").ok
     assert not (repo / "tracked.txt").exists()
+
+
+# --- check_ignore ---
+
+
+def test_check_ignore_true_for_ignored(repo):
+    (repo / ".gitignore").write_text("secret.txt\n", encoding="utf-8")
+    (repo / "secret.txt").write_text("x\n", encoding="utf-8")
+    assert git_ops.check_ignore(repo, "secret.txt") is True
+
+
+def test_check_ignore_false_for_tracked(repo):
+    assert git_ops.check_ignore(repo, "tracked.txt") is False
+
+
+def test_check_ignore_false_for_untracked_non_ignored(repo):
+    (repo / "new.txt").write_text("x\n", encoding="utf-8")
+    assert git_ops.check_ignore(repo, "new.txt") is False
+
+
+def test_check_ignore_fail_safe_no_git(tmp_path, monkeypatch):
+    """Нет git / ошибка subprocess → None (fail-safe)."""
+    monkeypatch.setattr(
+        git_ops,
+        "_run_git",
+        lambda *_a, **_k: git_ops.GitRunResult(ok=False, stderr="boom", returncode=-1),
+    )
+    assert git_ops.check_ignore(tmp_path, "any.txt") is None

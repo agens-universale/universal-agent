@@ -333,7 +333,23 @@ class DiffStore:
             del index[key]
             self.save_index(index)
 
-    # --- maintenance (для шага 3+/service; минимально здесь) ---
+    # --- maintenance ---
+
+    def drop_entry(self, key: str) -> bool:
+        """Удалить ключ из index и соответствующий ``.orig`` (если есть)."""
+        index = self.load_index()
+        had = key in index
+        if had:
+            del index[key]
+            self.save_index(index)
+        orig = self._orig_path(key)
+        try:
+            if orig.is_file():
+                orig.unlink()
+                had = True
+        except OSError:
+            pass
+        return had
 
     def clear_all(self) -> None:
         if not self.diffs_dir.exists():

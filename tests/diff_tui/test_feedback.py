@@ -45,12 +45,25 @@ def test_format_undo_ack_one_and_many():
 
 def test_format_approve_ack_and_cta():
     assert format_approve_ack(1, "src/a.py") == "Принято: src/a.py"
+    assert format_approve_ack(1, "local.md") == "Принято: local.md"
+    assert "staged" not in (format_approve_ack(1, "local.md") or "").lower()
     assert format_approve_ack(3) == "Принято 3 файла"
     assert format_approve_ack(0) is None
     assert format_pending_cta(1) == (
         "Изменено 1 файл. diff [F5] · Ctrl+A принять все"
     )
     assert format_pending_cta(0) is None
+
+
+def test_format_bulk_dual_layer_acks():
+    from diff_tui.feedback import format_bulk_approve_ack, format_bulk_undo_ack
+
+    assert format_bulk_approve_ack(2, 1) == "Принято: git: 2; cache: 1"
+    assert format_bulk_approve_ack(3, 0) == "Принято: git: 3"
+    assert format_bulk_approve_ack(0, 2) == "Принято: cache: 2"
+    assert format_bulk_approve_ack(0, 0) is None
+    assert format_bulk_undo_ack(1, 1) == "Отменено: git: 1; cache: 1"
+    assert format_bulk_undo_ack(0, 0) is None
 
 
 def test_format_undo_noop_ack():

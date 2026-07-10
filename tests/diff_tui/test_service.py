@@ -191,7 +191,8 @@ def test_t10_nested_git_does_not_switch_service_mode(tmp_path, monkeypatch):
     assert svc.mode == "cache-mode"
 
 
-def test_t13_cache_to_git_auto_clears_diffs(tmp_path, monkeypatch):
+def test_t13_cache_to_git_keeps_ignored_cache(tmp_path, monkeypatch):
+    """v2: вход в git-mode не wipe'ает ``.gc/diffs/`` (только stale eviction)."""
     if not _has_git():
         pytest.skip("git недоступен")
     monkeypatch.setattr(env_vars.env, "gc_home", tmp_path / "gc_home")
@@ -206,12 +207,14 @@ def test_t13_cache_to_git_auto_clears_diffs(tmp_path, monkeypatch):
     assert store.index_path.is_file()
     assert list(store.diffs_dir.glob("*.orig"))
 
-    # появился .git → git-mode + clear
+    # появился .git → git-mode, но ignored cache сохраняется
     _git(root, "init", "-b", "main")
     _git(root, "config", "user.email", "t@t")
     _git(root, "config", "user.name", "t")
+    (root / ".gitignore").write_text("src/\n", encoding="utf-8")
     svc = DiffService(str(root))
     assert svc.mode == "git-mode"
     svc.ensure_mode_ready()
-    assert not store.index_path.exists()
-    assert list(store.diffs_dir.glob("*.orig")) == []
+    assert store.index_path.exists()
+    assert list(store.diffs_dir.glob("*.orig"))
+    assert "src/foo.py" in store.load_index()

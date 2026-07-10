@@ -1,4 +1,7 @@
-"""Оркестрация Diff-TUI: единый API list/approve/undo для git- и cache-mode."""
+"""Оркестрация Diff-TUI: единый API list/approve/undo для git- и cache-mode.
+
+В git-mode (v2) — гибрид: git-visible через index, ignored — через ``.gc/diffs/``.
+"""
 from __future__ import annotations
 
 import threading
@@ -12,7 +15,7 @@ from config_modules.diff_tui import (
     DEFAULT_PREVIEW_CONTEXT_LINES,
 )
 from diff_tui import git_ops
-from diff_tui.mode import maybe_clear_cache_on_git, resolve_mode
+from diff_tui.mode import evict_stale_cache, resolve_mode
 from diff_tui.notices import notice_undo_created, notice_undo_untracked
 from diff_tui.paths import canonical_path_key, orig_key
 from diff_tui.store import (
@@ -28,6 +31,7 @@ PathLike = Union[str, Path]
 
 FileKind = Literal["modified", "created", "deleted"]
 ReviewState = Literal["pending", "approved"]
+FileBackend = Literal["git", "cache"]
 
 
 @dataclass(frozen=True)
@@ -36,6 +40,7 @@ class DiffFileEntry:
     kind: FileKind
     state: ReviewState
     mark: str  # "M" | "A" | "D"
+    backend: FileBackend = "cache"
 
 
 @dataclass(frozen=True)
@@ -44,6 +49,9 @@ class OpResult:
     reason: str = ""
     key: str = ""
     undone_keys: tuple[str, ...] = ()
+    backend: FileBackend | Literal[""] = ""
+    git_count: int = 0
+    cache_count: int = 0
 
 
 _KIND_MARK = {
@@ -89,11 +97,16 @@ class DiffService:
         return resolve_mode(self.launch_root)
 
     def ensure_mode_ready(self) -> None:
-        """Первый вход в git-mode → auto clear устаревшего cache."""
+        """Первый вход: stale-cleanup cache-ключей, видимых git (без полного wipe)."""
         if self._cache_cleared:
             return
         if self.mode == "git-mode":
-            maybe_clear_cache_on_git(self.launch_root)
+            git_keys = {
+                e.path
+                for e in git_ops.git_status(self.launch_root)
+                if self._cache_key(e.path) is not None
+            }
+            evict_stale_cache(self._store, git_visible_keys=git_keys)
         self._cache_cleared = True
 
     def _lock_for(self, key: str) -> threading.Lock:
@@ -118,7 +131,6 @@ class DiffService:
         key = self._cache_key(path)
         if key is not None and not Path(key).is_absolute():
             return key
-        # fallback: relative_to launch_root
         try:
             return Path(path).resolve().relative_to(
                 Path(self.launch_root).resolve()
@@ -126,17 +138,46 @@ class DiffService:
         except ValueError:
             return None
 
+    def backend_for(self, path: PathLike) -> Optional[FileBackend]:
+        """Per-file backend: ``git`` | ``cache`` | ``None`` (не трекаем)."""
+        key = self._cache_key(path)
+        if key is None:
+            return None
+        if self.mode == "cache-mode":
+            return "cache"
+
+        rel = self._git_rel(path) or key
+        ignored = git_ops.check_ignore(self.launch_root, rel)
+        if ignored is True:
+            return "cache"
+        if ignored is False:
+            return "git"
+        # check-ignore fail: git только если путь уже в status; иначе не трекаем
+        status_paths = {e.path for e in git_ops.git_status(self.launch_root)}
+        if rel in status_paths or key in status_paths:
+            return "git"
+        return None
+
     # --- list ---
 
     def list_entries(self, *, pending_only: bool = False) -> list[DiffFileEntry]:
         self.ensure_mode_ready()
         if self.mode == "git-mode":
-            return self._list_git(pending_only=pending_only)
+            return self._list_hybrid(pending_only=pending_only)
         return self._list_cache(pending_only=pending_only)
 
-    def _list_git(self, *, pending_only: bool) -> list[DiffFileEntry]:
+    def _list_hybrid(self, *, pending_only: bool) -> list[DiffFileEntry]:
+        git_entries = list(git_ops.git_status(self.launch_root))
+        # protected / вне perimeter (.gc и т.п.) — не показываем в /diff
+        trackable_git = [
+            e for e in git_entries if self._cache_key(e.path) is not None
+        ]
+        git_keys = {e.path for e in trackable_git}
+        # конфликт → git побеждает; stale cache удаляем при refresh
+        evict_stale_cache(self._store, git_visible_keys=git_keys)
+
         out: list[DiffFileEntry] = []
-        for e in git_ops.git_status(self.launch_root):
+        for e in trackable_git:
             if pending_only and e.state != "pending":
                 continue
             out.append(
@@ -145,6 +186,20 @@ class DiffService:
                     kind=e.kind,
                     state=e.state,
                     mark=_KIND_MARK[e.kind],
+                    backend="git",
+                )
+            )
+
+        for entry in self._list_cache(pending_only=pending_only):
+            if entry.key in git_keys:
+                continue
+            out.append(
+                DiffFileEntry(
+                    key=entry.key,
+                    kind=entry.kind,
+                    state=entry.state,
+                    mark=entry.mark,
+                    backend="cache",
                 )
             )
         return out
@@ -160,13 +215,9 @@ class DiffService:
             elif e.status == STATUS_DELETED or (
                 not disk.is_file() and orig.is_file()
             ):
-                # STATUS_DELETED или внешнее удаление (rm) при живом .orig.
                 kind = "deleted"
             else:
                 kind = "modified"
-            # cache: после approve disk==.orig → файл уходит из pending;
-            # в index остаётся, но для UX считаем pending пока disk ≠ baseline
-            # или created без approve.
             state = self._cache_review_state(e.key, e.status, e.baseline_exists)
             if pending_only and state != "pending":
                 continue
@@ -176,6 +227,7 @@ class DiffService:
                     kind=kind,
                     state=state,
                     mark=_KIND_MARK[kind],
+                    backend="cache",
                 )
             )
         return out
@@ -202,21 +254,48 @@ class DiffService:
 
     def approve(self, path: PathLike) -> OpResult:
         self.ensure_mode_ready()
-        if self.mode == "git-mode":
+        backend = self.backend_for(path)
+        if backend == "git":
             return self._approve_git(path)
-        return self._approve_cache(path)
+        if backend == "cache":
+            return self._approve_cache(path)
+        return OpResult(ok=False, reason="not_trackable")
 
     def approve_all(self) -> OpResult:
         self.ensure_mode_ready()
-        if self.mode == "git-mode":
-            result = git_ops.git_add_all(self.launch_root)
-            return OpResult(ok=result.ok, reason=result.stderr if not result.ok else "")
-        # cache: approve каждый pending
-        ok_any = False
-        for entry in self.list_entries(pending_only=True):
-            r = self._approve_cache(entry.key)
-            ok_any = ok_any or r.ok
-        return OpResult(ok=ok_any or not self.list_entries(pending_only=True))
+        if self.mode == "cache-mode":
+            ok_any = False
+            cache_n = 0
+            for entry in self.list_entries(pending_only=True):
+                r = self._approve_cache(entry.key)
+                if r.ok:
+                    ok_any = True
+                    cache_n += 1
+            return OpResult(
+                ok=ok_any or not self.list_entries(pending_only=True),
+                cache_count=cache_n,
+            )
+
+        pending = self.list_entries(pending_only=True)
+        git_pending = [e for e in pending if e.backend == "git"]
+        cache_pending = [e for e in pending if e.backend == "cache"]
+
+        git_n = 0
+        for entry in git_pending:
+            # Поштучный add: не трогаем protected/.gc (в отличие от ``git add -A``).
+            if self._approve_git(entry.key).ok:
+                git_n += 1
+
+        cache_n = 0
+        for entry in cache_pending:
+            if self._approve_cache(entry.key).ok:
+                cache_n += 1
+
+        return OpResult(
+            ok=True,
+            git_count=git_n,
+            cache_count=cache_n,
+        )
 
     def _approve_git(self, path: PathLike) -> OpResult:
         rel = self._git_rel(path)
@@ -228,6 +307,7 @@ class DiffService:
                 ok=result.ok,
                 reason=result.stderr if not result.ok else "",
                 key=rel,
+                backend="git",
             )
 
     def _approve_cache(self, path: PathLike) -> OpResult:
@@ -236,42 +316,77 @@ class DiffService:
             return OpResult(ok=False, reason="not_trackable")
         with self._lock_for(key):
             ok = self._store.approve(path)
-            return OpResult(ok=ok, reason="" if ok else "approve_failed", key=key)
+            return OpResult(
+                ok=ok,
+                reason="" if ok else "approve_failed",
+                key=key,
+                backend="cache",
+            )
 
     # --- undo ---
 
     def undo(self, path: PathLike) -> OpResult:
         self.ensure_mode_ready()
-        if self.mode == "git-mode":
+        backend = self.backend_for(path)
+        if backend == "git":
             result = self._undo_git(path)
-        else:
+        elif backend == "cache":
             result = self._undo_cache(path)
+        else:
+            result = OpResult(ok=False, reason="not_trackable")
         return self._with_undone_keys(result)
 
     def undo_all(self) -> OpResult:
         self.ensure_mode_ready()
-        if self.mode == "git-mode":
-            status = {e.path: e for e in git_ops.git_status(self.launch_root)}
-            # untracked restore не трогает — в feedback не включаем
-            keys = [
-                e.key
-                for e in self.list_entries(pending_only=True)
-                if status.get(e.key) is None or status[e.key].xy != "??"
-            ]
+        if self.mode == "cache-mode":
+            undone: list[str] = []
+            for entry in list(self.list_entries(pending_only=True)):
+                if entry.kind == "created":
+                    self._emit_created_notice(entry.key)
+                    continue
+                r = self._undo_cache(entry.key)
+                if r.ok and r.key:
+                    undone.append(r.key)
+            return OpResult(
+                ok=bool(undone),
+                undone_keys=tuple(undone),
+                cache_count=len(undone),
+            )
+
+        pending = self.list_entries(pending_only=True)
+        git_pending = [e for e in pending if e.backend == "git"]
+        cache_pending = [e for e in pending if e.backend == "cache"]
+
+        # untracked restore не трогает — в feedback не включаем
+        status = {e.path: e for e in git_ops.git_status(self.launch_root)}
+        git_undone = [
+            e.key
+            for e in git_pending
+            if status.get(e.key) is None or status[e.key].xy != "??"
+        ]
+        git_n = 0
+        if git_pending:
             result = git_ops.git_restore_worktree_all(self.launch_root)
             if not result.ok:
                 return OpResult(ok=False, reason=result.stderr)
-            return OpResult(ok=True, undone_keys=tuple(keys))
+            git_n = len(git_undone)
 
-        undone: list[str] = []
-        for entry in list(self.list_entries(pending_only=True)):
+        cache_undone: list[str] = []
+        for entry in cache_pending:
             if entry.kind == "created":
                 self._emit_created_notice(entry.key)
                 continue
             r = self._undo_cache(entry.key)
             if r.ok and r.key:
-                undone.append(r.key)
-        return OpResult(ok=bool(undone), undone_keys=tuple(undone))
+                cache_undone.append(r.key)
+
+        all_undone = tuple(git_undone) + tuple(cache_undone)
+        return OpResult(
+            ok=bool(all_undone) or (not git_pending and not cache_pending),
+            undone_keys=all_undone,
+            git_count=git_n,
+            cache_count=len(cache_undone),
+        )
 
     def _with_undone_keys(self, result: OpResult) -> OpResult:
         """Успешный undo с реальным эффектом → ``undone_keys`` для thread feedback."""
@@ -284,6 +399,7 @@ class DiffService:
             reason=result.reason,
             key=result.key,
             undone_keys=(result.key,),
+            backend=result.backend,
         )
 
     def _undo_git(self, path: PathLike) -> OpResult:
@@ -295,21 +411,24 @@ class DiffService:
             entry = entries.get(rel)
             if entry is not None and entry.xy == "??":
                 self._emit_untracked_notice(rel)
-                return OpResult(ok=False, reason="untracked", key=rel)
-            # Staged delete: worktree уже совпадает с index (файла нет).
-            # ``git restore --worktree`` на pathspec удалённого из index даёт
-            # ошибку — трактуем как успешный no-op (спека T12).
+                return OpResult(ok=False, reason="untracked", key=rel, backend="git")
             if (
                 entry is not None
                 and entry.kind == "deleted"
                 and entry.state == "approved"
             ):
-                return OpResult(ok=True, reason="already_deleted_in_index", key=rel)
+                return OpResult(
+                    ok=True,
+                    reason="already_deleted_in_index",
+                    key=rel,
+                    backend="git",
+                )
             result = git_ops.git_restore_worktree(self.launch_root, rel)
             return OpResult(
                 ok=result.ok,
                 reason=result.stderr if not result.ok else "",
                 key=rel,
+                backend="git",
             )
 
     def _undo_cache(self, path: PathLike) -> OpResult:
@@ -320,7 +439,12 @@ class DiffService:
             result: UndoResult = self._store.undo(path)
             if result.reason == "created_no_approve":
                 self._emit_created_notice(key)
-            return OpResult(ok=result.ok, reason=result.reason, key=key)
+            return OpResult(
+                ok=result.ok,
+                reason=result.reason,
+                key=key,
+                backend="cache",
+            )
 
     def _emit_created_notice(self, key: str) -> None:
         if self.emit_notices:
@@ -330,12 +454,11 @@ class DiffService:
         if self.emit_notices:
             push_runtime_notice(notice_undo_untracked(key))
 
-    # --- maintenance (cache only) ---
+    # --- maintenance ---
 
     def clear_all(self) -> OpResult:
+        """Очистить только ``.gc/diffs/`` (в git-mode git-слой не трогаем)."""
         self.ensure_mode_ready()
-        if self.mode == "git-mode":
-            return OpResult(ok=False, reason="not_supported_in_git_mode")
         self._store.clear_all()
         return OpResult(ok=True)
 
@@ -345,12 +468,18 @@ class DiffService:
         Context/truncation — из ``diff_tui.preview_context_lines`` / ``max_diff_chars``.
         """
         self.ensure_mode_ready()
-        if self.mode == "git-mode":
+        backend = self.backend_for(path)
+        if backend == "git":
             rel = self._git_rel(path)
             if rel is None:
                 return ""
             raw = git_ops.git_diff_worktree(self.launch_root, rel).stdout
             return truncate_diff(raw, self.max_diff_chars)
+        if backend != "cache":
+            return ""
+        return self._visual_diff_cache(path)
+
+    def _visual_diff_cache(self, path: PathLike) -> str:
         key = self._cache_key(path)
         if key is None:
             return ""
@@ -369,7 +498,6 @@ class DiffService:
                 context_lines=self.preview_context_lines,
                 max_diff_chars=self.max_diff_chars,
             )
-        # Удаление: .orig есть, файла на диске нет (в т.ч. внешний rm).
         if orig.is_file() and not disk.is_file():
             return build_unified_diff(
                 orig.read_text(encoding="utf-8"),

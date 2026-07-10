@@ -10,7 +10,13 @@ from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import Screen
 from textual.widgets import Static
 
-from diff_tui.feedback import format_approve_ack, format_undo_ack, format_undo_noop_ack
+from diff_tui.feedback import (
+    format_approve_ack,
+    format_bulk_approve_ack,
+    format_bulk_undo_ack,
+    format_undo_ack,
+    format_undo_noop_ack,
+)
 from diff_tui.service import DiffFileEntry, DiffService, OpResult
 from tui.palette import ACCENT, ERR, OK, MUTED, INK
 from tui.services.diff_render import render_unified_diff_widget
@@ -220,6 +226,9 @@ class DiffScreen(Screen):
         t = Text(no_wrap=True)
         t.append(f"{cursor} ")
         t.append(f"{badge:<10}", style=style)
+        # В git-mode cache-backed (ignored) помечаем маркером ``i``.
+        if entry.backend == "cache" and self._svc.mode == "git-mode":
+            t.append(" i", style=MUTED)
         t.append(f" {entry.key}", style=INK)
         t.append(f"  {state}", style=MUTED)
         return t
@@ -333,9 +342,14 @@ class DiffScreen(Screen):
         self._reload()
 
     def _approve_all(self) -> None:
-        n = len(self._entries)
-        self._svc.approve_all()
-        ack = format_approve_ack(n)
+        pending = list(self._entries)
+        result = self._svc.approve_all()
+        if self._svc.mode == "git-mode" and (
+            result.git_count or result.cache_count
+        ):
+            ack = format_bulk_approve_ack(result.git_count, result.cache_count)
+        else:
+            ack = format_approve_ack(len(pending))
         if ack:
             self._emit_ui_ack(ack)
         self._reload()
@@ -343,7 +357,23 @@ class DiffScreen(Screen):
     def _undo_all(self) -> None:
         created_keys = [e.key for e in self._entries if e.kind == "created"]
         result = self._svc.undo_all()
-        if result.undone_keys:
+        if (
+            self._svc.mode == "git-mode"
+            and (result.git_count or result.cache_count)
+            and result.undone_keys
+        ):
+            base = format_bulk_undo_ack(result.git_count, result.cache_count) or ""
+            if created_keys:
+                n = len(created_keys)
+                self._emit_ui_ack(
+                    f"{base}; {n} созданн"
+                    f"{'ый' if n == 1 else 'ых'} — удалите вручную"
+                )
+            else:
+                self._emit_ui_ack(base)
+            if self._on_undo_feedback is not None:
+                self._on_undo_feedback(result.undone_keys)
+        elif result.undone_keys:
             if created_keys:
                 n = len(created_keys)
                 base = format_undo_ack(result.undone_keys) or ""

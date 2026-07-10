@@ -189,6 +189,12 @@ Visual review правок агента по файлам (pending → прин�
 с незаапрувленными изменениями в трейсе появляется CTA
 `Изменено N. diff [F5] · Ctrl+A принять все`.
 
+В git-репозитории `/diff` гибридный: tracked / untracked non-ignored — через
+git index (`approve` = `git add`, `undo` = `git restore --worktree`); пути из
+`.gitignore` внутри tracking-perimeter — через локальный cache (`.gc/diffs/`,
+маркер `i` в списке). `approve` ignored **не** делает `git add -f`. При смеси
+слоёв bulk-ack: `git: N; cache: M`. Без `.git` — прежний cache-mode.
+
 Экран `/diff` (F5):
 
 | Клавиша | Действие |

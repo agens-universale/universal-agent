@@ -2,15 +2,19 @@
 
 Режим зависит только от ``launch_root`` (snapshot cwd на старте TUI)
 и доступности ``git``. Nested ``.git`` внутри launch_root не учитывается.
+
+В git-mode (v2 hybrid) полный wipe ``.gc/diffs/`` отключён — только
+точечный stale-cleanup git-visible ключей через ``evict_stale_cache``.
 """
 from __future__ import annotations
 
 import logging
 import shutil
 from pathlib import Path
-from typing import Literal, Union
+from typing import TYPE_CHECKING, Literal, Set, Union
 
-from config_modules.env_vars import project_gc_dir
+if TYPE_CHECKING:
+    from diff_tui.store import DiffStore
 
 DiffMode = Literal["git-mode", "cache-mode"]
 
@@ -30,24 +34,24 @@ def resolve_mode(launch_root: Union[str, Path]) -> DiffMode:
     return "cache-mode"
 
 
-def maybe_clear_cache_on_git(launch_root: Union[str, Path]) -> bool:
-    """При входе в git-mode очистить устаревший ``.gc/diffs/`` (cache→git).
+def evict_stale_cache(
+    store: "DiffStore",
+    *,
+    git_visible_keys: Set[str],
+) -> int:
+    """Удалить cache-ключи, которые видны git (конфликт → git побеждает).
 
-    Возвращает True, если что-то удалили.
+    Возвращает число удалённых ключей.
     """
-    if resolve_mode(launch_root) != "git-mode":
-        return False
-    diffs = project_gc_dir(str(launch_root)) / "diffs"
-    if not diffs.exists():
-        return False
-    removed = False
-    for p in diffs.iterdir():
-        try:
-            if p.is_file():
-                p.unlink()
-                removed = True
-        except OSError:
-            pass
+    if not git_visible_keys:
+        return 0
+    removed = 0
+    for key in list(store.load_index()):
+        if key in git_visible_keys:
+            if store.drop_entry(key):
+                removed += 1
     if removed:
-        _logger.info("git detected; removed obsolete .gc/diffs cache")
+        _logger.info(
+            "evicted %s stale cache key(s) superseded by git", removed
+        )
     return removed

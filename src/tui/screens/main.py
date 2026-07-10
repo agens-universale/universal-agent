@@ -2854,7 +2854,7 @@ class TraceScreen(Screen):
 
     def action_diff_approve_all(self) -> None:
         """С экрана сессии: принять все pending (поштучно — только /diff)."""
-        from diff_tui.feedback import format_approve_ack
+        from diff_tui.feedback import format_approve_ack, format_bulk_approve_ack
 
         svc = self._diff_service_for_preview()
         if svc is None:
@@ -2882,7 +2882,7 @@ class TraceScreen(Screen):
             )
             return
         try:
-            svc.approve_all()
+            result = svc.approve_all()
         except Exception:
             self._mount_trace_row(
                 prefix="· ",
@@ -2890,8 +2890,11 @@ class TraceScreen(Screen):
                 kind_class="line-meta",
             )
             return
-        ack = format_approve_ack(n) or f"Принято {n}"
-        self._on_diff_ui_ack(ack)
+        if svc.mode == "git-mode" and (result.git_count or result.cache_count):
+            ack = format_bulk_approve_ack(result.git_count, result.cache_count)
+        else:
+            ack = format_approve_ack(n)
+        self._on_diff_ui_ack(ack or f"Принято {n}")
 
     def _on_diff_ui_ack(self, text: str) -> None:
         """TUI-only строка в трейсе после принять/откатить (не в thread модели)."""

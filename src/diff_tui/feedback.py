@@ -4,7 +4,7 @@ UX-строки для DiffScreen / trace — отдельно от technical me
 """
 from __future__ import annotations
 
-from typing import Sequence
+from typing import Optional, Sequence
 
 from message_policy.user_message_policy import (
     TECHNICAL_TYPE_TECHNICAL,
@@ -48,12 +48,41 @@ def format_undo_noop_ack(key: str, reason: str) -> str | None:
 
 
 def format_approve_ack(count: int, key: str | None = None) -> str | None:
-    """Короткий ack после approve (одного или all)."""
+    """Короткий ack после approve (одного или all).
+
+    Без слова «staged» — для cache-backed отличие даёт маркер ``i`` /
+    двуслойный bulk-ack.
+    """
     if count <= 0:
         return None
     if count == 1 and key:
         return f"Принято: {key}"
     return f"Принято {count} {files_word(count)}"
+
+
+def _dual_layer_parts(git_count: int, cache_count: int) -> list[str]:
+    parts: list[str] = []
+    if git_count > 0:
+        parts.append(f"git: {git_count}")
+    if cache_count > 0:
+        parts.append(f"cache: {cache_count}")
+    return parts
+
+
+def format_bulk_approve_ack(git_count: int, cache_count: int) -> Optional[str]:
+    """Двуслойный ack для approve all: «Принято: git: N; cache: M»."""
+    parts = _dual_layer_parts(git_count, cache_count)
+    if not parts:
+        return None
+    return "Принято: " + "; ".join(parts)
+
+
+def format_bulk_undo_ack(git_count: int, cache_count: int) -> Optional[str]:
+    """Двуслойный ack для undo all: «Отменено: git: N; cache: M»."""
+    parts = _dual_layer_parts(git_count, cache_count)
+    if not parts:
+        return None
+    return "Отменено: " + "; ".join(parts)
 
 
 def format_pending_cta(count: int) -> str | None:

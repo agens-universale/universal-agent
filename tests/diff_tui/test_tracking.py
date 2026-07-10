@@ -195,7 +195,8 @@ def test_t7_binary_write_not_tracked_via_overwrite_of_binary(launch_root):
 # --- git-mode no-op ---
 
 
-def test_git_mode_tracking_is_noop(launch_root):
+def test_git_mode_tracking_is_noop_for_tracked(launch_root):
+    """git-mode + non-ignored → snapshot no-op (baseline = git index)."""
     if not _has_git():
         pytest.skip("git недоступен")
     subprocess.run(
@@ -213,3 +214,23 @@ def test_git_mode_tracking_is_noop(launch_root):
     assert not (launch_root / ".gc" / "diffs").exists() or list(
         (launch_root / ".gc" / "diffs").glob("*")
     ) == []
+
+
+def test_git_mode_ignored_is_tracked_via_cache(launch_root):
+    """git-mode + ignored → snapshot в ``.gc/diffs/``."""
+    if not _has_git():
+        pytest.skip("git недоступен")
+    subprocess.run(
+        ["git", "init", "-b", "main"],
+        cwd=launch_root,
+        check=True,
+        capture_output=True,
+    )
+    (launch_root / ".gitignore").write_text("src/secret.md\n", encoding="utf-8")
+    target = launch_root / "src" / "secret.md"
+    target.write_text("base\n", encoding="utf-8")
+    tool = _write_tool(launch_root)
+
+    assert json.loads(tool(path=str(target), content="new\n"))["ok"] is True
+    assert _orig(launch_root, "src/secret.md").read_text(encoding="utf-8") == "base\n"
+    assert DiffStore(str(launch_root)).load_index()["src/secret.md"]["status"] == "modified"

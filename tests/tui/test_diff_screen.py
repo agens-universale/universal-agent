@@ -86,6 +86,74 @@ async def test_diff_screen_lists_pending_and_approve(tmp_path, launch_root):
 
 
 @pytest.mark.asyncio
+async def test_diff_screen_hybrid_shows_i_marker(tmp_path, launch_root):
+    """В git-mode cache-backed (ignored) помечается маркером ``i``."""
+    pytest.importorskip("textual")
+    import subprocess
+
+    from tui.app import TuiApp
+    from tui.screens.diff import DiffScreen
+
+    def _has_git() -> bool:
+        try:
+            subprocess.run(["git", "--version"], capture_output=True, check=True)
+            return True
+        except (OSError, subprocess.SubprocessError):
+            return False
+
+    if not _has_git():
+        pytest.skip("git недоступен")
+
+    subprocess.run(
+        ["git", "init", "-b", "main"],
+        cwd=launch_root,
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.email", "t@t"],
+        cwd=launch_root,
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "t"],
+        cwd=launch_root,
+        check=True,
+        capture_output=True,
+    )
+    (launch_root / ".gitignore").write_text("src/local.md\n", encoding="utf-8")
+    subprocess.run(
+        ["git", "add", ".gitignore"],
+        cwd=launch_root,
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "commit", "-m", "init"],
+        cwd=launch_root,
+        check=True,
+        capture_output=True,
+    )
+
+    target = launch_root / "src" / "local.md"
+    target.write_text("v1\n", encoding="utf-8")
+    DiffStore(str(launch_root)).register_mutation(str(target))
+    target.write_text("v2\n", encoding="utf-8")
+
+    cfg = _cfg(launch_root)
+    async with TuiApp(
+        threads_dir=str(tmp_path / "threads"), system="cli", config=cfg
+    ).run_test() as pilot:
+        scr = DiffScreen(launch_root=str(launch_root), config=cfg)
+        await pilot.app.push_screen(scr)
+        await pilot.pause()
+        assert any(e.key == "src/local.md" and e.backend == "cache" for e in scr._entries)
+        label = str(scr._row_label(scr._entries[0], selected=True))
+        assert " i" in label
+
+
+@pytest.mark.asyncio
 async def test_diff_screen_undo_restores(tmp_path, launch_root):
     pytest.importorskip("textual")
     from tui.app import TuiApp

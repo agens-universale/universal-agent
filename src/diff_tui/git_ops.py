@@ -110,10 +110,6 @@ def git_add(launch_root: PathLike, path: str) -> GitRunResult:
     return _run_git(launch_root, ["add", "--", path])
 
 
-def git_add_all(launch_root: PathLike) -> GitRunResult:
-    return _run_git(launch_root, ["add", "-A"])
-
-
 def git_restore_worktree(launch_root: PathLike, path: str) -> GitRunResult:
     """``git restore --worktree -- <path>`` — worktree ← index; staging не трогаем."""
     return _run_git(launch_root, ["restore", "--worktree", "--", path])
@@ -126,3 +122,19 @@ def git_restore_worktree_all(launch_root: PathLike) -> GitRunResult:
 def git_diff_worktree(launch_root: PathLike, path: str) -> GitRunResult:
     """Unstaged / pending diff vs index для одного файла."""
     return _run_git(launch_root, ["diff", "--", path])
+
+
+def check_ignore(launch_root: PathLike, path: str) -> Optional[bool]:
+    """``git check-ignore -q -- <path>``.
+
+    Returns:
+        ``True`` — путь ignored (exit 0);
+        ``False`` — не ignored (exit 1);
+        ``None`` — ошибка / git недоступен (fail-safe).
+    """
+    result = _run_git(launch_root, ["check-ignore", "-q", "--", path])
+    if result.returncode == 0:
+        return True
+    if result.returncode == 1:
+        return False
+    return None
