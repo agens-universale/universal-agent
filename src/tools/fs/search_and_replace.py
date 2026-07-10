@@ -3,6 +3,7 @@ import functools
 import difflib
 from typing import Dict, Any
 from tools.simple_tool_base import AbstractSimpleTool
+from tools.fs.edit_suggestions import build_edit_miss_suggestions
 from utils.tool_report_paths import tool_report_abspath
 from security.path_policy import enforce_write_guard
 from tools.schema_optional import coalesce_optional_string
@@ -19,102 +20,6 @@ class SearchAndReplace(AbstractSimpleTool):
     max_file_size_bytes = 100 * 1024 * 1024
     default_diff_context_lines = 3
     default_max_diff_chars = 12000
-
-    @staticmethod
-    def _normalize_spaces(text: str) -> str:
-        return " ".join(text.split())
-
-    @classmethod
-    def _build_simple_suggestions(
-        cls,
-        *,
-        search: str,
-        content: str,
-        max_suggestions: int = 10,
-        max_lines: int = 5000,
-    ) -> tuple[list[Dict[str, Any]], int]:
-        suggestions: list[Dict[str, Any]] = []
-        lines = content.splitlines()
-        limited_lines = lines[:max_lines]
-        is_multiline_search = "\n" in search or "\r" in search
-
-        if is_multiline_search:
-            search_lines = search.splitlines()
-            if not search_lines or len(search_lines) > len(limited_lines):
-                return suggestions, 0
-            normalized_search = "\n".join(
-                cls._normalize_spaces(line).lower().strip()
-                for line in search_lines
-            )
-            if not normalized_search.strip():
-                return suggestions, 0
-
-            scored: list[tuple[float, int, str]] = []
-            window_size = len(search_lines)
-            for start_idx in range(0, len(limited_lines) - window_size + 1):
-                window_lines = limited_lines[start_idx:start_idx + window_size]
-                normalized_window = "\n".join(
-                    cls._normalize_spaces(line).lower().strip()
-                    for line in window_lines
-                )
-                score = difflib.SequenceMatcher(
-                    None, normalized_search, normalized_window
-                ).ratio()
-                if score <= 0.6:
-                    continue
-                scored.append((score, start_idx + 1, "\n".join(window_lines)))
-
-            scored.sort(key=lambda x: x[0], reverse=True)
-            suggestions_total = len(scored)
-            for score, start_line, text in scored[:max_suggestions]:
-                suggestions.append(
-                    {
-                        "line": start_line,
-                        "end_line": start_line + len(search_lines) - 1,
-                        "text": text,
-                        "reason": "multiline difflib similarity",
-                        "score": round(score, 4),
-                    }
-                )
-            return suggestions, suggestions_total
-
-        search_tokens = cls._normalize_spaces(search).lower().strip().split()
-        if len(search_tokens) < 2:
-            return suggestions, 0
-
-        seen: set[tuple[int, str]] = set()
-        suggestions_total = 0
-
-        def contains_subsequence(tokens: list[str], needle: list[str]) -> bool:
-            if len(needle) > len(tokens):
-                return False
-            for start in range(0, len(tokens) - len(needle) + 1):
-                if tokens[start:start + len(needle)] == needle:
-                    return True
-            return False
-
-        for i, line in enumerate(limited_lines, start=1):
-            line_tokens = cls._normalize_spaces(line).lower().strip().split()
-            if not line_tokens:
-                continue
-            if not contains_subsequence(line_tokens, search_tokens):
-                continue
-
-            key = (i, line)
-            if key in seen:
-                continue
-            seen.add(key)
-            suggestions_total += 1
-            if len(suggestions) < max_suggestions:
-                suggestions.append(
-                    {
-                        "line": i,
-                        "text": line,
-                        "reason": "token subsequence match (lowercased, stripped)",
-                    }
-                )
-
-        return suggestions, suggestions_total
 
     @staticmethod
     def _build_unified_diff(
@@ -704,7 +609,10 @@ Update version string:
 
         match_count = len(match_entries)
         if match_count == 0:
-            suggestions, suggestions_total = self._build_simple_suggestions(search=search, content=content)
+            suggestions, suggestions_total = build_edit_miss_suggestions(
+                search=search,
+                content=content,
+            )
             miss_message = "Search string not found in file. No changes made."
             if start_line is not None or end_line is not None:
                 miss_message = (

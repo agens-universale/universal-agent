@@ -23,7 +23,7 @@ def test_replace_multiline_and_not_found(tmp_path):
     assert ok["ok"] is True
     assert ok["match_count"] == 1
     assert p.read_text(encoding="utf-8") == "top\nline3\n"
-    miss = json.loads(SearchAndReplace()(path=str(p), search="absent", replace="x"))
+    miss = json.loads(SearchAndReplace()(path=str(p), search="zzzzzzzzzz", replace="x"))
     assert miss["ok"] is False and miss["matched"] is False and miss["error"] is None
     assert miss["match_count"] == 0
     assert miss["suggestions"] == []
@@ -225,7 +225,7 @@ def test_backup_created(tmp_path):
     assert bak.read_text(encoding="utf-8") == "first"
 
 
-def test_not_found_suggestions_by_token_subsequence(tmp_path):
+def test_not_found_suggestions_by_difflib_similarity(tmp_path):
     p = tmp_path / "s.txt"
     p.write_text("KEY: value\nretry    count\nalpha beta gamma\nunrelated\n", encoding="utf-8")
 
@@ -233,18 +233,19 @@ def test_not_found_suggestions_by_token_subsequence(tmp_path):
     assert by_case["ok"] is False and by_case["matched"] is False
     assert len(by_case["suggestions"]) >= 1
     assert by_case["suggestions"][0]["line"] == 1
-    assert by_case["suggestions"][0]["reason"] == "token subsequence match (lowercased, stripped)"
+    assert by_case["suggestions"][0]["reason"] == "single-line difflib similarity"
+    assert isinstance(by_case["suggestions"][0]["score"], float)
 
     by_spaces = json.loads(SearchAndReplace()(path=str(p), search="retry count", replace="x"))
     assert by_spaces["ok"] is False and by_spaces["matched"] is False
     assert len(by_spaces["suggestions"]) >= 1
     assert by_spaces["suggestions"][0]["line"] == 2
-    assert by_spaces["suggestions"][0]["reason"] == "token subsequence match (lowercased, stripped)"
+    assert by_spaces["suggestions"][0]["reason"] == "single-line difflib similarity"
 
-    by_subseq = json.loads(SearchAndReplace()(path=str(p), search="ALPHA BETA", replace="x"))
-    assert by_subseq["ok"] is False and by_subseq["matched"] is False
-    assert len(by_subseq["suggestions"]) >= 1
-    assert by_subseq["suggestions"][0]["line"] == 3
+    by_casefold = json.loads(SearchAndReplace()(path=str(p), search="ALPHA BETA", replace="x"))
+    assert by_casefold["ok"] is False and by_casefold["matched"] is False
+    assert len(by_casefold["suggestions"]) >= 1
+    assert by_casefold["suggestions"][0]["line"] == 3
 
 
 def test_not_found_suggestions_for_multiline_search(tmp_path):
@@ -259,19 +260,22 @@ def test_not_found_suggestions_for_multiline_search(tmp_path):
     assert miss["suggestions"][0]["end_line"] == 2
     assert miss["suggestions"][0]["reason"] == "multiline difflib similarity"
     assert isinstance(miss["suggestions"][0]["score"], float)
+    assert miss["suggestions"][0]["score"] > 0.2
 
 
-def test_not_found_suggestions_disabled_for_single_token_search(tmp_path):
+def test_not_found_suggestions_for_single_token_search(tmp_path):
     p = tmp_path / "st.txt"
     p.write_text("alpha beta gamma\n", encoding="utf-8")
     miss = json.loads(
         SearchAndReplace()(path=str(p), search="ALPHA", replace="x")
     )
     assert miss["ok"] is False and miss["matched"] is False
-    assert miss["suggestions"] == []
+    assert len(miss["suggestions"]) >= 1
+    assert miss["suggestions"][0]["line"] == 1
+    assert miss["suggestions"][0]["reason"] == "single-line difflib similarity"
 
 
-def test_not_found_suggestions_limit_to_ten(tmp_path):
+def test_not_found_suggestions_limit_to_three(tmp_path):
     p = tmp_path / "lim.txt"
     lines = [f"alpha beta line {i}" for i in range(20)]
     p.write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -279,8 +283,73 @@ def test_not_found_suggestions_limit_to_ten(tmp_path):
         SearchAndReplace()(path=str(p), search="Alpha   beta", replace="x")
     )
     assert miss["ok"] is False and miss["matched"] is False
-    assert len(miss["suggestions"]) == 10
+    assert len(miss["suggestions"]) == 3
     assert miss["suggestions_total"] == 20
+    scores = [s["score"] for s in miss["suggestions"]]
+    assert scores == sorted(scores, reverse=True)
+
+
+def test_not_found_suggestions_typo_in_token(tmp_path):
+    p = tmp_path / "typo.txt"
+    p.write_text("alpha beta gamma\nother stuff\n", encoding="utf-8")
+    miss = json.loads(
+        SearchAndReplace()(path=str(p), search="alpha betta gamma", replace="x")
+    )
+    assert miss["ok"] is False and miss["matched"] is False
+    assert len(miss["suggestions"]) >= 1
+    assert miss["suggestions"][0]["line"] == 1
+    assert miss["suggestions"][0]["score"] > 0.2
+
+
+def test_not_found_suggestions_picks_nearest_function_line(tmp_path):
+    p = tmp_path / "code.py"
+    p.write_text(
+        "import os\n"
+        "def compute_total(items):\n"
+        "    return sum(items)\n"
+        "print('done')\n",
+        encoding="utf-8",
+    )
+    miss = json.loads(
+        SearchAndReplace()(
+            path=str(p),
+            search="def compute_totl(items):",
+            replace="def compute_total(items):",
+        )
+    )
+    assert miss["ok"] is False and miss["matched"] is False
+    assert miss["suggestions_total"] >= 1
+    assert miss["suggestions"][0]["line"] == 2
+    assert "compute_total" in miss["suggestions"][0]["text"]
+    assert miss["suggestions"][0]["score"] > 0.2
+
+
+def test_not_found_suggestions_mid_score_multiline_kept(tmp_path):
+    p = tmp_path / "block.txt"
+    p.write_text("hello world\nexample text\nnoise noise\n", encoding="utf-8")
+    miss = json.loads(
+        SearchAndReplace()(
+            path=str(p),
+            search="hello wrld\nexampl text",
+            replace="x",
+        )
+    )
+    assert miss["ok"] is False and miss["matched"] is False
+    assert len(miss["suggestions"]) >= 1
+    assert miss["suggestions"][0]["line"] == 1
+    assert miss["suggestions"][0]["end_line"] == 2
+    assert 0.2 < miss["suggestions"][0]["score"] < 1.0
+
+
+def test_not_found_unrelated_search_has_no_suggestions(tmp_path):
+    p = tmp_path / "u.txt"
+    p.write_text("short\n", encoding="utf-8")
+    miss = json.loads(
+        SearchAndReplace()(path=str(p), search="zzzzzzzzzzzzzzzz", replace="x")
+    )
+    assert miss["ok"] is False and miss["matched"] is False
+    assert miss["suggestions"] == []
+    assert miss["suggestions_total"] == 0
 
 
 def test_stale_file_sha256_guard(tmp_path):

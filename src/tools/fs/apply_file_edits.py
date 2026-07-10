@@ -8,6 +8,7 @@ from utils.file_text import (
     check_expected_file_sha256,
     is_valid_sha256_hex,
 )
+from tools.fs.edit_suggestions import build_edit_miss_suggestions
 from tools.schema_optional import coalesce_optional_string
 from tools.simple_tool_base import AbstractSimpleTool
 from utils.tool_report_paths import tool_report_abspath
@@ -235,12 +236,17 @@ class ApplyFileEdits(AbstractSimpleTool):
         )
         match_count = len(matches)
         if match_count == 0:
+            suggestions, _suggestions_total = build_edit_miss_suggestions(
+                search=search,
+                content=content,
+            )
             return False, content, {
                 "matched": False,
                 "replaced": 0,
                 "match_count": 0,
                 "line_numbers": [],
                 "match_ranges": [],
+                "suggestions": suggestions,
             }, {"type": "not_found"}
 
         if expected_matches is not None and match_count != expected_matches:
@@ -380,6 +386,22 @@ class ApplyFileEdits(AbstractSimpleTool):
             meta["index"] = i
             edit_results.append(meta)
             if not ok_edit:
+                message = f"Edit #{i} failed. No changes applied."
+                if err and err.get("type") == "not_found":
+                    suggestions = meta.get("suggestions") or []
+                    if suggestions:
+                        tops = ", ".join(
+                            f"line {s['line']} ({s['score']})" for s in suggestions
+                        )
+                        message = (
+                            f"Edit #{i} failed: search not found. "
+                            f"Top matches: {tops}."
+                        )
+                    else:
+                        message = (
+                            f"Edit #{i} failed: search not found. "
+                            "No changes applied."
+                        )
                 return _result(
                     ok=False,
                     applied=False,
@@ -389,7 +411,7 @@ class ApplyFileEdits(AbstractSimpleTool):
                     total_replaced=0,
                     edit_results=edit_results,
                     failed_edit_index=i,
-                    message=f"Edit #{i} failed. No changes applied.",
+                    message=message,
                     error=err,
                 )
             current = next_content
