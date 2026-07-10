@@ -6,6 +6,7 @@ from jsonschema import Draft7Validator
 from tools.connect_mcp.validation import _validate_tool_arguments
 from tools.schema_optional import (
     normalize_optional_empty_as_omit,
+    parameters_schema_for_local_validation,
     resolve_optional_property_keys,
 )
 
@@ -253,14 +254,15 @@ def parse_and_validate_tool_arguments(
             parsed_args=None,
         )
 
+    validation_schema = parameters_schema_for_local_validation(params_schema)
     try:
-        _validate_tool_arguments(tool_name, params_schema, parsed_args)
+        _validate_tool_arguments(tool_name, validation_schema, parsed_args)
     except Exception as e:  # noqa: BLE001
         coerced, changed = _coerce_double_encoded_fields(parsed_args, params_schema)
         recovered = False
         if changed:
             try:
-                _validate_tool_arguments(tool_name, params_schema, coerced)
+                _validate_tool_arguments(tool_name, validation_schema, coerced)
             except Exception:  # noqa: BLE001
                 recovered = False
             else:

@@ -17,6 +17,9 @@ backend:
   chat_completions_max_tokens: 8096
   use_ssl: false
   use_max_tokens_param: true
+  # true — провайдер требует OpenAI strict tools (все properties в required).
+  # false — типично для GigaCode и non-OpenAI; при true локальная валидация всё равно
+  # принимает omit semantic optional (x-optional-keys).
   openai_strict_tools_schema: false
   use_retry: true
   chat_completion_headers:
@@ -25,7 +28,7 @@ backend:
 agent:
   model: "gigacode_agent_v1.6_rc"
   system_prompt_id: v1
-  use_server_subagents: true
+  use_server_subagents: false
   use_local_subagents: true
   subagent_max_steps: 500
   client_name: gc_ua_agent

@@ -7,6 +7,7 @@ appends OPTIONAL_OMIT_HINT or OPTIONAL_EMPTY_AS_OMIT_HINT via augment_optional_p
 
 from __future__ import annotations
 
+import copy
 from typing import Any
 
 # LLM-facing hints for semantically optional string fields (must match JSON required).
@@ -118,6 +119,65 @@ def apply_openai_strict_parameters(params: dict[str, Any]) -> None:
     apply_openai_strict_object(params)
 
 
+def _rewrite_semantic_required(schema: Any) -> None:
+    """In-place: on strict/optional-marked objects, set required to semantic keys only."""
+    if not isinstance(schema, dict):
+        return
+
+    is_object = schema.get("type") == "object" or isinstance(schema.get("properties"), dict)
+    if is_object and (
+        isinstance(schema.get("x-optional-keys"), list) or schema.get("x-openai-strict")
+    ):
+        props = schema.get("properties")
+        if isinstance(props, dict):
+            optional = set(resolve_optional_property_keys(schema))
+            schema["required"] = [k for k in props if k not in optional]
+        else:
+            schema["required"] = []
+
+    props = schema.get("properties")
+    if isinstance(props, dict):
+        for sub in props.values():
+            _rewrite_semantic_required(sub)
+
+    items = schema.get("items")
+    if isinstance(items, dict):
+        _rewrite_semantic_required(items)
+    elif isinstance(items, list):
+        for item in items:
+            _rewrite_semantic_required(item)
+
+    for key in ("anyOf", "oneOf", "allOf"):
+        branches = schema.get(key)
+        if isinstance(branches, list):
+            for branch in branches:
+                _rewrite_semantic_required(branch)
+
+    for defs_key in ("$defs", "definitions"):
+        defs = schema.get(defs_key)
+        if isinstance(defs, dict):
+            for def_schema in defs.values():
+                _rewrite_semantic_required(def_schema)
+
+
+def parameters_schema_for_local_validation(params: dict[str, Any]) -> dict[str, Any]:
+    """
+    Schema for local Draft7 validation under OpenAI strict tools mode.
+
+    API schema keeps full ``required``; local validation uses semantic required
+    (properties − x-optional-keys) so omit of optional keys is allowed.
+    """
+    if not isinstance(params, dict):
+        return params
+    if not params.get("x-openai-strict") and not isinstance(
+        params.get("x-optional-keys"), list
+    ):
+        return params
+    out = copy.deepcopy(params)
+    _rewrite_semantic_required(out)
+    return out
+
+
 def augment_optional_property_descriptions(
     spec: dict[str, Any],
     *,
@@ -158,7 +218,7 @@ def normalize_optional_empty_as_omit(
     """
     Drop semantically optional keys whose value is \"\" or null.
 
-    Call after JSON Schema validation so strict mode still receives all keys during validate.
+    Call after JSON Schema validation (local validate uses semantic required under strict).
     """
     optional_keys = resolve_optional_property_keys(params_schema)
     if not optional_keys:
@@ -182,6 +242,7 @@ __all__ = [
     "resolve_optional_property_keys",
     "apply_openai_strict_object",
     "apply_openai_strict_parameters",
+    "parameters_schema_for_local_validation",
     "augment_optional_property_descriptions",
     "coalesce_optional_string",
     "normalize_optional_empty_as_omit",

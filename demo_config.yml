@@ -27,7 +27,9 @@ backend:
   chat_completions_max_tokens: 32768
   # true -> отправлять max_tokens; false -> max_completion_tokens
   use_max_tokens_param: true
-  # Optional strict tools schema mode for OpenAI-like validators.
+  # true — провайдер требует OpenAI strict tools (все properties в required).
+  # false — типично для GigaCode и non-OpenAI; при true локальная валидация
+  # принимает omit semantic optional (x-optional-keys).
   openai_strict_tools_schema: false
   # Vendor-specific параметры. Настраивайте под свой провайдер.
   chat_completion_kwargs:
