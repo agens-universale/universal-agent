@@ -1,6 +1,9 @@
 import json
+from typing import Any, Dict
 
 from tools.simple_tool_base import AbstractSimpleTool
+
+_THINK_FIELDS = ("thoughts", "critics", "doubts", "reflection")
 
 
 class Think(AbstractSimpleTool):
@@ -20,6 +23,23 @@ class Think(AbstractSimpleTool):
             },
             ensure_ascii=False,
         )
+
+    @classmethod
+    def prepare_args_before_strip(cls, args: Dict[str, Any]) -> Dict[str, Any]:
+        """If only injected ``reason`` is filled, treat it as ``thoughts`` before strip."""
+        if not isinstance(args, dict):
+            return args
+        reason = args.get("reason")
+        if not isinstance(reason, str) or not reason.strip():
+            return args
+        if any(
+            isinstance(args.get(name), str) and args.get(name, "").strip()
+            for name in _THINK_FIELDS
+        ):
+            return args
+        remapped = dict(args)
+        remapped["thoughts"] = reason
+        return remapped
 
     @classmethod
     def tool_description(cls):
@@ -68,6 +88,7 @@ class Think(AbstractSimpleTool):
 Tool description: Think out loud for the current turn. Supports structured multi-layer thinking: thoughts, critics, doubts, reflection.
 IMPORTANT: think content is NOT saved to thread memory and NOT saved to any durable storage. It only exists in the current dialogue context.
 RULE: If your think output contains a specific Decision / Canonical target / Plan completed / Verified fact, record it separately via the thread memory tool (append) when one is available so it can persist.
+If only injected `reason` is filled, it is treated as `thoughts`.
 Input schema: {"type":"object","properties":{"thoughts":{"type":"string"},"critics":{"type":"string"},"doubts":{"type":"string"},"reflection":{"type":"string"}},"additionalProperties":false}
 At least one of thoughts, critics, doubts, reflection should be non-empty.
 
@@ -77,9 +98,8 @@ Return format (JSON string):
         return description
 
     def __call__(self, thoughts: str | None = None, critics: str | None = None, doubts: str | None = None, reflection: str | None = None, **kwargs) -> str:
-        FIELDS = ("thoughts", "critics", "doubts", "reflection")
         vals = [thoughts, critics, doubts, reflection]
-        for name, val in zip(FIELDS, vals):
+        for name, val in zip(_THINK_FIELDS, vals):
             if val is not None and not isinstance(val, str):
                 return self._result(
                     ok=False,

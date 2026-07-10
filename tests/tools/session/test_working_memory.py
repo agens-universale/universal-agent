@@ -75,17 +75,17 @@ def test_rewrite_replaces_content():
     assert state.shared.working_memory[REGISTER_KNOWLEDGE] == "new stable fact"
 
 
-def test_append_requires_reason_and_content():
+def test_append_reason_optional_content_required():
     state = _make_state()
     no_reason = _call(
         state,
         action="append",
         register=REGISTER_STATE,
         reason=" ",
-        content="delta",
+        content="- done",
     )
-    assert no_reason["ok"] is False
-    assert no_reason["error"]["type"] == "invalid_reason"
+    assert no_reason["ok"] is True
+    assert "- done" in state.shared.working_memory[REGISTER_STATE]
 
     no_content = _call(
         state,
@@ -96,6 +96,37 @@ def test_append_requires_reason_and_content():
     )
     assert no_content["ok"] is False
     assert no_content["error"]["type"] == "empty_content"
+
+
+def test_append_without_reason_kwarg_ok():
+    state = _make_state()
+    res = _call(
+        state,
+        action="append",
+        register=REGISTER_STATE,
+        content="- done: implement parser",
+    )
+    assert res["ok"] is True
+    assert "implement parser" in state.shared.working_memory[REGISTER_STATE]
+
+
+def test_rewrite_without_reason_ok():
+    state = _make_state({REGISTER_KNOWLEDGE: "old"})
+    res = _call(
+        state,
+        action="rewrite",
+        register=REGISTER_KNOWLEDGE,
+        content="new stable fact",
+    )
+    assert res["ok"] is True
+    assert state.shared.working_memory[REGISTER_KNOWLEDGE] == "new stable fact"
+
+
+def test_prompt_description_reason_optional():
+    prompt = WorkingMemory.prompt_description().lower()
+    assert "reason" in prompt
+    assert "optional" in prompt
+    assert "content" in prompt
 
 
 def test_invalid_register_rejected():

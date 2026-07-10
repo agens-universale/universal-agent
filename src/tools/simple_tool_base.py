@@ -55,6 +55,15 @@ class AbstractSimpleTool(ABC):
         pass
 
     @classmethod
+    def prepare_args_before_strip(cls, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Adjust parsed args before injected schema fields are stripped.
+
+        Override in tools that need to preserve injected values (e.g. remap
+        injected ``reason`` into a native field). Default: no-op.
+        """
+        return args
+
+    @classmethod
     def wrong_arguments_feedback_hint(
         cls,
         *,

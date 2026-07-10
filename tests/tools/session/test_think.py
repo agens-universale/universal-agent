@@ -52,6 +52,7 @@ def test_think_descriptions_are_tool_agnostic():
     assert "thread memory" in combined
     assert "working_memory" not in combined
     assert "memory_files" not in combined
+    assert "if only injected `reason`" in prompt.lower() or "treated as `thoughts`" in prompt.lower()
 
 
 def test_think_invalid_argument_type():
@@ -59,3 +60,31 @@ def test_think_invalid_argument_type():
     assert bad["ok"] is False
     assert bad.get("error") is not None
     assert bad["error"].get("field") == "thoughts"
+
+
+def test_prepare_args_before_strip_remaps_reason_to_thoughts():
+    args = Think.prepare_args_before_strip(
+        {"reason": "long reasoning about the next step"}
+    )
+    assert args["thoughts"] == "long reasoning about the next step"
+    assert args["reason"] == "long reasoning about the next step"
+
+
+def test_prepare_args_before_strip_keeps_explicit_thoughts():
+    args = Think.prepare_args_before_strip(
+        {"reason": "injected why", "thoughts": "explicit thoughts"}
+    )
+    assert args["thoughts"] == "explicit thoughts"
+
+
+def test_prepare_args_before_strip_ignores_blank_reason():
+    args = Think.prepare_args_before_strip({"reason": "  ", "critics": ""})
+    assert "thoughts" not in args
+
+
+def test_prepare_args_before_strip_skips_when_any_think_field_set():
+    args = Think.prepare_args_before_strip(
+        {"reason": "injected why", "critics": "a critique"}
+    )
+    assert "thoughts" not in args
+    assert args["critics"] == "a critique"

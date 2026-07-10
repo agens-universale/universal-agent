@@ -174,6 +174,9 @@ def apply_tool(
             allow_empty_for_empty_schema=False,
             tool_fabric=entry.get("tool_fabric"),
         )
+        prepare = getattr(entry.get("tool_fabric"), "prepare_args_before_strip", None)
+        if callable(prepare):
+            parsed_args = prepare(parsed_args)
         parsed_args = strip_injected_tool_args(
             parsed_args,
             injected_fields=entry.get("injected_fields") or [],
@@ -209,6 +212,9 @@ def apply_tool(
         tool_fabric=tool_fabric,
     )
     entry = tools_data_[tool_name]
+    prepare = getattr(tool_fabric, "prepare_args_before_strip", None)
+    if callable(prepare):
+        arguments = prepare(arguments)
     arguments = strip_injected_tool_args(
         arguments,
         injected_fields=entry.get("injected_fields") or [],

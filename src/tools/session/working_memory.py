@@ -139,8 +139,9 @@ class WorkingMemory(AbstractSimpleTool):
                     "reason": {
                         "type": "string",
                         "description": (
-                            "Brief justification for why this update is useful and "
-                            "why it belongs in this register. Think before writing memory."
+                            "Optional brief justification for why this update is useful "
+                            "and why it belongs in this register. Recommended but optional; "
+                            "content is required for append/rewrite."
                         ),
                     },
                     "content": {
@@ -219,6 +220,8 @@ If unsure:
 
 Do NOT store chain-of-thought, verbose reasoning, raw logs, large blobs, full file contents, repetitive history, or transient chatter.
 Keep memory compact, structured, and durable.
+
+`reason` is optional; `content` is required for append/rewrite.
 
 Input schema: {"type":"object","properties":{"action":{"type":"string","enum":["list","read","append","rewrite"]},"register":{"type":"string","enum":["goal","constraints","state","knowledge"]},"reason":{"type":"string"},"content":{"type":"string"}},"required":["action"],"additionalProperties":false}
 """
@@ -323,11 +326,11 @@ Input schema: {"type":"object","properties":{"action":{"type":"string","enum":["
         return None
 
     def _validate_reason_and_content(self, action: str, reason: str, content: str) -> Optional[str]:
-        if not isinstance(reason, str) or not reason.strip():
+        if reason is not None and not isinstance(reason, str):
             return self._error(
                 action=action,
                 error_type="invalid_reason",
-                message=f"reason must be non-empty for {action}.",
+                message=f"reason must be a string for {action}.",
             )
         if not isinstance(content, str) or not content.strip():
             return self._error(
