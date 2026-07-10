@@ -51,8 +51,7 @@ async def test_palette_enter_executes_selected():
 
     async with TuiApp().run_test() as pilot:
         await pilot.press("/")
-        await pilot.press("s")
-        await pilot.press("k")          # filter "sk" -> skill, skills (2 matches)
+        await pilot.press("s")          # sessions, skills, skill, status, stop
         await pilot.press("down")       # index 1: skills
         await pilot.press("enter")
         # Palette closed
