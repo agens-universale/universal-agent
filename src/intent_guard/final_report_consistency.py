@@ -47,6 +47,31 @@ def _parse_finish_handoff_args(arguments: Any) -> Dict[str, Any]:
     return obj if isinstance(obj, dict) else {}
 
 
+def _normalize_handoff_in_finish_args(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Decode string-typed ``handoff`` to object for the finish-gate LLM payload.
+
+    Tool schema requires ``handoff`` as a JSON string; tool outputs / digest already
+    expose a parsed object. Normalize so Axis B compares object↔object.
+    """
+    if not isinstance(args, dict):
+        return {}
+    out = dict(args)
+    if "handoff" not in out:
+        return out
+    raw = out["handoff"]
+    if isinstance(raw, dict):
+        return out
+    if not isinstance(raw, str):
+        return out
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        return out
+    if isinstance(parsed, dict):
+        out["handoff"] = parsed
+    return out
+
+
 def _load_guard_prompt(prompt_path: str | None = None) -> str:
     path = prompt_path or DEFAULT_INTENT_GUARD_PROMPT_PATH
     if not os.path.exists(path):
@@ -83,7 +108,9 @@ def validate_final_report_vs_user_intent(
     ``current_user_requests`` and ``context_user_messages`` are JSONL lines
     (one ``IntentRecord`` per line, §2.1) via ``records_to_jsonl_lines(deserialize_list(...))``.
     """
-    args = _parse_finish_handoff_args(finish_handoff_arguments)
+    args = _normalize_handoff_in_finish_args(
+        _parse_finish_handoff_args(finish_handoff_arguments)
+    )
     active_user_requests = [str(x) for x in current_user_requests if isinstance(x, str)]
     user_context = [str(x) for x in (context_user_messages or []) if isinstance(x, str)]
 

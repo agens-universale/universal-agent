@@ -61,6 +61,8 @@ Check **each** user-facing requirement in `current_user_requests` against `trace
 
 Compare **`finish_handoff_arguments`** to **visible** trace (and intent). Valid `solution_type` values include: `full_solution`, `partial_solution`, `direct_answer`, `couldnt_solve`, `need_additional_info`, `abandoned`.
 
+In tool **arguments**, `handoff` is always a JSON **string** encoding an object (schema contract). In tool **outputs** in the digest, the same field may appear as a nested object after client parse. Do **not** treat string-vs-object as a `report_mismatches` contradiction. Reject only if decoded content contradicts the trace.
+
 Reject report (`report_ok=false`) on **contradictions**, for example:
 - `solution_type` incompatible with intent (e.g. `full_solution` when the user only asked a question; `direct_answer` while claiming full delivery that intent required).
 - `task_report` / `comment` claims a step that trace does not show or shows as failed.
