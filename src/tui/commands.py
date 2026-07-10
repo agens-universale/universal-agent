@@ -61,12 +61,16 @@ def build_default_registry() -> CommandRegistry:
     """Каноничный набор MVP-команд (§4 спеки), по убыванию частоты."""
     reg = CommandRegistry()
     cmds = [
-        Command("help", (), "", "справка по командам", hotkey="F1"),
-        Command("sessions", (), "", "список сессий — выбрать и продолжить", hotkey="F2"),
-        Command("diff", (), "", "просмотр pending-диффов, принять/откатить", hotkey="F3"),
-        Command("notices", (), "", "уведомления (старт + runtime)", hotkey="F4"),
-        Command("new", (), "", "новая сессия в этом окне", hotkey="F5"),
-        Command("config", (), "", "конфиг сессии + пути к файлам", hotkey="F6"),
+        Command("help", (), "", "справка по командам", hotkey="F1 · Ctrl+/"),
+        Command("sessions", (), "", "список сессий — выбрать и продолжить",
+                hotkey="F2 · Ctrl+S"),
+        Command("diff", (), "", "просмотр pending-диффов, принять/откатить",
+                hotkey="F3 · Ctrl+D"),
+        Command("notices", (), "", "уведомления (старт + runtime)",
+                hotkey="F4 · Ctrl+O"),
+        Command("new", (), "", "новая сессия в этом окне", hotkey="Ctrl+N"),
+        Command("config", (), "", "конфиг сессии + пути к файлам",
+                hotkey="F5 · Ctrl+G"),
         Command("export", (), "[txt|json|log-txt|log-json]", "экспорт сессии",
                 arg_options=(("txt", "вся сессия в читаемом виде"),
                              ("json", "структурированные данные сессии"),

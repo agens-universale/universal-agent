@@ -19,14 +19,15 @@ async def test_help_header_and_hotkeys():
         assert len(scr.query("#header-right")) == 0
         keys = " ".join(str(s.render()) for s in scr.query(".help-row-key"))
         assert "F1" in keys and "F2" in keys and "F3" in keys
-        assert "F4" in keys and "F5" in keys and "F6" in keys
+        assert "F4" in keys and "F5" in keys
         key_tokens = set(keys.split())
-        assert "F7" not in key_tokens and "F12" not in key_tokens
+        assert "F6" not in key_tokens and "F7" not in key_tokens
         assert "Ctrl+C" in keys and "Esc" in keys
         assert "Ctrl+A" in keys
+        assert "Ctrl+N" in keys and "Ctrl+S" in keys
+        assert "Ctrl+D" in keys and "Ctrl+O" in keys and "Ctrl+G" in keys
+        assert "Ctrl+/" in keys
         assert "Ctrl+E" not in key_tokens
-        assert "Ctrl+N" not in key_tokens  # алиас, не в /help
-        assert "Ctrl+S" not in key_tokens
         assert str(scr.query_one("#footer", Static).render()) == "[Esc] назад"
         # блок «Связь с разработчиками / Телеграм / Сберчат» убран
         body = " ".join(str(s.render()) for s in scr.query(Static))

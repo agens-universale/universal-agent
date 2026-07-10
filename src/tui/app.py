@@ -36,12 +36,14 @@ class TuiApp(App):
         Binding("f2", "sessions", "/sessions"),
         Binding("f3", "diff", "/diff"),
         Binding("f4", "notices", "/notices"),
-        Binding("f5", "new", "/new"),
-        # priority: TextArea перехватывает F6 как «select line».
-        Binding("f6", "config", "/config", priority=True),
-        # Доп. алиасы (не в /help): привычные Ctrl+N / Ctrl+S.
-        Binding("ctrl+n", "new", "/new", show=False),
-        Binding("ctrl+s", "sessions", "/sessions", show=False),
+        Binding("f5", "config", "/config"),
+        Binding("ctrl+slash", "help", "Help"),
+        Binding("ctrl+s", "sessions", "/sessions"),
+        # priority: TextArea перехватывает Ctrl+D как delete-right.
+        Binding("ctrl+d", "diff", "/diff", priority=True),
+        Binding("ctrl+o", "notices", "/notices"),
+        Binding("ctrl+n", "new", "/new"),
+        Binding("ctrl+g", "config", "/config"),
         # Ctrl+C: есть выделение → копировать; нет → отменить текущий run.
         # priority — перебивает копирование TextArea и системный help_quit.
         Binding("ctrl+c", "interrupt", "копировать/стоп", show=False, priority=True),
@@ -245,7 +247,12 @@ class TuiApp(App):
 
     def action_diff(self) -> None:
         from tui.screens.diff import DiffScreen
+        from tui.screens.sessions import SessionsScreen
 
+        # На /sessions Ctrl+D — массовое удаление (не перехватываем в /diff).
+        if isinstance(self.screen, SessionsScreen):
+            self.screen._open_mass_delete()
+            return
         if isinstance(self.screen, DiffScreen):
             return
         main = self._main_screen()

@@ -90,8 +90,12 @@ def test_status_has_no_raw_arg():
 
 def test_command_hotkeys():
     expected = {
-        "help": "F1", "sessions": "F2", "diff": "F3",
-        "notices": "F4", "new": "F5", "config": "F6",
+        "help": "F1 · Ctrl+/",
+        "sessions": "F2 · Ctrl+S",
+        "diff": "F3 · Ctrl+D",
+        "notices": "F4 · Ctrl+O",
+        "new": "Ctrl+N",
+        "config": "F5 · Ctrl+G",
         "export": "", "compact": "", "init": "",
         "skills": "", "skill": "", "status": "",
         "stop": "Ctrl+C", "mcp": "", "quit": "Esc",
@@ -111,18 +115,27 @@ def test_default_registry_frequency_order():
 
 
 def test_hotkeys_match_app_bindings():
-    """Каждая команда с hotkey имеет совпадающую привязку в app.BINDINGS."""
+    """Каждый токен hotkey имеет совпадающую привязку в app.BINDINGS."""
     from tui.app import TuiApp
     binding_keys = {b.key for b in TuiApp.BINDINGS}
 
     def normalize(display: str) -> str:
-        k = display.lower()
-        return "escape" if k == "esc" else k
+        k = display.lower().replace(" ", "")
+        aliases = {
+            "esc": "escape",
+            "ctrl+/": "ctrl+slash",
+        }
+        return aliases.get(k, k)
 
     reg = build_default_registry()
     for cmd in reg.list_commands():
-        if cmd.hotkey:
-            assert normalize(cmd.hotkey) in binding_keys, f"{cmd.name}: {cmd.hotkey}"
+        if not cmd.hotkey:
+            continue
+        for part in cmd.hotkey.split("·"):
+            token = part.strip()
+            if not token:
+                continue
+            assert normalize(token) in binding_keys, f"{cmd.name}: {token}"
 
 
 def test_compact_command_registered_with_alias():

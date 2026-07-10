@@ -51,26 +51,69 @@ async def test_f2_opens_sessions(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_f5_opens_new(tmp_path):
+async def test_ctrl_n_opens_new(tmp_path):
     pytest.importorskip("textual")
     from tui.app import TuiApp
     async with TuiApp(threads_dir=str(tmp_path)).run_test() as pilot:
-        await pilot.press("f5")
+        await pilot.press("ctrl+n")
         await pilot.pause()
-        # /new остаётся на главном экране (новая сессия в том же окне)
         from tui.screens.main import TraceScreen
         assert isinstance(pilot.app.screen, TraceScreen)
 
 
 @pytest.mark.asyncio
-async def test_f6_opens_config():
+async def test_f5_opens_config():
     pytest.importorskip("textual")
     from tui.app import TuiApp
     async with TuiApp().run_test() as pilot:
-        await pilot.press("f6")
+        await pilot.press("f5")
         await pilot.pause()
         from tui.screens.config import ConfigScreen
         assert isinstance(pilot.app.screen, ConfigScreen)
+
+
+@pytest.mark.asyncio
+async def test_ctrl_g_opens_config():
+    pytest.importorskip("textual")
+    from tui.app import TuiApp
+    async with TuiApp().run_test() as pilot:
+        await pilot.press("ctrl+g")
+        await pilot.pause()
+        from tui.screens.config import ConfigScreen
+        assert isinstance(pilot.app.screen, ConfigScreen)
+
+
+@pytest.mark.asyncio
+async def test_ctrl_d_opens_diff(tmp_path):
+    pytest.importorskip("textual")
+    from tui.app import TuiApp
+    async with TuiApp(config={"launch_root": str(tmp_path)}).run_test() as pilot:
+        await pilot.press("ctrl+d")
+        await pilot.pause()
+        from tui.screens.diff import DiffScreen
+        assert isinstance(pilot.app.screen, DiffScreen)
+
+
+@pytest.mark.asyncio
+async def test_ctrl_o_opens_notices(tmp_path):
+    pytest.importorskip("textual")
+    from tui.app import TuiApp
+    async with TuiApp(threads_dir=str(tmp_path)).run_test() as pilot:
+        await pilot.press("ctrl+o")
+        await pilot.pause()
+        from tui.screens.notices import NoticesScreen
+        assert isinstance(pilot.app.screen, NoticesScreen)
+
+
+@pytest.mark.asyncio
+async def test_ctrl_slash_opens_help():
+    pytest.importorskip("textual")
+    from tui.app import TuiApp
+    async with TuiApp().run_test() as pilot:
+        await pilot.press("ctrl+slash")
+        await pilot.pause()
+        from tui.screens.help import HelpScreen
+        assert isinstance(pilot.app.screen, HelpScreen)
 
 
 @pytest.mark.asyncio

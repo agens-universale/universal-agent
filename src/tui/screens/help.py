@@ -8,7 +8,7 @@ from textual.widgets import Static
 
 from tui.commands import build_default_registry
 
-# Хоткеи, которых нет у отдельной /команды (F1–F6 / Ctrl+C / … уже в реестре).
+# Хоткеи, которых нет у отдельной /команды (F1–F5 / Ctrl+… уже в реестре).
 # Перенос строки: Ctrl+J надёжен везде; Shift/Ctrl+Enter — только если терминал
 # отдаёт отдельную последовательность (Kitty / modifyOtherKeys).
 _EXTRA_HOTKEYS: tuple[tuple[str, str], ...] = (

@@ -1,4 +1,4 @@
-"""Навигация по экранам: без задвоения (F1/F4), F6/F3 — с главного и notices,
+"""Навигация по экранам: без задвоения (F1/F4), F5/F3 — с главного и notices,
 F4 (уведомления) — с любого экрана, F1 (справка) — с любого, кроме самой справки."""
 import pytest
 
@@ -67,8 +67,8 @@ async def test_f1_help_reachable_from_subscreen(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_f6_f3_reachable_from_notices(tmp_path):
-    """С экрана уведомлений можно перейти на config (F6) и diff (F3)."""
+async def test_f5_f3_reachable_from_notices(tmp_path):
+    """С экрана уведомлений можно перейти на config (F5) и diff (F3)."""
     pytest.importorskip("textual")
     from tui.app import TuiApp
     from tui.screens.config import ConfigScreen
@@ -78,7 +78,7 @@ async def test_f6_f3_reachable_from_notices(tmp_path):
     async with TuiApp(threads_dir=str(tmp_path), config=cfg).run_test() as pilot:
         await pilot.press("f4"); await pilot.pause()
         assert isinstance(pilot.app.screen, NoticesScreen)
-        await pilot.press("f6"); await pilot.pause()
+        await pilot.press("f5"); await pilot.pause()
         assert isinstance(pilot.app.screen, ConfigScreen)
         await pilot.press("escape"); await pilot.pause()
         assert isinstance(pilot.app.screen, NoticesScreen)  # config конечна → назад к notices
