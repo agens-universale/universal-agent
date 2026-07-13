@@ -1,6 +1,7 @@
 import json
 from copy import deepcopy
 
+from message_projection import project_assistant_text
 from utils.convertations import output_chat_completion_to_response
 
 cut_message = 350
@@ -129,11 +130,15 @@ def _extract_text_from_canonical_message_content(content):
 def _canonical_to_chat_completions_message(message):
     m_type = message.get("type")
     if m_type == "message":
+        role = message.get("role", "assistant")
+        content = message.get("content")
+        if str(role).strip().lower() == "assistant":
+            plain = project_assistant_text(content)
+        else:
+            plain = _extract_text_from_canonical_message_content(content)
         return {
-            "role": message.get("role", "assistant"),
-            "content": _extract_text_from_canonical_message_content(
-                message.get("content")
-            ),
+            "role": role,
+            "content": plain,
         }
     if m_type == "function_call":
         return {
@@ -186,7 +191,7 @@ def _legacy_role_to_chat_completions_message(message):
     if m_role == 'assistant':
         return {
             'role': 'assistant',
-            'content': deepcopy(message['content']),
+            'content': project_assistant_text(message.get('content')),
             'tool_calls': deepcopy(message.get('tool_calls', list()))
         }
     return None
