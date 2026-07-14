@@ -115,6 +115,16 @@ def inject_property_into_spec(
             *[r for r in required if r != field_name],
         ]
 
+    optional_keys = params.get("x-optional-keys")
+    if not isinstance(optional_keys, list):
+        optional_keys = [
+            k for k in params.get("properties", {})
+            if k not in (params.get("required") or [])
+        ]
+    if field_name not in optional_keys:
+        optional_keys = [*optional_keys, field_name]
+    params["x-optional-keys"] = optional_keys
+
     return [field_name]
 
 

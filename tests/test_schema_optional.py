@@ -170,18 +170,20 @@ def test_strict_read_file_omits_optional_ok():
     assert args == {"reason": "inspect", "path": "/tmp/f.txt"}
 
 
-def test_strict_read_file_missing_reason_fails():
+def test_strict_read_file_missing_reason_ok():
+    """Injected reason stays in the API required list, but local validation lets it be omitted."""
     spec = copy.deepcopy(ReadFile.tool_description())
     apply_injected_fields_to_spec(spec, _REASON_FIELDS)
     apply_openai_strict_parameters(spec["parameters"])
-    with pytest.raises(WrongFunctionArgumentsException) as exc_info:
-        parse_and_validate_tool_arguments(
-            tool_name="fs_read_file",
-            arguments={"path": "/tmp/f.txt"},
-            tool_spec=spec,
-            allow_empty_for_empty_schema=False,
-        )
-    assert "reason" in str(exc_info.value).lower()
+    assert "reason" in spec["parameters"]["required"]
+
+    args = parse_and_validate_tool_arguments(
+        tool_name="fs_read_file",
+        arguments={"path": "/tmp/f.txt"},
+        tool_spec=spec,
+        allow_empty_for_empty_schema=False,
+    )
+    assert args == {"path": "/tmp/f.txt"}
 
 
 def test_strict_apply_file_edits_omits_top_level_flags_ok():

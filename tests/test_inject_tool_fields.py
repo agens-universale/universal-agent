@@ -242,26 +242,30 @@ class TestApplyTool:
         )
         assert received["args"] == {"reason": "native", "task": "work"}
 
-    def test_missing_reason_raises_validation_error(self):
+    def test_missing_reason_is_accepted(self):
+        """Omitted injected reason no longer rejects the call (it is semantically optional)."""
         tools_data, _, _, _ = build_tools_data(
             _base_config(inject_tool_fields=_reason_fields())
         )
+
+        received = {}
 
         class FakeTool:
             def __init__(self, **kw):
                 pass
 
             def __call__(self, **kwargs):
+                received["args"] = kwargs
                 return "ok"
 
         tools_data["fs_write_file"]["tool_fabric"] = FakeTool
 
-        with pytest.raises(WrongFunctionArgumentsException):
-            apply_tool(
-                tool_name="fs_write_file",
-                arguments=json.dumps({"path": "/tmp/x", "content": "y"}),
-                ctx=self._make_ctx(tools_data),
-            )
+        apply_tool(
+            tool_name="fs_write_file",
+            arguments=json.dumps({"path": "/tmp/x", "content": "y"}),
+            ctx=self._make_ctx(tools_data),
+        )
+        assert received["args"] == {"path": "/tmp/x", "content": "y"}
 
     def test_mcp_wrapper_does_not_receive_synthetic_reason(self):
         from tools.connect_mcp.agent_tools import MCPToolWrapper
