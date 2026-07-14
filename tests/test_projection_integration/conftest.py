@@ -64,6 +64,7 @@ def make_ctx_state(*, history: list[dict] | None = None):
         "backend_api_mode": "chat_completions",
         "chat_completions_max_tokens": 256,
         "chat_completions_min_response_tokens": 64,
+        "backend_request_timeout_sec": 600,
         "use_ssl": False,
         "use_retry": False,
         "x_cl_id": "test-cl-id",
@@ -106,6 +107,7 @@ def capture_outbound(monkeypatch):
         request_label=None,
         runtime_notices_enabled=False,
         notice_url=None,
+        timeout=600,
     ):
         payload = payload_factory(initial_max_tokens)
         captured["payload"] = payload
