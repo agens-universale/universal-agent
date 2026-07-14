@@ -164,3 +164,38 @@ def test_setup_guide_lists_pending_fields_and_path(tmp_path, monkeypatch):
     assert "backend.completions_url" in text
     assert "Authorization" in text
     assert "имя модели" not in text   # модель задана в дефолте → не в списке полей
+
+
+def test_setup_guide_offers_init_config_helper_with_program():
+    """pending-подсказка называет команду помощника с именем бинаря (program)."""
+    cfg = {
+        "completions_url": onboarding.URL_SENTINEL,
+        "chat_completion_headers": {"Authorization": onboarding.TOKEN_SENTINEL},
+        "model": "gigacode_agent_v1.6_rc",
+    }
+    assert "gc-cli --init-config" in onboarding.setup_guide("/p", cfg, program="gc-cli")
+    assert "gc-ua --init-config" in onboarding.setup_guide("/p", cfg, program="gc-ua")
+
+
+def test_setup_guide_marks_config_created_when_just_created():
+    """just_created=True → явно сообщает о создании файла; False → «Конфигурация:»."""
+    cfg = {
+        "completions_url": onboarding.URL_SENTINEL,
+        "chat_completion_headers": {"Authorization": onboarding.TOKEN_SENTINEL},
+        "model": "gigacode_agent_v1.6_rc",
+    }
+    created = onboarding.setup_guide("/p", cfg, just_created=True)
+    assert "Создан файл конфигурации" in created
+    existing = onboarding.setup_guide("/p", cfg, just_created=False)
+    assert "Создан файл конфигурации" not in existing
+    assert "Конфигурация:" in existing
+
+
+def test_setup_guide_mentions_gc_mcp():
+    """pending-подсказка упоминает gc-mcp для установки MCP-серверов."""
+    cfg = {
+        "completions_url": onboarding.URL_SENTINEL,
+        "chat_completion_headers": {"Authorization": onboarding.TOKEN_SENTINEL},
+        "model": "gigacode_agent_v1.6_rc",
+    }
+    assert "gc-mcp install" in onboarding.setup_guide("/p", cfg)
