@@ -28,3 +28,18 @@ def test_state_with_sandbox_backend_uses_container_cwd():
     state = _state(os_backend=backend)
     assert state.initial_project_data["projectDir"] == "/testbed"
     assert state.initial_project_data["isGitProject"] == "true"
+
+
+def test_state_with_backend_is_json_serializable():
+    """The backend is a live I/O handle: it must not leak into the persisted snapshot."""
+    import json
+
+    from persistence.state_repository import StateRepository
+
+    backend = FakeSandboxBackend(cwd="/testbed", tree={"/testbed": []}, git=False)
+    state = _state(os_backend=backend)
+
+    payload = StateRepository.serialize_storage({state.state_id: state})
+
+    json.dumps(payload)                                   # must not raise
+    assert "os_backend" not in payload[state.state_id]
