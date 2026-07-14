@@ -48,6 +48,7 @@ class State:
         logger: Optional[Any] = None,
         is_tui: bool = False,
         agentsmd_override: bool = False,
+        os_backend: Optional[Any] = None,
     ):
         self.logger = logger
         self.parent_state_id = parent_state_id
@@ -56,7 +57,8 @@ class State:
         self.specific_role = specific_role
         self.verbose = verbose
         self.default_model = model
-        self.initial_project_data = get_project_data(workspace_config)
+        self.os_backend = os_backend
+        self.initial_project_data = get_project_data(workspace_config, backend=os_backend)
         if limit_project_metadata:
             # В серверном режиме не передаём чувствительные данные о файловой системе.
             # Оставляем только дату, остальные поля будут добавлены в set_call_metadata.

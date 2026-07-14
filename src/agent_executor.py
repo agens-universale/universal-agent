@@ -194,6 +194,7 @@ class AgentExecutor:
             "shared": thread_shared,
             "workspace_config": config_dict,
             "logger": logger,
+            "os_backend": getattr(self._ctx, "os_backend", None),
         }
         if config_dict.get("use_local_subagents", False):
             state_data["specific_role"] = ORCHESTRATOR_SPECIFIC_ROLE
