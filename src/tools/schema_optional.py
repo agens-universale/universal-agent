@@ -160,6 +160,36 @@ def _rewrite_semantic_required(schema: Any) -> None:
                 _rewrite_semantic_required(def_schema)
 
 
+def _has_optional_markers(schema: Any) -> bool:
+    """True if the schema (or any nested subschema) carries strict/optional markers."""
+    if not isinstance(schema, dict):
+        return False
+    if schema.get("x-openai-strict") or isinstance(schema.get("x-optional-keys"), list):
+        return True
+
+    props = schema.get("properties")
+    if isinstance(props, dict) and any(_has_optional_markers(sub) for sub in props.values()):
+        return True
+
+    items = schema.get("items")
+    if isinstance(items, dict) and _has_optional_markers(items):
+        return True
+    if isinstance(items, list) and any(_has_optional_markers(item) for item in items):
+        return True
+
+    for key in ("anyOf", "oneOf", "allOf"):
+        branches = schema.get(key)
+        if isinstance(branches, list) and any(_has_optional_markers(b) for b in branches):
+            return True
+
+    for defs_key in ("$defs", "definitions"):
+        defs = schema.get(defs_key)
+        if isinstance(defs, dict) and any(_has_optional_markers(d) for d in defs.values()):
+            return True
+
+    return False
+
+
 def parameters_schema_for_local_validation(params: dict[str, Any]) -> dict[str, Any]:
     """
     Schema for local Draft7 validation under OpenAI strict tools mode.
@@ -169,9 +199,7 @@ def parameters_schema_for_local_validation(params: dict[str, Any]) -> dict[str, 
     """
     if not isinstance(params, dict):
         return params
-    if not params.get("x-openai-strict") and not isinstance(
-        params.get("x-optional-keys"), list
-    ):
+    if not _has_optional_markers(params):
         return params
     out = copy.deepcopy(params)
     _rewrite_semantic_required(out)
