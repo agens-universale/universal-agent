@@ -113,6 +113,41 @@ async def test_view_remembers_page_across_reopen(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_view_arrow_hold_coalesces_moves(tmp_path):
+    """Зажатая ↓ не должна делать read на каждый key-repeat — throttle ~10 Hz."""
+    pytest.importorskip("textual")
+    import asyncio
+
+    f = tmp_path / "thr.txt"
+    f.write_text("\n".join(f"T{i}" for i in range(1, 201)) + "\n", encoding="utf-8")
+
+    from tui.app import TuiApp
+    from tui.screens.file_view import FileViewerScreen
+
+    app = TuiApp(
+        threads_dir=str(tmp_path),
+        config={"tui_file_view": {"page_lines": 10}},
+    )
+    async with app.run_test() as pilot:
+        pilot.app.screen._cmd_view(str(f))
+        await pilot.pause()
+        viewer = pilot.app.screen
+        assert isinstance(viewer, FileViewerScreen)
+        assert viewer._start_line == 1
+
+        for _ in range(10):
+            viewer.action_line_down()
+        # leading-edge: один flush сразу, остальное в pending
+        assert viewer._start_line == 2
+        assert viewer._pending_delta == 9
+
+        await asyncio.sleep(0.12)
+        await pilot.pause()
+        assert viewer._pending_delta == 0
+        assert viewer._start_line == 11
+
+
+@pytest.mark.asyncio
 async def test_view_pagedown_changes_window(tmp_path):
     pytest.importorskip("textual")
     f = tmp_path / "p.txt"

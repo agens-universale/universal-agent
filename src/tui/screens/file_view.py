@@ -8,6 +8,7 @@ from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.screen import Screen
+from textual.timer import Timer
 from textual.widgets import Static
 
 from tui.services.file_view import (
@@ -32,6 +33,9 @@ from tui.services.file_view import (
 from tui.services.skill_view import truncate_path_left
 
 _PATH_MAXLEN = 56
+# Схлопываем key-repeat: не чаще ~10 Hz один read_window + Syntax.
+# Одиночный тик — сразу (leading-edge); hold на больших файлах важнее «30 fps».
+_MOVE_THROTTLE_SEC = 1.0 / 10.0
 _FOOTER_OK = "[Esc] назад  ·  [↑↓] строка  ·  [PgUp/PgDn] стр."
 _FOOTER_ERR = "[Esc] назад"
 
@@ -68,6 +72,8 @@ class FileViewerScreen(Screen):
         self._window: Optional[ViewWindow] = None
         self._lexer: Optional[str] = None
         self._display_path = (raw_path or "").strip() or "view"
+        self._pending_delta = 0
+        self._move_timer: Optional[Timer] = None
 
     def compose(self) -> ComposeResult:
         with Vertical(id="root"):
@@ -88,23 +94,25 @@ class FileViewerScreen(Screen):
         self._sync_page_from_layout()
 
     def on_unmount(self) -> None:
+        self._flush_move_queue(stop_timer=True)
         self._persist_position()
 
     def action_close(self) -> None:
+        self._flush_move_queue(stop_timer=True)
         self._persist_position()
         self.dismiss()
 
     def action_line_up(self) -> None:
-        self._move(-1)
+        self._queue_move(-1)
 
     def action_line_down(self) -> None:
-        self._move(1)
+        self._queue_move(1)
 
     def action_page_up(self) -> None:
-        self._move(-(max(1, self._page - 1)))
+        self._queue_move(-(max(1, self._page - 1)))
 
     def action_page_down(self) -> None:
-        self._move(max(1, self._page - 1))
+        self._queue_move(max(1, self._page - 1))
 
     def _initial_page(self) -> int:
         if self._settings.page_lines is not None:
@@ -164,6 +172,39 @@ class FileViewerScreen(Screen):
                 self._start_line, total_lines=self._total_lines, page=self._page,
             )
         self._reload_window()
+
+    def _queue_move(self, delta: int) -> None:
+        """Leading-edge throttle: первый тик сразу, дальше не чаще _MOVE_THROTTLE_SEC."""
+        if self._error is not None or self._path is None or delta == 0:
+            return
+        self._pending_delta += delta
+        if self._move_timer is not None:
+            return
+        self._flush_pending_delta()
+        self._move_timer = self.set_timer(
+            _MOVE_THROTTLE_SEC, self._on_move_throttle_tick,
+        )
+
+    def _on_move_throttle_tick(self) -> None:
+        self._move_timer = None
+        if self._pending_delta:
+            self._flush_pending_delta()
+            self._move_timer = self.set_timer(
+                _MOVE_THROTTLE_SEC, self._on_move_throttle_tick,
+            )
+
+    def _flush_pending_delta(self) -> None:
+        delta = self._pending_delta
+        self._pending_delta = 0
+        if delta:
+            self._move(delta)
+
+    def _flush_move_queue(self, *, stop_timer: bool) -> None:
+        if self._move_timer is not None:
+            if stop_timer:
+                self._move_timer.stop()
+            self._move_timer = None
+        self._flush_pending_delta()
 
     def _move(self, delta: int) -> None:
         if self._error is not None or self._path is None or delta == 0:
