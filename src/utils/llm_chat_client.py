@@ -206,6 +206,7 @@ def request_chat_completion_text(
             request_label=request_label,
             runtime_notices_enabled=bool(getattr(ctx, "is_tui", False)),
             notice_url=cfg.get("completions_url"),
+            timeout=float(cfg["backend_request_timeout_sec"]),
         )
     logger = getattr(ctx, "logger", None)
     if logger is not None and full_log_backend:

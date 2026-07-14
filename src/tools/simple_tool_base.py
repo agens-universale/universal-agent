@@ -1,9 +1,8 @@
 import json
 from abc import ABC, abstractmethod
-from types import SimpleNamespace
 from typing import Any, Dict, Optional
 
-from tools.backends.local import LocalFsBackend
+from execution_workspace import ExecutionWorkspace
 
 
 class AbstractSimpleTool(ABC):
@@ -11,9 +10,6 @@ class AbstractSimpleTool(ABC):
         self._ctx = kwargs.get("ctx")
         self._state = kwargs.get("state")
         self._config_dict = kwargs.get("config_dict")
-        if self._ctx is None:
-            cfg = self._config_dict if isinstance(self._config_dict, dict) else {}
-            self._ctx = SimpleNamespace(config_dict=cfg, os_backend=LocalFsBackend())
 
     @property
     def _backend(self):
@@ -21,7 +17,8 @@ class AbstractSimpleTool(ABC):
         ctx = getattr(self, "_ctx", None)
         if ctx is None:
             raise RuntimeError(
-                f"{type(self).__name__} requires ctx; use apply_tool or bind_os_backend in tests"
+                f"{type(self).__name__} requires ctx; use apply_tool "
+                f"(tests: with_local_ctx / tests.harbor.fakes.bind_os_backend)"
             )
         backend = getattr(ctx, "os_backend", None)
         if backend is None:
@@ -29,6 +26,23 @@ class AbstractSimpleTool(ABC):
                 f"{type(self).__name__}: ctx.os_backend is missing; use create_run_context()"
             )
         return backend
+
+    @property
+    def _workspace(self) -> ExecutionWorkspace:
+        """Execution workspace from ``RunContext.workspace`` (assembled with the run)."""
+        ctx = getattr(self, "_ctx", None)
+        if ctx is None:
+            raise RuntimeError(
+                f"{type(self).__name__} requires ctx; use apply_tool "
+                f"(tests: with_local_ctx / tests.harbor.fakes.bind_os_backend)"
+            )
+        workspace = getattr(ctx, "workspace", None)
+        if not isinstance(workspace, ExecutionWorkspace):
+            raise RuntimeError(
+                f"{type(self).__name__}: ctx.workspace is missing; "
+                f"create_run_context() must assemble ExecutionWorkspace"
+            )
+        return workspace
 
     @classmethod
     @abstractmethod

@@ -2,6 +2,7 @@ from dataclasses import dataclass, field
 from uuid import uuid4
 from typing import Any, Dict, List, Optional
 from project_memory import attach_status_to_prompt_vars
+from execution_workspace import ExecutionWorkspace, build_execution_workspace
 from utils.project_data import get_project_data
 from tools.session.stored_outputs.tool_call_outputs_store import ToolCallOutputsStore
 from message_policy.tool_usage_notice.state import hydrate_tool_usage_notice_state
@@ -48,6 +49,8 @@ class State:
         logger: Optional[Any] = None,
         is_tui: bool = False,
         agentsmd_override: bool = False,
+        workspace: Optional[ExecutionWorkspace] = None,
+        os_backend: Optional[Any] = None,
     ):
         self.logger = logger
         self.parent_state_id = parent_state_id
@@ -56,7 +59,12 @@ class State:
         self.specific_role = specific_role
         self.verbose = verbose
         self.default_model = model
-        self.initial_project_data = get_project_data(workspace_config)
+        if workspace is None and os_backend is not None:
+            workspace = build_execution_workspace(os_backend, workspace_config)
+        self.workspace = workspace
+        self.initial_project_data = get_project_data(
+            workspace_config, workspace=workspace, backend=os_backend
+        )
         if limit_project_metadata:
             # В серверном режиме не передаём чувствительные данные о файловой системе.
             # Оставляем только дату, остальные поля будут добавлены в set_call_metadata.

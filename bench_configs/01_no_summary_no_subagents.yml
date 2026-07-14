@@ -20,6 +20,7 @@ backend:
     tool_choice: auto
   use_ssl: false
   use_retry: true
+  request_timeout_sec: 600
 
 chat_completions:
   llm:

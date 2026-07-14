@@ -8,8 +8,10 @@ from tools.backends.local import _sanitize_env
 from tools.exec.run_python_code import RunPythonCode
 
 
+from tests.helpers.tool_ctx import with_local_ctx
+
 def test_run_python_success_non_zero_and_timeout():
-    tool = RunPythonCode()
+    tool = with_local_ctx(RunPythonCode)
     ok = json.loads(tool(code="print('ok')"))
     assert ok["ok"] is True and ok["stdout"] == "ok"
     bad = json.loads(tool(code="import sys; sys.exit(3)"))
@@ -19,7 +21,7 @@ def test_run_python_success_non_zero_and_timeout():
 
 
 def test_run_python_validation_and_truncation():
-    tool = RunPythonCode()
+    tool = with_local_ctx(RunPythonCode)
     assert json.loads(tool(code=""))["error"]["field"] == "code"
     assert json.loads(tool(code="print(1)", max_output_chars=0))["error"]["field"] == "max_output_chars"
     trunc = json.loads(tool(code="print('A'*100)", max_output_chars=10))
@@ -29,7 +31,7 @@ def test_run_python_validation_and_truncation():
 
 
 def test_run_python_env_and_cwd(tmp_path):
-    tool = RunPythonCode()
+    tool = with_local_ctx(RunPythonCode)
     code = "import os; print(os.getenv('A')); print(os.getenv('B')); print(os.getenv('PYTHONPATH'))"
     out = json.loads(
         tool(
@@ -43,7 +45,7 @@ def test_run_python_env_and_cwd(tmp_path):
 
 
 def test_run_python_env_vars_validation(tmp_path):
-    tool = RunPythonCode()
+    tool = with_local_ctx(RunPythonCode)
     bad_not_list = json.loads(tool(code="print(1)", env_vars="A=1"))  # type: ignore[arg-type]
     assert bad_not_list["ok"] is False
     assert bad_not_list["error"]["field"] == "env_vars"
@@ -78,7 +80,7 @@ def test_run_python_default_cwd_is_launch_root(tmp_path, monkeypatch):
     monkeypatch.chdir(work)
     project = tmp_path / "project"
     project.mkdir()
-    tool = RunPythonCode(config_dict=_allow_config(str(project)))
+    tool = with_local_ctx(RunPythonCode, config_dict=_allow_config(str(project)))
     marker = project / "from_root.txt"
     r = json.loads(tool(code=f"from pathlib import Path; Path({str(marker.name)!r}).write_text('x')"))
     assert r["ok"] is True
@@ -90,8 +92,7 @@ def test_run_python_cwd_invalid_returns_allowed_paths(tmp_path):
     workspace.mkdir()
     extra = tmp_path / "extra_write"
     extra.mkdir()
-    tool = RunPythonCode(
-        config_dict={
+    tool = with_local_ctx(RunPythonCode, config_dict={
             "launch_root": str(workspace),
             "command_moderation": {"mode": "allow"},
             "write_guard": {"enabled": True, "extra_paths": [str(extra)]},
@@ -116,8 +117,7 @@ def test_run_python_cwd_invalid_omits_non_writable_launch_root(tmp_path):
         ro_launch.chmod(0o555)
         extra = tmp_path / "writable_extra"
         extra.mkdir()
-        tool = RunPythonCode(
-            config_dict={
+        tool = with_local_ctx(RunPythonCode, config_dict={
                 "launch_root": str(ro_launch),
                 "command_moderation": {"mode": "allow"},
                 "write_guard": {"enabled": True, "extra_paths": [str(extra)]},

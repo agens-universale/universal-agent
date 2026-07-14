@@ -210,6 +210,7 @@ def _request_backend_canonical_once(
     verify = cfg.get("use_ssl", True)
     cert = get_backend_client_cert(cfg)
     use_retry = cfg.get("use_retry", False)
+    request_timeout_sec = float(cfg["backend_request_timeout_sec"])
     backend_mode = _get_backend_api_mode(ctx)
 
     if backend_mode == "responses":
@@ -228,6 +229,7 @@ def _request_backend_canonical_once(
                 cert=cert,
                 use_retry=use_retry,
                 logger=getattr(ctx, "logger", None),
+                timeout=request_timeout_sec,
             )
         resp_messages = res["output"]
         response_id = str(res["id"])
@@ -280,6 +282,7 @@ def _request_backend_canonical_once(
             request_label="main_agent",
             runtime_notices_enabled=bool(getattr(ctx, "is_tui", False)),
             notice_url=url,
+            timeout=request_timeout_sec,
         )
     if not isinstance(res, dict):
         raise ValueError("chat/completions backend response must be an object")

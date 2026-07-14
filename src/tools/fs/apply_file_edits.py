@@ -116,8 +116,7 @@ class ApplyFileEdits(AbstractSimpleTool):
             "Pass expected_file_sha256 from file_info(include_hash=true) to detect stale readback.\n"
         )
 
-    @staticmethod
-    def _result(
+    def _result(self, 
         *,
         path: str,
         ok: bool,
@@ -139,14 +138,14 @@ class ApplyFileEdits(AbstractSimpleTool):
                 "tool": ApplyFileEdits.registered_tool_name(),
                 "ok": ok,
                 "applied": applied,
-                "path": tool_report_abspath(path),
+                "path": tool_report_abspath(path, workspace=self._workspace),
                 "edits_would_apply": edits_would_apply,
                 "total_would_replace": total_would_replace,
                 "edits_applied": edits_applied,
                 "total_replaced": total_replaced,
                 "edit_results": edit_results,
                 "failed_edit_index": failed_edit_index,
-                "backup_path": tool_report_abspath(backup_path),
+                "backup_path": tool_report_abspath(backup_path, workspace=self._workspace),
                 "diff": diff,
                 "diff_truncated": diff_truncated,
                 "message": message,

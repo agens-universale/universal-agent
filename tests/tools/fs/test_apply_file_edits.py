@@ -4,11 +4,13 @@ from tools.fs.apply_file_edits import ApplyFileEdits
 from utils.file_text import sha256_hex_of_text
 
 
+from tests.helpers.tool_ctx import with_local_ctx
+
 def test_apply_batch_success(tmp_path):
     p = tmp_path / "f.txt"
     p.write_text("A B C\nA B C\n", encoding="utf-8")
     res = json.loads(
-        ApplyFileEdits()(
+        with_local_ctx(ApplyFileEdits)(
             path=str(p),
             edits=[
                 {"search": "A", "replace": "X", "occurrence": "first", "expected_matches": 2},
@@ -29,7 +31,7 @@ def test_apply_batch_atomic_fail_keeps_file(tmp_path):
     original = "one two\none two\n"
     p.write_text(original, encoding="utf-8")
     res = json.loads(
-        ApplyFileEdits()(
+        with_local_ctx(ApplyFileEdits)(
             path=str(p),
             edits=[
                 {"search": "one", "replace": "ONE", "occurrence": "all", "expected_matches": 2},
@@ -50,7 +52,7 @@ def test_apply_batch_dry_run(tmp_path):
     p = tmp_path / "f.txt"
     p.write_text("foo bar\n", encoding="utf-8")
     res = json.loads(
-        ApplyFileEdits()(
+        with_local_ctx(ApplyFileEdits)(
             path=str(p),
             edits=[{"search": "foo", "replace": "FOO"}],
             dry_run=True,
@@ -71,7 +73,7 @@ def test_apply_batch_stale_file_guard(tmp_path):
     p = tmp_path / "f.txt"
     p.write_text("live content", encoding="utf-8")
     res = json.loads(
-        ApplyFileEdits()(
+        with_local_ctx(ApplyFileEdits)(
             path=str(p),
             edits=[{"search": "live", "replace": "dead"}],
             expected_file_sha256=sha256_hex_of_text("old content"),
@@ -87,7 +89,7 @@ def test_apply_batch_backup_once(tmp_path):
     p = tmp_path / "f.txt"
     p.write_text("x y z\n", encoding="utf-8")
     res = json.loads(
-        ApplyFileEdits()(
+        with_local_ctx(ApplyFileEdits)(
             path=str(p),
             edits=[
                 {"search": "x", "replace": "X"},
@@ -106,7 +108,7 @@ def test_apply_not_found_includes_suggestions(tmp_path):
     p = tmp_path / "f.txt"
     p.write_text("alpha beta gamma\nother line\n", encoding="utf-8")
     res = json.loads(
-        ApplyFileEdits()(
+        with_local_ctx(ApplyFileEdits)(
             path=str(p),
             edits=[{"search": "alpha betta gamma", "replace": "x"}],
         )
@@ -131,7 +133,7 @@ def test_apply_not_found_multiline_suggestions(tmp_path):
     p = tmp_path / "ml.txt"
     p.write_text("foo bar\nbaz qux\nzap zot\n", encoding="utf-8")
     res = json.loads(
-        ApplyFileEdits()(
+        with_local_ctx(ApplyFileEdits)(
             path=str(p),
             edits=[{"search": "foo baar\nbaz qxx", "replace": "x"}],
         )
@@ -157,7 +159,7 @@ def test_apply_not_found_picks_nearest_among_distractors(tmp_path):
         encoding="utf-8",
     )
     res = json.loads(
-        ApplyFileEdits()(
+        with_local_ctx(ApplyFileEdits)(
             path=str(p),
             edits=[{"search": "def compute_totl(items):", "replace": "x"}],
         )
@@ -172,7 +174,7 @@ def test_apply_success_path_has_no_suggestions_field_needed(tmp_path):
     p = tmp_path / "ok.txt"
     p.write_text("alpha beta gamma\n", encoding="utf-8")
     res = json.loads(
-        ApplyFileEdits()(
+        with_local_ctx(ApplyFileEdits)(
             path=str(p),
             edits=[{"search": "alpha beta gamma", "replace": "ALPHA BETA GAMMA"}],
         )

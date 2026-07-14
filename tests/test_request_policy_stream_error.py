@@ -8,7 +8,7 @@ def test_policy_retries_stream_error_then_succeeds(monkeypatch):
     monkeypatch.setattr(policy.time, "sleep", lambda *_a, **_k: None)  # без задержки
     calls = {"n": 0}
 
-    def _fake_request(payload, headers, url, verify, use_retry, logger, on_delta, cert=None):
+    def _fake_request(payload, headers, url, verify, use_retry, logger, on_delta, cert=None, timeout=600):
         calls["n"] += 1
         if calls["n"] == 1:
             raise BackendStreamError(

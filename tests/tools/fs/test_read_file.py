@@ -9,20 +9,22 @@ from tools.fs.read_file import (
 from utils.file_text import sha256_hex_of_text
 
 
+from tests.helpers.tool_ctx import with_local_ctx
+
 def test_read_returns_sha256_for_full_file(tmp_path):
     text = "hello\nworld\n"
     p = tmp_path / "h.txt"
     p.write_text(text, encoding="utf-8")
-    res = json.loads(ReadFile()(path=str(p), offset=1, limit=1))
+    res = json.loads(with_local_ctx(ReadFile)(path=str(p), offset=1, limit=1))
     assert res["sha256"] == sha256_hex_of_text(text)
-    info = json.loads(FileInfo()(path=str(p), include_hash=True))
+    info = json.loads(with_local_ctx(FileInfo)(path=str(p), include_hash=True))
     assert res["sha256"] == info["sha256"]
 
 
 def test_read_default_preview_and_pagination(tmp_path):
     p = tmp_path / "big.txt"
     p.write_text("\n".join(f"line {i}" for i in range(1, 601)), encoding="utf-8")
-    res = json.loads(ReadFile()(path=str(p)))
+    res = json.loads(with_local_ctx(ReadFile)(path=str(p)))
     assert res["file_size_bytes"] == p.stat().st_size
     assert res["start_line"] == 1
     assert res["end_line"] == 500
@@ -35,12 +37,12 @@ def test_read_default_preview_and_pagination(tmp_path):
 def test_read_offset_limit(tmp_path):
     p = tmp_path / "f.txt"
     p.write_text("a\nb\nc\nd\ne\n", encoding="utf-8")
-    by_page = json.loads(ReadFile()(path=str(p), offset=2, limit=2))
+    by_page = json.loads(with_local_ctx(ReadFile)(path=str(p), offset=2, limit=2))
     assert by_page["content"] == "b\nc\n"
 
 
 def test_read_errors_and_type_validation(tmp_path):
-    tool = ReadFile()
+    tool = with_local_ctx(ReadFile)
     bad_type = json.loads(tool(path=123))  # type: ignore[arg-type]
     assert bad_type["ok"] is False and bad_type["error"]["field"] == "path"
     missing = json.loads(tool(path=str(tmp_path / "missing.txt")))
@@ -54,7 +56,7 @@ def test_read_errors_and_type_validation(tmp_path):
 def test_read_offset_limit_validation_and_clamp(tmp_path):
     p = tmp_path / "f.txt"
     p.write_text("1\n2\n3\n", encoding="utf-8")
-    tool = ReadFile()
+    tool = with_local_ctx(ReadFile)
     bad_offset = json.loads(tool(path=str(p), offset="1"))  # type: ignore[arg-type]
     assert bad_offset["ok"] is False and bad_offset["error"]["field"] == "offset"
     bad_limit = json.loads(tool(path=str(p), limit="2"))  # type: ignore[arg-type]
@@ -66,7 +68,7 @@ def test_read_offset_limit_validation_and_clamp(tmp_path):
 def test_single_huge_line_char_truncated(tmp_path):
     p = tmp_path / "one_line.log"
     p.write_text("x" * 50_000, encoding="utf-8")
-    res = json.loads(ReadFile()(path=str(p)))
+    res = json.loads(with_local_ctx(ReadFile)(path=str(p)))
     assert res["total_lines"] == 1
     assert res["truncated"] is False
     assert res["total_chars"] == 50_000
@@ -80,16 +82,16 @@ def test_single_huge_line_char_truncated(tmp_path):
 def test_char_offset_pagination_within_line_range(tmp_path):
     p = tmp_path / "one_line.log"
     p.write_text("a" * 25_000, encoding="utf-8")
-    first = json.loads(ReadFile()(path=str(p), char_limit=10_000))
+    first = json.loads(with_local_ctx(ReadFile)(path=str(p), char_limit=10_000))
     second = json.loads(
-        ReadFile()(path=str(p), char_offset=10_000, char_limit=10_000)
+        with_local_ctx(ReadFile)(path=str(p), char_offset=10_000, char_limit=10_000)
     )
     assert first["content"] == "a" * 10_000
     assert second["content"] == "a" * 10_000
     assert second["char_offset"] == 10_000
     assert second["content_truncated"] is True
     assert second["next_char_offset"] == 20_000
-    third = json.loads(ReadFile()(path=str(p), char_offset=20_000, char_limit=10_000))
+    third = json.loads(with_local_ctx(ReadFile)(path=str(p), char_offset=20_000, char_limit=10_000))
     assert third["content"] == "a" * 5_000
     assert third["content_truncated"] is False
 
@@ -97,7 +99,7 @@ def test_char_offset_pagination_within_line_range(tmp_path):
 def test_char_limit_applies_after_line_selection(tmp_path):
     p = tmp_path / "f.txt"
     p.write_text("aa\n" + "b" * 20_000 + "\ncc\n", encoding="utf-8")
-    res = json.loads(ReadFile()(path=str(p), offset=2, limit=1, char_limit=5_000))
+    res = json.loads(with_local_ctx(ReadFile)(path=str(p), offset=2, limit=1, char_limit=5_000))
     assert res["start_line"] == 2
     assert res["end_line"] == 2
     assert res["content"] == "b" * 5_000
@@ -108,7 +110,7 @@ def test_char_limit_applies_after_line_selection(tmp_path):
 def test_char_offset_validation(tmp_path):
     p = tmp_path / "f.txt"
     p.write_text("hi", encoding="utf-8")
-    tool = ReadFile()
+    tool = with_local_ctx(ReadFile)
     bad = json.loads(tool(path=str(p), char_offset="0"))  # type: ignore[arg-type]
     assert bad["ok"] is False and bad["error"]["field"] == "char_offset"
     bad_limit = json.loads(tool(path=str(p), char_limit=0))
@@ -119,7 +121,7 @@ def test_rejects_file_over_max_bytes(tmp_path):
     p = tmp_path / "huge.txt"
     p.write_bytes(b"x" * 200)
     res = json.loads(
-        ReadFile(config_dict={"read_file_max_bytes": 100})(path=str(p))
+        with_local_ctx(ReadFile, config_dict={"read_file_max_bytes": 100})(path=str(p))
     )
     assert res["ok"] is False
     assert res["error"]["type"] == "file_too_large"
@@ -134,7 +136,7 @@ def test_reads_file_at_max_bytes_boundary(tmp_path):
     p = tmp_path / "ok.txt"
     p.write_bytes(b"y" * 100)
     res = json.loads(
-        ReadFile(config_dict={"read_file_max_bytes": 100})(path=str(p))
+        with_local_ctx(ReadFile, config_dict={"read_file_max_bytes": 100})(path=str(p))
     )
     assert res["ok"] is True
     assert res["file_size_bytes"] == 100
@@ -144,9 +146,9 @@ def test_reads_file_at_max_bytes_boundary(tmp_path):
 def test_file_size_bytes_on_not_found_and_success(tmp_path):
     p = tmp_path / "x.txt"
     p.write_text("ab", encoding="utf-8")
-    ok = json.loads(ReadFile()(path=str(p)))
+    ok = json.loads(with_local_ctx(ReadFile)(path=str(p)))
     assert ok["file_size_bytes"] == 2
-    missing = json.loads(ReadFile()(path=str(tmp_path / "nope.txt")))
+    missing = json.loads(with_local_ctx(ReadFile)(path=str(tmp_path / "nope.txt")))
     assert missing["file_size_bytes"] is None
 
 
@@ -155,7 +157,7 @@ def test_read_file_via_symlink(tmp_path):
     real.write_text("hello via link", encoding="utf-8")
     link = tmp_path / "link.txt"
     link.symlink_to(real)
-    res = json.loads(ReadFile()(path=str(link)))
+    res = json.loads(with_local_ctx(ReadFile)(path=str(link)))
     assert res["ok"] is True
     assert "hello via link" in res["content"]
 
@@ -167,6 +169,6 @@ def test_default_max_bytes_constant_is_modest():
 def test_unicode_char_slice(tmp_path):
     p = tmp_path / "u.txt"
     p.write_text("A😀" * 3, encoding="utf-8")
-    res = json.loads(ReadFile()(path=str(p), char_limit=2))
+    res = json.loads(with_local_ctx(ReadFile)(path=str(p), char_limit=2))
     assert res["content"] == "A😀"
     assert res["total_chars"] == 6

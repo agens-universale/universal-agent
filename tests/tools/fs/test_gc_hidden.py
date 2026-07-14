@@ -5,6 +5,8 @@ from tools.fs.list_files import ListFiles
 from tools.fs.search_files import SearchFiles
 
 
+from tests.helpers.tool_ctx import with_local_ctx
+
 def _mkproject(tmp_path):
     """Project with the agent's own .gc scaffolding plus real project files."""
     (tmp_path / "a.txt").write_text("needle here", encoding="utf-8")
@@ -20,7 +22,7 @@ def _mkproject(tmp_path):
 
 def test_list_depth0_hides_gc_but_keeps_other_dotfiles(tmp_path):
     _mkproject(tmp_path)
-    res = json.loads(ListFiles()(path=str(tmp_path), max_depth=0))
+    res = json.loads(with_local_ctx(ListFiles)(path=str(tmp_path), max_depth=0))
     assert res["ok"] is True
     names = {Path(e["path"]).name for e in res["entries"]}
     assert ".gc" not in names
@@ -31,7 +33,7 @@ def test_list_depth0_hides_gc_but_keeps_other_dotfiles(tmp_path):
 
 def test_list_deep_hides_gc_and_its_contents(tmp_path):
     _mkproject(tmp_path)
-    res = json.loads(ListFiles()(path=str(tmp_path), max_depth=5))
+    res = json.loads(with_local_ctx(ListFiles)(path=str(tmp_path), max_depth=5))
     assert res["ok"] is True
     for e in res["entries"]:
         assert ".gc" not in Path(e["path"]).parts
@@ -41,7 +43,7 @@ def test_list_deep_hides_gc_and_its_contents(tmp_path):
 
 def test_search_files_skips_gc_contents(tmp_path):
     _mkproject(tmp_path)
-    res = json.loads(SearchFiles()(path=str(tmp_path), regex="needle"))
+    res = json.loads(with_local_ctx(SearchFiles)(path=str(tmp_path), regex="needle"))
     assert res["ok"] is True
     files = {Path(m["file"]).name for m in res["matches"]}
     assert "a.txt" in files
@@ -53,7 +55,7 @@ def test_exact_match_only_gcignore_and_suffix_stay_visible(tmp_path):
     (tmp_path / ".gcignore").write_text("x", encoding="utf-8")
     (tmp_path / "foo.gc").mkdir()
     (tmp_path / "a.txt").write_text("x", encoding="utf-8")
-    res = json.loads(ListFiles()(path=str(tmp_path), max_depth=0))
+    res = json.loads(with_local_ctx(ListFiles)(path=str(tmp_path), max_depth=0))
     names = {Path(e["path"]).name for e in res["entries"]}
     assert ".gcignore" in names
     assert "foo.gc" in names

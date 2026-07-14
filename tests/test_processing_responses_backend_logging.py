@@ -92,6 +92,7 @@ def test_chat_completions_logs_raw_backend_payload_on_conversion_error(caplog, m
             "completions_url": "http://backend.local/v1/chat/completions",
             "use_ssl": True,
             "use_retry": False,
+            "backend_request_timeout_sec": 600,
         },
         logger=logger,
     )

@@ -138,6 +138,7 @@ def test_request_chat_completion_text_merges_payload_overrides_after_global_kwar
     ctx = SimpleNamespace(
         config_dict={
             "completions_url": "http://example.test/v1/chat/completions",
+            "backend_request_timeout_sec": 600,
             "chat_completion_kwargs": {
                 "temperature": 1.0,
                 "separate_reasoning": True,

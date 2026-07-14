@@ -159,9 +159,13 @@ class FakeBackend:
 
 def bind_os_backend(tool, backend, *, config_dict=None):
     """Attach ``backend`` via minimal RunContext-like ``_ctx`` (unit/diff tests)."""
+    from execution_workspace import build_execution_workspace
+
+    cfg = config_dict if config_dict is not None else {}
     tool._ctx = SimpleNamespace(
-        config_dict=config_dict if config_dict is not None else {},
+        config_dict=cfg,
         os_backend=backend,
+        workspace=build_execution_workspace(backend, cfg),
     )
     return tool
 

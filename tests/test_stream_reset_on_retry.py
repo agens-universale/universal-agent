@@ -7,7 +7,7 @@ def test_on_delta_reset_between_retried_attempts(monkeypatch):
     events = []
     calls = {"n": 0}
 
-    def _fake_request(payload, headers, url, verify, use_retry, logger, on_delta, cert=None):
+    def _fake_request(payload, headers, url, verify, use_retry, logger, on_delta, cert=None, timeout=600):
         calls["n"] += 1
         on_delta("reset", "")               # каждая попытка сбрасывает дисплей
         if calls["n"] == 1:

@@ -62,6 +62,9 @@ backend:
   # cert_path: "/path/client.crt"
   # key_path:  "/path/client.key"
   use_retry: true
+  # HTTP-таймаут одного запроса к LLM (секунды). Дефолт 600 (10 минут).
+  # При стриме лимит — на connect и на паузу между чанками, не на весь ответ.
+  request_timeout_sec: 600
 
 # Динамическая авторизация GigaCode (альтернатива статическому Bearer в
 # backend.chat_completion_headers). Токен запрашивается у auth_endpoint и

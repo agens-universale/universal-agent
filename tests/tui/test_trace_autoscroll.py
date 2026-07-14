@@ -162,6 +162,7 @@ async def test_command_opening_screen_does_not_scroll(tmp_path):
         trace = scr.query_one("#trace", VerticalScroll)
         calls = []
         trace.scroll_end = lambda **kw: calls.append(kw)
+        scr._stick_bottom = False                          # отскроллен вверх читать
         scr._trace_is_at_bottom = lambda: False
         scr._handle_command("help")                        # push_screen, трейс не растёт
         await pilot.pause()

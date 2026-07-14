@@ -48,7 +48,8 @@ class DownloadFile(AbstractSimpleTool):
 
     def __init__(self, ctx: Any = None, state: Any = None, **kwargs: Any) -> None:
         super().__init__(**kwargs)
-        self._ctx = ctx
+        if ctx is not None:  # keep the base-class LocalFsBackend fallback when ctx is absent
+            self._ctx = ctx
         self._state = state
 
     @classmethod
@@ -94,8 +95,7 @@ class DownloadFile(AbstractSimpleTool):
             "- filename must include a supported extension (.pdf, .docx, .xlsx, ...).\n"
         )
 
-    @staticmethod
-    def _result(
+    def _result(self, 
         *,
         ok: bool = False,
         path: str = "",
@@ -107,7 +107,7 @@ class DownloadFile(AbstractSimpleTool):
             {
                 "tool": DownloadFile.registered_tool_name(),
                 "ok": ok,
-                "path": tool_report_abspath(path) if path else "",
+                "path": tool_report_abspath(path, workspace=self._workspace) if path else "",
                 "filename": filename,
                 "bytes_written": bytes_written,
                 "error": error,

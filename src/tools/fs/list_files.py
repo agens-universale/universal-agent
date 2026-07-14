@@ -120,8 +120,7 @@ List deeper files (example):
 '''
         return description
 
-    @staticmethod
-    def _result(
+    def _result(self, 
         *,
         path: str,
         glob: Optional[str],
@@ -135,7 +134,7 @@ List deeper files (example):
         payload = {
             "tool": ListFiles.registered_tool_name(),
             "ok": ok,
-            "path": tool_report_abspath(path),
+            "path": tool_report_abspath(path, workspace=self._workspace),
             "max_depth": max_depth,
             "max_entries": max_entries,
             "truncated": truncated,
@@ -275,7 +274,7 @@ List deeper files (example):
 
     def _entry(self, filepath: str, is_dir: bool) -> Dict[str, Any]:
         return {
-            "path": tool_report_abspath(filepath),
+            "path": tool_report_abspath(filepath, workspace=self._workspace),
             "type": "directory" if is_dir else "file",
             "is_hidden": self._backend.is_hidden(filepath),
         }

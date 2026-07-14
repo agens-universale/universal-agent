@@ -5,6 +5,8 @@ from tools.fs.search_and_replace import SearchAndReplace
 from tools.fs.write_to_file_tool import WriteToFile
 
 
+from tests.helpers.tool_ctx import with_local_ctx
+
 def _config(launch_root, extra_paths=None, enabled=True):
     return {
         "launch_root": str(launch_root),
@@ -21,7 +23,7 @@ def test_write_to_file_blocks_outside_launch_root(tmp_path):
     outside = tmp_path / "outside.txt"
 
     result = json.loads(
-        WriteToFile(config_dict=_config(launch_root))(
+        with_local_ctx(WriteToFile, config_dict=_config(launch_root))(
             path=str(outside),
             content="blocked",
         )
@@ -41,7 +43,7 @@ def test_write_to_file_allows_launch_root_and_extra_paths(tmp_path):
 
     inside = launch_root / "inside.txt"
     extra = extra_root / "artifact.txt"
-    tool = WriteToFile(config_dict=_config(launch_root, [extra_root]))
+    tool = with_local_ctx(WriteToFile, config_dict=_config(launch_root, [extra_root]))
 
     inside_result = json.loads(tool(path=str(inside), content="inside"))
     extra_result = json.loads(tool(path=str(extra), content="extra"))
@@ -59,7 +61,7 @@ def test_append_to_file_blocks_outside_launch_root(tmp_path):
     outside.write_text("start", encoding="utf-8")
 
     result = json.loads(
-        AppendToFile(config_dict=_config(launch_root))(
+        with_local_ctx(AppendToFile, config_dict=_config(launch_root))(
             path=str(outside),
             content="blocked",
         )
@@ -78,7 +80,7 @@ def test_search_and_replace_blocks_outside_launch_root(tmp_path):
     outside.write_text("print('old')", encoding="utf-8")
 
     result = json.loads(
-        SearchAndReplace(config_dict=_config(launch_root))(
+        with_local_ctx(SearchAndReplace, config_dict=_config(launch_root))(
             path=str(outside),
             search="old",
             replace="new",
@@ -97,7 +99,7 @@ def test_root_box_can_be_disabled_for_file_tools(tmp_path):
     outside = tmp_path / "outside.txt"
 
     result = json.loads(
-        WriteToFile(config_dict=_config(launch_root, enabled=False))(
+        with_local_ctx(WriteToFile, config_dict=_config(launch_root, enabled=False))(
             path=str(outside),
             content="allowed",
         )

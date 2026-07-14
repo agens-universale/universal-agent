@@ -7,14 +7,13 @@ from __future__ import annotations
 import json
 import subprocess
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
 from config_modules import env_vars
 from diff_tui.paths import orig_key
 from diff_tui.store import DiffStore
-from tools.backends.local import LocalFsBackend
+from tests.helpers.tool_ctx import local_ctx
 from tools.fs.append_to_file import AppendToFile
 from tools.fs.apply_file_edits import ApplyFileEdits
 from tools.fs.search_and_replace import SearchAndReplace
@@ -51,13 +50,10 @@ def _cfg(launch_root: Path) -> dict:
     }
 
 
-def _tool_ctx(launch_root: Path, *, is_tui: bool = True) -> SimpleNamespace:
-    cfg = _cfg(launch_root)
-    return SimpleNamespace(
-        config_dict=cfg,
-        os_backend=LocalFsBackend(),
-        is_tui=is_tui,
-    )
+def _tool_ctx(launch_root: Path, *, is_tui: bool = True):
+    ctx = local_ctx(_cfg(launch_root))
+    ctx.is_tui = is_tui
+    return ctx
 
 
 def _write_tool(launch_root: Path, *, is_tui: bool = True) -> WriteToFile:

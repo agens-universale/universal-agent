@@ -91,6 +91,8 @@ class StateSerializer:
         # State() defaults logger=None on reconstruction, which is correct —
         # a fresh logger is threaded back in by the caller when it resumes.
         raw.pop("logger", None)
+        # Live I/O handle (backend inside): rebuilt by RunContext on resume.
+        raw.pop("workspace", None)
 
         shared = raw.get("shared")
         if isinstance(shared, SharedStateData) or (

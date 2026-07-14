@@ -152,6 +152,7 @@ def test_request_backend_canonical_sanitizes_state_history_for_chat_completions(
             "completions_url": "http://backend.local/v1/chat/completions",
             "use_ssl": True,
             "use_retry": False,
+            "backend_request_timeout_sec": 600,
         },
         logger=None,
     )
