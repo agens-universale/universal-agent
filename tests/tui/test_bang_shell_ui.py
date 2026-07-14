@@ -107,6 +107,21 @@ async def _await_bang_done(pilot, scr, needle: str, *, rounds: int = 50) -> None
     pytest.fail(f"{needle!r} not in trace: {_trace_text(scr)!r}")
 
 
+async def _await_bang_gone(pilot, scr, *needles: str, rounds: int = 50) -> None:
+    """Дождаться, пока блоки уйдут из трейса.
+
+    remove_children() в Textual — отложенный prune (см. TraceScreen._clear_trace):
+    одной pilot.pause() не хватает, и под нагрузкой полного прогона это читается
+    как флап, хотя очистка отрабатывает штатно."""
+    await pilot.pause()
+    for _ in range(rounds):
+        text = _trace_text(scr)
+        if not any(n in text for n in needles):
+            return
+        await pilot.pause(0.05)
+    pytest.fail(f"{needles!r} still in trace: {_trace_text(scr)!r}")
+
+
 @pytest.mark.asyncio
 async def test_bang_clear_all(tmp_path, monkeypatch):
     pytest.importorskip("textual")
@@ -134,7 +149,7 @@ async def test_bang_clear_all(tmp_path, monkeypatch):
         assert "one" in _trace_text(scr) and "two" in _trace_text(scr)
 
         scr.on_command_text_area_submitted(CommandTextArea.Submitted(value="! clear"))
-        await pilot.pause()
+        await _await_bang_gone(pilot, scr, "one", "two")
         text = _trace_text(scr)
         assert "one" not in text
         assert "two" not in text
@@ -169,7 +184,7 @@ async def test_bang_clear_last_n(tmp_path, monkeypatch):
             await _await_bang_done(pilot, scr, word)
 
         scr.on_command_text_area_submitted(CommandTextArea.Submitted(value="! clear 2"))
-        await pilot.pause()
+        await _await_bang_gone(pilot, scr, "beta", "gamma")
         text = _trace_text(scr)
         assert "alpha" in text
         assert "beta" not in text

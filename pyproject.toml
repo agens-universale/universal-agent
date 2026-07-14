@@ -4,6 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "gc-ua"
+# Релизная дисциплина (спека 2026-07-11-config-foundation): бампать при нарезке
+# release/vX.Y.Z — стамп агента сверяет версию+коммит, notice «обновлён» берёт отсюда.
 version = "0.0.1"
 description = "GigaCode Universal Agent — TUI/CLI клиент агента GigaCode"
 readme = "readme.md"

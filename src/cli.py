@@ -3,6 +3,7 @@ import sys
 from typing import Any
 
 import arg_parser
+import config_sync
 import onboarding
 from agent_executor import AgentExecutor
 from config import (
@@ -19,6 +20,9 @@ from message_policy.user_message_policy import (
 )
 from run_context import RunContext, create_run_context
 from mcp_daemon_autostart import ensure_mcp_daemons, shutdown_mcp_daemons
+from updater import check as updater_check
+from updater import runner as updater_runner
+from updater import source as updater_source
 from utils.json_text import format_json_for_display
 from utils.logging_module import human_console_enabled
 
@@ -109,16 +113,128 @@ def _resolve_forced_skill(skill_name: str, config_dict: dict) -> str | None:
     return res.canonical_id
 
 
+def _interactive() -> bool:
+    """TTY на входе и выходе → можно запускать интерактивный визард."""
+    return sys.stdin.isatty() and sys.stdout.isatty()
+
+
 def _run_init() -> int:
-    """`gc-cli --init-config`: создать ~/.gc/config.yml из шаблона и выйти, агент не
-    запускается. Существующий конфиг не перетираем."""
+    """`gc-cli --init-config`: настроить конфиг (интерактивно на TTY) и выйти."""
     path = user_config_path()
-    created = _bootstrap_user_config()
-    if created:
-        config_dict = load_config(None)
-        print(onboarding.setup_guide(str(path), config_dict), file=sys.stderr)
+    just_created = _bootstrap_user_config()
+    config_dict = load_config(None)
+    if _interactive():
+        import onboarding_wizard
+        onboarding_wizard.run(config_dict, path, review_all=True,
+                              io=onboarding_wizard.default_io())   # без mcp — gc-cli не ставит MCP
     else:
-        print(f"[gc] конфиг уже есть: {path} — не меняю", file=sys.stderr)
+        print(onboarding.setup_guide(str(path), config_dict, just_created=just_created), file=sys.stderr)
+    return 0
+
+
+def _run_sync_config() -> int:
+    """`gc-cli --sync-config`: обновить config.yml по свежему шаблону и выйти."""
+    from pathlib import Path
+    from config import _default_config_path, _project_local_config_path
+
+    config_arg = arg_parser.run_args.config
+    target = Path(config_arg) if config_arg else user_config_path()
+    bundled = Path(_default_config_path()).resolve()
+
+    # I5: project-local overlay — частичный файл, sync его не трогает
+    project_local = _project_local_config_path()
+    if project_local and Path(project_local).resolve() == target.resolve():
+        print(
+            "[gc] project-local .gc/config.yml — частичный overlay, sync его не обновляет\n"
+            "     (обновляйте глобальный config.yml).",
+            file=sys.stderr,
+        )
+        return 1
+
+    # M9a: раздельные сообщения для «не создан» и «это bundled-шаблон»
+    if not target.is_file():
+        print(
+            f"[gc] config.yml не найден (ещё не создан) — {target}.\n"
+            f"     Сначала настройте агента: gc-cli --init-config",
+            file=sys.stderr,
+        )
+        return 1
+    if target.resolve() == bundled:
+        print(
+            "[gc] нечего обновлять: target — пакетный шаблон config.default.yml, его не правим.",
+            file=sys.stderr,
+        )
+        return 1
+    try:
+        report = config_sync.sync_config(target)
+    except ValueError as exc:
+        print(f"[gc] config.yml НЕ обновлён: {exc}", file=sys.stderr)
+        return 1
+    lines = [
+        f"[gc] ✓ config.yml обновлён по образцу текущей версии: {target}",
+        f"     перенесено: {report.transferred} · переименовано: {report.renamed}",
+    ]
+    if report.removed:
+        lines.append(f"     устаревших убрано: {', '.join(report.removed)} (в бэкапе)")
+    if report.unknown:
+        lines.append(f"     неизвестных ключей: {', '.join(report.unknown)} (в бэкапе)")
+    if report.reenter:
+        lines.append(f"     задайте заново (формат изменился): {', '.join(report.reenter)}")
+    lines.append(f"     бэкап: {report.backup_path}")
+    lines.append("     личные комментарии из старого файла не переносятся — они в бэкапе.")
+    print("\n".join(lines), file=sys.stderr)
+    return 0
+
+
+def _run_check_update() -> int:
+    """`gc-cli --check-update`: разовая проверка обновлений и выход.
+
+    Работает и при ``update.check: off`` в config.yml — это ручная команда,
+    троттлинг авто-чека её не касается.
+    """
+    src = updater_source.resolved_source()
+    if src is None:
+        print(
+            "[gc] обновление недоступно для этой установки — обновляйтесь через git (dev-установка)",
+            file=sys.stderr,
+        )
+        return 0
+    result = updater_check.check_for_update(src)
+    # ASCII-only маркеры ([update]\[ok]\[--]), не $ok/$warn-глифы (✓\⚠\—):
+    # консоль, в которую печатает CLI, может быть не-UTF8 (напр. Windows
+    # cp1251) — такие глифы вне её кодовой страницы валят print() с
+    # UnicodeEncodeError.
+    if result.status == "update":
+        print(f"[gc] [update] {result.detail}", file=sys.stderr)
+    elif result.status == "current":
+        print(f"[gc] [ok] {result.detail}", file=sys.stderr)
+    else:
+        print(f"[gc] [--] {result.detail}", file=sys.stderr)
+    return 0
+
+
+def _run_update() -> int:
+    """`gc-cli --update`: собрать команду `uv tool install` и запустить
+    отвязанное обновление, ждущее завершения текущего процесса.
+
+    CLI короткоживущий — без авто-рестарта (``restart_cmd=None``); по
+    завершении пользователь сам запускает gc-cli/gc-ua заново.
+    """
+    src = updater_source.resolved_source()
+    if src is None:
+        print(
+            "[gc] обновление недоступно для этой установки — обновляйтесь через git (dev-установка)",
+            file=sys.stderr,
+        )
+        return 0
+    config_dict = load_config(arg_parser.run_args.config)
+    command = updater_runner.build_install_command(src, updater_check.extra_args(config_dict))
+    updater_runner.spawn_detached_update(command, parent_pid=os.getpid(), restart_cmd=None)
+    print(
+        f"[gc] установка запущена {updater_runner.install_location_phrase()} — "
+        "по завершении запустите gc-cli/gc-ua заново",
+        file=sys.stderr,
+    )
     return 0
 
 
@@ -151,10 +267,21 @@ def main() -> int:
     if getattr(arg_parser.run_args, "init_config", False):
         return _run_init()
 
+    if getattr(arg_parser.run_args, "sync_config", False):
+        return _run_sync_config()
+
+    if getattr(arg_parser.run_args, "check_update", False):
+        return _run_check_update()
+
+    if getattr(arg_parser.run_args, "update", False):
+        return _run_update()
+
     if getattr(arg_parser.run_args, "init", False):
         return _run_init_agents_md()
 
-    config_dict = load_config(arg_parser.run_args.config)
+    config_arg = arg_parser.run_args.config
+    just_created = _bootstrap_user_config() if config_arg is None else False
+    config_dict = load_config(config_arg)
 
     # Единая точка применения CLI-override поверх config.yml.
     apply_cli_overrides(
@@ -168,15 +295,18 @@ def main() -> int:
         read_guard_mode=getattr(arg_parser.run_args, "read_guard_mode", None),
         agentsmd_override=getattr(arg_parser.run_args, "agentsmd_override", False),
     )
+    import upgrade_gate
+    _upgrade_info = upgrade_gate.detect_upgrade()
 
-    # Онбординг: дефолтный путь (без --config) и конфиг ещё не настроен
-    # (остался плейсхолдер) → показать гайд и выйти, бэкенд не дёргаем.
-    if arg_parser.run_args.config is None and onboarding.is_unconfigured(config_dict):
-        print(
-            onboarding.setup_guide(str(user_config_path()), config_dict),
-            file=sys.stderr,
-        )
+    # gc-cli больше НЕ запускает визард автоматически — только по --init-config.
+    # При неполном конфиге на дефолтном пути — пассивный текстовый хинт и выход.
+    if config_arg is None and onboarding.is_unconfigured(config_dict):
+        print(onboarding.setup_guide(str(user_config_path()), config_dict, just_created=just_created), file=sys.stderr)
         return 0
+
+    # Стамп — только на полноценном запуске: хинт-путь выше не должен «сжигать»
+    # notice «агент обновлён» (ревью Task 4).
+    upgrade_gate.mark_current_run()
     forced_skill_id = _resolve_forced_skill(
         arg_parser.run_args.skill, config_dict
     )
@@ -196,6 +326,8 @@ def main() -> int:
         getattr(ctx, "mcp_status", None),
         is_tui=False,
         deprecated_keys_used=config_dict.get("deprecated_keys_used"),
+        upgrade_info=_upgrade_info,
+        compat_notices=config_dict.get("compat_notices"),
     )
     if _notices:
         print(render_notices_for_cli(_notices), file=sys.stderr)

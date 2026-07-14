@@ -30,6 +30,7 @@ from tools.registry import all_builtin_tool_names
 from tui.commands import build_default_registry, closest_command
 from tui.models import TaskCursor
 from rich.text import Text
+from tui.palette import ACCENT as _ACCENT
 from tui.palette import DEEP_DIM as _DEEP_DIM
 from tui.palette import DIM as _DIM
 from tui.palette import ERR as _ERR_RED
@@ -161,7 +162,9 @@ class TraceScreen(Screen):
         self._active_task_id: Optional[str] = None
         self._error_shown: bool = False
         self._mcp_status_row = None   # Optional[Static] — live MCP-loading индикатор
+        self._warnings_toasted = False  # warning-тосты при старте показываются один раз за запуск
         self._mcp_status_done = False
+        # последняя MCP-строка карточки — для перерисовки (runtime-notice / update-notice)
         self._last_mcp_card_line: Optional[str] = None
         # Phase 2: tool-row mutation state
         self._active_calls: dict[str, ToolCallRow] = {}
@@ -461,7 +464,7 @@ class TraceScreen(Screen):
     def _footer_left_text(self) -> str:
         """Команды footer-left + счётчик уведомлений (если есть)."""
         base = self._footer_left_commands()
-        suffix = format_notices_footer_suffix(self._collect_notices())
+        suffix = format_notices_footer_suffix(self._collect_footer_notices())
         return base + suffix if suffix else base
 
     def _refresh_notices_footer(self) -> None:
@@ -1708,9 +1711,10 @@ class TraceScreen(Screen):
         mcp_status осел → карточка и /notices согласованы (иначе счётчик уведомлений
         недосчитывал бы MCP-фейлы)."""
         try:
-            self._refresh_notices_card(mcp_line=mcp_line)
+            self._refresh_notices_card(mcp_line=mcp_line)   # запоминает mcp_line для перерисовок
         except Exception:
             pass
+        self._maybe_toast_warnings()       # notices финальны (mcp_status осел) → warning-тосты
 
     def _mcp_screen_snapshot(self):
         """Снапшот для экрана /mcp: предпочитаем boot-результат (app._mcp_snapshot,
@@ -2040,25 +2044,23 @@ class TraceScreen(Screen):
         trace.mount(brand)
         self._brand = brand
 
-    def _collect_startup_notices(self):
-        """Собрать стартовые уведомления через канал startup_notices."""
-        cfg = getattr(self.app, "_config", None) or {}
-        mcp_status = getattr(self.app, "_mcp_status", None)
-        return collect_startup_notices(
-            cfg, all_builtin_tool_names(cfg), mcp_status, is_tui=True,
-            deprecated_keys_used=cfg.get("deprecated_keys_used"),
-        )
-
     def _collect_notices(self):
-        """Стартовые + unread runtime (для бейджей в футере/карточке)."""
+        """Бейдж КАРТОЧКИ: стартовые + unread runtime (без обновления — оно там строкой).
+
+        Владелец сборки — App (_startup_notices / collect_unread_notices): экран не
+        пересобирает то же самое, иначе новый источник уведомлений, добавленный на
+        одной стороне, молча разъедется с другой."""
         collect = getattr(self.app, "collect_unread_notices", None)
         if callable(collect):
             return collect()
-        # Fallback (напр. если app даёт только collect_notices).
-        collect_all = getattr(self.app, "collect_notices", None)
-        if callable(collect_all):
-            return collect_all()
-        return self._collect_startup_notices() + collect_unread_runtime_notices()
+        return collect_unread_runtime_notices()
+
+    def _collect_footer_notices(self):
+        """Бейдж ФУТЕРА: то же + обновление (отдельной строки про него в футере нет)."""
+        collect = getattr(self.app, "collect_footer_notices", None)
+        if callable(collect):
+            return collect()
+        return self._collect_notices()
 
     def _has_mcp_servers(self) -> bool:
         """Заданы ли MCP-серверы в конфиге. При них mcp_status осядет только на
@@ -2066,25 +2068,65 @@ class TraceScreen(Screen):
         cfg = getattr(self.app, "_config", None) or {}
         return bool(cfg.get("mcp-servers"))
 
-    def _compose_card_lines(self, mcp_line: "Optional[str]") -> str:
-        """Итог-содержимое правой колонки карточки: до трёх строк через пустую строку.
+    def _compose_card_lines(self, mcp_line: "Optional[str]") -> Text:
+        """Итог-содержимое правой колонки карточки: до четырёх строк через пустую строку.
 
-            ⚠ MCP: 3/5 подключены · /mcp      (только если заданы MCP-серверы)
+            ⚠ MCP: 3/5 подключены · /mcp             (только если заданы MCP-серверы)
 
-            уведомления: ⚠ 2 · ℹ 1 · /notices (F4)  (только если есть уведомления)
+            ⚠ 2 · ℹ 1 · /notices (F4)                (только если есть уведомления)
+
+            ↑ доступна новая версия · /settings → Обновление  (teal, если авто-чек нашёл)
 
             ✓ готов к работе                         (всегда)
 
+        Строка уведомлений — голый бейдж `format_notices_badge`, без слова-префикса:
+        тот же вид, что в футере и на /sessions (единый источник — notices_ui).
         Детали уведомлений — на экране /notices (F4); трейс держим чистым."""
         notices = self._collect_notices()
-        lines = []
+        lines = []          # (text, style|None)
         if mcp_line:
-            lines.append(mcp_line)
+            lines.append((mcp_line, None))
         badge = format_notices_badge(notices)
         if badge:
-            lines.append(f"уведомления: {badge}")
-        lines.append("✓ готов к работе")
-        return "\n\n".join(lines)
+            lines.append((badge, None))                     # строка целиком — базовым цветом карточки
+        if getattr(self.app, "_update_available", False):
+            lines.append(("↑ доступна новая версия · /settings → Обновление", _ACCENT))
+        lines.append(("✓ готов к работе", None))
+        t = Text()
+        for i, (s, style) in enumerate(lines):
+            if i:
+                t.append("\n\n")
+            t.append(s, style=style)
+        return t
+
+    def refresh_update_notice(self) -> None:
+        """Дорисовать строку «доступна новая версия» в brand-карточке — зовётся из
+        async авто-чека (app) при находке обновления. MCP-строку карточки не трогаем:
+        _refresh_notices_card без mcp_line переиспользует запомненную."""
+        self._refresh_notices_card()
+
+    def _maybe_toast_warnings(self) -> None:
+        """Один раз при старте (когда notices финальны): warning-уведомления → тост,
+        только если набор warning-кодов изменился с прошлого показа (on-change — не
+        спамим тем же; карточка/notices держат постоянную видимость). info не тостим.
+        Кап 3 + сводный «+N ещё». Персист набора — в agent_state.json."""
+        if self._warnings_toasted:
+            return
+        self._warnings_toasted = True
+        try:
+            import upgrade_gate
+            from startup_notices import warning_toasts
+            messages, summary, codes = warning_toasts(self.app._startup_notices())
+            last = frozenset(upgrade_gate.read_state().get("last_shown_warning_codes") or [])
+            if codes == last:
+                return                       # набор тот же — молчим (постоянная видимость в карточке)
+            upgrade_gate.write_state({"last_shown_warning_codes": sorted(codes)})
+            for msg in messages:
+                self.app.notify(msg, severity="warning", timeout=6.0)
+            if summary:
+                self.app.notify(summary, severity="warning", timeout=6.0)
+        except Exception:
+            pass                             # тосты — best-effort, не роняют старт
 
     def _render_startup_notices(self) -> None:
         """Boot-оркестрация карточки. Без MCP-серверов данные полны сразу →
@@ -2093,6 +2135,7 @@ class TraceScreen(Screen):
         if self._has_mcp_servers():
             return
         self._refresh_notices_card(mcp_line=None)
+        self._maybe_toast_warnings()
 
     def _refresh_notices_card(self, *, mcp_line: "Optional[str]" = None) -> None:
         """Обновить правую колонку карточки: MCP + счётчик уведомлений + готовность."""
@@ -2265,20 +2308,7 @@ class TraceScreen(Screen):
                 return
 
             # Пусто, run не идёт → модалка выхода.
-            from tui.screens.confirm import ConfirmScreen
-
-            def _on_exit(confirmed: bool) -> None:
-                if confirmed:
-                    self.app.exit()
-
-            self.app.push_screen(
-                ConfirmScreen(
-                    title="Выход",
-                    message="Завершить сессию?",
-                    hint="[Y] да, выйти   [N] нет, остаться",
-                ),
-                _on_exit,
-            )
+            self._request_exit()
             event.stop()
             event.prevent_default()
             return
@@ -2839,6 +2869,14 @@ class TraceScreen(Screen):
             return None
         return wrap_technical_user_content(body, technical_type="technical")
 
+    def _cmd_settings(self) -> None:
+        from tui.screens.settings import SettingsScreen
+        self.app.push_screen(SettingsScreen(
+            config=getattr(self.app, "_config", None) or {},
+            config_path=getattr(self.app, "_config_path", None),
+            on_apply=self.app.reload_config,
+        ))
+
     def _cmd_config(self) -> None:
         from tui.screens.config import ConfigScreen
         self.app.push_screen(ConfigScreen(
@@ -3050,6 +3088,23 @@ class TraceScreen(Screen):
                 hint="[Y] да, прервать   [N] нет, продолжить",
             ),
             _on_result,
+        )
+
+    def _request_exit(self) -> None:
+        """Модалка подтверждения выхода (Esc/Ctrl+C вхолостую)."""
+        from tui.screens.confirm import ConfirmScreen
+
+        def _on_exit(confirmed: bool) -> None:
+            if confirmed:
+                self.app.exit()
+
+        self.app.push_screen(
+            ConfirmScreen(
+                title="Выход",
+                message="Завершить сессию?",
+                hint="[Y] да, выйти   [N] нет, остаться",
+            ),
+            _on_exit,
         )
 
     def _cmd_stop(self) -> None:
@@ -3682,6 +3737,9 @@ class TraceScreen(Screen):
             return
         if name == "config":
             self._cmd_config()
+            return
+        if name == "settings":
+            self._cmd_settings()
             return
         if name == "mcp":
             self._cmd_mcp()

@@ -60,6 +60,13 @@
     `deny` — всегда bounce (как CLI), `judge` — intent_guard решает, `allow` — принять текст.
   - `tui.file_view.enabled` / `max_file_bytes` / `page_lines` (`null` = авто по высоте)
     — постраничный просмотр `/view` в TUI (см. [tui.md](tui.md#просмотр-файла-view)).
+- **Обновление**: секция `update` управляет самообновлением агента:
+  - `update.check` (`auto | off`, по умолчанию `auto`) — проверять ли при запуске, вышла ли
+    новая версия. Вердикт виден в TUI (`/settings` → Обновление) и по `gc-cli --check-update`.
+  - `update.extra_args` (список, по умолчанию пустой) — дополнительные аргументы к
+    `uv tool install` при обновлении. **В корпоративной сети обязателен**
+    `["--system-certs"]`: без него установка упирается в TLS-перехват и падает —
+    как из `/settings`, так и по `gc-cli --update`.
 - **Слои инструкций** (`paths.agent_md_path`, `tui.agentsmd_override`) — см. раздел
   [«Слои инструкций (AGENTS.md)»](#слои-инструкций-agentsmd) ниже.
 

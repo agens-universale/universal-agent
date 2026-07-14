@@ -235,10 +235,11 @@ ToolCallRow.tool-group-start { margin-top: 1; }
 .stream-block-think { color: $muted; text-style: italic; }
 
 /* Палитра команд (overlay, Task 3.3) */
-.palette       { background: #161A23; border: round $run-color; max-height: 80%; }
+.palette       { background: #161A23; border: round $run-color; height: auto; max-height: 80%; }
 .palette-row   { color: $ink; padding: 0 1; }
 .palette-row.selected { background: $band-bg; color: $bright; }
 .palette-hint  { color: $deep-dim; padding: 0 1; }
+.palette-keys  { margin-top: 1; }   /* воздух перед строкой клавиш — как .set-hint */
 
 /* Строки HelpScreen — реестр команд + доп. хоткеи */
 .help-section  { color: $deep-dim; padding: 0 1; }
@@ -320,6 +321,8 @@ TextArea.ask-human-mode { border: solid $run-color; }
 .mcp-card { height: auto; padding: 0 1; margin-bottom: 1; }
 .mcp-card:focus { background: $band-bg; border-left: outer $accent; }
 .mcp-summary { padding: 0 1; }
+.mcp-confirm { background: $band-bg; border-left: outer $warn; padding: 0 1; }
+.mcp-row { width: 1fr; text-wrap: nowrap; text-overflow: ellipsis; }   /* описание обрезается … */
 
 /* ConfigScreen — fieldset-панели (spec 2026-06-10) */
 .config-caption { color: $dim; padding: 0 1; margin: 0 0 1 0; }
@@ -338,4 +341,79 @@ TextArea.ask-human-mode { border: solid $run-color; }
 #config-filter-row { height: 3; width: 1fr; padding: 0; background: $bg; border-top: solid $deep-dim; border-bottom: solid $deep-dim; }
 #config-filter-prompt { width: 2; color: $accent; height: 1; background: $bg; content-align: left middle; padding: 0; }
 #config-filter { height: 1; width: 1fr; border: none; padding: 0; background: $bg; color: $ink; }
+
+/* ── Онбординг ─────────────────────────────────────────── */
+/* Хедер (титул) сверху + футер (подсказки, слева) снизу — как на основном экране;
+   teal-карточка (лого+тэглайн+степпер+шаг) — контент между ними, по размеру. */
+#onb-header { height: 2; background: $bg; color: $deep-dim; padding: 0 1; border-bottom: solid $deep-dim; }
+#header-left { width: 1fr; color: $deep-dim; }
+#onb-scroll { height: auto; max-height: 100%; padding: 0; background: $bg; }
+#onb-footer { height: 2; background: $bg; color: $dim; padding: 0 1; }
+#onb-frame { height: auto; width: 1fr; border: round $accent; padding: 1 2; margin: 1 1; background: $bg; }
+#onb-logo { height: auto; padding: 0; }
+#onb-tagline { height: auto; color: $deep-dim; margin-top: 1; padding: 0; }
+#onb-stepper { height: auto; padding: 2 0; }
+#onb-body { height: auto; padding: 0; margin-bottom: 1; }   /* воздух под заголовком шага (как #set-title) */
+/* Поля ввода — плоские, как #config-filter (без дефолтной рамки Input, что мусорит box-символами). */
+#onb-endpoint, #onb-token, #onb-model { height: 1; width: 1fr; border: none; padding: 0; background: $bg; color: $ink; }
+#onb-endpoint:focus, #onb-token:focus, #onb-model:focus { border: none; background: $band-bg; }
+.onb-option { height: auto; padding: 0 1; width: 1fr; }
+/* Выбор — только фон, БЕЗ border-left: полоса сдвигала контент на 1 колонку,
+   отчего кружки ●/○ в /settings-секциях съезжали друг относительно друга. */
+.onb-option.selected { background: $band-bg; }
+.onb-mcp-row { text-wrap: nowrap; text-overflow: ellipsis; }
+.set-spaced { margin-bottom: 1; }   /* воздух между строками-опциями в /settings-секциях */
+/* Первая строка-действие: зазор сверху (от инфо-строк) И снизу (между действиями) одним
+   shorthand — раздельные longhand'ы .set-gap+.set-spaced на одном элементе Textual перетирает
+   (последний .set-gap обнулял margin-bottom → пропадал воздух под первым действием). */
+.set-spaced-gap { margin: 1 0 1 0; }
+.auth-nested { margin-left: 4; }
+.onb-hint { color: $deep-dim; padding: 0; }
+.onb-warn { color: $warn; padding: 0; }
 #config-filter:focus { border: none; }
+
+/* /settings — хаб настроек (визуальный контракт §2-3; идиомы = onb-*) */
+#set-header { height: 2; background: $bg; color: $deep-dim; padding: 0 1; border-bottom: solid $deep-dim; }
+#set-scroll { height: auto; max-height: 100%; padding: 0; background: $bg; }
+#set-footer { height: 2; background: $bg; color: $dim; padding: 0 1; }
+#set-frame { height: auto; width: 1fr; border: round $accent; padding: 1 2; margin: 1 1; background: $bg; }
+/* Единая левая граница контента = padding 0 1 у ВСЕХ элементов секции/меню
+   (frame даёт +2, элементы +1 → всё на 3 от рамки; рассинхрон отступов был
+   причиной «адрес левее / авторизация поехала»). */
+#set-title { height: auto; padding: 0 1; margin-bottom: 1; }   /* воздух под заголовком */
+/* Строка меню — горизонтальная раскладка: текст слева (1fr) + глиф статуса
+   у правого края. Так глиф не «едет» при выборе и не липнет к значению. */
+.set-menurow { height: auto; layout: horizontal; padding: 0 1; margin-bottom: 1; }
+.set-menurow.selected { background: $band-bg; }
+.set-rowtext { width: 1fr; height: auto; text-wrap: nowrap; text-overflow: ellipsis; }
+.set-glyph { width: 3; height: auto; text-align: right; }
+.set-row { height: auto; padding: 0 1; }
+.set-row.selected { background: $band-bg; }
+.set-hint { color: $deep-dim; padding: 0 1; margin-top: 1; }   /* воздух перед контекст-подсказкой */
+.set-info { height: auto; padding: 0 1; }   /* инфо-строки (Версия/Источник) — тот же отступ */
+.set-gap { margin-top: 1; }                 /* вертикальный зазор между смысловыми группами */
+.set-warnflash { color: $warn; }
+.set-probe { margin-top: 1; }               /* воздух перед строкой статуса probe */
+
+/* Пост-апдейт (D4) — карточка по контенту, как #set-frame (визуальный контракт §6);
+   раньше сидел в #trace{height:1fr} и раскатывался на весь пустой экран. */
+#pu-scroll { height: auto; max-height: 100%; padding: 0; background: $bg; }
+#pu-frame { height: auto; width: 1fr; border: round $accent; padding: 1 2; margin: 1 1; background: $bg; }
+.pu-title { height: auto; padding: 0 0 1 0; border-bottom: solid $deep-dim; margin-bottom: 1; }
+.pu-title.solo { padding: 0; border-bottom: none; margin-bottom: 0; }   /* нечего обновлять — линии под заголовком нет */
+.post-update-hint { height: auto; color: $deep-dim; padding: 0; }
+.post-update-item { height: auto; padding: 0; }
+.set-confirm { background: $band-bg; border-left: outer $warn; padding: 0 1; margin-top: 1; }
+#set-notice { margin-top: 1; }              /* отделить notice (итог install/удаления) от контента над ним */
+/* Поле ввода в /settings — скруглённая amber-рамка (id+class специфичнее flat
+   #onb-* → онбординг остаётся без рамки, как принят). */
+#onb-endpoint.set-framed, #onb-token.set-framed, #onb-model.set-framed {
+    border: round $run-color; height: 3; width: 1fr; padding: 0 1; background: $bg;
+}
+#onb-endpoint.set-framed:focus, #onb-token.set-framed:focus, #onb-model.set-framed:focus {
+    border: round $run-color; background: $band-bg;
+}
+
+/* Редакторы полей — Vertical по дефолту height:1fr и растягивают рамку;
+   принудительно height:auto, чтобы рамка (#onb-frame/#set-frame) обнимала контент. */
+EndpointEditor, AuthEditor, ModelEditor, McpSectionEditor { height: auto; }

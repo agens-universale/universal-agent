@@ -38,7 +38,9 @@ def test_resolve_absolute_ignores_cwd(tmp_path):
 
 
 def test_resolve_expanduser(monkeypatch, tmp_path):
+    # Path.expanduser() на Windows читает USERPROFILE, на POSIX — HOME: подменяем оба.
     monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
     p = resolve_view_path("~/f.txt", cwd="/tmp")
     assert p == tmp_path / "f.txt"
 

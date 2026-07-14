@@ -19,6 +19,67 @@ from tui.screens.main import TraceScreen
 from tui.services.stream_sink import StreamSink
 from tools.registry import all_builtin_tool_names
 
+_AUTO_UPDATE_NOTICE = "Доступна новая версия — /settings → Обновление"
+
+
+def _maybe_auto_check(config: dict, state: dict, now: float, installed_commit,
+                      *, check, record_result, on_available, on_result=None) -> None:
+    """Ядро авто-проверки обновления при старте (спека D, Task 8; персист-вердикт).
+
+    Два сигнала:
+    1. **Персистентный вердикт** (КАЖДЫЙ старт, без сети): если сохранённый remote-коммит
+       последней проверки ≠ установленный → обновление доступно → `on_available(fresh=False)`
+       (строка держится до обновления, а не только в день чека).
+    2. **Свежая сетевая перепроверка** (КАЖДЫЙ старт, если `update.check: auto`): обновляет
+       сохранённый remote; при найденном обновлении → `on_available(fresh=True)` (свежая
+       находка → можно и toast). Сам вердикт уходит наружу через `on_result(CheckResult)` —
+       из него живут глиф «Обновление» в хабе настроек и сама секция (второй раз в сеть
+       ходить незачем). Сеть недоступна → вердикт `unknown`.
+
+    Сеть/UI/время/персист — только через инъекцию (`check`, `record_result`, `on_available`,
+    `on_result`), поэтому функция зовётся из фонового воркер-треда, не с UI-потока."""
+    from updater.check import CheckResult, auto_check_enabled, update_available_from_state
+    from updater.source import resolved_source
+
+    resolved = resolved_source()
+    if resolved is None:
+        return                                   # dev/неизвестный источник — обновлений нет
+    if update_available_from_state(state, installed_commit):
+        on_available(False)                      # персист-вердикт: строка без toast
+    if not auto_check_enabled(config):
+        return
+    try:
+        result = check(resolved)
+    except Exception:
+        result = None
+    if result is None:
+        record_result(now, None, installed_commit)   # только стамп; прошлый remote сохраняется
+        if on_result is not None:
+            on_result(CheckResult("unknown", None, "не удалось проверить"))
+        return
+    record_result(now, result.remote_commit, installed_commit)
+    if on_result is not None:
+        on_result(result)
+    if result.status == "update":
+        on_available(True)                       # свежая находка → toast + строка
+
+
+def _run_auto_check_safely(config: dict, state: dict, now: float, installed_commit,
+                           *, check, record_result, on_available, on_result=None) -> None:
+    """Best-effort обёртка воркера: авто-чек обновления НИКОГДА не роняет старт.
+
+    Воркер стартует при каждом запуске TUI с дефолтным `exit_on_error=True`, а
+    внутренний try в `_maybe_auto_check` покрывает только `check()`. Любое иное
+    исключение (гейты, `record_result`, `on_available`-мост `call_from_thread` при
+    shutdown-гонке) иначе дошло бы до Textual `_handle_exception` и уронило
+    приложение — поэтому глотаем всё здесь."""
+    try:
+        _maybe_auto_check(config, state, now, installed_commit,
+                          check=check, record_result=record_result,
+                          on_available=on_available, on_result=on_result)
+    except Exception:
+        pass
+
 
 class TuiApp(App):
     """GigaCode — основное приложение."""
@@ -66,10 +127,18 @@ class TuiApp(App):
         self._mcp_snapshot = None      # boot-дискавери для /mcp (сервер→статус/тулы)
         self._mcp_status = None        # per-server status dict — для startup_notices
         self.active_runner = None      # AgentRunner | None
+        self._runner_stale = False   # конфиг изменился при живом run → пересборка после завершения
         self.last_runner_error: Optional[str] = None
         self._session_log_path: Optional[str] = None
         self.last_terminal_outcome: Optional[str] = None
         self.last_stop_requested: bool = False   # юзер /stop по живому прогону → терминал «stopped»
+        self._onboarding_mode = None          # None | "auto" | "review"; ставит tui/__init__.py
+        self._config_path = None              # путь к конфигу на диске; задаётся снаружи после __init__
+        self._onboarding_config_path = None   # куда писать конфиг (user_config_path)
+        self._upgrade_info = None             # upgrade_gate.UpgradeInfo | None; ставит tui/__init__.py
+        self._update_available = False        # async авто-чек нашёл новую версию (brand-строка + /notices)
+        self._update_check_result = None      # CheckResult сессии: питает глиф хаба и секцию «Обновление»
+        self._update_checking = False         # стартовый авто-чек в полёте (глиф хаба — «…»)
         from tui.services.file_view import ViewPositionStore
         from tui.state import TuiState
         self.tui_state = TuiState()
@@ -85,9 +154,154 @@ class TuiApp(App):
     def on_mount(self) -> None:
         from tui.services.terminal_title import format_terminal_title, set_terminal_title
         set_terminal_title(format_terminal_title())
+        self._start_auto_update_check()
+        if not self._needs_onboarding():
+            self._show_post_update_if_needed()
+
+    def _start_auto_update_check(self) -> None:
+        """Тонкая обёртка над `_maybe_auto_check`: реальные зависимости
+        (check_for_update/record_check_result/upgrade_gate.read_state/install_source),
+        запуск в фоновом воркер-треде — сеть не блокирует старт TUI, ошибки тихи."""
+        import time
+        import upgrade_gate
+        import app_version
+        from updater.check import check_for_update, record_check_result
+
+        config = self._config or {}
+        state = upgrade_gate.read_state()
+        src = app_version.install_source()
+        installed = src.commit if src else None
+
+        def _on_available(fresh: bool) -> None:
+            self._update_available = True     # постоянный сигнал: brand-строка + запись в /notices
+            if self.is_running:
+                if fresh:
+                    self.notify(_AUTO_UPDATE_NOTICE, severity="information")   # toast только при свежей находке
+                # M3: главный экран, а не активный (self.screen) — иначе, если авто-чек
+                # приходит, пока сверху онбординг/PostUpdate/Settings, строка в карточке
+                # так и не появится за всю сессию.
+                scr = self._main_screen()
+                if scr is not None and hasattr(scr, "refresh_update_notice"):
+                    scr.refresh_update_notice()                # дорисовать строку в brand-блоке
+
+        def _on_result(result) -> None:
+            self._update_check_result = result   # вердикт сессии: хаб настроек и секция берут его
+            self._refresh_update_glyph()
+
+        def _done() -> None:
+            self._update_checking = False        # проверка завершилась (в т.ч. по гейту/ошибке)
+            self._refresh_update_glyph()
+
+        self._update_checking = True
+        self._refresh_update_glyph()
+
+        def _work() -> None:
+            try:
+                _run_auto_check_safely(
+                    config, state, time.time(), installed,
+                    check=check_for_update,
+                    record_result=record_check_result,
+                    on_available=lambda fresh: self.call_from_thread(_on_available, fresh),
+                    on_result=lambda r: self.call_from_thread(_on_result, r),
+                )
+            finally:
+                try:
+                    self.call_from_thread(_done)
+                except Exception:
+                    pass       # выход из приложения во время чека: event-loop уже закрыт,
+                               # а поток жив — call_from_thread бросил бы RuntimeError
+
+        self.run_worker(_work, thread=True, name="auto-update-check")
+
+    def _refresh_update_glyph(self) -> None:
+        """Перерисовать строку «Обновление» в хабе настроек, если он открыт: вердикт
+        стартового чека приходит асинхронно, юзер может уже сидеть в настройках."""
+        scr = self.screen if self.is_running else None
+        if scr is not None and hasattr(scr, "refresh_update_glyph"):
+            scr.refresh_update_glyph()
+
+    def _needs_onboarding(self) -> bool:
+        import onboarding
+        return self._onboarding_mode == "review" or (
+            self._onboarding_mode == "auto" and onboarding.is_unconfigured(self._config or {})
+        )
 
     def get_default_screen(self) -> Screen:
+        from tui.screens.onboarding import OnboardingScreen
+        if self._needs_onboarding():
+            return OnboardingScreen(
+                config=self._config or {},
+                config_path=self._onboarding_config_path,
+                review_all=self._onboarding_mode == "review",
+                on_commit=self._finish_onboarding,
+            )
         return TraceScreen()
+
+    def _show_post_update_if_needed(self) -> None:
+        """Пуш пост-апдейт экрана (спека D, D4/Task 10) поверх базового экрана,
+        если этот запуск — первый после апгрейда версии (`_upgrade_info`).
+
+        Порядок: если требовался онбординг (обязательные поля не заполнены),
+        сначала он — этот метод зовётся из `on_mount` только когда онбординг
+        НЕ нужен, и из `_finish_onboarding` после его завершения. Идемпотентно:
+        повторный вызов при уже смонтированном экране — no-op (защита от
+        двойного push при повторном прогоне onboarding-финала)."""
+        if self._upgrade_info is None:
+            return
+        from tui.screens.post_update import PostUpdateScreen
+        if any(isinstance(s, PostUpdateScreen) for s in self.screen_stack):
+            return
+        self.push_screen(PostUpdateScreen(
+            upgrade=self._upgrade_info,
+            config=self._config or {},
+            config_path=self._config_path,
+        ))
+
+    def reload_config(self) -> None:
+        """Hot-apply (спека B, B3): перечитать конфиг с диска и применить к app.
+
+        Executor в TUI кэшируется (get_runner: one per app) — без сброса
+        active_runner следующий run продолжил бы жить на старом RunContext.
+        Живой run не трогаем: помечаем stale, пересборка при следующем get_runner
+        после завершения."""
+        from config import load_config, apply_cli_overrides
+        from thread_store import resolve_threads_dir
+        from tui.runtime_config import carry_over_runtime_fields
+        cfg = load_config(self._config_path)
+        apply_cli_overrides(cfg)
+        # launch_root и прочие поля рантайма TUI в файле конфига отсутствуют: без переноса
+        # они исчезают при первом же сохранении настроек — /diff перестаёт работать, а
+        # периметр path_policy съезжает со снапшота cwd на живой os.getcwd().
+        carry_over_runtime_fields(self._config or {}, cfg)
+        self._config = cfg
+        self._threads_dir = resolve_threads_dir(cfg)
+        runner = self.active_runner
+        if runner is None:
+            return
+        if runner.is_running():
+            self._runner_stale = True
+        else:
+            self.active_runner = None
+            self._runner_stale = False
+
+    def _finish_onboarding(self) -> None:
+        """Финал онбординга (auto и review одинаково): reload_config + переход
+        на главный экран — «завершил настройку → стартует агент»."""
+        self._config_path = self._onboarding_config_path
+        self.reload_config()
+        self._onboarding_mode = None
+        # OnboardingScreen — базовый экран (get_default_screen), у него нет result-callback,
+        # из-за чего switch_screen падает на _pop_result_callback (IndexError: pop from empty).
+        # Кладём заглушку — switch_screen штатно заменяет базовый экран свежим TraceScreen,
+        # который прогреет executor уже на ПРАВИЛЬНОМ конфиге (при unconfigured-базе он бы
+        # прогрелся на плейсхолдерах). Textual 8.2.7 (pinned).
+        scr = self.screen
+        if not scr._result_callbacks:
+            scr._result_callbacks.append(None)
+        self.switch_screen(TraceScreen())
+        # Онбординг только что закрыл дорогу обязательным полям — теперь можно
+        # показать пост-апдейт экран, если это первый запуск после апгрейда.
+        self._show_post_update_if_needed()
 
     def get_runner(self):
         """Lazy-build the AgentRunner (one per app instance for MVP).
@@ -97,6 +311,10 @@ class TuiApp(App):
         сборка заморозила бы event-loop Textual. Передаём фабрику; AgentRunner
         построит executor в своём worker-потоке при первом start().
         """
+        if (self.active_runner is not None and self._runner_stale
+                and not self.active_runner.is_running()):
+            self.active_runner = None
+            self._runner_stale = False
         if self.active_runner is not None:
             return self.active_runner
         from tui.services.agent_runner import AgentRunner
@@ -112,6 +330,7 @@ class TuiApp(App):
             executor_factory=factory, on_error=_on_runner_error,
             on_complete=_on_runner_complete,
         )
+        self._runner_stale = False
         return self.active_runner
 
     def _build_real_executor(self):
@@ -182,29 +401,45 @@ class TuiApp(App):
         """Текущий экран — главный (TraceScreen). sessions открываются только отсюда."""
         return isinstance(self.screen, TraceScreen)
 
+    def _startup_notices(self) -> List[Notice]:
+        """Стартовые уведомления — единая сборка для полного списка и для бейджей."""
+        cfg = self._config or {}
+        return collect_startup_notices(
+            cfg,
+            all_builtin_tool_names(cfg),
+            self._mcp_status,
+            is_tui=True,
+            deprecated_keys_used=cfg.get("deprecated_keys_used"),
+            upgrade_info=self._upgrade_info,
+            compat_notices=cfg.get("compat_notices"),
+        )
+
+    def _update_notice(self) -> List[Notice]:
+        """«Доступна новая версия» как Notice — один владелец текста.
+
+        Без ведущего ↑: NoticesScreen._notice_text сам подставляет глиф уровня (ℹ)."""
+        if not self._update_available:
+            return []
+        return [Notice("info", "update_available",
+                       "доступна новая версия · /settings → Обновление")]
+
     def collect_notices(self) -> List[Notice]:
         """Стартовые + runtime-уведомления (эфемерные, не сбрасываются при просмотре)."""
-        cfg = self._config or {}
-        startup = collect_startup_notices(
-            cfg,
-            all_builtin_tool_names(cfg),
-            self._mcp_status,
-            is_tui=True,
-            deprecated_keys_used=cfg.get("deprecated_keys_used"),
-        )
-        return startup + collect_runtime_notices()
+        return self._update_notice() + self._startup_notices() + collect_runtime_notices()
 
     def collect_unread_notices(self) -> List[Notice]:
-        """Стартовые + unread runtime-уведомления (для бейджей в футере/карточке)."""
-        cfg = self._config or {}
-        startup = collect_startup_notices(
-            cfg,
-            all_builtin_tool_names(cfg),
-            self._mcp_status,
-            is_tui=True,
-            deprecated_keys_used=cfg.get("deprecated_keys_used"),
-        )
-        return startup + collect_unread_runtime_notices()
+        """Бейдж КАРТОЧКИ: стартовые + unread runtime.
+
+        Обновления здесь нет намеренно: в карточке оно показано отдельной строкой
+        (_compose_card_lines), и счётчик утверждал бы то же самое второй раз."""
+        return self._startup_notices() + collect_unread_runtime_notices()
+
+    def collect_footer_notices(self) -> List[Notice]:
+        """Бейдж ФУТЕРА: то же, что в карточке, ПЛЮС обновление.
+
+        В футере отдельной строки про обновление нет — без счётчика признак исчезал бы
+        вместе с карточкой, как только трейс уедет вверх, и до перезапуска не вернулся."""
+        return self._update_notice() + self.collect_unread_notices()
 
     def _main_screen(self):
         """Базовый (главный) экран — низ стека; None если это не TraceScreen."""
@@ -216,6 +451,28 @@ class TuiApp(App):
         config/diff/справка — конечные: с них только F1-справка и Esc назад."""
         from tui.screens.notices import NoticesScreen
         return isinstance(self.screen, (TraceScreen, NoticesScreen))
+
+    def check_action(self, action: str, parameters: "tuple[object, ...]") -> bool:
+        """Гейт app-биндингов: Textual спрашивает его перед применением привязки и на
+        False пропускает клавишу дальше — в `on_key` активного экрана.
+
+        Без гейта priority-биндинг съедает клавишу даже там, где его action ничего не
+        делает: priority-привязки проверяются ДО форварда события экрану, а Textual
+        считает действие выполненным по факту существования метода — ранний `return`
+        по гейту он не видит. Так пропадал Ctrl+D в секции MCP экрана /settings (там
+        он удаляет пакет), хотя /diff с настроек всё равно не открывается.
+
+        Экран, помеченный BLOCKS_GLOBAL_NAV, модален: мастер настройки и пост-апдейт
+        живут до/вокруг записи конфига, и глобальная навигация поверх них показывала бы
+        справку с неработающими клавишами и уведомления по ещё не записанному конфигу.
+        """
+        if getattr(self.screen, "BLOCKS_GLOBAL_NAV", False):
+            return action in ("back", "interrupt")   # Esc и Ctrl+C остаются
+        if action == "diff":
+            from tui.screens.sessions import SessionsScreen
+            # На /sessions Ctrl+D — массовое удаление; action_diff это учитывает.
+            return self._can_open_tool() or isinstance(self.screen, SessionsScreen)
+        return True
 
     def action_help(self) -> None:
         from tui.screens.help import HelpScreen
@@ -293,7 +550,7 @@ class TuiApp(App):
             return ""
 
     def action_interrupt(self) -> None:
-        """Ctrl+C: есть выделение → копировать в буфер; иначе → остановить run."""
+        """Ctrl+C: выделение → копировать; активный run → стоп; вхолостую → exit-модалка (как Esc)."""
         sel = self._current_selection()
         if sel:
             self.copy_to_clipboard(sel)  # OSC 52 + внутренний app.clipboard (SSH/удалённые)
@@ -301,5 +558,9 @@ class TuiApp(App):
             write_clipboard(sel)         # нативный ОС-буфер (локальные терминалы без OSC 52)
             return
         scr = self.screen
-        if hasattr(scr, "_cmd_stop"):
-            scr._cmd_stop()
+        runner = getattr(self, "active_runner", None)
+        if runner is not None and runner.is_running():
+            if hasattr(scr, "_cmd_stop"):
+                scr._cmd_stop()
+        elif hasattr(scr, "_request_exit"):
+            scr._request_exit()

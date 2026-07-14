@@ -45,7 +45,7 @@ def test_default_registry_is_exactly_keep_set():
     names = sorted(c.name for c in reg.list_commands())
     assert names == sorted([
         "sessions", "new", "stop", "skill", "skills",
-        "status", "config", "mcp", "notices", "diff", "view", "export", "help", "init", "compact", "quit",
+        "status", "config", "settings", "mcp", "notices", "diff", "view", "export", "help", "init", "compact", "quit",
     ])
 
 
@@ -108,7 +108,7 @@ def test_command_hotkeys():
 def test_default_registry_frequency_order():
     names = [c.name for c in build_default_registry().list_commands()]
     assert names == [
-        "help", "sessions", "diff", "view", "notices", "new", "config",
+        "help", "sessions", "diff", "view", "notices", "new", "config", "settings",
         "export", "compact", "init", "skills", "skill", "status",
         "stop", "mcp", "quit",
     ]
@@ -136,6 +136,11 @@ def test_hotkeys_match_app_bindings():
             if not token:
                 continue
             assert normalize(token) in binding_keys, f"{cmd.name}: {token}"
+
+
+def test_settings_command_description_mentions_server_address():
+    reg = build_default_registry()
+    assert reg.lookup("settings").description == "настройки: адрес сервера, модель, MCP, обновление"
 
 
 def test_compact_command_registered_with_alias():

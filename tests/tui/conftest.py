@@ -29,6 +29,18 @@ def pytest_collection_modifyitems(items):
             item.add_marker(flaky)
 
 
+@pytest.fixture(autouse=True)
+def _isolate_agent_state(tmp_path, monkeypatch):
+    """I3: TraceScreen._maybe_toast_warnings (и другой upgrade_gate-код) читает/пишет
+    agent_state.json на КАЖДОМ буте TraceScreen, включая любой `TuiApp(...).run_test()` —
+    без редиректа тесты гадят в реальный `~/.gc/agent_state.json`. Редиректим на tmp_path
+    для всех TUI-тестов; локальный monkeypatch внутри теста (если есть) просто
+    переопределяет этот же путь позже — конфликта нет."""
+    import upgrade_gate
+    state_path = tmp_path / "agent_state.json"
+    monkeypatch.setattr(upgrade_gate, "_state_path", lambda: state_path)
+
+
 async def wait_until(
     pilot,
     cond: Callable[[], bool],
