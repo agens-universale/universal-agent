@@ -3,15 +3,17 @@
 from __future__ import annotations
 
 import os
+from typing import Any, Optional
 
 
-def tool_report_abspath(path: str | None) -> str | None:
+def tool_report_abspath(path: Optional[str], backend: Optional[Any] = None) -> Optional[str]:
     """
-    Absolute path in the host OS’s native form (separators, drive letters on Windows).
+    Absolute path as the model should see it.
 
-    Callers may already pass an absolute path; ``os.path.abspath`` still helps by
-    collapsing ``.`` / ``..`` and redundant separators so the model can reuse the
-    string verbatim in later tool calls on the same machine.
+    With a sandbox backend the path belongs to the task container: resolve relatives
+    against the container cwd and normalize with the backend's path semantics. Without
+    a backend (local CLI) keep the host's native ``os.path.abspath``, which also
+    collapses ``.`` / ``..`` so the model can reuse the string verbatim later.
     """
     if path is None:
         return None
@@ -19,4 +21,8 @@ def tool_report_abspath(path: str | None) -> str | None:
         return str(path)
     if not path:
         return path
+    if backend is not None and getattr(backend, "is_sandbox", False):
+        if not path.startswith("/"):
+            path = backend.join(backend.default_cwd() or "/", path)
+        return backend.normpath(path)
     return os.path.abspath(path)
