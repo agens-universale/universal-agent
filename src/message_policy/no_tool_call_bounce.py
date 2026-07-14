@@ -7,6 +7,8 @@ from __future__ import annotations
 
 from typing import Any, Dict, List
 
+from message_projection import project_assistant_text
+
 # Anti-fabrication: append to every no-tool-call bounce. The agent must never
 # act on a user reply it did not receive (spec 2026-06-24-no-fabricated-approval).
 _NO_FABRICATION_CLAUSE = (
@@ -33,9 +35,9 @@ NO_TOOL_CALL_BOUNCE_MESSAGE = (
 
 def extract_last_assistant_text(messages: List[Dict[str, Any]]) -> str:
     """
-    Return concatenated text from the last assistant `message` in the batch.
-    Returns empty string if there is no assistant message or the content is
-    empty/whitespace-only. Handles both string content and list-of-parts.
+    Return projected prose from the last assistant `message` in the batch
+    (``for_model``: without ``<think>``). Empty string if missing or empty
+    after projection. Handles string content and list-of-parts.
     """
     if not messages:
         return ""
@@ -45,18 +47,7 @@ def extract_last_assistant_text(messages: List[Dict[str, Any]]) -> str:
             and message.get("type") == "message"
             and message.get("role") == "assistant"
         ):
-            content = message.get("content")
-            if isinstance(content, str):
-                return content.strip()
-            if isinstance(content, list):
-                parts: List[str] = []
-                for part in content:
-                    if isinstance(part, dict):
-                        text = part.get("text")
-                        if isinstance(text, str) and text.strip():
-                            parts.append(text)
-                return "\n\n".join(parts).strip()
-            return ""
+            return project_assistant_text(message.get("content")).strip()
     return ""
 
 

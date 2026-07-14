@@ -8,6 +8,7 @@ from message_policy.user_message_policy import (
     is_dialog_summary_user_message_text,
     user_content_to_text,
 )
+from message_projection import project_assistant_text
 
 _ORIGINAL_USER_MESSAGES_BLOCK_RE = re.compile(
     r"<original_user_messages>.*?</original_user_messages>\s*",
@@ -93,7 +94,11 @@ def message_text_for_summary(message: Dict[str, Any]) -> str:
         output = message.get("output")
         return f"[{label}]\n{_message_content_to_text(output)}"
     role = str(message.get("role") or "")
-    content = _message_content_to_text(message.get("content"))
+    raw_content = message.get("content")
+    if role.strip().lower() == "assistant":
+        content = project_assistant_text(raw_content)
+    else:
+        content = _message_content_to_text(raw_content)
     return f"[{role}] {content}".strip()
 
 
@@ -108,7 +113,11 @@ def message_raw_payload_chars_for_trigger(message: Dict[str, Any]) -> int:
         return len(name) + len(arg_text)
     if msg_type in ("function_call_output", "tool_call_output"):
         return len(_message_content_to_text(message.get("output")))
-    return len(_message_content_to_text(message.get("content")))
+    role = str(message.get("role") or "")
+    raw_content = message.get("content")
+    if role.strip().lower() == "assistant":
+        return len(project_assistant_text(raw_content))
+    return len(_message_content_to_text(raw_content))
 
 
 def calc_history_chars_for_trigger(messages: List[Dict[str, Any]]) -> int:
