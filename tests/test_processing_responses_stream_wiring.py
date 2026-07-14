@@ -26,6 +26,7 @@ def _patch_policy(monkeypatch):
         request_label=None,
         runtime_notices_enabled=False,
         notice_url=None,
+        timeout=None,
     ):
         seen["on_delta"] = on_delta
         return (
@@ -46,6 +47,7 @@ def _make_ctx_state_messages(stream: bool):
         "chat_completions_min_response_tokens": 64,
         "use_ssl": False,
         "use_retry": False,
+        "backend_request_timeout_sec": 600,
         "x_cl_id": "test-cl-id",
     }
     ctx = SimpleNamespace(

@@ -87,7 +87,9 @@ class BackendModeSwitchTest(unittest.TestCase):
         responses_calls = []
         completions_calls = []
 
-        def _mock_responses_backend(data, headers, url, verify=True, cert=None, use_retry=True, logger=None):
+        def _mock_responses_backend(
+            data, headers, url, verify=True, cert=None, use_retry=True, logger=None, timeout=None,
+        ):
             responses_calls.append(
                 {
                     "data": data,
@@ -118,7 +120,7 @@ class BackendModeSwitchTest(unittest.TestCase):
             )
 
         def _mock_completions_backend(
-            data, headers, url, verify=True, cert=None, use_retry=True, logger=None,
+            data, headers, url, verify=True, cert=None, use_retry=True, logger=None, timeout=None,
         ):
             completions_calls.append(
                 {
@@ -167,6 +169,7 @@ class BackendModeSwitchTest(unittest.TestCase):
                     "chat_completions_system_prompt_path": prompt_path,
                     "use_ssl": True,
                     "use_retry": False,
+                    "backend_request_timeout_sec": 600,
                     "x_cl_id": 12345,
                     "no_tool_call_max_count": 5,
                     "summary_params": {
