@@ -24,8 +24,10 @@ from tui.services.file_view import (
     clamp_start_line,
     count_lines,
     format_range_label,
+    lexer_name_for_path,
     open_for_view,
     read_window,
+    view_window_renderable,
 )
 from tui.services.skill_view import truncate_path_left
 
@@ -64,6 +66,7 @@ class FileViewerScreen(Screen):
         self._page = self._initial_page()
         self._total_lines: Optional[int] = None
         self._window: Optional[ViewWindow] = None
+        self._lexer: Optional[str] = None
         self._display_path = (raw_path or "").strip() or "view"
 
     def compose(self) -> ComposeResult:
@@ -121,6 +124,7 @@ class FileViewerScreen(Screen):
         self._path = result.path
         self._display_path = str(result.path)
         self._total_lines = result.total_lines
+        self._lexer = lexer_name_for_path(result.path)
         self._page = self._resolve_page()
         saved = self._store.get(result.path)
         self._start_line = saved if saved is not None else 1
@@ -217,7 +221,9 @@ class FileViewerScreen(Screen):
         if empty:
             body.update(MSG_EMPTY)
         else:
-            body.update("\n".join(window.lines))
+            body.update(view_window_renderable(
+                "\n".join(window.lines), lexer=self._lexer,
+            ))
         self.query_one("#footer", Static).update(_FOOTER_OK)
         self._refresh_header(
             empty=empty or (self._total_lines == 0),

@@ -1,6 +1,8 @@
 """Юнит-тесты tui.services.file_view: resolve, probe, window, store, limits."""
 from pathlib import Path
 
+from rich.syntax import Syntax
+
 from tui.services.file_view import (
     DEFAULT_MAX_FILE_BYTES,
     MSG_BINARY,
@@ -16,9 +18,11 @@ from tui.services.file_view import (
     count_lines,
     format_range_label,
     is_probably_binary,
+    lexer_name_for_path,
     open_for_view,
     read_window,
     resolve_view_path,
+    view_window_renderable,
 )
 
 
@@ -171,3 +175,18 @@ def test_settings_page_lines_auto_and_clamp():
     assert FileViewSettings.from_mapping({"page_lines": "x"}).page_lines is None
     assert FileViewSettings.from_mapping({"page_lines": 999}).page_lines == 200
     assert FileViewSettings.from_mapping({"page_lines": 10}).page_lines == 10
+
+
+def test_lexer_name_for_known_and_plain():
+    assert lexer_name_for_path(Path("x.py")) == "python"
+    assert lexer_name_for_path(Path("a.yml")) in {"yaml", "yml"}
+    assert lexer_name_for_path(Path("notes.txt")) is None
+    assert lexer_name_for_path(Path("noext")) is None
+
+
+def test_view_window_renderable_syntax_or_plain():
+    plain = view_window_renderable("a = 1", lexer=None)
+    assert plain == "a = 1"
+    syn = view_window_renderable("a = 1", lexer="python")
+    assert isinstance(syn, Syntax)
+    assert "python" in syn.lexer.aliases

@@ -26,6 +26,29 @@ async def test_view_command_opens_file(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_view_python_uses_syntax_highlight(tmp_path):
+    pytest.importorskip("textual")
+    from rich.syntax import Syntax
+
+    f = tmp_path / "mod.py"
+    f.write_text("def hello():\n    return 1\n", encoding="utf-8")
+
+    from tui.app import TuiApp
+    from tui.screens.file_view import FileViewerScreen
+
+    app = TuiApp(threads_dir=str(tmp_path))
+    async with app.run_test() as pilot:
+        pilot.app.screen._cmd_view(str(f))
+        await pilot.pause()
+        viewer = pilot.app.screen
+        assert isinstance(viewer, FileViewerScreen)
+        assert viewer._lexer == "python"
+        body = viewer.query_one("#file-view-body", Static)
+        assert isinstance(body.content, Syntax)
+        assert "python" in body.content.lexer.aliases
+
+
+@pytest.mark.asyncio
 async def test_view_missing_file_error_on_screen(tmp_path):
     pytest.importorskip("textual")
     from tui.app import TuiApp
