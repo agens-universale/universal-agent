@@ -101,9 +101,28 @@ def get_listing_from_backend(backend: Any, dir_path: str) -> str:
     return tpl.strip()
 
 
+def _backend_cwd(backend: Any) -> str:
+    """Working directory of the environment the backend talks to.
+
+    ``default_cwd()`` is None for container backends (the container owns its workdir),
+    so ask the environment itself; fall back to root only if even that is unavailable.
+    """
+    declared = backend.default_cwd()
+    if declared:
+        return declared
+    try:
+        res = backend.exec("pwd")
+    except Exception:  # noqa: BLE001 — env may be down; the caller must still get a dict
+        return "/"
+    cwd = (getattr(res, "stdout", "") or "").strip().splitlines()
+    if getattr(res, "return_code", 1) == 0 and cwd and cwd[0].startswith("/"):
+        return cwd[0]
+    return "/"
+
+
 def _project_data_from_backend(backend: Any) -> Dict[str, str]:
     """Env facts sourced from the task container: cwd, .git, listing come from the backend."""
-    project_dir = backend.default_cwd() or "/"
+    project_dir = _backend_cwd(backend)
     is_git_project = "true" if backend.exists(backend.join(project_dir, ".git")) else "false"
     try:
         project_dir_listing = get_listing_from_backend(backend, project_dir)

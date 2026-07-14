@@ -88,3 +88,54 @@ def test_non_sandbox_backend_falls_back_to_local(tmp_path, monkeypatch):
     data = get_project_data(None, backend=LocalLike(cwd="/testbed", tree={}, git=True))
     assert data["projectDir"] == str(tmp_path.resolve())
     assert "b.txt" in data["projectDirListing"]
+
+
+class _Exec:
+    def __init__(self, stdout: str, return_code: int = 0):
+        self.stdout = stdout
+        self.stderr = ""
+        self.return_code = return_code
+        self.timed_out = False
+
+
+class ContainerBackend(FakeSandboxBackend):
+    """Container backend: default_cwd() is None (the container owns its workdir)."""
+
+    def __init__(self, pwd: str, tree, git: bool, pwd_rc: int = 0):
+        super().__init__(cwd="", tree=tree, git=git)
+        self._pwd = pwd
+        self._pwd_rc = pwd_rc
+
+    def default_cwd(self):
+        return None
+
+    def exec(self, command, *, cwd=None, timeout=None, env=None):
+        assert command == "pwd"
+        return _Exec(self._pwd + "\n", self._pwd_rc)
+
+
+def test_container_cwd_is_asked_from_the_environment():
+    backend = ContainerBackend(
+        pwd="/app/personal-site",
+        tree={"/app/personal-site": [("index.html", False)]},
+        git=True,
+    )
+    data = get_project_data(None, backend=backend)
+    assert data["projectDir"] == "/app/personal-site"
+    assert data["isGitProject"] == "true"
+    assert "index.html" in data["projectDirListing"]
+
+
+def test_container_cwd_falls_back_to_root_when_pwd_fails():
+    backend = ContainerBackend(pwd="", tree={"/": []}, git=False, pwd_rc=1)
+    data = get_project_data(None, backend=backend)
+    assert data["projectDir"] == "/"
+
+
+def test_container_cwd_falls_back_to_root_when_exec_raises():
+    class Broken(ContainerBackend):
+        def exec(self, command, *, cwd=None, timeout=None, env=None):
+            raise RuntimeError("environment unavailable")
+
+    data = get_project_data(None, backend=Broken(pwd="/x", tree={"/": []}, git=False))
+    assert data["projectDir"] == "/"
