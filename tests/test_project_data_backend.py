@@ -1,5 +1,6 @@
 from typing import Optional
 
+from execution_workspace import ExecutionWorkspace, build_execution_workspace
 from utils.project_data import get_project_data
 
 
@@ -30,6 +31,9 @@ class FakeSandboxBackend:
     def join(self, base: str, name: str) -> str:
         return base.rstrip("/") + "/" + name
 
+    def normpath(self, path: str) -> str:
+        return path.rstrip("/") or "/"
+
 
 def _backend() -> FakeSandboxBackend:
     return FakeSandboxBackend(
@@ -42,22 +46,27 @@ def _backend() -> FakeSandboxBackend:
     )
 
 
-def test_sandbox_backend_supplies_project_dir_and_git_flag():
-    data = get_project_data(None, backend=_backend())
+def _ws(backend: FakeSandboxBackend | None = None) -> ExecutionWorkspace:
+    be = backend or _backend()
+    return ExecutionWorkspace(root=be.default_cwd() or "/", backend=be, shell="sh", os_name="Linux", root_writable=True)
+
+
+def test_sandbox_workspace_supplies_project_dir_and_git_flag():
+    data = get_project_data(workspace=_ws())
     assert data["projectDir"] == "/testbed"
     assert data["isGitProject"] == "true"
 
 
-def test_sandbox_backend_supplies_listing():
-    data = get_project_data(None, backend=_backend())
+def test_sandbox_workspace_supplies_listing():
+    data = get_project_data(workspace=_ws())
     listing = data["projectDirListing"]
     assert "django/" in listing
     assert "setup.py" in listing
     assert "    __init__.py" in listing          # nested entry, one level deep
 
 
-def test_sandbox_backend_reports_container_writable_and_shell():
-    data = get_project_data(None, backend=_backend())
+def test_sandbox_workspace_reports_container_writable_and_shell():
+    data = get_project_data(workspace=_ws())
     assert data["projectDirWritable"] == "true"
     assert data["allowed_write_paths"] == "/testbed"
     assert data["shell"] == "sh"
@@ -65,16 +74,16 @@ def test_sandbox_backend_reports_container_writable_and_shell():
 
 def test_no_git_dir_reports_false():
     backend = FakeSandboxBackend(cwd="/app", tree={"/app": []}, git=False)
-    data = get_project_data(None, backend=backend)
+    data = get_project_data(workspace=_ws(backend))
     assert data["projectDir"] == "/app"
     assert data["isGitProject"] == "false"
     assert data["projectDirListing"] == ""
 
 
-def test_local_path_unchanged_when_backend_is_none(tmp_path, monkeypatch):
+def test_local_path_unchanged_when_workspace_is_none(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     (tmp_path / "a.txt").write_text("x")
-    data = get_project_data(None, backend=None)
+    data = get_project_data(None)
     assert data["projectDir"] == str(tmp_path.resolve())
     assert "a.txt" in data["projectDirListing"]
 
@@ -114,13 +123,15 @@ class ContainerBackend(FakeSandboxBackend):
         return _Exec(self._pwd + "\n", self._pwd_rc)
 
 
-def test_container_cwd_is_asked_from_the_environment():
+def test_container_cwd_is_asked_when_building_workspace():
     backend = ContainerBackend(
         pwd="/app/personal-site",
         tree={"/app/personal-site": [("index.html", False)]},
         git=True,
     )
-    data = get_project_data(None, backend=backend)
+    ws = build_execution_workspace(backend)
+    data = get_project_data(workspace=ws)
+    assert ws.root == "/app/personal-site"
     assert data["projectDir"] == "/app/personal-site"
     assert data["isGitProject"] == "true"
     assert "index.html" in data["projectDirListing"]
@@ -128,8 +139,9 @@ def test_container_cwd_is_asked_from_the_environment():
 
 def test_container_cwd_falls_back_to_root_when_pwd_fails():
     backend = ContainerBackend(pwd="", tree={"/": []}, git=False, pwd_rc=1)
-    data = get_project_data(None, backend=backend)
-    assert data["projectDir"] == "/"
+    ws = build_execution_workspace(backend)
+    assert ws.root == "/"
+    assert get_project_data(workspace=ws)["projectDir"] == "/"
 
 
 def test_container_cwd_falls_back_to_root_when_exec_raises():
@@ -137,5 +149,11 @@ def test_container_cwd_falls_back_to_root_when_exec_raises():
         def exec(self, command, *, cwd=None, timeout=None, env=None):
             raise RuntimeError("environment unavailable")
 
-    data = get_project_data(None, backend=Broken(pwd="/x", tree={"/": []}, git=False))
-    assert data["projectDir"] == "/"
+    ws = build_execution_workspace(Broken(pwd="/x", tree={"/": []}, git=False))
+    assert ws.root == "/"
+    assert get_project_data(workspace=ws)["projectDir"] == "/"
+
+
+def test_backend_compat_shim_still_builds_sandbox_facts():
+    data = get_project_data(None, backend=_backend())
+    assert data["projectDir"] == "/testbed"

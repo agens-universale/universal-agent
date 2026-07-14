@@ -4,7 +4,6 @@ from __future__ import annotations
 import json
 import subprocess
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
@@ -19,7 +18,7 @@ from diff_tui.paths import orig_key
 from diff_tui.service import DiffService
 from diff_tui.store import DiffStore
 from runtime_notices import clear_runtime_notices
-from tools.backends.local import LocalFsBackend
+from tests.helpers.tool_ctx import local_ctx
 from tools.fs.write_to_file_tool import WriteToFile
 
 
@@ -77,12 +76,8 @@ def _cfg(launch_root: Path) -> dict:
 
 
 def _write_tool(launch_root: Path) -> WriteToFile:
-    cfg = _cfg(launch_root)
-    ctx = SimpleNamespace(
-        config_dict=cfg,
-        os_backend=LocalFsBackend(),
-        is_tui=True,
-    )
+    ctx = local_ctx(_cfg(launch_root))
+    ctx.is_tui = True
     return WriteToFile(ctx=ctx)
 
 

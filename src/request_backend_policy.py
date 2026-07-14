@@ -2,6 +2,7 @@ import logging
 import time
 from typing import Any, Callable, Dict, Optional, Tuple
 
+from config_modules.backend import DEFAULT_REQUEST_TIMEOUT_SEC
 from runtime_notices import maybe_push_llm_failure_notice
 from utils.connect_backend import request_backend_chat_completions
 from utils.backend_errors import is_retriable_backend_error
@@ -33,6 +34,7 @@ def request_chat_completions_with_policy(
     request_label: Optional[str] = None,
     runtime_notices_enabled: bool = False,
     notice_url: Optional[str] = None,
+    timeout: float = DEFAULT_REQUEST_TIMEOUT_SEC,
 ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     """
     Execute chat/completions request with the minimal adaptive max_tokens policy.
@@ -56,6 +58,7 @@ def request_chat_completions_with_policy(
             use_retry=transport_use_retry,
             logger=logger,
             on_delta=on_delta,
+            timeout=timeout,
         )
         return response, payload
 

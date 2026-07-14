@@ -96,11 +96,11 @@ Usage:
             {
                 "tool": WriteToFile.registered_tool_name(),
                 "ok": ok,
-                "path": tool_report_abspath(path, backend=self._backend),
+                "path": tool_report_abspath(path, workspace=self._workspace),
                 "mode": mode,
                 "created": created,
                 "bytes_written": bytes_written,
-                "backup_path": tool_report_abspath(backup_path, backend=self._backend),
+                "backup_path": tool_report_abspath(backup_path, workspace=self._workspace),
                 "error": error,
             },
             ensure_ascii=False,

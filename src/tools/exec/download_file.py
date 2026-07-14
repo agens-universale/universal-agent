@@ -107,7 +107,7 @@ class DownloadFile(AbstractSimpleTool):
             {
                 "tool": DownloadFile.registered_tool_name(),
                 "ok": ok,
-                "path": tool_report_abspath(path, backend=self._backend) if path else "",
+                "path": tool_report_abspath(path, workspace=self._workspace) if path else "",
                 "filename": filename,
                 "bytes_written": bytes_written,
                 "error": error,

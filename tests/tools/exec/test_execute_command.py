@@ -4,8 +4,10 @@ import sys
 from tools.exec.execute_command import ExecuteCommand
 
 
+from tests.helpers.tool_ctx import with_local_ctx
+
 def test_execute_success_and_non_zero():
-    tool = ExecuteCommand()
+    tool = with_local_ctx(ExecuteCommand)
     ok = json.loads(tool(command=f'"{sys.executable}" -c "print(123)"'))
     assert ok["ok"] is True and "123" in ok["stdout"]
     bad = json.loads(tool(command=f'"{sys.executable}" -c "import sys; sys.exit(7)"'))
@@ -13,7 +15,7 @@ def test_execute_success_and_non_zero():
 
 
 def test_execute_env_timeout_and_truncation(tmp_path):
-    tool = ExecuteCommand()
+    tool = with_local_ctx(ExecuteCommand)
     env = json.loads(
         tool(
             command=f'"{sys.executable}" -c "import os; print(os.getenv(\'X\'))"',
@@ -28,14 +30,14 @@ def test_execute_env_timeout_and_truncation(tmp_path):
 
 
 def test_execute_validation(tmp_path):
-    tool = ExecuteCommand()
+    tool = with_local_ctx(ExecuteCommand)
     assert json.loads(tool(command=""))["error"]["field"] == "command"
     assert json.loads(tool(command="echo 1", timeout_seconds=0))["error"]["field"] == "timeout_seconds"
     assert json.loads(tool(command="echo 1", cwd=str(tmp_path / "none")))["error"]["field"] == "cwd"
 
 
 def test_execute_cwd_and_env_conversion(tmp_path):
-    tool = ExecuteCommand()
+    tool = with_local_ctx(ExecuteCommand)
     marker = tmp_path / "marker.txt"
     marker.write_text("ok", encoding="utf-8")
     cmd = f'"{sys.executable}" -c "from pathlib import Path; print(Path(\'marker.txt\').exists())"'
@@ -53,7 +55,7 @@ def test_execute_cwd_and_env_conversion(tmp_path):
 
 
 def test_execute_env_vars_validation():
-    tool = ExecuteCommand()
+    tool = with_local_ctx(ExecuteCommand)
     bad_not_list = json.loads(tool(command="echo 1", env_vars="X=1"))  # type: ignore[arg-type]
     assert bad_not_list["ok"] is False
     assert bad_not_list["error"]["field"] == "env_vars"
@@ -69,7 +71,7 @@ def test_execute_env_vars_validation():
 
 def test_execute_empty_env_vars_list_inherits_parent_environ():
     """env_vars=[] must not wipe the process environment (same as omitting env_vars)."""
-    tool = ExecuteCommand()
+    tool = with_local_ctx(ExecuteCommand)
     cmd = f'"{sys.executable}" -c "import os; print(os.getenv(\'PATH\', \'\')[:20])"'
     with_vars = json.loads(tool(command=cmd, env_vars=[]))
     without = json.loads(tool(command=cmd))

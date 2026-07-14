@@ -182,7 +182,7 @@ Search for error logs in Rust source files:
                     else:
                         found_content = found_content.strip()
                     found_data = {
-                        "file": tool_report_abspath(file_path, backend=self._backend),
+                        "file": tool_report_abspath(file_path, workspace=self._workspace),
                         "line": line_num,
                         "line_content": found_content
                     }
@@ -213,7 +213,7 @@ Search for error logs in Rust source files:
         payload: Dict[str, Any] = {
             "tool": SearchFiles.registered_tool_name(),
             "ok": ok,
-            "path": tool_report_abspath(path, backend=self._backend),
+            "path": tool_report_abspath(path, workspace=self._workspace),
             "regex": regex,
             "file_pattern": file_pattern,
             "error": error,

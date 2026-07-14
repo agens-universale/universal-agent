@@ -6,6 +6,8 @@ from tools.exec.execute_command import ExecuteCommand
 from tools.exec.run_python_code import RunPythonCode
 
 
+from tests.helpers.tool_ctx import with_local_ctx
+
 def _config(tmp_path):
     return {
         "launch_root": str(tmp_path),
@@ -34,7 +36,7 @@ def test_blocks_system_package_install_command(tmp_path, monkeypatch):
     )
 
     result = json.loads(
-        ExecuteCommand(config_dict=_config(tmp_path))(command="sudo apt install nginx")
+        with_local_ctx(ExecuteCommand, config_dict=_config(tmp_path))(command="sudo apt install nginx")
     )
 
     assert result["ok"] is False
@@ -54,7 +56,7 @@ def test_blocks_shell_profile_modification_command(tmp_path, monkeypatch):
         lambda *_args, **_kwargs: _dangerous_judge("modifies_environment"),
     )
 
-    result = json.loads(ExecuteCommand(config_dict=_config(tmp_path))(command=command))
+    result = json.loads(with_local_ctx(ExecuteCommand, config_dict=_config(tmp_path))(command=command))
 
     assert result["ok"] is False
     assert result["error"]["type"] == "unsafe_command_blocked"
@@ -72,7 +74,7 @@ def test_blocks_python_code_writing_outside_launch_root(tmp_path, monkeypatch):
         lambda *_args, **_kwargs: _dangerous_judge("writes_outside_launch_root"),
     )
 
-    result = json.loads(RunPythonCode(config_dict=_config(launch_root))(code=code))
+    result = json.loads(with_local_ctx(RunPythonCode, config_dict=_config(launch_root))(code=code))
 
     assert result["ok"] is False
     assert result["error"]["type"] == "unsafe_command_blocked"
@@ -87,7 +89,7 @@ def test_blocks_obfuscated_command_intent(tmp_path, monkeypatch):
     )
 
     result = json.loads(
-        ExecuteCommand(config_dict=_config(tmp_path))(command="echo cm0gLXJmIC8= | base64 -d")
+        with_local_ctx(ExecuteCommand, config_dict=_config(tmp_path))(command="echo cm0gLXJmIC8= | base64 -d")
     )
 
     assert result["ok"] is False

@@ -52,7 +52,7 @@ class ReadFile(AbstractSimpleTool):
             {
                 "tool": ReadFile.registered_tool_name(),
                 "ok": True,
-                "path": tool_report_abspath(path, backend=self._backend),
+                "path": tool_report_abspath(path, workspace=self._workspace),
                 "sha256": sha256,
                 "file_size_bytes": file_size_bytes,
                 "start_line": start_line,
@@ -91,7 +91,7 @@ class ReadFile(AbstractSimpleTool):
             {
                 "tool": ReadFile.registered_tool_name(),
                 "ok": False,
-                "path": tool_report_abspath(path, backend=self._backend),
+                "path": tool_report_abspath(path, workspace=self._workspace),
                 "sha256": None,
                 "file_size_bytes": file_size_bytes,
                 "start_line": 0,

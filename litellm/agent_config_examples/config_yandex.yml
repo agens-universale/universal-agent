@@ -13,6 +13,7 @@ backend:
   chat_completions_max_tokens: 4096
   use_ssl: false
   use_retry: true
+  request_timeout_sec: 600
   chat_completion_headers:
     Authorization: "Bearer sk-litellm-test-master-1234"
 

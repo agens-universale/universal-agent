@@ -7,6 +7,7 @@ from uuid import uuid4
 from typing import List, Dict, Optional, Tuple
 
 
+from config_modules.backend import DEFAULT_REQUEST_TIMEOUT_SEC
 from message_policy.chat_completions import prepare_chat_completion_messages_for_api
 from utils.convertations import output_chat_completion_to_response
 from utils.format_messages import format_message_chat_completions_to_send_backend
@@ -106,11 +107,13 @@ def request_backend_responses(
     cert: Optional[Tuple[str, str]] = None,
     use_retry: bool = True,
     logger: Optional[logging.Logger] = None,
+    timeout: float = DEFAULT_REQUEST_TIMEOUT_SEC,
 ) -> Tuple[Dict, Dict]:
     """
     Отправить запрос в backend responses API.
 
     url и verify передаются явно вызывающим кодом (как правило, из ctx.config_dict).
+    timeout — HTTP-таймаут (connect + idle между чанками стрима), секунды.
     """
     chunks: List[bytes] = []
 
@@ -122,7 +125,15 @@ def request_backend_responses(
             extra={"event": "backend_request", "api_mode": "responses", "url": url, "payload": data},
         )
 
-    with _NO_NETRC_SESSION.post(url, json=data, headers=headers, stream=True, verify=verify, cert=cert) as r:
+    with _NO_NETRC_SESSION.post(
+        url,
+        json=data,
+        headers=headers,
+        stream=True,
+        verify=verify,
+        cert=cert,
+        timeout=timeout,
+    ) as r:
         r.raise_for_status()
         r_headers = r.headers
         for line in r.iter_lines():
@@ -173,11 +184,13 @@ def request_backend_chat_completions(
     use_retry: bool = True,
     logger: Optional[logging.Logger] = None,
     on_delta: Optional[OnDelta] = None,
+    timeout: float = DEFAULT_REQUEST_TIMEOUT_SEC,
 ):
     """
     Отправить запрос в backend chat completions API.
 
     url передаётся явно вызывающим кодом (как правило, из ctx.config_dict).
+    timeout — HTTP-таймаут (connect + idle между чанками стрима), секунды.
     """
     # Стриминг задействован ТОЛЬКО когда caller передал on_delta (его ставит
     # лишь TUI через ctx.on_stream_delta). CLI/server/swarm → on_delta=None →
@@ -210,7 +223,13 @@ def request_backend_chat_completions(
                 },
             )
         with _NO_NETRC_SESSION.post(
-            url, json=stream_data, headers=headers, stream=True, verify=verify, cert=cert
+            url,
+            json=stream_data,
+            headers=headers,
+            stream=True,
+            verify=verify,
+            cert=cert,
+            timeout=timeout,
         ) as r:
             try:
                 r.raise_for_status()
@@ -272,7 +291,9 @@ def request_backend_chat_completions(
             extra={"event": "backend_request", "api_mode": "chat_completions", "url": url, "payload": data},
         )
 
-    r = _NO_NETRC_SESSION.post(url, json=data, headers=headers, verify=verify, cert=cert)
+    r = _NO_NETRC_SESSION.post(
+        url, json=data, headers=headers, verify=verify, cert=cert, timeout=timeout
+    )
     try:
         r.raise_for_status()
     except requests.exceptions.HTTPError:

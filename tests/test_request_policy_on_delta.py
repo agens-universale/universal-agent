@@ -4,8 +4,9 @@ import request_backend_policy as policy
 def test_policy_forwards_on_delta(monkeypatch):
     seen = {}
 
-    def fake_req(payload, headers, *, url, verify, use_retry, logger, on_delta=None, cert=None):
+    def fake_req(payload, headers, *, url, verify, use_retry, logger, on_delta=None, cert=None, timeout=600):
         seen["on_delta"] = on_delta
+        seen["timeout"] = timeout
         return {"choices": [{"message": {"content": "ok"}}]}
 
     monkeypatch.setattr(policy, "request_backend_chat_completions", fake_req)

@@ -13,6 +13,7 @@ from utils.prod_auth import AuthConnector
 from utils.logging_module import create_run_logger
 from utils.logging_module import generate_run_id
 from tools import build_tools_data
+from execution_workspace import ExecutionWorkspace, build_execution_workspace
 from tools.backends.factory import resolve_os_backend
 from tools.backends.protocol import FsBackend
 from config_modules.env_vars import project_gc_dir as _resolve_project_gc_dir
@@ -32,7 +33,8 @@ class RunContext:
     - intent_scope — параметры intent-scope hook (из intent_scope в config);
     - tools_data / tools_spec / tools_description — подготовленные данные о тулах;
     - project_gc_dir — папка project-local артефактов (<cwd>/.gc/);
-    - os_backend — физический I/O порт (local FS или Harbor container).
+    - os_backend — физический I/O порт (local FS или Harbor container);
+    - workspace — root + backend в координатах среды исполнения.
     """
 
     config_dict: Dict[str, Any]
@@ -47,6 +49,7 @@ class RunContext:
     tools_spec: List[Dict[str, Any]]
     tools_description: List[str]
     os_backend: FsBackend
+    workspace: ExecutionWorkspace
     mcp_status: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     project_gc_dir: Path = field(default_factory=lambda: Path("."))
     environment: Optional[Any] = None
@@ -110,6 +113,7 @@ def create_run_context(
         loop=loop,
         override=os_backend,
     )
+    workspace = build_execution_workspace(backend, config_dict)
 
     ctx = RunContext(
         config_dict=config_dict,
@@ -127,14 +131,16 @@ def create_run_context(
         project_gc_dir=_resolve_project_gc_dir(),
         environment=environment,
         os_backend=backend,
+        workspace=workspace,
         on_stream_delta=on_stream_delta,
     )
 
     run_logger.debug(
-        "Created RunContext (run_id=%s, logging_path=%s, os_backend=%s)",
+        "Created RunContext (run_id=%s, logging_path=%s, os_backend=%s, workspace_root=%s)",
         effective_run_id,
         logging_path,
         type(backend).__name__,
+        workspace.root,
     )
 
     return ctx

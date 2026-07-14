@@ -1,9 +1,9 @@
 import os
 import shutil
-import sys
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
+from execution_workspace import build_execution_workspace, host_os_label
 from utils.directory_write_access import directory_allows_probe_write
 
 cut_first = 100
@@ -101,45 +101,6 @@ def get_listing_from_backend(backend: Any, dir_path: str) -> str:
     return tpl.strip()
 
 
-def _backend_cwd(backend: Any) -> str:
-    """Working directory of the environment the backend talks to.
-
-    ``default_cwd()`` is None for container backends (the container owns its workdir),
-    so ask the environment itself; fall back to root only if even that is unavailable.
-    """
-    declared = backend.default_cwd()
-    if declared:
-        return declared
-    try:
-        res = backend.exec("pwd")
-    except Exception:  # noqa: BLE001 — env may be down; the caller must still get a dict
-        return "/"
-    cwd = (getattr(res, "stdout", "") or "").strip().splitlines()
-    if getattr(res, "return_code", 1) == 0 and cwd and cwd[0].startswith("/"):
-        return cwd[0]
-    return "/"
-
-
-def _project_data_from_backend(backend: Any) -> Dict[str, str]:
-    """Env facts sourced from the task container: cwd, .git, listing come from the backend."""
-    project_dir = _backend_cwd(backend)
-    is_git_project = "true" if backend.exists(backend.join(project_dir, ".git")) else "false"
-    try:
-        project_dir_listing = get_listing_from_backend(backend, project_dir)
-    except OSError:
-        project_dir_listing = ""
-    return {
-        "OS": "Linux",                      # container images are Linux
-        "shell": "sh",
-        "projectDir": project_dir,
-        "projectDirWritable": "true",       # container-root perspective (matches HarborBackend.writable)
-        "allowed_write_paths": project_dir,
-        "currentDate": datetime.now().strftime("%Y-%m-%d"),
-        "isGitProject": is_git_project,
-        "projectDirListing": project_dir_listing,
-    }
-
-
 def _dir_writable_probe(path: str) -> bool:
     return directory_allows_probe_write(path)
 
@@ -182,17 +143,28 @@ def os_label() -> str:
     который при подвисшей службе блокируется намертво и замораживает старт агента.
     ``sys.platform`` зашит при сборке интерпретатора — без службы и без syscall.
     """
-    if sys.platform == "win32":
-        return "Windows"
-    if sys.platform == "darwin":
-        return "macOS"
-    if sys.platform.startswith("linux"):
-        return "Linux"
-    return sys.platform
+    return host_os_label()
+
+
+def _coerce_workspace(
+    workspace: Optional[Any],
+    backend: Optional[Any],
+    workspace_config: Optional[Dict[str, Any]],
+) -> Any:
+    """Build an ExecutionWorkspace; ignore non-sandbox backends (host I/O wins)."""
+    if workspace is not None:
+        return workspace
+    if backend is not None and getattr(backend, "is_sandbox", False):
+        return build_execution_workspace(backend, workspace_config)
+    # Lazy: avoids tools → security → project_data import cycle.
+    from tools.backends.local import LocalFsBackend
+
+    return build_execution_workspace(LocalFsBackend(), workspace_config)
 
 
 def get_project_data(
     workspace_config: Optional[Dict[str, Any]] = None,
+    workspace: Optional[Any] = None,
     backend: Optional[Any] = None,
 ) -> Dict[str, str]:
     """
@@ -211,52 +183,63 @@ def get_project_data(
     workspace_config: optional CLI/server config snapshot (launch_root, project_root,
     write_guard.extra_paths) used for projectDir / allowed writes.
 
-    backend: optional FsBackend; when it is a sandbox (task container), all facts are
-    sourced from the backend so the prompt describes the container, not this host.
+    workspace: optional ExecutionWorkspace assembled by RunContext.
+    backend: deprecated compat — sandbox backends are coerced into a workspace.
 
     ``allowed_write_paths`` lists only directories where a probe file can be created and removed
     (same meaning on Linux, macOS, and Windows); non-writable roots are omitted.
     """
-    if backend is not None and getattr(backend, "is_sandbox", False):
-        return _project_data_from_backend(backend)
-
-    os_str = os_label()
-
-    # Оболочка (shell)
-    shell = os.environ.get("SHELL", "unknown")  # для Unix-систем
-    if not shell or shell == "unknown" and sys.platform == "win32":
-        shell = os.environ.get("COMSPEC", "cmd.exe")
-
-    project_dir = _resolve_workspace_dir(workspace_config)
-    if not os.path.isdir(project_dir):
-        project_dir = os.path.abspath(os.getcwd())
-
-    # Проверка, является ли проект git-репозиторием
-    is_git_project = "true" if os.path.exists(os.path.join(project_dir, ".git")) else "false"
-
-    current_date = datetime.now().strftime('%Y-%m-%d')
+    ws = _coerce_workspace(workspace, backend, workspace_config)
+    project_dir = ws.root
+    be = ws.backend
+    current_date = datetime.now().strftime("%Y-%m-%d")
+    is_git_project = (
+        "true" if be.exists(be.join(project_dir, ".git")) else "false"
+    )
     try:
-        project_dir_listing = get_listing(project_dir)
+        project_dir_listing = get_listing_from_backend(be, project_dir)
     except OSError:
         project_dir_listing = ""
+    root_writable = "true" if ws.root_writable else "false"
 
-    allowed_roots = _dedupe_ordered_abs_paths([project_dir, *_extra_write_roots(workspace_config)])
+    if getattr(be, "is_sandbox", False):
+        return {
+            "OS": ws.os_name,
+            "shell": ws.shell,
+            "projectDir": project_dir,
+            "projectDirWritable": root_writable,
+            "allowed_write_paths": project_dir,
+            "currentDate": current_date,
+            "isGitProject": is_git_project,
+            "projectDirListing": project_dir_listing,
+        }
+
+    # Host CLI: extra write roots still probed here (write_guard policy).
+    if not os.path.isdir(project_dir):
+        project_dir = os.path.abspath(os.getcwd())
+        root_writable = "true" if _dir_writable_probe(project_dir) else "false"
+        is_git_project = (
+            "true" if os.path.exists(os.path.join(project_dir, ".git")) else "false"
+        )
+        try:
+            project_dir_listing = get_listing(project_dir)
+        except OSError:
+            project_dir_listing = ""
+
+    allowed_roots = _dedupe_ordered_abs_paths(
+        [project_dir, *_extra_write_roots(workspace_config)]
+    )
     writable_roots = [p for p in allowed_roots if _dir_writable_probe(p)]
-    allowed_write_paths = "\n".join(writable_roots)
-    project_dir_writable = "true" if _dir_writable_probe(project_dir) else "false"
-
-    data = {
-        'OS': os_str,
-        'shell': shell,
-        'projectDir': project_dir,
-        'projectDirWritable': project_dir_writable,
-        'allowed_write_paths': allowed_write_paths,
-        'currentDate': current_date,
-        'isGitProject': is_git_project,
-        'projectDirListing': project_dir_listing
+    return {
+        "OS": ws.os_name,
+        "shell": ws.shell,
+        "projectDir": project_dir,
+        "projectDirWritable": root_writable,
+        "allowed_write_paths": "\n".join(writable_roots),
+        "currentDate": current_date,
+        "isGitProject": is_git_project,
+        "projectDirListing": project_dir_listing,
     }
-
-    return data
 
 
 def run_tests():

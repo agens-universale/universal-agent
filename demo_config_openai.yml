@@ -21,6 +21,8 @@ backend:
 
   use_ssl: true
   use_retry: true
+  # HTTP-таймаут одного запроса к LLM (секунды). Дефолт 600 (10 минут).
+  request_timeout_sec: 600
 
 # Вспомогательные LLM (summary, finish gate, intent scope, judges).
 chat_completions:

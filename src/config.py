@@ -216,6 +216,7 @@ def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
         "cert_path": app_cfg.backend.cert_path,
         "key_path": app_cfg.backend.key_path,
         "use_retry": app_cfg.backend.use_retry,
+        "backend_request_timeout_sec": app_cfg.backend.request_timeout_sec,
         "stream": app_cfg.backend.stream,  # legacy: канонический ключ — tui.stream
         "deprecated_keys_used": _deprecated_keys_used,
         "tui_stream": app_cfg.tui.stream,

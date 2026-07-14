@@ -14,6 +14,7 @@ import types
 import pytest
 
 import security.command_guard as cg
+from tests.helpers.tool_ctx import with_local_ctx
 from tools.exec.execute_command import ExecuteCommand
 from tools.exec.run_python_code import RunPythonCode
 
@@ -54,7 +55,7 @@ def test_execute_command_rm_rf_gc_denied(tmp_path, monkeypatch):
 
     monkeypatch.setattr("subprocess.run", fake_subprocess_run)
 
-    tool = ExecuteCommand()
+    tool = with_local_ctx(ExecuteCommand)
     result = json.loads(tool(command=f"rm -rf {tmp_path / '.gc'}", ctx=_ctx(tmp_path)))
 
     assert result["ok"] is False
@@ -71,7 +72,7 @@ def test_execute_command_rm_rf_gc_relative_denied(tmp_path, monkeypatch):
     monkeypatch.setattr("subprocess.run", lambda *a, **kw: (_ for _ in ()).throw(
         AssertionError("subprocess must not be called")))
 
-    tool = ExecuteCommand()
+    tool = with_local_ctx(ExecuteCommand)
     result = json.loads(tool(command="rm -rf .gc", cwd=str(tmp_path), ctx=_ctx(tmp_path)))
 
     assert result["ok"] is False
@@ -91,7 +92,7 @@ def test_execute_command_skills_path_allowed(tmp_path, monkeypatch):
     skills_dir = tmp_path / ".gc" / "skills" / "foo"
     skills_dir.mkdir(parents=True)
 
-    tool = ExecuteCommand()
+    tool = with_local_ctx(ExecuteCommand)
     # We use a real benign command; the tripwire must not block it.
     cmd = f'"{sys.executable}" -c "print(1)"'
     result = json.loads(
@@ -110,7 +111,7 @@ def test_execute_command_plain_command_allowed(tmp_path, monkeypatch):
     from config_modules import env_vars
     monkeypatch.setattr(env_vars.env, "gc_home", tmp_path / "gc")
 
-    tool = ExecuteCommand()
+    tool = with_local_ctx(ExecuteCommand)
     result = json.loads(
         tool(command=f'"{sys.executable}" -c "print(\'ok\')"', cwd=str(tmp_path), ctx=_ctx(tmp_path))
     )
@@ -127,7 +128,7 @@ def test_execute_command_protection_disabled_skips_tripwire(tmp_path, monkeypatc
     from config_modules import env_vars
     monkeypatch.setattr(env_vars.env, "gc_home", tmp_path / "gc")
 
-    tool = ExecuteCommand()
+    tool = with_local_ctx(ExecuteCommand)
     # Even a .gc-targeting command passes when protection is disabled.
     result = json.loads(
         tool(
@@ -153,7 +154,7 @@ def test_execute_command_ask_path_confirmed_executes(tmp_path, monkeypatch):
     monkeypatch.setattr(cg, "scan_command_for_protected", lambda cmd, cwd, extra=None: "ask")
     monkeypatch.setattr("security.confirm_port.request_confirm", lambda **k: True)
 
-    tool = ExecuteCommand()
+    tool = with_local_ctx(ExecuteCommand)
     result = json.loads(
         tool(command=f'"{sys.executable}" -c "print(1)"', cwd=str(tmp_path), ctx=_ctx(tmp_path))
     )
@@ -168,7 +169,7 @@ def test_execute_command_ask_path_not_confirmed_blocks(tmp_path, monkeypatch):
     monkeypatch.setattr(cg, "scan_command_for_protected", lambda cmd, cwd, extra=None: "ask")
     monkeypatch.setattr("security.confirm_port.request_confirm", lambda **k: False)
 
-    tool = ExecuteCommand()
+    tool = with_local_ctx(ExecuteCommand)
     result = json.loads(
         tool(command="echo x", cwd=str(tmp_path), ctx=_ctx(tmp_path))
     )
@@ -203,7 +204,7 @@ def test_run_python_code_gc_deny_blocks_before_subprocess(tmp_path, monkeypatch)
 
     monkeypatch.setattr(sp, "run", spy_run)
 
-    tool = RunPythonCode()
+    tool = with_local_ctx(RunPythonCode)
     result = json.loads(tool(code="print(1)", cwd=str(tmp_path), ctx=_ctx(tmp_path)))
 
     assert result["ok"] is False

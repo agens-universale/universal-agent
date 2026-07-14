@@ -254,6 +254,7 @@ class SpecialAgent(AbstractSubagent):
             request_label="subagent_special_agent",
             runtime_notices_enabled=self._runtime_notices_enabled,
             notice_url=url,
+            timeout=float(self.config_dict["backend_request_timeout_sec"]),
         )
         return res_data["choices"][0]["message"]["content"]
 

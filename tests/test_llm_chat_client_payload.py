@@ -3,6 +3,15 @@ from types import SimpleNamespace
 from utils import llm_chat_client
 
 
+def _cfg(**overrides):
+    cfg = {
+        "completions_url": "http://example.test/v1/chat/completions",
+        "backend_request_timeout_sec": 600,
+    }
+    cfg.update(overrides)
+    return cfg
+
+
 def _patch_policy(monkeypatch):
     captured = {}
 
@@ -33,7 +42,7 @@ def test_request_chat_completion_text_raw_logging_controlled_by_config(monkeypat
     state = SimpleNamespace(default_model="m")
 
     ctx_no_raw = SimpleNamespace(
-        config_dict={"completions_url": "http://example.test/v1/chat/completions"},
+        config_dict=_cfg(),
         logger=_Log(),
     )
     llm_chat_client.request_chat_completion_text(
@@ -48,10 +57,7 @@ def test_request_chat_completion_text_raw_logging_controlled_by_config(monkeypat
     assert len(raw_entries) == 0
 
     ctx_raw = SimpleNamespace(
-        config_dict={
-            "completions_url": "http://example.test/v1/chat/completions",
-            "logging_params": {"full_log_backend": True},
-        },
+        config_dict=_cfg(logging_params={"full_log_backend": True}),
         logger=_Log(),
     )
     llm_chat_client.request_chat_completion_text(
@@ -73,14 +79,13 @@ def test_request_chat_completion_text_uses_max_completion_tokens_and_safe_kwargs
     captured = _patch_policy(monkeypatch)
 
     ctx = SimpleNamespace(
-        config_dict={
-            "completions_url": "http://example.test/v1/chat/completions",
-            "chat_completion_kwargs": {
+        config_dict=_cfg(
+            chat_completion_kwargs={
                 "temperature": 0.3,
                 "model": "must_not_override",
                 "max_tokens": 123,
             },
-        },
+        ),
         logger=None,
     )
     state = SimpleNamespace(default_model="test-model")
@@ -104,10 +109,7 @@ def test_request_chat_completion_text_uses_max_tokens_when_flag_enabled(monkeypa
     captured = _patch_policy(monkeypatch)
 
     ctx = SimpleNamespace(
-        config_dict={
-            "completions_url": "http://example.test/v1/chat/completions",
-            "use_max_tokens_param": True,
-        },
+        config_dict=_cfg(use_max_tokens_param=True),
         logger=None,
     )
     state = SimpleNamespace(default_model="test-model")
@@ -129,7 +131,7 @@ def test_request_chat_completion_text_omits_empty_tools(monkeypatch):
     captured = _patch_policy(monkeypatch)
 
     ctx = SimpleNamespace(
-        config_dict={"completions_url": "http://example.test/v1/chat/completions"},
+        config_dict=_cfg(),
         logger=None,
     )
     state = SimpleNamespace(default_model="test-model")

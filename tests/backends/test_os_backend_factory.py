@@ -60,3 +60,4 @@ def test_create_run_context_explicit_override():
         os_backend=sentinel,  # type: ignore[arg-type]
     )
     assert ctx.os_backend is sentinel
+    assert ctx.workspace.backend is sentinel

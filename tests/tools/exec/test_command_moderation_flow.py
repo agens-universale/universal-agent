@@ -6,6 +6,8 @@ from tools.exec.execute_command import ExecuteCommand
 from tools.exec.run_python_code import RunPythonCode
 
 
+from tests.helpers.tool_ctx import with_local_ctx
+
 def _config(tmp_path, mode):
     return {
         "launch_root": str(tmp_path),
@@ -34,7 +36,7 @@ def test_exec_command_allow_mode_skips_judge(tmp_path, monkeypatch):
     monkeypatch.setattr(command_moderation, "_default_judge_client", fail_if_called)
 
     result = json.loads(
-        ExecuteCommand(config_dict=_config(tmp_path, "allow"))(
+        with_local_ctx(ExecuteCommand, config_dict=_config(tmp_path, "allow"))(
             command=f'"{sys.executable}" -c "print(123)"'
         )
     )
@@ -51,7 +53,7 @@ def test_exec_command_deny_mode_executes_safe_verdict(tmp_path, monkeypatch):
     )
 
     result = json.loads(
-        ExecuteCommand(config_dict=_config(tmp_path, "deny"))(
+        with_local_ctx(ExecuteCommand, config_dict=_config(tmp_path, "deny"))(
             command=f'"{sys.executable}" -c "print(456)"'
         )
     )
@@ -71,7 +73,7 @@ def test_exec_command_deny_mode_blocks_dangerous_verdict(tmp_path, monkeypatch):
     )
 
     result = json.loads(
-        ExecuteCommand(config_dict=_config(tmp_path, "deny"))(
+        with_local_ctx(ExecuteCommand, config_dict=_config(tmp_path, "deny"))(
             command="sudo apt update"
         )
     )
@@ -96,7 +98,7 @@ def test_run_python_code_deny_mode_blocks_dangerous_verdict(tmp_path, monkeypatc
 
     target = tmp_path / "outside.txt"
     code = f"from pathlib import Path; Path({str(target)!r}).write_text('bad')"
-    result = json.loads(RunPythonCode(config_dict=_config(tmp_path, "deny"))(code=code))
+    result = json.loads(with_local_ctx(RunPythonCode, config_dict=_config(tmp_path, "deny"))(code=code))
 
     assert result["ok"] is False
     assert result["return_code"] is None
@@ -109,7 +111,7 @@ def test_exec_command_ask_mode_executes_when_user_confirms(tmp_path):
     marker = tmp_path / "confirmed.txt"
     command = f'"{sys.executable}" -c "from pathlib import Path; Path({str(marker)!r}).write_text(\'ok\')"'
 
-    tool = ExecuteCommand(config_dict=_config(tmp_path, "ask"))
+    tool = with_local_ctx(ExecuteCommand, config_dict=_config(tmp_path, "ask"))
     original_call = tool.__call__.__wrapped__.__wrapped__
     guarded_call = command_moderation.moderate_command_execution(
         payload_arg="command",
@@ -131,7 +133,7 @@ def test_exec_command_ask_mode_cancels_when_user_rejects(tmp_path):
     marker = tmp_path / "cancelled.txt"
     command = f'"{sys.executable}" -c "from pathlib import Path; Path({str(marker)!r}).write_text(\'bad\')"'
 
-    tool = ExecuteCommand(config_dict=_config(tmp_path, "ask"))
+    tool = with_local_ctx(ExecuteCommand, config_dict=_config(tmp_path, "ask"))
     original_call = tool.__call__.__wrapped__
     guarded_call = command_moderation.moderate_command_execution(
         payload_arg="command",
@@ -154,7 +156,7 @@ def test_exec_command_ask_mode_cancels_when_user_rejects(tmp_path):
 def test_command_moderation_fail_closed_when_judge_unavailable_in_deny(tmp_path):
     """Fail-CLOSED в deny: при недоступности судьи выполнение блокируется."""
     result = json.loads(
-        ExecuteCommand(config_dict=_config(tmp_path, "deny"))(
+        with_local_ctx(ExecuteCommand, config_dict=_config(tmp_path, "deny"))(
             command=f'"{sys.executable}" -c "print(789)"'
         )
     )
@@ -169,7 +171,7 @@ def test_command_moderation_asks_when_judge_unavailable_in_ask(tmp_path, monkeyp
     marker = tmp_path / "judge_unavailable.txt"
     command = f'"{sys.executable}" -c "from pathlib import Path; Path({str(marker)!r}).write_text(\'ok\')"'
 
-    tool = ExecuteCommand(config_dict=_config(tmp_path, "ask"))
+    tool = with_local_ctx(ExecuteCommand, config_dict=_config(tmp_path, "ask"))
     original_call = tool.__call__.__wrapped__.__wrapped__
     guarded_call = command_moderation.moderate_command_execution(
         payload_arg="command",

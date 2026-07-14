@@ -1,3 +1,4 @@
+from execution_workspace import ExecutionWorkspace
 from states import State
 from tests.test_project_data_backend import FakeSandboxBackend
 from utils.local_render_system_prompt import render_system_prompt
@@ -21,7 +22,7 @@ def test_env_block_describes_container_not_runner(tmp_path, monkeypatch):
         max_steps=10,
         system_prompt_id="sp",
         use_server_subagents=False,
-        os_backend=backend,
+        workspace=ExecutionWorkspace(root="/testbed", backend=backend, shell="sh", os_name="Linux", root_writable=True),
     )
 
     prompt = render_system_prompt(

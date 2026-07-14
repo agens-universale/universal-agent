@@ -7,6 +7,8 @@ import requests
 from tools.exec.download_file import DownloadFile
 
 
+from tests.helpers.tool_ctx import with_local_ctx
+
 PDF_BYTES = b"%PDF-1.4 fake pdf content"
 DOCX_BYTES = b"PK\x03\x04" + b"\x00" * 20
 EXE_BYTES = b"MZ" + b"\x00" * 50
@@ -80,7 +82,7 @@ def test_download_file_pdf_happy_path(tmp_path, monkeypatch):
     )
 
     result = json.loads(
-        DownloadFile(config_dict=_config(launch_root))(
+        with_local_ctx(DownloadFile, config_dict=_config(launch_root))(
             url="https://example.com/report.pdf",
             filename="report.pdf",
         )
@@ -105,7 +107,7 @@ def test_download_file_docx_zip_header(tmp_path, monkeypatch):
     )
 
     result = json.loads(
-        DownloadFile(config_dict=_config(launch_root))(
+        with_local_ctx(DownloadFile, config_dict=_config(launch_root))(
             url="https://example.com/doc.docx",
             filename="doc.docx",
         )
@@ -120,7 +122,7 @@ def test_download_file_invalid_filename_path_traversal(tmp_path):
     launch_root.mkdir()
 
     result = json.loads(
-        DownloadFile(config_dict=_config(launch_root))(
+        with_local_ctx(DownloadFile, config_dict=_config(launch_root))(
             url="https://example.com/x.pdf",
             filename="../../x.pdf",
         )
@@ -135,7 +137,7 @@ def test_download_file_format_blocked_extension(tmp_path):
     launch_root.mkdir()
 
     result = json.loads(
-        DownloadFile(config_dict=_config(launch_root))(
+        with_local_ctx(DownloadFile, config_dict=_config(launch_root))(
             url="https://example.com/malware.exe",
             filename="malware.exe",
         )
@@ -155,7 +157,7 @@ def test_download_file_format_blocked_magic_mismatch(tmp_path, monkeypatch):
     )
 
     result = json.loads(
-        DownloadFile(config_dict=_config(launch_root))(
+        with_local_ctx(DownloadFile, config_dict=_config(launch_root))(
             url="https://example.com/fake.pdf",
             filename="fake.pdf",
         )
@@ -181,7 +183,7 @@ def test_download_file_exists(tmp_path, monkeypatch):
     )
 
     result = json.loads(
-        DownloadFile(config_dict=_config(launch_root))(
+        with_local_ctx(DownloadFile, config_dict=_config(launch_root))(
             url="https://example.com/report.pdf",
             filename="report.pdf",
         )
@@ -202,7 +204,7 @@ def test_download_file_too_large(tmp_path, monkeypatch):
     )
 
     result = json.loads(
-        DownloadFile(config_dict=_config(launch_root, max_bytes=10))(
+        with_local_ctx(DownloadFile, config_dict=_config(launch_root, max_bytes=10))(
             url="https://example.com/big.pdf",
             filename="big.pdf",
         )
@@ -225,8 +227,7 @@ def test_download_file_redirect_blocked_by_policy(tmp_path, monkeypatch):
     monkeypatch.setattr(requests, "Session", lambda: _RedirectSessionStub([redirect]))
 
     result = json.loads(
-        DownloadFile(
-            config_dict=_config(
+        with_local_ctx(DownloadFile, config_dict=_config(
                 launch_root,
                 url_policy={
                     "enabled": True,
@@ -255,7 +256,7 @@ def test_download_file_relative_download_dir(tmp_path, monkeypatch):
     )
 
     result = json.loads(
-        DownloadFile(config_dict=_config(launch_root, download_dir="incoming"))(
+        with_local_ctx(DownloadFile, config_dict=_config(launch_root, download_dir="incoming"))(
             url="https://example.com/report.pdf",
             filename="report.pdf",
         )
@@ -276,8 +277,7 @@ def test_download_file_absolute_download_dir_in_extra_paths(tmp_path, monkeypatc
     )
 
     result = json.loads(
-        DownloadFile(
-            config_dict=_config(
+        with_local_ctx(DownloadFile, config_dict=_config(
                 launch_root,
                 download_dir=str(scratch),
                 write_guard={"enabled": True, "mode": "deny", "extra_paths": [str(scratch.parent)]},
@@ -303,8 +303,7 @@ def test_download_file_absolute_download_dir_outside_perimeter(tmp_path, monkeyp
     )
 
     result = json.loads(
-        DownloadFile(
-            config_dict=_config(
+        with_local_ctx(DownloadFile, config_dict=_config(
                 launch_root,
                 download_dir=str(outside),
                 write_guard={"enabled": True, "mode": "deny", "extra_paths": []},
@@ -351,7 +350,7 @@ def test_download_file_atomic_write_replace_failure(tmp_path, monkeypatch):
     monkeypatch.setattr(os, "replace", fail_replace)
 
     result = json.loads(
-        DownloadFile(config_dict=_config(launch_root))(
+        with_local_ctx(DownloadFile, config_dict=_config(launch_root))(
             url="https://example.com/report.pdf",
             filename="report.pdf",
         )

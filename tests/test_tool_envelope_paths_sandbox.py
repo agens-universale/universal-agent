@@ -1,5 +1,6 @@
 import json
 
+from tests.harbor.fakes import bind_os_backend
 from tools.backends.protocol import FsBackend
 from tools.fs.write_to_file_tool import WriteToFile
 
@@ -117,8 +118,7 @@ def test_write_to_file_envelope_reports_container_path(monkeypatch, tmp_path):
     """In sandbox mode the reported path must not be rewritten against the host cwd."""
     monkeypatch.chdir(tmp_path)                      # host cwd differs from container cwd
     backend = RecordingSandboxBackend()
-    tool = WriteToFile()
-    tool.bind_os_backend(backend)                    # test hook from AbstractSimpleTool
+    tool = bind_os_backend(WriteToFile(), backend)
 
     out = tool(path="/testbed/mod.py", content="x")   # tools are callables (__call__)
     envelope = json.loads(out) if isinstance(out, str) else out

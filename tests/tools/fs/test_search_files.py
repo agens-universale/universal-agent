@@ -3,14 +3,16 @@ import json
 from tools.fs.search_files import SearchFiles
 
 
+from tests.helpers.tool_ctx import with_local_ctx
+
 def test_search_basic_and_file_pattern(tmp_path):
     (tmp_path / "a.py").write_text("x = 42\nprint(x)\n", encoding="utf-8")
     (tmp_path / "b.md").write_text("answer: 42\n", encoding="utf-8")
-    data = json.loads(SearchFiles()(path=str(tmp_path), regex="42"))
+    data = json.loads(with_local_ctx(SearchFiles)(path=str(tmp_path), regex="42"))
     assert data["ok"] is True
     assert data["total_matches"] == 2 and data["count"] == 2
     assert data["truncated"] is False and data["next_offset"] is None
-    py = json.loads(SearchFiles()(path=str(tmp_path), regex="print", file_pattern="*.py"))
+    py = json.loads(with_local_ctx(SearchFiles)(path=str(tmp_path), regex="print", file_pattern="*.py"))
     assert py["ok"] is True and py["total_matches"] == 1 and py["count"] == 1
     assert py["matches"][0]["file"].endswith("a.py")
 
@@ -20,7 +22,7 @@ def test_search_pagination_and_offset_beyond(tmp_path):
     (tmp_path / "b.py").write_text("ALPHA\n", encoding="utf-8")
     (tmp_path / "c.py").write_text("ALPHA\n", encoding="utf-8")
 
-    tool = SearchFiles()
+    tool = with_local_ctx(SearchFiles)
     p1 = json.loads(tool(path=str(tmp_path), regex="ALPHA", file_pattern="*.py", offset=1, limit=2))
     assert p1["ok"] and p1["total_matches"] == 3
     assert p1["count"] == 2 and len(p1["matches"]) == 2
@@ -37,7 +39,7 @@ def test_search_pagination_and_offset_beyond(tmp_path):
 
 def test_search_invalid_pagination_offsets(tmp_path):
     (tmp_path / "z.txt").write_text("ALPHA\n", encoding="utf-8")
-    tool = SearchFiles()
+    tool = with_local_ctx(SearchFiles)
     bad_off = json.loads(tool(path=str(tmp_path), regex="ALPHA", offset=0, limit=1))
     assert bad_off["ok"] is False and bad_off["error"]["field"] == "offset"
     bad_lim = json.loads(tool(path=str(tmp_path), regex="ALPHA", offset=1, limit=0))
@@ -45,7 +47,7 @@ def test_search_invalid_pagination_offsets(tmp_path):
 
 
 def test_search_invalid_and_not_found(tmp_path):
-    tool = SearchFiles()
+    tool = with_local_ctx(SearchFiles)
     bad_regex = json.loads(tool(path=str(tmp_path), regex="("))
     # implementation swallows regex errors per-file, so ok remains true with zero matches
     assert bad_regex["ok"] is True and bad_regex["count"] == 0
@@ -62,7 +64,7 @@ def test_search_alternation_literal_prefilter(tmp_path):
         "line3 ALPHA beta\n",
         encoding="utf-8",
     )
-    tool = SearchFiles()
+    tool = with_local_ctx(SearchFiles)
     for regex in ("ALPHA|beta", "beta|ALPHA"):
         data = json.loads(tool(path=str(tmp_path), regex=regex))
         assert data["ok"] is True
@@ -77,14 +79,14 @@ def test_search_alternation_cyrillic(tmp_path):
         "строка 3: Аудит и План проверки\n",
         encoding="utf-8",
     )
-    data = json.loads(SearchFiles()(path=str(tmp_path), regex="Аудит|План проверки"))
+    data = json.loads(with_local_ctx(SearchFiles)(path=str(tmp_path), regex="Аудит|План проверки"))
     assert data["ok"] is True
     assert data["total_matches"] == 3
     assert [m["line"] for m in data["matches"]] == [1, 2, 3]
 
 
 def test_search_validation_and_directory_error(tmp_path):
-    tool = SearchFiles()
+    tool = with_local_ctx(SearchFiles)
     bad_regex_type = json.loads(tool(path=str(tmp_path), regex=123))  # type: ignore[arg-type]
     assert bad_regex_type["ok"] is False and bad_regex_type["error"]["field"] == "regex"
     # Non-string optional file_pattern is coalesced to absent (same as omit / "").
@@ -99,7 +101,7 @@ def test_search_validation_and_directory_error(tmp_path):
 def test_search_binary_file_does_not_crash(tmp_path):
     (tmp_path / "bin.dat").write_bytes(b"\x00\xff\xfeMATCH\xfe")
     (tmp_path / "text.txt").write_text("MATCH here\n", encoding="utf-8")
-    res = json.loads(SearchFiles()(path=str(tmp_path), regex="MATCH"))
+    res = json.loads(with_local_ctx(SearchFiles)(path=str(tmp_path), regex="MATCH"))
     assert res["ok"] is True
     assert res["total_matches"] >= 1
     files = {m["file"] for m in res["matches"]}

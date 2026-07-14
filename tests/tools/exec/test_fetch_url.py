@@ -8,6 +8,8 @@ from tools.exec.fetch_url import FetchUrl
 from tools.exec.simple_fetch_url import SimpleFetchUrl
 
 
+from tests.helpers.tool_ctx import with_local_ctx
+
 class _Resp:
     def __init__(self, text, content_type="text/html", status_code=200, url="https://x", content=None):
         self.text = text
@@ -47,7 +49,7 @@ def _url_policy_config(allowed_schemes=None, url_blacklist=None):
 
 
 def test_fetch_url_validation():
-    tool = FetchUrl()
+    tool = with_local_ctx(FetchUrl)
     assert json.loads(tool(url=""))["error"]["field"] == "url"
     assert json.loads(tool(url="ftp://x"))["error"]["field"] == "url"
     assert json.loads(tool(url="https://x", timeout_seconds=-1))["error"]["field"] == "timeout_seconds"
@@ -63,7 +65,7 @@ def test_fetch_url_policy_blocks_before_request(monkeypatch):
     monkeypatch.setattr(requests, "get", fail_if_called)
 
     data = json.loads(
-        FetchUrl(config_dict=_url_policy_config(url_blacklist=["blocked.example"]))(
+        with_local_ctx(FetchUrl, config_dict=_url_policy_config(url_blacklist=["blocked.example"]))(
             url="https://blocked.example/page"
         )
     )
@@ -81,7 +83,7 @@ def test_fetch_url_policy_blocks_disallowed_scheme_before_legacy_validation(monk
     monkeypatch.setattr(requests, "get", fail_if_called)
 
     data = json.loads(
-        FetchUrl(config_dict=_url_policy_config(allowed_schemes=["https"]))(
+        with_local_ctx(FetchUrl, config_dict=_url_policy_config(allowed_schemes=["https"]))(
             url="http://example.com"
         )
     )
@@ -92,7 +94,7 @@ def test_fetch_url_policy_blocks_disallowed_scheme_before_legacy_validation(monk
 
 def test_fetch_url_binary(monkeypatch):
     monkeypatch.setattr(requests, "get", lambda *a, **k: _Resp("", content_type="application/pdf"))
-    data = json.loads(FetchUrl()(url="https://example.com/a.pdf"))
+    data = json.loads(with_local_ctx(FetchUrl)(url="https://example.com/a.pdf"))
     assert data["ok"] is True and data["is_binary"] is True and data["content"] == "binary data"
 
 
@@ -100,7 +102,7 @@ def test_fetch_url_extraction_fallback(monkeypatch):
     monkeypatch.setattr(requests, "get", lambda *a, **k: _Resp("<html><body><p>hello world</p></body></html>"))
     monkeypatch.setattr(fetch_url_module.trafilatura, "extract", lambda *a, **k: None)
     monkeypatch.setattr(fetch_url_module, "Document", lambda *a, **k: SimpleNamespace(summary=lambda html_partial=True: "<p>fallback</p>"))
-    data = json.loads(FetchUrl()(url="https://example.com"))
+    data = json.loads(with_local_ctx(FetchUrl)(url="https://example.com"))
     assert data["ok"] is True
     assert data["is_binary"] is False
     assert data["content"]
@@ -111,7 +113,7 @@ def test_fetch_url_request_failure(monkeypatch):
         raise requests.RequestException("boom")
 
     monkeypatch.setattr(requests, "get", _raise)
-    data = json.loads(FetchUrl()(url="https://example.com"))
+    data = json.loads(with_local_ctx(FetchUrl)(url="https://example.com"))
     assert data["ok"] is False
     assert data["error"]["type"] == "request_failed"
 
@@ -188,7 +190,7 @@ def test_fetch_url_marks_unknown_binary_bytes_as_binary(monkeypatch):
             content=binary_payload,
         ),
     )
-    data = json.loads(FetchUrl()(url="https://example.com/blob"))
+    data = json.loads(with_local_ctx(FetchUrl)(url="https://example.com/blob"))
     assert data["ok"] is True
     assert data["is_binary"] is True
     assert data["result_type"] == "binary"
@@ -228,7 +230,7 @@ def test_simple_fetch_url_policy_blocks_before_request(monkeypatch):
     monkeypatch.setattr(requests, "Session", fail_session_if_called)
 
     data = json.loads(
-        SimpleFetchUrl(config_dict=_url_policy_config(url_blacklist=["*.internal"]))(
+        with_local_ctx(SimpleFetchUrl, config_dict=_url_policy_config(url_blacklist=["*.internal"]))(
             url="https://api.internal/path"
         )
     )
@@ -253,7 +255,7 @@ def test_simple_fetch_url_handles_lists_headings_pre_and_tables(monkeypatch):
         "Session",
         lambda: _SessionStub(_Resp(html, content_type="text/html", url="https://example.com")),
     )
-    data = json.loads(SimpleFetchUrl()(url="https://example.com"))
+    data = json.loads(with_local_ctx(SimpleFetchUrl)(url="https://example.com"))
     text = data["content"]
     assert data["ok"] is True
     assert "## Title" in text
@@ -276,7 +278,7 @@ def test_simple_fetch_url_does_not_mark_utf8_html_as_binary(monkeypatch):
             )
         ),
     )
-    data = json.loads(SimpleFetchUrl()(url="https://example.com"))
+    data = json.loads(with_local_ctx(SimpleFetchUrl)(url="https://example.com"))
     assert data["ok"] is True
     assert data["is_binary"] is False
     assert data["result_type"] == "content"

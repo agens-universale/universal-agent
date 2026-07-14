@@ -1,3 +1,4 @@
+from execution_workspace import ExecutionWorkspace
 from states import State
 from tests.test_project_data_backend import FakeSandboxBackend
 
@@ -23,23 +24,38 @@ def test_state_without_backend_uses_local_cwd(tmp_path, monkeypatch):
     assert state.initial_project_data["projectDir"] == str(tmp_path.resolve())
 
 
-def test_state_with_sandbox_backend_uses_container_cwd():
+def test_state_with_workspace_uses_container_root():
     backend = FakeSandboxBackend(cwd="/testbed", tree={"/testbed": [("pkg", True)]}, git=True)
-    state = _state(os_backend=backend)
+    state = _state(workspace=ExecutionWorkspace(root="/testbed", backend=backend, shell="sh", os_name="Linux", root_writable=True))
     assert state.initial_project_data["projectDir"] == "/testbed"
     assert state.initial_project_data["isGitProject"] == "true"
+    assert state.workspace.root == "/testbed"
+    assert state.workspace.shell == "sh"
+    assert state.workspace.os_name == "Linux"
+    assert state.workspace.root_writable is True
+    assert state.workspace.backend is backend
 
 
-def test_state_with_backend_is_json_serializable():
-    """The backend is a live I/O handle: it must not leak into the persisted snapshot."""
+def test_state_os_backend_compat_builds_workspace():
+    backend = FakeSandboxBackend(cwd="/testbed", tree={"/testbed": [("pkg", True)]}, git=True)
+    state = _state(os_backend=backend)
+    assert state.workspace is not None
+    assert state.workspace.root == "/testbed"
+    assert state.workspace.backend is backend
+    assert state.initial_project_data["projectDir"] == "/testbed"
+
+
+def test_state_with_workspace_is_json_serializable():
+    """Live I/O handle must not leak into the persisted snapshot."""
     import json
 
     from persistence.state_repository import StateRepository
 
     backend = FakeSandboxBackend(cwd="/testbed", tree={"/testbed": []}, git=False)
-    state = _state(os_backend=backend)
+    state = _state(workspace=ExecutionWorkspace(root="/testbed", backend=backend, shell="sh", os_name="Linux", root_writable=True))
 
     payload = StateRepository.serialize_storage({state.state_id: state})
 
     json.dumps(payload)                                   # must not raise
+    assert "workspace" not in payload[state.state_id]
     assert "os_backend" not in payload[state.state_id]

@@ -10,6 +10,7 @@ from bundled_assets import bundled_root
 from config_modules.stored_outputs import get_stored_tool_outputs_max_entries
 from config_modules.chat_completions import chat_completions_llm_from_config_dict
 from config_modules.intent_scope import intent_scope_from_config_dict
+from execution_workspace import ExecutionWorkspace
 from run_summary_coordinator import RunSummaryCoordinator
 from summarize.config import parse_summary_trigger_chars
 from message_policy.tool_usage_notice.policy import (
@@ -23,7 +24,6 @@ from intent_log.user_turn import append_user_asks_from_messages, init_subagent_o
 from run_context import RunContext
 from states import State
 from tools import build_tools_data
-from tools.backends.factory import resolve_os_backend
 from tools.subagents.registry import get_subagent_class
 from usage.account import CATEGORY_SUBAGENT as USAGE_CATEGORY_SUBAGENT
 from usage.context import usage_scope
@@ -273,6 +273,7 @@ class SubagentRunner:
             shared=parent.shared,
             workspace_config=child_config,
             logger=parent.logger,
+            workspace=getattr(parent, "workspace", None),
         )
         child_state.tool_call_outputs_store.set_max_entries(
             get_stored_tool_outputs_max_entries(child_config)
@@ -351,9 +352,13 @@ class SubagentRunner:
             child_config, run_id=child_run_id, agent_kind=child_agent_kind
         )
 
-        parent_backend = getattr(self._ctx, "os_backend", None)
-        if parent_backend is None:
-            parent_backend = resolve_os_backend(child_config)
+        parent_workspace = getattr(self._ctx, "workspace", None)
+        if not isinstance(parent_workspace, ExecutionWorkspace):
+            raise RuntimeError(
+                "SubagentRunner: parent ctx.workspace is missing; "
+                "create_run_context() must assemble ExecutionWorkspace"
+            )
+        parent_backend = getattr(self._ctx, "os_backend", None) or parent_workspace.backend
 
         child_ctx = RunContext(
             config_dict=child_config,
@@ -368,6 +373,7 @@ class SubagentRunner:
             tools_spec=child_tools_spec,
             tools_description=child_tools_descr,
             os_backend=parent_backend,
+            workspace=parent_workspace,
             environment=getattr(self._ctx, "environment", None),
             project_gc_dir=getattr(self._ctx, "project_gc_dir", Path(".")),
         )

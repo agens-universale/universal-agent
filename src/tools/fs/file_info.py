@@ -61,7 +61,7 @@ class FileInfo(AbstractSimpleTool):
             {
                 "tool": FileInfo.registered_tool_name(),
                 "ok": False,
-                "path": tool_report_abspath(path, backend=self._backend),
+                "path": tool_report_abspath(path, workspace=self._workspace),
                 "exists": False,
                 "message": message,
                 "error": error,
@@ -120,7 +120,7 @@ class FileInfo(AbstractSimpleTool):
                 message="Argument 'follow_symlinks' must be a boolean.",
             )
 
-        report_path = tool_report_abspath(path, backend=self._backend)
+        report_path = tool_report_abspath(path, workspace=self._workspace)
         if not self._backend.lexists(path):
             return self._result(
                 ok=True,

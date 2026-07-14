@@ -3,6 +3,7 @@ import json
 
 import pytest
 
+from tests.helpers.tool_ctx import with_local_ctx
 from tools.arguments_validation import (
     WrongFunctionArgumentsException,
     parse_and_validate_tool_arguments,
@@ -291,7 +292,7 @@ def test_search_and_replace_empty_sha_direct_call(tmp_path):
     p = tmp_path / "f.txt"
     p.write_text("abc", encoding="utf-8")
     res = json.loads(
-        SearchAndReplace()(
+        with_local_ctx(SearchAndReplace)(
             path=str(p),
             search="abc",
             replace="xyz",

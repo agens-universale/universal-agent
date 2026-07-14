@@ -1,10 +1,10 @@
 import json
 import logging
-from types import SimpleNamespace
 
 from states import SharedStateData
 from states import State
 from persistence.state_storage import save_state
+from tests.helpers.tool_ctx import local_ctx
 from tools.subagents.runner import SubagentRunner
 
 
@@ -47,43 +47,36 @@ def _make_config(tmp_path):
     }
 
 
+def _parent_ctx(tmp_path, *, is_tui: bool = False):
+    cfg = _make_config(tmp_path)
+    ctx = local_ctx(cfg)
+    ctx.run_id = "parent_run_1"
+    ctx.auth_connector = None
+    ctx.logger = None
+    ctx.logging_path = str(tmp_path / "agent_main_parent_run_1.log")
+    ctx.summary_trace_path = str(tmp_path / "summary_trace_main_parent_run_1.jsonl")
+    ctx.tools_data = {}
+    ctx.tools_spec = []
+    ctx.tools_description = []
+    ctx.is_tui = is_tui
+    return ctx, cfg
+
+
 def test_build_child_ctx_creates_dedicated_subagent_run_log(tmp_path):
     orch = _make_orchestrator_state()
-    cfg = _make_config(tmp_path)
-    parent_ctx = SimpleNamespace(
-        config_dict=cfg,
-        run_id="parent_run_1",
-        auth_connector=None,
-        logger=None,
-        logging_path=str(tmp_path / "agent_main_parent_run_1.log"),
-        summary_trace_path=str(tmp_path / "summary_trace_main_parent_run_1.jsonl"),
-        tools_data={},
-        tools_spec=[],
-        tools_description=[],
-    )
+    parent_ctx, cfg = _parent_ctx(tmp_path)
     runner = SubagentRunner(parent_ctx, orch, cfg)
 
     child_ctx = runner._build_child_ctx(tool_name="subagent_worker")
 
     assert child_ctx.run_id != parent_ctx.run_id
     assert f"agent_worker_{child_ctx.run_id}.log" in child_ctx.logging_path
+    assert child_ctx.workspace is parent_ctx.workspace
 
 
 def test_build_child_ctx_inherits_is_tui_from_parent(tmp_path):
     orch = _make_orchestrator_state()
-    cfg = _make_config(tmp_path)
-    parent_ctx = SimpleNamespace(
-        config_dict=cfg,
-        run_id="parent_run_1",
-        auth_connector=None,
-        logger=None,
-        logging_path=str(tmp_path / "agent_main_parent_run_1.log"),
-        summary_trace_path=str(tmp_path / "summary_trace_main_parent_run_1.jsonl"),
-        tools_data={},
-        tools_spec=[],
-        tools_description=[],
-        is_tui=True,
-    )
+    parent_ctx, cfg = _parent_ctx(tmp_path, is_tui=True)
     runner = SubagentRunner(parent_ctx, orch, cfg)
 
     child_ctx = runner._build_child_ctx(tool_name="subagent_worker")
@@ -92,8 +85,10 @@ def test_build_child_ctx_inherits_is_tui_from_parent(tmp_path):
 
 
 def test_lifecycle_payload_contains_parent_and_child_run_ids(tmp_path):
+    from types import SimpleNamespace
+
     orch = _make_orchestrator_state()
-    cfg = _make_config(tmp_path)
+    parent_ctx, cfg = _parent_ctx(tmp_path)
     recorded: list[str] = []
 
     class _CaptureHandler(logging.Handler):
@@ -104,18 +99,8 @@ def test_lifecycle_payload_contains_parent_and_child_run_ids(tmp_path):
     parent_log.handlers.clear()
     parent_log.addHandler(_CaptureHandler())
     parent_log.setLevel(logging.INFO)
+    parent_ctx.logger = parent_log
 
-    parent_ctx = SimpleNamespace(
-        config_dict=cfg,
-        run_id="parent_run_1",
-        auth_connector=None,
-        logger=parent_log,
-        logging_path="",
-        summary_trace_path="",
-        tools_data={},
-        tools_spec=[],
-        tools_description=[],
-    )
     runner = SubagentRunner(parent_ctx, orch, cfg)
     child_state = runner._build_child_state("role")
     child_ctx = SimpleNamespace(run_id="child_run_2", logger=None)

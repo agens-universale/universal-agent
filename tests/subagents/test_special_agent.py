@@ -44,6 +44,7 @@ def _make_config(**overrides):
         "system_prompt_id": "test-prompt",
         "completions_url": "http://fake-llm/v1/chat/completions",
         "use_ssl": False,
+        "backend_request_timeout_sec": 600,
         "chat_completion_headers": {"Authorization": "Bearer test-token"},
     }
     cfg.update(overrides)

@@ -56,7 +56,7 @@ class SaveBase64File(AbstractSimpleTool):
             {
                 "tool": SaveBase64File.registered_tool_name(),
                 "ok": ok,
-                "path": tool_report_abspath(path, backend=self._backend),
+                "path": tool_report_abspath(path, workspace=self._workspace),
                 "bytes_written": bytes_written,
                 "error": error,
             },

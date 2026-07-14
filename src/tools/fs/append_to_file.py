@@ -90,7 +90,7 @@ Usage:
             {
                 "tool": AppendToFile.registered_tool_name(),
                 "ok": ok,
-                "path": tool_report_abspath(path, backend=self._backend),
+                "path": tool_report_abspath(path, workspace=self._workspace),
                 "created": created,
                 "bytes_appended": bytes_appended,
                 "separator": separator,
