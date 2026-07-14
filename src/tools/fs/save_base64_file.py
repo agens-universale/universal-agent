@@ -51,13 +51,12 @@ class SaveBase64File(AbstractSimpleTool):
             "- data is the raw base64 string (without the data URI prefix).\n"
         )
 
-    @staticmethod
-    def _result(*, ok: bool, path: str, bytes_written: int = 0, error=None) -> str:
+    def _result(self, *, ok: bool, path: str, bytes_written: int = 0, error=None) -> str:
         return json.dumps(
             {
                 "tool": SaveBase64File.registered_tool_name(),
                 "ok": ok,
-                "path": tool_report_abspath(path),
+                "path": tool_report_abspath(path, backend=self._backend),
                 "bytes_written": bytes_written,
                 "error": error,
             },

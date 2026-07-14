@@ -195,8 +195,7 @@ Update version string:
 '''
         return description
 
-    @staticmethod
-    def _result(
+    def _result(self, 
         *,
         path: str,
         ok: bool,
@@ -224,8 +223,8 @@ Update version string:
                 "match_count": match_count,
                 "line_numbers": line_numbers or [],
                 "match_ranges": match_ranges or [],
-                "path": tool_report_abspath(path),
-                "backup_path": tool_report_abspath(backup_path),
+                "path": tool_report_abspath(path, backend=self._backend),
+                "backup_path": tool_report_abspath(backup_path, backend=self._backend),
                 "diff": diff,
                 "diff_truncated": diff_truncated,
                 "suggestions": suggestions or [],

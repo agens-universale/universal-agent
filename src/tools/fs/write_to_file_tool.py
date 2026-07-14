@@ -82,8 +82,7 @@ Usage:
 '''
         return description
 
-    @staticmethod
-    def _result(
+    def _result(self, 
         *,
         ok: bool,
         path: str,
@@ -97,11 +96,11 @@ Usage:
             {
                 "tool": WriteToFile.registered_tool_name(),
                 "ok": ok,
-                "path": tool_report_abspath(path),
+                "path": tool_report_abspath(path, backend=self._backend),
                 "mode": mode,
                 "created": created,
                 "bytes_written": bytes_written,
-                "backup_path": tool_report_abspath(backup_path),
+                "backup_path": tool_report_abspath(backup_path, backend=self._backend),
                 "error": error,
             },
             ensure_ascii=False,

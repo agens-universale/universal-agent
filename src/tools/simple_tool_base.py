@@ -30,6 +30,16 @@ class AbstractSimpleTool(ABC):
             )
         return backend
 
+    def bind_os_backend(self, backend) -> None:
+        """Test hook: attach a backend without building a full RunContext."""
+        ctx = getattr(self, "_ctx", None)
+        if ctx is None:
+            from types import SimpleNamespace
+
+            ctx = SimpleNamespace(config_dict={})
+            self._ctx = ctx
+        ctx.os_backend = backend
+
     @classmethod
     @abstractmethod
     def tool_description(cls) -> Dict[str, Any]:

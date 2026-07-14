@@ -31,8 +31,7 @@ def _max_file_bytes(config: Optional[Dict[str, Any]]) -> int:
 
 
 class ReadFile(AbstractSimpleTool):
-    @staticmethod
-    def _result(
+    def _result(self, 
         *,
         path: str,
         content: str,
@@ -53,7 +52,7 @@ class ReadFile(AbstractSimpleTool):
             {
                 "tool": ReadFile.registered_tool_name(),
                 "ok": True,
-                "path": tool_report_abspath(path),
+                "path": tool_report_abspath(path, backend=self._backend),
                 "sha256": sha256,
                 "file_size_bytes": file_size_bytes,
                 "start_line": start_line,
@@ -72,8 +71,7 @@ class ReadFile(AbstractSimpleTool):
             ensure_ascii=False,
         )
 
-    @staticmethod
-    def _error_result(
+    def _error_result(self, 
         *,
         path: str,
         error_type: str,
@@ -93,7 +91,7 @@ class ReadFile(AbstractSimpleTool):
             {
                 "tool": ReadFile.registered_tool_name(),
                 "ok": False,
-                "path": tool_report_abspath(path),
+                "path": tool_report_abspath(path, backend=self._backend),
                 "sha256": None,
                 "file_size_bytes": file_size_bytes,
                 "start_line": 0,

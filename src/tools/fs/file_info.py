@@ -56,13 +56,12 @@ class FileInfo(AbstractSimpleTool):
         payload = {"tool": FileInfo.registered_tool_name(), "error": None, **fields}
         return json.dumps(payload, ensure_ascii=False)
 
-    @staticmethod
-    def _error(path: str, error: Dict[str, Any], message: str) -> str:
+    def _error(self, path: str, error: Dict[str, Any], message: str) -> str:
         return json.dumps(
             {
                 "tool": FileInfo.registered_tool_name(),
                 "ok": False,
-                "path": tool_report_abspath(path),
+                "path": tool_report_abspath(path, backend=self._backend),
                 "exists": False,
                 "message": message,
                 "error": error,
@@ -121,7 +120,7 @@ class FileInfo(AbstractSimpleTool):
                 message="Argument 'follow_symlinks' must be a boolean.",
             )
 
-        report_path = tool_report_abspath(path)
+        report_path = tool_report_abspath(path, backend=self._backend)
         if not self._backend.lexists(path):
             return self._result(
                 ok=True,
