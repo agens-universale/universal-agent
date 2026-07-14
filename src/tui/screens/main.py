@@ -2831,6 +2831,24 @@ class TraceScreen(Screen):
             project_local=getattr(self.app, "_config_project_local", None),
         ))
 
+    def _cmd_view(self, arg: str) -> None:
+        """`/view <path>` → FileViewerScreen (ошибки тоже на этом экране)."""
+        from tui.services.file_view import FileViewSettings
+        from tui.screens.file_view import FileViewerScreen
+
+        cfg = getattr(self.app, "_config", None) or {}
+        store = getattr(self.app, "view_positions", None)
+        if store is None:
+            from tui.services.file_view import ViewPositionStore
+            store = ViewPositionStore()
+            self.app.view_positions = store
+        self.app.push_screen(FileViewerScreen(
+            raw_path=arg or "",
+            cwd=self._current_cwd(),
+            store=store,
+            settings=FileViewSettings.from_mapping(cfg.get("tui_file_view")),
+        ))
+
     def _cmd_mcp(self) -> None:
         from tui.screens.mcp import McpScreen
         self.app.push_screen(McpScreen(
@@ -3654,6 +3672,9 @@ class TraceScreen(Screen):
             return
         if name == "diff":
             self.app.action_diff()
+            return
+        if name == "view":
+            self._cmd_view(arg)
             return
         if name == "notices":
             self.app.action_notices()

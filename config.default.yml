@@ -67,6 +67,11 @@ tui:
     # timeout_sec: null
     max_output_bytes: 32768
     max_output_lines: 200
+  file_view:
+    enabled: true
+    max_file_bytes: 67108864   # 64 MiB
+    # null / omit = авто по высоте экрана; число = фиксированный шаг PgUp/PgDn.
+    # page_lines: null
 
 # Diff-TUI: visual review/approve/undo правок агента (не параметры fs return_diff).
 diff_tui:

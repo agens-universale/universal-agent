@@ -15,6 +15,17 @@ class BangShellConfig(BaseModel):
     max_output_lines: int = 200
 
 
+class FileViewConfig(BaseModel):
+    """Yaml ``tui.file_view`` — постраничный `/view` в TUI."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = True
+    max_file_bytes: int = 64 * 1024 * 1024
+    # None = авто по высоте экрана; число = фиксированный шаг PgUp/PgDn (1..200).
+    page_lines: Optional[int] = None
+
+
 class TuiConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -37,3 +48,4 @@ class TuiConfig(BaseModel):
     # paths.agent_md_path (путь главнее флага).
     agentsmd_override: bool = False
     bang_shell: BangShellConfig = Field(default_factory=BangShellConfig)
+    file_view: FileViewConfig = Field(default_factory=FileViewConfig)

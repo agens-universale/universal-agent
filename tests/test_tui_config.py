@@ -62,3 +62,47 @@ def test_flatten_exposes_tui_bang_shell(tmp_path, monkeypatch):
     cfg = cfgmod.load_config(str(conf))
     assert cfg["tui_bang_shell"]["enabled"] is False
     assert cfg["tui_bang_shell"]["timeout_sec"] == 30
+
+
+def test_tui_file_view_defaults():
+    from config_modules.tui import FileViewConfig, TuiConfig
+
+    assert TuiConfig().file_view == FileViewConfig()
+    assert TuiConfig().file_view.enabled is True
+    assert TuiConfig().file_view.max_file_bytes == 64 * 1024 * 1024
+    assert TuiConfig().file_view.page_lines is None
+
+
+def test_flatten_exposes_tui_file_view(tmp_path, monkeypatch):
+    import config as cfgmod
+    import mcp_runtime.paths as mpaths
+
+    monkeypatch.setattr(cfgmod, "_project_local_config_path", lambda: None)
+    monkeypatch.setattr(mpaths, "managed_config_path", lambda: tmp_path / "none.yml")
+
+    conf = tmp_path / "config.yml"
+    conf.write_text(
+        "tui:\n  file_view:\n    enabled: false\n    max_file_bytes: 1024\n"
+        "    page_lines: 40\n",
+        encoding="utf-8",
+    )
+    cfg = cfgmod.load_config(str(conf))
+    assert cfg["tui_file_view"]["enabled"] is False
+    assert cfg["tui_file_view"]["max_file_bytes"] == 1024
+    assert cfg["tui_file_view"]["page_lines"] == 40
+
+
+def test_flatten_file_view_page_lines_null(tmp_path, monkeypatch):
+    import config as cfgmod
+    import mcp_runtime.paths as mpaths
+
+    monkeypatch.setattr(cfgmod, "_project_local_config_path", lambda: None)
+    monkeypatch.setattr(mpaths, "managed_config_path", lambda: tmp_path / "none.yml")
+
+    conf = tmp_path / "config.yml"
+    conf.write_text(
+        "tui:\n  file_view:\n    page_lines: null\n",
+        encoding="utf-8",
+    )
+    cfg = cfgmod.load_config(str(conf))
+    assert cfg["tui_file_view"]["page_lines"] is None

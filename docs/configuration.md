@@ -58,6 +58,8 @@
   - `tui.text_answer_mode` (`deny | judge | allow`, по умолчанию `judge`) — как поступать
     с текстовым ответом агента без вызова инструмента:
     `deny` — всегда bounce (как CLI), `judge` — intent_guard решает, `allow` — принять текст.
+  - `tui.file_view.enabled` / `max_file_bytes` / `page_lines` (`null` = авто по высоте)
+    — постраничный просмотр `/view` в TUI (см. [tui.md](tui.md#просмотр-файла-view)).
 - **Слои инструкций** (`paths.agent_md_path`, `tui.agentsmd_override`) — см. раздел
   [«Слои инструкций (AGENTS.md)»](#слои-инструкций-agentsmd) ниже.
 

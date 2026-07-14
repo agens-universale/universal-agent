@@ -66,6 +66,7 @@ def build_default_registry() -> CommandRegistry:
                 hotkey="F2 · Ctrl+S"),
         Command("diff", (), "", "просмотр pending-диффов, принять/откатить",
                 hotkey="F3 · Ctrl+D"),
+        Command("view", (), "<path>", "постраничный просмотр текстового файла"),
         Command("notices", (), "", "уведомления (старт + runtime)",
                 hotkey="F4 · Ctrl+O"),
         Command("new", (), "", "новая сессия в этом окне", hotkey="Ctrl+N"),

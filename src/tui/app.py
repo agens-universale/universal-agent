@@ -70,8 +70,10 @@ class TuiApp(App):
         self._session_log_path: Optional[str] = None
         self.last_terminal_outcome: Optional[str] = None
         self.last_stop_requested: bool = False   # юзер /stop по живому прогону → терминал «stopped»
+        from tui.services.file_view import ViewPositionStore
         from tui.state import TuiState
         self.tui_state = TuiState()
+        self.view_positions = ViewPositionStore()
 
     def get_css_variables(self) -> dict:
         """Питаем TCSS палитрой из tui.palette — единый источник цветов для CSS и

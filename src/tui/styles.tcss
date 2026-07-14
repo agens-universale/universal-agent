@@ -249,6 +249,9 @@ ToolCallRow.tool-group-start { margin-top: 1; }
 
 /* Тело ViewerScreen — read-only payload/файл */
 .viewer-body   { color: $ink; padding: 0 1; }
+/* FileViewerScreen: тело занимает оставшуюся высоту (пагинация по size.height) */
+FileViewerScreen #root { height: 1fr; }
+#file-view-body { height: 1fr; }
 
 /* Строки списков (TasksScreen, SkillsScreen) */
 .list-row      { color: $ink; padding: 0 1; }

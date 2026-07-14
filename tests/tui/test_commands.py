@@ -36,7 +36,7 @@ def test_closest_match_none_for_far_input():
 def test_default_registry_includes_core_commands():
     reg = build_default_registry()
     for n in ["sessions", "stop", "skills", "skill",
-              "status", "export", "help", "quit"]:
+              "status", "export", "help", "quit", "view"]:
         assert reg.lookup(n) is not None, f"missing /{n}"
 
 
@@ -45,7 +45,7 @@ def test_default_registry_is_exactly_keep_set():
     names = sorted(c.name for c in reg.list_commands())
     assert names == sorted([
         "sessions", "new", "stop", "skill", "skills",
-        "status", "config", "mcp", "notices", "diff", "export", "help", "init", "compact", "quit",
+        "status", "config", "mcp", "notices", "diff", "view", "export", "help", "init", "compact", "quit",
     ])
 
 
@@ -96,7 +96,7 @@ def test_command_hotkeys():
         "notices": "F4 · Ctrl+O",
         "new": "Ctrl+N",
         "config": "F5 · Ctrl+G",
-        "export": "", "compact": "", "init": "",
+        "export": "", "compact": "", "init": "", "view": "",
         "skills": "", "skill": "", "status": "",
         "stop": "Ctrl+C", "mcp": "", "quit": "Esc",
     }
@@ -108,7 +108,7 @@ def test_command_hotkeys():
 def test_default_registry_frequency_order():
     names = [c.name for c in build_default_registry().list_commands()]
     assert names == [
-        "help", "sessions", "diff", "notices", "new", "config",
+        "help", "sessions", "diff", "view", "notices", "new", "config",
         "export", "compact", "init", "skills", "skill", "status",
         "stop", "mcp", "quit",
     ]
