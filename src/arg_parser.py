@@ -94,9 +94,30 @@ parser.add_argument(
 )
 
 parser.add_argument(
+    "--sync-config",
+    action="store_true",
+    dest="sync_config",
+    help="Обновить config.yml до текущей версии (новые поля, переименования; старый файл — в бэкап) и выйти",
+)
+
+parser.add_argument(
     "--init",
     action="store_true",
     help="Сгенерировать AGENTS.md сканом репозитория и выйти (агент не запускается)",
+)
+
+parser.add_argument(
+    "--check-update",
+    action="store_true",
+    dest="check_update",
+    help="Проверить, доступна ли новая версия агента (без установки) и выйти",
+)
+
+parser.add_argument(
+    "--update",
+    action="store_true",
+    dest="update",
+    help="Обновить агента (detached: ждёт завершения текущего процесса, затем uv tool install) и выйти",
 )
 
 parser.add_argument(
@@ -225,8 +246,31 @@ parser.add_argument(
 
 
 parsed_args, unknown_args = parser.parse_known_args()
-if not parsed_args.init_config and not getattr(parsed_args, "init", False) and not parsed_args.query:
-    parser.error("Нужен -q/--query (или --init-config для конфига, --init для AGENTS.md).")
+if (
+    not parsed_args.init_config
+    and not getattr(parsed_args, "init", False)
+    and not parsed_args.sync_config
+    and not parsed_args.check_update
+    and not parsed_args.update
+    and not parsed_args.query
+):
+    parser.error(
+        "Нужен -q/--query "
+        "(или --init-config для конфига, --sync-config для обновления конфига, --init для AGENTS.md, "
+        "--check-update/--update для обновления агента)."
+    )
+if parsed_args.init_config and parsed_args.query:
+    parser.error("--init-config и -q/--query нельзя вместе: --init-config только настраивает и выходит.")
+if parsed_args.sync_config and parsed_args.query:
+    parser.error("--sync-config и -q/--query нельзя вместе: --sync-config только обновляет файл и выходит.")
+if parsed_args.init_config and parsed_args.sync_config:
+    parser.error("--init-config и --sync-config нельзя вместе: используйте одно из двух.")
+if parsed_args.check_update and parsed_args.query:
+    parser.error("--check-update и -q/--query нельзя вместе: --check-update только проверяет и выходит.")
+if parsed_args.update and parsed_args.query:
+    parser.error("--update и -q/--query нельзя вместе: --update только запускает обновление и выходит.")
+if parsed_args.update and parsed_args.check_update:
+    parser.error("--update и --check-update нельзя вместе: используйте одно из двух.")
 if parsed_args.new and not parsed_args.thread_id:
     parser.error("Аргумент -n/--new можно использовать только вместе с -t/--thread-id.")
 run_args = parsed_args

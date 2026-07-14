@@ -79,11 +79,18 @@ diff_tui:
   preview_context_lines: 6     # контекст в TUI visual diff / trace-preview
   max_diff_chars: 8000         # усечение больших visual diff (0 = без лимита)
 
+# Обновление агента (спека D)
+update:
+  check: auto            # auto | off — фоновая проверка новой версии при старте TUI
+  extra_args: []         # доп. аргументы к uv tool install (корп-сеть: ["--system-certs"])
+
 logging:
   full_log_backend: false
   console_trace: true
   dump_storage: false
   save_logs: true
+  format: text                 # text — человекочитаемо; jsonl — структурный поток событий
+  log_level: info              # debug | info | warning | error
 
 paths:
   # Промпт роли запуска (agent_md). Пусто = ролевого промпта нет.
@@ -111,6 +118,7 @@ security:
     enabled: true
     mode: ask
     allowed_command_examples: []
+    denied_command_examples: []
   write_guard:
     enabled: true
     mode: ask

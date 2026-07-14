@@ -124,6 +124,11 @@ tui:
     # null / omit = авто по высоте экрана; число = фиксированный шаг PgUp/PgDn.
     page_lines: null
 
+# Обновление агента (спека D)
+update:
+  check: auto            # auto | off — фоновая проверка новой версии при старте TUI
+  extra_args: []         # доп. аргументы к uv tool install (корп-сеть: ["--system-certs"])
+
 # Diff-TUI: visual review/approve/undo правок агента в /diff (не параметры fs return_diff).
 diff_tui:
   cache_max_orig: 500          # LRU лимит .orig в cache-mode
