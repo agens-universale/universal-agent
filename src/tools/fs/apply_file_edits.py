@@ -76,6 +76,12 @@ class ApplyFileEdits(AbstractSimpleTool):
                                 "start_line",
                                 "end_line",
                             ],
+                            "x-optional-keys": [
+                                "expected_matches",
+                                "occurrence",
+                                "start_line",
+                                "end_line",
+                            ],
                             "additionalProperties": False,
                         },
                     },

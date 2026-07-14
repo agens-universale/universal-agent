@@ -170,18 +170,20 @@ def test_strict_read_file_omits_optional_ok():
     assert args == {"reason": "inspect", "path": "/tmp/f.txt"}
 
 
-def test_strict_read_file_missing_reason_fails():
+def test_strict_read_file_missing_reason_ok():
+    """Injected reason stays in the API required list, but local validation lets it be omitted."""
     spec = copy.deepcopy(ReadFile.tool_description())
     apply_injected_fields_to_spec(spec, _REASON_FIELDS)
     apply_openai_strict_parameters(spec["parameters"])
-    with pytest.raises(WrongFunctionArgumentsException) as exc_info:
-        parse_and_validate_tool_arguments(
-            tool_name="fs_read_file",
-            arguments={"path": "/tmp/f.txt"},
-            tool_spec=spec,
-            allow_empty_for_empty_schema=False,
-        )
-    assert "reason" in str(exc_info.value).lower()
+    assert "reason" in spec["parameters"]["required"]
+
+    args = parse_and_validate_tool_arguments(
+        tool_name="fs_read_file",
+        arguments={"path": "/tmp/f.txt"},
+        tool_spec=spec,
+        allow_empty_for_empty_schema=False,
+    )
+    assert args == {"path": "/tmp/f.txt"}
 
 
 def test_strict_apply_file_edits_omits_top_level_flags_ok():
@@ -212,28 +214,30 @@ def test_strict_apply_file_edits_omits_top_level_flags_ok():
     assert args["path"] == "/tmp/f.txt"
 
 
-def test_strict_apply_file_edits_omit_nested_start_line_fails():
+def test_strict_apply_file_edits_omit_nested_start_line_validates():
+    """Nullable refinements of an edit are semantically optional: omitting them is allowed."""
     spec = copy.deepcopy(ApplyFileEdits.tool_description())
     apply_openai_strict_parameters(spec["parameters"])
-    with pytest.raises(WrongFunctionArgumentsException) as exc_info:
-        parse_and_validate_tool_arguments(
-            tool_name="fs_apply_file_edits",
-            arguments={
-                "path": "/tmp/f.txt",
-                "edits": [
-                    {
-                        "search": "a",
-                        "replace": "b",
-                        "expected_matches": None,
-                        "occurrence": None,
-                        "end_line": None,
-                    }
-                ],
-            },
-            tool_spec=spec,
-            allow_empty_for_empty_schema=False,
-        )
-    assert "start_line" in str(exc_info.value)
+    args = parse_and_validate_tool_arguments(
+        tool_name="fs_apply_file_edits",
+        arguments={
+            "path": "/tmp/f.txt",
+            "edits": [
+                {
+                    "search": "a",
+                    "replace": "b",
+                    "expected_matches": None,
+                    "occurrence": None,
+                    "end_line": None,
+                }
+            ],
+        },
+        tool_spec=spec,
+        allow_empty_for_empty_schema=False,
+    )
+    assert "start_line" not in args["edits"][0]
+    # API schema still demands every field of the edit item.
+    assert "start_line" in spec["parameters"]["properties"]["edits"]["items"]["required"]
 
 
 def test_strict_api_schema_keeps_full_required():

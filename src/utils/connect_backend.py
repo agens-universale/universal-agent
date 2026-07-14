@@ -8,6 +8,7 @@ from typing import List, Dict, Optional, Tuple
 
 
 from message_policy.chat_completions import prepare_chat_completion_messages_for_api
+from utils.schema_markers import schema_without_internal_markers
 from utils.convertations import output_chat_completion_to_response
 from utils.format_messages import format_message_chat_completions_to_send_backend
 from utils.retry import retry_with_backoff
@@ -54,14 +55,14 @@ def normalize_chat_completions_tools(
             if "description" in tool:
                 fn["description"] = tool.get("description")
             if "parameters" in tool:
-                fn["parameters"] = tool.get("parameters")
+                fn["parameters"] = schema_without_internal_markers(tool.get("parameters"))
             if "strict" in tool:
                 fn["strict"] = tool.get("strict")
 
             normalized.append({"type": "function", "function": fn})
             continue
 
-        normalized.append(tool)
+        normalized.append(schema_without_internal_markers(tool))
 
     return normalized
 

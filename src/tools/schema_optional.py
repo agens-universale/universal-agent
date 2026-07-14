@@ -21,6 +21,8 @@ OPTIONAL_EMPTY_AS_OMIT_HINT = (
 _OPTIONAL_HINTS = (OPTIONAL_OMIT_HINT, OPTIONAL_EMPTY_AS_OMIT_HINT)
 
 # On a property schema: empty string is a real value, not “unused” (excluded from x-optional-keys).
+# All x-* keys are internal bookkeeping and are stripped before a request goes out —
+# see utils.schema_markers.schema_without_internal_markers.
 X_PRESERVE_EMPTY_STRING = "x-preserve-empty-string"
 
 
@@ -81,6 +83,40 @@ def _is_string_like_property(prop_schema: Any) -> bool:
     return False
 
 
+def seed_optional_keys(schema: dict[str, Any]) -> list[str]:
+    """
+    Ensure ``x-optional-keys`` exists on an object node and return it.
+
+    Seeded from the keys absent from ``required`` (minus properties that treat an
+    empty string as a real value). Idempotent: an existing list is kept as is.
+    Single source of truth for "which keys may be omitted" — callers that make a
+    property semantically optional (strict expansion, field injection) go through here.
+    """
+    existing = schema.get("x-optional-keys")
+    if isinstance(existing, list):
+        return existing
+    props = schema.get("properties")
+    if not isinstance(props, dict):
+        props = {}
+    required_before = schema.get("required")
+    if not isinstance(required_before, list):
+        required_before = []
+    seeded = [
+        k
+        for k in props
+        if k not in required_before and not _property_preserves_empty_string(props[k])
+    ]
+    schema["x-optional-keys"] = seeded
+    return seeded
+
+
+def mark_property_optional(schema: dict[str, Any], key: str) -> None:
+    """Record ``key`` as semantically optional (omittable) for local validation."""
+    optional = seed_optional_keys(schema)
+    if key not in optional:
+        schema["x-optional-keys"] = [*optional, key]
+
+
 def apply_openai_strict_object(schema: dict[str, Any]) -> None:
     """
     OpenAI strict mode for one object node: every property key is required;
@@ -97,15 +133,7 @@ def apply_openai_strict_object(schema: dict[str, Any]) -> None:
         schema["required"] = []
         schema["additionalProperties"] = False
         return
-    if "x-optional-keys" not in schema:
-        required_before = schema.get("required")
-        if not isinstance(required_before, list):
-            required_before = []
-        schema["x-optional-keys"] = [
-            k
-            for k in props
-            if k not in required_before and not _property_preserves_empty_string(props[k])
-        ]
+    seed_optional_keys(schema)
     schema["x-openai-strict"] = True
     schema["required"] = list(props.keys())
     # OpenAI strict always requires explicit false (Pydantic may emit true for dict types).
@@ -160,6 +188,36 @@ def _rewrite_semantic_required(schema: Any) -> None:
                 _rewrite_semantic_required(def_schema)
 
 
+def _has_optional_markers(schema: Any) -> bool:
+    """True if the schema (or any nested subschema) carries strict/optional markers."""
+    if not isinstance(schema, dict):
+        return False
+    if schema.get("x-openai-strict") or isinstance(schema.get("x-optional-keys"), list):
+        return True
+
+    props = schema.get("properties")
+    if isinstance(props, dict) and any(_has_optional_markers(sub) for sub in props.values()):
+        return True
+
+    items = schema.get("items")
+    if isinstance(items, dict) and _has_optional_markers(items):
+        return True
+    if isinstance(items, list) and any(_has_optional_markers(item) for item in items):
+        return True
+
+    for key in ("anyOf", "oneOf", "allOf"):
+        branches = schema.get(key)
+        if isinstance(branches, list) and any(_has_optional_markers(b) for b in branches):
+            return True
+
+    for defs_key in ("$defs", "definitions"):
+        defs = schema.get(defs_key)
+        if isinstance(defs, dict) and any(_has_optional_markers(d) for d in defs.values()):
+            return True
+
+    return False
+
+
 def parameters_schema_for_local_validation(params: dict[str, Any]) -> dict[str, Any]:
     """
     Schema for local Draft7 validation under OpenAI strict tools mode.
@@ -169,9 +227,7 @@ def parameters_schema_for_local_validation(params: dict[str, Any]) -> dict[str, 
     """
     if not isinstance(params, dict):
         return params
-    if not params.get("x-openai-strict") and not isinstance(
-        params.get("x-optional-keys"), list
-    ):
+    if not _has_optional_markers(params):
         return params
     out = copy.deepcopy(params)
     _rewrite_semantic_required(out)

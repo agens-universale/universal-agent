@@ -1,4 +1,5 @@
 import json
+import math
 from typing import Any, Dict, Type
 
 from jsonschema import Draft7Validator
@@ -201,6 +202,44 @@ def _coerce_double_encoded_fields(
     return coerced, changed
 
 
+def _coerce_numeric_strings(
+    parsed_args: Dict[str, Any], params_schema: Dict[str, Any]
+) -> tuple[Dict[str, Any], bool]:
+    """Recovery-проход: строка там, где схема ждёт число, и парс однозначен → число.
+
+    Консервативно: только для полей с type integer/number; дробное значение в
+    integer-поле не принимаем; не-конечные значения (inf/nan из "1e999") отвергаем;
+    строковые поля не трогаем (поэтому "123" в string-поле остаётся строкой)."""
+    properties = params_schema.get("properties", {}) or {}
+    if not isinstance(parsed_args, dict) or not properties:
+        return parsed_args, False
+    coerced = dict(parsed_args)
+    changed = False
+    for field, value in parsed_args.items():
+        if not isinstance(value, str):
+            continue
+        subschema = properties.get(field)
+        if not isinstance(subschema, dict):
+            continue
+        expected = subschema.get("type")
+        if expected not in ("integer", "number"):
+            continue
+        try:
+            num: Any = float(value)
+        except ValueError:
+            continue
+        if not math.isfinite(num):
+            continue
+        if expected == "integer":
+            if not float(num).is_integer():
+                continue
+            num = int(num)
+        if Draft7Validator(subschema).is_valid(num):
+            coerced[field] = num
+            changed = True
+    return coerced, changed
+
+
 def parse_and_validate_tool_arguments(
     *,
     tool_name: str,
@@ -258,16 +297,20 @@ def parse_and_validate_tool_arguments(
     try:
         _validate_tool_arguments(tool_name, validation_schema, parsed_args)
     except Exception as e:  # noqa: BLE001
-        coerced, changed = _coerce_double_encoded_fields(parsed_args, params_schema)
         recovered = False
-        if changed:
+        candidate = parsed_args
+        for coercer in (_coerce_double_encoded_fields, _coerce_numeric_strings):
+            coerced, changed = coercer(candidate, params_schema)
+            if not changed:
+                continue
+            candidate = coerced
             try:
-                _validate_tool_arguments(tool_name, validation_schema, coerced)
+                _validate_tool_arguments(tool_name, validation_schema, candidate)
             except Exception:  # noqa: BLE001
-                recovered = False
-            else:
-                parsed_args = coerced
-                recovered = True
+                continue
+            parsed_args = candidate
+            recovered = True
+            break
         if not recovered:
             _raise_wrong_function_arguments(
                 message=str(e),
