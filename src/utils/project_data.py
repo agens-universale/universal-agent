@@ -69,6 +69,58 @@ def get_listing(dir_path: str) -> str:
     return tpl.strip()
 
 
+def get_listing_from_backend(backend: Any, dir_path: str) -> str:
+    """Two-level listing of `dir_path` read through an FsBackend (same shape as get_listing)."""
+    entries = backend.listdir(dir_path)
+    res: List[tuple[str, List[str]]] = []
+    for i, (name, is_dir) in enumerate(entries):
+        if name in stop_folders:
+            continue
+        if i >= cut_first:
+            res.append(("...", []))
+            break
+        if is_dir:
+            sub_path = backend.join(dir_path, name)
+            sub_res: List[str] = []
+            for j, (sub_name, sub_is_dir) in enumerate(backend.listdir(sub_path)):
+                if sub_name in stop_folders:
+                    continue
+                if j >= cut_second:
+                    sub_res.append("...")
+                    break
+                sub_res.append(sub_name + "/" if sub_is_dir else sub_name)
+            res.append((name + "/", sub_res))
+        else:
+            res.append((name, []))
+
+    tpl = ""
+    for name, sub_files in res:
+        tpl += "\n" + name
+        for sub in sub_files:
+            tpl += "\n    " + sub
+    return tpl.strip()
+
+
+def _project_data_from_backend(backend: Any) -> Dict[str, str]:
+    """Env facts sourced from the task container: cwd, .git, listing come from the backend."""
+    project_dir = backend.default_cwd() or "/"
+    is_git_project = "true" if backend.exists(backend.join(project_dir, ".git")) else "false"
+    try:
+        project_dir_listing = get_listing_from_backend(backend, project_dir)
+    except OSError:
+        project_dir_listing = ""
+    return {
+        "OS": "Linux",                      # container images are Linux
+        "shell": "sh",
+        "projectDir": project_dir,
+        "projectDirWritable": "true",       # container-root perspective (matches HarborBackend.writable)
+        "allowed_write_paths": project_dir,
+        "currentDate": datetime.now().strftime("%Y-%m-%d"),
+        "isGitProject": is_git_project,
+        "projectDirListing": project_dir_listing,
+    }
+
+
 def _dir_writable_probe(path: str) -> bool:
     return directory_allows_probe_write(path)
 
@@ -120,7 +172,10 @@ def os_label() -> str:
     return sys.platform
 
 
-def get_project_data(workspace_config: Optional[Dict[str, Any]] = None) -> Dict[str, str]:
+def get_project_data(
+    workspace_config: Optional[Dict[str, Any]] = None,
+    backend: Optional[Any] = None,
+) -> Dict[str, str]:
     """
     return project data like
     {
@@ -137,9 +192,15 @@ def get_project_data(workspace_config: Optional[Dict[str, Any]] = None) -> Dict[
     workspace_config: optional CLI/server config snapshot (launch_root, project_root,
     write_guard.extra_paths) used for projectDir / allowed writes.
 
+    backend: optional FsBackend; when it is a sandbox (task container), all facts are
+    sourced from the backend so the prompt describes the container, not this host.
+
     ``allowed_write_paths`` lists only directories where a probe file can be created and removed
     (same meaning on Linux, macOS, and Windows); non-writable roots are omitted.
     """
+    if backend is not None and getattr(backend, "is_sandbox", False):
+        return _project_data_from_backend(backend)
+
     os_str = os_label()
 
     # Оболочка (shell)
