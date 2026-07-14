@@ -8,6 +8,8 @@ mutated by the transport, or the validator would lose the markers it depends on.
 import copy
 import json
 
+import pytest
+
 from tools import build_tools_data
 from tools.schema_optional import resolve_optional_property_keys
 from utils.connect_backend import normalize_chat_completions_tools
@@ -17,6 +19,17 @@ CONFIG = {
     "stop_tools": [],
     "openai_strict_tools_schema": False,
 }
+
+
+@pytest.fixture(scope="module")
+def specs() -> list:
+    """The registry exactly as it ships — the payload we care about is the real one.
+
+    Module-scoped: build_tools_data walks the skills registry and MCP discovery, so
+    build it once for the whole file rather than per test.
+    """
+    _, built, *_ = build_tools_data(CONFIG)
+    return built
 
 
 def _has_internal_marker(node) -> bool:
@@ -29,8 +42,7 @@ def _has_internal_marker(node) -> bool:
     return False
 
 
-def test_wire_payload_carries_no_internal_markers():
-    _, specs, *_ = build_tools_data(CONFIG)
+def test_wire_payload_carries_no_internal_markers(specs):
     assert _has_internal_marker(specs), "sanity: specs are expected to carry markers before normalization"
 
     wire = normalize_chat_completions_tools(specs)
@@ -42,9 +54,8 @@ def test_wire_payload_carries_no_internal_markers():
     )
 
 
-def test_nested_markers_are_stripped_too():
+def test_nested_markers_are_stripped_too(specs):
     """fs_apply_file_edits keeps its markers inside edits[].items."""
-    _, specs, *_ = build_tools_data(CONFIG)
     wire = normalize_chat_completions_tools(specs)
 
     edits = next(t for t in wire if t["function"]["name"] == "fs_apply_file_edits")
@@ -60,8 +71,7 @@ def test_nested_markers_are_stripped_too():
     ], "the standard part of the schema must survive untouched"
 
 
-def test_normalization_does_not_mutate_tools_data():
-    _, specs, *_ = build_tools_data(CONFIG)
+def test_normalization_does_not_mutate_tools_data(specs):
     before = copy.deepcopy(specs)
 
     normalize_chat_completions_tools(specs)
@@ -73,8 +83,7 @@ def test_normalization_does_not_mutate_tools_data():
     )
 
 
-def test_wire_payload_is_json_serializable_and_standard():
-    _, specs, *_ = build_tools_data(CONFIG)
+def test_wire_payload_is_json_serializable_and_standard(specs):
     wire = normalize_chat_completions_tools(specs)
 
     payload = json.loads(json.dumps({"tools": wire}))
