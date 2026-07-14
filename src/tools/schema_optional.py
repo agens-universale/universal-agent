@@ -81,6 +81,40 @@ def _is_string_like_property(prop_schema: Any) -> bool:
     return False
 
 
+def seed_optional_keys(schema: dict[str, Any]) -> list[str]:
+    """
+    Ensure ``x-optional-keys`` exists on an object node and return it.
+
+    Seeded from the keys absent from ``required`` (minus properties that treat an
+    empty string as a real value). Idempotent: an existing list is kept as is.
+    Single source of truth for "which keys may be omitted" — callers that make a
+    property semantically optional (strict expansion, field injection) go through here.
+    """
+    existing = schema.get("x-optional-keys")
+    if isinstance(existing, list):
+        return existing
+    props = schema.get("properties")
+    if not isinstance(props, dict):
+        props = {}
+    required_before = schema.get("required")
+    if not isinstance(required_before, list):
+        required_before = []
+    seeded = [
+        k
+        for k in props
+        if k not in required_before and not _property_preserves_empty_string(props[k])
+    ]
+    schema["x-optional-keys"] = seeded
+    return seeded
+
+
+def mark_property_optional(schema: dict[str, Any], key: str) -> None:
+    """Record ``key`` as semantically optional (omittable) for local validation."""
+    optional = seed_optional_keys(schema)
+    if key not in optional:
+        schema["x-optional-keys"] = [*optional, key]
+
+
 def apply_openai_strict_object(schema: dict[str, Any]) -> None:
     """
     OpenAI strict mode for one object node: every property key is required;
@@ -97,15 +131,7 @@ def apply_openai_strict_object(schema: dict[str, Any]) -> None:
         schema["required"] = []
         schema["additionalProperties"] = False
         return
-    if "x-optional-keys" not in schema:
-        required_before = schema.get("required")
-        if not isinstance(required_before, list):
-            required_before = []
-        schema["x-optional-keys"] = [
-            k
-            for k in props
-            if k not in required_before and not _property_preserves_empty_string(props[k])
-        ]
+    seed_optional_keys(schema)
     schema["x-openai-strict"] = True
     schema["required"] = list(props.keys())
     # OpenAI strict always requires explicit false (Pydantic may emit true for dict types).
