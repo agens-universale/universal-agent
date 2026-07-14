@@ -21,6 +21,8 @@ OPTIONAL_EMPTY_AS_OMIT_HINT = (
 _OPTIONAL_HINTS = (OPTIONAL_OMIT_HINT, OPTIONAL_EMPTY_AS_OMIT_HINT)
 
 # On a property schema: empty string is a real value, not “unused” (excluded from x-optional-keys).
+# All x-* keys are internal bookkeeping and are stripped before a request goes out —
+# see utils.schema_markers.schema_without_internal_markers.
 X_PRESERVE_EMPTY_STRING = "x-preserve-empty-string"
 
 
