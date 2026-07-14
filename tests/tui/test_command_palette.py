@@ -33,6 +33,68 @@ async def test_palette_opens_on_slash_and_filters():
 
 
 @pytest.mark.asyncio
+async def test_palette_opens_on_dot_only_and_closes_on_more_typing(tmp_path):
+    """Ровно `.` открывает палитру (RU-раскладка); дальше печатаем — закрывается."""
+    pytest.importorskip("textual")
+    from tui.app import TuiApp
+    from tui.widgets.command_palette import CommandPalette
+
+    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    async with app.run_test() as pilot:
+        inp = pilot.app.query_one("#cmdinput")
+        inp.text = "."
+        await pilot.pause(0.1)
+        assert len(pilot.app.query(CommandPalette)) == 1
+        palette = pilot.app.query_one(CommandPalette)
+        rows_text = "\n".join(
+            str(r.render()) for r in palette.query(".palette-row")
+        )
+        assert "/help" in rows_text
+        assert "/sessions" in rows_text
+
+        # Продолжили печатать — палитра пропала (не фильтр по `.x`).
+        inp.text = ".п"
+        await pilot.pause(0.1)
+        assert len(pilot.app.query(CommandPalette)) == 0
+
+
+@pytest.mark.asyncio
+async def test_palette_dot_enter_executes_selected(tmp_path):
+    """Enter по палитре, открытой через `.`, выполняет /команду — не шлёт `.`."""
+    pytest.importorskip("textual")
+    from tui.app import TuiApp
+    from tui.screens.help import HelpScreen
+
+    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    async with app.run_test() as pilot:
+        inp = pilot.app.query_one("#cmdinput")
+        inp.text = "."
+        await pilot.pause(0.1)
+        assert pilot.app.query(".palette")
+        # Первая в реестре — help.
+        await pilot.press("enter")
+        assert not pilot.app.query(".palette")
+        assert pilot.app.query_one("#cmdinput").text == ""
+        assert isinstance(pilot.app.screen, HelpScreen)
+
+
+@pytest.mark.asyncio
+async def test_palette_dot_tab_completes_with_slash(tmp_path):
+    """Tab из палитры по `.` подставляет /name — не `.name`."""
+    pytest.importorskip("textual")
+    from tui.app import TuiApp
+
+    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    async with app.run_test() as pilot:
+        inp = pilot.app.query_one("#cmdinput")
+        inp.text = "."
+        await pilot.pause(0.1)
+        await pilot.press("tab")
+        assert not pilot.app.query(".palette")
+        assert pilot.app.query_one("#cmdinput").text == "/help "
+
+
+@pytest.mark.asyncio
 async def test_palette_closes_on_esc():
     pytest.importorskip("textual")
     from tui.app import TuiApp

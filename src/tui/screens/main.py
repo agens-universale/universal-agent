@@ -2412,6 +2412,22 @@ class TraceScreen(Screen):
                 self._palette.set_filter(val[1:])
             return
 
+        # Состояние 1b: ровно `.` → та же палитра (клавиша `/` в RU-раскладке).
+        # Фильтр по дальнейшему вводу не делаем: латиница команд в RU недоступна,
+        # выбор — стрелками/Enter/Tab; любой символ после `.` палитру закрывает.
+        if val == ".":
+            if self._skill_picker is not None:
+                self._close_skill_picker()
+            if self._arg_picker is not None:
+                self._close_arg_picker()
+            if self._file_picker is not None:
+                self._close_file_picker()
+            if self._palette is None:
+                self._open_palette(prefix="")
+            else:
+                self._palette.set_filter("")
+            return
+
         # Состояние 2: /skill <фильтр> → skill-picker.
         if val.startswith("/") and " " in val:
             first, _, rest = val.partition(" ")

@@ -40,6 +40,7 @@ async def test_help_header_and_hotkeys():
         assert mains.index("/help") < mains.index("/sessions") < mains.index("/diff")
         assert "log-txt" in mains and "log-json" in mains
         assert "упомянуть файл" in mains
+        assert "палитра команд" in mains
         assert "вложить файл" not in mains
         assert "Ctrl+J" in keys
         assert "Ctrl+Enter" not in keys
@@ -48,6 +49,8 @@ async def test_help_header_and_hotkeys():
         assert "! git status" in mains
         assert "! clear" in mains
         assert "локальный shell" in mains
+        keys_all = " ".join(str(s.render()) for s in scr.query(".help-row-key"))
+        assert "." in keys_all.split()
 
 
 @pytest.mark.asyncio
