@@ -28,8 +28,11 @@ def _load_adapter():
         if key == "harbor" or key.startswith("harbor."):
             del sys.modules[key]
     sys.path.insert(0, str(REPO / "src"))
+    # Import as harbor does at runtime (`adapters.gc_cli_external:GcCliExternal`), so the
+    # adapter's own `from adapters.gc_cli_config import ...` resolves.
+    sys.path.insert(0, str(REPO / "harbor"))
     spec = importlib.util.spec_from_file_location(
-        "gc_cli_external", REPO / "harbor" / "adapters" / "gc_cli_external.py"
+        "adapters.gc_cli_external", REPO / "harbor" / "adapters" / "gc_cli_external.py"
     )
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
@@ -64,15 +67,16 @@ def test_adapter_points_dependency_paths_to_existing_files(monkeypatch):
 
 
 def test_security_guards_pinned_off_for_benches(monkeypatch):
-    # Fuse: if a release flips guard defaults to enabled/ask, benches must
-    # still get them explicitly OFF (absent keys would inherit the flip).
+    # Fuse: if a release flips guard defaults to enabled/ask, benches must still get them
+    # explicitly OFF. The rest of each guard's schema keys ride along from the defaults —
+    # only the switch is pinned.
     monkeypatch.delenv("GC_CLI_BACKEND_URL", raising=False)
     GcCliExternal = _load_adapter()
     c = _agent(GcCliExternal)._build_config()
-    assert c["read_guard"] == {"enabled": False}
-    assert c["write_guard"] == {"enabled": False}
-    assert c["url_policy"] == {"enabled": False}
-    assert c["command_moderation"] == {"mode": "allow"}
+    assert c["read_guard"]["enabled"] is False
+    assert c["write_guard"]["enabled"] is False
+    assert c["url_policy"]["enabled"] is False
+    assert c["command_moderation"]["mode"] == "allow"
 
 
 def test_no_backend_url_fails_fast(monkeypatch):

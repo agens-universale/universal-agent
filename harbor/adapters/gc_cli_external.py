@@ -33,6 +33,8 @@ from harbor.models.trajectories import (
 )
 from harbor.utils.trajectory_utils import format_trajectory_json
 
+from adapters.gc_cli_config import build_gc_cli_config
+
 # gc-cli is installed as a package into the harbor runner env
 # (`uv pip install gc-ua`), so it imports directly — no source-dir / PYTHONPATH.
 #
@@ -210,58 +212,17 @@ class GcCliExternal(BaseAgent):
         return url
 
     def _build_config(self) -> dict:
-        # Structural/fleet-parity defaults; the harbor profile may override any key via
-        # agent_kwargs.gc_cli_config (deep-merged below).
-        #
-        # NO sampling defaults (temperature/top_p/top_k): open models ship their
-        # recommended values in generation_config.json, which the backend applies when
-        # the client sends none. Hardcoding sampling here would override every model's
-        # own recommended params (e.g. force MiniMax's 1.0/0.95/40 onto Qwen-Coder,
-        # whose card recommends 0.7/0.8/20/1.05). Pin per-model only via the profile's
-        # gc_cli_config.chat_completion_kwargs when generation_config is unavailable.
-        defaults = {
-            "backend_api_mode": "chat_completions",
-            "completions_url": self._backend_url,
-            "model": self._model,
-            "chat_completions_system_prompt_path": str(_PROMPTS_DIR / "chat_completions_system_prompt.md"),
-            "chat_completions_intent_guard_prompt_path": str(_PROMPTS_DIR / "chat_completions_intent_guard_prompt.md"),
-            "skills_data_path": str(_SKILLS_DIR),
-            "summary_params": {
-                "chat_completions_summary_prompt_path": str(_PROMPTS_DIR / "chat_completions_summary_prompt.md"),
-                "chat_completions_memory_patch_append_prompt_path": str(_PROMPTS_DIR / "chat_completions_memory_patch_append.md"),
-                "chat_completions_memory_patch_replace_prompt_path": str(_PROMPTS_DIR / "chat_completions_memory_patch_replace.md"),
-            },
-            "chat_completions_max_tokens": 32768,
-            "use_max_tokens_param": True,
-            "chat_completion_kwargs": {
-                "chat_template_kwargs": {"enable_thinking": False},
-                "tool_choice": "auto",
-            },
-            "use_ssl": False,
-            "use_retry": True,
-            "use_local_subagents": False,
-            "os_backend": "harbor",
-            "system_prompt_id": "v1",
-            "no_tool_call_max_count": 3,
-            "max_steps": 200,
-            "save_logs": False,
-            "dump_storage": False,
-            "console_trace": False,
-            # Guards pinned OFF for benches regardless of release defaults:
-            # host-path guards resolve against the RUNNER's fs tree (container
-            # paths always "out of perimeter"), and "ask" auto-declines on
-            # non-tty == deny. Profiles may re-enable via gc_cli_config.
-            "read_guard": {"enabled": False},
-            "write_guard": {"enabled": False},
-            "url_policy": {"enabled": False},
-            "command_moderation": {"mode": "allow"},
-        }
-        # completions_url/model are derived from runtime (api_base/model_name) — keep
-        # them authoritative over any stale profile value.
-        merged = _deep_merge(defaults, self._overrides)
-        merged["completions_url"] = self._backend_url
-        merged["model"] = self._model
-        return merged
+        # schema defaults < bench defaults < profile gc_cli_config < runtime (url/model).
+        # See adapters.gc_cli_config — starting from the schema is what keeps a newly
+        # added AppConfig key from KeyError-ing every bench run.
+        return build_gc_cli_config(
+            completions_url=self._backend_url,
+            model=self._model,
+            prompts_dir=_PROMPTS_DIR,
+            skills_dir=_SKILLS_DIR,
+            config_dir=str(_ADAPTER_DIR),
+            overrides=self._overrides,
+        )
 
     def _write_trajectory(self, state: Any) -> int:
         """Dump the gc-cli run as ATIF `trajectory.json`, mirroring Terminus2.

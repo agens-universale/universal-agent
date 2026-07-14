@@ -23,11 +23,13 @@ for _key in list(sys.modules.keys()):
     if _key == "harbor" or _key.startswith("harbor."):
         del sys.modules[_key]
 
-# The adapter is not part of src/; load it from harbor/adapters/.
-_ADAPTERS = Path(__file__).resolve().parent.parent / "harbor" / "adapters"
-sys.path.insert(0, str(_ADAPTERS))
+# The adapter is not part of src/; import it as harbor does at runtime
+# (`--agent-import-path adapters.gc_cli_external:GcCliExternal`), so its own
+# `from adapters.gc_cli_config import ...` resolves the same way here.
+_HARBOR = Path(__file__).resolve().parent.parent / "harbor"
+sys.path.insert(0, str(_HARBOR))
 
-from gc_cli_external import (  # noqa: E402
+from adapters.gc_cli_external import (  # noqa: E402
     GcCliExternal,
     _deep_merge,
     _messages_to_steps,

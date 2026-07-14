@@ -167,36 +167,13 @@ def resolve_config_path(config_path: Optional[str] = None) -> str:
     return config_path or _xdg_config_path() or _default_config_path()
 
 
-def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
-    if config_path is None and _xdg_config_path() is None:
-        _bootstrap_user_config()
-    path = resolve_config_path(config_path)
-    config_dir = os.path.dirname(os.path.abspath(path))
+def flatten_app_config(app_cfg: AppConfig) -> Dict[str, Any]:
+    """Проекция валидированного AppConfig в плоский config_dict агентного слоя.
 
-    with open(path, "r", encoding="utf-8") as file:
-        raw_config = yaml.safe_load(file) or {}
-
-    # Machine-managed overlay (gc-mcp install/remove): ~/.gc/config.local.yml.
-    # Мёржится поверх base, под project-local. mcp.servers аккумулируются.
-    managed_path = managed_config_path()
-    if managed_path.is_file() and os.path.abspath(str(managed_path)) != os.path.abspath(path):
-        with open(managed_path, "r", encoding="utf-8") as file:
-            managed_raw = yaml.safe_load(file) or {}
-        raw_config = deep_merge(raw_config, managed_raw)
-
-    # Layered loading: project <cwd>/.gc/config.yml поверх глобального.
-    project_path = _project_local_config_path()
-    if project_path is not None and os.path.abspath(project_path) != os.path.abspath(path):
-        with open(project_path, "r", encoding="utf-8") as file:
-            project_raw = yaml.safe_load(file) or {}
-        raw_config = deep_merge(raw_config, project_raw)
-
-    # Резолв ${ENV:VAR} после всех merge-слоёв, до валидации — креды модели/MCP из окружения.
-    raw_config = resolve_env_placeholders(raw_config)
-
-    app_cfg = AppConfig.model_validate(raw_config)
-    resolve_paths(app_cfg, config_dir)
-
+    Единственное место, где схема раскладывается в плоские ключи. Любой сборщик
+    конфига (load_config, harbor-адаптер) обязан идти через неё, иначе новый ключ
+    схемы не доедет до потребителей, которые читают его как cfg["..."].
+    """
     # Устаревшие ключи, заданные юзером ЯВНО (pydantic model_fields_set знает
     # explicit-set vs дефолт). Голый факт → startup_notices форматирует текст.
     _deprecated_keys_used: list[str] = []
@@ -312,6 +289,41 @@ def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
         "agent_auth": app_cfg.agent_auth.model_dump() if app_cfg.agent_auth else {},
         "diff_tui": app_cfg.diff_tui.model_dump(),
     }
+
+    return config_dict
+
+
+def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
+    if config_path is None and _xdg_config_path() is None:
+        _bootstrap_user_config()
+    path = resolve_config_path(config_path)
+    config_dir = os.path.dirname(os.path.abspath(path))
+
+    with open(path, "r", encoding="utf-8") as file:
+        raw_config = yaml.safe_load(file) or {}
+
+    # Machine-managed overlay (gc-mcp install/remove): ~/.gc/config.local.yml.
+    # Мёржится поверх base, под project-local. mcp.servers аккумулируются.
+    managed_path = managed_config_path()
+    if managed_path.is_file() and os.path.abspath(str(managed_path)) != os.path.abspath(path):
+        with open(managed_path, "r", encoding="utf-8") as file:
+            managed_raw = yaml.safe_load(file) or {}
+        raw_config = deep_merge(raw_config, managed_raw)
+
+    # Layered loading: project <cwd>/.gc/config.yml поверх глобального.
+    project_path = _project_local_config_path()
+    if project_path is not None and os.path.abspath(project_path) != os.path.abspath(path):
+        with open(project_path, "r", encoding="utf-8") as file:
+            project_raw = yaml.safe_load(file) or {}
+        raw_config = deep_merge(raw_config, project_raw)
+
+    # Резолв ${ENV:VAR} после всех merge-слоёв, до валидации — креды модели/MCP из окружения.
+    raw_config = resolve_env_placeholders(raw_config)
+
+    app_cfg = AppConfig.model_validate(raw_config)
+    resolve_paths(app_cfg, config_dir)
+
+    config_dict = flatten_app_config(app_cfg)
 
     apply_swarm_env_overrides(config_dict, config_dir)
 
