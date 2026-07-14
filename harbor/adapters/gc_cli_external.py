@@ -59,17 +59,6 @@ if not _PROMPTS_DIR.is_dir():                            # editable/local: fall 
     _SKILLS_DIR = _repo_root / "skills"
 
 
-def _deep_merge(base: dict, over: dict) -> dict:
-    """Recursively overlay `over` onto `base` (nested dicts merge, scalars replace)."""
-    out = dict(base)
-    for key, value in over.items():
-        if isinstance(value, dict) and isinstance(out.get(key), dict):
-            out[key] = _deep_merge(out[key], value)
-        else:
-            out[key] = value
-    return out
-
-
 def _stringify_content(content: Any) -> str:
     """Flatten an OpenAI chat `content` (str | list[part] | None) to plain text."""
     if content is None:

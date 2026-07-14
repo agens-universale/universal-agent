@@ -31,7 +31,6 @@ sys.path.insert(0, str(_HARBOR))
 
 from adapters.gc_cli_external import (  # noqa: E402
     GcCliExternal,
-    _deep_merge,
     _messages_to_steps,
     _stringify_content,
 )
@@ -78,12 +77,6 @@ def test_stringify_handles_none_str_and_parts():
         _stringify_content([{"type": "text", "text": "a"}, {"type": "text", "text": "b"}])
         == "a\nb"
     )
-
-
-def test_deep_merge_overlays_nested_dicts():
-    base = {"a": 1, "nested": {"x": 1, "y": 2}}
-    over = {"a": 9, "nested": {"y": 20, "z": 3}}
-    assert _deep_merge(base, over) == {"a": 9, "nested": {"x": 1, "y": 20, "z": 3}}
 
 
 def test_gc_cli_config_overrides_merge_into_build_config():

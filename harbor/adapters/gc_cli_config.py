@@ -8,6 +8,9 @@ was simply absent, and the run died with KeyError. So we start from the schema d
 
     schema defaults  <  bench defaults  <  profile gc_cli_config  <  runtime (url/model)
 
+Layering uses ``config_modules.merge.deep_merge`` — the same rules the project-local
+``.gc/config.yml`` overlay follows, so a bench profile and a project overlay behave alike.
+
 Kept free of any ``harbor`` import on purpose: the config contract is testable without
 the harbor runtime installed.
 """
@@ -17,18 +20,8 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from config import flatten_app_config
+from config_modules.merge import deep_merge
 from config_modules.root import AppConfig, resolve_paths
-
-
-def deep_merge(base: Dict[str, Any], over: Dict[str, Any]) -> Dict[str, Any]:
-    """Recursively overlay ``over`` onto ``base`` (nested dicts merge, scalars replace)."""
-    out = dict(base)
-    for key, value in over.items():
-        if isinstance(value, dict) and isinstance(out.get(key), dict):
-            out[key] = deep_merge(out[key], value)
-        else:
-            out[key] = value
-    return out
 
 
 def schema_defaults(config_dir: str) -> Dict[str, Any]:
