@@ -1,7 +1,12 @@
 import copy
 import json
 
-from tools.arguments_validation import parse_and_validate_tool_arguments
+import pytest
+
+from tools.arguments_validation import (
+    WrongFunctionArgumentsException,
+    parse_and_validate_tool_arguments,
+)
 from tools.fs.append_to_file import AppendToFile
 from tools.schema_optional import apply_openai_strict_parameters
 
@@ -37,6 +42,18 @@ def test_parse_preserves_empty_separator_non_strict():
         allow_empty_for_empty_schema=False,
     )
     assert args["separator"] == ""
+
+
+def test_parse_rejects_omitted_separator():
+    spec = AppendToFile.tool_description()
+    assert "separator" in spec["parameters"]["required"]
+    with pytest.raises(WrongFunctionArgumentsException):
+        parse_and_validate_tool_arguments(
+            tool_name="fs_append_file",
+            arguments={"path": "/tmp/note.txt", "content": "x"},
+            tool_spec=spec,
+            allow_empty_for_empty_schema=False,
+        )
 
 
 def test_parse_preserves_empty_separator_strict():

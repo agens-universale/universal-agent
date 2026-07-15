@@ -117,6 +117,56 @@ def test_download_file_docx_zip_header(tmp_path, monkeypatch):
     assert (launch_root / "downloads" / "doc.docx").read_bytes() == DOCX_BYTES
 
 
+@pytest.mark.parametrize(
+    ("filename", "body"),
+    [
+        ("notes.txt", b"hello plain text\n"),
+        ("readme.md", b"# Title\n\nSome markdown.\n"),
+    ],
+)
+def test_download_file_plain_text_extensions(tmp_path, monkeypatch, filename, body):
+    launch_root = tmp_path / "project"
+    launch_root.mkdir()
+    monkeypatch.setattr(
+        requests,
+        "Session",
+        lambda: _SessionStub(_Resp(content=body, url=f"https://example.com/{filename}")),
+    )
+
+    result = json.loads(
+        with_local_ctx(DownloadFile, config_dict=_config(launch_root))(
+            url=f"https://example.com/{filename}",
+            filename=filename,
+        )
+    )
+
+    dest = launch_root / "downloads" / filename
+    assert result["ok"] is True
+    assert result["filename"] == filename
+    assert dest.read_bytes() == body
+
+
+def test_download_file_plain_text_rejects_null_bytes(tmp_path, monkeypatch):
+    launch_root = tmp_path / "project"
+    launch_root.mkdir()
+    monkeypatch.setattr(
+        requests,
+        "Session",
+        lambda: _SessionStub(_Resp(content=b"text\x00binary", url="https://example.com/notes.txt")),
+    )
+
+    result = json.loads(
+        with_local_ctx(DownloadFile, config_dict=_config(launch_root))(
+            url="https://example.com/notes.txt",
+            filename="notes.txt",
+        )
+    )
+
+    assert result["ok"] is False
+    assert result["error"]["type"] == "format_blocked"
+    assert not (launch_root / "downloads" / "notes.txt").exists()
+
+
 def test_download_file_invalid_filename_path_traversal(tmp_path):
     launch_root = tmp_path / "project"
     launch_root.mkdir()

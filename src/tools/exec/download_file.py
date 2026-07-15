@@ -38,6 +38,7 @@ class DownloadFile(AbstractSimpleTool):
     )
     ALLOWED_EXTENSIONS = frozenset({
         ".pdf", ".docx", ".xls", ".xlsx", ".pptx", ".csv", ".html", ".msg",
+        ".txt", ".md",
     })
     _MAX_REDIRECTS = 10
     _BOM_PREFIXES = (
@@ -59,8 +60,8 @@ class DownloadFile(AbstractSimpleTool):
             "type": "function",
             "name": DOWNLOAD_FILE_NAME,
             "description": (
-                "Downloads an office document from an http(s) URL and saves it to the configured "
-                "download directory under the project. "
+                "Downloads a document or plain-text file from an http(s) URL and saves it to the "
+                "configured download directory under the project. "
                 f"Allowed extensions: {extensions}. "
                 "Returns JSON with the absolute saved path for follow-up reading or analysis."
             ),
@@ -86,13 +87,13 @@ class DownloadFile(AbstractSimpleTool):
     def prompt_description(cls) -> str:
         return (
             "Tool name: download_file\n"
-            "Tool description: Downloads an office document from a URL into the configured download directory.\n\n"
+            "Tool description: Downloads a document or plain-text file from a URL into the configured download directory.\n\n"
             "Usage:\n"
-            "- Use when you need a local copy of a PDF, DOCX, XLSX, etc. from a public http(s) URL.\n"
+            "- Use when you need a local copy of a PDF, DOCX, XLSX, TXT, MD, etc. from a public http(s) URL.\n"
             "- Only the basename is passed as filename; the directory comes from configuration.\n"
             "- On success, use the returned path with a document-reading tool to extract text.\n"
             "- Do not use shell download commands for these formats when this tool is available.\n"
-            "- filename must include a supported extension (.pdf, .docx, .xlsx, ...).\n"
+            "- filename must include a supported extension (.pdf, .docx, .xlsx, .txt, .md, ...).\n"
         )
 
     def _result(self, 
@@ -164,10 +165,10 @@ class DownloadFile(AbstractSimpleTool):
             return body.startswith(b"PK\x03\x04")
         if ext in {".xls", ".msg"}:
             return body.startswith(b"\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1")
-        if ext in {".csv", ".html"}:
+        if ext in {".csv", ".txt", ".md", ".html"}:
             if b"\x00" in body[:4096]:
                 return False
-            if ext == ".csv":
+            if ext != ".html":
                 return True
             payload = body
             for bom in cls._BOM_PREFIXES:
