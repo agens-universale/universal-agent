@@ -5,8 +5,15 @@ import pytest
 
 
 def _write_task(tmp_path, tid, n_messages):
+    # Baseline после compact = снимок meta.tui.live_msg_count (не scan data_*).
     (tmp_path / f"meta_cli_{tid}.json").write_text(
-        json.dumps({"thread_id": tid, "system_id": "cli"}), encoding="utf-8")
+        json.dumps({
+            "thread_id": tid,
+            "system_id": "cli",
+            "tui": {"live_msg_count": n_messages, "live_history_chars": n_messages},
+        }),
+        encoding="utf-8",
+    )
     lines = [json.dumps({"type": "message", "thread_id": tid, "system": "cli",
                          "seq": i, "ts": "t", "payload": {"role": "user", "content": f"m{i}"}})
              for i in range(1, n_messages + 1)]

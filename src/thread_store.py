@@ -7,6 +7,11 @@ from typing import Dict, List, Tuple, Any, Set, Optional
 
 from message_policy.tool_usage_notice.state import merge_tool_usage_notice_meta_to_base
 from intent_log.serialize import deserialize_list, serialize_for_meta
+from persistence.live_volume import (
+    bump_live_volume_for_messages,
+    live_volume_from_messages,
+    merge_tui_into_meta,
+)
 from persistence.thread_meta_mapper import ThreadMetaMapper
 from message_policy.user_message_policy import (
     TECHNICAL_TYPE_DIALOG_SUMMARY,
@@ -319,13 +324,14 @@ def discard_message_by_id(
             f.write(row + "\n")
     atomic_replace(tmp_path, data_path)
 
-    meta = load_thread_meta(threads_dir, sys_norm, thread_id)
-    if meta:
-        try:
-            meta["messages_count"] = max(0, int(meta.get("messages_count", 0)) - removed)
-            save_thread_meta(threads_dir, sys_norm, thread_id, meta)
-        except (TypeError, ValueError):
-            pass
+    meta = load_thread_meta(threads_dir, sys_norm, thread_id) or {}
+    try:
+        meta["messages_count"] = max(0, int(meta.get("messages_count", 0)) - removed)
+    except (TypeError, ValueError):
+        pass
+    live_msgs, _, _ = load_thread_messages(threads_dir, sys_norm, thread_id)
+    merge_tui_into_meta(meta, live_volume_from_messages(live_msgs))
+    save_thread_meta(threads_dir, sys_norm, thread_id, meta)
     return True
 
 
@@ -346,6 +352,7 @@ def append_new_thread_messages(
 
     seq = start_seq
     wrote = 0
+    written_payloads: List[Dict[str, Any]] = []
     with open(data_path, "a", encoding="utf-8") as f:
         for message in messages:
             key = make_message_key(message)
@@ -362,7 +369,13 @@ def append_new_thread_messages(
             }
             f.write(json.dumps(record, ensure_ascii=False) + "\n")
             known_message_keys.add(key)
+            written_payloads.append(message)
             wrote += 1
+    if wrote:
+        sys_norm = sanitize_system_id(system_id)
+        meta = load_thread_meta(threads_dir, sys_norm, thread_id) or {}
+        bump_live_volume_for_messages(meta, written_payloads)
+        save_thread_meta(threads_dir, sys_norm, thread_id, meta)
     return wrote
 
 
@@ -517,6 +530,13 @@ class ThreadSession:
         user_intent_log = summary_payload.get("user_intent_log")
         dialog_steps_offset = summary_payload.get("dialog_steps_offset", 0)
         data_path, meta_path = _thread_paths(self.threads_dir, self.system_id, self.thread_id)
+        # До переноса meta в архив: снимок disk tui (TUI-ключи не клобберить).
+        disk_tui = dict(
+            (load_thread_meta(self.threads_dir, self.system_id, self.thread_id) or {}).get(
+                "tui"
+            )
+            or {}
+        )
         ts_suffix = _utc_now_suffix()
         archive_data_path = data_path.replace(".jsonl", f"__pre_summary__{ts_suffix}.jsonl")
         archive_meta_path = meta_path.replace(".json", f"__pre_summary__{ts_suffix}.json")
@@ -614,6 +634,11 @@ class ThreadSession:
         last_backend_response_id = existing_meta.get("last_backend_response_id")
         if isinstance(last_backend_response_id, str) and last_backend_response_id.strip():
             new_meta["last_backend_response_id"] = last_backend_response_id
+        # meta.tui: disk wins для TUI-ключей; live_* — полный пересчёт по новому live.
+        session_tui = dict(existing_meta.get("tui") or {})
+        merged_tui = {**session_tui, **disk_tui}
+        merged_tui.update(live_volume_from_messages(compact_messages))
+        new_meta["tui"] = merged_tui
         save_thread_meta(self.threads_dir, self.system_id, self.thread_id, new_meta)
 
         self.history_messages = compact_messages

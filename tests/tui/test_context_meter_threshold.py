@@ -4,8 +4,18 @@ import pytest
 
 
 def _write_task(tmp_path, tid, content):
+    # Метр читает только meta.tui.live_history_chars (не data_*).
     (tmp_path / f"meta_cli_{tid}.json").write_text(
-        json.dumps({"thread_id": tid, "system_id": "cli"}), encoding="utf-8")
+        json.dumps({
+            "thread_id": tid,
+            "system_id": "cli",
+            "tui": {
+                "live_history_chars": len(content),
+                "live_msg_count": 1,
+            },
+        }),
+        encoding="utf-8",
+    )
     rec = {"type": "message", "thread_id": tid, "system": "cli", "seq": 1, "ts": "t",
            "payload": {"role": "user", "content": content}}
     (tmp_path / f"data_cli_{tid}.jsonl").write_text(json.dumps(rec) + "\n", encoding="utf-8")

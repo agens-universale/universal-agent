@@ -40,7 +40,6 @@ from tui.services.notices_ui import format_notices_badge, format_notices_footer_
 from tui.services.usage_meter import compose_adaptive_footer_right, usage_segments
 from tui.services.export import export_thread
 from tui.services.path_display import truncate_path
-from message_format import calc_history_chars_for_trigger
 from tui.services.git_info import current_branch
 from tui.services.stores.file_store import FileTaskStore
 from tui.services.trace_mapper import collect_skipped_call_ids, map_message
@@ -406,11 +405,16 @@ class TraceScreen(Screen):
         threshold = parse_summary_trigger_chars(cfg) or parse_summary_turn_end_trigger_chars(cfg)
         if threshold <= 0 or self._store is None or self._active_task_id is None:
             return None
-        # Источник — live data-файл (не in-memory state.messages executor'а):
-        # держит TUI-only слой. Во время прогона файл слегка отстаёт от state,
-        # гейдж самокорректируется на каждом тике — НЕ переводить на executor-state.
-        msgs = self._store.read_live_messages(self._active_task_id)
-        return render_context_meter(calc_history_chars_for_trigger(msgs), threshold)
+        # Источник — meta.tui.live_history_chars (persist пишет при append/compact/
+        # discard). Нет ключа → метр скрыт; data_*.jsonl на poll не читаем.
+        tui = self._store.get_task_meta(self._active_task_id).get("tui") or {}
+        if "live_history_chars" not in tui:
+            return None
+        try:
+            chars = int(tui["live_history_chars"])
+        except (TypeError, ValueError):
+            return None
+        return render_context_meter(chars, threshold)
 
     def _session_status_word(self) -> "Optional[str]":
         """Сырое слово статуса сессии (без скобок): asking/running/completed/
@@ -1849,6 +1853,7 @@ class TraceScreen(Screen):
             row.refresh_running_elapsed()
         summarizing = False
         finalizing = False
+        _tmeta: dict = {}
         if self._store is not None and self._active_task_id is not None:
             try:
                 _tmeta = self._store.get_task_meta(self._active_task_id)
@@ -1857,15 +1862,20 @@ class TraceScreen(Screen):
             except Exception:
                 summarizing = False
                 finalizing = False
-        # Завершение сжатия (tui_summarizing True→False) → зафиксировать baseline
-        # числа сообщений live-файла: /compact-антиспам разрешит повтор, только
-        # если с этого момента появилась хоть одна новая запись.
+                _tmeta = {}
+        # Завершение сжатия (tui_summarizing True→False) → baseline =
+        # снимок meta.tui.live_msg_count (persist уже пересчитал live_* на compact).
         if self._was_summarizing and not summarizing and self._store is not None \
                 and self._active_task_id is not None:
-            count = len(self._store.read_live_messages(self._active_task_id))
-            self._store.update_tui_meta(
-                self._active_task_id, {"last_compact_msg_count": count}
-            )
+            live_count = (_tmeta.get("tui") or {}).get("live_msg_count")
+            if live_count is not None:
+                try:
+                    self._store.update_tui_meta(
+                        self._active_task_id,
+                        {"last_compact_msg_count": int(live_count)},
+                    )
+                except (TypeError, ValueError):
+                    pass
         self._was_summarizing = summarizing
 
         # Инвариант: нет активной задачи (пустое состояние) → никакого активного
@@ -3984,14 +3994,16 @@ class TraceScreen(Screen):
                                   content="/compact: дождитесь паузы или /stop",
                                   kind_class="line-meta")
             return
-        # Антиспам по контенту: разрешаем только если с последнего сжатия
-        # появилась хоть одна новая запись (любого типа). baseline пишет
-        # _poll_active на завершении сжатия. Нет baseline → тред не сжимали → можно.
-        live_count = len(self._store.read_live_messages(tid))
-        last_compact = (self._store.get_task_meta(tid).get("tui") or {}).get(
-            "last_compact_msg_count"
-        )
-        if last_compact is not None and live_count <= int(last_compact):
+        # Антиспам: live_msg_count vs last_compact_msg_count (оба из meta.tui).
+        # baseline пишет _poll_active на завершении сжатия. Нет baseline → можно.
+        tui_meta = self._store.get_task_meta(tid).get("tui") or {}
+        last_compact = tui_meta.get("last_compact_msg_count")
+        live_count = tui_meta.get("live_msg_count")
+        if (
+            last_compact is not None
+            and live_count is not None
+            and int(live_count) <= int(last_compact)
+        ):
             self._mount_trace_row(
                 prefix="· ",
                 content="/compact: после последнего сжатия ничего не добавилось — сжимать нечего",
