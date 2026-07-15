@@ -968,6 +968,33 @@ class TraceScreen(Screen):
             if sink is not None:
                 sink.reset()
 
+    def _sticky_banner_widget(self):
+        """Sticky-баннер над вводом (ask_human / confirm) или None."""
+        return self._ask_human_banner or self._confirm_banner
+
+    def _cap_sticky_banner(self, banner, *, chrome: int) -> int:
+        """Потолок sticky-баннера: длинный вопрос не выдавливает input/footer.
+
+        Как у input-оверлея — ≤ половины экрана и оставляет min строк трейса.
+        Возвращает желаемую (уже ужатую) высоту баннера для расчёта #trace."""
+        cap = min(self.size.height // 2,
+                  self.size.height - chrome - self._MIN_TRACE_WITH_OVERLAY)
+        if cap <= 0:
+            return 0
+        banner.styles.max_height = cap
+        # После layout region уже включает round-border и ≤ cap — самый точный замер.
+        # До layout / пока region ещё не ужат: virtual_size = контент без рамки (+2),
+        # иначе chrome занижается на 2 и футер уезжает за край экрана.
+        region_h = banner.region.height
+        if 0 < region_h <= cap:
+            return region_h
+        try:
+            content_h = banner.virtual_size.height
+        except Exception:
+            content_h = 0
+        estimated = (content_h + 2) if content_h > 0 else (len(banner.children) + 2)
+        return min(estimated, cap)
+
     def _sync_trace_max_height(self) -> None:
         """Потолок #trace = экран минус хром #root.
 
@@ -979,30 +1006,40 @@ class TraceScreen(Screen):
         С открытым input-оверлеем (палитра/пикер): #trace ужимается под его ЖЕЛАЕМУЮ
         высоту (`virtual_size` — полный контент, а НЕ зажатый `region`: region зависит
         от #trace, #trace — от него → петля, оверлей оставался бы вжатым в остаток),
-        оставляя оверлею место и min строк трейса; сам оверлей — со своим потолком."""
+        оставляя оверлею место и min строк трейса; сам оверлей — со своим потолком.
+
+        Sticky-баннер (ask_human/confirm) тоже капается: иначе длинный вопрос
+        раздувает chrome и выдавливает поле ввода за край экрана."""
         try:
             root = self.query_one("#root", Vertical)
             trace = self.query_one("#trace", VerticalScroll)
         except Exception:
             return
         overlay = self._open_overlay_widget()
+        banner = self._sticky_banner_widget()
         # region.height включает бордеры; скрытые виджеты (display:none) дают 0.
+        # Баннер/оверлей исключаем — их желаемую высоту считаем отдельно (иначе
+        # ещё не ужатый region баннера раздувает chrome до available<=0).
         chrome = sum(c.region.height for c in root.children
-                     if c.id != "trace" and c is not overlay)
+                     if c.id != "trace" and c is not overlay and c is not banner)
+        banner_h = 0
+        if banner is not None:
+            banner_h = self._cap_sticky_banner(banner, chrome=chrome)
+        chrome_with_banner = chrome + banner_h
         if overlay is not None:
             # Оверлей ≤ половины экрана (дальше — его скролл) и оставляет ≥ min строк
             # трейса. На малых экранах вторая граница жёстче, на больших — половина.
             cap = min(self.size.height // 2,
-                      self.size.height - chrome - self._MIN_TRACE_WITH_OVERLAY)
+                      self.size.height - chrome_with_banner - self._MIN_TRACE_WITH_OVERLAY)
             if cap <= 0:
                 return
             overlay.styles.max_height = cap            # потолок оверлея → дальше его скролл
             # Желаемая высота = строки+хинт (дети, по 1 строке) + рамка .palette (2).
             # len(children) обновляется при фильтре сразу, а virtual_size залипает.
             desired = min(len(overlay.children) + 2, cap)
-            available = self.size.height - chrome - desired
+            available = self.size.height - chrome_with_banner - desired
         else:
-            available = self.size.height - chrome
+            available = self.size.height - chrome_with_banner
         if available <= 0:
             return
         if available != self._trace_max_height:
@@ -1466,9 +1503,11 @@ class TraceScreen(Screen):
         self.app.tui_state.ask_human_state = AskHumanState(
             call_id=ev.call_id or "", question=ev.summary,
         )
-        # mount banner before #input-row
+        # mount banner before #input-row; потолок высоты — после layout
+        # (_cap_sticky_banner), иначе длинный вопрос выдавливает input/footer.
         inp_row = self.query_one("#input-row", Horizontal)
         self.query_one("#root", Vertical).mount(banner, before=inp_row)
+        self.call_after_refresh(self._sync_trace_max_height)
         # switch input to ask-human mode
         inp = self.query_one("#cmdinput", CommandTextArea)
         inp.placeholder = "ваш ответ агенту…"
@@ -1520,6 +1559,7 @@ class TraceScreen(Screen):
         self._confirm_active = True
         inp_row = self.query_one("#input-row", Horizontal)
         self.query_one("#root", Vertical).mount(banner, before=inp_row)
+        self.call_after_refresh(self._sync_trace_max_height)
         inp_row.add_class("hidden")
         # Инпут на время confirm: blur + СИНХРОННО disabled. Одного set_focus(None)
         # мало — он применяется асинхронно (след. цикл pump), и под нагрузкой первый

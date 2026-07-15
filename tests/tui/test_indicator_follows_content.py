@@ -123,3 +123,28 @@ async def test_ask_human_banner_keeps_footer_onscreen(tmp_path):
         await pilot.pause(0.4)
         footer = pilot.app.query_one("#footer")
         assert footer.region.bottom <= 24                  # футер на экране (не выдавлен)
+
+
+@pytest.mark.asyncio
+async def test_tall_ask_human_question_keeps_input_onscreen(tmp_path):
+    """Регресс: длинный вопрос ask_human капается (≤ половины экрана) и скроллится
+    внутри баннера — поле ввода и футер остаются на экране, не уезжают вниз."""
+    pytest.importorskip("textual")
+    from types import SimpleNamespace
+    tid = "ah2"; _write_task(tmp_path, tid)
+    async with _app(tmp_path).run_test(size=(80, 24)) as pilot:
+        scr = pilot.app.screen
+        scr.attach_active_task(tid)
+        await pilot.pause(0.2)
+        tall_q = "\n".join(f"пункт {i}: очень подробный вопрос агента" for i in range(40))
+        ev = SimpleNamespace(call_id="c-tall", summary=tall_q, no=1, kind="ask_human")
+        scr._on_ask_human_event(ev, live=False)
+        await pilot.pause(0.5)
+        banner = scr._ask_human_banner
+        inp = pilot.app.query_one("#input-row")
+        footer = pilot.app.query_one("#footer")
+        assert banner is not None
+        assert banner.region.height <= 24 // 2            # потолок половины экрана
+        assert inp.region.bottom <= 24                    # ввод на экране
+        assert footer.region.bottom <= 24                 # футер на экране
+        assert inp.region.height >= 3                     # поле ввода видимо (не схлопнуто)

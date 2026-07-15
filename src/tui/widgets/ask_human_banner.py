@@ -2,18 +2,23 @@
 from __future__ import annotations
 
 from textual.app import ComposeResult
-from textual.containers import Vertical
+from textual.containers import VerticalScroll
 from textual.widgets import Static
 
 
-class AskHumanBanner(Vertical):
+class AskHumanBanner(VerticalScroll):
     """Banner с вопросом агента.
+
+    VerticalScroll + max-height: длинный вопрос скроллится внутри баннера,
+    не выдавливает поле ввода и футер (см. _sync_trace_max_height).
 
     Тон ink/bright (НЕ violet — violet только в empty-state).
     Стили — `.ask-human-banner` в styles.tcss.
     """
 
     DEFAULT_CSS = ""  # стили в styles.tcss
+    # Фокус остаётся в поле ответа; колёсико над баннером всё равно скроллит.
+    can_focus = False
 
     def __init__(self, *, question: str, **kwargs) -> None:
         kwargs.setdefault("classes", "")

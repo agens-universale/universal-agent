@@ -265,13 +265,16 @@ FileViewerScreen #root { height: 1fr; }
 /* Строки списков (TasksScreen, SkillsScreen) */
 .list-row      { color: $ink; padding: 0 1; }
 
-/* ask_human banner (§3.4) — янтарный тон (как running), сигнал «жду тебя» */
+/* ask_human banner (§3.4) — янтарный тон (как running), сигнал «жду тебя».
+ * max-height: длинный вопрос скроллится внутри (VerticalScroll), не выдавливает
+ * input/footer. Точный потолок дополнительно ставит _sync_trace_max_height. */
 .ask-human-banner {
     background: #161A23;
     border: round $run-color;
     padding: 0 1;
     margin: 0 1;
     height: auto;
+    max-height: 50%;
     width: 1fr;
 }
 .ah-label { color: $bright; text-style: bold; }
@@ -279,13 +282,15 @@ FileViewerScreen #root { height: 1fr; }
 /* input в режиме ask_human — янтарная рамка (как баннер / running) */
 TextArea.ask-human-mode { border: solid $run-color; }
 
-/* confirm banner — служебный/security, бирюзовый (accent) вместо янтарного */
+/* confirm banner — служебный/security, бирюзовый (accent) вместо янтарного.
+ * max-height как у ask_human: длинные fields не выдавливают футер. */
 .confirm-banner {
     background: #161A23;
     border: round $accent;
     padding: 0 1;
     margin: 0 1;
     height: auto;
+    max-height: 50%;
     width: 1fr;
 }
 .cb-label    { color: $bright; text-style: bold; }
