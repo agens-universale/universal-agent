@@ -424,10 +424,12 @@ class TraceScreen(Screen):
         runner = getattr(self.app, "active_runner", None)
         if runner is not None and runner.is_running():
             return "running"
-        # Нет активного runner — терминальный статус.
+        # Нет активного runner — статус из meta (tui-owned, затем legacy top-level).
         if self._store is not None and self._active_task_id is not None:
             meta = self._store.get_task_meta(self._active_task_id)
             tui_status = (meta.get("tui") or {}).get("status")
+            if tui_status == "running":
+                return "running"
             if tui_status in ("completed", "stopped", "failed"):
                 return tui_status
             if meta.get("status") == "running":
@@ -1724,7 +1726,9 @@ class TraceScreen(Screen):
 
     def _prepare_for_new_run(self) -> None:
         """Подготовить TUI к новому запуску runner.start:
-        сбросить error-флаг, очистить last_runner_error.
+        сбросить error-флаг, очистить last_runner_error,
+        сбросить meta.tui.status → running (B1: иначе после прошлого completed
+        бейдж/список сессий врут, пока живой runner не перекрывает live).
 
         _mcp_status_row НЕ обнуляем: колонка — часть бренд-карточки (#brand-mcp),
         переживает пересборку (_clear_trace); ссылка остаётся валидной."""
@@ -1733,6 +1737,16 @@ class TraceScreen(Screen):
         self.app.last_runner_error = None
         self.app.last_terminal_outcome = None
         self.app.last_stop_requested = False
+        self._stamp_tui_running()
+
+    def _stamp_tui_running(self) -> None:
+        """meta.tui.status=running + сброс last_indicator (новый ход, не итог прошлого)."""
+        if self._store is None or self._active_task_id is None:
+            return
+        self._store.update_tui_meta(
+            self._active_task_id,
+            {"status": "running", "last_indicator": None},
+        )
 
     def _update_mcp_indicator(self) -> None:
         if self._mcp_status_done:
@@ -1855,6 +1869,11 @@ class TraceScreen(Screen):
         _SOFT_HIDE_KINDS = {"agent", "system"}
         runner = getattr(self.app, "active_runner", None)
         is_running = runner is not None and runner.is_running()
+        _kind = getattr(runner, "_thread_kind", "run") if runner is not None else "run"
+        # Восходящий фронт: прогон стартовал → running (страховочная сетка к
+        # _prepare_for_new_run; ловит любой путь, где prepare не вызвали).
+        if (not self._was_running) and is_running and _kind != "compact":
+            self._stamp_tui_running()
         # Спадающий фронт: агент мог создать скилл в прогоне → инвалидируем
         # TUI-кэш скиллов (/skill picker/inline); ленивый релоад при следующем
         # /skill. Открытие пикера/набор по клавишам диск не трогают.
@@ -1862,13 +1881,13 @@ class TraceScreen(Screen):
             self._skills_cache = None
             # CTA про pending-диффы — после turn (не compact). Монтаж отложен
             # до конца poll / после stream_reset: иначе compaction стирает строку.
-            if getattr(runner, "_thread_kind", "run") != "compact":
+            if _kind != "compact":
                 self._diff_pending_cta_pending = True
         # Спадающий фронт прогона True→False → зафиксировать терминальный статус
         # в meta.tui.status (TUI-owned), чтобы бейдж пережил переоткрытие сессии.
         if self._was_running and not is_running and self._store is not None \
                 and self._active_task_id is not None \
-                and getattr(runner, "_thread_kind", "run") != "compact":
+                and _kind != "compact":
             outcome = resolve_terminal_outcome(
                 runner_error=getattr(self.app, "last_runner_error", None),
                 stop_requested=getattr(self.app, "last_stop_requested", False),

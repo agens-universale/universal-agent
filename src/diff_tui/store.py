@@ -169,9 +169,17 @@ class DiffStore:
         if key is None:
             return False
         disk = self._disk_path(key)
+        # deleted approve: подтвердить удаление — убрать из index и .orig
         if not disk.is_file():
-            # deleted approve (v1+) — не в этом шаге; без файла approve no-op
-            return False
+            index = self.load_index()
+            entry = index.get(key)
+            if entry is not None:
+                orig = self._orig_path(key)
+                if orig.is_file():
+                    orig.unlink(missing_ok=True)
+                del index[key]
+                self.save_index(index)
+            return True
         if classify_file_content(str(disk)).is_binary:
             return False
 

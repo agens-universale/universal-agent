@@ -125,6 +125,26 @@ def test_cache_external_delete_shows_deleted_diff(cache_proj):
     assert "keep-me" in body or "-keep-me" in body or "changed" in body
 
 
+def test_cache_approve_deleted_clears_pending_and_orig(cache_proj):
+    """Approve deleted: pending уходит, .orig и index чистятся (не no-op)."""
+    target = cache_proj / "src" / "gone.py"
+    store = DiffStore(str(cache_proj))
+    target.write_text("base\n", encoding="utf-8")
+    store.register_mutation(str(target))
+    target.write_text("changed\n", encoding="utf-8")
+    target.unlink()
+
+    key = "src/gone.py"
+    orig = store.diffs_dir / f"{orig_key(key)}.orig"
+    assert orig.is_file()
+
+    svc = DiffService(str(cache_proj), emit_notices=False)
+    assert svc.approve(key).ok
+    assert all(e.key != key for e in svc.list_entries(pending_only=True))
+    assert key not in store.load_index()
+    assert not orig.exists()
+
+
 # --- git T11–T12 ---
 
 

@@ -76,23 +76,67 @@ async def test_compact_transition_does_not_stamp(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_stop_and_replace_sets_stop_flag(tmp_path):
-    """`_stop_and_replace_runner` живого прогона взводит app.last_stop_requested →
-    следующий спадающий фронт стампит «stopped» (а не «completed»)."""
+async def test_prepare_for_new_run_stamps_running_over_completed(tmp_path):
+    """B1: новый ход сбрасывает meta.tui.status=completed → running и чистит
+    last_indicator, иначе список сессий/бейдж врут после прошлого финиша."""
     pytest.importorskip("textual")
     from tui.app import TuiApp
-    tid = "stmp0000000000000000000000000002a"
+    tid = "stmp0000000000000000000000000004a"
     _write_task(tmp_path, tid)
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr.attach_active_task(tid)
+        scr._store.update_tui_meta(
+            tid,
+            {"status": "completed",
+             "last_indicator": {"kind": "done", "elapsed": 32}},
+        )
+        scr._prepare_for_new_run()
+        meta = scr._store.get_task_meta(tid)
+        tui = meta.get("tui") or {}
+        assert tui.get("status") == "running"
+        assert tui.get("last_indicator") is None
+
+
+@pytest.mark.asyncio
+async def test_rising_edge_stamps_running(tmp_path):
+    """Восходящий фронт poll: was_running False→True → status=running."""
+    pytest.importorskip("textual")
+    from tui.app import TuiApp
+    tid = "stmp0000000000000000000000000005a"
+    _write_task(tmp_path, tid)
+    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    async with app.run_test() as pilot:
+        scr = pilot.app.screen
+        scr.attach_active_task(tid)
+        scr._store.update_tui_meta(
+            tid,
+            {"status": "completed",
+             "last_indicator": {"kind": "done", "elapsed": 7}},
+        )
+        scr._was_running = False
         pilot.app.active_runner = _Runner(running=True)
-        pilot.app.last_stop_requested = False
-        scr._was_running = True
-        scr._stop_and_replace_runner()        # юзер нажал /stop по живому прогону
-        assert pilot.app.last_stop_requested is True
-        scr._poll_active()                    # active_runner=None → спадающий фронт
+        scr._poll_active()
         await pilot.pause()
         meta = scr._store.get_task_meta(tid)
-        assert (meta.get("tui") or {}).get("status") == "stopped"
+        tui = meta.get("tui") or {}
+        assert tui.get("status") == "running"
+        assert tui.get("last_indicator") is None
+
+
+@pytest.mark.asyncio
+async def test_session_status_word_reads_tui_running(tmp_path):
+    """meta.tui.status=running без живого runner (crash mid-run) → 'running'."""
+    pytest.importorskip("textual")
+    from tui.app import TuiApp
+    tid = "stmp0000000000000000000000000006a"
+    _write_task(tmp_path, tid)
+    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    async with app.run_test() as pilot:
+        scr = pilot.app.screen
+        scr.attach_active_task(tid)
+        scr._store.update_tui_meta(tid, {"status": "running"})
+        pilot.app.active_runner = None
+        assert scr._session_status_word() == "running"
+

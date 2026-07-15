@@ -112,6 +112,24 @@ def test_t3_approve_created_promotes_to_modified(proj):
     assert entry["baseline_exists"] is True
 
 
+def test_t3_approve_deleted_removes_orig_and_index(proj):
+    """D approve: файл уже снят с диска → убрать .orig и запись из index."""
+    target = proj / "src" / "gone.py"
+    target.write_text("base\n", encoding="utf-8")
+    store = _store(proj)
+    store.register_mutation(str(target))
+    target.write_text("dirty\n", encoding="utf-8")
+    target.unlink()
+
+    key = "src/gone.py"
+    assert _orig_path(store, key).is_file()
+    assert key in store.load_index()
+
+    assert store.approve(str(target)) is True
+    assert key not in store.load_index()
+    assert not _orig_path(store, key).exists()
+
+
 # --- T4: undo M → disk == .orig ---
 
 
