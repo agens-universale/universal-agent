@@ -9,6 +9,62 @@
 реально незаполненное; если всё покрыто — позитивное «настроен».
 """
 from typing import Any, Callable, Dict, List, NamedTuple
+from urllib.parse import urlparse
+
+import config_raw
+
+
+def authorization_header(raw: str) -> str:
+    """Ensure raw token has Authorization scheme; add Bearer if missing.
+
+    If raw contains no space after strip, prepend 'Bearer '.
+    If raw has space, keep as-is (Basic, Bearer, or custom scheme).
+    """
+    s = raw.strip()
+    return s if " " in s else f"Bearer {s}"
+
+
+def mask_authorization(header: str) -> str:
+    """Mask authorization header for logging: show scheme and first 3 chars of secret.
+
+    Format: '<scheme> <first 3 chars>***'
+    If no scheme+secret pair, return '***'.
+    """
+    parts = header.split(" ", 1)
+    if len(parts) == 2 and parts[1]:
+        scheme, secret = parts
+        return f"{scheme} {secret[:3]}***"
+    return "***"
+
+
+ENV_REF_RESOLVED = "переменная подставилась"
+ENV_REF_MISSING = "переменной нет"
+
+
+def env_ref_status(raw: Any) -> str:
+    """Статус ссылки ${ENV:VAR} в СЫРОМ значении поля ("" — значение не ссылка)."""
+    if not config_raw.env_refs(raw):
+        return ""
+    return ENV_REF_MISSING if config_raw.missing_env_refs(raw) else ENV_REF_RESOLVED
+
+
+def display_value(raw: Any) -> str:
+    """Сырое значение поля для показа: ссылка — ссылкой + её статус, литерал — как есть."""
+    status = env_ref_status(raw)
+    return f"{raw} · {status}" if status else (raw or "")
+
+
+def display_secret(raw: Any) -> str:
+    """То же для секрета: литерал — под маской. Ссылка секретом не является и
+    показывается как есть: маска выдавала бы «токен задан» там, где его нет."""
+    return display_value(raw) if env_ref_status(raw) else mask_authorization(raw)
+
+
+def _valid_endpoint_url(raw: str) -> bool:
+    """Структурная проверка адреса: схема http(s) + непустой хост.
+    Путь и достижимость НЕ проверяем (осознанно — обрезанный-но-валидный путь пройдёт)."""
+    parsed = urlparse(raw)
+    return parsed.scheme in ("http", "https") and bool(parsed.netloc)
 
 # Сентинелы из config.default.yml (страж совпадения — tests/test_onboarding.py).
 URL_SENTINEL = "http://your-backend:PORT/v1/chat/completions"
@@ -64,6 +120,27 @@ REQUIREMENTS: List[_Requirement] = [
 ]
 
 
+# Соответствие ключ-якорь (leaf в config.yml) → предикат «поле задано».
+# Переиспользует те же предикаты, что и REQUIREMENTS — единый источник политики.
+_FIELD_CHECKS: Dict[str, Callable[[Dict[str, Any]], bool]] = {
+    "completions_url": _endpoint_set,
+    "Authorization": _auth_set,
+    "model": _model_set,
+}
+
+# Dotted-пути якорей полей визарда в config.yml (для path-aware записи и вставки).
+FIELD_ANCHOR_PATHS: Dict[str, str] = {
+    "completions_url": "backend.completions_url",
+    "Authorization": "backend.chat_completion_headers.Authorization",
+    "model": "agent.model",
+}
+
+
+def pending_field_keys(config: Dict[str, Any]) -> set:
+    """Ключи-якоря полей, ещё не удовлетворённых конфигом (для визарда)."""
+    return {key for key, is_set in _FIELD_CHECKS.items() if not is_set(config)}
+
+
 def pending_requirements(config: Dict[str, Any]) -> List[_Requirement]:
     """Требования, ещё не удовлетворённые текущим конфигом."""
     return [r for r in REQUIREMENTS if not r.is_satisfied(config)]
@@ -74,26 +151,39 @@ def is_unconfigured(config: Dict[str, Any]) -> bool:
     return bool(pending_requirements(config))
 
 
-def setup_guide(config_path: str, config: Dict[str, Any]) -> str:
+def setup_guide(config_path: str, config: Dict[str, Any], program: str = "gc-cli",
+                just_created: bool = False) -> str:
     """Подсказка по config_path.
 
-    pending непуст → что вписать. pending пуст → позитивное «настроен».
+    pending непуст → что вписать + как открыть помощник (`{program} --init-config`).
+    pending пуст → позитивное «настроен». program — имя бинаря (gc-cli / gc-ua).
+    just_created=True → конфиг создан этим запуском (иначе уже существовал).
     Если модель уже задана (а адрес/токен — нет), добавляем ремарку: эти поля
     нужны для preset-модели; либо укажи свою модель и адрес/токен под неё."""
     pending = pending_requirements(config)
     if not pending:
         return f"[gc] Конфиг настроен: {config_path} — можно запускать."
-    lines = "\n".join(f"  • {r.hint}" for r in pending)
+    fields = "\n".join(f"    • {r.hint}" for r in pending)
     note = ""
     if _model_set(config):
         note = (
-            f"     Модель по умолчанию уже задана (agent.model = {config.get('model')}) — "
-            f"осталось указать для неё адрес и токен; либо укажите свою модель и "
-            f"соответствующие адрес/токен.\n"
+            f"\n  Модель по умолчанию уже задана (agent.model = {config.get('model')}) —\n"
+            f"  осталось указать для неё адрес и токен; либо укажите свою модель\n"
+            f"  и соответствующие адрес/токен.\n"
         )
+    if just_created:
+        header = "  GigaCode — конфигурация создана, настройка не завершена\n\n"
+        location = f"  Создан файл конфигурации:\n    {config_path}\n\n"
+    else:
+        header = "  GigaCode — настройка не завершена\n\n"
+        location = f"  Конфигурация:\n    {config_path}\n\n"
     return (
-        f"[gc] Конфиг ещё не настроен: {config_path}\n"
-        f"     Впишите перед запуском:\n{lines}\n"
-        f"{note}"
-        f"     затем запустите снова."
+        f"\n{header}{location}"
+        f"  Не заполнены обязательные поля:\n{fields}\n"
+        f"{note}\n"
+        f"  Что дальше:\n"
+        f"    • Помощник настройки (рекомендуется):\n"
+        f"        {program} --init-config\n"
+        f"    • Либо впишите поля вручную и запустите снова.\n\n"
+        f"  MCP-серверы (веб-поиск, документы и др.): gc-mcp install — поставить, gc-mcp help — все команды\n"
     )

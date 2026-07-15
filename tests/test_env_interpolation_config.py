@@ -30,3 +30,23 @@ def test_cli_override_resolves_env(monkeypatch):
     cd = {"completions_url": "orig"}
     apply_cli_overrides(cd, extra_overrides={"completions_url": "${ENV:U}"})
     assert cd["completions_url"] == "http://h/v1/chat"
+
+
+def test_validate_config_text_resolves_env_like_load_config(monkeypatch):
+    """Writer валидирует конфиг тем же конвейером, что и загрузчик: compat → ${ENV:} → схема.
+
+    load_config резолвит ${ENV:VAR} до валидации, а validate_config_text — нет. В строковом
+    поле это незаметно, но в нестроковом (backend.request_timeout_sec: int) плейсхолдер
+    не проходит схему: агент на таком конфиге работает, а сохранение в /settings, финал
+    онбординга и --sync-config падают «конфиг не проходит схему» — юзер заблокирован в UI
+    без внятной причины.
+    """
+    import config as config_mod
+
+    monkeypatch.setenv("GC_BACKEND_TIMEOUT", "42")
+    text = (
+        "backend:\n"
+        '  completions_url: "http://h/v1/chat/completions"\n'
+        '  request_timeout_sec: "${ENV:GC_BACKEND_TIMEOUT}"\n'
+    )
+    config_mod.validate_config_text(text)      # не бросает: ${ENV:} резолвится как в load_config

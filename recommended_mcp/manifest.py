@@ -28,6 +28,10 @@ class InstallSpec:
     # Имя python-дистрибутива (для проверки установки/деинсталла), source-dir-независимо.
     # Для pypi имя берётся из package; для source — объявляется здесь явно.
     dist: str | None = None
+    # Версия MCP в ЭТОМ релизе агента (манифест едет вместе с агентом). Расхождение с
+    # установленной = «есть что обновлять» — локальный признак, без сети. Для source/wheel
+    # задаётся явно и держится в синке с external/<name>/pyproject.toml (тест это стережёт).
+    version: str | None = None
 
 
 @dataclass(frozen=True)
@@ -48,6 +52,7 @@ class MCPEntry:
     install: InstallSpec
     run: RunSpec | None = None
     optional: bool = False
+    description: str = ""
 
 
 def default_manifest_path(root: Path) -> Path:
@@ -136,6 +141,8 @@ def _parse_entry(raw: dict[str, Any], source: Path) -> MCPEntry:
     install_npm_package = str(npm_package_raw).strip() if npm_package_raw else None
     dist_raw = install_raw.get("dist")
     install_dist = str(dist_raw).strip() if dist_raw else None
+    version_raw = install_raw.get("version")
+    install_version = str(version_raw).strip() if version_raw else None
     raw_commands = install_raw.get("commands", ()) or ()
     commands = tuple(tuple(str(arg) for arg in cmd) for cmd in raw_commands)
 
@@ -147,6 +154,7 @@ def _parse_entry(raw: dict[str, Any], source: Path) -> MCPEntry:
         package=install_package,
         npm_package=install_npm_package,
         dist=install_dist,
+        version=install_version,
     )
     if not install.type:
         raise ManifestError(f"mcp '{name}' missing 'install.type' in {source}")
@@ -190,7 +198,10 @@ def _parse_entry(raw: dict[str, Any], source: Path) -> MCPEntry:
                 f"mcp '{name}' run.type=command requires run.command in {source}"
             )
 
+    description = str(raw.get("description", "")).strip()
+
     return MCPEntry(
         name=name, path=Path(path_str), install=install, run=run,
         optional=bool(raw.get("optional", False)),
+        description=description,
     )

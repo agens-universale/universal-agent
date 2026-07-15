@@ -35,6 +35,7 @@ from config_modules.project_memory import (
 from config_modules.chat_completions import ChatCompletionsConfig
 from config_modules.pricing import PricingConfig
 from config_modules.tui import TuiConfig
+from config_modules.update import UpdateConfig
 from config_modules.diff_tui import DiffTuiConfig
 from config_modules.summary import (
     DEFAULT_INCREMENTAL_BATCH_MULTIPLIER,
@@ -75,6 +76,7 @@ class AppConfig(BaseModel):
     mcp: McpConfig = Field(default_factory=McpConfig)
     pricing: PricingConfig = Field(default_factory=PricingConfig)
     tui: TuiConfig = Field(default_factory=TuiConfig)
+    update: UpdateConfig = Field(default_factory=UpdateConfig)
     diff_tui: DiffTuiConfig = Field(default_factory=DiffTuiConfig)
     strip_tags_projection: StripTagsProjectionConfig = Field(
         default_factory=StripTagsProjectionConfig

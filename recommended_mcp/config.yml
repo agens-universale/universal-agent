@@ -12,41 +12,50 @@ repo_url: https://gitverse.ru/gigacode-ai/background-agent
 # repo_ref:   # опц. пин ветки/тега; пусто = дефолтная ветка
 mcps:
   - name: computer
+    description: управление ПК — скриншоты, клики, ввод
     path: ./computer
     install:
       type: source
       source: ../external/computer-mcp
       dist: computer-mcp
+      version: "0.1.0"      # синк с external/*/pyproject.toml (стережёт тест)
       platforms: [win32]
     # run-блок отсутствует: MCP спавнится агентом через stdio.
 
   - name: office
+    description: чтение/запись Word · Excel · PDF · PowerPoint…
     path: ./office
     install:
       type: source
       source: ../external/office-mcp
       dist: office-mcp
+      version: "0.3.1"      # синк с external/*/pyproject.toml (стережёт тест)
 
   - name: science
+    description: научные данные и вычисления
     path: ./science
     install:
       type: source
       source: ../external/science-mcp
       dist: science-mcp
+      version: "0.1.0"      # синк с external/*/pyproject.toml (стережёт тест)
     run:
       type: command
       command: science-mcp
       args: ["--transport", "http"]
 
   - name: duckduckgo_search
+    description: веб-поиск в интернете
     path: ./duckduckgo_search
     install:
       type: source
       source: ../external/ddgs-mcp
       dist: ddgs-mcp
+      version: "0.2.0"      # синк с external/*/pyproject.toml (стережёт тест)
     # run-блок отсутствует: агент спавнит ddgs-mcp по stdio.
 
   - name: browser_playwright
+    description: автоматизация браузера
     path: ./browser_playwright
     optional: true
     install:

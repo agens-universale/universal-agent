@@ -32,7 +32,7 @@ class CommandPalette(VerticalScroll):
         for i, cmd in enumerate(self._visible_rows()):
             classes = "palette-row selected" if i == self._selected else "palette-row"
             yield Static(self._format_row(cmd), classes=classes, markup=False)
-        yield Static(_HINT, classes="palette-hint", markup=False)
+        yield Static(_HINT, classes="palette-hint palette-keys", markup=False)
 
     def _format_row(self, cmd: Command) -> str:
         return f" /{cmd.name}   {cmd.description}"
@@ -75,7 +75,7 @@ class CommandPalette(VerticalScroll):
             if i == self._selected:
                 selected_widget = w
             new_widgets.append(w)
-        new_widgets.append(Static(_HINT, classes="palette-hint", markup=False))
+        new_widgets.append(Static(_HINT, classes="palette-hint palette-keys", markup=False))
         self.remove_children()
         self.mount_all(new_widgets)
         if selected_widget is not None:

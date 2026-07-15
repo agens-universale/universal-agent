@@ -1,0 +1,252 @@
+import pytest
+pytest.importorskip("textual")
+from textual.widgets import Static
+
+
+class _Upg:  # UpgradeInfo-подобный
+    old_version = "0.3.0"; new_version = "0.4.0"
+
+
+def _states(monkeypatch, updates: dict):
+    """installed_state-заглушка: {имя: версия-обновления|None}."""
+    import mcp_runtime.cli as cli
+    monkeypatch.setattr(cli, "load_manifest_entries", lambda config=None: ([], None))
+    monkeypatch.setattr(cli, "installed_state",
+                        lambda name, config=None, manifest=None:
+                        {"installed": True, "version": "0.1.0", "update": updates.get(name)})
+
+
+async def test_post_update_lists_checkboxes(monkeypatch):
+    import mcp_runtime.cli as cli, config_sync, tui.app as app_mod
+    from tui.screens.post_update import PostUpdateScreen
+    monkeypatch.setattr(cli, "wired_names", lambda config=None: ["office", "ddg"])
+    monkeypatch.setattr(config_sync, "needs_sync", lambda *a, **k: True)
+    _states(monkeypatch, {"office": "0.3.1", "ddg": "0.2.0"})
+    app = app_mod.TuiApp(config={})
+    async with app.run_test() as pilot:
+        scr = PostUpdateScreen(upgrade=_Upg(), config={}, config_path="c.yml")
+        app.push_screen(scr); await pilot.pause(); await pilot.pause()
+        body = " ".join(str(w.render()) for w in scr.query(Static))
+        assert "Агент обновлён: 0.3.0 → 0.4.0" in body
+        assert "[●] Обновить подключённые MCP" in body
+        assert "office" in body and "ddg" in body
+        assert "[●] Обновить config.yml" in body
+
+
+async def test_post_update_hides_mcp_when_nothing_to_update(monkeypatch):
+    """MCP подключены, но их версии совпадают с манифестом новой версии агента →
+    пункт не предлагаем (как с config.yml: нечего делать — нечего показывать)."""
+    import mcp_runtime.cli as cli, config_sync, tui.app as app_mod
+    from tui.screens.post_update import PostUpdateScreen
+    monkeypatch.setattr(cli, "wired_names", lambda config=None: ["office", "ddg"])
+    monkeypatch.setattr(config_sync, "needs_sync", lambda *a, **k: True)
+    _states(monkeypatch, {})                       # ни у кого нет обновления
+    app = app_mod.TuiApp(config={})
+    async with app.run_test() as pilot:
+        scr = PostUpdateScreen(upgrade=_Upg(), config={}, config_path="c.yml")
+        app.push_screen(scr); await pilot.pause(); await pilot.pause()
+        body = " ".join(str(w.render()) for w in scr.query(Static))
+        assert "Обновить подключённые MCP" not in body
+        assert "[●] Обновить config.yml" in body
+
+
+async def test_post_update_mcp_row_lists_only_outdated(monkeypatch):
+    """В строке — только серверы, которым правда есть что обновить."""
+    import mcp_runtime.cli as cli, config_sync, tui.app as app_mod
+    from tui.screens.post_update import PostUpdateScreen
+    monkeypatch.setattr(cli, "wired_names", lambda config=None: ["office", "ddg"])
+    monkeypatch.setattr(config_sync, "needs_sync", lambda *a, **k: False)
+    _states(monkeypatch, {"office": "0.3.1"})      # обновление только у office
+    app = app_mod.TuiApp(config={})
+    async with app.run_test() as pilot:
+        scr = PostUpdateScreen(upgrade=_Upg(), config={}, config_path="c.yml")
+        app.push_screen(scr); await pilot.pause(); await pilot.pause()
+        body = " ".join(str(w.render()) for w in scr.query(Static))
+        assert "office" in body and "ddg" not in body
+        assert scr._mcp_outdated == ["office"]
+
+
+async def test_post_update_hides_config_when_nothing_to_sync(monkeypatch):
+    import mcp_runtime.cli as cli, config_sync, tui.app as app_mod
+    from tui.screens.post_update import PostUpdateScreen
+    monkeypatch.setattr(cli, "wired_names", lambda config=None: [])
+    monkeypatch.setattr(config_sync, "needs_sync", lambda *a, **k: False)
+    app = app_mod.TuiApp(config={})
+    async with app.run_test() as pilot:
+        scr = PostUpdateScreen(upgrade=_Upg(), config={}, config_path="c.yml")
+        app.push_screen(scr); await pilot.pause()
+        body = " ".join(str(w.render()) for w in scr.query(Static))
+        assert "Обновить config.yml" not in body          # нечего синхронизировать → скрыт
+
+
+async def test_post_update_space_unmarks_then_enter_skips_it(monkeypatch):
+    import mcp_runtime.cli as cli, config_sync, upgrade_gate, tui.app as app_mod
+    from tui.screens.post_update import PostUpdateScreen
+    monkeypatch.setattr(cli, "wired_names", lambda config=None: ["office"])
+    monkeypatch.setattr(config_sync, "needs_sync", lambda *a, **k: False)
+    _states(monkeypatch, {"office": "0.3.1"})
+    installed = []
+    monkeypatch.setattr(cli, "install", lambda name: installed.append(name) or 0)
+    stamped = []
+    monkeypatch.setattr(upgrade_gate, "mark_current_run", lambda *a, **k: stamped.append(True))
+    app = app_mod.TuiApp(config={})
+    async with app.run_test() as pilot:
+        scr = PostUpdateScreen(upgrade=_Upg(), config={}, config_path="c.yml")
+        app.push_screen(scr); await pilot.pause(); await pilot.pause()
+        assert "mcp" in scr._marked
+        await pilot.press("space")           # снять отметку с единственного пункта
+        assert "mcp" not in scr._marked
+        body = " ".join(str(w.render()) for w in scr.query(Static))
+        assert "[ ] Обновить подключённые MCP" in body
+        await pilot.press("enter")           # выполнить (пункт снят — install не зовём)
+        await pilot.pause()
+        assert installed == []
+        assert stamped == [True]             # стамп — после закрытия
+
+
+async def test_post_update_enter_installs_marked_and_stamps_once(monkeypatch):
+    import mcp_runtime.cli as cli, config_sync, upgrade_gate, tui.app as app_mod
+    from tui.screens.post_update import PostUpdateScreen
+    monkeypatch.setattr(cli, "wired_names", lambda config=None: ["office", "ddg"])
+    monkeypatch.setattr(config_sync, "needs_sync", lambda *a, **k: True)
+    _states(monkeypatch, {"office": "0.3.1", "ddg": "0.2.0"})
+    installed = []
+    synced = []
+
+    class _FakeReport:
+        transferred = 3
+
+    def _fake_sync(path, **k):
+        synced.append(path)
+        return _FakeReport()
+
+    monkeypatch.setattr(cli, "install", lambda name: installed.append(name) or 0)
+    monkeypatch.setattr(config_sync, "sync_config", _fake_sync)
+    stamped = []
+    monkeypatch.setattr(upgrade_gate, "mark_current_run", lambda *a, **k: stamped.append(True))
+    app = app_mod.TuiApp(config={})
+    async with app.run_test() as pilot:
+        scr = PostUpdateScreen(upgrade=_Upg(), config={}, config_path="c.yml")
+        app.push_screen(scr); await pilot.pause(); await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+        assert installed == ["office", "ddg"]
+        assert synced == ["c.yml"]
+        assert stamped == [True]
+
+
+async def test_post_update_esc_stamps_without_executing(monkeypatch):
+    import mcp_runtime.cli as cli, config_sync, upgrade_gate, tui.app as app_mod
+    from tui.screens.post_update import PostUpdateScreen
+    monkeypatch.setattr(cli, "wired_names", lambda config=None: ["office"])
+    monkeypatch.setattr(config_sync, "needs_sync", lambda *a, **k: True)
+    installed = []
+    synced = []
+    monkeypatch.setattr(cli, "install", lambda name: installed.append(name) or 0)
+    monkeypatch.setattr(config_sync, "sync_config", lambda path, **k: synced.append(path))
+    stamped = []
+    monkeypatch.setattr(upgrade_gate, "mark_current_run", lambda *a, **k: stamped.append(True))
+    app = app_mod.TuiApp(config={})
+    async with app.run_test() as pilot:
+        scr = PostUpdateScreen(upgrade=_Upg(), config={}, config_path="c.yml")
+        app.push_screen(scr); await pilot.pause()
+        await pilot.press("escape")          # позже — ничего не выполняет
+        await pilot.pause()
+        assert installed == [] and synced == []
+        assert stamped == [True]             # но стамп пишется
+
+
+async def test_post_update_nothing_to_do_shows_only_title(monkeypatch):
+    """Обновлять нечего → блок «Осталось обновить» не показываем вовсе (ни подзаголовка,
+    ни «всё уже актуально»), футер честный: отмечать нечего."""
+    import mcp_runtime.cli as cli, config_sync, tui.app as app_mod
+    from tui.screens.post_update import PostUpdateScreen
+    monkeypatch.setattr(cli, "wired_names", lambda config=None: ["office"])
+    monkeypatch.setattr(config_sync, "needs_sync", lambda *a, **k: False)
+    _states(monkeypatch, {})                       # у MCP тоже нечего обновлять
+    app = app_mod.TuiApp(config={})
+    async with app.run_test() as pilot:
+        scr = PostUpdateScreen(upgrade=_Upg(), config={}, config_path="c.yml")
+        app.push_screen(scr); await pilot.pause(); await pilot.pause()
+        body = " ".join(str(w.render()) for w in scr.query(Static))
+        assert "Агент обновлён: 0.3.0 → 0.4.0" in body
+        assert "Осталось обновить" not in body
+        assert "всё уже актуально" not in body
+        assert "Enter или Esc — продолжить" in body
+        assert "Space — отметить" not in body
+
+
+async def test_post_update_hint_and_footer_when_there_is_work(monkeypatch):
+    """Есть что обновить → подзаголовок «Осталось обновить:» и полный футер."""
+    import mcp_runtime.cli as cli, config_sync, tui.app as app_mod
+    from tui.screens.post_update import PostUpdateScreen
+    monkeypatch.setattr(cli, "wired_names", lambda config=None: [])
+    monkeypatch.setattr(config_sync, "needs_sync", lambda *a, **k: True)
+    app = app_mod.TuiApp(config={})
+    async with app.run_test() as pilot:
+        scr = PostUpdateScreen(upgrade=_Upg(), config={}, config_path="c.yml")
+        app.push_screen(scr); await pilot.pause()
+        body = " ".join(str(w.render()) for w in scr.query(Static))
+        assert "Осталось обновить:" in body
+        assert "Довести машину" not in body
+        assert "Space — отметить" in body
+
+
+async def test_post_update_equal_version_title_is_plain(monkeypatch):
+    """Номер версии не изменился → просто «Агент обновлён», без «до актуальной версии»."""
+    import mcp_runtime.cli as cli, config_sync, tui.app as app_mod
+    from tui.screens.post_update import PostUpdateScreen
+
+    class _SameVer:
+        old_version = "0.0.1"; new_version = "0.0.1"
+
+    monkeypatch.setattr(cli, "wired_names", lambda config=None: [])
+    monkeypatch.setattr(config_sync, "needs_sync", lambda *a, **k: False)
+    app = app_mod.TuiApp(config={})
+    async with app.run_test() as pilot:
+        scr = PostUpdateScreen(upgrade=_SameVer(), config={}, config_path="c.yml")
+        app.push_screen(scr); await pilot.pause()
+        body = " ".join(str(w.render()) for w in scr.query(Static))
+        assert "✓ Агент обновлён" in body
+        assert "до актуальной версии" not in body
+
+
+async def test_post_update_title_always_carries_version(monkeypatch):
+    """Версия видна всегда: сдвига не было → «Агент обновлён · v0.0.1»."""
+    import mcp_runtime.cli as cli, config_sync, tui.app as app_mod
+    from tui.screens.post_update import PostUpdateScreen
+
+    class _SameVer:
+        old_version = "0.0.1"; new_version = "0.0.1"
+
+    monkeypatch.setattr(cli, "wired_names", lambda config=None: [])
+    monkeypatch.setattr(config_sync, "needs_sync", lambda *a, **k: False)
+    app = app_mod.TuiApp(config={})
+    async with app.run_test() as pilot:
+        scr = PostUpdateScreen(upgrade=_SameVer(), config={}, config_path="c.yml")
+        app.push_screen(scr); await pilot.pause()
+        body = " ".join(str(w.render()) for w in scr.query(Static))
+        assert "✓ Агент обновлён · v0.0.1" in body
+        assert "0.0.1 → 0.0.1" not in body
+
+
+async def test_post_update_title_divider_only_when_there_is_work(monkeypatch):
+    """Линия под заголовком отделяет заголовок ОТ блока — без блока она не висит."""
+    import mcp_runtime.cli as cli, config_sync, tui.app as app_mod
+    from tui.screens.post_update import PostUpdateScreen
+    monkeypatch.setattr(cli, "wired_names", lambda config=None: [])
+    monkeypatch.setattr(config_sync, "needs_sync", lambda *a, **k: False)
+    app = app_mod.TuiApp(config={})
+    async with app.run_test() as pilot:
+        scr = PostUpdateScreen(upgrade=_Upg(), config={}, config_path="c.yml")
+        app.push_screen(scr); await pilot.pause()
+        title = scr.query_one(".pu-title")
+        assert title.styles.border_bottom[0] in (None, "", "none")   # пусто → без линии
+
+    monkeypatch.setattr(config_sync, "needs_sync", lambda *a, **k: True)
+    app2 = app_mod.TuiApp(config={})
+    async with app2.run_test() as pilot:
+        scr2 = PostUpdateScreen(upgrade=_Upg(), config={}, config_path="c.yml")
+        app2.push_screen(scr2); await pilot.pause()
+        title2 = scr2.query_one(".pu-title")
+        assert title2.styles.border_bottom[0] == "solid"             # есть блок → линия

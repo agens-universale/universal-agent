@@ -113,8 +113,9 @@ async def test_palette_enter_executes_selected():
 
     async with TuiApp().run_test() as pilot:
         await pilot.press("/")
-        await pilot.press("s")          # sessions, skills, skill, status, stop
-        await pilot.press("down")       # index 1: skills
+        await pilot.press("s")          # sessions, settings, skills, skill, status, stop
+        await pilot.press("down")
+        await pilot.press("down")       # index 2: skills
         await pilot.press("enter")
         # Palette closed
         assert not pilot.app.query(".palette")
@@ -180,3 +181,45 @@ def test_registry_does_not_contain_main():
     from tui.commands import build_default_registry
     reg = build_default_registry()
     assert reg.lookup("main") is None
+
+
+@pytest.mark.asyncio
+async def test_palette_hugs_content(tmp_path):
+    """Рамка палитры обнимает список (height: auto) — не растянута на весь экран."""
+    pytest.importorskip("textual")
+    from tui.app import TuiApp
+    from tui.widgets.command_palette import CommandPalette
+    from tui.commands import build_default_registry
+
+    app = TuiApp(threads_dir=str(tmp_path / "t"), config={"model": "M"})
+    async with app.run_test(size=(80, 40)) as pilot:
+        reg = build_default_registry()
+        pal = CommandPalette(reg, initial_filter="se")   # фильтр → 2 реальные команды (/sessions, /settings)
+        await app.screen.mount(pal)
+        await pilot.pause()
+        rows = pal._visible_rows()
+        assert len(rows) >= 1  # непустой список — не вырожденный нулевой случай
+        assert pal.styles.height is not None and pal.styles.height.is_auto  # height: auto
+        assert pal.region.height < 40                                      # не на весь экран
+        assert pal.region.height < 10                                      # рамка обнимает малый список, не растянута
+
+
+@pytest.mark.asyncio
+async def test_palette_keys_hint_has_air_above(tmp_path):
+    """Строка клавиш отделена от списка команд воздухом (то же правило, что `.set-hint`
+    в настройках) — иначе читается как ещё один пункт списка. «Нет совпадений» воздуха
+    не получает: там отделять нечего."""
+    pytest.importorskip("textual")
+    from tui.app import TuiApp
+    from tui.widgets.command_palette import CommandPalette
+    from tui.commands import build_default_registry
+
+    app = TuiApp(threads_dir=str(tmp_path / "t"), config={"model": "M"})
+    async with app.run_test(size=(80, 40)) as pilot:
+        pal = CommandPalette(build_default_registry(), initial_filter="se")
+        await app.screen.mount(pal)
+        await pilot.pause()
+        keys = pal.query_one(".palette-keys")
+        assert keys.styles.margin.top == 1
+        rows = list(pal.query(".palette-row"))
+        assert rows and rows[-1].styles.margin.top == 0     # у команд воздуха нет

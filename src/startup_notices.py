@@ -100,6 +100,22 @@ def _agentsmd(config_dict: Dict[str, Any], *, is_tui: bool) -> List[Notice]:
     return []
 
 
+def _compat(compat_notices: Optional[List[str]]) -> List[Notice]:
+    return [Notice("warning", "config_compat", msg) for msg in compat_notices or []]
+
+
+def _upgrade(upgrade_info) -> List[Notice]:
+    # upgrade_info: upgrade_gate.UpgradeInfo | None (duck-typed, без импорта политики)
+    if not upgrade_info:
+        return []
+    old = getattr(upgrade_info, "old_version", None)
+    new = getattr(upgrade_info, "new_version", "")
+    frm = f" {old} →" if old else ""
+    return [Notice("info", "agent_upgraded",
+                   f"Агент обновлён:{frm} {new}.",
+                   highlights=(new,))]
+
+
 def collect_startup_notices(
     config_dict: Dict[str, Any],
     builtin_tool_names: Set[str],
@@ -107,6 +123,8 @@ def collect_startup_notices(
     *,
     is_tui: bool,
     deprecated_keys_used: Optional[List[str]] = None,
+    upgrade_info=None,
+    compat_notices: Optional[List[str]] = None,
 ) -> List[Notice]:
     """Единая точка сборки. Warnings перед infos, внутри — по источнику."""
     warns: List[Notice] = []
@@ -115,8 +133,10 @@ def collect_startup_notices(
         _stop_tools_unknown(config_dict, builtin_tool_names)
         + _mcp_failed(mcp_status)
         + _agentsmd(config_dict, is_tui=is_tui)
+        + _compat(compat_notices)
         + _pricing_zero_rates(config_dict)
         + _deprecated(deprecated_keys_used)
+        + _upgrade(upgrade_info)
     ):
         (warns if n.level == "warning" else infos).append(n)
     return warns + infos
@@ -126,3 +146,15 @@ def render_notices_for_cli(notices: List[Notice]) -> str:
     """Строки для stderr: по одной, с глифом уровня."""
     glyph = {"warning": "⚠", "info": "ℹ"}
     return "\n".join(f"{glyph.get(n.level, '·')} {n.message}" for n in notices)
+
+
+def warning_toasts(notices: List[Notice], *, cap: int = 3) -> "Tuple[List[str], Optional[str], frozenset]":
+    """Warning-уведомления для тоста при старте: до `cap` сообщений + сводный «+N ещё»
+    (info НЕ тостим — только карточка/notices). Третий элемент — frozenset warning-кодов
+    для сравнения «набор изменился» (тост показываем только on-change, см. вызывающего)."""
+    warns = [n for n in notices if n.level == "warning"]
+    codes = frozenset(n.code for n in warns)
+    messages = [n.message for n in warns[:cap]]
+    extra = len(warns) - cap
+    summary = f"+{extra} ещё · /notices (F4)" if extra > 0 else None
+    return messages, summary, codes

@@ -109,12 +109,15 @@ def query_installed_version(distribution_name: str) -> str | None:
         "import importlib.metadata as m; "
         f"print(m.version({distribution_name!r}))"
     )
-    result = subprocess.run(
-        [str(active_pip_python()), "-c", script],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    argv = [str(active_pip_python()), "-c", script]
+    from utils.win_console import preserve_console_mode
+    with preserve_console_mode():   # зовётся из воркеров при живом TUI: subprocess на
+        result = subprocess.run(     # Windows сбрасывает режим консоли (мышь, Ctrl+C)
+            argv,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
     if result.returncode != 0:
         return None
     return result.stdout.strip() or None

@@ -9,13 +9,18 @@ import argparse
 import importlib
 import os
 import sys
-from pathlib import Path
 from typing import Optional, Sequence
 
 
 _MISSING_TEXTUAL_MSG = (
     "TUI mode requires 'textual'. Reinstall: uv tool install -e . --force"
 )
+
+
+def _interactive() -> bool:
+    """TTY на входе и выходе → можно запускать интерактивный визард."""
+    import sys as _sys
+    return _sys.stdin.isatty() and _sys.stdout.isatty()
 
 
 def _force_truecolor_if_supported() -> None:
@@ -47,7 +52,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument("--config", default=None)
     parser.add_argument("--task-root", default=None)
     parser.add_argument(
-        "--init",
+        "--init-config",
         action="store_true",
         help="Создать ~/.gc/config.yml из шаблона и выйти (TUI не запускается)",
     )
@@ -80,30 +85,31 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     )
     import onboarding
 
-    if getattr(args, "init", False):
-        path = user_config_path()
-        if _bootstrap_user_config():
-            print(onboarding.setup_guide(str(path), load_config(None)), file=sys.stderr)
-        else:
-            print(f"[gc] конфиг уже есть: {path} — не меняю", file=sys.stderr)
-        return 0
+    onb_write_path = user_config_path()
+    onboarding_mode = None
 
-    config_dict = load_config(args.config)
-    apply_cli_overrides(config_dict)
+    if getattr(args, "init_config", False):
+        just_created = _bootstrap_user_config()
+        config_dict = load_config(None)
+        if not _interactive():
+            print(onboarding.setup_guide(str(onb_write_path), config_dict, program="gc-ua", just_created=just_created), file=sys.stderr)
+            return 0
+        onboarding_mode = "review"
+    else:
+        just_created = _bootstrap_user_config() if args.config is None else False
+        config_dict = load_config(args.config)
+        apply_cli_overrides(config_dict)
 
-    # Онбординг: дефолтный путь и конфиг ещё не настроен → гайд ДО входа в
-    # alt-screen (иначе TUI проглотит stderr) и выходим, бэкенд не дёргаем.
-    if args.config is None and onboarding.is_unconfigured(config_dict):
-        print(
-            onboarding.setup_guide(str(user_config_path()), config_dict),
-            file=sys.stderr,
-        )
-        return 0
+        if args.config is None and onboarding.is_unconfigured(config_dict):
+            if not _interactive():
+                print(onboarding.setup_guide(str(onb_write_path), config_dict, program="gc-ua", just_created=just_created), file=sys.stderr)
+                return 0
+            onboarding_mode = "auto"
 
-    config_dict["console_trace"] = False  # TUI owns alt-screen output.
-    # Snapshot cwd на старте TUI — источник launch_root для Diff-TUI / perimeter.
-    # Не подменять live Path.cwd() после возможных cd внутри сессии.
-    config_dict["launch_root"] = str(Path.cwd().resolve())
+    # Поля, вычисляемые рантаймом TUI (в файле конфига их нет) — владелец
+    # tui/runtime_config; тот же модуль переносит их через hot-reload настроек.
+    from tui.runtime_config import apply_runtime_fields
+    apply_runtime_fields(config_dict)
 
     from thread_store import resolve_threads_dir
     threads_dir = resolve_threads_dir(config_dict)
@@ -115,8 +121,19 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         ensure_mcp_daemons(config_dict)
 
     app = _app_mod.TuiApp(threads_dir=threads_dir, system="cli", config=config_dict)
-    app._config_path = resolve_config_path(args.config)
+    app._config_path = onb_write_path if onboarding_mode else resolve_config_path(args.config)
     app._config_project_local = _project_local_config_path()  # str | None
+    app._onboarding_mode = onboarding_mode
+    app._onboarding_config_path = onb_write_path
+    import upgrade_gate
+    app._upgrade_info = upgrade_gate.detect_upgrade()
+    if app._upgrade_info is None:
+        # Нет апгрейда в этом запуске — стампим сразу (база для будущего
+        # detect_upgrade: первый запуск / повтор той же версии).
+        upgrade_gate.mark_current_run()
+    # Если апгрейд ЕСТЬ — стамп откладывается до закрытия PostUpdateScreen
+    # (спека D, Task 10): иначе крэш до показа экрана «съедает» уведомление
+    # об апгрейде на следующем запуске.
     try:
         app.run()
     finally:

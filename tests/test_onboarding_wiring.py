@@ -1,4 +1,4 @@
-"""Проводка онбординга в контроллеры: --init и стоп-гайд первого запуска."""
+"""Проводка онбординга в контроллеры: --init-config и стоп-гайд первого запуска."""
 import sys
 
 # `import cli` парсит sys.argv на импорте (нужен -q или --init) — пиннем валидный.
@@ -34,16 +34,52 @@ def test_cli_init_does_not_clobber_existing(tmp_path, monkeypatch, capsys):
     (cfgdir / "config.yml").write_text("agent:\n  model: mine\n", encoding="utf-8")
     rc = cli._run_init()
     assert rc == 0
-    assert "уже есть" in capsys.readouterr().err
+    # Новое поведение: не-TTY → setup_guide (путь к конфигу выводится в stderr)
+    assert "config.yml" in capsys.readouterr().err
     assert "mine" in (cfgdir / "config.yml").read_text(encoding="utf-8")
 
 
-def test_tui_init_creates_and_exits(tmp_path, monkeypatch, capsys):
+def test_tui_init_config_creates_and_exits(tmp_path, monkeypatch, capsys):
     _isolate(tmp_path, monkeypatch)
-    rc = tui.main(["--init"])
+    rc = tui.main(["--init-config"])
     assert rc == 0
     assert (tmp_path / "gc" / "config.yml").is_file()
     assert "config.yml" in capsys.readouterr().err
+
+
+def test_tui_init_config_runs_review_and_exits(tmp_path, monkeypatch):
+    # --init-config + interactive → app._onboarding_mode == "review"; app.run() вызван
+    _isolate(tmp_path, monkeypatch)
+    monkeypatch.setattr(tui, "_interactive", lambda: True)
+
+    import thread_store as ts_mod
+    monkeypatch.setattr(ts_mod, "resolve_threads_dir", lambda cfg: str(tmp_path / "threads"))
+
+    import mcp_daemon_autostart as mcp_da_mod
+    monkeypatch.setattr(mcp_da_mod, "ensure_mcp_daemons", lambda cfg: None, raising=False)
+    monkeypatch.setattr(mcp_da_mod, "shutdown_mcp_daemons", lambda: None, raising=False)
+
+    captured = {}
+
+    import sys
+    import tui.app as app_mod
+    OrigTuiApp = app_mod.TuiApp
+
+    class FakeTuiApp(OrigTuiApp):
+        def __init__(self, **kwargs):
+            super().__init__(**kwargs)
+            captured["app"] = self
+
+        def run(self, **kwargs):
+            captured["ran"] = True
+
+    monkeypatch.setattr(app_mod, "TuiApp", FakeTuiApp)
+    monkeypatch.setitem(sys.modules, "tui.app", app_mod)
+
+    rc = tui.main(["--init-config"])
+    assert rc == 0
+    assert captured.get("ran") is True, "app.run() должен быть вызван"
+    assert captured["app"]._onboarding_mode == "review"
 
 
 def test_tui_stop_guide_on_unconfigured(tmp_path, monkeypatch, capsys):
@@ -52,7 +88,7 @@ def test_tui_stop_guide_on_unconfigured(tmp_path, monkeypatch, capsys):
     _isolate(tmp_path, monkeypatch)
     rc = tui.main([])
     assert rc == 0
-    assert "не настроен" in capsys.readouterr().err
+    assert "gc-ua --init-config" in capsys.readouterr().err   # стоп-гайд с помощником, program=gc-ua
     assert (tmp_path / "gc" / "config.yml").is_file()
 
 

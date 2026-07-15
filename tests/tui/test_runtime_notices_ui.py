@@ -17,7 +17,7 @@ async def test_runtime_notice_appears_in_card(tmp_path):
     async with TuiApp(threads_dir=str(tmp_path / "t"), config=cfg).run_test() as pilot:
         scr = pilot.app.screen
         await pilot.pause()
-        assert "уведомления:" not in str(scr._mcp_status_row.render())
+        assert "/notices" not in str(scr._mcp_status_row.render())
 
         push_runtime_notice(Notice(
             "warning", "llm_error_400",
@@ -25,7 +25,7 @@ async def test_runtime_notice_appears_in_card(tmp_path):
         ))
         pilot.app.refresh_notices_indicators()
         card = str(scr._mcp_status_row.render())
-        assert "уведомления:" in card
+        assert "⚠ 1" in card
         assert "/notices (F4)" in card
         footer = str(scr.query_one("#footer-left").render())
         assert "⚠ 1" in footer

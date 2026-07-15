@@ -44,7 +44,12 @@ gc-mcp install   # MCP → ~/.local/share/gc/recommended_mcp/venv + авто-wir
 # Требуется: git на PATH + доступ к сети.
 ```
 
-После установки `gc-ua` / `gc-cli` работают **без `--config`**: при первом запуске конфиг создаётся (Windows — `~/.gc/config.yml`, macOS/Linux — `~/.config/gc/config.yml`), и агент **останавливается с подсказкой** — впишите `backend.completions_url` и токен (`backend.chat_completion_headers.Authorization`), при необходимости `agent.model`, затем запустите снова. Подготовить конфиг заранее, не запуская агента: `gc-cli --init-config` (или `gc-ua --init-config`).
+После установки `gc-ua` / `gc-cli` работают **без `--config`**: при первом запуске конфиг создаётся сам (Windows — `~/.gc/config.yml`, macOS/Linux — `~/.config/gc/config.yml`).
+
+- **`gc-ua`** — первый запуск открывает **мастер настройки**: адрес сервера → токен → модель → MCP-серверы. По завершении настройки сохраняются, и агент сразу стартует.
+- **`gc-cli`** — печатает подсказку и выходит: впишите `backend.completions_url` и токен (`backend.chat_completion_headers.Authorization`), при необходимости `agent.model`, затем запустите снова. Пройти мастер: `gc-cli --init-config` (настроить и выйти).
+
+Поменять адрес, токен, модель, MCP или обновить агента потом можно прямо из TUI — команда `/settings`.
 
 > **Миграция с gc-cli-pub:** если ранее была установлена старая версия дистрибутива, сначала удалите её: `uv tool uninstall gc-cli-pub`, затем выполните установку выше.
 

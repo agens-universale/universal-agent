@@ -138,3 +138,31 @@ async def test_footer_left_drops_stop_after_runner_finishes(tmp_path):
         assert "/stop" not in rendered
         assert "/sessions" in rendered
         assert "Ctrl+a" not in rendered
+
+
+@pytest.mark.asyncio
+async def test_footer_badge_counts_update_notice():
+    """«Доступна новая версия» попадает в счётчик ФУТЕРА: он виден всегда.
+
+    В карточке этот же факт показан отдельной строкой — там в счётчик он не идёт,
+    иначе одно и то же утверждалось бы дважды. Футер такой строки не имеет: без
+    счётчика признак исчезает вместе с карточкой при скролле."""
+    pytest.importorskip("textual")
+    from textual.widgets import Static
+    from tui.app import TuiApp
+
+    async with TuiApp().run_test() as pilot:
+        pilot.app._update_available = True
+        screen = pilot.app.screen_stack[0]
+        screen._refresh_notices_footer()
+        await pilot.pause()
+        footer = str(pilot.app.query_one("#footer-left", Static).render())
+        assert "notices" in footer          # счётчик появился
+
+    # набор для футера содержит уведомление об обновлении, для карточки — нет
+    async with TuiApp().run_test() as pilot:
+        pilot.app._update_available = True
+        footer_codes = {n.code for n in pilot.app.collect_footer_notices()}
+        card_codes = {n.code for n in pilot.app.collect_unread_notices()}
+        assert "update_available" in footer_codes
+        assert "update_available" not in card_codes

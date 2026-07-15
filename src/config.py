@@ -19,6 +19,7 @@ from config_modules.root import AppConfig, resolve_paths
 from config_modules.security import (
     apply_cli_command_moderation_overrides,
 )
+from config_modules.compat import apply_compat
 from config_modules.summary import DEFAULT_LAST_DIALOG_STEP_MESSAGE_MAX_CHARS
 from config_modules import env_vars
 from bundled_assets import bundled_root
@@ -200,6 +201,7 @@ def flatten_app_config(app_cfg: AppConfig) -> Dict[str, Any]:
         "tui_stream": app_cfg.tui.stream,
         "tui_stream_display": app_cfg.tui.stream_display,
         "tui_text_answer_mode": app_cfg.tui.text_answer_mode,
+        "update": app_cfg.update.model_dump(),  # спека D: check/extra_args
         "tui_bang_shell": app_cfg.tui.bang_shell.model_dump(),
         "tui_file_view": app_cfg.tui.file_view.model_dump(),
         "command_moderation": {
@@ -319,6 +321,9 @@ def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
             project_raw = yaml.safe_load(file) or {}
         raw_config = deep_merge(raw_config, project_raw)
 
+    # Compat-слой (A4): rename/remove устаревших ключей in-memory, файл не трогаем.
+    _compat_notices = apply_compat(raw_config)
+
     # Резолв ${ENV:VAR} после всех merge-слоёв, до валидации — креды модели/MCP из окружения.
     raw_config = resolve_env_placeholders(raw_config)
 
@@ -328,6 +333,8 @@ def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
     configure_for_model_tags(app_cfg.strip_tags_projection.tags)
 
     config_dict = flatten_app_config(app_cfg)
+    # Не поле схемы: результат разбора СЫРОГО конфига compat-слоем — докладывает загрузчик.
+    config_dict["compat_notices"] = _compat_notices
 
     apply_swarm_env_overrides(config_dict, config_dir)
 
@@ -338,6 +345,28 @@ def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
         urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
     return config_dict
+
+
+def validate_config_text(text: str) -> None:
+    """Контрольная валидация текста config.yml перед записью (writer/sync).
+
+    Конвейер тот же, что в load_config: compat → ${ENV:VAR} → схема. Иначе файл со
+    старым (переименованным) ключом или с плейсхолдером в нестроковом поле проходил бы
+    загрузку, но отвергался при записи — и юзер оказывался заблокирован в /settings.
+    Бросает ValueError с человекочитаемой причиной.
+    """
+    try:
+        raw = yaml.safe_load(text) or {}
+    except yaml.YAMLError as exc:
+        raise ValueError(f"невалидный YAML: {exc}") from exc
+    if not isinstance(raw, dict):
+        raise ValueError("config.yml должен быть YAML-объектом")
+    apply_compat(raw)
+    raw = resolve_env_placeholders(raw)
+    try:
+        AppConfig.model_validate(raw)
+    except Exception as exc:
+        raise ValueError(f"конфиг не проходит схему: {exc}") from exc
 
 
 if __name__ == "__main__":

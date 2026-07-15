@@ -72,6 +72,7 @@ def build_default_registry() -> CommandRegistry:
         Command("new", (), "", "новая сессия в этом окне", hotkey="Ctrl+N"),
         Command("config", (), "", "конфиг сессии + пути к файлам",
                 hotkey="F5 · Ctrl+G"),
+        Command("settings", (), "", "настройки: адрес сервера, модель, MCP, обновление"),
         Command("export", (), "[txt|json|log-txt|log-json]", "экспорт сессии",
                 arg_options=(("txt", "вся сессия в читаемом виде"),
                              ("json", "структурированные данные сессии"),

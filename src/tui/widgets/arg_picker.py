@@ -41,7 +41,7 @@ class ArgPicker(VerticalScroll):
             for i, opt in enumerate(rows):
                 classes = "palette-row selected" if i == self._selected else "palette-row"
                 yield Static(self._format_row(opt), classes=classes, markup=False)
-        yield Static(_HINT, classes="palette-hint", markup=False)
+        yield Static(_HINT, classes="palette-hint palette-keys", markup=False)
 
     def _format_row(self, opt: tuple[str, str]) -> str:
         value, desc = opt
@@ -87,7 +87,7 @@ class ArgPicker(VerticalScroll):
                 if i == self._selected:
                     selected_widget = w
                 new_widgets.append(w)
-        new_widgets.append(Static(_HINT, classes="palette-hint", markup=False))
+        new_widgets.append(Static(_HINT, classes="palette-hint palette-keys", markup=False))
         self.remove_children()
         self.mount_all(new_widgets)
         if selected_widget is not None:

@@ -2,6 +2,8 @@
 import sys
 import types
 
+import pytest
+
 
 def _parse(argv, monkeypatch):
     """Прямой парс без subprocess — надёжнее в среде проекта.
@@ -32,3 +34,11 @@ def test_init_flag_registered(monkeypatch):
     """--init зарегистрирован как флаг генерации AGENTS.md (Task 8)."""
     run_args = _parse(["gc-cli", "--init"], monkeypatch)
     assert getattr(run_args, "init", False) is True
+
+
+def test_init_config_and_query_mutually_exclusive(monkeypatch):
+    """--init-config и -q вместе должны вызвать SystemExit."""
+    import importlib
+    monkeypatch.setattr(sys, "argv", ["gc-cli", "--init-config", "-q", "hi"])
+    with pytest.raises(SystemExit):
+        importlib.reload(importlib.import_module("arg_parser"))

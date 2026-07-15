@@ -112,8 +112,8 @@ async def test_indicator_all_ok_settles_to_ready(tmp_path):
 
 @pytest.mark.asyncio
 async def test_settle_card_reflects_mcp_fail_trace_clean(tmp_path):
-    """После MCP-settle карточка несёт статус MCP + строку «уведомления: … /notices»
-    (учтён упавший MCP) + одну «готов»; трейс чистый (нет блока «Уведомления»)."""
+    """После MCP-settle карточка несёт статус MCP + строку «⚠ N · /notices» (формат B,
+    учтён упавший MCP) + одну «готов»; трейс чистый (нет блока «Уведомления»)."""
     pytest.importorskip("textual")
     from textual.widgets import Static
     from tui.app import TuiApp
@@ -137,7 +137,7 @@ async def test_settle_card_reflects_mcp_fail_trace_clean(tmp_path):
         # Точный формат карточки: три строки через пустую (MCP · уведомления · готовность).
         assert card == (
             "⚠ MCP: 0/1 — ни один не подключился · /mcp\n\n"
-            "уведомления: ⚠ 1 · /notices (F4)\n\n"
+            "⚠ 1 · /notices (F4)\n\n"
             "✓ готов к работе"
         ), f"Формат карточки разошёлся: {card!r}"
         # Ровно одна «готов» во всём трейсе (готовность только в карточке).
