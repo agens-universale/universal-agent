@@ -5,11 +5,14 @@
 """
 from __future__ import annotations
 
+from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping, Optional, Union
 
-from pygments.lexers import get_lexer_for_filename
+from pygments import lex
+from pygments.lexers import get_lexer_by_name, get_lexer_for_filename
+from pygments.token import Token
 from pygments.util import ClassNotFound
 from rich.syntax import Syntax
 
@@ -53,6 +56,139 @@ def lexer_name_for_path(path: Path) -> Optional[str]:
     if not lexer.aliases:
         return None
     return lexer.aliases[0]
+
+
+# Pygments alias → TextArea.language (tree-sitter). Нет в наборе → None.
+_TEXTAREA_LANG_MAP = {
+    "python": "python",
+    "javascript": "javascript",
+    "js": "javascript",
+    "typescript": "javascript",  # отдельного ts в TextArea нет
+    "ts": "javascript",
+    "json": "json",
+    "yaml": "yaml",
+    "yml": "yaml",
+    "toml": "toml",
+    "html": "html",
+    "css": "css",
+    "xml": "xml",
+    "markdown": "markdown",
+    "md": "markdown",
+    "bash": "bash",
+    "sh": "bash",
+    "shell": "bash",
+    "rust": "rust",
+    "go": "go",
+    "java": "java",
+    "sql": "sql",
+    "tsql": "sql",
+}
+
+
+def textarea_language_for_lexer(lexer: Optional[str]) -> Optional[str]:
+    """Pygments alias → language id TextArea; неизвестное → None (без подсветки)."""
+    if not lexer:
+        return None
+    return _TEXTAREA_LANG_MAP.get(lexer.lower())
+
+
+# Pygments Token → имя стиля TextAreaTheme.syntax_styles (vscode_dark и др.).
+# Ищем от конкретного типа вверх по иерархии Token.
+_PYGMENTS_TO_TA_STYLE: dict[Any, str] = {
+    Token.Keyword.Constant: "constant.builtin",
+    Token.Keyword.Namespace: "include",
+    Token.Keyword.Type: "type",
+    Token.Keyword: "keyword",
+    Token.Name.Function: "function",
+    Token.Name.Class: "class",
+    Token.Name.Decorator: "function",
+    Token.Name.Builtin: "type.builtin",
+    Token.Name.Tag: "tag",
+    Token.Name.Attribute: "css.property",
+    Token.Name.Label: "json.label",
+    Token.Name.Constant: "constant.builtin",
+    Token.String.Doc: "string.documentation",
+    Token.String: "string",
+    Token.Literal.String: "string",
+    Token.Comment: "comment",
+    Token.Number: "number",
+    Token.Literal.Number: "number",
+    Token.Operator: "operator",
+    Token.Punctuation: "punctuation.delimiter",
+    Token.Generic.Heading: "heading",
+    Token.Generic.Subheading: "heading",
+}
+
+
+def _textarea_style_for_token(ttype: Any) -> Optional[str]:
+    while ttype is not None:
+        mapped = _PYGMENTS_TO_TA_STYLE.get(ttype)
+        if mapped is not None:
+            return mapped
+        ttype = getattr(ttype, "parent", None)
+    return None
+
+
+def pygments_highlight_map(
+    text: str,
+    *,
+    lexer: Optional[str],
+) -> dict[int, list[tuple[int, Optional[int], str]]]:
+    """Pygments → карта подсветок TextArea: line → [(byte_start, byte_end, style)].
+
+    TextArea без `textual[syntax]` (tree-sitter) сам не красит; эта карта
+    пишется в `TextArea._highlights` и рендерится штатной темой.
+    """
+    out: dict[int, list[tuple[int, Optional[int], str]]] = defaultdict(list)
+    if not lexer or not text:
+        return out
+    try:
+        pyg_lexer = get_lexer_by_name(lexer, stripnl=False)
+    except ClassNotFound:
+        return out
+
+    line_idx = 0
+    col_byte = 0
+    for ttype, value in lex(text, pyg_lexer):
+        if not value:
+            continue
+        style = _textarea_style_for_token(ttype)
+        parts = value.split("\n")
+        for i, part in enumerate(parts):
+            if i:
+                line_idx += 1
+                col_byte = 0
+            if not part:
+                continue
+            part_bytes = part.encode("utf-8")
+            if style is not None:
+                start = col_byte
+                end = col_byte + len(part_bytes)
+                out[line_idx].append((start, end, style))
+            col_byte += len(part_bytes)
+    return out
+
+
+def apply_pygments_highlights(
+    text_area: Any,
+    text: str,
+    *,
+    lexer: Optional[str],
+) -> None:
+    """Заполнить `text_area._highlights` из pygments и перерисовать."""
+    highlights = getattr(text_area, "_highlights", None)
+    if highlights is None:
+        return
+    highlights.clear()
+    mapped = pygments_highlight_map(text, lexer=lexer)
+    for line_idx, spans in mapped.items():
+        highlights[line_idx] = list(spans)
+    line_cache = getattr(text_area, "_line_cache", None)
+    if line_cache is not None and hasattr(line_cache, "clear"):
+        line_cache.clear()
+    refresh = getattr(text_area, "refresh", None)
+    if callable(refresh):
+        refresh()
 
 
 def view_window_renderable(

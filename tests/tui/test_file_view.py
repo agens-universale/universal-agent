@@ -22,6 +22,7 @@ from tui.services.file_view import (
     open_for_view,
     read_window,
     resolve_view_path,
+    textarea_language_for_lexer,
     view_window_renderable,
 )
 
@@ -184,6 +185,24 @@ def test_lexer_name_for_known_and_plain():
     assert lexer_name_for_path(Path("a.yml")) in {"yaml", "yml"}
     assert lexer_name_for_path(Path("notes.txt")) is None
     assert lexer_name_for_path(Path("noext")) is None
+
+
+def test_textarea_language_for_lexer_maps_aliases():
+    assert textarea_language_for_lexer("python") == "python"
+    assert textarea_language_for_lexer("js") == "javascript"
+    assert textarea_language_for_lexer("typescript") == "javascript"
+    assert textarea_language_for_lexer("tsql") == "sql"
+    assert textarea_language_for_lexer("c") is None
+    assert textarea_language_for_lexer(None) is None
+
+
+def test_pygments_highlight_map_python_keywords():
+    from tui.services.file_view import pygments_highlight_map
+
+    mapped = pygments_highlight_map("def hello():\n    return 1\n", lexer="python")
+    styles = {name for spans in mapped.values() for _, _, name in spans}
+    assert "keyword" in styles
+    assert mapped  # непусто
 
 
 def test_view_window_renderable_syntax_or_plain():

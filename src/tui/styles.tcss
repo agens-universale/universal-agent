@@ -250,9 +250,17 @@ ToolCallRow.tool-group-start { margin-top: 1; }
 
 /* Тело ViewerScreen — read-only payload/файл */
 .viewer-body   { color: $ink; padding: 0 1; }
-/* FileViewerScreen: тело занимает оставшуюся высоту (пагинация по size.height) */
+/* FileViewerScreen: TextArea(read_only) — скролл, syntax, мышиное выделение */
 FileViewerScreen #root { height: 1fr; }
-#file-view-body { height: 1fr; }
+#file-view-body {
+    height: 1fr;
+    width: 1fr;
+    border: none;
+    padding: 0 1;
+    background: $bg;
+    color: $ink;
+}
+#file-view-body:focus { border: none; }
 
 /* Строки списков (TasksScreen, SkillsScreen) */
 .list-row      { color: $ink; padding: 0 1; }

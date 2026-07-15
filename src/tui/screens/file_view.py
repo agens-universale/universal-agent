@@ -9,7 +9,7 @@ from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.screen import Screen
 from textual.timer import Timer
-from textual.widgets import Static
+from textual.widgets import Static, TextArea
 
 from tui.services.file_view import (
     DEFAULT_PAGE_LINES_FALLBACK,
@@ -21,6 +21,7 @@ from tui.services.file_view import (
     OpenOk,
     ViewPositionStore,
     ViewWindow,
+    apply_pygments_highlights,
     clamp_page_lines,
     clamp_start_line,
     count_lines,
@@ -28,12 +29,12 @@ from tui.services.file_view import (
     lexer_name_for_path,
     open_for_view,
     read_window,
-    view_window_renderable,
+    textarea_language_for_lexer,
 )
 from tui.services.skill_view import truncate_path_left
 
 _PATH_MAXLEN = 56
-# Схлопываем key-repeat: не чаще ~10 Hz один read_window + Syntax.
+# Схлопываем key-repeat: не чаще ~10 Hz один read_window + load_text.
 # Одиночный тик — сразу (leading-edge); hold на больших файлах важнее «30 fps».
 _MOVE_THROTTLE_SEC = 1.0 / 10.0
 _FOOTER_OK = "[Esc] назад  ·  [↑↓] строка  ·  [PgUp/PgDn] стр."
@@ -41,7 +42,11 @@ _FOOTER_ERR = "[Esc] назад"
 
 
 class FileViewerScreen(Screen):
-    """Один Screen: ok-режим (окно файла) или error-state в теле."""
+    """Просмотр файла: TextArea(read_only) — скролл, подсветка, выделение мышью.
+
+    Ctrl+C: app._current_selection → focused.selected_text, иначе get_selected_text
+    (вся текущая страница как fallback).
+    """
 
     BINDINGS = [
         Binding("escape", "close", "назад", priority=True),
@@ -71,6 +76,7 @@ class FileViewerScreen(Screen):
         self._total_lines: Optional[int] = None
         self._window: Optional[ViewWindow] = None
         self._lexer: Optional[str] = None
+        self._ta_language: Optional[str] = None
         self._display_path = (raw_path or "").strip() or "view"
         self._pending_delta = 0
         self._move_timer: Optional[Timer] = None
@@ -80,11 +86,26 @@ class FileViewerScreen(Screen):
             with Horizontal(id="header"):
                 yield Static("", id="header-left", markup=False)
                 yield Static("", id="header-right", markup=False)
-            yield Static("", id="file-view-body", classes="viewer-body", markup=False)
+            yield TextArea(
+                "",
+                id="file-view-body",
+                classes="viewer-body",
+                read_only=True,
+                soft_wrap=False,
+                show_line_numbers=False,
+                show_cursor=True,
+                highlight_cursor_line=False,
+                tab_behavior="focus",
+                theme="vscode_dark",
+            )
             yield Static(_FOOTER_ERR, id="footer", markup=False)
 
     def on_mount(self) -> None:
         self._bootstrap()
+        try:
+            self.query_one("#file-view-body", TextArea).focus()
+        except Exception:
+            pass
         if self._settings.page_lines is None:
             self.call_after_refresh(self._sync_page_from_layout)
 
@@ -133,6 +154,7 @@ class FileViewerScreen(Screen):
         self._display_path = str(result.path)
         self._total_lines = result.total_lines
         self._lexer = lexer_name_for_path(result.path)
+        self._ta_language = textarea_language_for_lexer(self._lexer)
         self._page = self._resolve_page()
         saved = self._store.get(result.path)
         self._start_line = saved if saved is not None else 1
@@ -150,7 +172,7 @@ class FileViewerScreen(Screen):
 
     def _page_from_body(self) -> int:
         try:
-            body = self.query_one("#file-view-body", Static)
+            body = self.query_one("#file-view-body", TextArea)
             h = body.size.height
         except Exception:
             h = 0
@@ -257,14 +279,23 @@ class FileViewerScreen(Screen):
 
     def _apply_window(self, window: ViewWindow) -> None:
         self._window = window
-        body = self.query_one("#file-view-body", Static)
         empty = not window.lines
-        if empty:
-            body.update(MSG_EMPTY)
+        plain = MSG_EMPTY if empty else "\n".join(window.lines)
+        body = self.query_one("#file-view-body", TextArea)
+        # TextArea.language красит только при textual[syntax]/tree-sitter).
+        # Иначе — pygments → _highlights (та же тема vscode_dark).
+        try:
+            from textual._tree_sitter import TREE_SITTER
+        except ImportError:
+            TREE_SITTER = False
+        if TREE_SITTER and self._ta_language:
+            body.language = self._ta_language
+            body.load_text(plain)
         else:
-            body.update(view_window_renderable(
-                "\n".join(window.lines), lexer=self._lexer,
-            ))
+            body.language = None
+            body.load_text(plain)
+            if not empty:
+                apply_pygments_highlights(body, plain, lexer=self._lexer)
         self.query_one("#footer", Static).update(_FOOTER_OK)
         self._refresh_header(
             empty=empty or (self._total_lines == 0),
@@ -273,8 +304,10 @@ class FileViewerScreen(Screen):
         )
 
     def _show_error(self) -> None:
-        body = self.query_one("#file-view-body", Static)
-        body.update(self._error or "")
+        body = self.query_one("#file-view-body", TextArea)
+        body.language = None
+        body.load_text(self._error or "")
+        apply_pygments_highlights(body, "", lexer=None)
         self.query_one("#footer", Static).update(_FOOTER_ERR)
         left = f"view · {truncate_path_left(self._display_path, _PATH_MAXLEN)}"
         if not self._display_path or self._display_path == "view":
@@ -297,3 +330,16 @@ class FileViewerScreen(Screen):
         if self._error is not None or self._path is None:
             return
         self._store.set(self._path, self._start_line)
+
+    def get_selected_text(self) -> str:
+        """Выделение TextArea или, если пусто, текст текущей страницы."""
+        try:
+            body = self.query_one("#file-view-body", TextArea)
+            sel = body.selected_text
+            if sel:
+                return sel
+        except Exception:
+            pass
+        if self._window and self._window.lines:
+            return "\n".join(self._window.lines)
+        return ""
