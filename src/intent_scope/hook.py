@@ -108,6 +108,7 @@ def _append_raw_tool_intent(
 ) -> None:
     scope_cfg = getattr(ctx, "intent_scope", None)
     max_raw = int(getattr(scope_cfg, "max_raw_record_chars", 0) or 0)
+    # Tool args/outputs: as-is (think живёт в model prose до tool_call JSON, не внутри).
     arguments = _parse_tool_arguments(tool_arguments) if store_arguments else None
     output = _parse_tool_output(tool_output_raw) if store_output else None
     if store_arguments:

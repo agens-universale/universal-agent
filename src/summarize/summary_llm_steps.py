@@ -5,7 +5,6 @@ from typing import Any
 import message_format.dialog_history as dialog_history
 from summarize.llm import request_summary_text
 from summarize.summary_spec import render_output_shape_for_prompt, render_tag_roles_for_prompt
-from utils.llm_chat_client import log_llm_prompt_and_result
 
 
 def compress_summary_text(
@@ -42,13 +41,6 @@ def compress_summary_text(
         request_label="summary_compress",
         max_tokens=max_tokens,
     )
-    log_llm_prompt_and_result(
-        logger=getattr(ctx, "logger", None),
-        label="summary_compress",
-        messages=request_messages,
-        output_text=text,
-    )
-    text = (text or "").strip()
     if not text:
         return summary_text[:max_chars]
     if len(text) > max_chars:
@@ -102,17 +94,10 @@ def repair_summary_text(
         {"role": "system", "content": system},
         {"role": "user", "content": user},
     ]
-    out = request_summary_text(
+    return request_summary_text(
         ctx=ctx,
         state=state,
         messages=request_messages,
         request_label="summary_repair",
         max_tokens=max_tokens,
     )
-    log_llm_prompt_and_result(
-        logger=getattr(ctx, "logger", None),
-        label="summary_repair",
-        messages=request_messages,
-        output_text=out,
-    )
-    return out

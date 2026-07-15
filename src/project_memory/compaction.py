@@ -8,8 +8,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Optional
 
-from utils.llm_chat_client import request_chat_completion_text
 from bundled_assets import bundled_root
+from summarize.llm import request_auxiliary_completion_text
 
 from config_modules.project_memory import DEFAULT_PROJECT_MEMORY_MAX_APPEND_CHARS
 
@@ -67,7 +67,7 @@ def compact_text(text: str, ctx: Any, state: Any = None) -> CompactionResult:
         {"role": "user", "content": text},
     ]
     try:
-        raw = request_chat_completion_text(
+        compressed = request_auxiliary_completion_text(
             ctx=ctx,
             state=state,
             messages=messages,
@@ -79,7 +79,6 @@ def compact_text(text: str, ctx: Any, state: Any = None) -> CompactionResult:
             ok=False, text="", error_type="backend_error", error_message=str(exc)
         )
 
-    compressed = (raw or "").strip()
     if not compressed:
         return CompactionResult(
             ok=False,

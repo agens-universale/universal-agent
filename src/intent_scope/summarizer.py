@@ -12,7 +12,6 @@ from config_modules.intent_scope import IntentScopeConfig
 from intent_log.serialize import deserialize_list, records_to_jsonl_lines
 from message_format.dialog_history import truncate_text
 from summarize.llm import request_summary_text
-from utils.llm_chat_client import log_llm_prompt_and_result
 from bundled_assets import bundled_root
 
 _logger = logging.getLogger(__name__)
@@ -140,11 +139,12 @@ def summarize_tool_intent_line(
     ]
     request_label = f"intent_scope:{tool_name}"
     try:
-        raw = request_summary_text(
+        line = request_summary_text(
             ctx=ctx,
             state=state,
             messages=request_messages,
             request_label=request_label,
+            logger=log,
         )
     except Exception as exc:
         log.warning(
@@ -155,15 +155,10 @@ def summarize_tool_intent_line(
         )
         return ""
 
-    log_llm_prompt_and_result(
-        logger=log,
-        label=request_label,
-        messages=request_messages,
-        output_text=raw,
-    )
-
-    line = str(raw or "").strip()
-    if line and scope_cfg.max_summary_chars > 0:
+    if not line:
+        log_intent_scope_summary_done(log, tool_name=tool_name, summary_chars=0)
+        return ""
+    if scope_cfg.max_summary_chars > 0:
         line = truncate_text(line, scope_cfg.max_summary_chars)
     log_intent_scope_summary_done(
         log, tool_name=tool_name, summary_chars=len(line)
@@ -176,7 +171,11 @@ def build_fallback_aggregated_content(
     ctx: Any,
     tool_output_raw: str,
 ) -> str:
-    """Truncated tool output for aggregated record when LLM summary fails."""
+    """Truncated tool output for aggregated record when LLM summary fails.
+
+    Tool output as-is (no strip-tags projection): contamination is in model prose /
+    aux LLM replies, not in opaque tool results.
+    """
     scope_cfg = _scope_cfg(ctx)
     body = str(tool_output_raw or "").strip()
     if not body:
@@ -217,11 +216,12 @@ def summarize_final_answer_line(
                 ),
             },
         ]
-        raw = request_summary_text(
+        line = request_summary_text(
             ctx=ctx,
             state=state,
             messages=request_messages,
             request_label=request_label,
+            logger=log,
         )
     except Exception as exc:
         log.warning(
@@ -229,12 +229,10 @@ def summarize_final_answer_line(
         )
         return ""
 
-    log_llm_prompt_and_result(
-        logger=log, label=request_label, messages=request_messages, output_text=raw
-    )
-
-    line = str(raw or "").strip()
-    if line and scope_cfg.max_summary_chars > 0:
+    if not line:
+        log_intent_scope_summary_done(log, tool_name="final_answer", summary_chars=0)
+        return ""
+    if scope_cfg.max_summary_chars > 0:
         line = truncate_text(line, scope_cfg.max_summary_chars)
     log_intent_scope_summary_done(log, tool_name="final_answer", summary_chars=len(line))
     return line

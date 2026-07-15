@@ -59,7 +59,10 @@ def is_valid_summary_text(text: str) -> bool:
 
 
 def merge_repaired_summary(*, invalid_text: str, repaired_text: str) -> str:
-    """Склеивает теги из repair поверх сохранённых из невалидного черновика."""
+    """Склеивает теги из repair поверх сохранённых из невалидного черновика.
+
+    Ожидает already-projected тексты (aux LLM choke в ``request_summary_text``).
+    """
     preserved = extract_summary_bodies(invalid_text)
     repaired = extract_summary_bodies(repaired_text)
     return assemble_summary_xml(merge_summary_bodies(preserved=preserved, repaired=repaired))

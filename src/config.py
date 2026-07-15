@@ -23,6 +23,7 @@ from config_modules.summary import DEFAULT_LAST_DIALOG_STEP_MESSAGE_MAX_CHARS
 from config_modules import env_vars
 from bundled_assets import bundled_root
 from mcp_runtime.paths import managed_config_path
+from message_projection import configure_for_model_tags
 
 # Backward compatibility for existing imports.
 _DEFAULT_LAST_DIALOG_STEP_MESSAGE_MAX_CHARS = (
@@ -288,6 +289,7 @@ def flatten_app_config(app_cfg: AppConfig) -> Dict[str, Any]:
         "pricing": app_cfg.pricing.model_dump(),
         "agent_auth": app_cfg.agent_auth.model_dump() if app_cfg.agent_auth else {},
         "diff_tui": app_cfg.diff_tui.model_dump(),
+        "strip_tags_projection": app_cfg.strip_tags_projection.model_dump(),
     }
 
     return config_dict
@@ -322,6 +324,8 @@ def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
 
     app_cfg = AppConfig.model_validate(raw_config)
     resolve_paths(app_cfg, config_dir)
+    # Bootstrap for_model strip tags after validate/normalize (no hot-path yaml reads).
+    configure_for_model_tags(app_cfg.strip_tags_projection.tags)
 
     config_dict = flatten_app_config(app_cfg)
 

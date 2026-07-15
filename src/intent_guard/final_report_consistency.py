@@ -8,8 +8,11 @@ from intent_guard.validation_result import (
     fail_open_validation_result,
     parse_validator_response,
 )
-from summarize.llm import auxiliary_llm_completion_kwargs, auxiliary_llm_judge_max_tokens
-from utils.llm_chat_client import log_llm_prompt_and_result, request_chat_completion_text
+from summarize.llm import (
+    auxiliary_llm_completion_kwargs,
+    auxiliary_llm_judge_max_tokens,
+    request_auxiliary_completion_text,
+)
 from bundled_assets import bundled_root
 
 # bundled_root() — единый резолвер ассетов (editable → repo, wheel → site-packages).
@@ -122,6 +125,7 @@ def _build_finish_gate_retry_user_prompt(
     payload: Dict[str, Any],
     previous_raw: str,
 ) -> str:
+    # previous_raw already projected by aux LLM choke.
     draft = _clip_retry_draft(previous_raw)
     return (
         "Your previous finish-gate reply was INVALID: it was not parseable JSON with "
@@ -151,7 +155,7 @@ def _request_finish_gate_once(
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": user_prompt},
     ]
-    raw = request_chat_completion_text(
+    return request_auxiliary_completion_text(
         ctx=ctx,
         state=state,
         messages=request_messages,
@@ -159,13 +163,6 @@ def _request_finish_gate_once(
         request_label=request_label,
         payload_overrides=auxiliary_llm_completion_kwargs(ctx),
     )
-    log_llm_prompt_and_result(
-        logger=getattr(ctx, "logger", None),
-        label=request_label,
-        messages=request_messages,
-        output_text=raw,
-    )
-    return raw
 
 
 def validate_final_report_vs_user_intent(

@@ -48,6 +48,7 @@ def append_user_asks_from_messages(
 
 
 def seed_subagent_current_user_intent(assignment_text: str) -> list[Any]:
+    # Assignment — tool-arg parent agent'а; strip-tags живут в prose до tool_call, не здесь.
     line = str(assignment_text or "").strip()
     if not line:
         return []

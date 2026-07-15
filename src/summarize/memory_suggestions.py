@@ -13,10 +13,6 @@ from summarize.working_memory_gateway import (
     MEMORY_DELTAS_FORMAT_REPAIR_REQUEST_LABEL,
     build_memory_deltas_format_repair_messages,
 )
-from utils.llm_chat_client import (
-    log_llm_prompt_and_result,
-    shorten_for_log,
-)
 from bundled_assets import bundled_root
 
 # bundled_root() — единый резолвер ассетов (editable → repo, wheel → site-packages).
@@ -31,7 +27,11 @@ DEFAULT_MEMORY_PATCH_REPLACE_PROMPT_PATH = os.path.abspath(
 
 @dataclass
 class MemoryPatchLlmResult:
-    """Raw LLM transport result for a memory patch step (no parsing here)."""
+    """LLM transport result for a memory patch step (no parsing here).
+
+    ``raw_response`` is already ``for_model``-projected (aux choke in
+    ``request_summary_text``); dirty text is logged there, not here.
+    """
 
     request_messages: List[Dict[str, str]]
     raw_response: str
@@ -61,28 +61,17 @@ def _request_patch(
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": user_prompt},
     ]
-    raw_llm_response = request_summary_text(
+    # Dirty logged inside request_summary_text / aux choke; return is projected.
+    projected = request_summary_text(
         ctx=ctx,
         state=state,
         messages=request_messages,
         request_label=request_label,
-    )
-    log_llm_prompt_and_result(
         logger=logger,
-        label=request_label,
-        messages=request_messages,
-        output_text=raw_llm_response,
     )
-    if logger is not None:
-        logger.info(
-            "%s_raw chars=%s preview=%s",
-            request_label,
-            len(raw_llm_response or ""),
-            shorten_for_log(raw_llm_response or "", max_chars=500),
-        )
     return MemoryPatchLlmResult(
         request_messages=request_messages,
-        raw_response=raw_llm_response,
+        raw_response=projected,
     )
 
 

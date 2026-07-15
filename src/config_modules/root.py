@@ -47,6 +47,10 @@ from config_modules.summary import (
     DEFAULT_TURN_END_TRIGGER_RATIO,
     SummaryConfig,
 )
+from config_modules.strip_tags_projection import (
+    StripTagsProjectionConfig,
+    normalize_strip_tags_projection_config,
+)
 
 
 class AgentAuthConfig(BaseModel):
@@ -72,6 +76,9 @@ class AppConfig(BaseModel):
     pricing: PricingConfig = Field(default_factory=PricingConfig)
     tui: TuiConfig = Field(default_factory=TuiConfig)
     diff_tui: DiffTuiConfig = Field(default_factory=DiffTuiConfig)
+    strip_tags_projection: StripTagsProjectionConfig = Field(
+        default_factory=StripTagsProjectionConfig
+    )
     agent_auth: AgentAuthConfig | None = None
 
 
@@ -169,6 +176,7 @@ def resolve_paths(cfg: AppConfig, config_dir: str) -> None:
     cfg.tool_usage_notice = normalize_tool_usage_notice_rules(cfg.tool_usage_notice)
     normalize_project_memory_config(cfg.project_memory)
     normalize_intent_scope_config(cfg.intent_scope)
+    normalize_strip_tags_projection_config(cfg.strip_tags_projection)
     cfg.intent_scope.intent_scope_tool_summary_prompt_path = to_abs(
         cfg.intent_scope.intent_scope_tool_summary_prompt_path
     ) or _prompt_default(config_dir, "intent_scope_tool_summary_prompt.md")

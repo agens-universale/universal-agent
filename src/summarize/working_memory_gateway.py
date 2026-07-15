@@ -334,7 +334,10 @@ def parse_memory_deltas(
     *,
     full_replace: bool = False,
 ) -> tuple[WorkingMemoryDeltas, frozenset[str]]:
-    """Parse register tags; return deltas and which register names were present in output."""
+    """Parse register tags; return deltas and which register names were present in output.
+
+    Expects already-projected aux LLM text (choke in ``request_summary_text``).
+    """
     del full_replace  # kept for call-site compatibility
     bodies = extract_register_bodies(str(raw_output or ""))
     deltas: Dict[str, str] = {}

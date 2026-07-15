@@ -153,3 +153,13 @@ def _clear_runtime_notices_between_tests():
     clear_runtime_notices(listeners=True)
     yield
     clear_runtime_notices(listeners=True)
+
+
+@pytest.fixture(autouse=True)
+def _reset_message_projection_tags():
+    """Спека 08: каждый тест стартует с default for_model = только think."""
+    from message_projection import configure_for_model_tags
+
+    configure_for_model_tags([])
+    yield
+    configure_for_model_tags([])

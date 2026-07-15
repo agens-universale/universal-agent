@@ -26,7 +26,7 @@ from summarize.working_memory_gateway import (
     parse_memory_deltas_with_repair,
     resolve_persistent_state_block,
 )
-from utils.llm_chat_client import log_llm_prompt_and_result, shorten_for_log
+from utils.llm_chat_client import shorten_for_log
 
 
 def summarize_dialog_via_chat_completions(
@@ -270,12 +270,7 @@ def summarize_dialog_via_chat_completions(
             messages=request_messages,
             request_label=f"summary_batch_{batch_index}",
             max_tokens=max_tokens,
-        )
-        log_llm_prompt_and_result(
             logger=logger,
-            label=f"summary_batch_{batch_index}",
-            messages=request_messages,
-            output_text=text,
         )
         trace_batch["output_summary_text"] = text
         if logger is not None:

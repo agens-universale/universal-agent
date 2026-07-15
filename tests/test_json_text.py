@@ -1,7 +1,28 @@
 import json
 import unittest
 
-from utils.json_text import format_json_for_display
+from utils.json_text import extract_json_candidate, format_json_for_display, parse_json_from_text
+
+
+class ExtractJsonCandidateTest(unittest.TestCase):
+    def test_fenced_json(self) -> None:
+        raw = 'noise\n```json\n{"a": 1}\n```\nmore'
+        self.assertEqual(extract_json_candidate(raw), '{"a": 1}')
+
+    def test_prose_before_object(self) -> None:
+        raw = 'prefix\n{"a": 1, "b": 2}\n'
+        self.assertEqual(extract_json_candidate(raw), '{"a": 1, "b": 2}')
+
+    def test_starts_with_brace_unchanged(self) -> None:
+        raw = '{"a": 1}'
+        self.assertEqual(extract_json_candidate(raw), raw)
+
+    def test_parse_json_from_text_with_preamble(self) -> None:
+        raw = "ok\n" + json.dumps({"trace_ok": True, "report_ok": False})
+        self.assertEqual(
+            parse_json_from_text(raw),
+            {"trace_ok": True, "report_ok": False},
+        )
 
 
 class FormatJsonForDisplayTest(unittest.TestCase):

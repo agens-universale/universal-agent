@@ -5,12 +5,13 @@ from typing import Any
 
 def extract_json_candidate(text: str) -> str:
     """
-    Return best-effort JSON candidate from arbitrary text.
+    Return best-effort JSON object candidate from arbitrary text.
 
-    Handles common LLM pattern when JSON is wrapped in markdown fences:
-    ```json
-    { ... }
-    ```
+    Order:
+    1. markdown fence `` ```json {…} ``` ``;
+    2. whole text if it already starts with ``{``;
+    3. slice from first ``{`` to last ``}`` (prose/preamble before JSON);
+    4. otherwise the stripped raw text.
     """
     raw = (text or "").strip()
     if not raw:
@@ -22,6 +23,12 @@ def extract_json_candidate(text: str) -> str:
     )
     if fenced:
         return fenced.group(1).strip()
+    if raw.startswith("{"):
+        return raw
+    start = raw.find("{")
+    end = raw.rfind("}")
+    if start != -1 and end != -1 and end > start:
+        return raw[start : end + 1]
     return raw
 
 

@@ -37,7 +37,7 @@ def test_request_summary_text_uses_ctx_chat_completions_llm(monkeypatch):
     def _fake_request(*, max_tokens=None, payload_overrides=None, **kwargs):
         captured["max_tokens"] = max_tokens
         captured["payload_overrides"] = payload_overrides
-        return "summary ok"
+        return "<think>x</think>summary ok"
 
     monkeypatch.setattr(summary_llm, "request_chat_completion_text", _fake_request)
 
@@ -47,6 +47,7 @@ def test_request_summary_text_uses_ctx_chat_completions_llm(monkeypatch):
             completion_kwargs={"reasoning_effort": "none"},
         ),
         config_dict={},
+        logger=None,
     )
     out = summary_llm.request_summary_text(
         ctx=ctx,

@@ -121,6 +121,22 @@ class ParseValidatorResponseTest(unittest.TestCase):
     def test_invalid_json_returns_none(self) -> None:
         self.assertIsNone(parse_validator_response("not json at all"))
 
+    def test_prose_preamble_before_json_is_parsed(self) -> None:
+        """Finish-gate: prose before object (same idea as command judge brace slice)."""
+        payload = {
+            "action": "accept",
+            "trace_ok": True,
+            "report_ok": True,
+            "trace_gaps": [],
+            "report_mismatches": [],
+            "coverage_score": 1.0,
+        }
+        raw = "Кратко: всё ок.\n" + json.dumps(payload)
+        result = parse_validator_response(raw)
+        assert result is not None
+        self.assertTrue(result.ok)
+        self.assertEqual(result.action, "accept")
+
     def test_missing_axes_returns_none(self) -> None:
         self.assertIsNone(parse_validator_response(json.dumps({"action": "accept", "ok": True})))
 

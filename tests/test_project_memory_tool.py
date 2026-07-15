@@ -4,9 +4,17 @@ from unittest.mock import patch
 
 import pytest
 
+from config_modules import env_vars
 from project_memory.compaction import CompactionResult
 from tools.project.project_memory import ProjectMemory
 from tools.registry import get_builtin_tools_data
+
+
+@pytest.fixture(autouse=True)
+def _isolate_project_memory_gc_home(tmp_path, monkeypatch):
+    """Не писать backup в реальный gc_state — иначе re-run с тем же basetemp
+    восстанавливает leftover backup и ломает append/read assertions (length=22)."""
+    monkeypatch.setattr(env_vars, "env", env_vars.EnvVars(gc_home=tmp_path / "gc_home"))
 
 
 def _make_tool(tmp_path) -> ProjectMemory:

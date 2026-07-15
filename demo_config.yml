@@ -231,6 +231,13 @@ project_memory:
   max_chars: 10000
   max_append_chars: 3000
 
+# Доп. strip-теги для for_model / aux LLM (summary, intent, judges, compaction).
+# <think> всегда on в коде и выключить нельзя; сюда — только extras.
+# Секция опциональна: без неё стрипается только think (non-greedy).
+strip_tags_projection:
+  tags:
+    - redacted_thinking
+
 # Intent scope: LLM post-hook после human-facing tools (только chat_completions).
 # tools: [] — выключить. Параметры LLM — chat_completions.llm.
 intent_scope:

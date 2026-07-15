@@ -34,7 +34,6 @@ def test_summarize_tool_intent_line_uses_chat_completions_llm_completion_kwargs(
     monkeypatch.setattr(
         summarizer, "request_summary_text", _fake_request_summary_text
     )
-    monkeypatch.setattr(summarizer, "log_llm_prompt_and_result", lambda **kwargs: None)
 
     from config_modules.intent_scope import IntentScopeConfig, IntentScopeToolConfig
     from intent_log import append_user_ask
@@ -82,7 +81,6 @@ def test_summarize_tool_intent_line_fail_open_on_llm_error(monkeypatch):
         "request_summary_text",
         lambda **kwargs: (_ for _ in ()).throw(RuntimeError("boom")),
     )
-    monkeypatch.setattr(summarizer, "log_llm_prompt_and_result", lambda **kwargs: None)
 
     from config_modules.intent_scope import IntentScopeConfig, IntentScopeToolConfig
 

@@ -520,7 +520,7 @@ def test_finish_gate_builds_trace_digest_from_state_messages(monkeypatch):
         return_value=digest,
     ) as mock_build:
         with patch(
-            "intent_guard.final_report_consistency.request_chat_completion_text",
+            "summarize.llm.request_chat_completion_text",
             return_value=validator_json,
         ):
             run_agent(

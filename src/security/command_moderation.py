@@ -20,11 +20,12 @@ from security.path_policy import (
     resolve_tool_context,
 )
 from security.protected_paths import protected_paths
+from message_projection import project_text_for_model
 from summarize.llm import (
     auxiliary_llm_completion_kwargs,
     auxiliary_llm_judge_max_tokens,
+    request_auxiliary_completion_text,
 )
-from utils.llm_chat_client import request_chat_completion_text
 from utils.project_data import os_label
 from bundled_assets import bundled_root
 
@@ -562,7 +563,7 @@ def _default_judge_client(args: tuple[Any, ...], kwargs: dict[str, Any]) -> Call
 
     def judge(judge_payload: dict[str, Any]) -> dict[str, Any]:
         messages = _build_judge_messages(judge_payload)
-        raw_text = request_chat_completion_text(
+        raw_text = request_auxiliary_completion_text(
             ctx=ctx,
             state=state,
             messages=messages,
@@ -611,13 +612,8 @@ def _load_prompt_file(path: Path) -> str:
 
 
 def _strip_judge_response_text(raw_text: str) -> str:
-    text = (raw_text or "").strip()
-    # Reasoning models (Minimax, DeepSeek-R1 и т.п.) могут встраивать thinking-блок в content.
-    for pattern in (
-        r"<think\b[^>]*>.*?</think>",
-        r"<redacted_thinking\b[^>]*>.*?</think>",
-    ):
-        text = re.sub(pattern, "", text, flags=re.DOTALL | re.IGNORECASE).strip()
+    # Effective strip tags (think + strip_tags_projection) via for_model; fence/JSON поверх.
+    text = project_text_for_model(raw_text)
     fence_match = re.search(r"```(?:json)?\s*\n?(.*?)\n?```", text, flags=re.DOTALL | re.IGNORECASE)
     if fence_match:
         return fence_match.group(1).strip()

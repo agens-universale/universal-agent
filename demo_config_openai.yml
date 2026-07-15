@@ -90,6 +90,10 @@ summary:
   last_dialog_steps_count: 4
   last_dialog_step_message_max_chars: 6000
 
+# Доп. strip-теги для for_model / aux LLM. <think> всегда on; extras — сюда.
+strip_tags_projection:
+  tags: []
+
 security:
   command_moderation:
     mode: deny

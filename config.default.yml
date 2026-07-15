@@ -101,6 +101,10 @@ summary:
   last_dialog_steps_count: 5
   last_dialog_step_message_max_chars: 1500
 
+# Доп. strip-теги для for_model / aux LLM. <think> всегда on; extras — сюда.
+strip_tags_projection:
+  tags: []
+
 intent_scope:
   # Финальная проза, закрывающая ход, пишется в intent log:
   # <= порога — как есть (raw); > порога — LLM-саммари (кап max_summary_chars).
