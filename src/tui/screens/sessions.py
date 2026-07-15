@@ -20,6 +20,7 @@ from tui.palette import (
 from tui.services.git_info import current_branch
 from tui.services.notices_ui import format_notices_badge
 from tui.services.relative_time import format_relative_local
+from tui.services.session_lock import BUSY_MESSAGE, is_held_by_other
 from tui.services.skill_view import truncate_path_left
 from tui.services.stores.file_store import FileTaskStore
 
@@ -207,6 +208,13 @@ class SessionsScreen(Screen):
         t.append(title, style=BRIGHT if selected else INK)
         return t
 
+    def _session_is_busy(self, thread_id: str) -> bool:
+        """Чужой свежий lock → сессия занята другим TUI."""
+        tui_id = getattr(self.app, "tui_id", "") or ""
+        if not tui_id:
+            return False
+        return is_held_by_other(self._threads_dir, self._system, thread_id, tui_id)
+
     def _meta_line(self, task) -> Text:
         t = Text(no_wrap=True, overflow="ellipsis")
         t.append(format_relative_local(task.updated_at), style=DIM)
@@ -220,6 +228,9 @@ class SessionsScreen(Screen):
         if status:   # None — исход не записан → бейдж не показываем (без пустых «[]»)
             t.append(" · ", style=MUTED)
             t.append(f"[{status}]", style=_STATUS_COLOR.get(status, DEEP_DIM))
+        if self._session_is_busy(task.thread_id):
+            t.append(" · ", style=MUTED)
+            t.append("🔒 занято", style=ERR)
         t.append(" · ", style=MUTED)
         t.append(_short_id(task.thread_id), style=MUTED)
         return t
@@ -333,12 +344,18 @@ class SessionsScreen(Screen):
     # ---- actions -------------------------------------------------------
 
     def _resume_thread(self, thread_id: str) -> None:
-        self.app.tui_state.active_task_id = thread_id
+        if self._session_is_busy(thread_id):
+            self.app.notify(BUSY_MESSAGE, severity="warning")
+            return
         self.app.pop_screen()
         from tui.screens.main import TraceScreen
         scr = self.app.screen
         if isinstance(scr, TraceScreen):
-            scr.attach_active_task(thread_id, is_resume=True)   # промпт заголовка — из стора
+            # acquire(B) → release(A) → attach внутри attach_active_task
+            if not scr.attach_active_task(thread_id, is_resume=True):
+                return
+        else:
+            self.app.tui_state.active_task_id = thread_id
 
     def _delete_selected(self) -> None:
         task = self._selected_task()

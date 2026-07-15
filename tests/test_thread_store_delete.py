@@ -13,6 +13,7 @@ def test_delete_thread_removes_all_shapes(tmp_path):
     sys_, tid, other = "cli", "abc123", "zzz999"
     files = [
         f"data_{sys_}_{tid}.jsonl", f"meta_{sys_}_{tid}.json",          # canonical
+        f"lock_{sys_}_{tid}.json",                                      # session lock
         f"data_{tid}.jsonl", f"meta_{tid}.json",                        # legacy
         f"data_{sys_}_{tid}__pre_summary__20260101_000000.jsonl",       # архив 1
         f"meta_{sys_}_{tid}__pre_summary__20260101_000000.json",
