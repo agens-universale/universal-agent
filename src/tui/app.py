@@ -1,6 +1,7 @@
 """TuiApp — Textual application."""
 from __future__ import annotations
 
+import uuid
 from pathlib import Path
 from typing import List, Optional
 
@@ -144,6 +145,8 @@ class TuiApp(App):
         from tui.state import TuiState
         self.tui_state = TuiState()
         self.view_positions = ViewPositionStore()
+        # Один id на процесс TUI — для exclusive session lock (session-lock SPEC).
+        self.tui_id = uuid.uuid4().hex
 
     def get_css_variables(self) -> dict:
         """Питаем TCSS палитрой из tui.palette — единый источник цветов для CSS и

@@ -41,6 +41,7 @@ from tui.services.usage_meter import compose_adaptive_footer_right, usage_segmen
 from tui.services.export import export_thread
 from tui.services.path_display import truncate_path
 from tui.services.git_info import current_branch
+from tui.services.session_lock import BUSY_MESSAGE, heartbeat, release, try_acquire
 from tui.services.stores.file_store import FileTaskStore
 from tui.services.trace_mapper import collect_skipped_call_ids, map_message
 from tui.services.trace_render import build_compaction_label
@@ -159,6 +160,7 @@ class TraceScreen(Screen):
         self._cursor: Optional[TaskCursor] = None
         self._next_no: int = 1
         self._active_task_id: Optional[str] = None
+        self._session_lock_hb_mono: float = 0.0  # throttle heartbeat ≤ 1 Гц
         self._error_shown: bool = False
         self._mcp_status_row = None   # Optional[Static] — live MCP-loading индикатор
         self._warnings_toasted = False  # warning-тосты при старте показываются один раз за запуск
@@ -608,15 +610,60 @@ class TraceScreen(Screen):
         self._last_event_at = _time.monotonic()
         self._last_event_kind = None
 
-    def attach_active_task(self, task_id: str, *, is_resume: bool = False) -> None:
+    def _session_lock_acquire(self, task_id: str) -> bool:
+        """Exclusive attach: True если стали holder, иначе notify и False."""
+        threads_dir = self.app._threads_dir or ""
+        tui_id = getattr(self.app, "tui_id", "") or ""
+        if not threads_dir or not tui_id:
+            return True
+        if try_acquire(threads_dir, self.app._system, task_id, tui_id):
+            return True
+        self.app.notify(BUSY_MESSAGE, severity="warning")
+        return False
+
+    def _session_lock_release(self, task_id: Optional[str] = None) -> None:
+        """Best-effort снять свой lock (уход с tid / exit)."""
+        tid = task_id if task_id is not None else self._active_task_id
+        if not tid:
+            return
+        threads_dir = self.app._threads_dir or ""
+        tui_id = getattr(self.app, "tui_id", None)
+        if not threads_dir:
+            return
+        release(threads_dir, self.app._system, tid, tui_id)
+
+    def _session_lock_heartbeat(self) -> None:
+        """Throttle ≤ 1 Гц, только при живом active_task_id."""
+        tid = self._active_task_id
+        if not tid:
+            return
+        threads_dir = self.app._threads_dir or ""
+        tui_id = getattr(self.app, "tui_id", "") or ""
+        if not threads_dir or not tui_id:
+            return
+        self._session_lock_hb_mono = heartbeat(
+            threads_dir, self.app._system, tid, tui_id,
+            last_mono=self._session_lock_hb_mono,
+        )
+
+    def attach_active_task(self, task_id: str, *, is_resume: bool = False) -> bool:
         """Attach a thread for polling. Initial state loads via read_all_events.
 
         is_resume=True (переключение/возобновление сессии через пикер): промпт
         заголовка АВТОРИТЕТНО берётся из стора (даже если None — у пустой сессии).
         is_resume=False (auto-create после send): не затираем только что
-        отправленный _resumed_prompt, если стор ещё не успел записать сообщение."""
+        отправленный _resumed_prompt, если стор ещё не успел записать сообщение.
+
+        Returns False если сессия занята другим TUI (не attach).
+        """
+        prev = self._active_task_id
+        if not self._session_lock_acquire(task_id):
+            return False
+        if prev and prev != task_id:
+            self._session_lock_release(prev)
         self._active_task_id = task_id
         self.app.tui_state.active_task_id = task_id
+        self._session_lock_hb_mono = 0.0
         self._reset_render_state()
         self._store = FileTaskStore(
             threads_dir=self.app._threads_dir or "",
@@ -655,6 +702,11 @@ class TraceScreen(Screen):
         # баннер для уже отвеченного вопроса (его output суммаризован) — см. helper.
         # Висячий вопрос (реально последний, без живого агента) → remnant с меткой.
         self._reconcile_ask_human_after_render(allow_remnant=True)
+        return True
+
+    def on_unmount(self) -> None:
+        """App exit / снятие экрана — отпустить lock удерживаемого tid."""
+        self._session_lock_release()
 
     def _mount_failed_from_meta(self, task_id: str) -> None:
         """После рестарта: смонтировать виджеты failed-реплик из
@@ -1900,6 +1952,8 @@ class TraceScreen(Screen):
             self._refresh_footer()
             self._update_terminal_title()
             return
+
+        self._session_lock_heartbeat()
 
         _indicator_mode = select_indicator_mode(
             err=err, is_running=is_running,
@@ -3499,9 +3553,11 @@ class TraceScreen(Screen):
         """Очистить trace и перейти в empty-state. pending_skill_id/cwd сохраняются."""
         # Сбросить терминальные error/stop-флаги app-уровня (last_runner_error и пр.):
         # иначе poll видит протухшую ошибку и репейнтит «✗ Ошибка» поверх пустой сессии.
+        self._session_lock_release()
         self._prepare_for_new_run()
         self._active_task_id = None
         self.app.tui_state.active_task_id = None
+        self._session_lock_hb_mono = 0.0
         self._store = None
         self._cursor = None
         self._reset_render_state()

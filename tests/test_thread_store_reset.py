@@ -10,11 +10,13 @@ def test_reset_thread_files_deletes_only_target_thread_files(tmp_path: Path) -> 
 
     target_data = threads_dir / "data_cli_demo-thread.jsonl"
     target_meta = threads_dir / "meta_cli_demo-thread.json"
+    target_lock = threads_dir / "lock_cli_demo-thread.json"
     other_data = threads_dir / "data_cli_other-thread.jsonl"
     other_meta = threads_dir / "meta_cli_other-thread.json"
 
     target_data.write_text("x\n", encoding="utf-8")
     target_meta.write_text("{}", encoding="utf-8")
+    target_lock.write_text("{}", encoding="utf-8")
     other_data.write_text("y\n", encoding="utf-8")
     other_meta.write_text("{}", encoding="utf-8")
 
@@ -22,8 +24,10 @@ def test_reset_thread_files_deletes_only_target_thread_files(tmp_path: Path) -> 
 
     assert str(target_data) in deleted
     assert str(target_meta) in deleted
+    assert str(target_lock) in deleted
     assert not target_data.exists()
     assert not target_meta.exists()
+    assert not target_lock.exists()
     assert other_data.exists()
     assert other_meta.exists()
 

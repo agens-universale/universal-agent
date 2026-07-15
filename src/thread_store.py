@@ -136,9 +136,16 @@ def ensure_threads_dir(threads_dir: str) -> None:
     os.makedirs(threads_dir, exist_ok=True)
 
 
+def _lock_path(threads_dir: str, system_id: str, thread_id: str) -> str:
+    """Путь lease-файла TUI session lock (рядом с data/meta; без legacy)."""
+    sys_norm = sanitize_system_id(system_id)
+    tid = validate_thread_id(thread_id)
+    return os.path.join(threads_dir, f"lock_{sys_norm}_{tid}.json")
+
+
 def reset_thread_files(threads_dir: str, system_id: str, thread_id: str) -> List[str]:
     """
-    Удалить файлы конкретного треда (data/meta), включая legacy-формат.
+    Удалить файлы конкретного треда (data/meta/lock), включая legacy data/meta.
     Возвращает список удалённых путей.
     """
     sys_norm = sanitize_system_id(system_id)
@@ -146,6 +153,7 @@ def reset_thread_files(threads_dir: str, system_id: str, thread_id: str) -> List
     paths = []
     paths.extend(_thread_paths(threads_dir, sys_norm, normalized_thread_id))
     paths.extend(_thread_paths_legacy(threads_dir, normalized_thread_id))
+    paths.append(_lock_path(threads_dir, sys_norm, normalized_thread_id))
 
     deleted: List[str] = []
     for path in paths:
@@ -165,7 +173,7 @@ def _thread_archive_paths(threads_dir: str, system_id: str, thread_id: str) -> L
 
 
 def delete_thread(threads_dir: str, system_id: str, thread_id: str) -> List[str]:
-    """Полностью удалить тред: canonical + legacy + __pre_summary__-архивы.
+    """Полностью удалить тред: canonical + legacy + lock + __pre_summary__-архивы.
 
     Возвращает список удалённых путей. Отсутствие файла — no-op.
     """
@@ -173,6 +181,7 @@ def delete_thread(threads_dir: str, system_id: str, thread_id: str) -> List[str]
     paths.extend(_thread_paths(threads_dir, system_id, thread_id))
     paths.extend(_thread_paths_legacy(threads_dir, thread_id))
     paths.extend(_thread_archive_paths(threads_dir, system_id, thread_id))
+    paths.append(_lock_path(threads_dir, system_id, thread_id))
 
     deleted: List[str] = []
     for path in paths:
