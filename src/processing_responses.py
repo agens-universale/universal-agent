@@ -428,16 +428,16 @@ def process_tool_calls(
                     f'one finalizer per turn."}}'
                 ),
             })
-    # turn_ask_human блокируется на input() до ответа юзера. Если он последний в
-    # батче, output'ы предыдущих (не-блокирующих) тулов + skip'ов иначе висят
-    # "running", пока ждём ответ (персист всего батча — только когда функция вернётся).
-    blocks_at_end = bool(executed) and str(executed[-1].get("name") or "") == ASK_HUMAN_TOOL_NAME
+    # Human-wait (ask_human | confirm-in-tool): до блокировки сфлашить уже
+    # посчитанные output'ы предыдущих тулов + skip'ы (I2), чтобы TUI не держал
+    # их в running на время wait. Полный батч персистится ещё раз на выходе
+    # process_tool_calls (run_agent → _maybe_persist); уже записанные id
+    # пропускаются в append_new_thread_messages по make_message_key.
     for i, m in enumerate(executed):
-        if blocks_at_end and i == len(executed) - 1 and (tools_outputs or skip_outputs):
-            # Сфлашить уже посчитанные output'ы + skip'ы ДО блокировки. Тред дедупит
-            # по make_message_key → повторный персист на выходе из run_agent — no-op.
-            _maybe_persist(persist_messages_callback, list(tools_outputs) + skip_outputs, state)
         tool_name = str(m.get("name") or "")
+        prior = list(tools_outputs) + skip_outputs
+        if prior and (i > 0 or tool_name == ASK_HUMAN_TOOL_NAME):
+            _maybe_persist(persist_messages_callback, prior, state)
         tool_arguments = str(m.get("arguments", ""))
         try:
             tool_res_raw = apply_tool(
@@ -490,8 +490,8 @@ def process_tool_calls(
 
     state.last_batch_unknown_tool_count = unknown_in_batch
 
-    # Skip-output'ы уже посчитаны выше и сфлашены перед блокировкой — добавляем в
-    # возврат (тред/state дедупят повторный персист по make_message_key).
+    # Skip-output'ы уже в возврате (и могли быть сфлашены выше); на выходном
+    # персисте дубли id снова отсечёт make_message_key.
     tools_outputs.extend(skip_outputs)
 
     if getattr(state, "session_compact_applied", False):
@@ -837,7 +837,7 @@ def run_agent(
                     if decision.accept:
                         # Финальная проза принята → TUI-индикатор «✓ завершаю…»
                         # на время записи/саммари/flush (mark_finalizing пишет
-                        # tui_finalizing в meta; снимаем строго в finally).
+                        # runtime.finalizing в meta; снимаем строго в finally).
                         if mark_finalizing is not None:
                             mark_finalizing(True)
                         try:

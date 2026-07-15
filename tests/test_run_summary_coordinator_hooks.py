@@ -29,14 +29,17 @@ def ctx_stub():
 
 
 def _patch_save_thread_meta(monkeypatch) -> None:
-    """pre_backend_compaction_hook вызывает _summarizing_flag → save_thread_meta;
+    """pre_backend_compaction_hook вызывает _summarizing_flag → patch_runtime_flag;
     в unit-тестах с MagicMock thread_session это не цель проверки."""
-    monkeypatch.setattr(rsc, "save_thread_meta", lambda *_a, **_k: None)
+    monkeypatch.setattr(rsc, "patch_runtime_flag", lambda *_a, **_k: None)
 
 
 def _thread_session_mock() -> MagicMock:
     thread = MagicMock()
     thread.meta = {}
+    thread.threads_dir = "/tmp/x"
+    thread.system_id = "cli"
+    thread.thread_id = "t1"
     return thread
 
 

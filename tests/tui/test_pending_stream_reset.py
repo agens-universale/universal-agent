@@ -99,26 +99,20 @@ async def test_pending_record_survives_stream_reset(tmp_path):
         await wait_until(lambda: "после-сжатия" in trace_text(),
                          "stream_reset-ререндер")
 
-        # Минимум-гарантия: запись НЕ потеряна из meta (источник восстановления).
+        # I1: GC на stream_reset — truly-orphaned remount failed без re-attach.
+        await wait_until(
+            lambda: any(
+                w._text == "не подтверждено" and w.state == "failed"
+                for w in pilot.app.query(UserReplyContainer)
+            ),
+            "failed pending после stream_reset",
+        )
         records = _read_pending(tmp_path, tid)
         assert len(records) == 1
         assert records[0]["content"] == "не подтверждено"
-        assert records[0]["status"] == "pending"
-
-        # Фактическое поведение (фиксация): optimistic-виджет НЕ переживает
-        # stream_reset — _reset_render_state чистит _pending_user_widgets,
-        # ререндер идёт только из записей нового live-файла.
-        assert [w._text for w in pilot.app.query(UserReplyContainer)] == []
+        assert records[0]["status"] == "failed"
         assert screen._pending_user_widgets == {}
 
-        # Восстановление: на следующем attach запись из meta монтируется
-        # failed-виджетом (truly orphaned — в треде доставки нет).
         fake.stop_run()
         runner = pilot.app.get_runner()
         await wait_until(lambda: not runner.is_running(), "runner остановился")
-        screen.attach_active_task(tid)
-        await pilot.pause()
-        replies = [w for w in pilot.app.query(UserReplyContainer)
-                   if w._text == "не подтверждено"]
-        assert len(replies) == 1
-        assert replies[0].state == "failed"

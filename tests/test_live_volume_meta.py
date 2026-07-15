@@ -23,7 +23,8 @@ def _session(tmp_path, tid="t1"):
 
 
 def _live_tui(tmp_path, tid="t1"):
-    return (load_thread_meta(str(tmp_path), "cli", tid).get("tui") or {})
+    """Обратная совместимость имени: live_* теперь в meta.runtime."""
+    return (load_thread_meta(str(tmp_path), "cli", tid).get("runtime") or {})
 
 
 def test_persist_batch_sets_live_volume_matching_full_recompute(tmp_path):
@@ -100,8 +101,8 @@ def test_discard_keeps_live_volume_consistent(tmp_path):
 
 
 def test_persist_batch_preserves_tui_owned_keys(tmp_path):
-    """live_* пишет persist; last_compact_msg_count (TUI) не затирается."""
-    from thread_store import update_tui_meta
+    """live_* пишет persist в runtime; last_compact_msg_count (TUI) не затирается."""
+    from thread_store import load_thread_meta, update_tui_meta
 
     ts = _session(tmp_path)
     ts.persist_batch(
@@ -114,13 +115,13 @@ def test_persist_batch_preserves_tui_owned_keys(tmp_path):
         previous_response_id=None,
     )
 
-    tui = _live_tui(tmp_path)
-    assert tui["last_compact_msg_count"] == 1
-    assert tui["live_msg_count"] == 2
+    meta = load_thread_meta(str(tmp_path), "cli", "t1")
+    assert (meta.get("tui") or {})["last_compact_msg_count"] == 1
+    assert (meta.get("runtime") or {})["live_msg_count"] == 2
 
 
 def test_compact_preserves_tui_owned_keys(tmp_path):
-    from thread_store import update_tui_meta
+    from thread_store import load_thread_meta, update_tui_meta
 
     ts = _session(tmp_path)
     ts.persist_batch(
@@ -141,7 +142,8 @@ def test_compact_preserves_tui_owned_keys(tmp_path):
         {"summary_message_content": "кратко", "dialog_steps_offset": 0}
     )
 
-    tui = _live_tui(tmp_path)
+    meta = load_thread_meta(str(tmp_path), "cli", "t1")
+    tui = meta.get("tui") or {}
     assert tui["last_compact_msg_count"] == 1
     assert tui["pending_user_messages"] == [{"id": "p1"}]
-    assert tui["live_msg_count"] == 1
+    assert (meta.get("runtime") or {})["live_msg_count"] == 1

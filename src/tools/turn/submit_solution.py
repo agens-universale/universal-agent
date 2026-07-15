@@ -163,7 +163,7 @@ class SubmitSolution(AbstractSimpleTool):
                 payload["finish_gate"]["runtime_outcome"] = "fail_open_limit"
             elif decision.outcome == "fail_open_error":
                 payload["finish_gate"]["runtime_outcome"] = "fail_open_error"
-        elif decision.outcome in ("fail_open_limit", "fail_open_error"):
+        elif decision.outcome in ("fail_open_limit", "fail_open_error", "skipped"):
             payload["finish_gate"] = {"runtime_outcome": decision.outcome}
 
         return json.dumps(payload, ensure_ascii=False)

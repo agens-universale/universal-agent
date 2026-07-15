@@ -405,13 +405,13 @@ class TraceScreen(Screen):
         threshold = parse_summary_trigger_chars(cfg) or parse_summary_turn_end_trigger_chars(cfg)
         if threshold <= 0 or self._store is None or self._active_task_id is None:
             return None
-        # Источник — meta.tui.live_history_chars (persist пишет при append/compact/
-        # discard). Нет ключа → метр скрыт; data_*.jsonl на poll не читаем.
-        tui = self._store.get_task_meta(self._active_task_id).get("tui") or {}
-        if "live_history_chars" not in tui:
+        # Источник — meta.runtime.live_history_chars (persist).
+        meta = self._store.get_task_meta(self._active_task_id)
+        rt = meta.get("runtime") or {}
+        if "live_history_chars" not in rt:
             return None
         try:
-            chars = int(tui["live_history_chars"])
+            chars = int(rt["live_history_chars"])
         except (TypeError, ValueError):
             return None
         return render_context_meter(chars, threshold)
@@ -582,14 +582,14 @@ class TraceScreen(Screen):
                 self.app.tui_state.ask_human_state = None
         self._ask_human_question_row = None  # виджет ушёл вместе с trace-очисткой
         self._ask_human_owner_runner = None
-        # Backstop: clear confirm banner on task switch / stream_reset
+        # I2: cancel_confirm всегда (даже если баннер не монтировался).
+        _reset_runner = getattr(self.app, "active_runner", None)
+        if _reset_runner is not None and hasattr(_reset_runner, "cancel_confirm"):
+            try:
+                _reset_runner.cancel_confirm()
+            except Exception:
+                pass
         if self._confirm_active:
-            _reset_runner = getattr(self.app, "active_runner", None)
-            if _reset_runner is not None and hasattr(_reset_runner, "cancel_confirm"):
-                try:
-                    _reset_runner.cancel_confirm()
-                except Exception:
-                    pass
             try:
                 self._hide_confirm_banner()
             except Exception:
@@ -1728,15 +1728,15 @@ class TraceScreen(Screen):
             return snap
         if self._store is not None and self._active_task_id is not None:
             meta = self._store.get_task_meta(self._active_task_id)
-            return (meta.get("tui") or {}).get("mcp_tools")
+            return (meta.get("runtime") or {}).get("mcp_tools")
         return None
 
     def _pending_wire_match(self, client_id: str, polled_content: str) -> bool:
         """Проверить, что pending-запись с этим client_id имеет wire_content,
         равный содержимому, пришедшему из polling-rendered .jsonl записи.
 
-        Источник истины — in-memory кэш `_pending_wire_cache`, т.к. meta-файл
-        может быть перезаписан executor'ом между submit'ом и polling-тиком.
+        Источник истины — in-memory кэш `_pending_wire_cache`; fallback —
+        ``meta.tui.pending_user_messages[].wire_content`` (после сброса кэша).
 
         Сравнение по .strip(): polled-контент приходит из map_message уже
         обрезанным, а wire может иметь хвостовой whitespace (многострочный
@@ -1744,8 +1744,19 @@ class TraceScreen(Screen):
         маркер «/init» не схлопнулся бы и полный промпт тёк бы в трейс."""
         cached = self._pending_wire_cache.get(client_id)
         if cached is None:
-            return False
-        return cached.strip() == polled_content.strip()
+            tid = self._active_task_id
+            if tid is None or self._store is None:
+                return False
+            records = (self._store.get_task_meta(tid).get("tui") or {}).get(
+                "pending_user_messages", []
+            )
+            for rec in records:
+                if rec.get("client_id") == client_id:
+                    cached = rec.get("wire_content") or ""
+                    break
+            else:
+                return False
+        return str(cached).strip() == polled_content.strip()
 
     def _pump_reasoning_stream_source(self) -> None:
         """Stream-think как источник reasoning-часов: пока sink в 'thinking' —
@@ -1857,17 +1868,18 @@ class TraceScreen(Screen):
         if self._store is not None and self._active_task_id is not None:
             try:
                 _tmeta = self._store.get_task_meta(self._active_task_id)
-                summarizing = bool(_tmeta.get("tui_summarizing"))
-                finalizing = bool(_tmeta.get("tui_finalizing"))
+                _rt = _tmeta.get("runtime") or {}
+                summarizing = bool(_rt.get("summarizing"))
+                finalizing = bool(_rt.get("finalizing"))
             except Exception:
                 summarizing = False
                 finalizing = False
                 _tmeta = {}
-        # Завершение сжатия (tui_summarizing True→False) → baseline =
-        # снимок meta.tui.live_msg_count (persist уже пересчитал live_* на compact).
+        # Завершение сжатия (summarizing True→False) → baseline =
+        # снимок meta.runtime.live_msg_count (persist уже пересчитал live_* на compact).
         if self._was_summarizing and not summarizing and self._store is not None \
                 and self._active_task_id is not None:
-            live_count = (_tmeta.get("tui") or {}).get("live_msg_count")
+            live_count = (_tmeta.get("runtime") or {}).get("live_msg_count")
             if live_count is not None:
                 try:
                     self._store.update_tui_meta(
@@ -2016,6 +2028,8 @@ class TraceScreen(Screen):
             # После компакции (stream_reset) баннер мог пере-монтироваться для уже
             # отвеченного вопроса — снять, иначе ввод уйдёт в stdin «вникуда».
             self._reconcile_ask_human_after_render(allow_remnant=False)
+            # I1/A: GC pending симметрично attach — delivered drop, orphan → failed.
+            self._mount_failed_from_meta(self._active_task_id)
             self._refresh_header()
             self._refresh_footer()
             # Wipe стёр CTA: если idle и есть pending — показать снова.
@@ -3141,10 +3155,11 @@ class TraceScreen(Screen):
             self._bang.cancel()
             return
 
+        runner = self.app.active_runner
+        # I2: /stop всегда разблокирует confirm (даже без смонтированного баннера).
+        if runner is not None and hasattr(runner, "cancel_confirm"):
+            runner.cancel_confirm()
         if self._confirm_active:
-            runner = self.app.active_runner
-            if runner is not None and hasattr(runner, "cancel_confirm"):
-                runner.cancel_confirm()   # unblock parked thread (fail-closed False)
             self._hide_confirm_banner()
             if runner is not None and runner.is_running():
                 # live agent-run confirm → also stop the run (Ctrl+C = abort)
@@ -3157,7 +3172,6 @@ class TraceScreen(Screen):
                                       kind_class="line-meta")
             return
 
-        runner = self.app.active_runner
         if runner is None or not runner.is_running():
             self._mount_trace_row(
                 prefix="· ", content="нет активного запуска",
@@ -4012,11 +4026,13 @@ class TraceScreen(Screen):
                                   content="/compact: дождитесь паузы или /stop",
                                   kind_class="line-meta")
             return
-        # Антиспам: live_msg_count vs last_compact_msg_count (оба из meta.tui).
+        # Антиспам: runtime.live_msg_count vs tui.last_compact_msg_count.
         # baseline пишет _poll_active на завершении сжатия. Нет baseline → можно.
-        tui_meta = self._store.get_task_meta(tid).get("tui") or {}
+        meta = self._store.get_task_meta(tid)
+        tui_meta = meta.get("tui") or {}
+        rt = meta.get("runtime") or {}
         last_compact = tui_meta.get("last_compact_msg_count")
-        live_count = tui_meta.get("live_msg_count")
+        live_count = rt.get("live_msg_count")
         if (
             last_compact is not None
             and live_count is not None

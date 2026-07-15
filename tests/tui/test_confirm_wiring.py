@@ -23,29 +23,29 @@ import pytest
 
 def test_present_confirm_calls_call_from_thread_and_show_banner(monkeypatch):
     """_present_confirm на агент-потоке вызывает call_from_thread;
-    тот при синхронном вызове немедленно зовёт show_confirm_banner."""
+    тот при синхронном вызове немедленно зовёт show_confirm_banner на TraceScreen."""
     pytest.importorskip("textual")
     from tui.app import TuiApp
 
     app = TuiApp()
     calls: list[tuple] = []
 
-    # Мок screen с show_confirm_banner — патчим через property на классе.
     fake_screen = types.SimpleNamespace(
         show_confirm_banner=lambda t, q, f: calls.append((t, q, f)),
     )
-    monkeypatch.setattr(TuiApp, "screen", property(lambda self: fake_screen), raising=False)
+    monkeypatch.setattr(app, "_main_screen", lambda: fake_screen, raising=False)
 
     # call_from_thread подменяем синхронной версией (немедленно выполняет fn).
     captured: list = []
 
     def sync_call_from_thread(fn):
-        fn()
+        result = fn()
         captured.append(fn)
+        return result
 
     monkeypatch.setattr(app, "call_from_thread", sync_call_from_thread, raising=False)
 
-    app._present_confirm("Title", "Question?", [("Path", "/x")])
+    assert app._present_confirm("Title", "Question?", [("Path", "/x")]) is True
 
     assert len(calls) == 1
     assert calls[0] == ("Title", "Question?", [("Path", "/x")])  # fields проброшены в баннер

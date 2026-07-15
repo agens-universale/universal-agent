@@ -1,16 +1,19 @@
 """Poller записывает meta.tui.last_compact_msg_count на завершении сжатия
-(спадающий фронт tui_summarizing True→False) — baseline для антиспама /compact."""
+(спадающий фронт runtime.summarizing True→False) — baseline для антиспама /compact."""
 import json
 import pytest
 
 
 def _write_task(tmp_path, tid, n_messages):
-    # Baseline после compact = снимок meta.tui.live_msg_count (не scan data_*).
+    # Baseline после compact = снимок meta.runtime.live_msg_count (не scan data_*).
     (tmp_path / f"meta_cli_{tid}.json").write_text(
         json.dumps({
             "thread_id": tid,
             "system_id": "cli",
-            "tui": {"live_msg_count": n_messages, "live_history_chars": n_messages},
+            "runtime": {
+                "live_msg_count": n_messages,
+                "live_history_chars": n_messages,
+            },
         }),
         encoding="utf-8",
     )
@@ -31,7 +34,7 @@ async def test_summarizing_falling_edge_records_baseline(tmp_path):
         scr = pilot.app.screen
         scr.attach_active_task(tid)
         scr._was_summarizing = True             # сжатие шло на прошлом тике
-        # tui_summarizing в meta отсутствует → summarizing=False → спадающий фронт
+        # runtime.summarizing отсутствует → summarizing=False → спадающий фронт
         scr._poll_active()
         await pilot.pause()
         meta = scr._store.get_task_meta(tid)

@@ -22,7 +22,7 @@ from summarize.summary_logging import (
     log_pre_run_max_rounds,
 )
 from message_policy.user_message_policy import extract_real_user_message_text
-from thread_store import make_message_key, save_thread_meta
+from thread_store import load_thread_meta, make_message_key, patch_runtime_flag
 
 if TYPE_CHECKING:
     from run_context import RunContext
@@ -36,12 +36,25 @@ _FUNCTION_OUTPUT_TYPES = frozenset({"function_call_output", "tool_call_output"})
 _PRE_RUN_SUMMARY_MAX_ROUNDS = 20
 
 
+def _set_runtime_flag(thread_session, flag: str, active: bool) -> None:
+    """Прокси в thread_store.patch_runtime_flag (I1: не clobber tui)."""
+    ts = thread_session
+    patch_runtime_flag(
+        ts.threads_dir,
+        ts.system_id,
+        ts.thread_id,
+        flag,
+        active=active,
+        session_meta=ts.meta,
+    )
+
+
 @contextlib.contextmanager
 def _summarizing_flag(thread_session):
     """Помечает тред как «идёт суммаризация» для TUI-индикатора.
 
-    Флаг ``tui_summarizing`` пишется в meta + немедленный flush на диск (TUI поллит
-    meta каждые 250мс). Снимается строго в finally — иначе индикатор залипнет.
+    Флаг ``meta.runtime.summarizing`` + немедленный flush (TUI поллит meta).
+    Снимается строго в finally — иначе индикатор залипнет.
     ``thread_session=None`` (CLI без треда) → no-op.
     """
     if thread_session is None:
@@ -49,48 +62,42 @@ def _summarizing_flag(thread_session):
         return
     ts = thread_session
     try:
-        ts.meta["tui_summarizing"] = True
-        save_thread_meta(ts.threads_dir, ts.system_id, ts.thread_id, ts.meta)
+        _set_runtime_flag(ts, "summarizing", True)
         yield
     finally:
-        ts.meta.pop("tui_summarizing", None)
-        save_thread_meta(ts.threads_dir, ts.system_id, ts.thread_id, ts.meta)
+        _set_runtime_flag(ts, "summarizing", False)
 
 
 def reset_stale_summarizing_flag(thread_session) -> None:
-    """Снять протухший ``tui_summarizing`` на старте run'а.
+    """Снять протухший ``runtime.summarizing`` на старте run'а.
 
     Флаг транзиентный (живёт только на время компакции внутри ``_summarizing_flag``),
     но персистится в meta. Если прошлый run был прерван посреди компакции (закрытие
     TUI/выход процесса убивает daemon-поток до finally, либо зависание summary-вызова
-    на нездоровом бэкенде), флаг остаётся ``True`` на диске навсегда — и TUI вечно
+    на нездоровом бэкенде), флаг остаётся на диске навсегда — и TUI вечно
     показывает «сжимаю контекст» вместо «думаю». На старте нового run'а компакция
     точно не идёт, поэтому сбрасываем. ``thread_session=None`` → no-op.
     """
     if thread_session is None:
         return
     ts = thread_session
-    if ts.meta.get("tui_summarizing"):
-        ts.meta.pop("tui_summarizing", None)
-        save_thread_meta(ts.threads_dir, ts.system_id, ts.thread_id, ts.meta)
+    disk = load_thread_meta(ts.threads_dir, ts.system_id, ts.thread_id) or {}
+    rt = (ts.meta.get("runtime") or {}) if isinstance(ts.meta.get("runtime"), dict) else {}
+    disk_rt = disk.get("runtime") if isinstance(disk.get("runtime"), dict) else {}
+    if rt.get("summarizing") or disk_rt.get("summarizing"):
+        _set_runtime_flag(ts, "summarizing", False)
 
 
 def set_tui_finalizing(thread_session, active: bool) -> None:
-    """TUI-индикатор: пометить/снять «идёт финализация ответа» (``tui_finalizing``).
+    """TUI-индикатор: ``meta.runtime.finalizing`` (+ flush).
 
-    Пишется top-level в meta + немедленный flush (как ``tui_summarizing``; TUI поллит
-    meta). Ставится на время записи/саммари финальной прозы в accept-ветке run_agent,
+    Ставится на время записи/саммари финальной прозы в accept-ветке run_agent,
     снимается строго в finally. ``active=False`` также снимает протухший флаг на старте
     run'а. ``thread_session=None`` (CLI без треда) → no-op.
     """
     if thread_session is None:
         return
-    ts = thread_session
-    if active:
-        ts.meta["tui_finalizing"] = True
-    else:
-        ts.meta.pop("tui_finalizing", None)
-    save_thread_meta(ts.threads_dir, ts.system_id, ts.thread_id, ts.meta)
+    _set_runtime_flag(thread_session, "finalizing", active)
 
 
 def _messages_tail_matches(messages: list[dict], suffix: list[dict]) -> bool:

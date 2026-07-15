@@ -91,6 +91,8 @@ def append_cycle_stop_tool_outputs_for_batch(
     if backend_mode != "chat_completions":
         return
     synthetic_messages: List[Dict] = []
+    # I3: finish output персистится один раз уже после apply_finish_gate — не здесь.
+    immediate_persist: List[Dict] = []
     for tool_call in tool_calls:
         call_id = tool_call.get("call_id")
         tool_name = str(tool_call.get("name") or "")
@@ -111,16 +113,17 @@ def append_cycle_stop_tool_outputs_for_batch(
             config=getattr(ctx, "config_dict", {}) or {},
             logger=getattr(ctx, "logger", None),
         )
-        synthetic_messages.append(
-            {
-                "id": generate_message_id_func("fco"),
-                "type": "function_call_output",
-                "call_id": call_id,
-                "output": tool_res,
-            }
-        )
+        msg = {
+            "id": generate_message_id_func("fco"),
+            "type": "function_call_output",
+            "call_id": call_id,
+            "output": tool_res,
+        }
+        synthetic_messages.append(msg)
+        if tool_name != FINISH_TOOL_NAME:
+            immediate_persist.append(msg)
     if not synthetic_messages:
         return
     state.messages.extend(synthetic_messages)
-    if persist_messages_callback is not None:
-        persist_messages_callback(synthetic_messages)
+    if persist_messages_callback is not None and immediate_persist:
+        persist_messages_callback(immediate_persist)

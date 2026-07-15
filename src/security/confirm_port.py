@@ -30,8 +30,12 @@ def confirm_available(ctx: Any) -> bool:
 def _ask_choice(ctx: Any, *, title: str, question: str, fields: list) -> str:
     if not confirm_available(ctx):
         return CONFIRM_DENY
-    if getattr(ctx, "is_tui", False) and getattr(ctx, "tui_confirm", None):
-        choice = ctx.tui_confirm(title=title, question=question, fields=fields)
+    if getattr(ctx, "is_tui", False):
+        tui_confirm = getattr(ctx, "tui_confirm", None)
+        if not callable(tui_confirm):
+            # Нет рабочего present → deny, не CLI input() за Textual (I2).
+            return CONFIRM_DENY
+        choice = tui_confirm(title=title, question=question, fields=fields)
         return choice if choice in _VALID_CHOICES else CONFIRM_DENY
     return prompt_user_confirmation_choice(title=title, fields=fields, question=question)
 
