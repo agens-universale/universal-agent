@@ -385,13 +385,29 @@ class TuiApp(App):
         if callable(fn):
             fn()
 
-    def _present_confirm(self, title: str, question: str, fields: list) -> None:
-        """Вызывается на агент-потоке; маршаллит показ баннера в UI-поток."""
-        def _show() -> None:
-            fn = getattr(self.screen, "show_confirm_banner", None)
-            if fn is not None:
+    def _present_confirm(self, title: str, question: str, fields: list) -> bool:
+        """Агент-поток → UI: баннер на TraceScreen. True = mounted, False = fail.
+
+        Цель — базовый TraceScreen (не top-modal). Sync ack через return
+        ``call_from_thread``: без mounted нельзя звать wait() (I2).
+        """
+        def _show() -> bool:
+            screen = self._main_screen()
+            if screen is None:
+                return False
+            fn = getattr(screen, "show_confirm_banner", None)
+            if not callable(fn):
+                return False
+            try:
                 fn(title, question, fields)
-        self.call_from_thread(_show)
+            except Exception:
+                return False
+            return True
+
+        try:
+            return bool(self.call_from_thread(_show))
+        except Exception:
+            return False
 
     # --- actions ------------------------------------------------------
 

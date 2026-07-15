@@ -47,7 +47,6 @@ def bench_defaults(prompts_dir: Path, skills_dir: Path) -> Dict[str, Any]:
         "skills_data_path": str(skills_dir),
         "summary_params": {
             "chat_completions_summary_prompt_path": str(prompts_dir / "chat_completions_summary_prompt.md"),
-            "chat_completions_memory_patch_append_prompt_path": str(prompts_dir / "chat_completions_memory_patch_append.md"),
             "chat_completions_memory_patch_replace_prompt_path": str(prompts_dir / "chat_completions_memory_patch_replace.md"),
         },
         "chat_completions_max_tokens": 32768,

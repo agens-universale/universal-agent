@@ -4,12 +4,12 @@ import pytest
 
 
 def _write_task(tmp_path, tid, content):
-    # Метр читает только meta.tui.live_history_chars (не data_*).
+    # Метр читает только meta.runtime.live_history_chars (не data_*).
     (tmp_path / f"meta_cli_{tid}.json").write_text(
         json.dumps({
             "thread_id": tid,
             "system_id": "cli",
-            "tui": {
+            "runtime": {
                 "live_history_chars": len(content),
                 "live_msg_count": 1,
             },

@@ -19,9 +19,10 @@ async def test_help_header_and_hotkeys():
         assert len(scr.query("#header-right")) == 0
         keys = " ".join(str(s.render()) for s in scr.query(".help-row-key"))
         assert "F1" in keys and "F2" in keys and "F3" in keys
-        assert "F4" in keys and "F5" in keys
+        assert "F4" in keys and "F5" in keys and "F6" in keys
         key_tokens = set(keys.split())
-        assert "F6" not in key_tokens and "F7" not in key_tokens
+        assert "F7" not in key_tokens
+
         assert "Ctrl+C" in keys and "Esc" in keys
         assert "Ctrl+A" in keys
         assert "Ctrl+N" in keys and "Ctrl+S" in keys

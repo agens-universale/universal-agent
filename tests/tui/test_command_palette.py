@@ -128,6 +128,46 @@ async def test_palette_enter_inserts_command_with_args(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_palette_enter_inserts_export_then_field_enter_runs(tmp_path, monkeypatch):
+    """Из палитры Enter только подставляет `/export `; выполнение — следующим Enter в поле."""
+    pytest.importorskip("textual")
+    monkeypatch.chdir(tmp_path)
+    from thread_store import append_new_thread_messages
+    from tui.app import TuiApp
+    from tui.services.stores.file_store import FileTaskStore
+    from tui.widgets.arg_picker import ArgPicker
+    from tui.widgets.command_palette import CommandPalette
+
+    append_new_thread_messages(
+        str(tmp_path), "cli", "tid1",
+        [{"role": "user", "content": "вопрос", "id": "m1"}], set(),
+    )
+    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    async with app.run_test() as pilot:
+        scr = pilot.app.screen
+        scr._active_task_id = "tid1"
+        scr._store = FileTaskStore(threads_dir=str(tmp_path), system="cli")
+        await pilot.press("/")
+        await pilot.press("e")
+        await pilot.press("x")
+        await pilot.press("enter")
+        await pilot.pause()
+        # Палитра команд закрыта; в поле `/export ` + arg-picker форматов.
+        assert not pilot.app.query(CommandPalette)
+        inp = pilot.app.query_one("#cmdinput")
+        assert inp.text == "/export "
+        assert len(pilot.app.query(ArgPicker)) == 1
+        assert list(tmp_path.glob("export-tid1-*.txt")) == []
+
+        await pilot.press("enter")
+        await pilot.pause()
+        files = list(tmp_path.glob("export-tid1-*.txt"))
+        assert len(files) == 1
+        assert "вопрос" in files[0].read_text(encoding="utf-8")
+        assert inp.text == ""
+
+
+@pytest.mark.asyncio
 async def test_palette_enter_executes_selected():
     pytest.importorskip("textual")
     from tui.app import TuiApp

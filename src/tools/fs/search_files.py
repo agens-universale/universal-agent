@@ -292,6 +292,18 @@ Search for error logs in Rust source files:
         if limit is not None and not isinstance(limit, int):
             return _result(ok=False, error={"type": "invalid_argument", "field": "limit"})
 
+        try:
+            re.compile(regex)
+        except re.error as e:
+            return _result(
+                ok=False,
+                error={
+                    "type": "invalid_argument",
+                    "field": "regex",
+                    "message": f"Invalid regex: {e}",
+                },
+            )
+
         if not self._backend.exists(path):
             return _result(ok=False, error={"type": "not_found"})
         if not self._backend.is_dir(path):

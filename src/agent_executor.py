@@ -36,7 +36,7 @@ from thread_store import (
     make_message_key,
     reset_thread_files,
     resolve_threads_dir,
-    update_tui_meta,
+    update_runtime_meta,
 )
 from tools.connect_mcp.persistent_stdio import PersistentStdioRegistry
 from tools.connect_mcp.stream_client import _SESSION_MANAGER as _STREAM_SESSION_MANAGER
@@ -134,7 +134,7 @@ class AgentExecutor:
             try:
                 from tools.mcp_snapshot import build_mcp_tools_snapshot
                 snap = build_mcp_tools_snapshot(config_dict, self._ctx.tools_data, self._ctx.mcp_status)
-                update_tui_meta(
+                update_runtime_meta(
                     resolve_threads_dir(config_dict), system_id, thread_id,
                     {"mcp_tools": snap},
                 )

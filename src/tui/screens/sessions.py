@@ -9,6 +9,7 @@ from typing import Optional
 from rich.text import Text
 from textual import events
 from textual.app import ComposeResult
+from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import Screen
 from textual.widgets import Input, Static
@@ -47,6 +48,14 @@ class SessionsScreen(Screen):
     """Picker сессий текущего проекта."""
 
     DEFAULT_CSS = ""
+
+    # Input: ctrl+a = home. Нужен select-all в фильтре (ЙЦУКЕН / Caps).
+    BINDINGS = [
+        Binding("ctrl+a", "filter_select_all", "выделить всё", show=False, priority=True),
+        Binding("ctrl+ф", "filter_select_all", "выделить всё", show=False, priority=True),
+        Binding("ctrl+A", "filter_select_all", "выделить всё", show=False, priority=True),
+        Binding("ctrl+Ф", "filter_select_all", "выделить всё", show=False, priority=True),
+    ]
 
     def __init__(self, *, threads_dir: str, system: str = "cli", **kwargs) -> None:
         super().__init__(**kwargs)
@@ -298,6 +307,16 @@ class SessionsScreen(Screen):
         self._filter = new
         self._page = 0
         self._reload()
+
+    def action_filter_select_all(self) -> None:
+        """Ctrl+A в поле фильтра: выделить весь текст (не approve диффов)."""
+        try:
+            inp = self.query_one("#sessions-filter", Input)
+        except Exception:
+            return
+        if not inp.has_focus:
+            return
+        inp.action_select_all()
 
     def on_key(self, event: events.Key) -> None:
         page_len = len(self._page_items())

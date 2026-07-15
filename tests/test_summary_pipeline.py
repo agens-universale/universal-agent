@@ -120,10 +120,6 @@ def test_maybe_run_summary_compaction_twice_uses_meta_user_log(monkeypatch):
         )
         empty_patch = types.SimpleNamespace(request_messages=[], raw_response="")
         monkeypatch.setattr(
-            "summarize.memory_suggestions.request_patch_append",
-            lambda **_k: empty_patch,
-        )
-        monkeypatch.setattr(
             "summarize.memory_suggestions.request_patch_replace",
             lambda **_k: empty_patch,
         )
@@ -216,10 +212,6 @@ def test_maybe_run_summary_compaction_works_without_thread(monkeypatch):
     )
     empty_patch = types.SimpleNamespace(request_messages=[], raw_response="")
     monkeypatch.setattr(
-        "summarize.memory_suggestions.request_patch_append",
-        lambda **_k: empty_patch,
-    )
-    monkeypatch.setattr(
         "summarize.memory_suggestions.request_patch_replace",
         lambda **_k: empty_patch,
     )
@@ -253,10 +245,6 @@ def test_maybe_run_summary_compaction_preserves_system_and_state_metadata(monkey
         lambda **_kwargs: valid_summary_xml_for_tests(seed="context"),
     )
     empty_patch = types.SimpleNamespace(request_messages=[], raw_response="")
-    monkeypatch.setattr(
-        "summarize.memory_suggestions.request_patch_append",
-        lambda **_k: empty_patch,
-    )
     monkeypatch.setattr(
         "summarize.memory_suggestions.request_patch_replace",
         lambda **_k: empty_patch,

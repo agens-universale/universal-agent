@@ -8,11 +8,14 @@ import pytest
 
 
 def _write_task(tmp_path, tid, n_messages=1, last_compact=None):
-    # Антиспам /compact сравнивает meta.tui.live_msg_count с last_compact_msg_count.
-    tui = {"live_msg_count": n_messages}
+    # Антиспам /compact: runtime.live_msg_count vs tui.last_compact_msg_count.
+    runtime = {"live_msg_count": n_messages}
+    tui = {}
     if last_compact is not None:
         tui["last_compact_msg_count"] = last_compact
-    meta = {"thread_id": tid, "system_id": "cli", "tui": tui}
+    meta = {"thread_id": tid, "system_id": "cli", "runtime": runtime}
+    if tui:
+        meta["tui"] = tui
     (tmp_path / f"meta_cli_{tid}.json").write_text(json.dumps(meta), encoding="utf-8")
     lines = []
     for i in range(1, n_messages + 1):

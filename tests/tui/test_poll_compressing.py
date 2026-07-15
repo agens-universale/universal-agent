@@ -1,4 +1,4 @@
-"""При meta.tui_summarizing=True индикатор переходит в compressing."""
+"""При meta.runtime.summarizing=True индикатор переходит в compressing."""
 import pytest
 
 
@@ -10,7 +10,7 @@ class _RunningRunner:
 
 class _FakeStore:
     def get_task_meta(self, task_id, system=None):
-        return {"tui_summarizing": True}
+        return {"runtime": {"summarizing": True}}
 
     def tail_events(self, task_id, cursor):
         return type("T", (), {"stream_reset": False, "new_records": [], "next_cursor": cursor})()

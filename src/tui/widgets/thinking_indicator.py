@@ -12,7 +12,7 @@
 без размонтирования — непрерывный визуал между фазами, без флика
 «исчез → вернулся».
 
-Управляется из TraceScreen._poll_active: meta-флаг `tui_summarizing` →
+Управляется из TraceScreen._poll_active: meta-флаг `runtime.summarizing` →
 compressing; иначе по `_last_event_kind`: "_finalized" sentinel → validating,
 иначе → thinking.
 """

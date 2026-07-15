@@ -17,7 +17,8 @@ class SaveBase64File(AbstractSimpleTool):
             "description": (
                 "Decodes a base64-encoded string and saves it as a binary file. "
                 "Use this to persist images (screenshots, etc.) received as base64 data from MCP tools. "
-                "Returns JSON with fields: ok, path, bytes_written, error."
+                "data must be standard base64 (A-Z a-z 0-9 + / =), ASCII only, with correct padding; "
+                "no data URI prefix. Returns JSON with fields: ok, path, bytes_written, error."
             ),
             "parameters": {
                 "type": "object",
@@ -28,7 +29,11 @@ class SaveBase64File(AbstractSimpleTool):
                     },
                     "data": {
                         "type": "string",
-                        "description": "Base64-encoded content to decode and write.",
+                        "description": (
+                            "Raw standard base64 content (A-Z a-z 0-9 + / =), ASCII only, "
+                            "with correct padding. Do not include a data URI prefix "
+                            "(e.g. data:image/png;base64,)."
+                        ),
                     },
                 },
                 "required": ["path", "data"],
@@ -48,7 +53,9 @@ class SaveBase64File(AbstractSimpleTool):
             "- Use this after browser_screenshot (or any tool returning base64 image data) "
             "to save the result to disk.\n"
             "- path must be absolute.\n"
-            "- data is the raw base64 string (without the data URI prefix).\n"
+            "- data is the raw standard base64 string (A-Z a-z 0-9 + / =), ASCII only, "
+            "with correct padding; no data URI prefix.\n"
+            "- On decode_failed, check for non-ASCII characters or incorrect padding.\n"
         )
 
     def _result(self, *, ok: bool, path: str, bytes_written: int = 0, error=None) -> str:

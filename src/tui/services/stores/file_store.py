@@ -81,20 +81,21 @@ class FileTaskStore:
         if not meta_path.exists():
             return {}
         try:
-            return json.loads(meta_path.read_text(encoding="utf-8"))
+            raw = json.loads(meta_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             return {}
+        return raw if isinstance(raw, dict) else {}
 
     def update_tui_meta(
         self, task_id: str, patch: dict, system: Optional[str] = None
     ) -> None:
-        """Объединяет patch с meta.tui sub-dict и сохраняет."""
+        """Объединяет patch с meta.tui sub-dict и сохраняет (TUI-owned)."""
         sys_ = system or self._system
         meta_path = self._meta_path(task_id, sys_)
         meta = self.get_task_meta(task_id, system=sys_)
         if not meta:
             meta = {"thread_id": task_id, "system_id": sys_}
-        tui_meta = meta.get("tui") or {}
+        tui_meta = dict(meta.get("tui") or {})
         tui_meta.update(patch)
         meta["tui"] = tui_meta
         # Fresh project dir: TUI may write meta before the executor's first write

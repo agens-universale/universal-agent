@@ -48,12 +48,12 @@ def test_snapshot_without_status_defaults_unknown():
     assert snap["office"]["tools"] == []
 
 
-def test_update_tui_meta_roundtrip_visible_to_filestore(tmp_path):
-    # Контракт между run-путём (writer) и TUI (reader): один и тот же meta-файл.
-    from thread_store import update_tui_meta
+def test_update_runtime_meta_mcp_tools_visible_to_filestore(tmp_path):
+    # Контракт: ядро пишет runtime.mcp_tools, TUI читает тот же meta-файл.
+    from thread_store import update_runtime_meta
     from tui.services.stores.file_store import FileTaskStore
     snap = {"search": [{"name": "mcp_search_web", "description": "web"}]}
-    update_tui_meta(str(tmp_path), "cli", "t1", {"mcp_tools": snap})
+    update_runtime_meta(str(tmp_path), "cli", "t1", {"mcp_tools": snap})
     store = FileTaskStore(str(tmp_path), system="cli")
     meta = store.get_task_meta("t1")
-    assert meta.get("tui", {}).get("mcp_tools", {}).get("search")[0]["name"] == "mcp_search_web"
+    assert meta.get("runtime", {}).get("mcp_tools", {}).get("search")[0]["name"] == "mcp_search_web"

@@ -1,10 +1,12 @@
-"""_context_meter / compact-count читают только meta.tui.live_*, не data_*."""
+"""_context_meter / compact-count читают только meta.runtime.live_*, не data_*."""
 import json
 import pytest
 
 
-def _write_task(tmp_path, tid, *, content="hello", tui=None, data_content=None):
+def _write_task(tmp_path, tid, *, content="hello", runtime=None, tui=None, data_content=None):
     meta = {"thread_id": tid, "system_id": "cli"}
+    if runtime is not None:
+        meta["runtime"] = runtime
     if tui is not None:
         meta["tui"] = tui
     (tmp_path / f"meta_cli_{tid}.json").write_text(
@@ -37,7 +39,7 @@ def _cfg(trigger=10_000, turn_end=1):
 
 @pytest.mark.asyncio
 async def test_context_meter_hidden_without_live_chars_key(tmp_path):
-    """Нет meta.tui.live_history_chars → метр скрыт; data_* не читаем."""
+    """Нет meta.runtime.live_history_chars → метр скрыт; data_* не читаем."""
     pytest.importorskip("textual")
     from tui.app import TuiApp
 
@@ -70,7 +72,7 @@ async def test_context_meter_reads_meta_not_data(tmp_path):
     _write_task(
         tmp_path,
         tid,
-        tui={"live_history_chars": 500, "live_msg_count": 1},
+        runtime={"live_history_chars": 500, "live_msg_count": 1},
         data_content="Z" * 50_000,
     )
     app = TuiApp(
@@ -104,7 +106,8 @@ async def test_cmd_compact_antispam_uses_live_msg_count(tmp_path):
     meta = {
         "thread_id": tid,
         "system_id": "cli",
-        "tui": {"live_msg_count": 3, "last_compact_msg_count": 3},
+        "runtime": {"live_msg_count": 3},
+        "tui": {"last_compact_msg_count": 3},
     }
     (tmp_path / f"meta_cli_{tid}.json").write_text(
         json.dumps(meta), encoding="utf-8"

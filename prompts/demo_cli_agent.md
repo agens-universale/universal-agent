@@ -23,5 +23,5 @@ Do not store in `project_memory`:
 - secrets, credentials, personal data, or hidden reasoning;
 - guesses, unverified claims, or temporary hypotheses.
 
-Memory entries should be short, factual, and useful for future sessions. Include a resolvable path, date, source, or evidence pointer when it materially helps. If memory becomes noisy or stale, compact/rewrite it into a short index instead of appending more.
+Memory entries should be short, factual, and useful for future sessions. Include a resolvable path, date, source, or evidence pointer when it materially helps. If memory becomes noisy or stale, compact it with action=write (full overwrite) into a short index instead of appending more.
 

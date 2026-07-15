@@ -14,7 +14,7 @@ _HINT_WITH_ARGS = "↑↓ выбрать · Enter ввести аргумент 
 
 
 def _hint_for(cmd: Command | None) -> str:
-    """Динамический хинт в зависимости от наличия аргументов у команды."""
+    """Динамический хинт: есть схема args → Enter подставит команду в поле."""
     if cmd is not None and cmd.args:
         return _HINT_WITH_ARGS
     return _HINT_NO_ARGS

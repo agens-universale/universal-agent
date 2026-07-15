@@ -49,10 +49,17 @@ def test_format_approve_ack_and_cta():
     assert "staged" not in (format_approve_ack(1, "local.md") or "").lower()
     assert format_approve_ack(3) == "Принято 3 файла"
     assert format_approve_ack(0) is None
-    assert format_pending_cta(1) == (
-        "Изменено 1 файл. diff [F3] · Ctrl+A принять все"
+    assert format_pending_cta(["src/a.py"]) == "src/a.py\n[F3]/diff"
+    assert format_pending_cta(["a.py", "b.py"]) == "a.py\nb.py\n[F3]/diff"
+    assert format_pending_cta([f"f{i}.py" for i in range(1, 6)]) == (
+        "f1.py\nf2.py\nf3.py\nf4.py\nf5.py\n[F3]/diff"
     )
-    assert format_pending_cta(0) is None
+    assert format_pending_cta([f"f{i}.py" for i in range(1, 8)]) == (
+        "f1.py\nf2.py\nf3.py\nf4.py\nf5.py\n(5 из 7) [F3]/diff"
+    )
+    assert "Ctrl+A" not in (format_pending_cta(["x.py"]) or "")
+    assert format_pending_cta([]) is None
+    assert format_pending_cta([""]) is None
 
 
 def test_format_bulk_dual_layer_acks():

@@ -1,7 +1,8 @@
-"""tui_summarizing флаг выставляется на время компакции и снимается (в т.ч. при ошибке)."""
+"""tui summarizing → meta.runtime.summarizing; снимается (в т.ч. при ошибке)."""
 import pytest
 
 import run_summary_coordinator as rsc
+import thread_store
 
 
 class _FakeTS:
@@ -12,10 +13,13 @@ class _FakeTS:
 
 
 def _patch_flush(monkeypatch, ts):
-    # Перехватываем save_thread_meta — записываем снимок наличия флага.
+    monkeypatch.setattr(thread_store, "load_thread_meta", lambda *a, **k: {})
+
     def fake_save(threads_dir, system_id, thread_id, meta):
-        ts.flushed_states.append(bool(meta.get("tui_summarizing")))
-    monkeypatch.setattr(rsc, "save_thread_meta", fake_save, raising=False)
+        rt = meta.get("runtime") or {}
+        ts.flushed_states.append(bool(rt.get("summarizing")))
+
+    monkeypatch.setattr(thread_store, "save_thread_meta", fake_save)
 
 
 def test_flag_set_during_and_cleared_after(monkeypatch):
@@ -23,12 +27,13 @@ def test_flag_set_during_and_cleared_after(monkeypatch):
     _patch_flush(monkeypatch, ts)
     seen_during = {}
     def fake_compaction():
-        seen_during["flag"] = bool(ts.meta.get("tui_summarizing"))
+        rt = ts.meta.get("runtime") or {}
+        seen_during["flag"] = bool(rt.get("summarizing"))
     with rsc._summarizing_flag(ts):
         fake_compaction()
-    assert seen_during["flag"] is True          # внутри — флаг стоял
-    assert ts.meta.get("tui_summarizing") is None  # после — снят
-    assert ts.flushed_states == [True, False]   # flush на set и на clear
+    assert seen_during["flag"] is True
+    assert not (ts.meta.get("runtime") or {}).get("summarizing")
+    assert ts.flushed_states == [True, False]
 
 
 def test_flag_cleared_on_exception(monkeypatch):
@@ -37,11 +42,10 @@ def test_flag_cleared_on_exception(monkeypatch):
     with pytest.raises(ValueError):
         with rsc._summarizing_flag(ts):
             raise ValueError("boom")
-    assert ts.meta.get("tui_summarizing") is None
+    assert not (ts.meta.get("runtime") or {}).get("summarizing")
     assert ts.flushed_states[-1] is False
 
 
 def test_flag_noop_when_no_thread_session():
-    # ts=None (CLI без треда) — не должно падать.
     with rsc._summarizing_flag(None):
         pass

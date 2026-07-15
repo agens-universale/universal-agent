@@ -226,20 +226,26 @@ class AgentRunner:
 
     def make_tui_confirm(
         self,
-        present: Callable[[str, str, list], None],
+        present: Callable[..., bool | None],
     ) -> Callable[..., str]:
         """Вернуть замыкание tui_confirm для передачи в ctx.
 
-        Замыкание вызывается на агент-потоке и блокирует его до ответа юзера.
-        present(title, question, fields) — инжектированный UI-presenter; он
-        отвечает за маршаллинг в UI-поток и показ баннера.
+        Замыкание вызывается на агент-потоке и блокирует его до ответа юзера
+        только после sync ack mounted. present(...) → True|False|None; при
+        False — сразу deny без wait() (I2). None — legacy present без ack.
         Возвращает ConfirmChoice: 'once'|'session'|'deny'.
         """
 
         def _tui_confirm(*, title: str, question: str, fields: list) -> str:
             self._confirm_event.clear()
             self._confirm_choice = "deny"
-            present(title, question, fields)
+            try:
+                mounted = present(title, question, fields)
+            except Exception:
+                return "deny"
+            # False = explicit fail; None/True — mounted (None = legacy present без ack).
+            if mounted is False:
+                return "deny"
             self._confirm_event.wait()
             return self._confirm_choice
 

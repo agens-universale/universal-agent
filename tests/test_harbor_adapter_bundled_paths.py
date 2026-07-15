@@ -57,7 +57,6 @@ def test_adapter_points_dependency_paths_to_existing_files(monkeypatch):
     # summary sub-prompt paths exist
     sp = c["summary_params"]
     for k in ("chat_completions_summary_prompt_path",
-              "chat_completions_memory_patch_append_prompt_path",
               "chat_completions_memory_patch_replace_prompt_path"):
         assert os.path.isfile(sp[k]), k
     # intent_guard prompt path is bundled + exists (activates the finish gate in the

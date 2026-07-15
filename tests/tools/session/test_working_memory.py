@@ -62,11 +62,11 @@ def test_append_and_read_register():
     assert "implement parser" in read_back["content"]
 
 
-def test_rewrite_replaces_content():
+def test_write_replaces_content():
     state = _make_state({REGISTER_KNOWLEDGE: "old"})
     res = _call(
         state,
-        action="rewrite",
+        action="write",
         register=REGISTER_KNOWLEDGE,
         reason="compact memory",
         content="new stable fact",
@@ -110,11 +110,11 @@ def test_append_without_reason_kwarg_ok():
     assert "implement parser" in state.shared.working_memory[REGISTER_STATE]
 
 
-def test_rewrite_without_reason_ok():
+def test_write_without_reason_ok():
     state = _make_state({REGISTER_KNOWLEDGE: "old"})
     res = _call(
         state,
-        action="rewrite",
+        action="write",
         register=REGISTER_KNOWLEDGE,
         content="new stable fact",
     )
@@ -144,7 +144,7 @@ def test_register_limit_exceeded():
     tool = WorkingMemory(ctx=ctx, state=_make_state())
     res = json.loads(
         tool(
-            action="rewrite",
+            action="write",
             register=REGISTER_GOAL,
             reason="set goal",
             content="x" * 11,

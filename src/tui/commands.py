@@ -23,6 +23,16 @@ class Command:
     # ArgPicker при вводе `/<cmd> `. Пусто = у команды нет такого меню.
     arg_options: tuple[tuple[str, str], ...] = ()
 
+    @property
+    def requires_args(self) -> bool:
+        """True, если без аргумента команду нельзя выполнить (схема `<…>`).
+
+        Опциональные `[…]` (как у /export) — Enter выполняет с дефолтом;
+        обязательные `<path>` / `<id>` — Enter подставляет `/cmd ` для ввода.
+        """
+        a = (self.args or "").strip()
+        return bool(a) and not a.startswith("[")
+
 
 class CommandRegistry:
     def __init__(self) -> None:

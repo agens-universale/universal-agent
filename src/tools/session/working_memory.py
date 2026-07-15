@@ -105,7 +105,7 @@ class WorkingMemory(AbstractSimpleTool):
             "name": "session_memory",
             "description": (
                 "Thread/session memory for THIS dialogue only — not project-wide 'remember forever'. "
-                "Do not append on every trivial step; write after meaningful progress or before handoff/delegation. "
+                "Do not append on every trivial step; update after meaningful progress or before handoff/delegation. "
                 "This tool does NOT write files to disk. "
                 "Stores compact state that survives dialog summarization. "
                 "Use fixed registers only: "
@@ -113,10 +113,10 @@ class WorkingMemory(AbstractSimpleTool):
                 "constraints = hard requirements, preferences, prohibitions, format/technical/safety limits; "
                 "state = current plan, progress, completed steps, open TODOs, blockers, next actions, active hypotheses; "
                 "knowledge = stable verified facts, architecture decisions, implementation notes, artifact references, evidence. "
-                "Actions: list, read, append, rewrite. "
+                "Actions: list, read, append (short delta), write (full replace of one register; rare). "
                 "Every response includes per-register length vs limit in registers. "
-                "Use append for compact new deltas only. Use rewrite for compaction, cleanup, deduplication, or removing obsolete information. "
-                "Maintenance: when register sizes in that metadata approach or exceed limits, proactively compact the affected register—read it, then rewrite (deduplicate, drop obsolete detail; do not keep appending into an overfull register). "
+                "Use append for compact new deltas only. Use write for full replace: compaction, cleanup, deduplication, or removing obsolete information. "
+                "Maintenance: when register sizes in that metadata approach or exceed limits, proactively compact the affected register—read it, then write the compact full replacement (deduplicate, drop obsolete detail; do not keep appending into an overfull register). "
                 "Move bulky details to a file/artifact when needed; keep a concise form of what belongs in that register per the definitions above (e.g. facts, decisions, plan/TODOs, blockers, artifact links—not chain-of-thought or raw dumps). "
                 "Do not wait for the user to ask; memory hygiene is part of using this tool. "
                 "Do NOT store chain-of-thought, verbose reasoning, raw logs, large blobs, full file contents, repetitive history, or transient chatter. "
@@ -129,7 +129,13 @@ class WorkingMemory(AbstractSimpleTool):
                 "properties": {
                     "action": {
                         "type": "string",
-                        "enum": ["list", "read", "append", "rewrite"],
+                        "enum": ["list", "read", "append", "write"],
+                        "description": (
+                            "list = show register sizes; "
+                            "read = return one register; "
+                            "append = add ONLY the new delta; "
+                            "write = fully replace one register (rare; full overwrite)."
+                        ),
                     },
                     "register": {
                         "type": "string",
@@ -141,12 +147,16 @@ class WorkingMemory(AbstractSimpleTool):
                         "description": (
                             "Optional brief justification for why this update is useful "
                             "and why it belongs in this register. Recommended but optional; "
-                            "content is required for append/rewrite."
+                            "content is required for append/write."
                         ),
                     },
                     "content": {
                         "type": "string",
-                        "description": "Markdown content for append or rewrite.",
+                        "description": (
+                            "Markdown text for append/write. "
+                            "For append: ONLY the new delta. "
+                            "For write: the FULL updated register content (full overwrite)."
+                        ),
                     },
                 },
                 "required": ["action"],
@@ -174,7 +184,7 @@ class WorkingMemory(AbstractSimpleTool):
         registers = ", ".join(REGISTER_ORDER)
         return (
             "💡 Hint: This tool is for INTERNAL AGENT MEMORY only — it does NOT write files to disk.\n"
-            f"Use `register` ({registers}) with `action` append/rewrite/read/list.\n"
+            f"Use `register` ({registers}) with `action` append/write/read/list.\n"
             "To create files on the filesystem, use the filesystem write tool with "
             "`path` (absolute) and `content`.\n"
         )
@@ -184,7 +194,7 @@ class WorkingMemory(AbstractSimpleTool):
         return """Tool name: session_memory
 Tool description: Thread/session memory for THIS dialogue only — not project-wide remember-forever.
 Persistent per-thread operational memory for the agent.
-Do not append on every trivial step; write after meaningful progress or before handoff/delegation.
+Do not append on every trivial step; update after meaningful progress or before handoff/delegation.
 This tool does NOT write files to disk or filesystem.
 It stores compact durable task state that survives dialog summarization.
 
@@ -198,11 +208,11 @@ Actions:
 - list: show register sizes
 - read: return one register
 - append: add compact new deltas only
-- rewrite: fully replace a register for compaction, cleanup, deduplication, or removing obsolete information
+- write: fully replace one register (full overwrite; rare) — for compaction, cleanup, deduplication, or removing obsolete information
 
 Maintenance (register hygiene):
 - Every tool response includes per-register length vs limit in `registers`.
-- When sizes approach or exceed limits, read the affected register and rewrite it compactly (deduplicate, drop obsolete detail; do not keep appending into an overfull register).
+- When sizes approach or exceed limits, read the affected register and write a compact full replacement (deduplicate, drop obsolete detail; do not keep appending into an overfull register).
 - Move bulky details to a file/artifact when needed; keep a concise form of register-appropriate content per definitions above (facts, decisions, plan/TODOs, blockers, artifact links—not chain-of-thought or raw dumps).
 - Do not wait for the user to ask; memory hygiene is part of using this tool.
 
@@ -221,9 +231,9 @@ If unsure:
 Do NOT store chain-of-thought, verbose reasoning, raw logs, large blobs, full file contents, repetitive history, or transient chatter.
 Keep memory compact, structured, and durable.
 
-`reason` is optional; `content` is required for append/rewrite.
+`reason` is optional; `content` is required for append/write.
 
-Input schema: {"type":"object","properties":{"action":{"type":"string","enum":["list","read","append","rewrite"]},"register":{"type":"string","enum":["goal","constraints","state","knowledge"]},"reason":{"type":"string"},"content":{"type":"string"}},"required":["action"],"additionalProperties":false}
+Input schema: {"type":"object","properties":{"action":{"type":"string","enum":["list","read","append","write"]},"register":{"type":"string","enum":["goal","constraints","state","knowledge"]},"reason":{"type":"string"},"content":{"type":"string"}},"required":["action"],"additionalProperties":false}
 """
 
     def _get_registers(self) -> Dict[str, str]:
@@ -303,7 +313,7 @@ Input schema: {"type":"object","properties":{"action":{"type":"string","enum":["
             "list": self._action_list,
             "read": self._action_read,
             "append": self._action_append,
-            "rewrite": self._action_rewrite,
+            "write": self._action_write,
         }
         handler = actions.get(action)
         if handler is None:
@@ -391,18 +401,18 @@ Input schema: {"type":"object","properties":{"action":{"type":"string","enum":["
         self._set_registers(registers)
         return self._result(ok=True, action="append", registers=registers, error=None)
 
-    def _action_rewrite(self, register: str, reason: str, content: str, **_: Any) -> str:
-        register_err = self._validate_register(register, "rewrite")
+    def _action_write(self, register: str, reason: str, content: str, **_: Any) -> str:
+        register_err = self._validate_register(register, "write")
         if register_err:
             return register_err
-        validation_err = self._validate_reason_and_content("rewrite", reason, content)
+        validation_err = self._validate_reason_and_content("write", reason, content)
         if validation_err:
             return validation_err
 
         registers = self._get_registers()
         new_text = content.strip()
         limits_err = self._check_limits(
-            action="rewrite",
+            action="write",
             registers=registers,
             target_register=register,
             new_text=new_text,
@@ -412,7 +422,7 @@ Input schema: {"type":"object","properties":{"action":{"type":"string","enum":["
 
         registers[register] = new_text
         self._set_registers(registers)
-        return self._result(ok=True, action="rewrite", registers=registers, error=None)
+        return self._result(ok=True, action="write", registers=registers, error=None)
 
     def _check_limits(
         self,
@@ -425,9 +435,9 @@ Input schema: {"type":"object","properties":{"action":{"type":"string","enum":["
         register_limit = self._register_limits[target_register]
         if len(new_text) > register_limit:
             hint = (
-                "Read and rewrite it compactly first."
+                "Read it, then action=write with a compact full replacement."
                 if action == "append"
-                else "Provide a more compact rewrite."
+                else "Provide a more compact full replacement via action=write."
             )
             return self._error(
                 action=action,
@@ -448,7 +458,7 @@ Input schema: {"type":"object","properties":{"action":{"type":"string","enum":["
                 message=(
                     f"Writing to '{target_register}' would exceed total budget of "
                     f"{self._total_budget_chars} chars. Compact the largest relevant "
-                    "registers with rewrite first."
+                    "registers with action=write first."
                 ),
             )
         return None

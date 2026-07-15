@@ -12,6 +12,7 @@ from persistence.live_volume import (
     live_volume_from_messages,
     merge_tui_into_meta,
 )
+from persistence.meta_ownership import resolve_runtime_flag_name
 from persistence.thread_meta_mapper import ThreadMetaMapper
 from message_policy.user_message_policy import (
     TECHNICAL_TYPE_DIALOG_SUMMARY,
@@ -276,13 +277,66 @@ def save_thread_meta(
 def update_tui_meta(
     threads_dir: str, system_id: str, thread_id: str, patch: Dict[str, Any]
 ) -> None:
-    """Слить patch в meta.tui (read-merge-write). Run-путь пишет снимки для TUI-экранов."""
+    """Слить patch в meta.tui (read-merge-write). Только TUI-owned ключи."""
     sys_norm = sanitize_system_id(system_id)
     meta = load_thread_meta(threads_dir, sys_norm, thread_id) or {}
-    tui_meta = meta.get("tui") or {}
+    tui_meta = dict(meta.get("tui") or {})
     tui_meta.update(patch)
     meta["tui"] = tui_meta
     save_thread_meta(threads_dir, sys_norm, thread_id, meta)
+
+
+def update_runtime_meta(
+    threads_dir: str, system_id: str, thread_id: str, patch: Dict[str, Any]
+) -> None:
+    """Слить patch в meta.runtime (read-merge-write). Только runtime-owned ключи."""
+    from persistence.meta_ownership import merge_runtime_into_meta
+
+    sys_norm = sanitize_system_id(system_id)
+    meta = load_thread_meta(threads_dir, sys_norm, thread_id) or {}
+    merge_runtime_into_meta(meta, patch)
+    save_thread_meta(threads_dir, sys_norm, thread_id, meta)
+
+
+def patch_runtime_flag(
+    threads_dir: str,
+    system_id: str,
+    thread_id: str,
+    flag: str,
+    *,
+    active: bool,
+    session_meta: Optional[Dict[str, Any]] = None,
+) -> None:
+    """Точечный patch ``meta.runtime.<flag>`` без clobber ``meta.tui`` (I1).
+
+    ``flag``: ``summarizing``|``finalizing``.
+    """
+    sys_norm = sanitize_system_id(system_id)
+    name = resolve_runtime_flag_name(flag)
+    disk = load_thread_meta(threads_dir, sys_norm, thread_id) or {}
+    runtime = dict(disk.get("runtime") or {})
+    if active:
+        runtime[name] = True
+    else:
+        runtime.pop(name, None)
+    if runtime:
+        disk["runtime"] = runtime
+    else:
+        disk.pop("runtime", None)
+
+    if session_meta is not None:
+        if runtime:
+            session_meta["runtime"] = dict(runtime)
+        else:
+            session_meta.pop("runtime", None)
+        disk_tui = disk.get("tui")
+        if isinstance(disk_tui, dict):
+            session_meta["tui"] = dict(disk_tui)
+        elif "tui" in session_meta:
+            session_meta.pop("tui", None)
+            disk.pop("tui", None)
+
+    save_thread_meta(threads_dir, sys_norm, thread_id, disk)
 
 
 def discard_message_by_id(
@@ -539,13 +593,10 @@ class ThreadSession:
         user_intent_log = summary_payload.get("user_intent_log")
         dialog_steps_offset = summary_payload.get("dialog_steps_offset", 0)
         data_path, meta_path = _thread_paths(self.threads_dir, self.system_id, self.thread_id)
-        # До переноса meta в архив: снимок disk tui (TUI-ключи не клобберить).
-        disk_tui = dict(
-            (load_thread_meta(self.threads_dir, self.system_id, self.thread_id) or {}).get(
-                "tui"
-            )
-            or {}
-        )
+        # До переноса meta в архив: снимок disk tui/runtime (TUI-ключи не клобберить).
+        disk_meta = load_thread_meta(self.threads_dir, self.system_id, self.thread_id) or {}
+        disk_tui = dict(disk_meta.get("tui") or {})
+        disk_runtime = dict(disk_meta.get("runtime") or {})
         ts_suffix = _utc_now_suffix()
         archive_data_path = data_path.replace(".jsonl", f"__pre_summary__{ts_suffix}.jsonl")
         archive_meta_path = meta_path.replace(".json", f"__pre_summary__{ts_suffix}.json")
@@ -643,11 +694,13 @@ class ThreadSession:
         last_backend_response_id = existing_meta.get("last_backend_response_id")
         if isinstance(last_backend_response_id, str) and last_backend_response_id.strip():
             new_meta["last_backend_response_id"] = last_backend_response_id
-        # meta.tui: disk wins для TUI-ключей; live_* — полный пересчёт по новому live.
+        # meta.tui: disk wins (TUI-owned). meta.runtime: merge + live_* пересчёт.
         session_tui = dict(existing_meta.get("tui") or {})
-        merged_tui = {**session_tui, **disk_tui}
-        merged_tui.update(live_volume_from_messages(compact_messages))
-        new_meta["tui"] = merged_tui
+        new_meta["tui"] = {**session_tui, **disk_tui}
+        session_runtime = dict(existing_meta.get("runtime") or {})
+        merged_runtime = {**session_runtime, **disk_runtime}
+        merged_runtime.update(live_volume_from_messages(compact_messages))
+        new_meta["runtime"] = merged_runtime
         save_thread_meta(self.threads_dir, self.system_id, self.thread_id, new_meta)
 
         self.history_messages = compact_messages
