@@ -227,25 +227,43 @@ def test_long_line_truncation(tmp_path):
         )
 
 
-def test_invalid_regex(tmp_path):
-    """Invalid regex: SearchFiles raises ValueError once a file is actually searched.
+def _assert_invalid_regex_envelope(env: dict, pattern: str) -> None:
+    assert env["ok"] is False
+    assert env["error"]["type"] == "invalid_argument"
+    assert env["error"]["field"] == "regex"
+    assert env["error"]["message"].startswith("Invalid regex:")
+    assert env["matches"] == []
+    assert env["count"] == 0
+    assert env["regex"] == pattern
 
-    Regex compilation happens lazily inside `_search_lines`, called per file during
-    the walk — same as the pre-refactor `_search_in_file`. There is no early/upfront
-    regex validation in `__call__`; an invalid pattern only raises once at least one
-    file is reached in the walk order. This is base behavior, unchanged by the
-    backend-seam refactor, and applies identically whether driven by LocalFsBackend
-    (real fs) or an injected FakeBackend.
+
+def test_invalid_regex(tmp_path):
+    """Invalid regex: SearchFiles returns ok=False with error.type=invalid_argument.
+
+    Regex is validated upfront in ``__call__`` before walking files, so both
+    LocalFsBackend and an injected FakeBackend return the same envelope.
     """
     real_root = _make_real_tree(tmp_path)
+    pattern = "[invalid("
 
     base = _base_tool()
-    with pytest.raises(ValueError, match="Invalid regex pattern"):
-        base(path=real_root, regex="[invalid(")
+    base_env = json.loads(base(path=real_root, regex=pattern))
+    _assert_invalid_regex_envelope(base_env, pattern)
 
     shim = _shim_tool()
-    with pytest.raises(ValueError, match="Invalid regex pattern"):
-        shim(path=SHIM_ROOT, regex="[invalid(")
+    shim_env = json.loads(shim(path=SHIM_ROOT, regex=pattern))
+    _assert_invalid_regex_envelope(shim_env, pattern)
+
+
+def test_invalid_regex_empty_tree(tmp_path):
+    """Invalid regex is rejected even when the search root has no files."""
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    pattern = "("
+
+    base = _base_tool()
+    base_env = json.loads(base(path=str(empty), regex=pattern))
+    _assert_invalid_regex_envelope(base_env, pattern)
 
 
 def test_not_a_directory(tmp_path):

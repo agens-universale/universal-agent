@@ -46,11 +46,33 @@ def test_search_invalid_pagination_offsets(tmp_path):
     assert bad_lim["ok"] is False and bad_lim["error"]["field"] == "limit"
 
 
+def test_search_invalid_regex_returns_envelope(tmp_path):
+    """Syntactically invalid regex must not raise; return ok=false envelope."""
+    tool = with_local_ctx(SearchFiles)
+    (tmp_path / "a.txt").write_text("hello\n", encoding="utf-8")
+
+    for pattern in ("[invalid(", "(", "*"):
+        data = json.loads(tool(path=str(tmp_path), regex=pattern))
+        assert data["ok"] is False, pattern
+        assert data["error"]["type"] == "invalid_argument", pattern
+        assert data["error"]["field"] == "regex", pattern
+        assert data["error"]["message"].startswith("Invalid regex:"), pattern
+        assert data["matches"] == []
+        assert data["count"] == 0
+        assert data["total_matches"] is None
+        assert data["regex"] == pattern
+
+    # Early validation: empty directory still rejects bad regex (no walk needed).
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    empty_dir = json.loads(tool(path=str(empty), regex="[invalid("))
+    assert empty_dir["ok"] is False
+    assert empty_dir["error"]["type"] == "invalid_argument"
+    assert empty_dir["error"]["field"] == "regex"
+
+
 def test_search_invalid_and_not_found(tmp_path):
     tool = with_local_ctx(SearchFiles)
-    bad_regex = json.loads(tool(path=str(tmp_path), regex="("))
-    # implementation swallows regex errors per-file, so ok remains true with zero matches
-    assert bad_regex["ok"] is True and bad_regex["count"] == 0
     missing = json.loads(tool(path=str(tmp_path / "none"), regex="x"))
     assert missing["ok"] is False and missing["error"]["type"] == "not_found"
     bad_path = json.loads(tool(path=1, regex="x"))  # type: ignore[arg-type]

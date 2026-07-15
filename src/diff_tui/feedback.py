@@ -81,14 +81,26 @@ def format_bulk_undo_ack(git_count: int, cache_count: int) -> Optional[str]:
     return "Отменено: " + "; ".join(parts)
 
 
-def format_pending_cta(count: int) -> str | None:
-    """Post-turn CTA в трейсе, если есть pending."""
-    if count <= 0:
+_PENDING_CTA_PREVIEW = 5
+
+
+def format_pending_cta(paths: Sequence[str]) -> str | None:
+    """Post-turn CTA в трейсе: до 5 путей + ``[F3]/diff``.
+
+    Если pending больше лимита — список режется и хвост
+    ``(5 из N) [F3]/diff``; иначе просто ``[F3]/diff``.
+    """
+    keys = [p for p in paths if p]
+    n = len(keys)
+    if n <= 0:
         return None
-    return (
-        f"Изменено {count} {files_word(count)}. "
-        "diff [F3] · Ctrl+A принять все"
-    )
+    shown = keys[:_PENDING_CTA_PREVIEW]
+    lines = list(shown)
+    if n > _PENDING_CTA_PREVIEW:
+        lines.append(f"({_PENDING_CTA_PREVIEW} из {n}) [F3]/diff")
+    else:
+        lines.append("[F3]/diff")
+    return "\n".join(lines)
 
 
 def build_undo_feedback_body(

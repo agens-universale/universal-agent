@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from textual import events
+from textual.binding import Binding
 from textual.message import Message
 from textual.widgets import TextArea
 
@@ -16,6 +17,15 @@ class CommandTextArea(TextArea):
     Использует нативное сообщение ``TextArea.Changed`` для live-фильтра палитры;
     собственное ``Submitted`` постится по Enter (без newline-модификатора).
     """
+
+    # Textual TextArea: ctrl+a = cursor_line_start. Нам нужен select-all
+    # (Backspace/копирование); priority перебивает дефолт + ЙЦУКЕН.
+    BINDINGS = [
+        Binding("ctrl+a", "select_all", "выделить всё", show=False, priority=True),
+        Binding("ctrl+ф", "select_all", "выделить всё", show=False, priority=True),
+        Binding("ctrl+A", "select_all", "выделить всё", show=False, priority=True),
+        Binding("ctrl+Ф", "select_all", "выделить всё", show=False, priority=True),
+    ]
 
     class Submitted(Message):
         """Posted when user presses Enter (without newline-modifier)."""

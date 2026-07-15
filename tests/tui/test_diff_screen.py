@@ -458,7 +458,7 @@ async def test_trace_mounts_pending_cta(tmp_path, launch_root):
         pilot.app.screen._maybe_mount_diff_pending_cta()
         await pilot.pause()
         found = any(
-            "Изменено" in str(row._content) and "diff [F3]" in str(row._content)
+            "[F3]/diff" in str(row._content)
             for row in pilot.app.screen.query(TraceRow)
         )
         assert found, "expected pending CTA in trace"
@@ -492,7 +492,7 @@ async def test_flush_cta_survives_after_clear_trace(tmp_path, launch_root):
         scr._flush_diff_pending_cta()
         await pilot.pause()
         found = any(
-            "Изменено" in str(row._content) and "diff [F3]" in str(row._content)
+            "[F3]/diff" in str(row._content)
             for row in scr.query(TraceRow)
         )
         assert found
@@ -520,7 +520,7 @@ async def test_cta_always_shows_when_pending(tmp_path, launch_root):
         ctas = [
             row
             for row in scr.query(TraceRow)
-            if "Изменено" in str(row._content) and "diff [F3]" in str(row._content)
+            if "[F3]/diff" in str(row._content)
         ]
         assert len(ctas) == 2
 
@@ -585,12 +585,12 @@ async def test_diff_viewer_undo_created_deletes_file(tmp_path, launch_root):
 
 
 @pytest.mark.asyncio
-async def test_trace_ctrl_a_approves_all(tmp_path, launch_root):
-    """С экрана сессии Ctrl+a принимает все pending."""
+async def test_trace_ctrl_a_selects_input_not_approve(tmp_path, launch_root):
+    """На TraceScreen Ctrl+A — select-all во вводе; pending не approve."""
     pytest.importorskip("textual")
     from tui.app import TuiApp
     from tui.screens.main import TraceScreen
-    from tui.widgets.trace_row import TraceRow
+    from tui.widgets.command_input import CommandTextArea
     from diff_tui.store import DiffStore
 
     _seed_pending(launch_root)
@@ -605,16 +605,17 @@ async def test_trace_ctrl_a_approves_all(tmp_path, launch_root):
         threads_dir=str(tmp_path / "threads"), system="cli", config=cfg
     ).run_test() as pilot:
         assert isinstance(pilot.app.screen, TraceScreen)
+        inp = pilot.app.screen.query_one("#cmdinput", CommandTextArea)
+        inp.text = "hello draft"
+        inp.focus()
+        await pilot.pause()
         await pilot.press("ctrl+a")
         await pilot.pause()
-        found = any(
-            "Принято" in str(row._content) for row in pilot.app.screen.query(TraceRow)
-        )
-        assert found
+        assert inp.selected_text == "hello draft"
         from tui.screens.diff import _service_from_config
 
         svc = _service_from_config(str(launch_root), cfg)
-        assert svc.list_entries(pending_only=True) == []
+        assert len(svc.list_entries(pending_only=True)) >= 2
 
 
 @pytest.mark.asyncio

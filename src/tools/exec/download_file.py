@@ -38,7 +38,7 @@ class DownloadFile(AbstractSimpleTool):
     )
     ALLOWED_EXTENSIONS = frozenset({
         ".pdf", ".docx", ".xls", ".xlsx", ".pptx", ".csv", ".html", ".msg",
-        ".txt", ".md",
+        ".txt", ".md", ".json",
     })
     _MAX_REDIRECTS = 10
     _BOM_PREFIXES = (
@@ -89,11 +89,11 @@ class DownloadFile(AbstractSimpleTool):
             "Tool name: download_file\n"
             "Tool description: Downloads a document or plain-text file from a URL into the configured download directory.\n\n"
             "Usage:\n"
-            "- Use when you need a local copy of a PDF, DOCX, XLSX, TXT, MD, etc. from a public http(s) URL.\n"
+            "- Use when you need a local copy of a PDF, DOCX, XLSX, TXT, MD, JSON, etc. from a public http(s) URL.\n"
             "- Only the basename is passed as filename; the directory comes from configuration.\n"
             "- On success, use the returned path with a document-reading tool to extract text.\n"
             "- Do not use shell download commands for these formats when this tool is available.\n"
-            "- filename must include a supported extension (.pdf, .docx, .xlsx, .txt, .md, ...).\n"
+            "- filename must include a supported extension (.pdf, .docx, .xlsx, .txt, .md, .json, ...).\n"
         )
 
     def _result(self, 
@@ -165,7 +165,7 @@ class DownloadFile(AbstractSimpleTool):
             return body.startswith(b"PK\x03\x04")
         if ext in {".xls", ".msg"}:
             return body.startswith(b"\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1")
-        if ext in {".csv", ".txt", ".md", ".html"}:
+        if ext in {".csv", ".txt", ".md", ".html", ".json"}:
             if b"\x00" in body[:4096]:
                 return False
             if ext != ".html":

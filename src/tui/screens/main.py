@@ -16,7 +16,6 @@ if TYPE_CHECKING:
 
 from textual import events
 from textual.app import ComposeResult
-from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import Screen
 from textual.widget import Widget
@@ -122,7 +121,7 @@ def select_active_substate(*, summarizing, finalizing, last_event_kind, since_la
 # Футер с функциональными клавишами; /stop добавляется только при активном run.
 # (/skills, /export доступны через палитру — в футере лишние. /mcp не дублируем —
 # подсказка «/mcp» уже в бренд-карточке.)
-# Diff: F3 в базовом хроме футера; Ctrl+A — принять все pending из CTA трейса.
+# Diff: F3 в базовом хроме футера; CTA в трейсе — пути pending + [F3]/diff.
 _FOOTER_LEFT = "[F1]/help  [F2]/sessions  [F3]/diff  [F5]/config  [F6]/settings"
 _FOOTER_RUNNING_LEFT = "[F1]/help  [F2]/sessions  [F3]/diff  [Ctrl+C]/stop"
 _PLACEHOLDER_READY = "опишите задачу или /команда"
@@ -140,13 +139,7 @@ _PREVIEW_PREFIX = "     "
 class TraceScreen(Screen):
     """Главный экран: трейс, ввод пользователя, команды и сопровождение run'а."""
 
-    # priority: перебить select-all у TextArea (#cmdinput).
-    BINDINGS = [
-        Binding("ctrl+a", "diff_approve_all", "принять все", show=False, priority=True),
-        Binding("ctrl+ф", "diff_approve_all", "принять все", show=False, priority=True),
-        Binding("ctrl+A", "diff_approve_all", "принять все", show=False, priority=True),
-        Binding("ctrl+Ф", "diff_approve_all", "принять все", show=False, priority=True),
-    ]
+    # Ctrl+A — select-all в #cmdinput (CommandTextArea); approve-all только на /diff.
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
@@ -2971,7 +2964,7 @@ class TraceScreen(Screen):
         )
 
     def action_diff_approve_all(self) -> None:
-        """С экрана сессии: принять все pending (поштучно — только /diff)."""
+        """Принять все pending (оставлен для явного вызова; хоткей Ctrl+A — на /diff)."""
         from diff_tui.feedback import format_approve_ack, format_bulk_approve_ack
 
         svc = self._diff_service_for_preview()
@@ -3045,17 +3038,17 @@ class TraceScreen(Screen):
         self._maybe_mount_diff_pending_cta()
 
     def _maybe_mount_diff_pending_cta(self) -> None:
-        """После turn: если есть незаапрувленные диффы — строка «Изменено N. /diff»."""
+        """После turn: если есть незаапрувленные диффы — пути + ``[F3]/diff``."""
         from diff_tui.feedback import format_pending_cta
 
         svc = self._diff_service_for_preview()
         if svc is None:
             return
         try:
-            n = len(svc.list_entries(pending_only=True))
+            keys = [e.key for e in svc.list_entries(pending_only=True)]
         except Exception:
             return
-        text = format_pending_cta(n)
+        text = format_pending_cta(keys)
         if not text:
             return
         self._mount_trace_row(

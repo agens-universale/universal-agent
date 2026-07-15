@@ -122,6 +122,7 @@ def test_download_file_docx_zip_header(tmp_path, monkeypatch):
     [
         ("notes.txt", b"hello plain text\n"),
         ("readme.md", b"# Title\n\nSome markdown.\n"),
+        ("data.json", b'{"ok": true, "n": 1}\n'),
     ],
 )
 def test_download_file_plain_text_extensions(tmp_path, monkeypatch, filename, body):
