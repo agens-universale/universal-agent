@@ -120,12 +120,12 @@ def select_active_substate(*, summarizing, finalizing, last_event_kind, since_la
     return "thinking"
 
 
-# Один набор команд в футере; /stop добавляется только при активном run.
+# Футер с функциональными клавишами; /stop добавляется только при активном run.
 # (/skills, /export доступны через палитру — в футере лишние. /mcp не дублируем —
 # подсказка «/mcp» уже в бренд-карточке.)
 # Diff: F3 / Ctrl+A — в CTA трейса и футере /diff, не в базовом хроме сессии.
-_FOOTER_LEFT = "/sessions  /help  /config"
-_FOOTER_RUNNING_LEFT = "/stop  /sessions  /help  /config"
+_FOOTER_LEFT = "[F1]/help  [F2]/sessions  [F3]/diff  [F5]/config  [F6]/settings"
+_FOOTER_RUNNING_LEFT = "[F1]/help  [F2]/sessions  [F3]/diff  [Ctrl+C]/stop"
 _PLACEHOLDER_READY = "опишите задачу или /команда"
 _HINT_TEXT = {
     "clear": "Esc ещё раз, чтобы очистить",

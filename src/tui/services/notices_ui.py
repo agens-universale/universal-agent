@@ -13,7 +13,7 @@ def notice_counts(notices: List[Notice]) -> Tuple[int, int]:
 
 
 def format_notices_badge(notices: List[Notice], *, with_hint: bool = True) -> str:
-    """Строка вида «⚠ 2 · ℹ 1 · /notices (F4)»; пустая, если уведомлений нет."""
+    """Строка вида «⚠ 2 · ℹ 1 · [F4]/notices»; пустая, если уведомлений нет."""
     warns, infos = notice_counts(notices)
     if not warns and not infos:
         return ""
@@ -23,11 +23,11 @@ def format_notices_badge(notices: List[Notice], *, with_hint: bool = True) -> st
     if infos:
         parts.append(f"ℹ {infos}")
     if with_hint:
-        parts.append("/notices (F4)")
+        parts.append("[F4]/notices")
     return " · ".join(parts)
 
 
 def format_notices_footer_suffix(notices: List[Notice]) -> str:
-    """Суффикс для footer-left: «  ·  ⚠ 1 · /notices (F4)»."""
+    """Суффикс для footer-left: «  ·  ⚠ 1 · [F4]/notices»."""
     badge = format_notices_badge(notices)
     return f"  ·  {badge}" if badge else ""

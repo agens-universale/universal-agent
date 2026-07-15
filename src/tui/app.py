@@ -98,6 +98,7 @@ class TuiApp(App):
         Binding("f3", "diff", "/diff"),
         Binding("f4", "notices", "/notices"),
         Binding("f5", "config", "/config"),
+        Binding("f6", "settings", "/settings"),
         Binding("ctrl+slash", "help", "Help"),
         Binding("ctrl+s", "sessions", "/sessions"),
         # priority: TextArea перехватывает Ctrl+D как delete-right.
