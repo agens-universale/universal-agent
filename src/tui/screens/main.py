@@ -122,7 +122,7 @@ def select_active_substate(*, summarizing, finalizing, last_event_kind, since_la
 # Футер с функциональными клавишами; /stop добавляется только при активном run.
 # (/skills, /export доступны через палитру — в футере лишние. /mcp не дублируем —
 # подсказка «/mcp» уже в бренд-карточке.)
-# Diff: F3 / Ctrl+A — в CTA трейса и футере /diff, не в базовом хроме сессии.
+# Diff: F3 в базовом хроме футера; Ctrl+A — принять все pending из CTA трейса.
 _FOOTER_LEFT = "[F1]/help  [F2]/sessions  [F3]/diff  [F5]/config  [F6]/settings"
 _FOOTER_RUNNING_LEFT = "[F1]/help  [F2]/sessions  [F3]/diff  [Ctrl+C]/stop"
 _PLACEHOLDER_READY = "опишите задачу или /команда"
@@ -2097,7 +2097,7 @@ class TraceScreen(Screen):
 
             ⚠ MCP: 3/5 подключены · /mcp             (только если заданы MCP-серверы)
 
-            ⚠ 2 · ℹ 1 · /notices (F4)                (только если есть уведомления)
+            ⚠ 2 · ℹ 1 · [F4]/notices                (только если есть уведомления)
 
             ↑ доступна новая версия · /settings → Обновление  (teal, если авто-чек нашёл)
 
@@ -2720,21 +2720,19 @@ class TraceScreen(Screen):
 
         # Если открыта палитра — Enter выполняет выбранную/набранную команду
         # (логика перенесена из on_key, т.к. TextArea перехватывает Enter).
-        # Команды с аргументами подставляются в поле ввода вместо немедленного
-        # выполнения, чтобы пользователь мог ввести нужные параметры.
+        # Команды со схемой args (`<path>`, `[txt|…]`) подставляются в поле;
+        # выполнение (с дефолтом, если args опциональны) — следующим Enter в поле.
         if self._palette is not None:
             cmd = self._palette.selected_command()
             typed = event.value.strip()
             has_args = len(typed.split()) > 1
             if cmd is not None and not has_args:
-                # Если у команды есть аргументы — подставить в поле ввода
                 if cmd.args:
                     inp.text = f"/{cmd.name} "
                     inp.move_cursor(inp.document.end)
                     self._close_palette()
                     inp.focus()
                     return
-                # Без аргументов — выполнить сразу
                 self._close_palette()
                 inp.text = ""
                 self._handle_command(cmd.name)

@@ -88,7 +88,6 @@ project_memory:
 
 summary:
   chat_completions_summary_prompt_path: "../prompts/chat_completions_summary_prompt.md"
-  chat_completions_memory_patch_append_prompt_path: "../prompts/chat_completions_memory_patch_append.md"
   chat_completions_memory_patch_replace_prompt_path: "../prompts/chat_completions_memory_patch_replace.md"
   chat_completions_summary_trigger_chars: 0
   chat_completions_summary_turn_end_trigger_chars: 0

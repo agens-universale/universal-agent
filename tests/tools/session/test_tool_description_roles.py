@@ -51,12 +51,15 @@ def test_working_memory_register_hygiene_in_description():
     prompt = WorkingMemory.prompt_description().lower()
     for text in (desc, prompt):
         assert "approach" in text and "exceed" in text
-        assert "rewrite" in text
+        assert "write" in text
+        assert "full replace" in text or "full overwrite" in text or "fully replace" in text
         assert "do not wait" in text
         assert "hygiene" in text
         assert "deduplicate" in text or "deduplication" in text
     assert "do not append on every trivial step" in prompt
     assert "definitions above" in desc or "per the definitions above" in desc
+    assert "rewrite" not in WorkingMemory.tool_description()["parameters"]["properties"]["action"]["enum"]
+    assert "write" in WorkingMemory.tool_description()["parameters"]["properties"]["action"]["enum"]
 
 
 def test_project_memory_project_future():

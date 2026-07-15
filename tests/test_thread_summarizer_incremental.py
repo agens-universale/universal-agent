@@ -28,10 +28,6 @@ def _patch_chat_completion(monkeypatch, fake):
 def _patch_memory_patch_empty(monkeypatch):
     empty = types.SimpleNamespace(request_messages=[], raw_response="")
     monkeypatch.setattr(
-        "summarize.memory_suggestions.request_patch_append",
-        lambda **_k: empty,
-    )
-    monkeypatch.setattr(
         "summarize.memory_suggestions.request_patch_replace",
         lambda **_k: empty,
     )

@@ -1,11 +1,9 @@
 """Footer-left контекстно зависит от наличия задачи и активного run.
 
-2 вариации:
-- Нет активного run (empty state / task idle): /sessions  /help  /config
-- Task active + active run: /stop  /sessions  /help  /config
+Idle: [F1]/help  [F2]/sessions  [F3]/diff  [F5]/config  [F6]/settings
+Running: [F1]/help  [F2]/sessions  [F3]/diff  [Ctrl+C]/stop
 (/skills и /export из футера убраны — доступны через палитру; /mcp не дублируем —
 подсказка /mcp в бренд-карточке.)
-Diff (F3 / Ctrl+A) — в CTA трейса и футере /diff, не в базовом хроме сессии.
 
 [Esc] back/выход убраны — на main Esc контекстуален (clear/exit/stop),
 поведение досказывается confirm-hint в footer-right.
@@ -27,16 +25,18 @@ def _write_task(tmp_path, tid):
 
 @pytest.mark.asyncio
 async def test_footer_left_empty_state_no_back_no_stop_no_export():
-    """Empty state: /sessions /help /config; без /mcp, [Esc], /stop, /export, Ctrl+a."""
+    """Empty state: F-hotkeys chrome; без /mcp, [Esc], /stop, /export, Ctrl+a."""
     pytest.importorskip("textual")
     from textual.widgets import Static
     from tui.app import TuiApp
 
     async with TuiApp().run_test() as pilot:
         rendered = str(pilot.app.query_one("#footer-left", Static).render())
-        assert "/sessions" in rendered
-        assert "/help" in rendered
-        assert "/config" in rendered
+        assert "[F1]/help" in rendered
+        assert "[F2]/sessions" in rendered
+        assert "[F3]/diff" in rendered
+        assert "[F5]/config" in rendered
+        assert "[F6]/settings" in rendered
         assert "/mcp" not in rendered
         assert "/skills" not in rendered
         assert "/stop" not in rendered
@@ -45,7 +45,6 @@ async def test_footer_left_empty_state_no_back_no_stop_no_export():
         assert "back" not in rendered
         assert "выход" not in rendered
         assert "Ctrl+a" not in rendered
-        assert "/diff" not in rendered
 
 
 @pytest.mark.asyncio
@@ -64,9 +63,11 @@ async def test_footer_left_task_idle_no_stop(tmp_path):
         await pilot.pause()
 
         rendered = str(pilot.app.query_one("#footer-left", Static).render())
-        assert "/sessions" in rendered
-        assert "/help" in rendered
-        assert "/config" in rendered
+        assert "[F2]/sessions" in rendered
+        assert "[F1]/help" in rendered
+        assert "[F5]/config" in rendered
+        assert "[F3]/diff" in rendered
+        assert "[F6]/settings" in rendered
         assert "/mcp" not in rendered
         assert "/skills" not in rendered
         assert "/export" not in rendered
@@ -78,7 +79,7 @@ async def test_footer_left_task_idle_no_stop(tmp_path):
 
 @pytest.mark.asyncio
 async def test_footer_left_task_running_shows_stop(tmp_path):
-    """Task active + active_runner.is_running() → /stop появляется первым."""
+    """Task active + active_runner.is_running() → /stop вместо config/settings."""
     pytest.importorskip("textual")
     from textual.widgets import Static
     from tui.app import TuiApp
@@ -97,10 +98,12 @@ async def test_footer_left_task_running_shows_stop(tmp_path):
         await pilot.pause(0.4)
 
         rendered = str(pilot.app.query_one("#footer-left", Static).render())
-        assert "/stop" in rendered
-        assert "/sessions" in rendered
-        assert "/help" in rendered
-        assert "/config" in rendered
+        assert "[Ctrl+C]/stop" in rendered
+        assert "[F2]/sessions" in rendered
+        assert "[F1]/help" in rendered
+        assert "[F3]/diff" in rendered
+        assert "/config" not in rendered
+        assert "/settings" not in rendered
         assert "/mcp" not in rendered
         assert "/skills" not in rendered
         assert "/export" not in rendered
@@ -137,6 +140,7 @@ async def test_footer_left_drops_stop_after_runner_finishes(tmp_path):
         rendered = str(pilot.app.query_one("#footer-left", Static).render())
         assert "/stop" not in rendered
         assert "/sessions" in rendered
+        assert "[F5]/config" in rendered
         assert "Ctrl+a" not in rendered
 
 

@@ -5,7 +5,7 @@ Naming map (same four registers everywhere):
 - ``session_memory`` — builtin tool for the agent
 - ``<session_memory>`` inside ``<persistent_state>`` — summary / patch prompts
 
-1) **Trace** — ``session_memory`` tool: ``append`` or ``rewrite`` on any register.
+1) **Trace** — ``session_memory`` tool: ``append`` or ``write`` (full overwrite) on any register.
 2) **Summarization** — LLM patch via ``apply_summary_memory_patch``: full replace.
 
 Parsed/applied gateway deltas always use replace semantics (``REGISTER_MERGE_MODES``).
@@ -24,17 +24,14 @@ REGISTER_KNOWLEDGE = "knowledge"
 
 SESSION_MEMORY_REGISTER_NAMES_PLACEHOLDER = "{{SESSION_MEMORY_REGISTER_NAMES}}"
 MEMORY_PATCH_WM_REGISTERS_PLACEHOLDER = "{{MEMORY_PATCH_WM_REGISTERS}}"
-MEMORY_PATCH_APPEND_OUTPUT_PLACEHOLDER = "{{MEMORY_PATCH_APPEND_OUTPUT}}"
 
 
 @dataclass(frozen=True)
 class SessionMemoryRegister:
-    """Канон одного WM-регистра: имя, replace-правило для patch, опционально append."""
+    """Канон одного WM-регистра: имя и replace-правило для patch."""
 
     name: str
     replace_rule: str
-    append_allowed: bool = False
-    append_hint: str = ""
 
 
 SESSION_MEMORY_REGISTERS: tuple[SessionMemoryRegister, ...] = (
@@ -49,8 +46,6 @@ SESSION_MEMORY_REGISTERS: tuple[SessionMemoryRegister, ...] = (
         replace_rule=(
             "hard requirements and preferences still binding (no TODO lists, no repeated goal prose)"
         ),
-        append_allowed=True,
-        append_hint="new requirements, rules, or binding preferences worth appending",
     ),
     SessionMemoryRegister(
         name=REGISTER_STATE,
@@ -66,15 +61,10 @@ SESSION_MEMORY_REGISTERS: tuple[SessionMemoryRegister, ...] = (
             "stable verified facts and evidence; canonical paths, checksums, command verdicts "
             "(one line each; dedupe persistent_state; cap superseded noise)"
         ),
-        append_allowed=True,
-        append_hint="new durable facts, paths, checksums, or command verdicts worth appending",
     ),
 )
 
 REGISTER_ORDER: tuple[str, ...] = tuple(r.name for r in SESSION_MEMORY_REGISTERS)
-REGISTER_APPEND_ORDER: tuple[str, ...] = tuple(
-    r.name for r in SESSION_MEMORY_REGISTERS if r.append_allowed
-)
 
 # Parsed/applied LLM memory patches: every register is a full replace (not append).
 # The ``session_memory`` tool trace path does not use this map.
@@ -113,31 +103,6 @@ def render_memory_patch_registers_for_prompt() -> str:
     )
 
 
-def render_memory_patch_append_output_for_prompt() -> str:
-    shape = "\n".join(f"<{name}>...</{name}>" for name in REGISTER_APPEND_ORDER)
-    hints = "\n".join(
-        f"- **{reg.name}:** {reg.append_hint}"
-        for reg in SESSION_MEMORY_REGISTERS
-        if reg.append_allowed
-    )
-    names = ", ".join(f"`<{n}>`" for n in REGISTER_APPEND_ORDER)
-    return (
-        "Return **append deltas** only. Use zero, one, or more tags — "
-        "**only when you have non-empty text to add**:\n\n"
-        f"{shape}\n\n"
-        "Rules:\n\n"
-        "- **Append semantics downstream:** your text is added to the existing register. "
-        "Do not paste the full register back.\n"
-        f"- Include a tag ({names}) **only** if you have a non-empty delta worth appending.\n"
-        "- **Do not** emit a tag with empty body. **Do not** emit a tag to mean “no change” — omit the tag.\n"
-        "- If nothing should be appended, return an empty response (no tags).\n"
-        "- Preserve useful durable facts and decisions from dialog + summary.\n"
-        "- Deduplicate; avoid stale intermediate statuses in delta text.\n"
-        f"{hints}\n"
-        "- No verbose tool logs. No facts unsupported by the inputs."
-    )
-
-
 def render_memory_deltas_format_repair_system_prompt(*, full_replace: bool = False) -> str:
     register_tags = ", ".join(f"<{name}>...</{name}>" for name in REGISTER_ORDER)
     n = len(REGISTER_ORDER)
@@ -165,11 +130,6 @@ def inject_working_memory_prompt_placeholders(prompt: str) -> str:
         prompt = prompt.replace(
             MEMORY_PATCH_WM_REGISTERS_PLACEHOLDER,
             render_memory_patch_registers_for_prompt(),
-        )
-    if MEMORY_PATCH_APPEND_OUTPUT_PLACEHOLDER in prompt:
-        prompt = prompt.replace(
-            MEMORY_PATCH_APPEND_OUTPUT_PLACEHOLDER,
-            render_memory_patch_append_output_for_prompt(),
         )
     return prompt
 

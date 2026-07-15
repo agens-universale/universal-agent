@@ -35,16 +35,11 @@ def test_intent_scope_prompt_under_bundled_root():
 
 def test_memory_patch_prompts_under_bundled_root():
     from summarize.memory_suggestions import (
-        DEFAULT_MEMORY_PATCH_APPEND_PROMPT_PATH,
         DEFAULT_MEMORY_PATCH_REPLACE_PROMPT_PATH,
-    )
-    assert Path(DEFAULT_MEMORY_PATCH_APPEND_PROMPT_PATH) == _bp(
-        "prompts", "chat_completions_memory_patch_append.md"
     )
     assert Path(DEFAULT_MEMORY_PATCH_REPLACE_PROMPT_PATH) == _bp(
         "prompts", "chat_completions_memory_patch_replace.md"
     )
-    assert Path(DEFAULT_MEMORY_PATCH_APPEND_PROMPT_PATH).is_file()
     assert Path(DEFAULT_MEMORY_PATCH_REPLACE_PROMPT_PATH).is_file()
 
 

@@ -22,7 +22,8 @@ async def test_export_default_txt(tmp_path, monkeypatch):
     async with TuiApp().run_test() as pilot:
         scr = pilot.app.screen
         _attach(scr, tmp_path, "tid1")
-        pilot.app.query_one("#cmdinput").text = "/export"
+        # В поле уже `/export ` (после палитры / пробела) — Enter выполняет с дефолтом txt.
+        pilot.app.query_one("#cmdinput").text = "/export "
         await pilot.press("enter")
         await pilot.pause()
         files = list(tmp_path.glob("export-tid1-*.txt"))
@@ -76,7 +77,7 @@ async def test_export_no_active_task(tmp_path, monkeypatch):
     async with TuiApp().run_test() as pilot:
         scr = pilot.app.screen
         scr._active_task_id = None
-        pilot.app.query_one("#cmdinput").text = "/export"
+        pilot.app.query_one("#cmdinput").text = "/export "
         await pilot.press("enter")
         await pilot.pause()
         trace = pilot.app.query_one("#trace")

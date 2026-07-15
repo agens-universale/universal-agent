@@ -6,7 +6,6 @@ from typing import Any, Dict, List
 
 from summarize.llm import request_summary_text
 from summarize.prompt_loading import (
-    load_memory_patch_append_prompt,
     load_memory_patch_replace_prompt,
 )
 from summarize.working_memory_gateway import (
@@ -17,9 +16,6 @@ from bundled_assets import bundled_root
 
 # bundled_root() — единый резолвер ассетов (editable → repo, wheel → site-packages).
 _PROJECT_ROOT = str(bundled_root())
-DEFAULT_MEMORY_PATCH_APPEND_PROMPT_PATH = os.path.abspath(
-    os.path.join(_PROJECT_ROOT, "prompts", "chat_completions_memory_patch_append.md")
-)
 DEFAULT_MEMORY_PATCH_REPLACE_PROMPT_PATH = os.path.abspath(
     os.path.join(_PROJECT_ROOT, "prompts", "chat_completions_memory_patch_replace.md")
 )
@@ -75,39 +71,6 @@ def _request_patch(
     )
 
 
-def request_patch_append(
-    *,
-    ctx: Any,
-    state: Any,
-    history_text: str,
-    summary_text: str,
-    persistent_state_block: str,
-) -> MemoryPatchLlmResult:
-    """Legacy optional prompt (not used by default summarization pipeline)."""
-    prompt_path = _resolve_prompt_path(
-        ctx,
-        "chat_completions_memory_patch_append_prompt_path",
-        DEFAULT_MEMORY_PATCH_APPEND_PROMPT_PATH,
-    )
-    system = load_memory_patch_append_prompt(prompt_path)
-    user_prompt = (
-        "<dialog_history>\n"
-        f"{history_text}\n"
-        "</dialog_history>\n\n"
-        "<current_summary>\n"
-        f"{summary_text}\n"
-        "</current_summary>\n\n"
-        f"{persistent_state_block.strip()}\n"
-    )
-    return _request_patch(
-        ctx=ctx,
-        state=state,
-        system_prompt=system,
-        user_prompt=user_prompt,
-        request_label="working_memory_patch_append_after_summary",
-    )
-
-
 def request_patch_replace(
     *,
     ctx: Any,
@@ -116,7 +79,7 @@ def request_patch_replace(
     summary_text: str,
     persistent_state_block: str = "",
 ) -> MemoryPatchLlmResult:
-    """LLM step 2: full replace snapshots for all working_memory registers."""
+    """LLM step: full replace snapshots for all working_memory registers."""
     prompt_path = _resolve_prompt_path(
         ctx,
         "chat_completions_memory_patch_replace_prompt_path",

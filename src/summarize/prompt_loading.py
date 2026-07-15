@@ -73,7 +73,3 @@ def _load_memory_patch_prompt(path: str) -> str:
 
 def load_memory_patch_replace_prompt(path: str) -> str:
     return _load_memory_patch_prompt(path)
-
-
-def load_memory_patch_append_prompt(path: str) -> str:
-    return _load_memory_patch_prompt(path)

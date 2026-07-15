@@ -79,7 +79,7 @@ class ProjectMemory(AbstractSimpleTool):
             "description": (
                 "Project/long memory: durable facts for FUTURE sessions ('remember this rule', conventions, "
                 "artifact-first preferences, stable decisions). Not for turn-by-turn chat progress — use thread memory. "
-                "Survives restarts. Actions: read, append (short delta), write (full replace; rare). "
+                "Survives restarts. Actions: read, append (short delta), write (full replace / full overwrite; rare). "
                 "Reports fill percent. "
                 "Append verified bullets only; no secrets, chain-of-thought, or guesses as facts."
             ),
@@ -92,7 +92,7 @@ class ProjectMemory(AbstractSimpleTool):
                         "description": (
                             "read = return the current memory content; "
                             "append = add ONLY the new delta at end; "
-                            "write = replace the memory entirely (rare)."
+                            "write = fully replace the memory (full overwrite; rare)."
                         ),
                     },
                     "content": {
@@ -100,7 +100,8 @@ class ProjectMemory(AbstractSimpleTool):
                         "description": (
                             "Markdown text for append/write. "
                             "For append: ONLY the new delta. "
-                            "For write: the FULL updated markdown. Parameter is ignored for read action."
+                            "For write: the FULL updated markdown (full overwrite). "
+                            "Parameter is ignored for read action."
                         ),
                     },
                 },
@@ -115,7 +116,7 @@ class ProjectMemory(AbstractSimpleTool):
         return '''Tool name: project_memory
 Tool description: Persistent project-scoped markdown memory. Survives CLI restarts.
 Use read when Project Info reports long memory and conventions or durable facts may matter.
-Append short factual deltas; write only for rare full rewrites.
+Append short factual deltas; write (full overwrite) only for rare full replacements.
 
 What to put in (any task domain):
 - Purpose/scope, standing requirements, conventions, stable decisions, preferences.

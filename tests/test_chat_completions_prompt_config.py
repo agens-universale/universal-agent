@@ -115,11 +115,6 @@ class ChatCompletionsPromptConfigTest(unittest.TestCase):
             self.assertNotIn("original_user_messages_max_chars", cfg["summary_params"])
             self.assertTrue(
                 cfg["summary_params"][
-                    "chat_completions_memory_patch_append_prompt_path"
-                ].endswith("prompts/chat_completions_memory_patch_append.md")
-            )
-            self.assertTrue(
-                cfg["summary_params"][
                     "chat_completions_memory_patch_replace_prompt_path"
                 ].endswith("prompts/chat_completions_memory_patch_replace.md")
             )
@@ -311,15 +306,10 @@ class ChatCompletionsPromptConfigTest(unittest.TestCase):
                 fd.write(
                     "backend:\n  api_mode: chat_completions\n"
                     "summary:\n"
-                    "  chat_completions_memory_patch_append_prompt_path: prompts/patch_append.md\n"
                     "  chat_completions_memory_patch_replace_prompt_path: prompts/patch_replace.md\n"
                     "  intent_log_preview_chars: 8000\n"
                 )
             cfg = load_config(cfg_path)
-            self.assertEqual(
-                cfg["summary_params"]["chat_completions_memory_patch_append_prompt_path"],
-                os.path.join(tmp_dir, "prompts", "patch_append.md"),
-            )
             self.assertEqual(
                 cfg["summary_params"]["chat_completions_memory_patch_replace_prompt_path"],
                 os.path.join(tmp_dir, "prompts", "patch_replace.md"),

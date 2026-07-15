@@ -13,7 +13,6 @@ DEFAULT_TURN_END_TRIGGER_RATIO = 0.6
 class SummaryConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
     chat_completions_summary_prompt_path: str | None = None
-    chat_completions_memory_patch_append_prompt_path: str | None = None
     chat_completions_memory_patch_replace_prompt_path: str | None = None
     chat_completions_summary_trigger_chars: int = 0
     chat_completions_summary_turn_end_trigger_chars: int | None = None

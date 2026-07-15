@@ -136,9 +136,6 @@ def resolve_paths(cfg: AppConfig, config_dir: str) -> None:
     cfg.summary.chat_completions_summary_prompt_path = to_abs(
         cfg.summary.chat_completions_summary_prompt_path
     ) or _prompt_default(config_dir, "chat_completions_summary_prompt.md")
-    cfg.summary.chat_completions_memory_patch_append_prompt_path = to_abs(
-        cfg.summary.chat_completions_memory_patch_append_prompt_path
-    ) or _prompt_default(config_dir, "chat_completions_memory_patch_append.md")
     cfg.summary.chat_completions_memory_patch_replace_prompt_path = to_abs(
         cfg.summary.chat_completions_memory_patch_replace_prompt_path
     ) or _prompt_default(config_dir, "chat_completions_memory_patch_replace.md")

@@ -174,7 +174,6 @@ EXPERT_ONLY_KEYS: set = {
     # chat_completions_summary_trigger_chars — в шаблоне есть (preset включён).
     # Остальные — экспертный тюнинг параметров компакции.
     "summary.chat_completions_summary_prompt_path",
-    "summary.chat_completions_memory_patch_append_prompt_path",
     "summary.chat_completions_memory_patch_replace_prompt_path",
     "summary.chat_completions_summary_turn_end_trigger_chars",
     "summary.incremental_batch_chars",
