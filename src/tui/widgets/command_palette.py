@@ -9,8 +9,15 @@ from textual.widgets import Static
 
 from tui.commands import Command, CommandRegistry
 
+_HINT_NO_ARGS = "↑↓ выбрать · Enter выполнить · Esc закрыть"
+_HINT_WITH_ARGS = "↑↓ выбрать · Enter ввести аргумент · Esc закрыть"
 
-_HINT = "↑↓ выбрать · Tab дополнить · Enter выполнить · Esc закрыть"
+
+def _hint_for(cmd: Command | None) -> str:
+    """Динамический хинт в зависимости от наличия аргументов у команды."""
+    if cmd is not None and cmd.args:
+        return _HINT_WITH_ARGS
+    return _HINT_NO_ARGS
 
 
 class CommandPalette(VerticalScroll):
@@ -32,7 +39,7 @@ class CommandPalette(VerticalScroll):
         for i, cmd in enumerate(self._visible_rows()):
             classes = "palette-row selected" if i == self._selected else "palette-row"
             yield Static(self._format_row(cmd), classes=classes, markup=False)
-        yield Static(_HINT, classes="palette-hint palette-keys", markup=False)
+        yield Static(_hint_for(self.selected_command()), classes="palette-hint palette-keys", markup=False)
 
     def _format_row(self, cmd: Command) -> str:
         return f" /{cmd.name}   {cmd.description}"
@@ -75,7 +82,7 @@ class CommandPalette(VerticalScroll):
             if i == self._selected:
                 selected_widget = w
             new_widgets.append(w)
-        new_widgets.append(Static(_HINT, classes="palette-hint palette-keys", markup=False))
+        new_widgets.append(Static(_hint_for(self.selected_command()), classes="palette-hint palette-keys", markup=False))
         self.remove_children()
         self.mount_all(new_widgets)
         if selected_widget is not None:

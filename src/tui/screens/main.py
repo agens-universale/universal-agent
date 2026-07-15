@@ -2706,16 +2706,34 @@ class TraceScreen(Screen):
 
         # Если открыта палитра — Enter выполняет выбранную/набранную команду
         # (логика перенесена из on_key, т.к. TextArea перехватывает Enter).
+        # Команды с аргументами подставляются в поле ввода вместо немедленного
+        # выполнения, чтобы пользователь мог ввести нужные параметры.
         if self._palette is not None:
             cmd = self._palette.selected_command()
             typed = event.value.strip()
             has_args = len(typed.split()) > 1
+            if cmd is not None and not has_args:
+                # Если у команды есть аргументы — подставить в поле ввода
+                if cmd.args:
+                    inp.text = f"/{cmd.name} "
+                    inp.move_cursor(inp.document.end)
+                    self._close_palette()
+                    inp.focus()
+                    return
+                # Без аргументов — выполнить сразу
+                self._close_palette()
+                inp.text = ""
+                self._handle_command(cmd.name)
+                return
+            # Свободный ввод с / — выполнить (например, /view path/to/file)
+            if typed.startswith("/"):
+                self._close_palette()
+                inp.text = ""
+                self._handle_command(typed[1:])
+                return
+            # Всё остальное — закрыть палитру и очистить ввод
             self._close_palette()
             inp.text = ""
-            if cmd is not None and not has_args:
-                self._handle_command(cmd.name)
-            elif typed.startswith("/"):
-                self._handle_command(typed[1:])
             return
 
         text = event.value.strip()

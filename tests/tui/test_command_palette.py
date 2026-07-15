@@ -107,6 +107,27 @@ async def test_palette_closes_on_esc():
 
 
 @pytest.mark.asyncio
+async def test_palette_enter_inserts_command_with_args(tmp_path):
+    """Enter по команде с аргументами (/view) подставляет в input, не выполняет."""
+    pytest.importorskip("textual")
+    from tui.app import TuiApp
+    from tui.screens.file_view import FileViewerScreen
+
+    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    async with app.run_test() as pilot:
+        await pilot.press("/")
+        await pilot.press("v")  # view
+        await pilot.press("enter")
+        assert not pilot.app.query(".palette")
+        inp = pilot.app.query_one("#cmdinput")
+        assert inp.text == "/view "
+        # Курсор в конце — дальше можно дописывать путь.
+        assert inp.cursor_location == inp.document.end
+        # Экран viewer ещё не открыт.
+        assert not isinstance(pilot.app.screen, FileViewerScreen)
+
+
+@pytest.mark.asyncio
 async def test_palette_enter_executes_selected():
     pytest.importorskip("textual")
     from tui.app import TuiApp
