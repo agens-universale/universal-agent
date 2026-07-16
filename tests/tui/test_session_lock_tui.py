@@ -96,7 +96,7 @@ async def test_empty_state_does_not_create_lock(tmp_path):
 
     async with TuiApp(threads_dir=str(tmp_path), system="cli").run_test() as pilot:
         await pilot.pause()
-        locks = list(Path(tmp_path).glob("lock_*.json"))
+        locks = list((Path(tmp_path) / "locks").glob("lock_*.json"))
         assert locks == []
         assert pilot.app.screen._active_task_id is None
 

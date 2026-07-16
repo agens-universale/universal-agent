@@ -135,13 +135,14 @@ def _thread_paths(threads_dir: str, system_id: str, thread_id: str) -> Tuple[str
 
 def ensure_threads_dir(threads_dir: str) -> None:
     os.makedirs(threads_dir, exist_ok=True)
+    os.makedirs(os.path.join(threads_dir, "locks"), exist_ok=True)
 
 
 def _lock_path(threads_dir: str, system_id: str, thread_id: str) -> str:
-    """Путь lease-файла TUI session lock (рядом с data/meta; без legacy)."""
+    """Путь lease-файла TUI session lock в подпапке locks/ (без legacy)."""
     sys_norm = sanitize_system_id(system_id)
     tid = validate_thread_id(thread_id)
-    return os.path.join(threads_dir, f"lock_{sys_norm}_{tid}.json")
+    return os.path.join(threads_dir, "locks", f"lock_{sys_norm}_{tid}.json")
 
 
 def reset_thread_files(threads_dir: str, system_id: str, thread_id: str) -> List[str]:

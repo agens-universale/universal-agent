@@ -22,7 +22,7 @@ BUSY_MESSAGE = "сессия занята"
 def lock_path(threads_dir: str, system: str, thread_id: str) -> str:
     sys_norm = sanitize_system_id(system)
     tid = validate_thread_id(thread_id)
-    return os.path.join(threads_dir, f"lock_{sys_norm}_{tid}.json")
+    return os.path.join(threads_dir, "locks", f"lock_{sys_norm}_{tid}.json")
 
 
 def _utc_now() -> datetime:

@@ -23,7 +23,7 @@ def _write_raw(path: Path, payload) -> None:
 
 def test_lock_path_canonical(tmp_path):
     p = lock_path(str(tmp_path), "cli", "abc123")
-    assert p == str(tmp_path / "lock_cli_abc123.json")
+    assert p == str(tmp_path / "locks" / "lock_cli_abc123.json")
 
 
 def test_acquire_when_absent(tmp_path):
@@ -47,6 +47,7 @@ def test_acquire_allows_own_tui_id(tmp_path):
 
 def test_acquire_stale_after_ttl(tmp_path):
     path = Path(lock_path(str(tmp_path), "cli", "t1"))
+    path.parent.mkdir(parents=True, exist_ok=True)
     stale_at = (datetime.now(timezone.utc) - timedelta(seconds=TTL_SECONDS + 1)).isoformat()
     _write_raw(path, {"tui_id": "old", "heartbeat_at": stale_at})
     assert try_acquire(str(tmp_path), "cli", "t1", "new") is True
@@ -55,6 +56,7 @@ def test_acquire_stale_after_ttl(tmp_path):
 
 def test_unreadable_lock_treated_as_stale(tmp_path):
     path = Path(lock_path(str(tmp_path), "cli", "t1"))
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("{not-json", encoding="utf-8")
     assert read_lock(str(path)) is None
     assert try_acquire(str(tmp_path), "cli", "t1", "me") is True
@@ -62,6 +64,7 @@ def test_unreadable_lock_treated_as_stale(tmp_path):
 
 def test_empty_json_treated_as_stale(tmp_path):
     path = Path(lock_path(str(tmp_path), "cli", "t1"))
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("", encoding="utf-8")
     assert try_acquire(str(tmp_path), "cli", "t1", "me") is True
 

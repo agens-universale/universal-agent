@@ -10,10 +10,11 @@ def test_reset_thread_files_deletes_only_target_thread_files(tmp_path: Path) -> 
 
     target_data = threads_dir / "data_cli_demo-thread.jsonl"
     target_meta = threads_dir / "meta_cli_demo-thread.json"
-    target_lock = threads_dir / "lock_cli_demo-thread.json"
+    target_lock = threads_dir / "locks" / "lock_cli_demo-thread.json"
     other_data = threads_dir / "data_cli_other-thread.jsonl"
     other_meta = threads_dir / "meta_cli_other-thread.json"
 
+    (threads_dir / "locks").mkdir()
     target_data.write_text("x\n", encoding="utf-8")
     target_meta.write_text("{}", encoding="utf-8")
     target_lock.write_text("{}", encoding="utf-8")
