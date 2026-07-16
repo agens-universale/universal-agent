@@ -3,6 +3,7 @@ import os
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+from config_modules.agent import DEFAULT_EXEC_TIMEOUT_SEC, exec_timeout_from_config_dict
 from constants.tool_names import EXEC_PYTHON_NAME
 from security.command_guard import enforce_command_guard
 from security.command_moderation import effective_command_cwd, moderate_command_execution
@@ -45,8 +46,12 @@ class RunPythonCode(AbstractSimpleTool):
                     },
                     "timeout_seconds": {
                         "type": "integer",
-                        "description": "Maximum execution time in seconds before the process is terminated.",
-                        "default": 10
+                        "description": (
+                            f"Maximum execution time in seconds before the process is terminated. "
+                            f"Default is {DEFAULT_EXEC_TIMEOUT_SEC} (agent.exec_timeout_sec)."
+                        ),
+                        "default": DEFAULT_EXEC_TIMEOUT_SEC,
+                        "minimum": 1,
                     },
                     "max_output_chars": {
                         "type": "integer",
@@ -87,9 +92,12 @@ class RunPythonCode(AbstractSimpleTool):
 
     @classmethod
     def prompt_description(cls):
-        description = '''Tool name: exec_python
+        description = (
+            '''Tool name: exec_python
 Tool description: Runs a Python code snippet in a subprocess and returns stdout/stderr as JSON.
-Input schema: {"type": "object", "properties": {"code": {"type": "string", "description": "Python code to execute."}, "timeout_seconds": {"type": "integer", "description": "Execution timeout in seconds.", "default": 10}, "max_output_chars": {"type":"integer","description":"Max chars for stdout/stderr each.","default": 4000}, "cwd": {"type":"string","description":"Working directory (optional)"}, "env_vars": {"type":"array","description":"Env overrides as [{'name','value'}]","items":{"type":"object","properties":{"name":{"type":"string"},"value":{"type":"string"}},"required":["name","value"],"additionalProperties":false}}} , "required": ["code"], "additionalProperties": false}
+Input schema: {"type": "object", "properties": {"code": {"type": "string", "description": "Python code to execute."}, "timeout_seconds": {"type": "integer", "description": "Execution timeout in seconds.", "default": '''
+            + str(DEFAULT_EXEC_TIMEOUT_SEC)
+            + '''}, "max_output_chars": {"type":"integer","description":"Max chars for stdout/stderr each.","default": 4000}, "cwd": {"type":"string","description":"Working directory (optional)"}, "env_vars": {"type":"array","description":"Env overrides as [{'name','value'}]","items":{"type":"object","properties":{"name":{"type":"string"},"value":{"type":"string"}},"required":["name","value"],"additionalProperties":false}}} , "required": ["code"], "additionalProperties": false}
 
 Usage:
 - Use this tool to execute small, self-contained Python scripts that do not require interaction.
@@ -111,6 +119,7 @@ Return format (JSON string):
   "stderr": "..."
 }
 '''
+        )
         return description
 
     @staticmethod
@@ -199,7 +208,11 @@ Return format (JSON string):
                 error={"type": "invalid_argument", "field": "code", "message": "Code is empty"},
             )
 
-        effective_timeout = timeout_seconds if timeout_seconds is not None else 10
+        effective_timeout = (
+            timeout_seconds
+            if timeout_seconds is not None
+            else exec_timeout_from_config_dict(self._config_dict)
+        )
         if not isinstance(effective_timeout, int) or effective_timeout <= 0:
             return self._result(
                 ok=False,

@@ -78,7 +78,8 @@ def test_is_sandbox_and_default_exec_timeout(loop_in_thread):
     env = FakeEnv()
     backend = HarborBackend(env, loop_in_thread)
     assert backend.is_sandbox is True
-    assert backend.default_exec_timeout == 300
+    # Timeout comes from agent.exec_timeout_sec; backend does not hardcode one.
+    assert backend.default_exec_timeout is None
 
 
 def test_implements_full_fsbackend_protocol(loop_in_thread):

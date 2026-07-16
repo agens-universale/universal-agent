@@ -9,7 +9,7 @@ class FakeBackend:
     """Models a container filesystem as path -> content (str)."""
 
     is_sandbox = True
-    default_exec_timeout = 300
+    default_exec_timeout = None
 
     def __init__(self, files=None):
         self.files = dict(files or {})

@@ -52,7 +52,13 @@ def test_list_extra_validation_and_not_a_directory(tmp_path):
     f = tmp_path / "file.txt"
     f.write_text("x", encoding="utf-8")
     not_dir = json.loads(tool(path=str(f)))
-    assert not_dir["ok"] is False and not_dir["error"]["type"] == "not_a_directory"
+    err = not_dir["error"]
+    assert not_dir["ok"] is False and err["type"] == "not_a_directory"
+    assert err["path_kind"] == "file"
+    assert "file, not a directory" in err["message"]
+    assert "directory" in err["suggestion"].lower()
+    assert err["parent"] == str(tmp_path.resolve())
+    assert "fs_" not in err["message"] and "fs_" not in err["suggestion"]
 
 
 def test_list_symlink_to_dir_depth0_and_depth1(tmp_path):

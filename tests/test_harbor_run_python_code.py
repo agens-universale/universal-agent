@@ -33,10 +33,11 @@ class _RecordingFakeBackend:
         return path in self._dirs
 
 
-def _tool(backend):
+def _tool(backend, config_dict=None):
     t = RunPythonCode.__new__(RunPythonCode)
-    t._config_dict = None
-    return bind_os_backend(t, backend, config_dict={})
+    cfg = config_dict if config_dict is not None else {}
+    t._config_dict = cfg
+    return bind_os_backend(t, backend, config_dict=cfg)
 
 
 def test_envelope_shape_matches_base_contract():
@@ -47,10 +48,16 @@ def test_envelope_shape_matches_base_contract():
     assert env["return_code"] == 0 and env["ok"] is True
 
 
-def test_default_timeout_is_10():
+def test_default_timeout_is_schema_default():
     b = _RecordingFakeBackend()
     _tool(b)(code="x=1")
-    assert b.calls[0]["timeout"] == 10
+    assert b.calls[0]["timeout"] == 120
+
+
+def test_default_timeout_flows_from_exec_timeout_sec_config():
+    b = _RecordingFakeBackend()
+    _tool(b, config_dict={"exec_timeout_sec": 600})(code="x=1")
+    assert b.calls[0]["timeout"] == 600
 
 
 def test_explicit_timeout_forwarded():

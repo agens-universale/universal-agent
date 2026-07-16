@@ -283,6 +283,7 @@ def flatten_app_config(app_cfg: AppConfig) -> Dict[str, Any]:
         "limit_project_metadata": app_cfg.agent.limit_project_metadata,
         "tool_output_inline_max_chars": app_cfg.agent.tool_output_inline_max_chars,
         "stored_tool_outputs_max_entries": app_cfg.agent.stored_tool_outputs_max_entries,
+        "exec_timeout_sec": app_cfg.agent.exec_timeout_sec,
         "inject_tool_fields": dict(app_cfg.agent.inject_tool_fields),
         "mcp-servers": {
             name: server.model_dump(by_alias=True) for name, server in app_cfg.mcp.servers.items()

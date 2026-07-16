@@ -18,7 +18,8 @@ from tools.backends.walk_util import iter_files_from_flat, iter_walk_from_flat
 
 class HarborBackend(FsBackend):
     is_sandbox = True
-    default_exec_timeout = 300  # hardcoded (heavy container builds); config later if needed
+    # Дефолт берётся из agent.exec_timeout_sec (harbor bench_defaults → 600).
+    default_exec_timeout = None
 
     def __init__(self, environment: Any, loop: asyncio.AbstractEventLoop) -> None:
         self._env = environment

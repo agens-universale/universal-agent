@@ -8,6 +8,7 @@ from tools.simple_tool_base import AbstractSimpleTool
 from utils.glob_to_regex import compile_glob
 from utils.tool_report_paths import tool_report_abspath
 from tools.fs.agent_hidden import is_agent_hidden
+from tools.fs.path_errors import not_a_directory_error
 from security.read_guard import (
     enforce_read_guard,
     parse_read_guard_config,
@@ -307,7 +308,15 @@ Search for error logs in Rust source files:
         if not self._backend.exists(path):
             return _result(ok=False, error={"type": "not_found"})
         if not self._backend.is_dir(path):
-            return _result(ok=False, error={"type": "not_a_directory"})
+            return _result(
+                ok=False,
+                error=not_a_directory_error(
+                    path,
+                    backend=self._backend,
+                    workspace=self._workspace,
+                    contract="this tool searches under a directory",
+                ),
+            )
 
         file_matcher = self._create_file_matcher(file_pattern, base_path=path)
 

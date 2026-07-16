@@ -1,6 +1,7 @@
 from tools.simple_tool_base import AbstractSimpleTool
 import json
 
+from config_modules.agent import DEFAULT_EXEC_TIMEOUT_SEC, exec_timeout_from_config_dict
 from constants.tool_names import EXEC_COMMAND_NAME
 from security.command_guard import enforce_command_guard
 from security.command_moderation import moderate_command_execution
@@ -12,7 +13,8 @@ class ExecuteCommand(AbstractSimpleTool):
     """
     # Default max chars per field (stdout/stderr) before truncation.
     cut_n = 4000
-    timeout = 30
+    # Fallback when config_dict has no exec_timeout_sec (tests / partial wiring).
+    timeout = DEFAULT_EXEC_TIMEOUT_SEC
 
     @classmethod
     def tool_description(cls):
@@ -33,7 +35,10 @@ class ExecuteCommand(AbstractSimpleTool):
                     },
                     "timeout_seconds": {
                         "type": "integer",
-                        "description": f"Execution timeout in seconds. Default is {cls.timeout}.",
+                        "description": (
+                            f"Execution timeout in seconds. Default is {DEFAULT_EXEC_TIMEOUT_SEC} "
+                            "(agent.exec_timeout_sec)."
+                        ),
                         "minimum": 1,
                     },
                     "max_output_chars": {
@@ -77,7 +82,7 @@ class ExecuteCommand(AbstractSimpleTool):
     def prompt_description(cls):
         description = ('''Tool name: exec_command
 Tool description: Executes a CLI command synchronously and returns stdout/stderr/exit_code as JSON.
-Input schema: {"type": "object", "properties": {"command": {"type": "string", "description": "The CLI command to execute."}, "timeout_seconds": {"type": "integer", "description": "Execution timeout in seconds.", "default": 30}, "max_output_chars": {"type": "integer", "description": "Max chars returned for stdout/stderr each.", "default": 4000}, "cwd": {"type": "string", "description": "Optional working directory (absolute or relative)."}, "env_vars": {"type":"array","description":"Optional env overrides as [{name,value}]","items":{"type":"object","properties":{"name":{"type":"string"},"value":{"type":"string"}},"required":["name","value"],"additionalProperties":false}}}, "required": ["command"], "additionalProperties": false}
+Input schema: {"type": "object", "properties": {"command": {"type": "string", "description": "The CLI command to execute."}, "timeout_seconds": {"type": "integer", "description": "Execution timeout in seconds.", "default": ''' + str(DEFAULT_EXEC_TIMEOUT_SEC) + '''}, "max_output_chars": {"type": "integer", "description": "Max chars returned for stdout/stderr each.", "default": 4000}, "cwd": {"type": "string", "description": "Optional working directory (absolute or relative)."}, "env_vars": {"type":"array","description":"Optional env overrides as [{name,value}]","items":{"type":"object","properties":{"name":{"type":"string"},"value":{"type":"string"}},"required":["name","value"],"additionalProperties":false}}}, "required": ["command"], "additionalProperties": false}
 
 Return format (JSON string):
 {"tool":"exec_command","ok":true|false,"command":"...","cwd":"...","exit_code":number|null,"timed_out":true|false,"truncated":true|false,"error":null|{"type":"...","message":"..."},"stdout":"...","stderr":"..."}
@@ -220,11 +225,7 @@ Important Usage Rules:
             )
 
         if timeout_seconds is None:
-            timeout_seconds = (
-                self._backend.default_exec_timeout
-                if self._backend.default_exec_timeout is not None
-                else self.timeout
-            )
+            timeout_seconds = exec_timeout_from_config_dict(self._config_dict)
         if not isinstance(timeout_seconds, int) or timeout_seconds <= 0:
             return self._result(
                 ok=False,

@@ -28,7 +28,7 @@ DeepAgents: **тул определён один раз** (валидация, �
 
 - `local.py` — `LocalFsBackend`: хост (`os`/`open`/`subprocess`), дефолт;
 - `harbor.py` — `HarborBackend`: контейнер задачи через `BaseEnvironment`
-  (`is_sandbox = True`, дефолтный exec-timeout 300s).
+  (`is_sandbox = True`; exec-timeout из `agent.exec_timeout_sec`, в bench — 600s).
 
 Резолв: `create_run_context` собирает `ctx.os_backend` через `tools/backends/factory.py`
 (`os_backend: local` по умолчанию, `harbor` — при запуске через адаптер). Тулы читают

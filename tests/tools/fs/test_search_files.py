@@ -117,7 +117,13 @@ def test_search_validation_and_directory_error(tmp_path):
     f = tmp_path / "single.txt"
     f.write_text("x", encoding="utf-8")
     not_dir = json.loads(tool(path=str(f), regex="x"))
-    assert not_dir["ok"] is False and not_dir["error"]["type"] == "not_a_directory"
+    err = not_dir["error"]
+    assert not_dir["ok"] is False and err["type"] == "not_a_directory"
+    assert err["path_kind"] == "file"
+    assert "file, not a directory" in err["message"]
+    assert "directory" in err["suggestion"].lower()
+    assert err["parent"] == str(tmp_path.resolve())
+    assert "fs_" not in err["message"] and "fs_" not in err["suggestion"]
 
 
 def test_search_binary_file_does_not_crash(tmp_path):

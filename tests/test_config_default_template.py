@@ -70,6 +70,7 @@ EXPERT_ONLY_KEYS: set = {
     "agent.finish_gate_use_rule_hints",       # rule-layer без LLM, вне v1
     "agent.tool_output_inline_max_chars",     # лимит инлайн-вывода тула (байты контекста)
     "agent.stored_tool_outputs_max_entries",  # размер стора больших tool-outputs
+    "agent.exec_timeout_sec",                # таймаут execute_command / run_python_code
     "agent.limit_project_metadata",           # скрыть проектные метаданные из системного промпта
     # Списки по умолчанию пусты; наполнение — проектный оверлей (.gc/config.yml)
     "agent.disable_skills",

@@ -72,6 +72,8 @@ def bench_defaults(prompts_dir: Path, skills_dir: Path) -> Dict[str, Any]:
         "write_guard": {"enabled": False},
         "url_policy": {"enabled": False},
         "command_moderation": {"mode": "allow"},
+        # Длинные контейнерные сборки/тесты; schema default = 120.
+        "exec_timeout_sec": 600,
     }
 
 

@@ -61,6 +61,8 @@ def test_bench_defaults_win_over_schema_defaults():
     assert config["os_backend"] == "harbor"
     assert config["read_guard"]["enabled"] is False
     assert config["command_moderation"]["mode"] == "allow"
+    assert config["exec_timeout_sec"] == 600
+    assert AppConfig.model_validate({}).agent.exec_timeout_sec == 120
 
 
 def test_profile_overrides_win_over_bench_defaults():

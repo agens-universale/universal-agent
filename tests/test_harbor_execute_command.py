@@ -9,8 +9,6 @@ from tools.exec.execute_command import ExecuteCommand
 class _RecordingFakeBackend:
     """Records exec()/is_dir() calls; container semantics (no host cwd default)."""
 
-    default_exec_timeout = 300
-
     def __init__(self, stdout="", stderr="", rc=0, dirs=None, timed_out=False):
         self.res = ExecResult(stdout=stdout, stderr=stderr, return_code=rc, timed_out=timed_out)
         self.calls = []
@@ -27,10 +25,11 @@ class _RecordingFakeBackend:
         return None  # container: no implicit host cwd
 
 
-def _tool(backend):
+def _tool(backend, config_dict=None):
     t = ExecuteCommand.__new__(ExecuteCommand)
-    t._config_dict = None
-    return bind_os_backend(t, backend, config_dict={})
+    cfg = config_dict if config_dict is not None else {}
+    t._config_dict = cfg
+    return bind_os_backend(t, backend, config_dict=cfg)
 
 
 def test_envelope_shape_matches_base_contract():
@@ -42,18 +41,23 @@ def test_envelope_shape_matches_base_contract():
     assert env["exit_code"] == 0 and env["ok"] is True and env["timed_out"] is False
 
 
-def test_default_timeout_flows_from_backend_default_exec_timeout():
-    """When timeout_seconds is omitted, harbor-mode backend default (300) is used —
-    NOT the base class default of 30."""
+def test_default_timeout_flows_from_exec_timeout_sec_config():
+    """When timeout_seconds is omitted, agent.exec_timeout_sec from config is used."""
+    b = _RecordingFakeBackend()
+    _tool(b, config_dict={"exec_timeout_sec": 600})(command="x")
+    assert b.calls[0]["timeout"] == 600
+
+
+def test_default_timeout_without_config_is_schema_default():
     b = _RecordingFakeBackend()
     _tool(b)(command="x")
-    assert b.calls[0]["timeout"] == 300
+    assert b.calls[0]["timeout"] == 120
 
 
 def test_explicit_timeout_seconds_forwarded():
     b = _RecordingFakeBackend()
-    _tool(b)(command="x", timeout_seconds=120)
-    assert b.calls[0]["timeout"] == 120
+    _tool(b)(command="x", timeout_seconds=90)
+    assert b.calls[0]["timeout"] == 90
 
 
 def test_output_truncated_to_max_output_chars():
