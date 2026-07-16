@@ -518,6 +518,12 @@ class TuiApp(App):
             return
         main._cmd_config()
 
+    def action_settings(self) -> None:
+        main = self._main_screen()
+        if main is None or not self._can_open_tool():
+            return
+        main._cmd_settings()
+
     def action_notices(self) -> None:
         from tui.screens.notices import NoticesScreen
         if isinstance(self.screen, NoticesScreen):
