@@ -5,6 +5,7 @@ import json
 import os
 import subprocess
 import sys
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
@@ -37,20 +38,31 @@ def _make_complete_dev_dir(skill_dir: Path) -> Path:
     return dev_dir
 
 
+@contextmanager
 def _registry():
-    """Build a fresh SkillsRegistry pointing at the project's skills/.
+    """Fresh SkillsRegistry with isolated ``tools.*`` import.
 
     Defensive cleanup: tests/test_summary_triggers.py stubs `tools.skills.registry`
     in sys.modules at import time. Pop any stale entries before our import so
-    the test works both standalone and in the full suite.
+    the test works both standalone and in the full suite. On exit, restore the
+    previous ``tools.*`` graph so later tests keep their original module objects
+    (avoids stale class refs vs monkeypatch on a re-imported LocalFsBackend).
     """
     sys.path.insert(0, str(PROJECT_ROOT / "src"))
-    for name in list(sys.modules):
-        if name == "tools" or name.startswith("tools."):
-            sys.modules.pop(name, None)
-    from tools.skills.registry import SkillsRegistry  # noqa: E402
+    saved = {
+        name: sys.modules.pop(name)
+        for name in list(sys.modules)
+        if name == "tools" or name.startswith("tools.")
+    }
+    try:
+        from tools.skills.registry import SkillsRegistry  # noqa: E402
 
-    return SkillsRegistry(skills_root=str(PROJECT_ROOT / "skills"))
+        yield SkillsRegistry(skills_root=str(PROJECT_ROOT / "skills"))
+    finally:
+        for name in list(sys.modules):
+            if name == "tools" or name.startswith("tools."):
+                sys.modules.pop(name, None)
+        sys.modules.update(saved)
 
 
 def _sample_skill() -> tuple[Path, str]:
@@ -79,15 +91,15 @@ def test_skill_creator_loads_via_registry():
     In the lean version we don't ship references/ — so detail['references']
     should be empty.
     """
-    registry = _registry()
-    detail = registry.load_skill_detail("skill-creator")
+    with _registry() as registry:
+        detail = registry.load_skill_detail("skill-creator")
 
-    assert detail["id"] == "skill-creator"
-    assert detail["name"]
-    assert "skill" in detail["description"].lower()
-    assert detail["instructions"], "SKILL.md body must not be empty"
-    assert detail["has_scripts"] is True
-    assert detail["references"] == [], detail["references"]
+        assert detail["id"] == "skill-creator"
+        assert detail["name"]
+        assert "skill" in detail["description"].lower()
+        assert detail["instructions"], "SKILL.md body must not be empty"
+        assert detail["has_scripts"] is True
+        assert detail["references"] == [], detail["references"]
 
 
 def test_quick_validate_runs_on_existing_skill():

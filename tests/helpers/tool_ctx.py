@@ -6,13 +6,19 @@ from types import SimpleNamespace
 from typing import Any, Optional, Type, TypeVar
 
 from execution_workspace import build_execution_workspace
-from tools.backends.local import LocalFsBackend
 
 T = TypeVar("T")
 
 
 def local_ctx(config_dict: Optional[dict] = None) -> SimpleNamespace:
-    """Minimal RunContext-like object with LocalFsBackend + workspace."""
+    """Minimal RunContext-like object with LocalFsBackend + workspace.
+
+    LocalFsBackend импортируется здесь, а не на уровне модуля: некоторые тесты
+    вычищают ``tools.*`` из ``sys.modules`` и переимпортируют пакет — тогда
+    module-level ссылка становится чужим классом относительно monkeypatch.
+    """
+    from tools.backends.local import LocalFsBackend
+
     cfg = dict(config_dict or {})
     backend = LocalFsBackend()
     return SimpleNamespace(

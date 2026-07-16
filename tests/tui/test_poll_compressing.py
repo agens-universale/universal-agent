@@ -12,6 +12,9 @@ class _FakeStore:
     def get_task_meta(self, task_id, system=None):
         return {"runtime": {"summarizing": True}}
 
+    def update_tui_meta(self, task_id, patch):
+        pass
+
     def tail_events(self, task_id, cursor):
         return type("T", (), {"stream_reset": False, "new_records": [], "next_cursor": cursor})()
 
