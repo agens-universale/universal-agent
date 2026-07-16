@@ -652,10 +652,18 @@ class ThreadSession:
         existing_meta = dict(self.meta) if isinstance(self.meta, dict) else {}
         shared_data = summary_payload.get("shared")
         now_iso = _utc_now_iso()
+        # created_at — birth of the thread; never reset on summary.
+        # Prefer in-memory, then disk snapshot taken before archive move
+        # (self.meta can lag when save_thread_meta minted created_at on disk only).
+        created_at = (
+            existing_meta.get("created_at")
+            or disk_meta.get("created_at")
+            or now_iso
+        )
         new_meta = dict(existing_meta)
         new_meta.update(
             {
-                "created_at": existing_meta.get("created_at") or now_iso,
+                "created_at": created_at,
                 "previous_response_id": None,
                 "backend_api_mode": self.backend_api_mode,
                 "messages_count": len(compact_messages),

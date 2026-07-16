@@ -133,6 +133,52 @@ class ThreadSummaryTest(unittest.TestCase):
             self.assertEqual(meta.get("created_at"), "2026-01-01T00:00:00+00:00")
             self.assertEqual(meta.get("custom_meta_key"), "preserve-me")
 
+    def test_archive_and_compact_preserves_created_at_from_disk_when_missing_in_memory(
+        self,
+    ) -> None:
+        """Regression: save_thread_meta may mint created_at on disk while self.meta lags."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            thread_id = "demo-thread-created-at"
+            system_id = "cli"
+            known: set = set()
+            append_new_thread_messages(
+                tmp_dir,
+                system_id,
+                thread_id,
+                [{"role": "user", "content": "old message"}],
+                known,
+                start_seq=0,
+            )
+            original_created_at = "2026-01-01T00:00:00+00:00"
+            save_thread_meta(
+                tmp_dir,
+                system_id,
+                thread_id,
+                {
+                    "created_at": original_created_at,
+                    "backend_api_mode": "chat_completions",
+                },
+            )
+
+            session = ThreadSession.from_config(
+                config_dict={"threads_data_path": tmp_dir},
+                system_id=system_id,
+                thread_id=thread_id,
+            )
+            session.meta.pop("created_at", None)
+
+            session.archive_and_compact_summary_payload(
+                {
+                    "summary_message_content": "compressed summary",
+                    "shared": {"working_memory": {}, "notes_md": ""},
+                    "dialog_steps_offset": 1,
+                }
+            )
+
+            meta = load_thread_meta(tmp_dir, system_id, thread_id)
+            self.assertEqual(meta.get("created_at"), original_created_at)
+            self.assertEqual(session.meta.get("created_at"), original_created_at)
+
     def test_archive_and_compact_preserves_original_user_messages_in_dump(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             thread_id = "demo-thread"
