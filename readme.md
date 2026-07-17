@@ -23,6 +23,7 @@ Background и CLI-клиент для работы с агентом GigaCode: �
 Баги, пожелания, обратная связь - пишите сюда:
 - [В Телеграм](https://t.me/+2AwDQhHxaAdhNmUy)
 - [В Сберчат](https://sberchat.sberbank.ru/@gc-ua-support)
+- [В Маттермост](https://mm.sberdevices.ru/sberdevices/channels/gigacode-unuversal-agent-support)
 
 
 ## Быстрый старт
@@ -37,7 +38,7 @@ gc-mcp install duckduckgo_search   # поставить один MCP + авто-
 
 ```bash
 # установка без клонирования репо gc-cli + gc-ua (TUI по умолчанию)
-uv tool install git+ssh://git@gitverse.ru/gigacode-ai/background-agent
+uv tool install "git+https://gitverse.ru/gigacode-ai/background-agent"
 gc-mcp install   # MCP → ~/.local/share/gc/recommended_mcp/venv + авто-wire в ~/.gc/config.local.yml
 # Примечание: source-MCP (office/science/computer) устанавливаются напрямую из git-подкаталога репо
 # (pip install "git+...#subdirectory=external/<name>") — клонировать репо не нужно.
