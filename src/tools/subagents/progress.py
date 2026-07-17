@@ -1,0 +1,229 @@
+"""Subagent progress transport: events + sink (runtime → TUI drain).
+
+Domain/runtime owns emit; TUI only consumes. Default sink is no-op so CLI/server
+stay unchanged. Events are never persisted to thread jsonl.
+"""
+
+from __future__ import annotations
+
+import json
+import threading
+from collections import deque
+from dataclasses import dataclass
+from typing import Any, Deque, Dict, List, Literal, Optional, Protocol, runtime_checkable
+
+ProgressKind = Literal[
+    "started",
+    "tool_start",
+    "tool_end",
+    "intermediate_reply",
+    "ask_human",
+    "ask_human_done",
+    "confirm",
+    "confirm_done",
+    "usage",
+    "heartbeat",
+    "finished",
+    "error",
+    "cancelled",
+]
+
+_ERROR_BRIEF_MAX = 120
+_ARGS_SUMMARY_MAX = 80
+
+
+@dataclass(frozen=True)
+class SubagentProgressEvent:
+    parent_call_id: str
+    child_run_id: str
+    kind: ProgressKind
+    step: int
+    max_steps: int
+    elapsed_ms: int
+    tool_name: Optional[str] = None
+    tool_call_id: Optional[str] = None
+    args_summary: Optional[str] = None
+    prose: Optional[str] = None
+    ok: Optional[bool] = None
+    error_brief: Optional[str] = None  # ≤120 chars when set by emitters
+    usage_delta: Optional[Dict[str, Any]] = None
+
+
+@runtime_checkable
+class SubagentProgressSink(Protocol):
+    def emit(self, event: SubagentProgressEvent) -> None: ...
+
+
+class NoOpSubagentProgressSink:
+    """Default sink outside TUI — emit is a no-op."""
+
+    def emit(self, event: SubagentProgressEvent) -> None:
+        return None
+
+
+NOOP_SUBAGENT_PROGRESS_SINK = NoOpSubagentProgressSink()
+
+
+class QueueSubagentProgressSink:
+    """Thread-safe queue: runtime emits from worker thread; TUI drains on poll."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._queue: Deque[SubagentProgressEvent] = deque()
+
+    def emit(self, event: SubagentProgressEvent) -> None:
+        with self._lock:
+            self._queue.append(event)
+
+    def drain(self) -> List[SubagentProgressEvent]:
+        with self._lock:
+            items = list(self._queue)
+            self._queue.clear()
+            return items
+
+
+def resolve_progress_sink(ctx: Any) -> SubagentProgressSink:
+    """Return ctx.subagent_progress_sink or the shared no-op."""
+    sink = getattr(ctx, "subagent_progress_sink", None)
+    if sink is None:
+        return NOOP_SUBAGENT_PROGRESS_SINK
+    return sink
+
+
+def child_progress_enabled(ctx: Any) -> bool:
+    """True only for nested child runs that have a sink (parent_call_id set)."""
+    if not getattr(ctx, "parent_call_id", None):
+        return False
+    return getattr(ctx, "subagent_progress_sink", None) is not None
+
+
+def brief_args_summary(arguments: Any, *, limit: int = _ARGS_SUMMARY_MAX) -> str:
+    """Compact one-line args preview for progress events (no TUI dependency)."""
+    data: Any = arguments
+    if isinstance(arguments, str):
+        try:
+            data = json.loads(arguments) if arguments.strip() else {}
+        except json.JSONDecodeError:
+            text = " ".join(arguments.split())
+            return text if len(text) <= limit else text[:limit].rstrip() + "…"
+    if not isinstance(data, dict) or not data:
+        return ""
+    pairs: list[str] = []
+    for key, value in list(data.items())[:3]:
+        if isinstance(value, str):
+            preview = " ".join(value.split())
+            if len(preview) > 40:
+                preview = preview[:40].rstrip() + "…"
+            pairs.append(f"{key}={preview!r}")
+        elif isinstance(value, (int, float, bool)) or value is None:
+            pairs.append(f"{key}={value!r}")
+        elif isinstance(value, list):
+            pairs.append(f"{key}=<list {len(value)}>")
+        else:
+            pairs.append(f"{key}=<?>")
+    text = ", ".join(pairs)
+    return text if len(text) <= limit else text[:limit].rstrip() + "…"
+
+
+def _truncate_error_brief(message: str) -> str:
+    text = " ".join(str(message).split())
+    if len(text) <= _ERROR_BRIEF_MAX:
+        return text
+    return text[:_ERROR_BRIEF_MAX].rstrip() + "…"
+
+
+def parse_tool_result_status(output: Any) -> tuple[Optional[bool], Optional[str]]:
+    """Extract (ok, error_brief) from a tool result payload string/dict."""
+    data: Any = output
+    if isinstance(output, str):
+        try:
+            data = json.loads(output)
+        except json.JSONDecodeError:
+            return None, None
+    if not isinstance(data, dict):
+        return None, None
+    ok = data.get("ok")
+    if not isinstance(ok, bool):
+        ok = None
+    brief: Optional[str] = None
+    if ok is False:
+        err = data.get("error")
+        if isinstance(err, dict):
+            msg = err.get("message") or err.get("code") or ""
+            brief = _truncate_error_brief(str(msg)) if msg else None
+        elif isinstance(err, str) and err.strip():
+            brief = _truncate_error_brief(err)
+        elif isinstance(data.get("message"), str) and data["message"].strip():
+            brief = _truncate_error_brief(data["message"])
+    return ok, brief
+
+
+def extract_intermediate_prose(arguments: Any, output: Any) -> Optional[str]:
+    """Prefer answer from tool output; fall back to call arguments."""
+    for candidate in (output, arguments):
+        data: Any = candidate
+        if isinstance(candidate, str):
+            try:
+                data = json.loads(candidate) if candidate.strip() else {}
+            except json.JSONDecodeError:
+                continue
+        if isinstance(data, dict):
+            answer = data.get("answer")
+            if isinstance(answer, str) and answer.strip():
+                return answer.strip()
+    return None
+
+
+def emit_progress(
+    ctx: Any,
+    state: Any,
+    kind: ProgressKind,
+    *,
+    elapsed_ms: int = 0,
+    tool_name: Optional[str] = None,
+    tool_call_id: Optional[str] = None,
+    args_summary: Optional[str] = None,
+    prose: Optional[str] = None,
+    ok: Optional[bool] = None,
+    error_brief: Optional[str] = None,
+    usage_delta: Optional[Dict[str, Any]] = None,
+) -> None:
+    """Emit a progress event when running as a child with a sink; else no-op."""
+    if not child_progress_enabled(ctx):
+        return
+    sink = ctx.subagent_progress_sink
+    if error_brief is not None:
+        error_brief = _truncate_error_brief(error_brief)
+    sink.emit(
+        SubagentProgressEvent(
+            parent_call_id=str(ctx.parent_call_id),
+            child_run_id=str(getattr(ctx, "run_id", "") or ""),
+            kind=kind,
+            step=int(getattr(state, "steps", 0) or 0),
+            max_steps=int(getattr(state, "max_steps", 0) or 0),
+            elapsed_ms=int(elapsed_ms),
+            tool_name=tool_name,
+            tool_call_id=tool_call_id,
+            args_summary=args_summary,
+            prose=prose,
+            ok=ok,
+            error_brief=error_brief,
+            usage_delta=usage_delta,
+        )
+    )
+
+
+__all__ = [
+    "NOOP_SUBAGENT_PROGRESS_SINK",
+    "NoOpSubagentProgressSink",
+    "ProgressKind",
+    "QueueSubagentProgressSink",
+    "SubagentProgressEvent",
+    "SubagentProgressSink",
+    "brief_args_summary",
+    "child_progress_enabled",
+    "emit_progress",
+    "extract_intermediate_prose",
+    "parse_tool_result_status",
+    "resolve_progress_sink",
+]

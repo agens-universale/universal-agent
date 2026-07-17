@@ -125,6 +125,7 @@ class TuiApp(App):
         self._config = config or {}
         self._executor_factory = None  # callable returning an executor; for tests
         self._stream_sink = StreamSink()
+        self._subagent_progress_sink = None  # QueueSubagentProgressSink; set in executor build
         self._mcp_progress = None
         self._mcp_snapshot = None      # boot-дискавери для /mcp (сервер→статус/тулы)
         self._mcp_status = None        # per-server status dict — для startup_notices
@@ -365,6 +366,10 @@ class TuiApp(App):
             on_stream_delta=self._stream_pump.on_delta,
         )
         self._session_log_path = ctx.logging_path
+        # Live nested progress субагентов: очередь на app, копия на ctx → child.
+        from tools.subagents.progress import QueueSubagentProgressSink
+        self._subagent_progress_sink = QueueSubagentProgressSink()
+        ctx.subagent_progress_sink = self._subagent_progress_sink
         # Снапшот MCP «сервер→статус/тулы» app-уровнево — чтобы /mcp показывал
         # результат boot-дискавери сразу, не дожидаясь первого сообщения.
         from tools.mcp_snapshot import build_mcp_tools_snapshot
@@ -385,7 +390,13 @@ class TuiApp(App):
         if callable(fn):
             fn()
 
-    def _present_confirm(self, title: str, question: str, fields: list) -> bool:
+    def _present_confirm(
+        self,
+        title: str,
+        question: str,
+        fields: list,
+        via: str | None = None,
+    ) -> bool:
         """Агент-поток → UI: баннер на TraceScreen. True = mounted, False = fail.
 
         Цель — базовый TraceScreen (не top-modal). Sync ack через return
@@ -399,7 +410,10 @@ class TuiApp(App):
             if not callable(fn):
                 return False
             try:
-                fn(title, question, fields)
+                try:
+                    fn(title, question, fields, via=via)
+                except TypeError:
+                    fn(title, question, fields)
             except Exception:
                 return False
             return True

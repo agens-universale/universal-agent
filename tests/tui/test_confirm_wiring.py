@@ -31,7 +31,7 @@ def test_present_confirm_calls_call_from_thread_and_show_banner(monkeypatch):
     calls: list[tuple] = []
 
     fake_screen = types.SimpleNamespace(
-        show_confirm_banner=lambda t, q, f: calls.append((t, q, f)),
+        show_confirm_banner=lambda t, q, f, via=None: calls.append((t, q, f, via)),
     )
     monkeypatch.setattr(app, "_main_screen", lambda: fake_screen, raising=False)
 
@@ -48,7 +48,7 @@ def test_present_confirm_calls_call_from_thread_and_show_banner(monkeypatch):
     assert app._present_confirm("Title", "Question?", [("Path", "/x")]) is True
 
     assert len(calls) == 1
-    assert calls[0] == ("Title", "Question?", [("Path", "/x")])  # fields проброшены в баннер
+    assert calls[0] == ("Title", "Question?", [("Path", "/x")], None)
     assert len(captured) == 1
 
 

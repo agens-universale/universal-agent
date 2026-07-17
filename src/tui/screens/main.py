@@ -159,6 +159,13 @@ class TraceScreen(Screen):
         self._last_mcp_card_line: Optional[str] = None
         # Phase 2: tool-row mutation state
         self._active_calls: dict[str, ToolCallRow] = {}
+        # Nested progress под subagent_*: live-only, не из jsonl.
+        from tui.services.subagent_progress import SubagentProgressConsumer
+        self._subagent_progress = SubagentProgressConsumer()
+        self._nested_tool_rows: dict[str, ToolCallRow] = {}  # child tool_call_id → row
+        self._nested_widgets_by_parent: dict[str, list] = {}  # parent_call_id → widgets
+        self._nested_overflow_row: dict[str, object] = {}  # parent → overflow Static/TraceRow
+        self._nested_anchor: dict[str, ToolCallRow] = {}  # parent_call_id → last mounted nested
         self._reasoning_clock = ReasoningClock()
         self._submit_solution_call_ids: set[str] = set()
         # Track submit_solution agent-line widgets, чтобы при повторе свернуть предыдущие.
@@ -553,6 +560,11 @@ class TraceScreen(Screen):
         self._stick_bottom = True   # новый/переключённый трейс → показываем низ (latest)
         self._last_auto_y = 0
         self._active_calls.clear()
+        self._subagent_progress.reset()
+        self._nested_tool_rows.clear()
+        self._nested_widgets_by_parent.clear()
+        self._nested_overflow_row.clear()
+        self._nested_anchor.clear()
         self._submit_solution_call_ids.clear()
         self._submit_solution_widgets.clear()
         self._summary_body_widgets.clear()
@@ -1288,6 +1300,7 @@ class TraceScreen(Screen):
                 tool_name=ev.tool_name or "<tool>",
                 args_summary=args_portion(ev.summary),
                 event_no=ev.no,
+                waiting=True,  # batch: · пока очередь execute не дошла
             )
             # Первый tool в группе (предыдущий ряд — не tool) получает верхний
             # отступ; подряд идущие tool-строки остаются компактными.
@@ -1295,6 +1308,7 @@ class TraceScreen(Screen):
                 row.add_class("tool-group-start")
             self._active_calls[row.call_id] = row
             self._trace_mount(row)
+            self._reconcile_active_tool_phases()
             return
 
         if ev.kind in ("result", "error"):
@@ -1311,7 +1325,9 @@ class TraceScreen(Screen):
                     summary=ev.summary,
                     error=(ev.kind == "error"),
                 )
+                self._collapse_nested_under(ev.call_id)
                 self._active_calls.pop(ev.call_id, None)
+                self._reconcile_active_tool_phases()
                 return
             # Fallback (call_id unknown or no matching row) — append separate line
             prefix = "   " if ev.kind == "result" else "   [!] "
@@ -1367,13 +1383,231 @@ class TraceScreen(Screen):
         row = self._active_calls.get(ev.call_id) if ev.call_id else None
         if row is not None:
             row.set_result(summary=ev.summary, error=True)
+            self._collapse_nested_under(ev.call_id)
             self._active_calls.pop(ev.call_id, None)
+            self._reconcile_active_tool_phases()
             return
         self._mount_trace_row(
             prefix="[!] ", content=ev.summary,
             kind_class="line-error", event_no=ev.no,
         )
 
+    def _reconcile_active_tool_phases(self) -> None:
+        """В незавершённом batch: первая строка active (▸), остальные waiting (·)."""
+        from tui.services.subagent_progress import reconcile_batch_phases
+        reconcile_batch_phases(list(self._active_calls.values()))
+
+    def _drain_subagent_progress(self) -> None:
+        """Слить live-события субагента из app-очереди и отрисовать nested."""
+        sink = getattr(self.app, "_subagent_progress_sink", None)
+        if sink is None:
+            return
+        drain = getattr(sink, "drain", None)
+        if not callable(drain):
+            return
+        events = drain()
+        if not events:
+            return
+        self._subagent_progress.apply_drained(
+            events,
+            mount_nested_tool=self._mount_nested_tool,
+            finish_nested_tool=self._finish_nested_tool,
+            mount_nested_prose=self._mount_nested_prose,
+            nested_overflow=self._mount_nested_overflow,
+            parent_heartbeat=self._parent_subagent_heartbeat,
+            collapse_nested=self._collapse_nested_under,
+            show_ask_human=self._show_child_ask_human,
+            hide_ask_human=self._hide_child_ask_human,
+        )
+
+    def _nested_mount_after(self, parent_call_id: str, widget) -> None:
+        """Смонтировать nested-виджет сразу после parent или последнего nested."""
+        from textual.containers import VerticalScroll
+        parent = self._active_calls.get(parent_call_id)
+        if parent is None:
+            return
+        trace = self.query_one("#trace", VerticalScroll)
+        anchor = self._nested_anchor.get(parent_call_id, parent)
+        try:
+            trace.mount(widget, after=anchor)
+        except Exception:
+            trace.mount(widget)
+        self._nested_anchor[parent_call_id] = widget
+        self._nested_widgets_by_parent.setdefault(parent_call_id, []).append(widget)
+
+    def _mount_nested_tool(
+        self,
+        *,
+        parent_call_id: str,
+        tool_name: str,
+        tool_call_id: str,
+        args_summary: str,
+        step: int = 0,
+        max_steps: int = 0,
+        **_kw,
+    ) -> None:
+        if parent_call_id not in self._active_calls:
+            return
+        row = ToolCallRow(
+            call_id=tool_call_id or f"_nested_{tool_name}_{step}",
+            tool_name=tool_name,
+            args_summary=args_summary or "",
+            nested=True,
+            waiting=False,  # tool_start = уже execute
+        )
+        if tool_call_id:
+            self._nested_tool_rows[tool_call_id] = row
+        self._nested_mount_after(parent_call_id, row)
+
+    def _finish_nested_tool(
+        self,
+        *,
+        parent_call_id: str,
+        tool_call_id: str = "",
+        ok: bool = True,
+        error_brief: str | None = None,
+        **_kw,
+    ) -> None:
+        row = self._nested_tool_rows.get(tool_call_id) if tool_call_id else None
+        if row is None:
+            return
+        summary = "" if ok else (error_brief or "error")
+        row.set_result(summary=summary, error=not ok)
+
+    def _mount_nested_prose(
+        self,
+        *,
+        parent_call_id: str,
+        prose: str,
+        **_kw,
+    ) -> None:
+        if parent_call_id not in self._active_calls:
+            return
+        from tui.widgets.trace_row import TraceRow
+        text = (prose or "").strip()
+        if not text:
+            return
+        row = TraceRow(
+            prefix="       · ",
+            content=text,
+            kind_class="line-intermediate",
+            event_no=0,
+            focusable=False,
+        )
+        self._nested_mount_after(parent_call_id, row)
+
+    def _mount_nested_overflow(
+        self,
+        *,
+        parent_call_id: str,
+        overflow_count: int,
+        **_kw,
+    ) -> None:
+        if parent_call_id not in self._active_calls:
+            return
+        from tui.widgets.trace_row import TraceRow
+        existing = self._nested_overflow_row.get(parent_call_id)
+        label = f"… +{overflow_count}"
+        if existing is not None:
+            # TraceRow: обновить content если есть API; иначе remove+mount
+            try:
+                existing.remove()
+            except Exception:
+                pass
+            widgets = self._nested_widgets_by_parent.get(parent_call_id) or []
+            if existing in widgets:
+                widgets.remove(existing)
+        row = TraceRow(
+            prefix="       ",
+            content=label,
+            kind_class="line-meta",
+            event_no=0,
+            focusable=False,
+        )
+        self._nested_overflow_row[parent_call_id] = row
+        self._nested_mount_after(parent_call_id, row)
+
+    def _parent_subagent_heartbeat(
+        self,
+        *,
+        parent_call_id: str,
+        step: int = 0,
+        max_steps: int = 0,
+        last_tool: str | None = None,
+        **_kw,
+    ) -> None:
+        row = self._active_calls.get(parent_call_id)
+        if row is None:
+            return
+        from tui.services.subagent_progress import format_parent_live_status
+        row.set_live_status(
+            format_parent_live_status(
+                step=step, max_steps=max_steps, last_tool=last_tool,
+            )
+        )
+
+    def _show_child_ask_human(
+        self,
+        *,
+        parent_call_id: str,
+        prose: str,
+        via: str | None = None,
+        tool_call_id: str | None = None,
+        **_kw,
+    ) -> None:
+        """Баннер ask_human от child: только UI, без строки в parent jsonl/трейсе."""
+        from tui.widgets.ask_human_banner import AskHumanBanner
+        from tui.state import AskHumanState
+
+        if self._ask_human_banner is not None:
+            self._unmount_ask_human_banner()
+        # Не монтируем question-row в parent-трейс — HITL child эфемерен.
+        self._ask_human_question_row = None
+        banner = AskHumanBanner(question=prose, via=via)
+        self._ask_human_banner = banner
+        self._ask_human_call_id = tool_call_id or parent_call_id
+        self._ask_human_owner_runner = self.app.active_runner
+        self.app.tui_state.ask_human_state = AskHumanState(
+            call_id=self._ask_human_call_id or "",
+            question=prose,
+        )
+        # Пауза тикера корневого субагента на время ответа.
+        parent_row = self._active_calls.get(parent_call_id)
+        if parent_row is not None:
+            parent_row.pause()
+        inp_row = self.query_one("#input-row", Horizontal)
+        self.query_one("#root", Vertical).mount(banner, before=inp_row)
+        inp = self.query_one("#cmdinput", CommandTextArea)
+        inp.placeholder = "ваш ответ агенту…"
+        inp.add_class("ask-human-mode")
+        self._refresh_header()
+        self._refresh_footer()
+        self._update_terminal_title()
+
+    def _hide_child_ask_human(self, *, parent_call_id: str = "", **_kw) -> None:
+        """Снять child ask-баннер после ответа; resume тикера корня."""
+        parent_row = self._active_calls.get(parent_call_id) if parent_call_id else None
+        if parent_row is not None:
+            parent_row.resume()
+        self._unmount_ask_human_banner()
+
+    def _collapse_nested_under(self, parent_call_id: str | None) -> None:
+        """Убрать nested-виджеты под субагентом (после output / stop / finished)."""
+        if not parent_call_id:
+            return
+        widgets = self._nested_widgets_by_parent.pop(parent_call_id, [])
+        for w in widgets:
+            try:
+                w.remove()
+            except Exception:
+                pass
+            cid = getattr(w, "call_id", None)
+            if cid:
+                self._nested_tool_rows.pop(cid, None)
+        self._nested_overflow_row.pop(parent_call_id, None)
+        self._nested_anchor.pop(parent_call_id, None)
+
+    
     def _diff_service_for_preview(self):
         cfg = getattr(self.app, "_config", None) or {}
         launch_root = cfg.get("launch_root")
@@ -1454,18 +1688,25 @@ class TraceScreen(Screen):
     # ──────────────────────── confirm banner (T2) ───────────────────────────
 
     def show_confirm_banner(
-        self, title: str, question: str, fields: list | None = None
+        self,
+        title: str,
+        question: str,
+        fields: list | None = None,
+        via: str | None = None,
     ) -> None:
         """Смонтировать ConfirmBanner и переключить в режим одиночной клавиши.
 
         Вызывается на UI-потоке (напр. через App.call_from_thread из T3).
         Скрывает #input-row, убирает фокус с TextArea — «y»/«n» доходят до
         Screen.on_key и не поглощаются TextArea. fields — структурированные
-        детали решения (Tool/Path/Command/Reason/Risk) из confirm-порта."""
+        детали решения (Tool/Path/Command/Reason/Risk) из confirm-порта.
+        via — метка субагента для child HITL (опционально)."""
         from tui.widgets.confirm_banner import ConfirmBanner
         if self._confirm_active:
             self._hide_confirm_banner()
-        banner = ConfirmBanner(banner_title=title, question=question, fields=fields)
+        banner = ConfirmBanner(
+            banner_title=title, question=question, fields=fields, via=via,
+        )
         self._confirm_banner = banner
         self._confirm_active = True
         inp_row = self.query_one("#input-row", Horizontal)
@@ -1810,7 +2051,17 @@ class TraceScreen(Screen):
         if self._active_calls and self._task_status_badge() not in ("[running]", "[asking]"):
             for row in self._active_calls.values():
                 row.mark_interrupted()
+            for widgets in self._nested_widgets_by_parent.values():
+                for w in widgets:
+                    mark = getattr(w, "mark_interrupted", None)
+                    if callable(mark):
+                        mark()
             self._active_calls.clear()
+            self._nested_tool_rows.clear()
+            self._nested_widgets_by_parent.clear()
+            self._nested_overflow_row.clear()
+            self._nested_anchor.clear()
+            self._subagent_progress.reset()
         # ThinkingIndicator — пока runner работает, обычно виден внизу trace.
         # Эвристика «видимый ответ дан»: если последнее event это agent-текст
         # ИЛИ system-событие (think/policy — агент работает с текстом, не с
@@ -1877,6 +2128,8 @@ class TraceScreen(Screen):
         for row in self._active_calls.values():
             row.pause() if human_wait else row.resume()
             row.refresh_running_elapsed()
+        # Nested progress субагента: drain runtime-очереди → строки под parent.
+        self._drain_subagent_progress()
         summarizing = False
         finalizing = False
         _tmeta: dict = {}

@@ -232,15 +232,27 @@ class AgentRunner:
 
         Замыкание вызывается на агент-потоке и блокирует его до ответа юзера
         только после sync ack mounted. present(...) → True|False|None; при
-        False — сразу deny без wait() (I2). None — legacy present без ack.
+        False — сразу deny без wait() (I2). None — legacy present без ack;
+        поддерживается опциональный ``via`` для метки child HITL.
         Возвращает ConfirmChoice: 'once'|'session'|'deny'.
         """
 
-        def _tui_confirm(*, title: str, question: str, fields: list) -> str:
+        def _tui_confirm(
+            *,
+            title: str,
+            question: str,
+            fields: list,
+            via: str | None = None,
+        ) -> str:
             self._confirm_event.clear()
             self._confirm_choice = "deny"
             try:
-                mounted = present(title, question, fields)
+                mounted = present(title, question, fields, via=via)
+            except TypeError:
+                try:
+                    mounted = present(title, question, fields)
+                except Exception:
+                    return "deny"
             except Exception:
                 return "deny"
             # False = explicit fail; None/True — mounted (None = legacy present без ack).

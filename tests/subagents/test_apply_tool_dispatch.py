@@ -82,6 +82,7 @@ class TestSubagentDispatch:
             "subagent_worker",
             {"task": "do something", "reason": "test"},
             run_agent_func,
+            parent_call_id=None,
         )
         assert result == "subagent result"
 
@@ -105,7 +106,10 @@ class TestSubagentDispatch:
             )
 
         instance.run.assert_called_once_with(
-            "subagent_worker", {"task": "hello", "reason": "test"}, run_agent_func,
+            "subagent_worker",
+            {"task": "hello", "reason": "test"},
+            run_agent_func,
+            parent_call_id=None,
         )
 
     def test_regular_tool_not_affected(self):

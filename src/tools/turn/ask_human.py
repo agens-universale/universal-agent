@@ -210,6 +210,17 @@ Do not implement until they confirm.
         # Sanitize line endings and normalize whitespace
         question = self._normalize_text(question)
 
+        from tools.subagents.progress import emit_progress
+
+        via_name = getattr(self._ctx, "subagent_tool_name", None)
+        emit_progress(
+            self._ctx,
+            self._state,
+            "ask_human",
+            prose=question,
+            tool_name=via_name if isinstance(via_name, str) else None,
+        )
+
         try:
             # Print the question to stdout (visible to user)
             print("\n" + "="*60, file=sys.stderr)
@@ -246,6 +257,14 @@ Do not implement until they confirm.
                 extra={"event": "ask_human_response", "response": response},
             )
 
+            emit_progress(
+                self._ctx,
+                self._state,
+                "ask_human_done",
+                tool_name=via_name if isinstance(via_name, str) else None,
+                ok=True,
+            )
+
             return self._result(
                 ok=True,
                 question=question,
@@ -260,6 +279,14 @@ Do not implement until they confirm.
                 "ask_human_interrupted",
                 extra={"event": "ask_human_interrupted"},
             )
+            emit_progress(
+                self._ctx,
+                self._state,
+                "ask_human_done",
+                tool_name=via_name if isinstance(via_name, str) else None,
+                ok=False,
+                error_brief="interrupted",
+            )
             return self._result(
                 ok=False,
                 question=question,
@@ -273,6 +300,14 @@ Do not implement until they confirm.
             self._run_logger().warning(
                 "ask_human_error",
                 extra={"event": "ask_human_error", "error": error_msg},
+            )
+            emit_progress(
+                self._ctx,
+                self._state,
+                "ask_human_done",
+                tool_name=via_name if isinstance(via_name, str) else None,
+                ok=False,
+                error_brief=str(e),
             )
             return self._result(
                 ok=False,

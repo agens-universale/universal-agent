@@ -23,12 +23,14 @@ from tui.palette import ACCENT, BG, BRIGHT, DIM, RUN_COLOR
 GUARD_GLYPH = "⚠"
 
 
-def build_guard_label(title: str) -> Text:
+def build_guard_label(title: str, via: str | None = None) -> Text:
     """Заголовок шлюза: янтарный глиф ⚠ + bright-титул. '?' остаётся только
-    в самой строке вопроса ('Разрешить …?'), не в заголовке."""
+    в самой строке вопроса ('Разрешить …?'), не в заголовке.
+    via — метка субагента (child HITL), например `via subagent_worker`."""
     t = Text()
     t.append(f"{GUARD_GLYPH}  ", style=RUN_COLOR)  # двойной пробел: ⚠ широкий, одиночный «съедается»
-    t.append(title, style=BRIGHT)
+    label = f"{title} · via {via}" if via else title
+    t.append(label, style=BRIGHT)
     return t
 
 
@@ -81,6 +83,7 @@ class ConfirmBanner(Vertical):
         banner_title: str,
         question: str,
         fields: list | None = None,
+        via: str | None = None,
         **kwargs,
     ) -> None:
         kwargs.setdefault("classes", "")
@@ -89,11 +92,16 @@ class ConfirmBanner(Vertical):
         self.banner_title = banner_title
         self.question = question
         self.fields = list(fields or [])
+        self.via = via
         self.selected: int = 0  # 0 = Y/affirmative по умолчанию
         self._options_static: Static | None = None
 
     def compose(self) -> ComposeResult:
-        yield Static(build_guard_label(self.banner_title), classes="cb-label", markup=False)
+        yield Static(
+            build_guard_label(self.banner_title, via=self.via),
+            classes="cb-label",
+            markup=False,
+        )
         yield Static(self.question, classes="cb-question", markup=False)
         for label, value in self.fields:
             text = _fmt_field_value(value)

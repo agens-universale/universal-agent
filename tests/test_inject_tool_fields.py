@@ -348,6 +348,7 @@ class TestApplyTool:
                     "subagent_stub",
                     {"task": "do something"},
                     run_agent_func,
+                    parent_call_id=None,
                 )
 
 

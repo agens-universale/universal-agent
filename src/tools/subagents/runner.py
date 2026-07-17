@@ -26,10 +26,13 @@ from states import State
 from tools import build_tools_data
 from tools.subagents.registry import get_subagent_class
 from usage.account import CATEGORY_SUBAGENT as USAGE_CATEGORY_SUBAGENT
+from usage.account import UsageAccount
 from usage.context import usage_scope
 from utils.generate_message_id import generate_msg_id_sha256 as generate_message_id_func
 from utils.local_render_system_prompt import render_system_prompt
 from utils.logging_module import create_run_logger, generate_run_id
+from tools.subagents.progress import emit_progress
+from message_policy.user_stop import cancelled_by_user_output
 
 _log = logging.getLogger(__name__)
 
@@ -41,13 +44,19 @@ class SubagentRunner:
         self._ctx = ctx
         self._orchestrator_state = orchestrator_state
         self._config = config_dict
+        self._parent_call_id: str = ""
+        # Уже влитый в parent снимок child.usage — для incremental delta (без double-count).
+        self._usage_pushed = UsageAccount()
 
     def run(
         self,
         tool_name: str,
         arguments: Dict[str, Any],
         run_agent_func: Callable,
+        *,
+        parent_call_id: Optional[str] = None,
     ) -> str:
+        self._parent_call_id = parent_call_id or ""
         subagent_cls = get_subagent_class(tool_name)
         if subagent_cls is None:
             return self._error_response(
@@ -152,7 +161,7 @@ class SubagentRunner:
         )
 
         persist_messages_callback = partial(
-            self._persist_runtime_step, child_state, child_meta
+            self._persist_runtime_step, child_state, child_meta, child_ctx
         )
         pre_backend_compaction_hook = None
         if should_enable_summary:
@@ -167,6 +176,7 @@ class SubagentRunner:
             )
             pre_backend_compaction_hook = summary.pre_backend_compaction_hook
 
+        self._usage_pushed = UsageAccount()
         try:
             result = run_agent_func(
                 messages,
@@ -194,13 +204,12 @@ class SubagentRunner:
                 message=f"Subagent {tool_name} run failed: {exc}",
                 retryable=True,
                 steps=child_state.steps,
+                child_run_id=str(getattr(child_ctx, "run_id", "") or ""),
             )
         finally:
-            # Свернуть токены субагента (его main+aux) в категорию subagent родителя.
-            # finally — чтобы учесть и частичный прогон при ошибке/остановке.
-            self._orchestrator_state.usage.merge(
-                child_state.usage, as_category=USAGE_CATEGORY_SUBAGENT
-            )
+            # Только residual delta с последнего live-tick — не полный merge
+            # (иначе double-count уже запушенных токенов).
+            self._push_usage_delta(child_state, child_ctx)
 
         if result is None:
             self._log_lifecycle(
@@ -210,12 +219,39 @@ class SubagentRunner:
                 child_ctx=child_ctx,
                 extra={"steps": child_state.steps, "finish_reason": "stopped_by_user"},
             )
-            return self._error_response(
+            emit_progress(
+                child_ctx,
+                child_state,
+                "cancelled",
+                ok=False,
+                error_brief="stopped by user",
+            )
+            return self._cancelled_by_user_response(
                 tool_name=tool_name,
-                code="subagent_stopped_by_user",
-                message=f"Subagent {tool_name} stopped by user request. Run it again if needed.",
-                retryable=True,
                 steps=child_state.steps,
+                child_run_id=str(getattr(child_ctx, "run_id", "") or ""),
+            )
+
+        if getattr(child_state, "terminal_outcome", None) == "step_limit":
+            self._log_lifecycle(
+                event="subagent_end",
+                tool_name=tool_name,
+                child_state=child_state,
+                child_ctx=child_ctx,
+                extra={"steps": child_state.steps, "finish_reason": "step_limit"},
+            )
+            emit_progress(
+                child_ctx,
+                child_state,
+                "error",
+                ok=False,
+                error_brief="step limit",
+            )
+            return self._step_limit_response(
+                tool_name=tool_name,
+                steps=child_state.steps,
+                child_run_id=str(getattr(child_ctx, "run_id", "") or ""),
+                detail=result if isinstance(result, str) else None,
             )
 
         result_payload: Any = result or "Subagent finished without explicit result."
@@ -232,15 +268,37 @@ class SubagentRunner:
             steps=child_state.steps,
             finish_reason="completed",
             usage=child_state.usage.to_meta(),
+            child_run_id=str(getattr(child_ctx, "run_id", "") or ""),
         )
 
     def _check_stop_requested(self) -> bool:
         return self._orchestrator_state.stop_requested
 
+    def _push_usage_delta(self, child_state: State, child_ctx: Optional[Any] = None) -> None:
+        """Влить в parent только прирост child.usage с последнего tick (категория subagent)."""
+        child_usage = getattr(child_state, "usage", None)
+        if not isinstance(child_usage, UsageAccount):
+            return
+        delta = child_usage.delta_from(self._usage_pushed)
+        if delta.is_empty():
+            return
+        self._orchestrator_state.usage.merge(
+            delta, as_category=USAGE_CATEGORY_SUBAGENT
+        )
+        self._usage_pushed = UsageAccount.from_meta(child_usage.to_meta())
+        if child_ctx is not None:
+            emit_progress(
+                child_ctx,
+                child_state,
+                "usage",
+                usage_delta=delta.to_meta(),
+            )
+
     def _persist_runtime_step(
         self,
         child_state: State,
         child_meta: Dict[str, Any],
+        child_ctx: Any,
         step_messages: List[Dict[str, Any]],
     ) -> None:
         child_state.current_user_intent = append_user_asks_from_messages(
@@ -249,6 +307,8 @@ class SubagentRunner:
             user_turn_seq=child_state.user_turn_seq,
         )
         persist_tool_usage_notice_state(child_state, child_meta)
+        # Live spend → касса родителя (футер TUI читает parent state.usage).
+        self._push_usage_delta(child_state, child_ctx)
 
     def _build_child_state(self, agent_role: str) -> State:
         """Создать дочерний State, наследуя общие данные от оркестратора."""
@@ -378,6 +438,16 @@ class SubagentRunner:
             project_gc_dir=getattr(self._ctx, "project_gc_dir", Path(".")),
         )
         child_ctx.is_tui = bool(getattr(self._ctx, "is_tui", False))
+        # Progress bridge: same sink as parent (TUI queue or None/no-op); call_id of
+        # the parent subagent_* function_call for correlating nested UI rows.
+        child_ctx.subagent_progress_sink = getattr(
+            self._ctx, "subagent_progress_sink", None
+        )
+        child_ctx.parent_call_id = self._parent_call_id
+        # HITL: тот же confirm-баннер родителя + имя субагента для метки via.
+        child_ctx.tui_confirm = getattr(self._ctx, "tui_confirm", None)
+        child_ctx.permission_store = getattr(self._ctx, "permission_store", None)
+        child_ctx.subagent_tool_name = tool_name
         return child_ctx
 
     def _success_response(
@@ -387,18 +457,69 @@ class SubagentRunner:
         steps: int,
         finish_reason: str,
         usage: Dict[str, Any] | None = None,
+        child_run_id: str = "",
     ) -> str:
         meta: Dict[str, Any] = {
             "tool_name": tool_name,
             "steps": steps,
             "finish_reason": finish_reason,
         }
+        if child_run_id:
+            meta["child_run_id"] = child_run_id
         if usage is not None:
             meta["usage"] = usage
         payload = {
             "ok": True,
             "meta": meta,
             "result": result,
+        }
+        return json.dumps(payload, ensure_ascii=False)
+
+    def _cancelled_by_user_response(
+        self,
+        tool_name: str,
+        steps: int,
+        child_run_id: str = "",
+    ) -> str:
+        """Envelope A: active subagent interrupted by user stop."""
+        meta: Dict[str, Any] = {
+            "tool_name": tool_name,
+            "steps": steps,
+            "finish_reason": "stopped_by_user",
+        }
+        if child_run_id:
+            meta["child_run_id"] = child_run_id
+        return cancelled_by_user_output(tool_name, meta=meta)
+
+    def _step_limit_response(
+        self,
+        tool_name: str,
+        steps: int,
+        child_run_id: str = "",
+        detail: Optional[str] = None,
+    ) -> str:
+        """Step-limit: ok=false, finish_reason=step_limit (не маскировать под completed)."""
+        message = (detail or "").strip() or (
+            f"Subagent {tool_name} stopped: step limit reached ({steps})."
+        )
+        meta: Dict[str, Any] = {
+            "tool_name": tool_name,
+            "steps": steps,
+            "finish_reason": "step_limit",
+        }
+        if child_run_id:
+            meta["child_run_id"] = child_run_id
+        payload = {
+            "tool": tool_name,
+            "ok": False,
+            "status": "step_limit",
+            "message": message,
+            "error": {
+                "code": "step_limit",
+                "message": message,
+                "retryable": True,
+            },
+            "meta": meta,
         }
         return json.dumps(payload, ensure_ascii=False)
 
@@ -409,14 +530,18 @@ class SubagentRunner:
         message: str,
         retryable: bool,
         steps: int = 0,
+        child_run_id: str = "",
     ) -> str:
+        meta: Dict[str, Any] = {
+            "tool_name": tool_name,
+            "steps": steps,
+            "finish_reason": "error",
+        }
+        if child_run_id:
+            meta["child_run_id"] = child_run_id
         payload = {
             "ok": False,
-            "meta": {
-                "tool_name": tool_name,
-                "steps": steps,
-                "finish_reason": "error",
-            },
+            "meta": meta,
             "error": {
                 "code": code,
                 "message": message,
