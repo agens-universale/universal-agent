@@ -51,7 +51,6 @@ class SettingsScreen(Screen):
         self._config_gen = 0            # generation config-probe: устаревшие результаты отбрасываются
         self._draft_gen = 0             # generation draft-probe: независим от config-probe
         self._probe_in_flight = False
-        self._pending_force = False     # всегда False — force-save убран, Enter сохраняет сразу
         self._note_timer = None         # автогашение title-note «ничего не изменено»
         self._wave_timer = None         # таймер анимации загрузки (глифы хаба)
         self._wave_i = 0                # кадр «бегущего огонька»
@@ -536,7 +535,6 @@ class SettingsScreen(Screen):
         frame.mount(Static(text, classes="set-hint set-dyn set-probe"))
 
     def _reset_draft_state(self) -> None:
-        self._pending_force = False
         self._draft_checked = None
         self._cancel_env_confirm()  # правка обесценивает и подтверждение перезаписи ссылки
         self._draft_gen += 1        # правка значения обесценивает летящий draft-probe (config-probe не трогаем)

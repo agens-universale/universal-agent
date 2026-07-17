@@ -909,7 +909,6 @@ async def test_rejected_token_saves_without_force(tmp_path, monkeypatch):
         await pilot.pause()
         content = cfg_file.read_text(encoding="utf-8")
         assert "https://new/v1/chat/completions" in content   # сохранено сразу, без force
-        assert scr._pending_force is False
 
 
 async def test_smart_enter_rejected_saves_immediately_with_warn(tmp_path):
@@ -923,7 +922,6 @@ async def test_smart_enter_rejected_saves_immediately_with_warn(tmp_path):
         await pilot.pause(); await pilot.pause()
         assert scr._view == "menu"                    # сохранено, вернулись в хаб
         assert "new" in cfg_file.read_text(encoding="utf-8")
-        assert scr._pending_force is False
         flash = str(scr.query_one("#set-flash").render())
         assert "сервер отклонил токен" in flash
 

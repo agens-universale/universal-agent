@@ -82,7 +82,7 @@ class ConnectionEditor(Vertical):
 
     # --- навигация ---
     def _sync_visibility(self) -> None:
-        # токен-поле видно только когда курсор на Bearer (idx 1) И Bearer — активный/выбранный
+        # токен-поле видно только когда курсор на Bearer (idx 1)
         self.query_one("#conn-token", Input).display = self._idx == 1
 
     def move(self, delta: int) -> None:

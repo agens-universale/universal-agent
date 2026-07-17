@@ -12,7 +12,6 @@ import time
 from typing import Optional
 
 from rich.text import Text
-from typing import Optional
 
 from textual.app import ComposeResult
 from textual.containers import Horizontal
