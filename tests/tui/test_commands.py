@@ -149,7 +149,7 @@ def test_hotkeys_match_app_bindings():
 
 def test_settings_command_description_mentions_server_address():
     reg = build_default_registry()
-    assert reg.lookup("settings").description == "настройки: адрес сервера, модель, MCP, обновление"
+    assert reg.lookup("settings").description == "настройки: подключение, модель, MCP, обновление"
 
 
 def test_compact_command_registered_with_alias():
@@ -159,3 +159,22 @@ def test_compact_command_registered_with_alias():
     assert cmd.description == "сжать контекст сессии сейчас"
     # алиас /сжать ведёт на ту же команду
     assert reg.lookup("сжать") is cmd
+
+
+async def test_f6_opens_settings_with_input_focused():
+    """F6 открывает /settings при фокусе в поле ввода.
+
+    Регресс: у TextArea есть дефолтный биндинг f6=select_line — без priority на
+    app-биндинге виджет перехватывал клавишу, и хоткей был мёртв (баг master)."""
+    import pytest as _pytest
+    _pytest.importorskip("textual")
+    from tui.app import TuiApp
+    from tui.screens.settings import SettingsScreen
+
+    app = TuiApp(config={})
+    async with app.run_test() as pilot:
+        app.screen.query_one("#cmdinput").focus()
+        await pilot.pause()
+        await pilot.press("f6")
+        await pilot.pause()
+        assert isinstance(app.screen, SettingsScreen)
