@@ -231,6 +231,40 @@ def test_build_footer_empty():
     assert build_attachment_footer([]) == ""
 
 
+def test_fuzzy_finds_untracked_files(tmp_path, monkeypatch):
+    """Untracked (но не gitignored) файлы находятся fuzzy-ем, как и через drill-in.
+
+    Раньше _all_paths брал только `git ls-files` (tracked) → «.claude/» листился
+    drill-in'ом с диска, а «.claude/s» давал «нет совпадений» — новые/untracked
+    файлы не находились набором ни в @-пикере, ни в /view."""
+    # герметичность: глобальный ignore юзера — это XDG-дефолт
+    # ($XDG_CONFIG_HOME/git/ignore), уводим его в пустую папку
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg-empty"))
+    (tmp_path / "tracked.py").write_text("x", encoding="utf-8")
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "add", "-A"], cwd=tmp_path, check=True)
+    (tmp_path / ".claude").mkdir()
+    (tmp_path / ".claude" / "settings.local.json").write_text("{}", encoding="utf-8")
+    out = fuzzy_search(str(tmp_path), ".claude/s")
+    assert ".claude/settings.local.json" in out
+    # и папка находится без хвостового '/'
+    assert any(p.startswith(".claude") for p in fuzzy_search(str(tmp_path), ".cla"))
+
+
+def test_fuzzy_slash_query_lists_ignored_dir_like_drill_in(tmp_path):
+    """Drill-инвариант: gitignored-файл виден по «dir/» (list_dir читает диск),
+    значит и «dir/<буква>» обязан его находить — раньше пропадал на первой букве.
+    Глобальный поиск БЕЗ '/' ignore уважает (мусор не лезет в выдачу)."""
+    (tmp_path / "tracked.py").write_text("x", encoding="utf-8")
+    (tmp_path / "logs").mkdir()
+    (tmp_path / "logs" / "run.txt").write_text("x", encoding="utf-8")
+    (tmp_path / ".gitignore").write_text("logs/\n", encoding="utf-8")
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "add", "-A"], cwd=tmp_path, check=True)
+    assert "logs/run.txt" in fuzzy_search(str(tmp_path), "logs/r")
+    assert all("run.txt" not in p for p in fuzzy_search(str(tmp_path), "run"))
+
+
 def test_fuzzy_git_dir_respects_gitignore(tmp_path):
     """В git-репо .gitignore'нутая ПАПКА не протекает в fuzzy (деривация из ls-files)."""
     (tmp_path / "agents").mkdir()
@@ -246,3 +280,16 @@ def test_fuzzy_git_dir_respects_gitignore(tmp_path):
     # tracked-папка agents/ доступна
     out2 = fuzzy_search(str(tmp_path), "agent")
     assert "agents/" in out2
+
+
+def test_absolute_and_drive_queries_are_not_listed(tmp_path):
+    """Абсолютные/дисковые пути — вне корня проекта: пикер их не подсказывает
+    (спека: внешние пути набираются руками). Windows-ловушка: join(root, "D:")
+    даёт drive-relative путь = «текущая папка диска D» — листался бы корень
+    проекта под видом D:/…"""
+    (tmp_path / "a.py").write_text("x", encoding="utf-8")
+    assert list_dir(str(tmp_path), "D:") == []
+    assert list_dir(str(tmp_path), "C:/Users") == []
+    assert fuzzy_search(str(tmp_path), "D:/") == []
+    assert fuzzy_search(str(tmp_path), "C:/Us") == []
+    assert fuzzy_search(str(tmp_path), "/etc/pas") == []

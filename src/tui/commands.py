@@ -22,6 +22,9 @@ class Command:
     # Фиксированные варианты значения аргумента (value, описание) — открывают
     # ArgPicker при вводе `/<cmd> `. Пусто = у команды нет такого меню.
     arg_options: tuple[tuple[str, str], ...] = ()
+    # Аргумент — путь к файлу: при вводе `/<cmd> ` открывается файловый пикер
+    # (fuzzy по проекту, как @-аттач). Папки в нём — только навигация.
+    arg_file: bool = False
 
     @property
     def requires_args(self) -> bool:
@@ -76,7 +79,8 @@ def build_default_registry() -> CommandRegistry:
                 hotkey="F2 · Ctrl+S"),
         Command("diff", (), "", "просмотр pending-диффов, принять/откатить",
                 hotkey="F3 · Ctrl+D"),
-        Command("view", (), "<path>", "постраничный просмотр текстового файла"),
+        Command("view", (), "<path>", "постраничный просмотр текстового файла",
+                arg_file=True),
         Command("notices", (), "", "уведомления (старт + runtime)",
                 hotkey="F4 · Ctrl+O"),
         Command("new", (), "", "новая сессия в этом окне", hotkey="Ctrl+N"),

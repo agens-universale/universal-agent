@@ -35,9 +35,22 @@ def parse_at_segment(text: str, cursor: int) -> Optional[tuple[int, str]]:
     return None
 
 
+_DRIVE_RE = re.compile(r"^[A-Za-z]:")
+
+
+def _is_outside_root(rel: str) -> bool:
+    """Абсолютный или дисковый путь — вне корня проекта: пикер такие не
+    подсказывает (внешние пути набираются руками). Отдельная Windows-ловушка:
+    join(root, "D:") даёт drive-relative путь — «текущую папку диска D»,
+    т.е. листался бы корень проекта под видом D:/…"""
+    return bool(rel) and (os.path.isabs(rel) or bool(_DRIVE_RE.match(rel)))
+
+
 def list_dir(root: str, rel: str) -> list[str]:
     """Содержимое одной папки: папки выше файлов, папки с хвостовым '/'.
     Пути — относительные к root, через '/'. Скрываем только '.git'."""
+    if _is_outside_root(rel):
+        return []
     base = os.path.join(root, rel) if rel else root
     try:
         names = os.listdir(base)
@@ -111,11 +124,16 @@ def _walk_paths(root: str) -> list[str]:
 
 
 def _all_paths(root: str) -> list[str]:
-    """tracked-файлы git + их папки-префиксы (учтён .gitignore);
-    не git-репо → walk + хардкод-игнор."""
+    """tracked + untracked файлы git (учтён .gitignore) + их папки-префиксы;
+    не git-репо → walk + хардкод-игнор.
+
+    --others обязателен: без него untracked-файлы (новые, .claude/ и т.п.)
+    видны через drill-in (list_dir читает диск), но не находятся набором —
+    «.claude/» листится, «.claude/s» давал «нет совпадений»."""
     try:
         res = subprocess.run(
-            ["git", "ls-files"], cwd=root, capture_output=True, text=True, timeout=5,
+            ["git", "ls-files", "--cached", "--others", "--exclude-standard"],
+            cwd=root, capture_output=True, text=True, timeout=5,
         )
         if res.returncode == 0:
             files = [ln.strip().replace("\\", "/") for ln in res.stdout.splitlines() if ln.strip()]
@@ -132,11 +150,27 @@ def _all_paths(root: str) -> list[str]:
 
 
 def fuzzy_search(root: str, query: str, *, limit: int = 50) -> list[str]:
-    """Пустой query → верхний уровень (list_dir). Иначе — рекурсивный поиск по файлам."""
+    """Пустой query → верхний уровень (list_dir). Иначе — рекурсивный поиск по файлам.
+
+    query с '/' дополняется листингом названной папки с диска (фильтр по хвосту):
+    инвариант «что показал drill-in, то находит и набор» — иначе gitignored-файлы
+    (глобальный ignore, .claude/… и т.п.) листились по «dir/», но пропадали на
+    первой же букве фильтра. Глобальный поиск (без '/') ignore уважает — мусор
+    вроде .venv в выдачу не лезет."""
     if not query:
         return list_dir(root, "")
+    if _is_outside_root(query):
+        return []
     q = query.lower().replace("\\", "/")
     matched = [p for p in _all_paths(root) if _path_match(q, p.lower())]
+    if "/" in q:
+        dirpart, _, tail = query.replace("\\", "/").rpartition("/")
+        tail_l = tail.lower()
+        seen = set(matched)
+        for p in list_dir(root, dirpart):
+            base = p.rstrip("/").rsplit("/", 1)[-1].lower()
+            if (base.startswith(tail_l) or tail_l in base) and p not in seen:
+                matched.append(p)
     return rank(query, matched)[:limit]
 
 

@@ -161,6 +161,14 @@ def test_compact_command_registered_with_alias():
     assert reg.lookup("сжать") is cmd
 
 
+def test_view_command_has_arg_file_flag():
+    """/view — команда с файловым аргументом: открывает файловый пикер.
+    Флаг в реестре, а не имя команды в обработчике (системность)."""
+    reg = build_default_registry()
+    assert reg.lookup("view").arg_file is True
+    assert reg.lookup("help").arg_file is False   # дефолт не разлился
+
+
 async def test_f6_opens_settings_with_input_focused():
     """F6 открывает /settings при фокусе в поле ввода.
 

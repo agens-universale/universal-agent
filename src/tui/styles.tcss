@@ -228,7 +228,9 @@ ToolCallRow.tool-group-start { margin-top: 1; }
 /* Палитра команд (overlay, Task 3.3) */
 .palette       { background: #161A23; border: round $run-color; height: auto; max-height: 80%; }
 .palette-row   { color: $ink; padding: 0 1; }
-.palette-row.selected { background: $band-bg; color: $bright; }
+/* $focus-bg, не $band-bg: фон оверлея (#161A23) почти совпадает с $band-bg —
+   выделение было слепым; focus-bg = подсветка фокуса в трейсе, заметно светлее. */
+.palette-row.selected { background: $focus-bg; color: $bright; }
 .palette-hint  { color: $deep-dim; padding: 0 1; }
 .palette-keys  { margin-top: 1; }   /* воздух перед строкой клавиш — как .set-hint */
 
@@ -304,7 +306,7 @@ TextArea.ask-human-mode { border: solid $run-color; }
 #sessions-list { height: 1fr; }
 #sessions-list Static { padding: 0 1; }
 #sessions-list .card { height: auto; margin-bottom: 1; text-wrap: nowrap; text-overflow: ellipsis; }
-#sessions-list .card.selected { background: $band-bg; border-left: outer $accent; }
+#sessions-list .card.selected { background: $card-select-bg; border-left: outer $accent; }
 
 /* PreviewScreen — read-only превью сессии (футер с линией-разделителем) */
 #preview-footer { height: 2; background: #161A23; color: $dim;
@@ -319,11 +321,11 @@ TextArea.ask-human-mode { border: solid $run-color; }
 #skills-list { height: 1fr; }
 #skills-list Static { padding: 0 1; }
 #skills-list .card { height: auto; margin-bottom: 1; text-wrap: nowrap; text-overflow: ellipsis; }
-#skills-list .card.selected { background: $band-bg; border-left: outer $accent; }
+#skills-list .card.selected { background: $card-select-bg; border-left: outer $accent; }
 
 /* McpScreen — карточки серверов (spec 2026-06-10) */
 .mcp-card { height: auto; padding: 0 1; margin-bottom: 1; }
-.mcp-card:focus { background: $band-bg; border-left: outer $accent; }
+.mcp-card:focus { background: $card-select-bg; border-left: outer $accent; }
 .mcp-summary { padding: 0 1; }
 .mcp-confirm { background: $band-bg; border-left: outer $warn; padding: 0 1; }
 .mcp-row { width: 1fr; text-wrap: nowrap; text-overflow: ellipsis; }   /* описание обрезается … */
@@ -365,7 +367,7 @@ TextArea.ask-human-mode { border: solid $run-color; }
 .onb-option { height: auto; padding: 0 1; width: 1fr; }
 /* Выбор — только фон, БЕЗ border-left: полоса сдвигала контент на 1 колонку,
    отчего кружки ●/○ в /settings-секциях съезжали друг относительно друга. */
-.onb-option.selected { background: $band-bg; }
+.onb-option.selected { background: $focus-bg; }   /* контраст как у палитры/трейса */
 .onb-mcp-row { text-wrap: nowrap; text-overflow: ellipsis; }
 .set-spaced { margin-bottom: 1; }   /* воздух между строками-опциями в /settings-секциях */
 /* Первая строка-действие: зазор сверху (от инфо-строк) И снизу (между действиями) одним
@@ -396,11 +398,11 @@ TextArea.ask-human-mode { border: solid $run-color; }
 /* Строка меню — горизонтальная раскладка: текст слева (1fr) + глиф статуса
    у правого края. Так глиф не «едет» при выборе и не липнет к значению. */
 .set-menurow { height: auto; layout: horizontal; padding: 0 1; margin-bottom: 1; }
-.set-menurow.selected { background: $band-bg; }
+.set-menurow.selected { background: $focus-bg; }   /* контраст как у палитры/трейса */
 .set-rowtext { width: 1fr; height: auto; text-wrap: nowrap; text-overflow: ellipsis; }
 .set-glyph { width: 3; height: auto; text-align: right; }
 .set-row { height: auto; padding: 0 1; }
-.set-row.selected { background: $band-bg; }
+.set-row.selected { background: $focus-bg; }   /* контраст как у палитры/трейса */
 .set-hint { color: $deep-dim; padding: 0 1; margin-top: 1; }   /* воздух перед контекст-подсказкой */
 .set-info { height: auto; padding: 0 1; }   /* инфо-строки (Версия/Источник) — тот же отступ */
 /* Подписи редакторов (Модель/Подключение) несут .onb-hint/.onb-warn из онбординга

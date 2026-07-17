@@ -15,15 +15,30 @@ import re
 import uuid
 from typing import Any, Optional
 
-from rich.console import Group
 from rich.syntax import Syntax
 from rich.text import Text
+from textual.containers import Vertical
 from textual.widget import Widget
 from textual.widgets import Static
 
 from tui.palette import BAND_BG, CODE_BLOCK
 
 _MAX_UNFOLD_DEPTH = 5
+
+
+class PayloadBlocks(Vertical):
+    """Контейнер блоков payload: каждый блок — свой Static с Text-рендером.
+
+    Text-рендер — контракт селектируемости: Widget.get_selection отдаёт текст
+    только для Text/Content; Syntax/Group дают None, и Textual молча исключает
+    виджет из мышиного выделения (главный трейс селектируем именно потому,
+    что его строки рендерятся в rich.Text).
+    """
+
+    DEFAULT_CSS = """
+    PayloadBlocks { height: auto; width: 1fr; }
+    PayloadBlocks > Static { height: auto; width: 1fr; background: $band-bg; }
+    """
 
 
 def unfold_payload(content: Any, max_depth: int = _MAX_UNFOLD_DEPTH) -> Any:
@@ -169,14 +184,14 @@ def render_unfolded(data: dict | list) -> Widget:
     skeleton = _extract(data)
     pretty = json.dumps(skeleton, indent=2, ensure_ascii=False)
     if not blocks:
-        return Static(_syntax(pretty))
+        return PayloadBlocks(Static(_highlighted(pretty)))
 
     renderables = []
     json_buf: list[str] = []
 
     def _flush_json() -> None:
         if json_buf:
-            renderables.append(_syntax("\n".join(json_buf)))
+            renderables.append(_highlighted("\n".join(json_buf)))
             json_buf.clear()
 
     for line in pretty.splitlines():
@@ -197,7 +212,7 @@ def render_unfolded(data: dict | list) -> Widget:
         if tail:
             json_buf.append(" " * indent + tail)
     _flush_json()
-    return Static(Group(*renderables))
+    return PayloadBlocks(*[Static(r) for r in renderables])
 
 
 def _multiline_block(value: str, indent: int) -> Text:
@@ -208,7 +223,9 @@ def _multiline_block(value: str, indent: int) -> Text:
     return text
 
 
-def _syntax(pretty_json: str) -> Syntax:
+def _highlighted(pretty_json: str) -> Text:
+    # Syntax.highlight -> уже раскрашенный Text той же темы; сам Syntax как
+    # renderable не годится: get_selection требует Text-рендер (см. PayloadBlocks).
     # word_wrap=True: длинные строки JSON-payload (stdout/stderr из execute_command,
     # arguments с длинными command, content из read_file) переносятся на следующую
     # визуальную линию, иначе обрезаются за правым краем без горизонтального скролла.
@@ -217,10 +234,13 @@ def _syntax(pretty_json: str) -> Syntax:
     #                 one-dark, material, paraiso-dark, lightbulb, stata-dark
     #   контрастные:  monokai, dracula, github-dark, native, fruity, inkpot
     # Если хочется почти-без-цвета: bw (black/white), friendly_grayscale.
-    return Syntax(
-        pretty_json,
+    syntax = Syntax(
+        "",
         lexer="json",
         theme="solarized-dark",  # solarized-dark | monokai | nord
         background_color=BAND_BG,
         word_wrap=True,
     )
+    text = syntax.highlight(pretty_json)
+    text.rstrip()  # highlight добавляет хвостовой \n -> лишняя пустая строка
+    return text
