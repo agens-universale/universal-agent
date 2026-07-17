@@ -108,17 +108,22 @@ async def test_palette_closes_on_esc():
 
 @pytest.mark.asyncio
 async def test_palette_enter_inserts_command_with_args(tmp_path):
-    """Enter по команде с аргументами (/view) подставляет в input, не выполняет."""
+    """Enter по команде с аргументами (/view) подставляет в input, не выполняет.
+    /view — команда с arg_file: следом за подстановкой открывается file-picker
+    (состояние 3b), как /export открывает arg-picker — см. соседний тест."""
     pytest.importorskip("textual")
     from tui.app import TuiApp
     from tui.screens.file_view import FileViewerScreen
+    from tui.widgets.command_palette import CommandPalette
+    from tui.widgets.file_picker import FilePicker
 
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     async with app.run_test() as pilot:
         await pilot.press("/")
         await pilot.press("v")  # view
         await pilot.press("enter")
-        assert not pilot.app.query(".palette")
+        assert not pilot.app.query(CommandPalette)
+        assert len(pilot.app.query(FilePicker)) == 1
         inp = pilot.app.query_one("#cmdinput")
         assert inp.text == "/view "
         # Курсор в конце — дальше можно дописывать путь.

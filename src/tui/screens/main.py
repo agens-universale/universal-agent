@@ -2477,6 +2477,8 @@ class TraceScreen(Screen):
                 self._close_skill_picker()
             if self._arg_picker is not None:
                 self._close_arg_picker()
+            if self._file_picker is not None:
+                self._close_file_picker()
             if self._palette is None:
                 self._open_palette(prefix=val[1:])
             else:
@@ -2542,6 +2544,22 @@ class TraceScreen(Screen):
                     self._arg_picker.set_filter(rest)
                 return
 
+            # Состояние 3b: /<cmd> <query>, команда с файловым аргументом
+            # (Command.arg_file) → файловый пикер (тот же, что у @-сегмента).
+            # Стоит ДО @-детекта: '@' внутри такой строки — просто текст фильтра.
+            if cmd_obj is not None and cmd_obj.arg_file:
+                if self._suppress_picker_reopen:
+                    self._suppress_picker_reopen = False
+                    return
+                if self._palette is not None:
+                    self._close_palette()
+                if self._skill_picker is not None:
+                    self._close_skill_picker()
+                if self._arg_picker is not None:
+                    self._close_arg_picker()
+                self._show_file_picker(query=rest)
+                return
+
         # Состояние 4: активный @-сегмент под курсором → file-picker.
         inp = event.text_area
         try:
@@ -2559,10 +2577,7 @@ class TraceScreen(Screen):
             if self._arg_picker is not None:
                 self._close_arg_picker()
             _, query = seg
-            if self._file_picker is None:
-                self._open_file_picker(query=query)
-            else:
-                self._refresh_file_picker(query=query)
+            self._show_file_picker(query=query)
             return
         if self._file_picker is not None:
             self._close_file_picker()
@@ -2648,19 +2663,25 @@ class TraceScreen(Screen):
         return (list_dir(root, query[:-1]) if query.endswith("/")
                 else fuzzy_search(root, query))
 
-    def _open_file_picker(self, *, query: str) -> None:
-        if self._file_picker is not None:
-            self._refresh_file_picker(query=query)
-            return
-        from tui.widgets.file_picker import FilePicker
-        picker = FilePicker(self._file_picker_entries(query))
-        self._file_picker = picker
-        self._mount_input_overlay(picker)
+    def _show_file_picker(self, *, query: str) -> None:
+        """Открыть/обновить файловый пикер; совпадений нет → скрыть.
 
-    def _refresh_file_picker(self, *, query: str) -> None:
-        if self._file_picker is None:
+        Пустой ящик «(нет совпадений)» не показываем: выбрать из него нечего,
+        а информация «не нашлось» видна по отсутствию списка. Пикер сам
+        возвращается, как только fuzzy снова что-то находит (состояния
+        пересчитываются на каждый Changed)."""
+        entries = self._file_picker_entries(query)
+        if not entries:
+            if self._file_picker is not None:
+                self._close_file_picker()
             return
-        self._file_picker.set_entries(self._file_picker_entries(query))
+        if self._file_picker is None:
+            from tui.widgets.file_picker import FilePicker
+            picker = FilePicker(entries)
+            self._file_picker = picker
+            self._mount_input_overlay(picker)
+        else:
+            self._file_picker.set_entries(entries)
 
     def _close_file_picker(self) -> None:
         if self._file_picker is None:
@@ -2669,18 +2690,48 @@ class TraceScreen(Screen):
         self._file_picker = None
 
     def _complete_file_picker(self) -> None:
-        """Достроить выбранный путь в @-сегмент. Папка → '@dir/' + остаёмся;
-        файл → '@path ' + закрыть."""
+        """Достроить выбранный путь в открытом файловом пикере — два контекста,
+        приоритет как в state-цепочке on_text_area_changed (state 3b раньше
+        @-детекта, см. state 4): сначала файловый аргумент команды
+        (/<cmd с arg_file> <query> → путь без '@'), иначе — активный
+        @-сегмент под курсором (→ '@path'). Папка → drill-in (пикер
+        остаётся); файл → путь (+' ' у @-ветки) и закрыть."""
         if self._file_picker is None:
             return
         entry = self._file_picker.selected_entry()
         if entry is None:
             return
-        from tui.services.file_index import parse_at_segment
         inp = self.query_one("#cmdinput", CommandTextArea)
         row, col = inp.cursor_location
         lines = inp.text.split("\n")
         line = lines[row]
+
+        first, sep, _rest = line.partition(" ")
+        cmd_obj = (self._registry.lookup(first[1:])
+                   if sep and first.startswith("/") else None)
+        if cmd_obj is not None and cmd_obj.arg_file:
+            start = len(first) + 1
+            if col < start:
+                # Курсор левее зоны аргумента (клик в имя команды) —
+                # достройка здесь исказила бы строку, no-op.
+                return
+            is_dir = entry.endswith("/")
+            replacement = entry + ("" if is_dir else " ")
+            new_line = line[:start] + replacement + line[col:]
+            if not is_dir:
+                # Достроенная строка всё ещё матчит state 3b (/<cmd> <query>) —
+                # без suppress следующий Changed тут же переоткроет пикер.
+                self._suppress_picker_reopen = True
+            lines[row] = new_line
+            inp.text = "\n".join(lines)
+            inp.cursor_location = (row, start + len(replacement))
+            if is_dir:
+                self._show_file_picker(query=entry)
+            else:
+                self._close_file_picker()
+            return
+
+        from tui.services.file_index import parse_at_segment
         seg = parse_at_segment(line, col)
         if seg is None:
             return
@@ -2692,7 +2743,7 @@ class TraceScreen(Screen):
         inp.text = "\n".join(lines)
         inp.cursor_location = (row, start + len(replacement))
         if is_dir:
-            self._refresh_file_picker(query=entry)
+            self._show_file_picker(query=entry)
         else:
             self._close_file_picker()
 
@@ -2718,8 +2769,13 @@ class TraceScreen(Screen):
 
         # File picker открыт → Enter достраивает путь (не сабмитит сообщение).
         if self._file_picker is not None:
-            self._complete_file_picker()
-            return
+            if self._file_picker.selected_entry() is None:
+                # Fuzzy ничего не нашёл (например, абсолютный/внешний путь) —
+                # закрыть пикер и пропустить Enter в обычный submit-путь.
+                self._close_file_picker()
+            else:
+                self._complete_file_picker()
+                return
 
         # Arg picker открыт → Enter выполняет команду с выбранным/набранным значением.
         if self._arg_picker is not None:
