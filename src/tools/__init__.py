@@ -228,7 +228,12 @@ def apply_tool(
             injected_fields=entry.get("injected_fields") or [],
         )
         runner = SubagentRunner(ctx, orchestrator_state, config_dict)
-        return runner.run(tool_name, parsed_args, run_agent_func)
+        return runner.run(
+            tool_name,
+            parsed_args,
+            run_agent_func,
+            parent_call_id=kwargs.get("call_id"),
+        )
 
     # Определяем, каким логгером пользоваться: контекстный или модульный.
     log = _fallback_logger

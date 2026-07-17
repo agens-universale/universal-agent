@@ -1,10 +1,16 @@
-"""ToolCallRow — единый виджет на один tool-вызов; мутирует от running к ok/err.
+"""ToolCallRow — единый виджет на один tool-вызов; мутирует waiting → running → ok/err.
 
 Layout: Horizontal(prefix-Static, content-Static) — wrap длинных args/result
 происходит внутри content-колонки = hanging indent (continuation выравнивается
 под началом имени тула, col 5 относительно левого края строки).
 
 Статус-глиф живёт в prefix-Static (▸/✓/✗/·), content-Static несёт имя/args/хвост.
+
+Фазы:
+- waiting  — call уже нарисован, execute ещё не начался: · dim, без elapsed;
+- running  — сейчас исполняется: ▸ + elapsed (+ опциональный live_status);
+- done     — есть result: ✓/✗;
+- interrupted — стоп/обрыв до output: · + «прервано».
 """
 from __future__ import annotations
 
@@ -12,7 +18,6 @@ import time
 from typing import Optional
 
 from rich.text import Text
-from typing import Optional
 
 from textual.app import ComposeResult
 from textual.containers import Horizontal
@@ -39,7 +44,7 @@ _PULSE_SHADES = [
 
 
 class ToolCallRow(ClickModelMixin, Widget):
-    """Строка одного tool-вызова с состоянием pending / ok / error.
+    """Строка одного tool-вызова: waiting / running / ok / error / interrupted.
 
     DOM:
         ToolCallRow
@@ -71,9 +76,11 @@ class ToolCallRow(ClickModelMixin, Widget):
     can_focus = True
 
     _PREFIX = "   "   # отступ-индент тула (без «лесенки» |-); статус-глиф ✓/✗/▸ — следом
+    _NESTED_PREFIX = "       "  # nested под subagent: +4 пробела
 
     def __init__(self, *, call_id: str, tool_name: str,
-                 args_summary: str, event_no: int = 0, **kwargs) -> None:
+                 args_summary: str, event_no: int = 0,
+                 waiting: bool = False, nested: bool = False, **kwargs) -> None:
         super().__init__(**kwargs)
         self.call_id = call_id
         self._tool_name = tool_name
@@ -82,17 +89,20 @@ class ToolCallRow(ClickModelMixin, Widget):
         self._result: Optional[str] = None
         self._is_error: bool = False
         self._interrupted: bool = False  # терминальное «прервано» (стоп/обрыв run)
+        self._waiting: bool = bool(waiting)
+        self._nested: bool = bool(nested)
+        self._live_status: Optional[str] = None  # step/last для корневого субагента
         self._content_static: Optional[Static] = None
         self._prefix_static: Optional[Static] = None
         self._pulse_frame: int = 0
         self._pulse_timer = None     # собственный 0.1с-тик дыхания ▸ (on_mount)
-        # line-tool на самом widget'е — color: $dim каскадится в prefix-Static,
-        # чтобы `  |- ` отрисовалось dim (как и было до compose-рефакторинга).
+        # line-tool на самом widget'е — color: $dim каскадится в prefix-Static.
         self.add_class("line-tool")
-        # Момент создания строки — для тикающего elapsed в running-состоянии.
+        if self._nested:
+            self.add_class("nested-tool")
+        # Момент создания / активации — для тикающего elapsed в running.
         self._start_monotonic = time.monotonic()
-        # Пауза тикера на время человеко-ожидания (confirm / ask_human): агент
-        # заблокирован на решении юзера — это не работа тула, простой исключаем.
+        # Пауза тикера на время человеко-ожидания (confirm / ask_human).
         self._paused_at: Optional[float] = None
         self._paused_total: float = 0.0
 
@@ -110,88 +120,113 @@ class ToolCallRow(ClickModelMixin, Widget):
             yield self._content_static
 
     def on_mount(self) -> None:
-        # Пульс ▸ — на собственном 0.1с-тике (как индикатор) → плавное дыхание
-        # 10fps, независимо от 0.25с-поллера (он обновляет только секунды).
         self._pulse_timer = self.set_interval(0.1, self._pulse_tick)
 
     def _pulse_tick(self) -> None:
-        """Кадр дыхания running-глифа ▸ (0.1с). После завершения/прерывания
-        гасит собственный таймер — завершённые строки не тикают."""
-        if self._result is not None or self._interrupted:
-            if self._pulse_timer is not None:
-                self._pulse_timer.stop()
+        """Кадр дыхания ▸. Waiting / done / interrupted — не тикаем."""
+        if self._waiting or self._result is not None or self._interrupted:
             return
         self._pulse_frame += 1
         if self._prefix_static is not None:
             self._prefix_static.update(self._render_prefix())
 
     def _update(self) -> None:
-        """Перерисовать prefix (статус-глиф) и content (имя/хвост)."""
         if self._prefix_static is not None:
             self._prefix_static.update(self._render_prefix())
         if self._content_static is not None:
             self._content_static.update(self._render_content())
 
+    def set_waiting(self) -> None:
+        """Перевести в waiting (·, без elapsed). После result/interrupt — no-op."""
+        if self._result is not None or self._interrupted:
+            return
+        if self._waiting:
+            return
+        self._waiting = True
+        self._live_status = None
+        self._update()
+
+    def set_active(self) -> None:
+        """Снять waiting → running (▸ + elapsed). После result/interrupt — no-op."""
+        if self._result is not None or self._interrupted:
+            return
+        if not self._waiting:
+            return
+        self._waiting = False
+        self._start_monotonic = time.monotonic()
+        self._paused_at = None
+        self._paused_total = 0.0
+        self._update()
+
+    def set_live_status(self, text: Optional[str]) -> None:
+        """Хвост running-строки (step/last). None — только `· Ns`."""
+        if self._result is not None or self._interrupted or self._waiting:
+            return
+        self._live_status = text
+        self._update()
+
     def set_result(self, *, summary: str, error: bool) -> None:
-        """Завершить вызов; обновить prefix+content."""
         self._result = summary
         self._is_error = error
+        self._waiting = False
+        self._live_status = None
         self._update()
 
     def mark_interrupted(self) -> None:
-        """Терминальное «прервано»: run остановлен/оборвался до output'а.
-        После реального результата — no-op; повторный вызов — no-op."""
+        """Терминальное «прервано». После результата — no-op; повтор — no-op."""
         if self._result is not None or self._interrupted:
             return
         self._interrupted = True
+        self._waiting = False
+        self._live_status = None
         self._update()
 
     def refresh_running_elapsed(self) -> None:
-        """Тик секунд running-строки (поллер ~0.25с): перерисовать `· Nс`. Пульс
-        ▸ живёт отдельно на 0.1с-тике (_pulse_tick). После завершения — no-op."""
-        if self._result is not None or self._interrupted:
+        """Тик elapsed (~0.25с). Waiting / done / interrupted — no-op."""
+        if self._waiting or self._result is not None or self._interrupted:
             return
         self._update()
 
     def pause(self) -> None:
-        """Заморозить тикер elapsed (человеко-ожидание confirm/ask_human).
-        Идемпотентно; после завершения/прерывания — no-op."""
-        if self._paused_at is None and self._result is None and not self._interrupted:
+        """Заморозить elapsed на человеко-ожидании. Waiting/done — no-op."""
+        if (
+            self._paused_at is None
+            and self._result is None
+            and not self._interrupted
+            and not self._waiting
+        ):
             self._paused_at = time.monotonic()
 
     def resume(self) -> None:
-        """Снять паузу: накопить простой в _paused_total. Без паузы — no-op."""
         if self._paused_at is not None:
             self._paused_total += time.monotonic() - self._paused_at
             self._paused_at = None
 
     def _elapsed_s(self) -> int:
-        """Целые секунды работы тула (за вычетом простоя на человеко-ожидание).
-        Во время паузы — заморожено на момент паузы."""
         now = self._paused_at if self._paused_at is not None else time.monotonic()
         return int(now - self._start_monotonic - self._paused_total)
 
     def _status_glyph(self) -> tuple[str, str]:
-        """(глиф, цвет) статуса для prefix-зоны."""
         if self._result is None:
-            if self._interrupted:
+            if self._interrupted or self._waiting:
                 return "·", _DIM
             return "▸", _PULSE_SHADES[self._pulse_frame % len(_PULSE_SHADES)]
         if self._is_error:
             return "✗", _ERR
         return "✓", _OK
 
+    def _indent_prefix(self) -> str:
+        return self._NESTED_PREFIX if self._nested else self._PREFIX
+
     def _render_prefix(self) -> Text:
-        """`<отступ><статус-глиф> ` — индент-отступ + цветной ведущий глиф (✓/✗/▸/·)."""
         text = Text()
-        text.append(self._PREFIX, style=_DIM)   # отступ-индент
+        text.append(self._indent_prefix(), style=_DIM)
         glyph, color = self._status_glyph()
         text.append(glyph, style=color)
         text.append(" ")
         return text
 
     def _render_content(self) -> Text:
-        """rich.Text для content-колонки (имя/args/хвост, без статус-глифа)."""
         text = Text()
         text.append(self._tool_name, style=_TOOL_NAME)
         text.append("(", style=_DIM)
@@ -200,12 +235,15 @@ class ToolCallRow(ClickModelMixin, Widget):
             text.append(") ", style=_DIM)
             if self._interrupted:
                 text.append("прервано", style=_DIM)
+            elif self._waiting:
+                pass  # только имя(args), без elapsed
+            elif self._live_status:
+                text.append(f"· {self._live_status} · ", style=_DIM)
+                text.append(format_duration(self._elapsed_s()), style=_RUN)
             else:
                 text.append(f"· {format_duration(self._elapsed_s())}", style=_RUN)
             return text
         text.append(")", style=_DIM)
-        # ok и error: `-> хвост` серым (цвет несёт ведущий глиф в prefix).
-        # error — всегда показываем хвост (текст ошибки); ok — только если непустой.
         if self._is_error or self._result:
             text.append(f" -> {self._result}", style=_DIM)
         return text

@@ -15,6 +15,7 @@ from processing_responses import run_agent
 from run_context import RunContext
 from config_modules.stored_outputs import get_stored_tool_outputs_max_entries
 from message_policy.chat_completions import repair_tool_call_pairing
+from message_policy.stop_persist import is_persist_discarded
 from run_summary_coordinator import (
     RunSummaryCoordinator,
     reset_stale_summarizing_flag,
@@ -332,7 +333,7 @@ class AgentExecutor:
                 messages = [*base_messages, *new_user_messages]
 
             def _persist_thread_batch(step_messages: list[dict]) -> None:
-                if state.discard_writes_after_stop and state.stop_requested:
+                if is_persist_discarded(state):
                     return
                 # Persist notes from in-memory state into thread meta.
                 # Tools mutate state, but ThreadSession writes self.meta to disk.
@@ -380,7 +381,7 @@ class AgentExecutor:
             get_full_history_messages = thread_session.get_full_history_messages
         elif backend_api_mode == "chat_completions" and summary_trigger_chars > 0:
             def _persist_runtime_batch(step_messages: list[dict]) -> None:
-                if state.discard_writes_after_stop and state.stop_requested:
+                if is_persist_discarded(state):
                     return
                 state.current_user_intent = append_user_asks_from_messages(
                     state.current_user_intent,

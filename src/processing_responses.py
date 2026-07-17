@@ -1,4 +1,5 @@
 import json
+import time
 from types import SimpleNamespace
 
 from config import parse_chat_completions_max_tokens, resolve_tui_stream_enabled
@@ -9,6 +10,7 @@ from intent_guard.feedback import (
 from constants.tool_names import (
     ASK_HUMAN_TOOL_NAME,
     FINISH_TOOL_NAME,
+    INTERMEDIATE_REPLY_TOOL_NAME,
     SESSION_COMPACT_TOOL_NAME,
     TURN_FINALIZING_TOOLS,
 )
@@ -22,9 +24,17 @@ from intent_guard.turn_finish_emit import (
 from intent_scope.hook import maybe_update_intent_scope_from_tool
 from intent_scope.final_answer import maybe_record_final_answer_intent
 from message_policy.cycle_stop import append_cycle_stop_tool_outputs_for_batch
+from message_policy.stop_persist import is_persist_discarded
+from message_policy.user_stop import not_started_due_to_user_stop_output
 from request_backend_policy import request_chat_completions_with_policy
 from tools import apply_tool, WrongFunctionArgumentsException, is_unknown_tool_output
 from tools.session.stored_outputs.wrapping import maybe_store_and_wrap_tool_output
+from tools.subagents.progress import (
+    brief_args_summary,
+    emit_progress,
+    extract_intermediate_prose,
+    parse_tool_result_status,
+)
 from utils.connect_backend import create_call_headers
 from utils.connect_backend import request_backend_responses as request_backend
 from utils.ssl_config import get_backend_client_cert
@@ -69,12 +79,22 @@ def _maybe_persist(
     callback,
     messages: list,
     state,
+    *,
+    pairing: bool = False,
 ) -> None:
-    """Вызвать persist callback, если не активирован discard-after-stop guard."""
+    """Вызвать persist callback, если не активирован discard-after-stop guard.
+
+    ``pairing=True`` — technical closing A/B при user-stop пишем всегда
+    (иначе orphan function_call в jsonl).
+    """
     if callback is None:
         return
-    if state.discard_writes_after_stop and state.stop_requested:
+    if is_persist_discarded(state, pairing=pairing):
         return
+    token = False
+    if pairing:
+        token = True
+        state.allow_pairing_persist = True
     try:
         callback(messages)
     except Exception as persist_exc:
@@ -83,6 +103,40 @@ def _maybe_persist(
             persist_exc,
             exc_info=True,
         )
+    finally:
+        if token:
+            state.allow_pairing_persist = False
+
+
+def _function_call_output_message(call_id: Any, output: str) -> Dict:
+    return {
+        "id": generate_message_id_func("fco"),
+        "type": "function_call_output",
+        "call_id": call_id,
+        "output": output,
+    }
+
+
+def _commit_user_stop_pairing(
+    state: State,
+    outputs: List[Dict],
+    persist_messages_callback: Optional[Callable[[List[Dict]], None]],
+) -> None:
+    """Записать A/B в state.messages + jsonl несмотря на discard_writes_after_stop."""
+    if not outputs:
+        return
+    to_append = filter_messages_not_in_state(
+        list(getattr(state, "messages", []) or []),
+        list(outputs),
+    )
+    if to_append:
+        state.messages.extend(to_append)
+    _maybe_persist(
+        persist_messages_callback,
+        to_append or list(outputs),
+        state,
+        pairing=True,
+    )
 
 
 def _summarize_call_data_for_log(call_data: Dict[str, Any]) -> Dict[str, Any]:
@@ -400,15 +454,45 @@ def process_tool_calls(
     run_agent_func,
     persist_messages_callback: Optional[Callable[[List[Dict]], None]] = None,
 ):
+    """Исполнить batch function_call из ответа модели → список function_call_output.
+
+    На каждый call по порядку:
+      1) если сейчас пойдёт блокирующий ask_human — сначала записать уже готовые
+         output'ы предыдущих тулов (и skip), чтобы в UI они не висели «running»;
+      2) для субагента (вложенный прогон): сигнал «тул стартовал» в live-канал TUI;
+      3) вызвать тул (для subagent_* ещё передаём call_id, чтобы nested-строки
+         в TUI цеплялись к этой корневой строке субагента);
+      4) для субагента: сигнал «тул закончил» или текст intermediate_reply;
+         эти сигналы только в памяти TUI, в thread jsonl не пишутся;
+      5) при необходимости ужать длинный output, обновить intent-scope,
+         собрать function_call_output.
+
+    До цикла по batch:
+      - после первого turn-финализатора (finish / ask_human) остальные call'ы
+        не исполняем — сразу synthetic skip-output;
+      - skip готовим заранее, чтобы успеть записать их до ask_human вместе
+        с уже выполненными тулами.
+
+    User-stop: если ``state.stop_requested`` до/между тулами — remaining
+    не ``apply_tool``, сразу envelope B; active (уже вернул A) + B сразу
+    пишем в state/jsonl (исключение из discard_writes_after_stop).
+
+    Live-прогресс субагента шлётся только если это вложенный ctx (есть
+    parent_call_id и progress sink). У родителя sink может быть для чтения
+    очереди, но сам parent тулы туда не пишет.
+    """
     grouped_messages = group_messages(messages)
     if len(grouped_messages['tool_outputs']) > 0:
         raise ValueError('Messages has tool_outputs')
 
+    # Снимок batch до исполнения: если сработает session_compact, из него
+    # соберём «что оставить» вместо сырого списка output'ов.
     batch_snapshot = list(messages)
     state._session_compact_batch_snapshot = batch_snapshot
     state.session_compact_applied = False
 
     tools_outputs = []
+    # Один turn-финализатор на ход: executed исполняем, skipped — только synthetic output.
     unknown_in_batch = 0
     executed, skipped = split_at_first_finalizer(grouped_messages["tool_calls"])
     # Skip-output'ы синтетические — считаем заранее, чтобы сфлашить ВМЕСТЕ с
@@ -428,29 +512,109 @@ def process_tool_calls(
                     f'one finalizer per turn."}}'
                 ),
             })
+    aborted_by_user_stop = False
     # Human-wait (ask_human | confirm-in-tool): до блокировки сфлашить уже
     # посчитанные output'ы предыдущих тулов + skip'ы (I2), чтобы TUI не держал
     # их в running на время wait. Полный батч персистится ещё раз на выходе
     # process_tool_calls (run_agent → _maybe_persist); уже записанные id
     # пропускаются в append_new_thread_messages по make_message_key.
     for i, m in enumerate(executed):
+        # Между тулами / до старта — если stop, remaining не apply_tool → envelope B.
+        if getattr(state, "stop_requested", False):
+            for rem in executed[i:]:
+                rem_name = str(rem.get("name") or "")
+                rem_out = not_started_due_to_user_stop_output(rem_name)
+                rem_out = maybe_store_and_wrap_tool_output(
+                    rem_out,
+                    call_id=rem["call_id"],
+                    tool_name=rem_name,
+                    state=state,
+                    config=getattr(ctx, "config_dict", {}) or {},
+                    logger=getattr(ctx, "logger", None),
+                )
+                tools_outputs.append(
+                    _function_call_output_message(rem["call_id"], rem_out)
+                )
+            aborted_by_user_stop = True
+            break
+
         tool_name = str(m.get("name") or "")
         prior = list(tools_outputs) + skip_outputs
         if prior and (i > 0 or tool_name == ASK_HUMAN_TOOL_NAME):
             _maybe_persist(persist_messages_callback, prior, state)
         tool_arguments = str(m.get("arguments", ""))
+        tool_call_id = m.get("call_id")
+        call_id_str = str(tool_call_id) if tool_call_id is not None else None
+        # intermediate_reply в UI — просто текст «· …», не строка тула ▸/✓,
+        # поэтому ниже шлём отдельный сигнал, без «старт тула».
+        is_intermediate = tool_name == INTERMEDIATE_REPLY_TOOL_NAME
+        started_at = time.monotonic()
+
+        # Live-прогресс субагента: «тул пошёл». На обычном parent-прогоне — no-op.
+        if not is_intermediate:
+            emit_progress(
+                ctx,
+                state,
+                "tool_start",
+                tool_name=tool_name,
+                tool_call_id=call_id_str,
+                args_summary=brief_args_summary(tool_arguments),
+            )
         try:
+            # call_id для субагента: чтобы вложенные строки в TUI знали,
+            # под какой корневой subagent_* они относятся.
             tool_res_raw = apply_tool(
                 tool_name=tool_name,
                 arguments=tool_arguments,
                 ctx=ctx,
                 state=state,
                 run_agent_func=run_agent_func,
+                call_id=tool_call_id,
             )
         except WrongFunctionArgumentsException as exc:
             if getattr(exc, "call_id", None) is None:
-                exc.call_id = m.get("call_id")
+                exc.call_id = tool_call_id
+            # Даже при ошибке аргументов закрыть «бегущую» строку в TUI.
+            elapsed_ms = int((time.monotonic() - started_at) * 1000)
+            emit_progress(
+                ctx,
+                state,
+                "tool_end",
+                elapsed_ms=elapsed_ms,
+                tool_name=tool_name,
+                tool_call_id=call_id_str,
+                ok=False,
+                error_brief=str(exc),
+            )
             raise
+        # Live-прогресс: тул закончил — или текст intermediate_reply.
+        # В историю треда это не пишется.
+        elapsed_ms = int((time.monotonic() - started_at) * 1000)
+        ok, error_brief = parse_tool_result_status(tool_res_raw)
+        if is_intermediate:
+            emit_progress(
+                ctx,
+                state,
+                "intermediate_reply",
+                elapsed_ms=elapsed_ms,
+                tool_name=tool_name,
+                tool_call_id=call_id_str,
+                prose=extract_intermediate_prose(tool_arguments, tool_res_raw),
+                ok=ok if ok is not None else True,
+                error_brief=error_brief,
+            )
+        else:
+            emit_progress(
+                ctx,
+                state,
+                "tool_end",
+                elapsed_ms=elapsed_ms,
+                tool_name=tool_name,
+                tool_call_id=call_id_str,
+                ok=ok if ok is not None else True,
+                error_brief=error_brief,
+            )
+
         if is_unknown_tool_output(tool_res_raw):
             unknown_in_batch += 1
             if tool_name == getattr(state, "last_unknown_tool_name", None):
@@ -463,6 +627,8 @@ def process_tool_calls(
         else:
             state.last_unknown_tool_name = None
             state.unknown_tool_repeat_count = 0
+
+        # Длинный output ужимаем в stored-envelope; остальное оставляем как есть.
         tool_res = maybe_store_and_wrap_tool_output(
             tool_res_raw,
             call_id=m["call_id"],
@@ -479,21 +645,42 @@ def process_tool_calls(
                 state=state,
                 ctx=ctx,
             )
-        new_message = {
-            "id": generate_message_id_func("fco"),
-            "type": "function_call_output",
-            "call_id": m["call_id"],
-            "output": tool_res,
-        }
+        new_message = _function_call_output_message(m["call_id"], tool_res)
 
         tools_outputs.append(new_message)
 
-    state.last_batch_unknown_tool_count = unknown_in_batch
+        # После apply: если стопнули mid-tool (envelope A от runner) — хвост batch → B.
+        if getattr(state, "stop_requested", False):
+            for rem in executed[i + 1 :]:
+                rem_name = str(rem.get("name") or "")
+                rem_out = not_started_due_to_user_stop_output(rem_name)
+                rem_out = maybe_store_and_wrap_tool_output(
+                    rem_out,
+                    call_id=rem["call_id"],
+                    tool_name=rem_name,
+                    state=state,
+                    config=getattr(ctx, "config_dict", {}) or {},
+                    logger=getattr(ctx, "logger", None),
+                )
+                tools_outputs.append(
+                    _function_call_output_message(rem["call_id"], rem_out)
+                )
+            aborted_by_user_stop = True
+            break
 
-    # Skip-output'ы уже в возврате (и могли быть сфлашены выше); на выходном
-    # персисте дубли id снова отсечёт make_message_key.
+    # Skip-output'ы уже посчитаны выше и сфлашены перед блокировкой — добавляем в
+    # возврат (тред/state дедупят повторный персист по make_message_key).
+    state.last_batch_unknown_tool_count = unknown_in_batch
     tools_outputs.extend(skip_outputs)
 
+    if aborted_by_user_stop:
+        # run_agent после stop часто выходит на check_stop до обычного persist —
+        # закрывающие A/B пишем сразу (исключение discard_writes).
+        _commit_user_stop_pairing(state, tools_outputs, persist_messages_callback)
+
+    # Если внутри batch сработал session_compact — вместо сырых output'ов
+    # вернуть сохранённые пары call/output + technical-сообщение «продолжай»,
+    # чтобы не оставить висячий function_call и не тащить старое окно дальше.
     if getattr(state, "session_compact_applied", False):
         state.session_compact_applied = False
         snapshot = getattr(state, "_session_compact_batch_snapshot", None) or batch_snapshot

@@ -118,8 +118,27 @@ class TestStopRequestedPropagation:
 
         payload = json.loads(result)
         assert payload["ok"] is False
-        assert payload["meta"]["finish_reason"] == "error"
-        assert "stop" in payload["error"]["message"].lower()
+        assert payload["status"] == "cancelled_by_user"
+        assert payload["error"]["code"] == "cancelled_by_user"
+        assert payload["meta"]["finish_reason"] == "stopped_by_user"
+
+    def test_stopped_subagent_includes_child_run_id_in_meta(self):
+        orch = _make_orchestrator_state()
+        cfg = _make_config()
+        ctx = _make_ctx(cfg)
+
+        def fake_run_agent(messages, child_state, child_ctx, **kwargs):
+            return None
+
+        runner = SubagentRunner(ctx, orch, cfg)
+        with patch.object(
+            runner, "_build_child_ctx", return_value=SimpleNamespace(run_id="child-run-42")
+        ):
+            result = runner.run("subagent_worker", {"task": "test"}, fake_run_agent)
+
+        payload = json.loads(result)
+        assert payload["meta"]["child_run_id"] == "child-run-42"
+        assert payload["meta"]["finish_reason"] == "stopped_by_user"
 
     def test_normal_run_check_stop_returns_false(self):
         """check_stop returns False when orchestrator is not stopped."""

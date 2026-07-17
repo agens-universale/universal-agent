@@ -396,7 +396,25 @@ def _scalar_preview(v: Any) -> str:
     return "<?>"
 
 
+def _text_preview(v: Any, limit: int) -> str:
+    """Обрезать длинную строку до ~limit символов с «…», без `<N chars>`."""
+    if not isinstance(v, str):
+        return _scalar_preview(v)
+    text = " ".join(v.split())
+    if len(text) > limit:
+        text = text[:limit].rstrip() + "…"
+    return repr(text)
+
+
 def _arg_summary(name: str, args: dict) -> str:
+    if name.startswith("subagent_"):
+        # Спека: reason ~80, task ~60 — текст, не <N chars>.
+        pairs: list[str] = []
+        if "reason" in args:
+            pairs.append(f"reason={_text_preview(args.get('reason'), 80)}")
+        if "task" in args:
+            pairs.append(f"task={_text_preview(args.get('task'), 60)}")
+        return ", ".join(pairs)
     if name in ("read_file", "list_files"):
         p = args.get("path")
         return f"path={p!r}" if isinstance(p, str) else ""
@@ -425,7 +443,7 @@ def _arg_summary(name: str, args: dict) -> str:
         return f"action={a!r}"
 
     # default: name + 1-3 short scalars
-    pairs: list[str] = []
+    pairs = []
     for k, v in list(args.items())[:3]:
         pairs.append(f"{k}={_scalar_preview(v)}")
     return ", ".join(pairs)
@@ -457,6 +475,15 @@ def _summarize_output(output: Any, *, error: bool) -> str:
         return output.replace("\n", " ")[:80]
     if not isinstance(data, dict):
         return str(data)[:80]
+
+    # User-stop / step-limit: короткие статусы вместо длинного error.message.
+    status = data.get("status")
+    if status == "cancelled_by_user":
+        return "отменено"
+    if status == "not_started_due_to_user_stop":
+        return "не запущено (стоп)"
+    if status == "step_limit":
+        return "лимит шагов"
 
     if error:
         err = data.get("error") or data.get("message") or ""
