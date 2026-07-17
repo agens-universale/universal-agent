@@ -134,3 +134,48 @@ async def test_detail_screen_plain_output_not_json(tmp_path):
         body_text = "\n".join(str(s.render()) for s in pilot.app.screen.query(Static))
         assert "Traceback" in body_text
         assert "RuntimeError" in body_text
+
+
+@pytest.mark.asyncio
+async def test_detail_screen_payload_is_selectable(tmp_path):
+    """Экран события: get_selection на каждом Static payload-а возвращает текст.
+
+    Это контракт Ctrl+C: app._current_selection -> screen.get_selected_text
+    собирает текст только с виджетов, чей get_selection не None.
+    """
+    pytest.importorskip("textual")
+    from textual import events
+    from textual.selection import Selection
+    from textual.widgets import Static
+    from tui.app import TuiApp
+    from tui.widgets.tool_call_row import ToolCallRow
+    from tui.screens.tool_call_detail import ToolCallDetailScreen
+
+    tid = "detail_selectable"
+    _write_thread_with_tool_call(
+        tmp_path, tid,
+        call_payload={"type": "function_call", "name": "read_file",
+                      "arguments": {"path": "x.py"}, "call_id": "c1"},
+        result_payload={"type": "function_call_output", "call_id": "c1",
+                        "output": json.dumps({"ok": True, "content": "x = 1\ny = 2"})},
+    )
+
+    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    async with app.run_test() as pilot:
+        pilot.app.screen.attach_active_task(tid)
+        await pilot.pause(0.3)
+
+        row = pilot.app.screen.query_one(ToolCallRow)
+        click = events.Click(
+            widget=row, x=0, y=0, delta_x=0, delta_y=0, button=1,
+            shift=False, meta=False, ctrl=True, chain=1,
+        )
+        row.on_click(click)
+        await pilot.pause(0.2)
+
+        assert isinstance(pilot.app.screen, ToolCallDetailScreen)
+        statics = pilot.app.screen.query("PayloadBlocks > Static").results(Static)
+        texts = [w.get_selection(Selection(None, None)) for w in statics]
+        assert texts and all(t is not None for t in texts)
+        extracted = "".join(t[0] for t in texts)
+        assert extracted.strip()

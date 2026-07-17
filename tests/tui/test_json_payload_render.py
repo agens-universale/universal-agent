@@ -39,23 +39,22 @@ _BACKSLASH_N = chr(92) + "n"  # литеральные два символа \n 
 def _plain_text(widget) -> str:
     """Извлечь рендеримый текст из виджета render_payload.
 
-    По образцу _content_text из test_json_payload.py; расширено на составной
-    рендер (rich.console.Group из Syntax-кусков и Text-блоков).
+    render_payload для dict/list возвращает контейнер PayloadBlocks с дочерними
+    Static (каждый рендерится в rich.Text — это контракт селектируемости);
+    для строк — одиночный Static(Text).
     """
-    content = widget.content
-    parts = getattr(content, "renderables", [content])
-    out = []
-    for part in parts:
-        if hasattr(part, "code"):
-            out.append(part.code)
-        elif hasattr(part, "plain"):
-            out.append(part.plain)
-        else:
-            out.append(str(part))
-    # "": каждая часть уже несёт свои собственные переносы строк (Syntax.code,
-    # Text-блок с построчным "\n"); склейка через "\n" вставляла бы лишнюю
-    # пустую строку на стыке и маскировала бы off-by-one в реальных переносах.
-    return "".join(out)
+    def _one(w) -> str:
+        content = getattr(w, "content", "")
+        if hasattr(content, "plain"):
+            return content.plain
+        return str(content)
+
+    children = list(getattr(widget, "_pending_children", []) or widget.children)
+    if not children:
+        return _one(widget)
+    # "": каждая часть несёт свои переносы; склейка через "\n" вставляла бы
+    # лишнюю пустую строку на стыке (см. прежний комментарий).
+    return "".join(_one(c) for c in children)
 
 
 # --- unfold_payload: чистая функция, без Textual ---
@@ -227,3 +226,34 @@ def test_render_multiline_block_normalizes_crlf():
     assert "\r" not in text
     assert "│ line1" in text
     assert "│ line2" in text
+
+
+# --- селектируемость: get_selection обязан отдавать текст (не None) ---
+
+
+def test_payload_blocks_children_render_to_text():
+    """Контракт селектируемости: каждый дочерний Static рендерится в rich.Text
+    (Widget.get_selection отдаёт None для не-Text рендера — Syntax/Group)."""
+    from rich.text import Text as RichText
+    w = render_payload(INTENT_LOG)
+    children = list(getattr(w, "_pending_children", []) or w.children)
+    assert children, "render_payload(dict) должен вернуть контейнер с блоками"
+    for child in children:
+        assert isinstance(child.content, RichText), type(child.content)
+
+
+def test_payload_skeleton_keeps_highlighting():
+    """Подсветка не потеряна: у Text JSON-каркаса есть непустые style-spans."""
+    w = render_payload(INTENT_LOG)
+    children = list(getattr(w, "_pending_children", []) or w.children)
+    skeleton = children[0].content
+    assert skeleton.spans, "Syntax.highlight должен дать стилевые spans"
+
+
+def test_multiline_payload_selectable_blocks():
+    """Payload с multiline-контентом: и каркас, и текст-блок — Text-рендер."""
+    from rich.text import Text as RichText
+    w = render_payload(FS_READ_MULTILINE)
+    children = list(getattr(w, "_pending_children", []) or w.children)
+    assert len(children) >= 2  # каркас-голова, multiline-блок, (хвост)
+    assert all(isinstance(c.content, RichText) for c in children)

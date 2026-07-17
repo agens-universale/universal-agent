@@ -5,17 +5,22 @@ import pytest
 
 
 def _content_text(widget) -> str:
-    """Извлечь рендеримый текст из Static без активного App-контекста.
+    """Извлечь рендеримый текст из виджета render_payload без App-контекста.
 
-    Static оборачивает либо rich.syntax.Syntax (.code = pretty JSON),
-    либо rich.text.Text (.plain = plain string).
+    render_payload для dict/list возвращает контейнер PayloadBlocks с дочерними
+    Static (каждый рендерится в rich.Text — контракт селектируемости); для
+    строк/прочего — одиночный Static(Text).
     """
-    content = widget.content
-    if hasattr(content, "code"):
-        return content.code
-    if hasattr(content, "plain"):
-        return content.plain
-    return str(content)
+    def _one(w) -> str:
+        content = getattr(w, "content", "")
+        if hasattr(content, "plain"):
+            return content.plain
+        return str(content)
+
+    children = list(getattr(widget, "_pending_children", []) or widget.children)
+    if not children:
+        return _one(widget)
+    return "".join(_one(c) for c in children)
 
 
 def test_dict_returns_widget_with_json_content():
