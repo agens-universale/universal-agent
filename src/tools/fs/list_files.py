@@ -15,7 +15,6 @@ from security.read_guard import (
 )
 from security.path_policy import resolve_tool_context, _extract_config_dict
 from tools.fs.agent_hidden import is_agent_hidden
-from tools.fs.path_errors import not_a_directory_error
 
 
 class ListFiles(AbstractSimpleTool):
@@ -222,15 +221,7 @@ List deeper files (example):
         if not self._backend.exists(path):
             return _result(ok=False, error={"type": "not_found"})
         if not self._backend.is_dir(path):
-            return _result(
-                ok=False,
-                error=not_a_directory_error(
-                    path,
-                    backend=self._backend,
-                    workspace=self._workspace,
-                    contract="this tool lists a directory",
-                ),
-            )
+            return _result(ok=False, error={"type": "not_a_directory"})
 
         file_matcher = None
         if glob:

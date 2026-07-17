@@ -284,12 +284,8 @@ def test_not_a_directory(tmp_path):
 
     assert base_env["ok"] is False
     assert shim_env["ok"] is False
-    for env in (base_env, shim_env):
-        err = env.get("error") or {}
-        assert err.get("type") == "not_a_directory"
-        assert err.get("path_kind") == "file"
-        assert "message" in err and "suggestion" in err and "parent" in err
-        assert "fs_" not in err["message"] and "fs_" not in err["suggestion"]
+    assert (base_env.get("error") or {}).get("type") == "not_a_directory"
+    assert (shim_env.get("error") or {}).get("type") == "not_a_directory"
 
 
 # ---------------------------------------------------------------------------

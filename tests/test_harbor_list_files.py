@@ -316,11 +316,6 @@ def test_not_a_directory(tmp_path):
     t = bind_os_backend(ListFiles.__new__(ListFiles), FakeBackend({"/work/a.py": "x"}))
     harbor_raw = t(path="/work/a.py")
     _compare_results(base_raw, harbor_raw, "not_a_directory")
-    for raw in (base_raw, harbor_raw):
-        err = json.loads(raw).get("error") or {}
-        assert err.get("path_kind") == "file"
-        assert "message" in err and "suggestion" in err and "parent" in err
-        assert "fs_" not in err["message"] and "fs_" not in err["suggestion"]
 
 
 def test_not_found(tmp_path):
