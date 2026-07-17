@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from textual import events
 from textual.app import ComposeResult
+from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import Screen
 from textual.widgets import Input, Static
@@ -27,6 +28,12 @@ class OnboardingScreen(Screen):
     # показывала бы справку с неработающими клавишами и уведомления по незаписанному
     # конфигу. Гейт — TuiApp.check_action.
     BLOCKS_GLOBAL_NAV = True
+
+    # priority=True — перехватывает PgUp раньше фокусированного Input (иначе поля
+    # #onb-endpoint/#onb-token/#model-filter не отдали бы клавишу назад).
+    BINDINGS = [
+        Binding("pageup", "go_back", "назад", show=False, priority=True),
+    ]
 
     def __init__(self, config, config_path, *, review_all, on_commit,
                  fetch=None, mcp=None) -> None:
@@ -60,6 +67,8 @@ class OnboardingScreen(Screen):
                     yield Static(branding.logo_text(), id="onb-logo", markup=False)
                     yield Static(branding.tagline_under_logo(), id="onb-tagline", markup=False)
                     yield Static(self._stepper_text(), id="onb-stepper", markup=False)
+                    yield Static(self._summary_text(), id="onb-summary",
+                                 classes="onb-hint", markup=False)
                     yield Static(self._body_placeholder(), id="onb-body", markup=False)
             yield Static(self._footer_text(), id="onb-footer", markup=False)
 
@@ -84,12 +93,29 @@ class OnboardingScreen(Screen):
             t.append(name, style=f"bold {style}" if i == self._step else style)
         return t
 
+    def _summary_text(self) -> str:
+        from tui.services.onboarding_summary import summary_line
+        # Шаблонные заглушки конфига (…_SENTINEL) — это «ещё не задано», а не значение:
+        # показываем прочерком, как редактор адреса трактует URL_SENTINEL пустым полем.
+        url = self._values.get("completions_url") or self._config.get("completions_url") or ""
+        if url == onboarding.URL_SENTINEL:
+            url = ""
+        model = self._values.get("model") or self._config.get("model") or ""
+        if model == onboarding.MODEL_SENTINEL:
+            model = ""
+        return summary_line(
+            url=url,
+            auth=self._values.get("Authorization"),
+            model=model,
+            mcp_count=len(self._mcp_selected),
+        )
+
     def _footer_text(self) -> str:
         if self._step == _LAST_STEP:
-            return "Enter — подтвердить и завершить настройку  ·  ← назад  ·  Esc — выход"
+            return "Enter — подтвердить и завершить настройку  ·  PgUp — назад  ·  Esc — выход"
         parts = ["↑↓ навигация", "Enter — далее", "Esc — выход"]
         if self._step > 0:
-            parts.insert(1, "← назад")
+            parts.insert(1, "PgUp — назад")
         if self._step == 3:
             parts.insert(0, "Space — выбрать")
         return "  ·  ".join(parts)
@@ -186,6 +212,7 @@ class OnboardingScreen(Screen):
         """Перерисовать хром (хедер/степпер/футер) + тело под текущий _step."""
         self.query_one("#header-left", Static).update(self._title_text())
         self.query_one("#onb-stepper", Static).update(self._stepper_text())
+        self.query_one("#onb-summary", Static).update(self._summary_text())
         self.query_one("#onb-footer", Static).update(self._footer_text())
         self.query_one("#onb-body", Static).update(self._body_placeholder())
         self._mount_step_body()
@@ -276,7 +303,9 @@ class OnboardingScreen(Screen):
 
     def _submit_auth(self) -> None:
         from tui.editors.auth import AuthEditor
-        header, raw = self.query_one(AuthEditor).submit()
+        ok, header, raw = self.query_one(AuthEditor).submit()
+        if not ok:
+            return                              # «введите токен» показан внутри редактора
         if raw:
             self._auth_token_raw = raw   # не затирать введённый ранее токен пустым выбором
         if header is not None:
@@ -335,6 +364,9 @@ class OnboardingScreen(Screen):
             self._step -= 1
             self._render_step()
 
+    def action_go_back(self) -> None:
+        self._go_back()
+
     def _confirm_exit(self) -> None:
         """Esc → модалка подтверждения выхода (как в основном TUI), не мгновенный выход."""
         from tui.screens.confirm import ConfirmScreen
@@ -353,10 +385,6 @@ class OnboardingScreen(Screen):
         if event.key == "escape":
             event.stop()
             self._confirm_exit()
-            return
-        if event.key == "left":
-            event.stop()
-            self._go_back()
             return
         if event.key in ("up", "down") and self._step == 1:
             event.stop()
