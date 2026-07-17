@@ -4,8 +4,12 @@ from __future__ import annotations
 from typing import Literal
 
 from rich.text import Text
-from textual import events
+from typing import Optional
+
+from textual.message import Message
 from textual.widget import Widget
+
+from tui.widgets.click_model import ClickModelMixin
 
 from tui.palette import ERR as _ERR_RED
 
@@ -13,7 +17,7 @@ from tui.palette import ERR as _ERR_RED
 _State = Literal["normal", "pending", "failed"]
 
 
-class UserReplyContainer(Widget):
+class UserReplyContainer(ClickModelMixin, Widget):
     """Контейнер реплики пользователя.
 
     Визуал: фон `$band-bg`, 2px кромка `$accent` слева на всю высоту хода
@@ -30,7 +34,6 @@ class UserReplyContainer(Widget):
 
     DEFAULT_CSS = ""  # стили — .user-band / .user-reply-pending / .user-reply-failed в styles.tcss
     can_focus = True
-    FOCUS_ON_CLICK = False   # клик не фокусирует реплику; навигация — только Tab/Shift+Tab
 
     def __init__(
         self,
@@ -83,13 +86,8 @@ class UserReplyContainer(Widget):
                 text.append(f"  {line}")
         return text
 
-    def on_click(self, event: events.Click) -> None:
-        if event.chain == 2 and self._event_no:
-            from tui.messages import OpenEventRequest
-            self.post_message(OpenEventRequest(self._event_no))
-
-    def on_key(self, event: events.Key) -> None:
-        if event.key == "enter" and self._event_no:
-            event.stop()
-            from tui.messages import OpenEventRequest
-            self.post_message(OpenEventRequest(self._event_no))
+    def _open_request(self) -> Optional[Message]:
+        if not self._event_no:
+            return None
+        from tui.messages import OpenEventRequest
+        return OpenEventRequest(self._event_no)

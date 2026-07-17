@@ -47,8 +47,8 @@ async def test_trace_row_kind_class_lands_on_widget():
 
 
 @pytest.mark.asyncio
-async def test_trace_row_double_click_emits_open_event_request():
-    """Двойной клик → OpenEventRequest (parity с AgentReplyLine)."""
+async def test_trace_row_ctrl_click_emits_open_event_request():
+    """Ctrl+клик → OpenEventRequest (parity с AgentReplyLine)."""
     pytest.importorskip("textual")
     from textual.app import App, ComposeResult
     from textual import events
@@ -71,7 +71,7 @@ async def test_trace_row_double_click_emits_open_event_request():
         # срабатывает дважды (артефакт тестового pattern, не production).
         click = events.Click(
             widget=row, x=0, y=0, delta_x=0, delta_y=0,
-            button=1, shift=False, meta=False, ctrl=False, chain=2,
+            button=1, shift=False, meta=False, ctrl=True, chain=1,
             screen_x=0, screen_y=0, style=None,
         )
         row.on_click(click)

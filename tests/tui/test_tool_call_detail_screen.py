@@ -24,7 +24,7 @@ def _write_thread_with_tool_call(tmp_path, tid, call_payload, result_payload):
 
 
 @pytest.mark.asyncio
-async def test_double_click_opens_detail_screen_with_call_and_output_sections(tmp_path):
+async def test_ctrl_click_opens_detail_screen_with_call_and_output_sections(tmp_path):
     pytest.importorskip("textual")
     from textual import events
     from tui.app import TuiApp
@@ -48,7 +48,7 @@ async def test_double_click_opens_detail_screen_with_call_and_output_sections(tm
         row = pilot.app.screen.query_one(ToolCallRow)
         click = events.Click(
             widget=row, x=0, y=0, delta_x=0, delta_y=0, button=1,
-            shift=False, meta=False, ctrl=False, chain=2,
+            shift=False, meta=False, ctrl=True, chain=1,
         )
         row.on_click(click)
         await pilot.pause(0.2)
@@ -88,7 +88,7 @@ async def test_detail_screen_pending_row_shows_placeholder(tmp_path):
         row = pilot.app.screen.query_one(ToolCallRow)
         click = events.Click(
             widget=row, x=0, y=0, delta_x=0, delta_y=0, button=1,
-            shift=False, meta=False, ctrl=False, chain=2,
+            shift=False, meta=False, ctrl=True, chain=1,
         )
         row.on_click(click)
         await pilot.pause(0.2)
@@ -125,7 +125,7 @@ async def test_detail_screen_plain_output_not_json(tmp_path):
         row = pilot.app.screen.query_one(ToolCallRow)
         click = events.Click(
             widget=row, x=0, y=0, delta_x=0, delta_y=0, button=1,
-            shift=False, meta=False, ctrl=False, chain=2,
+            shift=False, meta=False, ctrl=True, chain=1,
         )
         row.on_click(click)
         await pilot.pause(0.2)

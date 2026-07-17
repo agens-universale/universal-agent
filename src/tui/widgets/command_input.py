@@ -25,6 +25,9 @@ class CommandTextArea(TextArea):
         Binding("ctrl+ф", "select_all", "выделить всё", show=False, priority=True),
         Binding("ctrl+A", "select_all", "выделить всё", show=False, priority=True),
         Binding("ctrl+Ф", "select_all", "выделить всё", show=False, priority=True),
+        # macOS: option+backspace (терминал в режиме Option-as-Meta шлёт alt+backspace).
+        # В дефолтах TextArea клавиша не занята; Win/Linux — прежнее поведение контрактом.
+        Binding("alt+backspace", "delete_word_left", "удалить слово", show=False),
     ]
 
     class Submitted(Message):

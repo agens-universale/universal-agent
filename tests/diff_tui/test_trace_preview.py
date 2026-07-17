@@ -6,16 +6,6 @@ import json
 from config_modules import env_vars
 from diff_tui.service import DiffService
 from diff_tui.store import DiffStore
-from tui.services.tool_preview import extract_preview_lines
-
-
-def test_extract_preview_still_ignores_write_ok_only(tmp_path, monkeypatch):
-    """Регрессия: write-style {ok:true} без content → пустой extract."""
-    monkeypatch.setattr(env_vars.env, "gc_home", tmp_path / "gc_home")
-    out = json.dumps({"ok": True, "path": str(tmp_path / "a.py")})
-    lines, remaining = extract_preview_lines(out)
-    assert lines == []
-    assert remaining == 0
 
 
 def test_visual_diff_provides_preview_lines_for_pending(tmp_path, monkeypatch):

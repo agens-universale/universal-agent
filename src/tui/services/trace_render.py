@@ -131,8 +131,6 @@ def is_tool_group_start(mount_target) -> bool:
     for child in reversed(list(mount_target.children)):
         if getattr(child, "id", None) == "brand-block":
             continue  # шапка трейса — не контент
-        if child.has_class("tool-result-preview"):
-            continue  # hidden-превью результата — часть tool-строки выше
         return not isinstance(child, ToolCallRow)
     return True   # перед ним ничего — считаем стартом группы
 
