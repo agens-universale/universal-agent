@@ -36,3 +36,4 @@ harbor:
   environment: docker
   n_concurrent_trials: 1
   agent_timeout_multiplier: 6.0
+  verifier_timeout_multiplier: 6.0
