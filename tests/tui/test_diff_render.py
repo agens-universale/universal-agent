@@ -44,22 +44,6 @@ def test_style_unified_diff_does_not_treat_file_headers_as_add_del():
     assert ERR in styles
 
 
-def test_style_diff_preview_lines_prefixes_and_remaining():
-    pytest.importorskip("rich")
-    from tui.services.diff_render import style_diff_preview_lines
-
-    text = style_diff_preview_lines(
-        ["--- a", "+x", "-y"],
-        remaining=2,
-        prefix="     ",
-    )
-    plain = text.plain
-    assert plain.startswith("     --- a")
-    assert "+x" in plain
-    assert "-y" in plain
-    assert "... +2 more" in plain
-
-
 def test_render_unified_diff_widget_returns_static():
     pytest.importorskip("textual")
     from tui.services.diff_render import render_unified_diff_widget

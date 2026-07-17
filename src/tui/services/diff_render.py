@@ -1,4 +1,4 @@
-"""Подсветка unified diff для TUI (viewer /diff и trace-preview).
+"""Подсветка unified diff для TUI (viewer /diff).
 
 `+` → OK (зелёный), `-` → ERR (красный), заголовки/@@ → MUTED,
 контекст и прочее — CODE_BLOCK (как раньше монохромный дифф).
@@ -28,26 +28,6 @@ def style_unified_diff(text: str) -> Text:
 def render_unified_diff_widget(text: str) -> Static:
     """Static с раскрашенным unified diff (для DiffViewerScreen)."""
     return Static(style_unified_diff(text), markup=False)
-
-
-def style_diff_preview_lines(
-    lines: list[str],
-    *,
-    remaining: int = 0,
-    prefix: str = "     ",
-) -> Text:
-    """Краткий diff-preview для трейса: префикс + раскраска строк."""
-    out = Text()
-    for i, ln in enumerate(lines):
-        if i:
-            out.append("\n")
-        out.append(prefix, style=MUTED)
-        out.append(ln, style=_line_style(ln))
-    if remaining > 0:
-        if lines:
-            out.append("\n")
-        out.append(f"{prefix}... +{remaining} more", style=MUTED)
-    return out
 
 
 def _line_style(line: str) -> str:

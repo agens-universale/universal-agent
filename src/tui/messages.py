@@ -19,14 +19,6 @@ class OpenToolCallDetailRequest(Message):
         self.call_id = call_id
 
 
-class ToolCallFocusChanged(Message):
-    """ToolCallRow получила/потеряла фокус → TraceScreen toggle preview-widget."""
-    def __init__(self, call_id: str, *, focused: bool) -> None:
-        super().__init__()
-        self.call_id = call_id
-        self.focused = focused
-
-
 class SummaryToggleRequest(Message):
     """Клик/Enter по маркеру или телу сводки → TraceScreen раскрывает/сворачивает блок."""
     def __init__(self, event_no: int) -> None:

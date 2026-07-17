@@ -99,7 +99,7 @@ class TuiApp(App):
         Binding("f3", "diff", "/diff"),
         Binding("f4", "notices", "/notices"),
         Binding("f5", "config", "/config"),
-        Binding("f6", "settings", "/settings"),
+        Binding("f6", "settings", "/settings", priority=True),  # у TextArea свой f6=select_line — без priority хоткей мёртв при фокусе в инпуте
         Binding("ctrl+slash", "help", "Help"),
         Binding("ctrl+s", "sessions", "/sessions"),
         # priority: TextArea перехватывает Ctrl+D как delete-right.

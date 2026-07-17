@@ -131,9 +131,6 @@ _HINT_TEXT = {
     "stop":  "Esc ещё раз, чтобы остановить",
 }
 _PASTE_HINT_TEXT = "вставьте ещё раз, чтобы развернуть"
-# Префикс preview-строк под ToolCallRow: ровный отступ (без `|`), выравнивает
-# вывод под именем тула; левый rail блока даёт CSS (.tool-result-preview border-left).
-_PREVIEW_PREFIX = "     "
 # Модель и backend-режим показываются в шапке экрана (_compose_header_segments).
 
 
@@ -169,9 +166,6 @@ class TraceScreen(Screen):
         # spec 2026-05-26 (code-block-highlight): теперь храним СПИСОК виджетов
         # предыдущей submit_solution (multi-widget рендер: prose + code-panels).
         self._submit_solution_widgets: list[tuple[list[Widget], Optional["TraceRow"]]] = []
-        # Mapping call_id → preview-Static (показывается при focus row, скрывается при blur).
-        # spec 2026-05-27 (tool-output-detail).
-        self._tool_call_preview_widgets: dict[str, Static] = {}
         # Mapping event_no → summary-body TraceRow (скрыт; раскрывается при фокусе маркера).
         self._summary_body_widgets: dict[int, "TraceRow"] = {}
         self._summary_marker_widgets: dict[int, "TraceRow"] = {}
@@ -313,8 +307,9 @@ class TraceScreen(Screen):
 
     def on_click(self, event: events.Click) -> None:
         """Клик в ЛЮБОЙ части трейса → фокус на #trace, чтобы колесо/стрелки/PgUp-
-        PgDn скроллили его (а не зависели от попадания в пустой край). Строки
-        событий кликом не выделяются (FOCUS_ON_CLICK=False) — навигация по ним Tab.
+        PgDn скроллили его (а не зависели от попадания в пустой край). Сюда доходит
+        только клик по пустому месту / не-focusable строке: focusable строки сами
+        останавливают событие в своём on_click (self.focus() + event.stop()).
         Клик вне трейса (инпут/футер) фокус трейса не трогает."""
         try:
             trace = self.query_one("#trace", VerticalScroll)
@@ -560,7 +555,6 @@ class TraceScreen(Screen):
         self._active_calls.clear()
         self._submit_solution_call_ids.clear()
         self._submit_solution_widgets.clear()
-        self._tool_call_preview_widgets.clear()
         self._summary_body_widgets.clear()
         self._summary_marker_widgets.clear()
         self._pending_user_widgets.clear()  # spec 2026-05-26
@@ -1317,8 +1311,6 @@ class TraceScreen(Screen):
                     summary=ev.summary,
                     error=(ev.kind == "error"),
                 )
-                # Если есть полезный preview-контент — смонтировать preview-widget после row (.hidden).
-                self._maybe_mount_tool_preview(row, ev)
                 self._active_calls.pop(ev.call_id, None)
                 return
             # Fallback (call_id unknown or no matching row) — append separate line
@@ -1382,40 +1374,6 @@ class TraceScreen(Screen):
             kind_class="line-error", event_no=ev.no,
         )
 
-    def _maybe_mount_tool_preview(self, row, ev) -> None:
-        """При наличии полезного preview-контента — смонтировать Static после row.
-        Изначально с .hidden; on_tool_call_focus_changed toggle'ит видимость."""
-        if ev.kind == "error":
-            return  # error виден inline в row, preview не нужен
-        from tui.services.trace_render import raw_output
-        from tui.services.tool_preview import extract_preview_lines
-
-        raw = raw_output(ev) or ""
-        lines, remaining = extract_preview_lines(raw) if raw else ([], 0)
-        from_diff = False
-        # Write-tools часто без content-ключей → fallback: DiffService visual_diff.
-        if not lines:
-            lines, remaining = self._diff_preview_lines(ev)
-            from_diff = bool(lines)
-        if not lines:
-            return
-        if from_diff:
-            from tui.services.diff_render import style_diff_preview_lines
-
-            body = style_diff_preview_lines(
-                lines, remaining=remaining, prefix=_PREVIEW_PREFIX
-            )
-        else:
-            # Формат preview: каждая строка с префиксом `_PREVIEW_PREFIX`,
-            # маркер `... +N more` в конце.
-            body = "\n".join(f"{_PREVIEW_PREFIX}{ln}" for ln in lines)
-            if remaining > 0:
-                body += f"\n{_PREVIEW_PREFIX}... +{remaining} more"
-        preview = Static(body, classes="tool-result-preview hidden", markup=False)
-        trace = self.query_one("#trace", VerticalScroll)
-        trace.mount(preview, after=row)
-        self._tool_call_preview_widgets[ev.call_id] = preview
-
     def _diff_service_for_preview(self):
         cfg = getattr(self.app, "_config", None) or {}
         launch_root = cfg.get("launch_root")
@@ -1424,53 +1382,6 @@ class TraceScreen(Screen):
         from tui.screens.diff import _service_from_config
 
         return _service_from_config(str(launch_root), cfg)
-
-    def _tool_mutation_path(self, ev) -> Optional[str]:
-        """path из result output или call arguments (fs text-мутации)."""
-        from tui.services.tool_preview import unwrap_tool_output_dict
-        from tui.services.trace_render import raw_output
-
-        raw = raw_output(ev) or ""
-        data = unwrap_tool_output_dict(raw) if raw else None
-        if isinstance(data, dict):
-            path = data.get("path")
-            if isinstance(path, str) and path:
-                return path
-        call_id = getattr(ev, "call_id", None)
-        if not call_id:
-            return None
-        for call_ev in self._task_events:
-            if getattr(call_ev, "call_id", None) != call_id:
-                continue
-            if getattr(call_ev, "kind", None) != "call":
-                continue
-            payload = getattr(call_ev, "full_payload", None) or {}
-            args = payload.get("arguments")
-            if isinstance(args, dict):
-                path = args.get("path")
-                if isinstance(path, str) and path:
-                    return path
-            break
-        return None
-
-    def _diff_preview_lines(self, ev) -> tuple[list[str], int]:
-        """Краткий pending-diff из DiffService (не tool-output ``diff``)."""
-        path = self._tool_mutation_path(ev)
-        if not path:
-            return [], 0
-        svc = self._diff_service_for_preview()
-        if svc is None:
-            return [], 0
-        try:
-            body = svc.visual_diff(path)
-        except Exception:
-            return [], 0
-        if not body or not body.strip():
-            return [], 0
-        from diff_tui.visual import preview_change_lines
-
-        # Для created первые строки — ---/+++/@@; берём +/- с содержимым.
-        return preview_change_lines(body, limit=3)
 
     def _on_ask_human_event(self, ev, *, live: bool = False) -> None:
         from tui.widgets.ask_human_banner import AskHumanBanner
@@ -3944,16 +3855,6 @@ class TraceScreen(Screen):
     def on_open_event_request(self, message) -> None:
         """Двойной клик по строке tool-вызова/реплики → открыть payload."""
         self._open_event_by_no(message.event_no)
-
-    def on_tool_call_focus_changed(self, message) -> None:
-        """ToolCallRow получила/потеряла фокус → toggle preview-widget."""
-        preview = self._tool_call_preview_widgets.get(message.call_id)
-        if preview is None:
-            return
-        if message.focused:
-            preview.remove_class("hidden")
-        else:
-            preview.add_class("hidden")
 
     def on_summary_toggle_request(self, message) -> None:
         """Клик/Enter по маркеру или телу → раскрыть/свернуть summary-body."""

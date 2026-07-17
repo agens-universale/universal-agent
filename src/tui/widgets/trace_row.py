@@ -12,14 +12,19 @@ Textual wrap'ит его внутри этой колонки. Wrapped-стро�
 """
 from __future__ import annotations
 
+from typing import Optional
+
 from textual import events
 from textual.app import ComposeResult
 from textual.containers import Horizontal
+from textual.message import Message
 from textual.widget import Widget
 from textual.widgets import Static
 
+from tui.widgets.click_model import ClickModelMixin
 
-class TraceRow(Widget):
+
+class TraceRow(ClickModelMixin, Widget):
     """Строка трассы: prefix-колонка фиксированной ширины + content-колонка с wrap.
 
     DOM:
@@ -57,9 +62,6 @@ class TraceRow(Widget):
     }
     """
     can_focus = True
-    # Клик НЕ фокусирует строку трейса (навигация — только Tab/Shift+Tab, как в
-    # PowerShell). Tab-фокус идёт через set_focus и этим флагом не затрагивается.
-    FOCUS_ON_CLICK = False
 
     def __init__(
         self,
@@ -114,16 +116,11 @@ class TraceRow(Widget):
                 markup=False,
             )
 
-    def on_click(self, event: events.Click) -> None:
-        if event.chain == 2 and self._event_no:
-            from tui.messages import OpenEventRequest
-            self.post_message(OpenEventRequest(self._event_no))
-
-    def on_key(self, event: events.Key) -> None:
-        if event.key == "enter" and self._event_no:
-            event.stop()
-            from tui.messages import OpenEventRequest
-            self.post_message(OpenEventRequest(self._event_no))
+    def _open_request(self) -> Optional[Message]:
+        if not self._event_no:
+            return None
+        from tui.messages import OpenEventRequest
+        return OpenEventRequest(self._event_no)
 
 
 class SummaryMarker(TraceRow):

@@ -76,6 +76,8 @@ class AuthEditor(Vertical):
             (w.add_class if i == self._idx else w.remove_class)("selected")
 
     def move(self, delta: int) -> None:
+        for e in self.query("#onb-auth-error"):
+            e.remove()
         self._idx = (self._idx + delta) % len(self._options)
         self._refresh_options()
         tok = self.query_one(Input)
@@ -99,13 +101,22 @@ class AuthEditor(Vertical):
         except NoMatches:            # поле ещё не смонтировано (первый тик)
             return False
 
-    def submit(self) -> tuple[str | None, str]:
-        """(Authorization|None, raw). None = не менять (пустой токен / пропуск)."""
+    def submit(self) -> tuple[bool, str | None, str]:
+        """(ok, Authorization|None, raw). ok=False → шаг не продвигать (ошибка внутри).
+        Bearer+токен → задать; Bearer+пусто и действующий токен есть → не менять;
+        Bearer+пусто без действующего токена → «введите токен»; без авторизации → "";
+        пропустить → None (отложить)."""
+        for e in self.query("#onb-auth-error"):
+            e.remove()
         if self._idx == 0:
             raw = self.query_one(Input).value.strip()
             if raw:
-                return onboarding.authorization_header(raw), raw
-            return None, ""
+                return True, onboarding.authorization_header(raw), raw
+            if self._active == 0:                 # действующий Bearer-токен остаётся
+                return True, None, ""
+            self.mount(Static("введите токен", id="onb-auth-error",
+                              classes="onb-warn onb-dyn"))
+            return False, None, ""
         if self._idx == 1:
-            return "", ""
-        return None, ""
+            return True, "", ""
+        return True, None, ""

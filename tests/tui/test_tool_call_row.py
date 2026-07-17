@@ -234,7 +234,7 @@ async def test_tool_call_row_set_result_twice_overwrites():
 
 
 @pytest.mark.asyncio
-async def test_double_click_posts_open_tool_call_detail_request():
+async def test_ctrl_click_posts_open_tool_call_detail_request():
     pytest.importorskip("textual")
     from textual import events
     from tui.widgets.tool_call_row import ToolCallRow
@@ -257,44 +257,12 @@ async def test_double_click_posts_open_tool_call_detail_request():
         row = pilot.app.query_one(ToolCallRow)
         click = events.Click(
             widget=row, x=0, y=0, delta_x=0, delta_y=0, button=1,
-            shift=False, meta=False, ctrl=False, chain=2,
+            shift=False, meta=False, ctrl=True, chain=1,
         )
         row.on_click(click)
         await pilot.pause()
 
     assert captured == ["c42"]
-
-
-@pytest.mark.asyncio
-async def test_focus_change_posts_tool_call_focus_changed():
-    pytest.importorskip("textual")
-    from tui.widgets.tool_call_row import ToolCallRow
-
-    received: list = []
-
-    from textual.app import App
-
-    class _App(App):
-        def compose(self):
-            yield ToolCallRow(call_id="c7", tool_name="read_file",
-                              args_summary="", event_no=1)
-            from textual.widgets import Input
-            yield Input(id="sink")
-
-        def on_tool_call_focus_changed(self, message):
-            received.append((message.call_id, message.focused))
-
-    app = _App()
-    async with app.run_test() as pilot:
-        row = pilot.app.query_one(ToolCallRow)
-        row.focus()
-        await pilot.pause()
-        pilot.app.query_one("#sink").focus()  # вызовет blur у row
-        await pilot.pause()
-
-    # Должны увидеть focused=True, потом focused=False для того же call_id
-    assert ("c7", True) in received
-    assert ("c7", False) in received
 
 
 @pytest.mark.asyncio

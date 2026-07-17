@@ -19,6 +19,8 @@ class PasteInput(Input):
             return False
         # Input однострочный: переводы строк сводим (bracketed шлёт \r).
         text = text.replace("\r\n", " ").replace("\r", " ").replace("\n", " ")
+        if not self.selection.is_empty:      # выделение → заменить, а не дописать (нативное поведение поля)
+            self.delete_selection()
         self.insert_text_at_cursor(text)
         return True
 

@@ -110,9 +110,8 @@ async def test_auth_editor_submit_bearer_with_input_returns_header_and_raw():
     app = _harness(ed)
     async with app.run_test():
         ed.query_one(Input).value = "secret123"
-        header, raw = ed.submit()
-        assert header == "Bearer secret123"
-        assert raw == "secret123"
+        ok, header, raw = ed.submit()
+        assert ok and header == "Bearer secret123" and raw == "secret123"
 
 
 async def test_auth_editor_submit_bearer_empty_returns_none():
@@ -120,9 +119,18 @@ async def test_auth_editor_submit_bearer_empty_returns_none():
     ed = AuthEditor(current_header="Bearer old-token")
     app = _harness(ed)
     async with app.run_test():
-        header, raw = ed.submit()          # idx 0 (Bearer действующий), поле не тронуто
-        assert header is None
-        assert raw == ""
+        ok, header, raw = ed.submit()      # Bearer действующий, поле пусто → не менять
+        assert ok and header is None and raw == ""
+
+
+async def test_auth_editor_bearer_empty_no_active_asks_for_token():
+    from tui.editors.auth import AuthEditor
+    ed = AuthEditor(current_header=None)          # действующего токена нет
+    app = _harness(ed)
+    async with app.run_test():
+        ok, header, raw = ed.submit()             # idx 0 (Bearer), поле пусто
+        assert ok is False and header is None
+        assert any("введите токен" in str(w.render()) for w in ed.query(".onb-warn"))
 
 
 async def test_auth_editor_submit_no_auth_returns_empty_header():
@@ -131,9 +139,8 @@ async def test_auth_editor_submit_no_auth_returns_empty_header():
     app = _harness(ed)
     async with app.run_test():
         ed.move(1)                       # → «без авторизации»
-        header, raw = ed.submit()
-        assert header == ""
-        assert raw == ""
+        ok, header, raw = ed.submit()
+        assert ok and header == "" and raw == ""
         assert not ed.query_one(Input).display   # токен-поле скрыто
 
 
@@ -143,9 +150,8 @@ async def test_auth_editor_submit_skip_returns_none():
     app = _harness(ed)
     async with app.run_test():
         ed.move(2)                       # → «пропустить»
-        header, raw = ed.submit()
-        assert header is None
-        assert raw == ""
+        ok, header, raw = ed.submit()
+        assert ok and header is None and raw == ""
 
 
 async def test_auth_editor_move_wraps_within_available_options():
@@ -157,8 +163,8 @@ async def test_auth_editor_move_wraps_within_available_options():
         for _ in range(n):
             ed.move(1)                   # полный круг
         assert ed._idx == 0
-        header, _ = ed.submit()          # снова Bearer, ввод пуст → None
-        assert header is None
+        ok, header, _ = ed.submit()      # снова Bearer, действующего токена нет → ошибка
+        assert ed._idx == 0 and ok is False
 
 
 async def test_auth_editor_peek_no_side_effects():

@@ -12,11 +12,15 @@ import time
 from typing import Optional
 
 from rich.text import Text
-from textual import events
+from typing import Optional
+
 from textual.app import ComposeResult
 from textual.containers import Horizontal
+from textual.message import Message
 from textual.widget import Widget
 from textual.widgets import Static
+
+from tui.widgets.click_model import ClickModelMixin
 
 from tui.palette import DIM as _DIM
 from tui.palette import ERR as _ERR
@@ -34,7 +38,7 @@ _PULSE_SHADES = [
 ]
 
 
-class ToolCallRow(Widget):
+class ToolCallRow(ClickModelMixin, Widget):
     """Строка одного tool-вызова с состоянием pending / ok / error.
 
     DOM:
@@ -65,7 +69,6 @@ class ToolCallRow(Widget):
     }
     """
     can_focus = True
-    FOCUS_ON_CLICK = False   # клик не фокусирует строку; навигация — только Tab/Shift+Tab
 
     _PREFIX = "   "   # отступ-индент тула (без «лесенки» |-); статус-глиф ✓/✗/▸ — следом
 
@@ -207,28 +210,7 @@ class ToolCallRow(Widget):
             text.append(f" -> {self._result}", style=_DIM)
         return text
 
-    def _on_focus(self, event) -> None:  # noqa: ANN001
-        # super() ПЕРВЫМ: Widget._on_focus ставит self.has_focus = True,
-        # иначе _render_content() ниже прочитает stale Reactive=False.
-        super()._on_focus(event)
-        from tui.messages import ToolCallFocusChanged
-        self.post_message(ToolCallFocusChanged(self.call_id, focused=True))
-
-    def _on_blur(self, event) -> None:  # noqa: ANN001
-        # super() ПЕРВЫМ: см. _on_focus.
-        super()._on_blur(event)
-        from tui.messages import ToolCallFocusChanged
-        self.post_message(ToolCallFocusChanged(self.call_id, focused=False))
-
-    def on_click(self, event: events.Click) -> None:
-        # Двойной клик → открыть детальный экран call + output.
-        if event.chain == 2:
-            from tui.messages import OpenToolCallDetailRequest
-            self.post_message(OpenToolCallDetailRequest(self.call_id))
-
-    def on_key(self, event: events.Key) -> None:
-        # Enter на сфокусированной строке → детальный экран call + output.
-        if event.key == "enter":
-            event.stop()
-            from tui.messages import OpenToolCallDetailRequest
-            self.post_message(OpenToolCallDetailRequest(self.call_id))
+    def _open_request(self) -> Optional[Message]:
+        # Клик/Enter → детальный экран call + output.
+        from tui.messages import OpenToolCallDetailRequest
+        return OpenToolCallDetailRequest(self.call_id)

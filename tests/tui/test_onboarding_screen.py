@@ -20,9 +20,18 @@ class _FakeMcp:
     def install(self, name=None): return 0
 
 
+def test_summary_hides_template_sentinels():
+    """Шаблонные заглушки конфига (URL/MODEL_SENTINEL) в верхней сводке — прочерк,
+    а не «your-backend:PORT» / «<ВПИШИТЕ_МОДЕЛЬ>» как заданное значение."""
+    scr = _screen()                       # config = все три ..._SENTINEL
+    line = scr._summary_text()
+    assert "your-backend" not in line and "ВПИШИТЕ" not in line
+    assert "сервер —" in line and "модель —" in line
+
+
 @pytest.mark.asyncio
 async def test_endpoint_restored_on_return(tmp_path):
-    # ввёл адрес → далее → ← назад: значение восстановлено, а не пустое
+    # ввёл адрес → далее → PgUp назад: значение восстановлено, а не пустое
     pytest.importorskip("textual")
     from tui.app import TuiApp
     from textual.widgets import Input
@@ -35,7 +44,7 @@ async def test_endpoint_restored_on_return(tmp_path):
         await pilot.press("enter")           # → шаг авторизации
         await pilot.pause()
         assert scr._step == 1
-        await pilot.press("left")            # ← назад на адрес
+        await pilot.press("pageup")          # PgUp назад на адрес
         await pilot.pause()
         assert scr._step == 0
         assert scr.query_one("#onb-endpoint", Input).value == "https://h/v1/chat/completions"
@@ -43,7 +52,7 @@ async def test_endpoint_restored_on_return(tmp_path):
 
 @pytest.mark.asyncio
 async def test_token_restored_on_return(tmp_path):
-    # ввёл токен → далее → ← назад: поле снова заполнено (масккировано), значение цело
+    # ввёл токен → далее → PgUp назад: поле снова заполнено (масккировано), значение цело
     pytest.importorskip("textual")
     from tui.app import TuiApp
     from textual.widgets import Input
@@ -60,7 +69,7 @@ async def test_token_restored_on_return(tmp_path):
         await pilot.pause()
         assert scr._values["Authorization"] == "Bearer sk-secret"
         assert scr._step == 2
-        await pilot.press("left")            # ← назад на авторизацию
+        await pilot.press("pageup")          # PgUp назад на авторизацию
         await pilot.pause()
         assert scr._step == 1
         assert scr.query_one("#onb-token", Input).value == "sk-secret"
@@ -68,7 +77,7 @@ async def test_token_restored_on_return(tmp_path):
 
 @pytest.mark.asyncio
 async def test_token_not_cleared_on_skip_auth(tmp_path):
-    # ввёл токен → далее → ← назад → выбрал «без авторизации» → далее → ← назад:
+    # ввёл токен → далее → PgUp назад → выбрал «без авторизации» → далее → PgUp назад:
     # поле #onb-token всё ещё содержит исходный токен (не затёрт пустым выбором)
     pytest.importorskip("textual")
     from tui.app import TuiApp
@@ -88,7 +97,7 @@ async def test_token_not_cleared_on_skip_auth(tmp_path):
         assert scr._values["Authorization"] == "Bearer sk-secret"
         assert scr._step == 2
         # Вернулись на авторизацию
-        await pilot.press("left")
+        await pilot.press("pageup")
         await pilot.pause()
         assert scr._step == 1
         assert scr.query_one("#onb-token", Input).value == "sk-secret"
@@ -99,7 +108,7 @@ async def test_token_not_cleared_on_skip_auth(tmp_path):
         await pilot.pause()
         assert scr._step == 2
         # Вернулись — токен всё ещё в поле
-        await pilot.press("left")
+        await pilot.press("pageup")
         await pilot.pause()
         assert scr._step == 1
         assert scr.query_one("#onb-token", Input).value == "sk-secret"
@@ -239,6 +248,27 @@ async def test_auth_no_auth_writes_empty(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_onboarding_auth_bearer_requires_token(tmp_path):
+    pytest.importorskip("textual")
+    from tui.app import TuiApp
+    from textual.widgets import Input
+    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    async with app.run_test() as pilot:
+        scr = _screen()
+        await pilot.app.push_screen(scr)
+        await pilot.pause()
+        scr.query_one("#onb-endpoint", Input).value = "https://h/v1/chat/completions"
+        await pilot.press("enter")                  # → авторизация (Bearer, поле пусто)
+        await pilot.press("enter")                  # попытка вперёд без токена
+        await pilot.pause()
+        assert scr._step == 1                        # НЕ продвинулся
+        await pilot.press("down"); await pilot.press("down")   # Bearer → без авт → пропустить
+        await pilot.press("enter")                  # «пропустить» → отложить, вперёд
+        await pilot.pause()
+        assert scr._step == 2
+
+
+@pytest.mark.asyncio
 async def test_auth_token_bearer(tmp_path):
     pytest.importorskip("textual")
     from tui.app import TuiApp
@@ -297,6 +327,64 @@ async def test_model_manual_fallback(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_onboarding_model_step_pgup_goes_back_with_filter(tmp_path):
+    pytest.importorskip("textual")
+    from tui.app import TuiApp
+    from textual.widgets import Input
+    from model_picker import ModelInfo
+    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    async with app.run_test() as pilot:
+        scr = _screen(fetch=lambda *a, **k: [ModelInfo(id="glm-5.2-fp8", tool_capable=True),
+                                             ModelInfo(id="openai/gpt-5.6-terra", tool_capable=True)])
+        await pilot.app.push_screen(scr)
+        await pilot.pause()
+        scr.query_one("#onb-endpoint", Input).value = "https://h/v1/chat/completions"
+        await pilot.press("enter")                      # → авторизация
+        scr.query_one("#onb-token", Input).value = "tok"   # Bearer требует токен (Task 5) → вводим
+        await pilot.press("enter")                      # → модель
+        await pilot.pause(); await pilot.pause()
+        assert scr._step == 2
+        scr.query_one("#model-filter", Input).value = "gpt"   # текст в фильтре
+        await pilot.pause()
+        scr.query_one("#model-filter", Input).focus()   # фокус в фильтре (в pilot автофокус после mount не встаёт)
+        await pilot.pause()
+        assert scr.query_one("#model-filter", Input).has_focus   # PgUp работает, пока фокус в поле фильтра
+        await pilot.press("pageup")                     # PgUp должен вернуть на шаг авторизации
+        await pilot.pause()
+        assert scr._step == 1
+
+
+@pytest.mark.asyncio
+async def test_onboarding_model_step_filter_and_pick(tmp_path):
+    pytest.importorskip("textual")
+    from tui.app import TuiApp
+    from textual.widgets import Input
+    from model_picker import ModelInfo
+    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    async with app.run_test() as pilot:
+        scr = _screen(fetch=lambda *a, **k: [ModelInfo(id="glm-5.2-fp8", tool_capable=True),
+                                             ModelInfo(id="openai/gpt-5.6-terra", tool_capable=True),
+                                             ModelInfo(id="deepseek-v3-base", tool_capable=True)])
+        await pilot.app.push_screen(scr)
+        await pilot.pause()
+        scr.query_one("#onb-endpoint", Input).value = "https://h/v1/chat/completions"
+        await pilot.press("enter")
+        scr.query_one("#onb-token", Input).value = "tok"       # Bearer требует токен (Task 5)
+        await pilot.press("enter")
+        await pilot.pause(); await pilot.pause()
+        scr.query_one("#model-filter", Input).value = "gpt"
+        await pilot.pause()
+        rows = [str(w.render()) for w in scr.query(".onb-option")]   # фильтр реально сужает список
+        assert any("gpt-5.6-terra" in r for r in rows)              # совпадение осталось
+        assert not any("deepseek" in r for r in rows)               # не-совпадение убрано
+        await pilot.press("down")                       # ↑↓ двигают выбор
+        await pilot.press("enter")                      # выбрать → шаг MCP
+        await pilot.pause()
+        assert scr._step == 3
+        assert scr._values.get("model") == "openai/gpt-5.6-terra"
+
+
+@pytest.mark.asyncio
 async def test_mcp_space_toggles(tmp_path):
     pytest.importorskip("textual")
     from tui.app import TuiApp
@@ -310,6 +398,29 @@ async def test_mcp_space_toggles(tmp_path):
         assert "duckduckgo" in scr._mcp_selected
         await pilot.press("enter"); await pilot.pause()
         assert scr._step == 4
+
+
+@pytest.mark.asyncio
+async def test_summary_line_fills_as_steps_complete(tmp_path):
+    """Строка сводки под степпером заполняется по ходу; токен маскируется."""
+    from tui.screens.onboarding import OnboardingScreen
+    from textual.widgets import Static
+    import tui.app as app_mod
+
+    app = app_mod.TuiApp(config={"completions_url": "", "chat_completion_headers": {},
+                                 "model": ""})
+    async with app.run_test() as pilot:
+        scr = OnboardingScreen(config=app._config, config_path=str(tmp_path / "c.yml"),
+                               review_all=True, on_commit=lambda: None)
+        app.push_screen(scr)
+        await pilot.pause()
+        scr._values["completions_url"] = "https://46.243.227.147:15000/v1/chat/completions"
+        scr._values["Authorization"] = "Bearer sk-SECRET"
+        scr._render_step()
+        await pilot.pause()
+        line = str(scr.query_one("#onb-summary", Static).render())
+        assert "46.243.227.147:15000" in line
+        assert "sk-SECRET" not in line and "токен Bearer" in line
 
 
 @pytest.mark.asyncio

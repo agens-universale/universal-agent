@@ -18,7 +18,7 @@ async def test_update_section_shows_actions_and_hint(tmp_path, monkeypatch):
         scr = SettingsScreen(config={}, config_path=str(cfg_file), on_apply=lambda: None,
                              probe_fn=lambda *a, **k: None)
         app.push_screen(scr); await pilot.pause()
-        scr._menu_idx = 4; scr._open_section(4); await pilot.pause()
+        scr._menu_idx = 3; scr._open_section(3); await pilot.pause()
         body = " ".join(str(w.render()) for w in scr.query(".set-dyn"))
         assert "Обновить агента" in body
         assert "Проверить обновления" in body
@@ -47,14 +47,14 @@ async def test_update_section_auto_checks_on_entry_and_cursor_on_top(tmp_path, m
         scr = SettingsScreen(config={}, config_path=str(cfg_file), on_apply=lambda: None,
                              probe_fn=lambda *a, **k: None)
         app.push_screen(scr); await pilot.pause()
-        scr._menu_idx = 4; scr._open_section(4)
+        scr._menu_idx = 3; scr._open_section(3)
         await pilot.pause(); await pilot.pause()
         assert calls                                   # авто-проверка сработала на входе
         assert scr._update_idx == 0                    # курсор на верхнем действии
         body = " ".join(str(w.render()) for w in scr.query(".set-dyn"))
         assert "доступна новая версия" in body
         n = len(calls)
-        scr._open_section(4); await pilot.pause()       # повторный вход
+        scr._open_section(3); await pilot.pause()       # повторный вход
         assert len(calls) == n                          # без нового запроса (кэш)
 
 
@@ -73,7 +73,7 @@ async def test_check_updates_sets_status(tmp_path, monkeypatch):
         scr = SettingsScreen(config={}, config_path=str(cfg_file), on_apply=lambda: None,
                              probe_fn=lambda *a, **k: None)
         app.push_screen(scr); await pilot.pause()
-        scr._menu_idx = 4; scr._open_section(4); await pilot.pause()
+        scr._menu_idx = 3; scr._open_section(3); await pilot.pause()
         scr._check_updates_now()                          # синхронный вход в воркер (инъекция)
         await pilot.pause(); await pilot.pause()
         body = " ".join(str(w.render()) for w in scr.query(".set-dyn"))
@@ -98,7 +98,7 @@ async def test_update_confirm_and_hint_text_use_location_phrase(tmp_path, monkey
         scr = SettingsScreen(config={}, config_path=str(cfg_file), on_apply=lambda: None,
                              probe_fn=lambda *a, **k: None)
         app.push_screen(scr); await pilot.pause()
-        scr._menu_idx = 4; scr._open_section(4); await pilot.pause(); await pilot.pause()
+        scr._menu_idx = 3; scr._open_section(3); await pilot.pause(); await pilot.pause()
         hint_body = " ".join(str(w.render()) for w in scr.query(".set-hint"))
         assert "в фоне" in hint_body and "в отдельном окне" not in hint_body
         scr._request_update()
@@ -123,7 +123,7 @@ async def test_update_confirm_banner_then_spawn(tmp_path, monkeypatch):
         scr = SettingsScreen(config={}, config_path=str(cfg_file), on_apply=lambda: None,
                              probe_fn=lambda *a, **k: None)
         app.push_screen(scr); await pilot.pause()
-        scr._menu_idx = 4; scr._open_section(4); await pilot.pause()
+        scr._menu_idx = 3; scr._open_section(3); await pilot.pause()
         scr._request_update()                             # показать confirm
         assert scr._update_awaiting_confirm is True
         body = " ".join(str(w.render()) for w in scr.query(".set-dyn"))
@@ -135,7 +135,7 @@ async def test_update_confirm_banner_then_spawn(tmp_path, monkeypatch):
 async def test_update_confirm_banner_blocks_section_switch(tmp_path, monkeypatch):
     """Регресс гейта (тот же Critical, что в MCP): пока висит confirm-баннер обновления,
     PgUp/PgDn через on_key НЕ листает секцию и НЕ уничтожает баннер; escape — отменяет
-    confirm, а не секцию. Ранний гейт секции 4 (до pageup-ветки) глотает всё, кроме
+    confirm, а не секцию. Ранний гейт секции 3 (до pageup-ветки) глотает всё, кроме
     enter (→ confirm) и escape (→ cancel)."""
     import app_version, updater.check as check_mod, tui.app as app_mod
     from tui.screens.settings import SettingsScreen
@@ -149,23 +149,23 @@ async def test_update_confirm_banner_blocks_section_switch(tmp_path, monkeypatch
         scr = SettingsScreen(config={}, config_path=str(cfg_file), on_apply=lambda: None,
                              probe_fn=lambda *a, **k: None)
         app.push_screen(scr); await pilot.pause()
-        scr._menu_idx = 4; scr._open_section(4); await pilot.pause()
+        scr._menu_idx = 3; scr._open_section(3); await pilot.pause()
         scr._request_update()                             # поднять confirm-баннер
         await pilot.pause()
         assert scr._update_awaiting_confirm is True
         await pilot.press("pageup")                       # попытка листнуть секцию
         await pilot.pause()
-        assert scr._view == 4                             # секция НЕ сменилась
+        assert scr._view == 3                             # секция НЕ сменилась
         assert scr._update_awaiting_confirm is True       # баннер жив
         assert list(scr.query(".set-confirm"))            # виджет баннера на месте
         await pilot.press("pagedown")                     # и в другую сторону
         await pilot.pause()
-        assert scr._view == 4
+        assert scr._view == 3
         assert scr._update_awaiting_confirm is True
         await pilot.press("escape")                       # отмена confirm
         await pilot.pause()
         assert scr._update_awaiting_confirm is False
-        assert scr._view == 4                             # escape отменил confirm, не секцию
+        assert scr._view == 3                             # escape отменил confirm, не секцию
 
 
 async def test_update_blocked_when_current(tmp_path, monkeypatch):
@@ -183,7 +183,7 @@ async def test_update_blocked_when_current(tmp_path, monkeypatch):
     async with app.run_test() as pilot:
         scr = SettingsScreen(config={}, config_path=str(cfg), on_apply=lambda: None, probe_fn=lambda *a, **k: None)
         app.push_screen(scr); await pilot.pause()
-        scr._menu_idx = 4; scr._open_section(4); await pilot.pause(); await pilot.pause()
+        scr._menu_idx = 3; scr._open_section(3); await pilot.pause(); await pilot.pause()
         scr._request_update()
         assert scr._update_awaiting_confirm is False              # confirm НЕ поднят
         title = str(scr.query_one("#set-title").render())
@@ -208,9 +208,9 @@ async def test_apply_check_result_persists_even_if_view_changed(tmp_path, monkey
         scr = SettingsScreen(config={}, config_path=str(cfg), on_apply=lambda: None,
                              probe_fn=lambda *a, **k: None)
         app.push_screen(scr); await pilot.pause()
-        scr._menu_idx = 4; scr._open_section(4); await pilot.pause()
+        scr._menu_idx = 3; scr._open_section(3); await pilot.pause()
         scr._update_checking = True                      # воркер в полёте
-        scr._view = 0                                     # юзер успел уйти из секции 4
+        scr._view = 0                                     # юзер успел уйти из секции 3
         scr._apply_check_result(CheckResult("current", "old", "установлена последняя версия"))
         assert scr._update_checking is False              # НЕ залипло
         assert scr._update_check_result is not None       # результат сохранён
@@ -236,7 +236,7 @@ async def test_apply_check_result_persists_verdict_and_syncs_main_card(tmp_path,
         scr = SettingsScreen(config={}, config_path=str(cfg), on_apply=lambda: None,
                              probe_fn=lambda *a, **k: None)
         app.push_screen(scr); await pilot.pause()
-        scr._menu_idx = 4; scr._open_section(4); await pilot.pause(); await pilot.pause()
+        scr._menu_idx = 3; scr._open_section(3); await pilot.pause(); await pilot.pause()
         scr._apply_check_result(check_mod.CheckResult("update", "newcommit", "доступна новая версия"))
         assert app._update_available is True
         state = upgrade_gate.read_state()
@@ -267,7 +267,7 @@ async def test_apply_check_result_unknown_keeps_known_update_verdict(tmp_path, m
         scr = SettingsScreen(config={}, config_path=str(cfg), on_apply=lambda: None,
                              probe_fn=lambda *a, **k: None)
         app.push_screen(scr); await pilot.pause()
-        scr._menu_idx = 4; scr._open_section(4); await pilot.pause(); await pilot.pause()
+        scr._menu_idx = 3; scr._open_section(3); await pilot.pause(); await pilot.pause()
         scr._apply_check_result(check_mod.CheckResult("update", "newcommit", "доступна новая версия"))
         assert app._update_available is True
         scr._apply_check_result(check_mod.CheckResult("unknown", None, "не удалось: офлайн"))
@@ -295,7 +295,7 @@ async def test_apply_check_result_current_clears_available(tmp_path, monkeypatch
         scr = SettingsScreen(config={}, config_path=str(cfg), on_apply=lambda: None,
                              probe_fn=lambda *a, **k: None)
         app.push_screen(scr); await pilot.pause()
-        scr._menu_idx = 4; scr._open_section(4); await pilot.pause(); await pilot.pause()
+        scr._menu_idx = 3; scr._open_section(3); await pilot.pause(); await pilot.pause()
         scr._apply_check_result(check_mod.CheckResult("update", "newcommit", "доступна новая версия"))
         assert app._update_available is True
         scr._apply_check_result(check_mod.CheckResult("current", "old", "установлена последняя версия"))
@@ -317,10 +317,10 @@ async def test_checked_line_unknown_is_dash_not_warn(tmp_path, monkeypatch):
         scr = SettingsScreen(config={}, config_path=str(cfg), on_apply=lambda: None,
                              probe_fn=lambda *a, **k: None)
         app.push_screen(scr); await pilot.pause()
-        scr._menu_idx = 4; scr._open_section(4); await pilot.pause(); await pilot.pause()
+        scr._menu_idx = 3; scr._open_section(3); await pilot.pause(); await pilot.pause()
         line = str(scr._checked_line_text())
         assert line.startswith("Проверено") and "—" in line and "⚠" not in line
-        glyph, _ = scr._menu_glyph(4)
+        glyph, _ = scr._menu_glyph(3)
         assert glyph == "—"                                # меню-глиф тоже без вердикта, не !
 
 

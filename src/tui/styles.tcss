@@ -155,15 +155,6 @@ ToolCallRow:focus, TraceRow:focus, UserReplyContainer:focus, AgentReplyLine:focu
     padding: 0 1;
 }
 
-.tool-result-preview {
-    color: $muted;
-    padding: 0 0 0 5;
-    border-left: outer $deep-dim;
-    height: auto;
-}
-.tool-result-preview.hidden {
-    display: none;
-}
 .line-tool      { color: $dim; }       /* |- механика тула */
 /* Первый tool в группе (предыдущий ряд — не tool) отделён верхним отступом;
    подряд идущие tool-строки компактны (класс вешается в коде — Textual CSS
@@ -366,10 +357,11 @@ TextArea.ask-human-mode { border: solid $run-color; }
 #onb-logo { height: auto; padding: 0; }
 #onb-tagline { height: auto; color: $deep-dim; margin-top: 1; padding: 0; }
 #onb-stepper { height: auto; padding: 2 0; }
+#onb-summary { height: 1; margin-bottom: 1; }   /* строка сводки — клип по краю, без переноса; воздух перед заголовком шага */
 #onb-body { height: auto; padding: 0; margin-bottom: 1; }   /* воздух под заголовком шага (как #set-title) */
 /* Поля ввода — плоские, как #config-filter (без дефолтной рамки Input, что мусорит box-символами). */
-#onb-endpoint, #onb-token, #onb-model { height: 1; width: 1fr; border: none; padding: 0; background: $bg; color: $ink; }
-#onb-endpoint:focus, #onb-token:focus, #onb-model:focus { border: none; background: $band-bg; }
+#onb-endpoint, #onb-token, #onb-model, #conn-url, #conn-token { height: 1; width: 1fr; border: none; padding: 0; background: $bg; color: $ink; }
+#onb-endpoint:focus, #onb-token:focus, #onb-model:focus, #conn-url:focus, #conn-token:focus { border: none; background: $band-bg; }
 .onb-option { height: auto; padding: 0 1; width: 1fr; }
 /* Выбор — только фон, БЕЗ border-left: полоса сдвигала контент на 1 колонку,
    отчего кружки ●/○ в /settings-секциях съезжали друг относительно друга. */
@@ -382,8 +374,15 @@ TextArea.ask-human-mode { border: solid $run-color; }
 .set-spaced-gap { margin: 1 0 1 0; }
 .auth-nested { margin-left: 4; }
 .onb-hint { color: $deep-dim; padding: 0; }
+.set-group-gap { margin-top: 1; }   /* отступ между группами секции (Адрес ↔ Авторизация) */
 .onb-warn { color: $warn; padding: 0; }
 #config-filter:focus { border: none; }
+
+/* Поле фильтра моделей — паттерн /sessions: «> » (accent) + плоский Input, без amber-рамки. */
+.model-filter-row { height: 1; width: 1fr; margin-bottom: 1; }
+.model-filter-prompt { width: 2; color: $accent; height: 1; }
+.model-filter { height: 1; width: 1fr; border: none; padding: 0; background: $bg; color: $ink; }
+.model-filter:focus { border: none; background: $band-bg; }
 
 /* /settings — хаб настроек (визуальный контракт §2-3; идиомы = onb-*) */
 #set-header { height: 2; background: $bg; color: $deep-dim; padding: 0 1; border-bottom: solid $deep-dim; }
@@ -404,6 +403,10 @@ TextArea.ask-human-mode { border: solid $run-color; }
 .set-row.selected { background: $band-bg; }
 .set-hint { color: $deep-dim; padding: 0 1; margin-top: 1; }   /* воздух перед контекст-подсказкой */
 .set-info { height: auto; padding: 0 1; }   /* инфо-строки (Версия/Источник) — тот же отступ */
+/* Подписи редакторов (Модель/Подключение) несут .onb-hint/.onb-warn из онбординга
+   (padding 0) — в /settings выравниваем их на ту же границу 3, что заголовок и опции.
+   Онбординг (#onb-frame) селектор не задевает — там своя раскладка. */
+#set-frame .onb-hint, #set-frame .onb-warn { padding: 0 1; }
 .set-gap { margin-top: 1; }                 /* вертикальный зазор между смысловыми группами */
 .set-warnflash { color: $warn; }
 .set-probe { margin-top: 1; }               /* воздух перед строкой статуса probe */
@@ -417,16 +420,20 @@ TextArea.ask-human-mode { border: solid $run-color; }
 .post-update-hint { height: auto; color: $deep-dim; padding: 0; }
 .post-update-item { height: auto; padding: 0; }
 .set-confirm { background: $band-bg; border-left: outer $warn; padding: 0 1; margin-top: 1; }
+.set-flash-ok   { background: $band-bg; border-left: outer $ok;   padding: 0 1; margin-top: 1; color: $ok; }
+.set-flash-warn { background: $band-bg; border-left: outer $warn; padding: 0 1; margin-top: 1; color: $warn; }
 #set-notice { margin-top: 1; }              /* отделить notice (итог install/удаления) от контента над ним */
 /* Поле ввода в /settings — скруглённая amber-рамка (id+class специфичнее flat
    #onb-* → онбординг остаётся без рамки, как принят). */
-#onb-endpoint.set-framed, #onb-token.set-framed, #onb-model.set-framed {
+#onb-endpoint.set-framed, #onb-token.set-framed, #onb-model.set-framed,
+#conn-url.set-framed, #conn-token.set-framed {
     border: round $run-color; height: 3; width: 1fr; padding: 0 1; background: $bg;
 }
-#onb-endpoint.set-framed:focus, #onb-token.set-framed:focus, #onb-model.set-framed:focus {
+#onb-endpoint.set-framed:focus, #onb-token.set-framed:focus, #onb-model.set-framed:focus,
+#conn-url.set-framed:focus, #conn-token.set-framed:focus {
     border: round $run-color; background: $band-bg;
 }
 
 /* Редакторы полей — Vertical по дефолту height:1fr и растягивают рамку;
    принудительно height:auto, чтобы рамка (#onb-frame/#set-frame) обнимала контент. */
-EndpointEditor, AuthEditor, ModelEditor, McpSectionEditor { height: auto; }
+EndpointEditor, AuthEditor, ModelEditor, McpSectionEditor, ConnectionEditor { height: auto; }

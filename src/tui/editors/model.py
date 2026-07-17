@@ -5,11 +5,19 @@ from __future__ import annotations
 
 from rich.text import Text
 from textual.app import ComposeResult
-from textual.containers import Vertical
+from textual.containers import Vertical, Horizontal
 from textual.widgets import Input, Static
 
 from tui.palette import ACCENT, DEEP_DIM
 from tui.widgets.paste_input import PasteInput
+
+from typing import NamedTuple
+
+
+class _Row(NamedTuple):
+    kind: str              # "current" | "manual" | "model"
+    model: object = None   # ModelInfo для current/model; None для manual
+
 
 _SOURCE_OK = "список получен с сервера"
 _SOURCE_FAIL = "сервер не отдаёт список моделей"
@@ -38,6 +46,8 @@ class ModelEditor(Vertical):
         self._truncated = 0            # сколько моделей скрыто капом (для подсказки)
         self.models_loaded = False
         self._idx = 0
+        self._rows: list[_Row] = []     # кэш видимых строк (пересобирается в _render)
+        self._filter: str = ""          # текст фильтра из #model-filter (on_input_changed)
 
     def compose(self) -> ComposeResult:
         yield Static("загрузка моделей…", classes="onb-hint onb-dyn", id="onb-model-loading")
@@ -63,26 +73,35 @@ class ModelEditor(Vertical):
             self._synthetic = True
         if models:
             models = self._ensure_active(models)
-            total = len(models)
-            models = self._cap_models(models)
-            self._truncated = total - len(models)
-        if models and self._active in {m.id for m in models}:
-            self._idx = next(i for i, m in enumerate(models) if m.id == self._active)
         self._models = models
         self.models_loaded = True
+        self._rows = self._visible_rows()
+        self._idx = self._initial_idx()
         for w in self.query("#onb-model-loading"):
             w.remove()
         self._mount_list()
+        for f in self.query("#model-filter"):
+            f.focus()
         if self._on_loaded is not None:
             self._on_loaded()
+
+    def _initial_idx(self) -> int:
+        for i, row in enumerate(self._rows):
+            if row.kind == "current":
+                return i
+        for i, row in enumerate(self._rows):
+            if row.kind == "model":
+                return i
+        return 0                                 # только manual
 
     def _ensure_active(self, models: list) -> list:
         """Инвариант: действующая модель всегда присутствует в списке выбора.
 
         Сервер может её не вернуть — сменили эндпоинт, модель снята с раздачи. Без неё
         предвыбор встаёт на чужую модель: секция читается как «изменено» при входе, а
-        Enter молча подменяет модель в конфиге. _cap_models держит тот же инвариант при
-        обрезке длинных списков; здесь он же для случая «модели нет в ответе сервера».
+        Enter молча подменяет модель в конфиге. _visible_rows держит тот же инвариант
+        отдельной строкой «текущая», не подверженной капу _other_models; здесь он же
+        для случая «модели нет в ответе сервера».
         """
         if not self._active or self._active in {m.id for m in models}:
             return models
@@ -90,18 +109,32 @@ class ModelEditor(Vertical):
         self._active_offered = False
         return [ModelInfo(id=self._active)] + list(models)
 
-    def _cap_models(self, models: list) -> list:
-        """Не более _MODEL_LIMIT моделей в списке (сервер может отдать сотни →
-        тормоза и невозможно найти нужную). Действующую модель включаем всегда,
-        даже если она за пределами топа — иначе «текущая»/предвыбор сломаются."""
-        if len(models) <= _MODEL_LIMIT:
-            return models
-        top = list(models[:_MODEL_LIMIT])
-        if self._active and self._active not in {m.id for m in top}:
-            active = next((m for m in models if m.id == self._active), None)
-            if active is not None:
-                top = top[:_MODEL_LIMIT - 1] + [active]
-        return top
+    def _active_model(self):
+        """ModelInfo действующей модели (из _models), или None."""
+        if not self._active or not self._models:
+            return None
+        return next((m for m in self._models if m.id == self._active), None)
+
+    def _other_models(self) -> list:
+        """«Остальные» = модели без действующей; при пустом фильтре — с капом."""
+        models = self._models or []
+        others = [m for m in models if m.id != self._active]
+        if self._filter:                       # активный фильтр снимает кап, режет по подстроке
+            q = self._filter.lower()
+            others = [m for m in others if q in m.id.lower()]
+            self._truncated = 0
+            return others
+        self._truncated = max(0, len(others) - _MODEL_LIMIT)
+        return others[:_MODEL_LIMIT]
+
+    def _visible_rows(self) -> list:
+        rows: list[_Row] = []
+        active = self._active_model()
+        if active is not None:
+            rows.append(_Row("current", active))
+        rows.append(_Row("manual", None))
+        rows.extend(_Row("model", m) for m in self._other_models())
+        return rows
 
     def _active_mark(self) -> str:
         """Подпись у модели из конфига.
@@ -122,74 +155,136 @@ class ModelEditor(Vertical):
             return f"  {word}"
         return f"  {word} · нет на сервере"
 
-    def _row_text(self, i: int, m) -> Text:
+    def _row_text_for(self, row, i: int) -> Text:
         cursor = "▸ " if i == self._idx else "  "
-        dot = "● " if m.id == self._active else "○ "   # ● — модель из конфига, ○ — прочие
-        warn = " ⚠" if m.tool_capable is False else ""
         t = Text()
-        t.append(cursor, style=ACCENT)                 # курсор teal, как в меню
+        t.append(cursor, style=ACCENT)
+        if row.kind == "manual":
+            from onboarding_fields import MANUAL_ENTRY
+            t.append(f"○ {MANUAL_ENTRY}")
+            return t
+        m = row.model
+        is_active = row.kind == "current"
+        dot = "● " if is_active else "○ "
+        warn = " ⚠" if m.tool_capable is False else ""
         t.append(f"{dot}{m.id}{warn}")
-        if m.id == self._active:
+        if is_active:
             t.append(self._active_mark(), style=DEEP_DIM)
         return t
 
-    def _manual_text(self) -> Text:
-        """«вписать вручную…» — тоже вариант выбора (○), с курсором ▸ (teal)."""
-        from onboarding_fields import MANUAL_ENTRY
-        manual_i = len(self._models or [])
-        cursor = "▸ " if self._idx == manual_i else "  "
-        t = Text()
-        t.append(cursor, style=ACCENT)
-        t.append(f"○ {MANUAL_ENTRY}")
-        return t
-
     def _mount_list(self) -> None:
-        from onboarding_fields import MODEL_WARN
-        models = self._models
-        spaced = " set-spaced" if self._framed else ""
-        input_cls = "onb-dyn set-framed" if self._framed else "onb-dyn"
-        if not models:
+        if not self._models:
+            input_cls = "onb-dyn set-framed" if self._framed else "onb-dyn"
             inp = PasteInput(value=self._current, placeholder="имя модели",
                              id=self._input_id, classes=input_cls)
             self.mount(inp)
             self.mount(Static(_SOURCE_FAIL, classes="onb-hint onb-dyn"))
             inp.focus()
             return
-        for i, m in enumerate(models):
+        self._rows = self._visible_rows()
+        row_filter = Horizontal(
+            Static("> ", classes="model-filter-prompt", markup=False),
+            PasteInput(value=self._filter, placeholder="поиск модели",
+                       id="model-filter", classes="model-filter onb-dyn"),
+            classes="model-filter-row onb-dyn",
+        )
+        self.mount(row_filter)
+        self._mount_rows_after_filter()
+
+    def _mount_rows_after_filter(self, from_filter: bool = False) -> None:
+        from onboarding_fields import MODEL_WARN
+        spaced = " set-spaced" if self._framed else ""
+        for i, row in enumerate(self._rows):
             cls = "onb-option onb-dyn" + spaced + (" selected" if i == self._idx else "")
-            self.mount(Static(self._row_text(i, m), classes=cls))
+            self.mount(Static(self._row_text_for(row, i), classes=cls))
         if self._truncated > 0:
-            self.mount(Static(f"…и ещё {self._truncated} — впишите имя вручную ниже",
+            self.mount(Static(f"…и ещё {self._truncated} — уточните фильтром",
                               classes="onb-hint onb-dyn"))
-        manual_i = len(models)
-        cls = "onb-option onb-dyn" + spaced + (" selected" if self._idx == manual_i else "")
-        self.mount(Static(self._manual_text(), classes=cls))
-        if any(m.tool_capable is False for m in models):
-            self.mount(Static(f"⚠ {MODEL_WARN}", classes="onb-warn onb-dyn"))
+        elif self._filter and not any(r.kind == "model" for r in self._rows):
+            self.mount(Static("ничего не найдено — впишите вручную",
+                              classes="onb-hint onb-dyn"))
+        input_cls = "onb-dyn set-framed" if self._framed else "onb-dyn"
         inp = PasteInput(value=self._current, placeholder="имя модели",
                          id=self._input_id, classes=input_cls)
-        inp.display = self._idx == manual_i
+        # При фильтрации (from_filter) ручной ввод не всплывает, даже если _idx сел на
+        # manual из-за схлопывания списка под фильтром: амбер-поле активирует только
+        # ↑↓-навигация (move), а не побочный эффект сужения — иначе поле зовёт печатать,
+        # а клавиши уходят в фильтр (пользователь печатал там).
+        inp.display = (not from_filter) and self._rows and self._rows[self._idx].kind == "manual"
         self.mount(inp)
-        # Строка-источник — В САМОМ НИЗУ (не разбивает варианты выбора и их поле).
+        if any(r.kind in ("current", "model") and r.model is not None
+               and r.model.tool_capable is False for r in self._rows):
+            self.mount(Static(f"⚠ {MODEL_WARN}", classes="onb-warn onb-dyn"))
         self.mount(Static(_SOURCE_FAIL if self._synthetic else _SOURCE_OK,
                           classes="onb-hint onb-dyn"))
+        if from_filter:                          # пользователь печатает в фильтре — фокус там
+            for f in self.query("#model-filter"):
+                f.focus()
+
+    def _manual_selector(self) -> str:
+        return f"#{self._input_id}"
+
+    async def on_input_changed(self, event) -> None:
+        if event.input.id != "model-filter":
+            return
+        new = event.value.strip()
+        if new == self._filter:
+            return
+        self._filter = new
+        await self._rebuild_rows()
+
+    async def _rebuild_rows(self) -> None:
+        """Пересобрать видимые строки под текущий фильтр, сохранив поле фильтра и фокус.
+
+        Снос старых виджетов дожидается завершения (await): .remove() в Textual лишь
+        планирует удаление (реальный detach происходит позже, асинхронно) — без await
+        ручной Input того же id ещё не освобождён, когда _mount_rows_after_filter()
+        монтирует новый с тем же id → DuplicateIds.
+        """
+        prev = self._rows[self._idx] if self._rows and 0 <= self._idx < len(self._rows) else None
+        await self.query(".onb-option").remove()
+        for w in list(self.query(".onb-hint.onb-dyn")):
+            if w.id != "onb-model-loading":
+                await w.remove()
+        await self.query(".onb-warn").remove()
+        try:
+            await self.query_one(self._manual_selector()).remove()
+        except Exception:
+            pass
+        self._rows = self._visible_rows()
+        self._idx = self._reselect_idx(prev)
+        self._mount_rows_after_filter(from_filter=True)
+
+    def _reselect_idx(self, prev) -> int:
+        """Сохранить выбранную строку по identity через пересбор; пропала → первая видимая (§4.4).
+
+        Клэмп старого числового индекса к новому списку молча подменял бы модель на ту,
+        что заняла ту же позицию после фильтрации, — submit()/peek() вернули бы чужой выбор.
+        """
+        if prev is None:
+            return 0
+        if prev.kind in ("current", "manual"):
+            return next((i for i, r in enumerate(self._rows) if r.kind == prev.kind), 0)
+        return next((i for i, r in enumerate(self._rows)
+                     if r.kind == "model" and r.model.id == prev.model.id), 0)
 
     def move(self, delta: int) -> None:
-        models = self._models or []
-        n = len(models) + 1
+        if not self._rows:
+            return
+        n = len(self._rows)
         self._idx = (self._idx + delta) % n
         cur = self._idx
         for i, w in enumerate(self.query(".onb-option")):
-            if i < len(models):
-                w.update(self._row_text(i, models[i]))
-            else:
-                w.update(self._manual_text())
+            w.update(self._row_text_for(self._rows[i], i))
             (w.add_class if i == cur else w.remove_class)("selected")
-        manual_i = len(models)
-        inp = self.query_one(Input)
-        inp.display = cur == manual_i
-        if cur == manual_i:
+        inp = self.query_one(self._manual_selector(), Input)
+        manual = self._rows[cur].kind == "manual"
+        inp.display = manual
+        if manual:
             inp.focus()
+        else:
+            for f in self.query("#model-filter"):
+                f.focus()
 
     @property
     def has_models(self) -> bool:
@@ -197,14 +292,18 @@ class ModelEditor(Vertical):
 
     def submit(self) -> str | None:
         """Имя модели или None (не менять)."""
-        models = self._models or []
-        if not models or self._idx == len(models):
-            try:
-                raw = self.query_one(Input).value.strip()
-            except Exception:
-                raw = ""
-            return raw or None
-        return models[self._idx].id
+        if not self._rows:                       # сервер без списка → только ручной ввод
+            return self._manual_value()
+        row = self._rows[self._idx]
+        if row.kind == "manual":
+            return self._manual_value()
+        return row.model.id
+
+    def _manual_value(self) -> str | None:
+        try:
+            return self.query_one(self._manual_selector(), Input).value.strip() or None
+        except Exception:
+            return None
 
     def peek(self) -> str | None:
         """Текущий выбор без сайд-эффектов (для dirty-проверки)."""
