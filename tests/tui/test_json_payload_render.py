@@ -67,11 +67,51 @@ def test_unfold_parses_top_level_string():
     assert data["type"] == "stored_tool_output"
 
 
-def test_unfold_truncated_content_stays_string():
-    """Оборванный JSON внутри content не парсится → честно остаётся строкой."""
+def test_unfold_truncated_content_repaired_to_dict():
+    """Оборванный JSON внутри content чинится для показа (закрываются строка
+    и скобки, оборванный хвост отбрасывается) → разворачивается как dict,
+    а не остаётся однострочной экранированной колбасой."""
     data = unfold_payload(STORED_TRUNCATED)
-    assert isinstance(data["content"], str)
-    assert data["content"].startswith('{"tool": "fs_list_files"')
+    inner = data["content"]
+    assert isinstance(inner, dict)
+    assert inner["tool"] == "fs_list_files"
+    assert isinstance(inner["entries"], list)
+    assert inner["entries"], "распарсенные элементы до места обрыва сохранены"
+
+
+def test_unfold_truncated_readfile_markdown_content():
+    """Кейс со скриншота: stored_tool_output, content = JSON read_file-конверта
+    с markdown-текстом, обрезанный посреди текста. После починки — dict, а
+    markdown внутри — строка с реальными переносами (для multiline-блока)."""
+    md = "# SPEC.md — Унифицированный CLI\n\n## 1. Objective\nОбъединить `chat.py`,\n" * 40
+    inner = json.dumps({"tool": "fs_read_file", "ok": True,
+                        "path": "D:\\dev\\SPEC.md", "content": md},
+                       ensure_ascii=False)
+    envelope = {"type": "stored_tool_output", "ok": True, "truncated": True,
+                "content": inner[:len(inner) // 2]}   # обрыв посреди markdown
+    data = unfold_payload(json.dumps(envelope, ensure_ascii=False))
+    repaired = data["content"]
+    assert isinstance(repaired, dict)
+    assert repaired["tool"] == "fs_read_file"
+    assert "\n" in repaired["content"]           # реальные переносы, не \\n
+    assert repaired["content"].startswith("# SPEC.md")
+
+
+def test_unfold_truncated_mid_key_and_mid_number():
+    """Обрыв на середине ключа / числа: хвост отбрасывается, остальное парсится."""
+    mid_key = '{"ok": true, "count": 200, "trunca'
+    data = unfold_payload(mid_key)
+    assert data == {"ok": True, "count": 200}
+    mid_number = '{"ok": true, "count": 12'
+    data = unfold_payload(mid_number)
+    assert data == {"ok": True}
+
+
+def test_unfold_unrepairable_stays_string():
+    """Строка, похожая на JSON, но не являющаяся им (не обрыв, а мусор) —
+    честно остаётся строкой."""
+    garbage = '{"a": 1} trailing garbage}'
+    assert unfold_payload(garbage) == garbage
 
 
 def test_unfold_expands_nested_json_string():

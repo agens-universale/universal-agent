@@ -11,8 +11,9 @@ pretty-print + rich.syntax(solarized-dark). Markdown не интерпретир
 from __future__ import annotations
 
 import json
+import re
 import uuid
-from typing import Any
+from typing import Any, Optional
 
 from rich.console import Group
 from rich.syntax import Syntax
@@ -39,7 +40,9 @@ def unfold_payload(content: Any, max_depth: int = _MAX_UNFOLD_DEPTH) -> Any:
             try:
                 parsed = json.loads(s)
             except (json.JSONDecodeError, ValueError):
-                return content
+                parsed = _parse_truncated_json(s)
+                if parsed is None:
+                    return content
             if isinstance(parsed, (dict, list)):
                 return unfold_payload(parsed, max_depth - 1)
         return content
@@ -48,6 +51,80 @@ def unfold_payload(content: Any, max_depth: int = _MAX_UNFOLD_DEPTH) -> Any:
     if isinstance(content, list):
         return [unfold_payload(v, max_depth - 1) for v in content]
     return content
+
+
+# Хвостовые обрезки оборванного JSON (все три — только НЕ-скобочные символы,
+# так что стек закрывашек после стрижки не меняется).
+_BARE_TAIL = re.compile(r'[^\s,:{}\[\]"]+$')            # голый литерал: 12 / tru / nul
+_KEY_TAIL = re.compile(r'"(?:[^"\\]|\\.)*"\s*:?\s*$')   # висящий ключ: "trunca" / "count":
+_SEP_TAIL = re.compile(r'[,:]\s*$')                     # висящий разделитель
+
+
+def _parse_truncated_json(s: str) -> Optional[Any]:
+    """Best-effort парс JSON, обрезанного на полуслове (stored_tool_output и т.п.).
+
+    Escape-aware скан считает открытые скобки и состояние «внутри строки», после
+    чего оборванная строка/скобки закрываются, а недописанный хвост (голый
+    литерал, висящий ключ, разделитель) отбрасывается. Ничего не выдумывается —
+    только закрытие структур и стрижка хвоста; о самом факте обрезки говорит
+    конверт (``"truncated": true``). Не похоже на обрыв (мусор, дисбаланс) → None.
+    """
+    stack: list[str] = []
+    in_str = esc = False
+    for ch in s:
+        if in_str:
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == '"':
+                in_str = False
+        elif ch == '"':
+            in_str = True
+        elif ch in "{[":
+            stack.append("}" if ch == "{" else "]")
+        elif ch in "}]":
+            if not stack or stack[-1] != ch:
+                return None     # дисбаланс — это не обрыв, чинить нечего
+            stack.pop()
+    if not stack and not in_str:
+        return None             # сбалансирован, но не парсится — не наш случай
+    base = s[:-1] if esc else s  # оборванная escape-последовательность
+    if in_str:
+        # обрыв посреди строки: закрытая строка — валидное значение, текст до
+        # места обрыва сохраняется целиком; фолбэк — обрыв посреди ключа
+        base += '"'
+        candidates = [base, _strip_dangling(base)]
+    else:
+        # обрыв в структурной позиции: голый литерал на конце всегда подозрителен
+        # (12 могло быть 125) — стрижём сразу; фолбэк добирает ключ/разделитель
+        candidates = [_strip_bare_literal(base), _strip_dangling(base)]
+    closers = "".join(reversed(stack))
+    for cand in candidates:
+        try:
+            return json.loads(cand + closers)
+        except (json.JSONDecodeError, ValueError):
+            continue
+    return None
+
+
+def _strip_bare_literal(t: str) -> str:
+    """Срезать голый литерал на конце (недописанное число / tru / nul).
+
+    true/false/null — завершённые токены (длиннее не бывают), их не трогаем."""
+    t = t.rstrip()
+    m = _BARE_TAIL.search(t)
+    if m and m.group(0) not in ("true", "false", "null"):
+        t = t[: m.start()].rstrip()
+    return t
+
+
+def _strip_dangling(t: str) -> str:
+    """Срезать недописанный хвост: голый литерал → висящий ключ → разделитель."""
+    t = _strip_bare_literal(t)
+    t = _KEY_TAIL.sub("", t).rstrip()
+    t = _SEP_TAIL.sub("", t).rstrip()
+    return t
 
 
 def render_payload(content: Any) -> Widget:
