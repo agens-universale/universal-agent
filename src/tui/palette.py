@@ -34,7 +34,8 @@ BRAND = "#9A6DD7"
 
 # Поверхности
 BAND_BG = "#1f2128"
-FOCUS_BG = "#363b47"       # подсветка строки трассы в фокусе (только CSS :focus) — светлее user-band
+FOCUS_BG = "#363b47"     # подсветка строки трассы в фокусе (только CSS :focus) — светлее user-band
+CARD_SELECT_BG = "#2e323d"  # выбранная карточка (/sessions, /skills, /mcp) — мягче focus-bg, светлее band-bg
 FRAME_ARCHIVE = "#4b525d"  # серая рамка «архив/история» (отвеченный вопрос)
 
 
@@ -46,5 +47,6 @@ def css_variables() -> dict[str, str]:
         "deep-dim": DEEP_DIM, "accent": ACCENT, "code": CODE, "tool-name": TOOL_NAME,
         "code-block": CODE_BLOCK, "ok": OK, "run-color": RUN_COLOR, "olive": OLIVE,
         "err": ERR, "warn": WARN, "info": INFO, "brand": BRAND,
-        "band-bg": BAND_BG, "focus-bg": FOCUS_BG, "frame-archive": FRAME_ARCHIVE,
+        "band-bg": BAND_BG, "focus-bg": FOCUS_BG, "card-select-bg": CARD_SELECT_BG,
+        "frame-archive": FRAME_ARCHIVE,
     }
