@@ -16,15 +16,18 @@ from rich.text import Text
 from tui.palette import ACCENT, DEEP_DIM, DIM, ERR, INK, OK, WARN
 from tui.widgets.loading_wave import WAVE_INTERVAL, WAVE_SEQ, wave_glyph
 
-SECTIONS = ("Адрес API-сервера", "Авторизация", "Модель", "MCP-серверы", "Обновление")
+SECTIONS = ("Подключение", "Модель", "MCP-серверы", "Обновление")
+
+_CONNECTION, _MODEL, _MCP, _UPDATE = 0, 1, 2, 3
+_EDITOR_SECTIONS = {_CONNECTION, _MODEL}   # редакторные: writable, dirty-tracked, submit
+_PROBE_SECTIONS = {_CONNECTION}            # server-probe: Tab-проверка, глиф из config-probe
 
 _FOOTERS = {
     "menu": "↑/↓ — выбор  ·  Enter — открыть  ·  Esc — закрыть",
-    0: "Enter — сохранить  ·  Tab — проверить соединение  ·  PgUp/PgDn — секции  ·  Esc — меню",
-    1: "↑/↓ — вариант  ·  Enter — сохранить  ·  Tab — проверить токен  ·  PgUp/PgDn — секции  ·  Esc — меню",
-    2: "↑/↓ — выбор  ·  Enter — сохранить  ·  PgUp/PgDn — секции  ·  Esc — меню",
-    3: "↑/↓ · Enter — установить · Space — вкл/выкл · Ctrl+U — обновить · Ctrl+D — удалить · PgUp/PgDn — секции · Esc",
-    4: "↑/↓ · Enter — выполнить · PgUp/PgDn — секции · Esc — меню",
+    0: "↑/↓ — навигация  ·  Enter — сохранить  ·  Tab — проверить соединение  ·  PgUp/PgDn — секции  ·  Esc — меню",
+    1: "↑/↓ — выбор  ·  Enter — сохранить  ·  PgUp/PgDn — секции  ·  Esc — меню",
+    2: "↑/↓ · Enter — установить · Space — вкл/выкл · Ctrl+U — обновить · Ctrl+D — удалить · PgUp/PgDn — секции · Esc",
+    3: "↑/↓ · Enter — выполнить · PgUp/PgDn — секции · Esc — меню",
 }
 _FOOTER_READONLY = "PgUp/PgDn — секции  ·  Esc — меню"
 
@@ -48,7 +51,7 @@ class SettingsScreen(Screen):
         self._config_gen = 0            # generation config-probe: устаревшие результаты отбрасываются
         self._draft_gen = 0             # generation draft-probe: независим от config-probe
         self._probe_in_flight = False
-        self._pending_force = False     # rejected показан, второй Enter сохраняет как есть
+        self._pending_force = False     # всегда False — force-save убран, Enter сохраняет сразу
         self._note_timer = None         # автогашение title-note «ничего не изменено»
         self._wave_timer = None         # таймер анимации загрузки (глифы хаба)
         self._wave_i = 0                # кадр «бегущего огонька»
@@ -88,7 +91,7 @@ class SettingsScreen(Screen):
     def _footer_text(self) -> str:
         if self._view == "menu":
             return _FOOTERS["menu"]
-        if self._view in (0, 1, 2) and not self._writable():
+        if self._view in _EDITOR_SECTIONS and not self._writable():
             return _FOOTER_READONLY
         return _FOOTERS.get(self._view, _FOOTER_READONLY)
 
@@ -143,23 +146,25 @@ class SettingsScreen(Screen):
 
     # --- значения для меню (правый столбец, dim) ---
     def _row_value(self, i: int) -> Text:
-        from onboarding import display_secret, display_value, TOKEN_SENTINEL
+        from onboarding import display_secret, display_value, env_ref_status, TOKEN_SENTINEL
         v = Text()
-        if i == 0:
+        if i == _CONNECTION:
             url = self._raw_value("completions_url")
-            v.append(display_value(url) if url else "—", style=DIM)
-        elif i == 1:
             auth = self._raw.get("Authorization")
-            if auth == TOKEN_SENTINEL:
-                v.append("—", style=DIM)               # не задано (шаблон)
-            elif not auth:
-                v.append("без авторизации", style=DIM)  # None/"" — токена нет
+            host = display_value(url) if url else "—"
+            if not auth:
+                mode = "без авторизации"
+            elif auth == TOKEN_SENTINEL:
+                mode = "—"
+            elif env_ref_status(auth):
+                mode = display_secret(auth)   # ссылка + статус (переменной нет / подставилась)
             else:
-                v.append(display_secret(auth), style=DIM)
-        elif i == 2:
+                mode = "Bearer"
+            v.append(f"{host} · {mode}", style=DIM)
+        elif i == _MODEL:
             model = self._raw_value("model")
             v.append(display_value(model) if model else "—", style=DIM)
-        elif i == 3:
+        elif i == _MCP:
             try:
                 import mcp_runtime.cli as mcp_mod
                 n = len(mcp_mod.wired_names())
@@ -194,7 +199,7 @@ class SettingsScreen(Screen):
     def _menu_glyph_text(self, i: int) -> Text:
         """Text глифа строки: анимированная волна в полёте probe (секции 0-2),
         иначе одиночный глиф ✓/!/— из _menu_glyph."""
-        if i in (0, 1, 2) and self._probe_in_flight:
+        if i in _EDITOR_SECTIONS and self._probe_in_flight:
             return self._wave_glyph()
         glyph, gstyle = self._menu_glyph(i)
         return Text(glyph, style=gstyle)
@@ -225,7 +230,7 @@ class SettingsScreen(Screen):
 
     def _refresh_wave_glyphs(self) -> None:
         for i, row in enumerate(self.query(".set-menurow")):
-            if i not in (0, 1, 2):
+            if i not in _EDITOR_SECTIONS:
                 continue
             try:
                 row.query_one(".set-glyph", Static).update(self._menu_glyph_text(i))
@@ -247,29 +252,27 @@ class SettingsScreen(Screen):
         """(глиф, style) для строки меню. … в полёте; ✓/!/— по §2 контракта.
         Глиф — вердикт probe о ДЕЙСТВУЮЩИХ (резолвнутых) значениях: он про то, работает
         ли конфиг, а не про то, что записано в файле (это показывает столбец значения)."""
-        if i in (0, 1, 2):
+        if i in _EDITOR_SECTIONS:
             if self._probe_in_flight:
                 return "…", DEEP_DIM
             r = self._probe_config
             c = self._config
-            if i == 0:
+            if i == _CONNECTION:
+                from onboarding import TOKEN_SENTINEL
                 endpoint, _a, _v, _m = self._probe_args_from_config()
                 if not endpoint:
                     return "—", DEEP_DIM
                 if r is None:
                     return "—", DEEP_DIM
-                if r.verdict == "ok" or (r.verdict == "rejected" and r.http_status == 401):
-                    return "✓", OK                   # 401 = сервер доступен, виноват токен
-                return "!", ERR                      # unknown (недоступен СЕЙЧАС) или 404
-            if i == 1:
-                from onboarding import TOKEN_SENTINEL
-                if self._raw.get("Authorization") == TOKEN_SENTINEL:
-                    return "—", DEEP_DIM             # не задано (шаблон)
-                if r is None:
-                    return "—", DEEP_DIM
-                if not r.auth_ok:
-                    return "!", ERR                 # сервер требует токен
-                return ("✓", OK) if r.verdict == "ok" else ("—", DEEP_DIM)
+                reachable = r.verdict == "ok" or (r.verdict == "rejected" and r.http_status == 401)
+                if not reachable:
+                    return "!", ERR                  # сервер недоступен СЕЙЧАС
+                auth = self._raw.get("Authorization")
+                if not auth:
+                    return "✓", OK                   # без авторизации — решает только достижимость
+                if auth == TOKEN_SENTINEL:
+                    return "—", DEEP_DIM             # токен не задан (шаблон) — нечем подтвердить
+                return ("✓", OK) if r.auth_ok else ("!", ERR)   # токен принят/отклонён (401)
             model = c.get("model") or ""
             if not model or r is None:
                 return "—", DEEP_DIM
@@ -277,13 +280,13 @@ class SettingsScreen(Screen):
                 return "—", DEEP_DIM
             ids = [m.id for m in r.models]
             return ("✓", OK) if model in ids else ("—", DEEP_DIM)   # не в списке → —, не !
-        if i == 3:
+        if i == _MCP:
             try:
                 import mcp_runtime.cli as mcp_mod
                 return ("✓", OK) if mcp_mod.wired_names() else ("—", DEEP_DIM)
             except Exception:
                 return "—", DEEP_DIM
-        if i == 4:
+        if i == _UPDATE:
             r = self._update_check_result
             if r is not None:
                 if r.status == "update":
@@ -328,7 +331,7 @@ class SettingsScreen(Screen):
         except NoMatches:
             return
         name = SECTIONS[self._view]
-        if self._view in (0, 1, 2) and self._is_dirty(self._view):
+        if self._view in _EDITOR_SECTIONS and self._is_dirty(self._view):
             t = Text(name)
             t.append("  изменено", style=WARN)
             title.update(t)
@@ -360,17 +363,10 @@ class SettingsScreen(Screen):
 
         Эталон — файл, а не резолвнутый конфиг: иначе поле со ссылкой ${ENV:VAR} вечно
         «изменено» (резолв ≠ ссылка) и каждое сохранение выписывает в файл литерал."""
-        if section == 0:
-            from tui.editors.endpoint import EndpointEditor
+        if section == _CONNECTION:
+            from tui.editors.connection import ConnectionEditor
             try:
-                raw = self.query_one(EndpointEditor).query_one(Input).value.strip()
-            except NoMatches:
-                return False
-            return raw != self._raw_value("completions_url")
-        if section == 1:
-            from tui.editors.auth import AuthEditor
-            try:
-                return self.query_one(AuthEditor).is_dirty()
+                return self.query_one(ConnectionEditor).is_dirty()
             except NoMatches:
                 return False
         from tui.editors.model import ModelEditor
@@ -437,75 +433,68 @@ class SettingsScreen(Screen):
 
     # --- draft-probe секции (Tab / умный Enter, спека v2 §3.1) ---
     def _probe_line_text(self, r, section: int) -> Text:
-        """Текст probe-строки по канону §3.1. section 0 → адрес, 1 → авторизация.
-        Для section 1 сообщение берётся из r.detail (его формирует interpret_auth:
-        «доступ без токена» / «токен принят» / «сервер требует авторизацию»)."""
+        """Текст probe-строки по канону §3.1. «Подключение» — совокупный вердикт
+        сервер+токен одной строкой (спек A4); прочие секции — общий формат из
+        r.detail (его формирует interpret_auth: «доступен» / «доступ без токена» /
+        «токен принят» / «сервер требует авторизацию»)."""
         if r is None:
             return Text("— не проверено", style=DEEP_DIM)
+        if section == _CONNECTION:
+            # Смысл авторизации — из r.auth_state (ставит interpret_auth); r.detail —
+            # только текст. Сырой config-probe (auth_state=None, без differential
+            # auth) «ok» читаем нейтрально — токен не проверяли, утверждать
+            # «принят» нечестно.
+            if r.verdict == "ok":
+                if r.auth_state == "accepted":
+                    t = Text("✓ сервер доступен · ", style=OK)
+                    t.append("✓ токен принят", style=OK)
+                    return t
+                if r.auth_state == "not_required":
+                    return Text("✓ сервер доступен · авторизация не требуется", style=OK)
+                return Text("✓ сервер доступен", style=OK)
+            if r.verdict == "rejected" and r.http_status == 401:
+                if r.auth_state == "required":
+                    # токена не было вовсе (сервер отклонил control-запрос без него) —
+                    # не «токен отклонён» (нечего было отклонять)
+                    t = Text("✓ сервер доступен · ", style=OK)
+                    t.append(f"⚠ {r.detail}", style=WARN)
+                    return t
+                t = Text("✓ сервер доступен · ", style=OK)
+                t.append("✗ токен отклонён (401)", style=WARN)
+                return t
+            if r.verdict == "unknown" and not r.http_status:
+                return Text("✗ сервер недоступен", style=WARN)
+            return Text(f"? не удалось проверить: {r.detail}", style=WARN)
         if r.verdict == "ok":
-            if section == 0:
-                msg = f"доступен · {r.latency_ms} ms"
-                if r.models is not None:
-                    msg += f" · {len(r.models)} моделей"
-            else:
-                msg = f"{r.detail} · {r.latency_ms} ms"
+            msg = f"{r.detail} · {r.latency_ms} ms"
             return Text(f"✓ {msg}", style=OK)
         if r.verdict == "rejected":
             return Text(f"✗ {r.detail}", style=ERR)
         return Text(f"⚠ не удалось проверить: {r.detail}", style=WARN)
 
-    def _endpoint_draft_args(self):
-        """(endpoint, auth, verify, model, ok) для draft-probe адреса из ВВЕДЁННОГО значения.
-        Поле не менялось → проверяем ДЕЙСТВУЮЩИЙ (резолвнутый) адрес: в поле может стоять
-        ссылка ${ENV:VAR}, как URL она невалидна, а проверять надо то, чем агент ходит."""
-        endpoint_cfg, auth_cfg, verify, model = self._probe_args_from_config()
-        if not self._is_dirty(0):
-            return endpoint_cfg, auth_cfg, verify, model, True
-        from tui.editors.endpoint import EndpointEditor
-        ok, value = self.query_one(EndpointEditor).submit()
-        endpoint = value if (ok and value) else endpoint_cfg
-        return endpoint, auth_cfg, verify, model, ok
-
     def _start_draft_probe(self, section: int, on_done=None) -> None:
-        if section == 1:
-            self._start_auth_draft_probe(on_done)
-            return
-        endpoint, auth, verify, model, ok = self._endpoint_draft_args()
-        if not ok:
-            return
-        self._draft_gen += 1
-        gen = self._draft_gen
-        self._set_probe_line(Text("проверяю…", style=DEEP_DIM))
-
-        def _work() -> None:
-            from tui.services.settings_probe import ProbeResult
-            try:
-                result = self._probe_fn(endpoint, auth, verify, model)
-            except Exception as exc:
-                result = ProbeResult("unknown", None, None, 0, f"внутренняя ошибка проверки: {exc}")
-            self.app.call_from_thread(self._on_draft_probe, result, gen=gen,
-                                      section=section, on_done=on_done)
-
-        self.run_worker(_work, thread=True, name="settings-draft-probe")
-
-    def _start_auth_draft_probe(self, on_done=None) -> None:
-        """Differential-probe авторизации: контрольный запрос БЕЗ токена определяет,
+        """Differential-probe «Подключения»: контрольный запрос БЕЗ токена определяет,
         требует ли сервер авторизацию; только при 401 проверяем сам токен. Так
-        честно отличаем «сервер не требует токен» от «токен принят/отклонён»."""
-        endpoint, auth_cfg, verify, model = self._probe_args_from_config()
+        честно отличаем «сервер не требует токен» от «токен принят/отклонён».
+
+        Endpoint и token берутся из ПОЛЯ (ConnectionEditor.peek(), draft), а не из
+        сохранённого конфига — иначе проверялась бы несуществующая комбинация
+        «новый адрес + старый токен»."""
+        from tui.editors.connection import ConnectionEditor
+        from onboarding import authorization_header
+        endpoint_cfg, auth_cfg, verify, model = self._probe_args_from_config()
+        url, auth_idx, token_raw = self.query_one(ConnectionEditor).peek()
+        endpoint = url or endpoint_cfg               # поле пусто → действующий (для ссылок)
         if not endpoint:
-            self._set_probe_line(Text("сначала настройте адрес — проверка токена стучится на него",
+            self._set_probe_line(Text("сначала настройте адрес — проверка стучится на него",
                                       style=DEEP_DIM))
             return
-        from tui.editors.auth import AuthEditor
-        from onboarding import authorization_header
-        idx, raw = self.query_one(AuthEditor).peek()
-        if idx != 0:
-            token = None                        # «без авторизации» — проверяем без токена
-        elif raw:
-            token = authorization_header(raw)   # введённый токен
+        if auth_idx == 1:
+            token = None                             # без авторизации
+        elif token_raw:
+            token = authorization_header(token_raw)  # введённый токен
         else:
-            token = auth_cfg                    # поле пусто → действующий (резолвнутый) токен
+            token = auth_cfg                         # поле пусто → действующий токен
         has_token = bool(token)
         self._draft_gen += 1
         gen = self._draft_gen
@@ -522,9 +511,9 @@ class SettingsScreen(Screen):
             except Exception as exc:
                 result = ProbeResult("unknown", None, None, 0, f"внутренняя ошибка проверки: {exc}")
             self.app.call_from_thread(self._on_draft_probe, result, gen=gen,
-                                      section=1, on_done=on_done)
+                                      section=_CONNECTION, on_done=on_done)
 
-        self.run_worker(_work, thread=True, name="settings-auth-draft-probe")
+        self.run_worker(_work, thread=True, name="settings-draft-probe")
 
     def _on_draft_probe(self, result, *, gen, section, on_done) -> None:
         if gen != self._draft_gen or not self.is_mounted or self._view != section:
@@ -551,25 +540,26 @@ class SettingsScreen(Screen):
         self._draft_checked = None
         self._cancel_env_confirm()  # правка обесценивает и подтверждение перезаписи ссылки
         self._draft_gen += 1        # правка значения обесценивает летящий draft-probe (config-probe не трогаем)
-        if self._view in (0, 1):
+        if self._view in _PROBE_SECTIONS:
             try:
                 self.query_one("#set-footer", Static).update(self._footer_text())
             except NoMatches:
                 pass
 
     def _smart_enter_decide(self, section: int, values: dict, r) -> None:
+        """Проверка ⊥ Сохранение: Enter всегда сохраняет (блок — только формальная
+        невалидность, её ловит _collect_values→submit). Вердикт сервера — информация."""
         if not values:
             self._title_note("ничего не изменено")
             return
-        if r.verdict == "ok":
-            self._do_save(section, values)
-        elif r.verdict == "unknown":
+        if r is not None and r.verdict == "rejected":
             self._do_save(section, values,
-                          warn_detail="проверить не удалось — сервер недоступен (Tab — повторить)")
-        else:  # rejected — достоверный отказ сервера
-            self._pending_force = True
-            self.query_one("#set-footer", Static).update(
-                "Enter — сохранить как есть  ·  Tab — проверить ещё раз  ·  Esc — меню")
+                          warn_detail="сервер отклонил токен — проверьте")
+        elif r is not None and r.verdict == "unknown":
+            self._do_save(section, values,
+                          warn_detail="проверить не удалось — сервер недоступен")
+        else:
+            self._do_save(section, values)
 
     # --- guard записи ---
     def _writable(self) -> bool:
@@ -585,8 +575,8 @@ class SettingsScreen(Screen):
 
     def _writable_or_mcp(self) -> bool:
         """Секция MCP пишет в config.local.yml (не в user config) — не блокируется
-        write-guard пакетного шаблона, применимым к секциям 0/1/2."""
-        return self._view == 3 or self._writable()
+        write-guard пакетного шаблона, применимым к секциям 0/1."""
+        return self._view == _MCP or self._writable()
 
     _SECRET_FIELD = "Authorization"   # действующее значение секрета маскируем, не печатаем как есть
 
@@ -626,37 +616,24 @@ class SettingsScreen(Screen):
 
     def _mount_section_body(self, frame: Vertical, section: int) -> None:
         from onboarding import TOKEN_SENTINEL
-        if section in (0, 1, 2) and not self._writable():
+        if section in _EDITOR_SECTIONS and not self._writable():
             frame.mount(Static(
                 "конфиг недоступен для записи: используется пакетный шаблон "
                 "(настройте GC_HOME или запустите gc-ua --init-config)",
                 classes="set-hint set-dyn"))
             return
-        if section == 0:
-            from tui.editors.endpoint import EndpointEditor
-            frame.mount(EndpointEditor(current=self._raw_value("completions_url"), framed=True))
-            self._mount_field_hints(frame, "completions_url")
-            frame.mount(Static(self._probe_line_text(self._probe_config, 0),
-                               classes="set-hint set-dyn set-probe"))
-        elif section == 1:
-            from tui.editors.auth import AuthEditor
+        if section == _CONNECTION:
+            from tui.editors.connection import ConnectionEditor
             auth = self._raw.get("Authorization")
-            # Нет токена (None/"") = «без авторизации» действует → передаём "" (active=1).
-            # Сентинел = не задано → None. Иначе — значение файла (литерал ИЛИ ссылка).
-            if auth == TOKEN_SENTINEL:
-                header = None
-            elif not auth:
-                header = ""
-            else:
-                header = auth
-            # Значение в редактируемое поле НЕ кладём: поле уходит в файл как есть, и ссылка
-            # ${ENV:VAR} стала бы литералом-секретом (а маска-точки скрыла бы подмену).
-            # Действующее значение показывает подпись у варианта (AuthEditor._render_option).
-            frame.mount(AuthEditor(current_header=header, framed=True))
+            header = None if auth == TOKEN_SENTINEL else auth   # None=сентинел; ""=без авт.; иначе значение
+            frame.mount(ConnectionEditor(
+                url_current=self._raw_value("completions_url"),
+                auth_header=header, framed=True))
+            self._mount_field_hints(frame, "completions_url")
             self._mount_field_hints(frame, "Authorization")
-            frame.mount(Static(self._probe_line_text(self._probe_config, 1),
+            frame.mount(Static(self._probe_line_text(self._probe_config, _CONNECTION),
                                classes="set-hint set-dyn set-probe"))
-        elif section == 2:
+        elif section == _MODEL:
             from tui.editors.model import ModelEditor
             from model_picker import fetch_models
             # За списком моделей ходим ДЕЙСТВУЮЩИМИ (резолвнутыми) адресом и токеном;
@@ -671,7 +648,7 @@ class SettingsScreen(Screen):
                 # а подпись ниже говорит именно это — экран не должен спорить сам с собой.
                 active_overridden=bool(origin is not None and origin.is_overridden)))
             self._mount_field_hints(frame, "model")
-        elif section == 3:
+        elif section == _MCP:
             from tui.editors.mcp_section import McpSectionEditor
             from tui.services.mcp_manager import McpManager
             mgr = McpManager(user_config=self._config)
@@ -843,7 +820,7 @@ class SettingsScreen(Screen):
         main = self.app._main_screen()
         if main is not None and hasattr(main, "refresh_update_notice"):
             main.refresh_update_notice()
-        if not self.is_mounted or self._view != 4:
+        if not self.is_mounted or self._view != _UPDATE:
             return
         self._render_view()
 
@@ -965,28 +942,29 @@ class SettingsScreen(Screen):
         if not self._is_dirty(section):
             return {}
         values: dict = {}
-        if section == 0:
-            from tui.editors.endpoint import EndpointEditor
-            ok, value = self.query_one(EndpointEditor).submit()
-            if not ok:
+        if section == _CONNECTION:
+            from tui.editors.connection import ConnectionEditor
+            url, header, error = self.query_one(ConnectionEditor).submit()
+            if error is not None:
+                self._title_note(error)          # блок: «введите адрес» / «нужны http(s)://…»
                 return None
-            if value is not None:
-                values["completions_url"] = value
-        elif section == 1:
-            from tui.editors.auth import AuthEditor
-            header, _raw = self.query_one(AuthEditor).submit()
+            if url is not None:
+                values["completions_url"] = url
             if header is not None:
                 values["Authorization"] = header
-        elif section == 2:
+        elif section == _MODEL:
             from tui.editors.model import ModelEditor
             value = self.query_one(ModelEditor).submit()
             if value is not None:
                 values["model"] = value
         return values
 
-    def _flash(self, text: str, *, warn: bool = False) -> None:
-        cls = "set-hint set-dyn set-warnflash" if warn else "set-hint set-dyn"
-        self._singleton("set-flash", text, cls)
+    def _flash(self, text: str, *, outcome: str = "ok") -> None:
+        """Заметная плашка результата (по языку confirm-баннера): фон + левый бордер +
+        ведущий глиф, окраска по исходу. outcome: "ok" (зелёная ✓) | "warn" (янтарная ⚠)."""
+        glyph = "✓ " if outcome == "ok" else "⚠ "
+        cls = "set-dyn set-flash-ok" if outcome == "ok" else "set-dyn set-flash-warn"
+        self._singleton("set-flash", glyph + text, cls)
 
     def _env_refs_overwritten(self, values: dict) -> list[str]:
         """Переменные окружения, чьи ссылки в файле затрёт вводимый литерал
@@ -1018,7 +996,7 @@ class SettingsScreen(Screen):
         from onboarding import FIELD_ANCHOR_PATHS
         if not confirmed:
             # Единственная точка записи → ссылка на переменную не может стать литералом
-            # молча, каким бы путём (probe, force, секция 2) сюда ни пришли.
+            # молча, каким бы путём (probe, force, секция 1) сюда ни пришли.
             refs = self._env_refs_overwritten(values)
             if refs:
                 self._pending_env_save = (section, values, warn_detail)
@@ -1070,12 +1048,22 @@ class SettingsScreen(Screen):
                      f"  поле «{SECTIONS[section]}» перекрыто {source}"]
             lines.extend(f"  {extra}" for extra in extras)
             self._notice("\n".join(lines))
-            if section in (0, 1):
+            if section in _PROBE_SECTIONS:
                 self._start_config_probe()
             return
-        head = "✓ сохранено — применится со следующего запуска" if was_running else "✓ сохранено"
-        self._flash(" · ".join([head] + extras), warn=bool(warn_detail))
-        if section in (0, 1):
+        parts = ["Сохранено"]
+        if was_running:
+            parts = ["Сохранено — применится со следующего запуска."]
+        elif had_session:
+            parts.append("Счётчики токенов сессии обнулены.")
+        outcome = "ok"
+        if warn_detail:
+            parts.append(warn_detail)
+            outcome = "warn"
+        # «Сохранено» без точки, когда это всё; точка — только разделитель перед продолжением
+        text = parts[0] if len(parts) == 1 else parts[0].rstrip(".") + ". " + " ".join(parts[1:])
+        self._flash(text, outcome=outcome)
+        if section in _PROBE_SECTIONS:
             self._start_config_probe()
 
     # --- навигация ---
@@ -1086,14 +1074,14 @@ class SettingsScreen(Screen):
     def _open_section(self, i: int) -> None:
         self._view = i
         self._reset_draft_state()   # бампает gen — стухший воркер прежней секции отбрасывается
-        if i == 4:
+        if i == _UPDATE:
             self._update_idx = None     # пересчитать дефолт-курсор при (пере)входе в секцию
         self._render_view()
         # Авто-проверка при ПЕРВОМ входе в «Обновление» за сессию (как probe в др. секциях):
         # секция сразу показывает статус, а не «не проверялось». Кэш (_update_check_result)
         # переживает повторные входы → сеть не долбим; «Проверить обновления» форсит свежий.
         # На dev-установке _check_updates_now — no-op (источника обновления нет).
-        if i == 4 and self._update_check_result is None and not self._update_checking:
+        if i == _UPDATE and self._update_check_result is None and not self._update_checking:
             self._check_updates_now()
 
     def _switch_section(self, delta: int) -> None:
@@ -1115,29 +1103,29 @@ class SettingsScreen(Screen):
         for w_ in self.query("#set-flash"):
             w_.remove()
         if event.key == "escape":
-            if self._view == 3:
+            if self._view == _MCP:
                 ed = self._mcp_editor()
                 if ed is not None and ed.awaiting_confirm:
                     event.stop()
                     ed.cancel_pending()
                     return
-            if self._view == 4 and self._update_awaiting_confirm:
+            if self._view == _UPDATE and self._update_awaiting_confirm:
                 event.stop()
                 self._cancel_update()
                 return
-            if self._view in (0, 1, 2) and self._pending_env_save is not None:
+            if self._view in _EDITOR_SECTIONS and self._pending_env_save is not None:
                 event.stop()
                 self._cancel_env_confirm()     # отмена подтверждения, из секции не выходим
                 return
             event.stop()
             self._close_or_back()
             return
-        if self._view == 3:
+        if self._view == _MCP:
             ed = self._mcp_editor()
             if ed is not None and ed.awaiting_confirm and event.key != "enter":
                 event.stop()                          # confirm-баннер висит: глотаем всё, кроме
                 return                                # enter (→ confirm_pending ниже) и escape (выше)
-        if self._view == 4 and self._update_awaiting_confirm:
+        if self._view == _UPDATE and self._update_awaiting_confirm:
             event.stop()
             if event.key == "enter":
                 self._confirm_update()
@@ -1146,13 +1134,13 @@ class SettingsScreen(Screen):
             event.stop()                          # Ctrl+ — тихий алиас для мышечной памяти
             self._switch_section(-1 if event.key in ("pageup", "ctrl+pageup") else 1)
             return
-        if event.key == "enter" and self._view in (0, 1, 2) and self._pending_env_save is not None:
+        if event.key == "enter" and self._view in _EDITOR_SECTIONS and self._pending_env_save is not None:
             event.stop()                          # confirm перезаписи ссылки: Enter — подтвердил
             section, values, warn_detail = self._pending_env_save
             self._pending_env_save = None
             self._do_save(section, values, warn_detail=warn_detail, confirmed=True)
             return
-        if event.key == "tab" and self._view in (0, 1):
+        if event.key == "tab" and self._view in _PROBE_SECTIONS:
             event.stop()
             event.prevent_default()                   # не отдавать focus-next
             if not self._writable():
@@ -1160,7 +1148,7 @@ class SettingsScreen(Screen):
             self._reset_draft_state()
             self._start_draft_probe(self._view)
             return
-        if event.key == "enter" and self._view in (0, 1):
+        if event.key == "enter" and self._view in _PROBE_SECTIONS:
             event.stop()
             section = self._view
             if not self._writable():
@@ -1172,16 +1160,13 @@ class SettingsScreen(Screen):
             if not values:
                 self._title_note("ничего не изменено")
                 return
-            if self._pending_force:
-                self._do_save(section, values)        # «Enter ещё раз — сохранить как есть»
-                return
             if self._draft_checked is not None:       # уже проверено (Tab): решаем по вердикту
                 self._smart_enter_decide(section, values, self._draft_checked)
                 return
             self._start_draft_probe(section, on_done=lambda r: self._smart_enter_decide(
                 section, self._collect_values(section) or {}, r))
             return
-        if event.key == "enter" and self._view == 2:
+        if event.key == "enter" and self._view == _MODEL:
             event.stop()
             section = self._view
             if not self._writable():
@@ -1195,18 +1180,18 @@ class SettingsScreen(Screen):
                 return
             self._do_save(section, values)
             return
-        if event.key == "enter" and self._view == 4:
+        if event.key == "enter" and self._view == _UPDATE:
             event.stop()
             self._run_update_action()
             return
-        if event.key in ("up", "down") and self._view == 4:
+        if event.key in ("up", "down") and self._view == _UPDATE:
             event.stop()
             n = len(self._update_actions)
             if n > 1:
                 self._update_idx = (self._update_idx + (1 if event.key == "down" else -1)) % n
                 self._render_view()
             return
-        if self._view == 3 and self._writable_or_mcp():
+        if self._view == _MCP and self._writable_or_mcp():
             ed = self._mcp_editor()
             if ed is not None:
                 if ed.awaiting_confirm:
@@ -1229,16 +1214,16 @@ class SettingsScreen(Screen):
                     event.stop(); ed.begin_update(); return
                 if event.key == "enter":
                     event.stop(); ed.begin_enter(); return
-        if event.key in ("up", "down") and self._view in (1, 2):
+        if event.key in ("up", "down") and self._view in {_CONNECTION, _MODEL}:
             event.stop()
             ed = None
-            if self._view == 1:
+            if self._view == _CONNECTION:
                 try:
-                    from tui.editors.auth import AuthEditor
-                    ed = self.query_one(AuthEditor)
+                    from tui.editors.connection import ConnectionEditor
+                    ed = self.query_one(ConnectionEditor)
                 except NoMatches:
                     pass
-            elif self._view == 2:
+            elif self._view == _MODEL:
                 try:
                     from tui.editors.model import ModelEditor
                     ed = self.query_one(ModelEditor)
@@ -1262,7 +1247,7 @@ class SettingsScreen(Screen):
                 return
 
     def on_input_changed(self, event: Input.Changed) -> None:
-        if self._view in (0, 1):
+        if self._view in _PROBE_SECTIONS:
             self._reset_draft_state()
-        if self._view in (0, 1, 2):
+        if self._view in _EDITOR_SECTIONS:
             self._update_dirty()

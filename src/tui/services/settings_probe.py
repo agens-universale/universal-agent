@@ -20,6 +20,12 @@ class ProbeResult:
     models: Optional[list]
     latency_ms: int
     detail: str
+    # Смысл авторизации (ставит interpret_auth; None — auth не интерпретировался,
+    # напр. сырой config-probe): "accepted" — токен реально принят;
+    # "not_required" — сервер отдаёт без токена; "required" — сервер требует
+    # авторизацию, токена не было; "rejected" — токен отклонён (401).
+    # detail — только текст для человека, вердикт по нему не восстанавливать.
+    auth_state: Optional[str] = None
 
     @property
     def reachable(self) -> bool:
@@ -74,15 +80,20 @@ def interpret_auth(control: ProbeResult, with_token: Optional[ProbeResult],
         detail = ("сервер не требует токен — введённый токен не проверяется"
                   if has_token else "доступ без токена — авторизация не требуется")
         return ProbeResult("ok", control.http_status, control.models,
-                           control.latency_ms, detail)
+                           control.latency_ms, detail, auth_state="not_required")
     # control rejected: авторизация значима только на 401 (404/иное — путь/модель)
     if control.http_status == 401:
         if not has_token:
             return ProbeResult("rejected", 401, None, control.latency_ms,
-                               "сервер требует авторизацию (401)")
+                               "сервер требует авторизацию (401)", auth_state="required")
         if with_token is None:
             return control
+        if with_token.verdict == "ok":
+            return ProbeResult("ok", with_token.http_status, with_token.models,
+                               with_token.latency_ms, "токен принят",
+                               auth_state="accepted")
+        auth_state = "rejected" if with_token.http_status == 401 else None
         return ProbeResult(with_token.verdict, with_token.http_status,
                            with_token.models, with_token.latency_ms,
-                           "токен принят" if with_token.verdict == "ok" else with_token.detail)
+                           with_token.detail, auth_state=auth_state)
     return control

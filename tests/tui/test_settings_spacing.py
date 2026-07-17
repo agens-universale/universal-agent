@@ -15,7 +15,7 @@ async def test_update_action_rows_have_air(tmp_path, monkeypatch):
         scr = SettingsScreen(config={}, config_path=str(cfg), on_apply=lambda: None,
                              probe_fn=lambda *a, **k: None)
         app.push_screen(scr); await pilot.pause()
-        scr._menu_idx = 4; scr._open_section(4)
+        scr._menu_idx = 3; scr._open_section(3)
         await pilot.pause(); await pilot.pause()
         rows = [w for w in scr.query(".set-row")
                 if "set-spaced" in w.classes or "set-spaced-gap" in w.classes]
