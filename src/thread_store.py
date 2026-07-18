@@ -133,6 +133,13 @@ def _thread_paths(threads_dir: str, system_id: str, thread_id: str) -> Tuple[str
     return data_path, meta_path
 
 
+def subagent_trace_path(threads_dir: str, system_id: str, thread_id: str) -> str:
+    """Путь sidecar nested-трейса: data_subagents_{system}_{thread_id}.jsonl."""
+    sys_norm = sanitize_system_id(system_id)
+    tid = validate_thread_id(thread_id)
+    return os.path.join(threads_dir, f"data_subagents_{sys_norm}_{tid}.jsonl")
+
+
 def ensure_threads_dir(threads_dir: str) -> None:
     os.makedirs(threads_dir, exist_ok=True)
     os.makedirs(os.path.join(threads_dir, "locks"), exist_ok=True)
@@ -147,7 +154,7 @@ def _lock_path(threads_dir: str, system_id: str, thread_id: str) -> str:
 
 def reset_thread_files(threads_dir: str, system_id: str, thread_id: str) -> List[str]:
     """
-    Удалить файлы конкретного треда (data/meta/lock), включая legacy data/meta.
+    Удалить файлы конкретного треда (data/meta/lock/sidecar), включая legacy data/meta.
     Возвращает список удалённых путей.
     """
     sys_norm = sanitize_system_id(system_id)
@@ -155,6 +162,7 @@ def reset_thread_files(threads_dir: str, system_id: str, thread_id: str) -> List
     paths = []
     paths.extend(_thread_paths(threads_dir, sys_norm, normalized_thread_id))
     paths.extend(_thread_paths_legacy(threads_dir, normalized_thread_id))
+    paths.append(subagent_trace_path(threads_dir, sys_norm, normalized_thread_id))
     paths.append(_lock_path(threads_dir, sys_norm, normalized_thread_id))
 
     deleted: List[str] = []
@@ -175,7 +183,7 @@ def _thread_archive_paths(threads_dir: str, system_id: str, thread_id: str) -> L
 
 
 def delete_thread(threads_dir: str, system_id: str, thread_id: str) -> List[str]:
-    """Полностью удалить тред: canonical + legacy + lock + __pre_summary__-архивы.
+    """Полностью удалить тред: canonical + legacy + lock + sidecar + __pre_summary__.
 
     Возвращает список удалённых путей. Отсутствие файла — no-op.
     """
@@ -183,6 +191,7 @@ def delete_thread(threads_dir: str, system_id: str, thread_id: str) -> List[str]
     paths.extend(_thread_paths(threads_dir, system_id, thread_id))
     paths.extend(_thread_paths_legacy(threads_dir, thread_id))
     paths.extend(_thread_archive_paths(threads_dir, system_id, thread_id))
+    paths.append(subagent_trace_path(threads_dir, system_id, thread_id))
     paths.append(_lock_path(threads_dir, system_id, thread_id))
 
     deleted: List[str] = []
@@ -191,6 +200,76 @@ def delete_thread(threads_dir: str, system_id: str, thread_id: str) -> List[str]
             os.remove(path)
             deleted.append(path)
     return deleted
+
+
+def _max_subagent_trace_seq(path: str) -> int:
+    """Максимальный seq в sidecar; битые строки пропускаем."""
+    if not os.path.exists(path):
+        return 0
+    max_seq = 0
+    with open(path, "r", encoding="utf-8") as f:
+        for line in f:
+            row = line.strip()
+            if not row:
+                continue
+            try:
+                record = json.loads(row)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(record, dict):
+                continue
+            seq = record.get("seq")
+            if isinstance(seq, int) and seq > max_seq:
+                max_seq = seq
+    return max_seq
+
+
+def append_subagent_trace_record(
+    threads_dir: str,
+    system_id: str,
+    thread_id: str,
+    *,
+    parent_call_id: str,
+    child_run_id: str,
+    kind: str,
+    payload: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Append-only запись в sidecar nested-трейса (flat envelope, seq = max+1)."""
+    ensure_threads_dir(threads_dir)
+    path = subagent_trace_path(threads_dir, system_id, thread_id)
+    record = {
+        "ts": _utc_now_iso(),
+        "seq": _max_subagent_trace_seq(path) + 1,
+        "parent_call_id": parent_call_id,
+        "child_run_id": child_run_id,
+        "kind": kind,
+        "payload": payload,
+    }
+    with open(path, "a", encoding="utf-8") as f:
+        f.write(json.dumps(record, ensure_ascii=False) + "\n")
+    return record
+
+
+def read_subagent_trace(
+    threads_dir: str, system_id: str, thread_id: str
+) -> List[Dict[str, Any]]:
+    """Прочитать все записи sidecar в порядке файла. Нет файла → []."""
+    path = subagent_trace_path(threads_dir, system_id, thread_id)
+    if not os.path.exists(path):
+        return []
+    records: List[Dict[str, Any]] = []
+    with open(path, "r", encoding="utf-8") as f:
+        for line in f:
+            row = line.strip()
+            if not row:
+                continue
+            try:
+                record = json.loads(row)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(record, dict):
+                records.append(record)
+    return records
 
 
 def load_thread_messages(
