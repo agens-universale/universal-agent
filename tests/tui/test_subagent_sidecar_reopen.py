@@ -120,6 +120,135 @@ def _write_sidecar(tmp_path: Path, tid: str) -> None:
     )
 
 
+def _sum_msg(text: str) -> dict:
+    return {
+        "role": "user",
+        "id": "m_s",
+        "content": (
+            '<technical type="dialog_summary">Summarized context.\n'
+            f"<summary>{text}</summary></technical>"
+        ),
+    }
+
+
+def _write_archived_subagent_thread(tmp_path: Path, tid: str) -> None:
+    """subagent_* в __pre_summary__; live начинается с dialog_summary."""
+    (tmp_path / f"meta_cli_{tid}.json").write_text(
+        json.dumps(
+            {
+                "thread_id": tid,
+                "status": "stopped",
+                "updated_at": "2026-07-18T12:00:00+00:00",
+                "messages_count": 4,
+                "last_summary_archive_suffix": "20260718_120000",
+            }
+        ),
+        encoding="utf-8",
+    )
+    archive = [
+        {
+            "type": "message",
+            "seq": 1,
+            "ts": "2026-07-18T11:00:00+00:00",
+            "payload": {"id": "u1", "role": "user", "content": "делегируй"},
+        },
+        {
+            "type": "message",
+            "seq": 2,
+            "ts": "2026-07-18T11:00:01+00:00",
+            "payload": {
+                "id": "fc1",
+                "type": "function_call",
+                "name": "subagent_worker",
+                "arguments": '{"task": "x", "reason": "y"}',
+                "call_id": "call_sub_arch",
+            },
+        },
+        {
+            "type": "message",
+            "seq": 3,
+            "ts": "2026-07-18T11:00:05+00:00",
+            "payload": {
+                "id": "fco1",
+                "type": "function_call_output",
+                "call_id": "call_sub_arch",
+                "output": '{"ok": true}',
+            },
+        },
+    ]
+    (tmp_path / f"data_cli_{tid}__pre_summary__20260718_120000.jsonl").write_text(
+        "\n".join(json.dumps(x, ensure_ascii=False) for x in archive) + "\n",
+        encoding="utf-8",
+    )
+    live = [
+        {
+            "type": "message",
+            "seq": 1,
+            "ts": "2026-07-18T12:00:00+00:00",
+            "payload": _sum_msg("после делегации"),
+        },
+        {
+            "type": "message",
+            "seq": 2,
+            "ts": "2026-07-18T12:00:01+00:00",
+            "payload": {"id": "u2", "role": "user", "content": "дальше"},
+        },
+    ]
+    (tmp_path / f"data_cli_{tid}.jsonl").write_text(
+        "\n".join(json.dumps(x, ensure_ascii=False) for x in live) + "\n",
+        encoding="utf-8",
+    )
+    append_subagent_trace_record(
+        str(tmp_path),
+        "cli",
+        tid,
+        parent_call_id="call_sub_arch",
+        child_run_id="run_arch",
+        kind="call",
+        payload={
+            "type": "function_call",
+            "name": "fs_list_files",
+            "arguments": '{"path": "."}',
+            "call_id": "child_arch_1",
+        },
+    )
+    append_subagent_trace_record(
+        str(tmp_path),
+        "cli",
+        tid,
+        parent_call_id="call_sub_arch",
+        child_run_id="run_arch",
+        kind="result",
+        payload={
+            "type": "function_call_output",
+            "call_id": "child_arch_1",
+            "output": "ok",
+        },
+    )
+
+
+@pytest.mark.asyncio
+async def test_reopen_merges_nested_under_archived_subagent(tmp_path):
+    """Приёмка #4: nested стыкуется к archived subagent_* в __pre_summary__."""
+    pytest.importorskip("textual")
+    from tui.app import TuiApp
+
+    tid = "reopen_arch"
+    _write_archived_subagent_thread(tmp_path, tid)
+
+    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    async with app.run_test() as pilot:
+        scr = pilot.app.screen
+        assert scr.attach_active_task(tid, is_resume=True) is True
+        await pilot.pause(0.3)
+
+        assert "call_sub_arch" in scr._subagent_parent_rows
+        nested = scr._nested_tool_rows.get("child_arch_1")
+        assert nested is not None
+        assert nested._nested is True
+        assert "fs_list_files" in str(nested._render_content())
+
+
 @pytest.mark.asyncio
 async def test_reopen_merges_nested_under_finished_subagent(tmp_path):
     pytest.importorskip("textual")
