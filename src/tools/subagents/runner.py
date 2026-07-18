@@ -31,13 +31,15 @@ from usage.context import usage_scope
 from utils.generate_message_id import generate_msg_id_sha256 as generate_message_id_func
 from utils.local_render_system_prompt import render_system_prompt
 from utils.logging_module import create_run_logger, generate_run_id
+from message_policy.user_message_policy import extract_real_user_message_text
+from message_policy.user_stop import cancelled_by_user_output
+from tools.subagents.active_scope import activate_child_input
 from tools.subagents.progress import emit_progress
 from tools.subagents.sidecar import (
     bind_thread_identity,
     clear_thread_identity,
     persist_subagent_trace,
 )
-from message_policy.user_stop import cancelled_by_user_output
 
 _log = logging.getLogger(__name__)
 
@@ -213,15 +215,40 @@ class SubagentRunner:
 
         self._usage_pushed = UsageAccount()
         try:
-            result = run_agent_func(
-                messages,
-                child_state,
-                child_ctx,
-                check_stop=self._check_stop_requested,
-                persist_messages_callback=persist_messages_callback,
-                pre_backend_compaction_hook=pre_backend_compaction_hook,
-                session_meta=child_meta,
-            )
+            with activate_child_input(parent_call_id=self._parent_call_id) as scope:
+
+                def _on_child_user_enqueue(message: Dict[str, Any]) -> None:
+                    prose = extract_real_user_message_text(message)
+                    if not prose:
+                        return
+                    emit_progress(
+                        child_ctx,
+                        child_state,
+                        "user_message",
+                        prose=prose,
+                    )
+                    payload: Dict[str, Any] = {
+                        "role": "user",
+                        "content": prose,
+                    }
+                    msg_id = message.get("id")
+                    if isinstance(msg_id, str) and msg_id:
+                        payload["id"] = msg_id
+                    persist_subagent_trace(
+                        child_ctx, kind="user", payload=payload
+                    )
+
+                scope.set_on_enqueue(_on_child_user_enqueue)
+                result = run_agent_func(
+                    messages,
+                    child_state,
+                    child_ctx,
+                    check_stop=self._check_stop_requested,
+                    persist_messages_callback=persist_messages_callback,
+                    pre_backend_compaction_hook=pre_backend_compaction_hook,
+                    session_meta=child_meta,
+                    get_pending_messages=scope.drain,
+                )
         except Exception as exc:
             self._log_lifecycle(
                 event="subagent_error",

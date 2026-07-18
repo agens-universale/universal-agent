@@ -14,6 +14,7 @@ ProgressActionKind = Literal[
     "mount_nested_tool",
     "finish_nested_tool",
     "mount_nested_prose",
+    "mount_nested_user",
     "parent_heartbeat",
     "show_ask_human",
     "hide_ask_human",
@@ -120,6 +121,17 @@ def plan_progress_actions(
                 )
             )
             actions.append(_heartbeat(ev))
+        elif ev.kind == "user_message":
+            actions.append(
+                ProgressAction(
+                    kind="mount_nested_user",
+                    parent_call_id=pid,
+                    prose=ev.prose or "",
+                    step=ev.step,
+                    max_steps=ev.max_steps,
+                )
+            )
+            actions.append(_heartbeat(ev))
         elif ev.kind == "ask_human":
             actions.append(
                 ProgressAction(
@@ -168,6 +180,7 @@ class SubagentProgressConsumer:
         parent_heartbeat: Callable[..., None],
         show_ask_human: Callable[..., None] | None = None,
         hide_ask_human: Callable[..., None] | None = None,
+        mount_nested_user: Callable[..., None] | None = None,
     ) -> None:
         for ev in events:
             pid = ev.parent_call_id
@@ -216,6 +229,27 @@ class SubagentProgressConsumer:
                     step=ev.step,
                     max_steps=ev.max_steps,
                 )
+                parent_heartbeat(
+                    parent_call_id=pid,
+                    step=ev.step,
+                    max_steps=ev.max_steps,
+                    last_tool=self._last_tool.get(pid),
+                )
+            elif ev.kind == "user_message":
+                if mount_nested_user is not None:
+                    mount_nested_user(
+                        parent_call_id=pid,
+                        prose=ev.prose or "",
+                        step=ev.step,
+                        max_steps=ev.max_steps,
+                    )
+                else:
+                    mount_nested_prose(
+                        parent_call_id=pid,
+                        prose=ev.prose or "",
+                        step=ev.step,
+                        max_steps=ev.max_steps,
+                    )
                 parent_heartbeat(
                     parent_call_id=pid,
                     step=ev.step,

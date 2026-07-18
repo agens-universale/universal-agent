@@ -51,6 +51,22 @@ def test_plan_groups_by_parent_and_seq():
     assert actions[2].prose == CHILD_SUMMARY_LABEL
 
 
+def test_plan_user_kind_mounts_nested_user():
+    actions = plan_sidecar_nested_actions(
+        [
+            {
+                "seq": 1,
+                "parent_call_id": "p1",
+                "kind": "user",
+                "payload": {"role": "user", "content": "steer here"},
+            }
+        ]
+    )
+    assert len(actions) == 1
+    assert actions[0].kind == "mount_nested_user"
+    assert actions[0].prose == "steer here"
+
+
 def test_apply_calls_hooks_in_order():
     seen = []
     actions = plan_sidecar_nested_actions(

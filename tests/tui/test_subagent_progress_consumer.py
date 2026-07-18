@@ -50,6 +50,14 @@ class TestPlanProgressActions:
         assert actions[0].prose == "Сейчас проверю"
         assert any(a.kind == "parent_heartbeat" for a in actions)
 
+    def test_user_message(self):
+        actions = plan_progress_actions(
+            [_ev(kind="user_message", prose="смотри auth")]
+        )
+        assert actions[0].kind == "mount_nested_user"
+        assert actions[0].prose == "смотри auth"
+        assert any(a.kind == "parent_heartbeat" for a in actions)
+
     def test_many_tools_all_mounted_no_overflow(self):
         events = [
             _ev(

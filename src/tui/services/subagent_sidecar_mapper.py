@@ -19,6 +19,7 @@ SidecarActionKind = Literal[
     "mount_nested_tool",
     "finish_nested_tool",
     "mount_nested_prose",
+    "mount_nested_user",
     "mount_nested_summary",
 ]
 
@@ -117,6 +118,16 @@ def plan_sidecar_nested_actions(
                             ),
                         )
                     )
+            elif kind == "user":
+                content = payload.get("content")
+                if isinstance(content, str) and content.strip():
+                    actions.append(
+                        SidecarNestedAction(
+                            kind="mount_nested_user",
+                            parent_call_id=pid,
+                            prose=content.strip(),
+                        )
+                    )
             elif kind == "child_summary":
                 actions.append(
                     SidecarNestedAction(
@@ -136,6 +147,7 @@ def apply_sidecar_nested_actions(
     finish_nested_tool: Callable[..., None],
     mount_nested_prose: Callable[..., None],
     mount_nested_summary: Callable[..., None],
+    mount_nested_user: Callable[..., None] | None = None,
 ) -> None:
     for act in actions:
         if act.kind == "mount_nested_tool":
@@ -157,6 +169,17 @@ def apply_sidecar_nested_actions(
                 parent_call_id=act.parent_call_id,
                 prose=act.prose or "",
             )
+        elif act.kind == "mount_nested_user":
+            if mount_nested_user is not None:
+                mount_nested_user(
+                    parent_call_id=act.parent_call_id,
+                    prose=act.prose or "",
+                )
+            else:
+                mount_nested_prose(
+                    parent_call_id=act.parent_call_id,
+                    prose=act.prose or "",
+                )
         elif act.kind == "mount_nested_summary":
             mount_nested_summary(
                 parent_call_id=act.parent_call_id,

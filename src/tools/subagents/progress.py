@@ -17,6 +17,7 @@ ProgressKind = Literal[
     "tool_start",
     "tool_end",
     "intermediate_reply",
+    "user_message",
     "ask_human",
     "ask_human_done",
     "confirm",

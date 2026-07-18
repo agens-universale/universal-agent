@@ -39,6 +39,7 @@ from thread_store import (
     resolve_threads_dir,
     update_runtime_meta,
 )
+from tools.subagents.active_scope import try_enqueue_user_message
 from tools.subagents.sidecar import bind_thread_identity, clear_thread_identity
 from tools.connect_mcp.persistent_stdio import PersistentStdioRegistry
 from tools.connect_mcp.stream_client import _SESSION_MANAGER as _STREAM_SESSION_MANAGER
@@ -503,7 +504,12 @@ class AgentExecutor:
         return response
 
     def add_message(self, message: dict) -> None:
-        """Потокобезопасно добавляет сообщение в очередь на обработку агентом."""
+        """Потокобезопасно добавляет сообщение в очередь активного скоупа.
+
+        Executing subagent → child pending; иначе → parent pending.
+        """
+        if try_enqueue_user_message(message):
+            return
         with self._lock:
             self._pending_messages.append(message)
 
