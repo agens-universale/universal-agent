@@ -77,7 +77,7 @@ tui:
 diff_tui:
   cache_max_orig: 500          # LRU лимит .orig в cache-mode
   preview_context_lines: 6     # контекст в TUI visual diff / trace-preview
-  max_diff_chars: 8000         # усечение больших visual diff (0 = без лимита)
+  max_diff_chars: 100000       # усечение больших visual diff (0 = без лимита)
 
 # Обновление агента (спека D)
 update:

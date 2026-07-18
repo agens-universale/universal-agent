@@ -92,7 +92,7 @@ def _service_from_config(launch_root: str, config: dict) -> DiffService:
         protected_extra=list(protected.get("extra") or []),
         cache_max_orig=int(dt.get("cache_max_orig", 500)),
         preview_context_lines=int(dt.get("preview_context_lines", 3)),
-        max_diff_chars=int(dt.get("max_diff_chars", 8000)),
+        max_diff_chars=int(dt.get("max_diff_chars", 100_000)),
         emit_notices=True,
     )
 

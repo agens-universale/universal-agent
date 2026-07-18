@@ -488,7 +488,8 @@ class DiffService:
     def visual_diff(self, path: PathLike) -> str:
         """Pending visual diff; пустая строка если не pending / ошибка.
 
-        Context/truncation — из ``diff_tui.preview_context_lines`` / ``max_diff_chars``.
+        Context/truncation — из ``diff_tui.preview_context_lines`` / ``max_diff_chars``
+        (``0`` = без лимита).
         Для created/untracked (``git diff`` пуст) — unified diff содержимого файла.
         """
         self.ensure_mode_ready()

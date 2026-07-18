@@ -6,7 +6,7 @@ from pydantic import BaseModel, ConfigDict
 
 DEFAULT_CACHE_MAX_ORIG = 500
 DEFAULT_PREVIEW_CONTEXT_LINES = 3
-DEFAULT_MAX_DIFF_CHARS = 8000
+DEFAULT_MAX_DIFF_CHARS = 100_000
 
 
 class DiffTuiConfig(BaseModel):

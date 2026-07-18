@@ -11,7 +11,7 @@ def test_diff_tui_defaults():
     cfg = DiffTuiConfig()
     assert cfg.cache_max_orig == 500
     assert cfg.preview_context_lines == 3
-    assert cfg.max_diff_chars == 8000
+    assert cfg.max_diff_chars == 100_000
 
 
 def test_diff_tui_rejects_unknown_keys():
@@ -25,7 +25,7 @@ def test_app_config_includes_diff_tui():
     app = AppConfig()
     assert app.diff_tui.cache_max_orig == 500
     assert app.diff_tui.preview_context_lines == 3
-    assert app.diff_tui.max_diff_chars == 8000
+    assert app.diff_tui.max_diff_chars == 100_000
 
 
 def test_flatten_exposes_diff_tui(tmp_path, monkeypatch):

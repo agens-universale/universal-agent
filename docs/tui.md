@@ -351,7 +351,7 @@ Enter — агент продолжит. Esc при пустом поле ост
 |---|---|---|
 | `diff_tui.cache_max_orig` | `500` | LRU-лимит `.orig` в cache-mode |
 | `diff_tui.preview_context_lines` | `3` (в `config.default.yml` часто `6`) | Контекст строк в visual diff / trace-preview |
-| `diff_tui.max_diff_chars` | `8000` | Усечение больших visual diff (`0` — без лимита) |
+| `diff_tui.max_diff_chars` | `100000` | Усечение больших visual diff (`0` — без лимита) |
 
 ## Внешний вид
 
