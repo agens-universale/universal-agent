@@ -164,7 +164,6 @@ class TraceScreen(Screen):
         self._subagent_progress = SubagentProgressConsumer()
         self._nested_tool_rows: dict[str, ToolCallRow] = {}  # child tool_call_id → row
         self._nested_widgets_by_parent: dict[str, list] = {}  # parent_call_id → widgets
-        self._nested_overflow_row: dict[str, object] = {}  # parent → overflow Static/TraceRow
         self._nested_anchor: dict[str, ToolCallRow] = {}  # parent_call_id → last mounted nested
         self._reasoning_clock = ReasoningClock()
         self._submit_solution_call_ids: set[str] = set()
@@ -563,7 +562,6 @@ class TraceScreen(Screen):
         self._subagent_progress.reset()
         self._nested_tool_rows.clear()
         self._nested_widgets_by_parent.clear()
-        self._nested_overflow_row.clear()
         self._nested_anchor.clear()
         self._submit_solution_call_ids.clear()
         self._submit_solution_widgets.clear()
@@ -1413,7 +1411,6 @@ class TraceScreen(Screen):
             mount_nested_tool=self._mount_nested_tool,
             finish_nested_tool=self._finish_nested_tool,
             mount_nested_prose=self._mount_nested_prose,
-            nested_overflow=self._mount_nested_overflow,
             parent_heartbeat=self._parent_subagent_heartbeat,
             show_ask_human=self._show_child_ask_human,
             hide_ask_human=self._hide_child_ask_human,
@@ -1493,37 +1490,6 @@ class TraceScreen(Screen):
             event_no=0,
             focusable=False,
         )
-        self._nested_mount_after(parent_call_id, row)
-
-    def _mount_nested_overflow(
-        self,
-        *,
-        parent_call_id: str,
-        overflow_count: int,
-        **_kw,
-    ) -> None:
-        if parent_call_id not in self._active_calls:
-            return
-        from tui.widgets.trace_row import TraceRow
-        existing = self._nested_overflow_row.get(parent_call_id)
-        label = f"… +{overflow_count}"
-        if existing is not None:
-            # TraceRow: обновить content если есть API; иначе remove+mount
-            try:
-                existing.remove()
-            except Exception:
-                pass
-            widgets = self._nested_widgets_by_parent.get(parent_call_id) or []
-            if existing in widgets:
-                widgets.remove(existing)
-        row = TraceRow(
-            prefix="       ",
-            content=label,
-            kind_class="line-meta",
-            event_no=0,
-            focusable=False,
-        )
-        self._nested_overflow_row[parent_call_id] = row
         self._nested_mount_after(parent_call_id, row)
 
     def _parent_subagent_heartbeat(
@@ -2042,7 +2008,6 @@ class TraceScreen(Screen):
             self._active_calls.clear()
             self._nested_tool_rows.clear()
             self._nested_widgets_by_parent.clear()
-            self._nested_overflow_row.clear()
             self._nested_anchor.clear()
             self._subagent_progress.reset()
         # ThinkingIndicator — пока runner работает, обычно виден внизу trace.

@@ -3,7 +3,6 @@ from __future__ import annotations
 
 from tools.subagents.progress import QueueSubagentProgressSink, SubagentProgressEvent
 from tui.services.subagent_progress import (
-    NESTED_ROW_CAP,
     SubagentProgressConsumer,
     plan_progress_actions,
 )
@@ -51,7 +50,7 @@ class TestPlanProgressActions:
         assert actions[0].prose == "Сейчас проверю"
         assert any(a.kind == "parent_heartbeat" for a in actions)
 
-    def test_cap_overflow_emits_marker_once(self):
+    def test_many_tools_all_mounted_no_overflow(self):
         events = [
             _ev(
                 kind="tool_start",
@@ -59,14 +58,12 @@ class TestPlanProgressActions:
                 tool_call_id=f"tc{i}",
                 step=i,
             )
-            for i in range(NESTED_ROW_CAP + 3)
+            for i in range(40)
         ]
         actions = plan_progress_actions(events)
         mounts = [a for a in actions if a.kind == "mount_nested_tool"]
-        overflows = [a for a in actions if a.kind == "nested_overflow"]
-        assert len(mounts) == NESTED_ROW_CAP
-        assert len(overflows) == 3
-        assert overflows[-1].overflow_count == 3
+        assert len(mounts) == 40
+        assert not any(a.kind == "nested_overflow" for a in actions)
 
     def test_finished_keeps_nested_no_collapse(self):
         actions = plan_progress_actions(
@@ -99,7 +96,6 @@ class TestConsumerApply:
             mount_nested_tool=lambda **kw: mounted.append(kw),
             finish_nested_tool=lambda **kw: finished.append(kw),
             mount_nested_prose=lambda **kw: None,
-            nested_overflow=lambda **kw: None,
             parent_heartbeat=lambda **kw: heartbeats.append(kw),
         )
         assert len(mounted) == 1

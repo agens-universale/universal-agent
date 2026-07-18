@@ -10,13 +10,10 @@ from typing import Any, Callable, List, Literal, Optional, Sequence
 
 from tools.subagents.progress import SubagentProgressEvent
 
-NESTED_ROW_CAP = 30
-
 ProgressActionKind = Literal[
     "mount_nested_tool",
     "finish_nested_tool",
     "mount_nested_prose",
-    "nested_overflow",
     "parent_heartbeat",
     "show_ask_human",
     "hide_ask_human",
@@ -36,7 +33,6 @@ class ProgressAction:
     step: int = 0
     max_steps: int = 0
     last_tool: Optional[str] = None
-    overflow_count: int = 0
     via: Optional[str] = None
 
 
@@ -64,15 +60,9 @@ def reconcile_batch_phases(rows: Sequence[Any]) -> None:
 
 def plan_progress_actions(
     events: Sequence[SubagentProgressEvent],
-    *,
-    nested_cap: int = NESTED_ROW_CAP,
 ) -> List[ProgressAction]:
     """Превратить drained events в список UI-действий (без виджетов)."""
     actions: List[ProgressAction] = []
-    # Сколько nested-строк уже «занято» под каждым parent (в рамках этого drain
-    # + накопление внутри вызова; consumer хранит счётчик между drain'ами).
-    mounted_count: dict[str, int] = {}
-    overflow_count: dict[str, int] = {}
     last_tool: dict[str, Optional[str]] = {}
 
     def _heartbeat(ev: SubagentProgressEvent) -> ProgressAction:
@@ -90,32 +80,17 @@ def plan_progress_actions(
         if ev.kind == "tool_start":
             if ev.tool_name:
                 last_tool[pid] = ev.tool_name
-            count = mounted_count.get(pid, 0)
-            if count >= nested_cap:
-                overflow_count[pid] = overflow_count.get(pid, 0) + 1
-                actions.append(
-                    ProgressAction(
-                        kind="nested_overflow",
-                        parent_call_id=pid,
-                        overflow_count=overflow_count[pid],
-                        step=ev.step,
-                        max_steps=ev.max_steps,
-                        last_tool=last_tool.get(pid),
-                    )
+            actions.append(
+                ProgressAction(
+                    kind="mount_nested_tool",
+                    parent_call_id=pid,
+                    tool_name=ev.tool_name,
+                    tool_call_id=ev.tool_call_id,
+                    args_summary=ev.args_summary or "",
+                    step=ev.step,
+                    max_steps=ev.max_steps,
                 )
-            else:
-                mounted_count[pid] = count + 1
-                actions.append(
-                    ProgressAction(
-                        kind="mount_nested_tool",
-                        parent_call_id=pid,
-                        tool_name=ev.tool_name,
-                        tool_call_id=ev.tool_call_id,
-                        args_summary=ev.args_summary or "",
-                        step=ev.step,
-                        max_steps=ev.max_steps,
-                    )
-                )
+            )
             actions.append(_heartbeat(ev))
         elif ev.kind == "tool_end":
             if ev.tool_name:
@@ -134,31 +109,16 @@ def plan_progress_actions(
             )
             actions.append(_heartbeat(ev))
         elif ev.kind == "intermediate_reply":
-            count = mounted_count.get(pid, 0)
-            if count >= nested_cap:
-                overflow_count[pid] = overflow_count.get(pid, 0) + 1
-                actions.append(
-                    ProgressAction(
-                        kind="nested_overflow",
-                        parent_call_id=pid,
-                        overflow_count=overflow_count[pid],
-                        step=ev.step,
-                        max_steps=ev.max_steps,
-                        last_tool=last_tool.get(pid),
-                    )
+            actions.append(
+                ProgressAction(
+                    kind="mount_nested_prose",
+                    parent_call_id=pid,
+                    tool_name=ev.tool_name,
+                    prose=ev.prose or "",
+                    step=ev.step,
+                    max_steps=ev.max_steps,
                 )
-            else:
-                mounted_count[pid] = count + 1
-                actions.append(
-                    ProgressAction(
-                        kind="mount_nested_prose",
-                        parent_call_id=pid,
-                        tool_name=ev.tool_name,
-                        prose=ev.prose or "",
-                        step=ev.step,
-                        max_steps=ev.max_steps,
-                    )
-                )
+            )
             actions.append(_heartbeat(ev))
         elif ev.kind == "ask_human":
             actions.append(
@@ -186,18 +146,15 @@ def plan_progress_actions(
             actions.append(_heartbeat(ev))
         elif ev.kind in ("finished", "error", "cancelled", "started", "heartbeat", "usage"):
             # Nested в живой сессии оставляем под parent (✓/✗); collapse — только
-            # при clear/смене треда. После reopen nested всё равно нет (не в jsonl).
+            # при clear/смене треда.
             actions.append(_heartbeat(ev))
     return actions
 
 
 class SubagentProgressConsumer:
-    """Stateful consumer: помнит счётчики nested между drain'ами."""
+    """Stateful consumer: last_tool / seen call_ids между drain'ами."""
 
-    def __init__(self, *, nested_cap: int = NESTED_ROW_CAP) -> None:
-        self._nested_cap = nested_cap
-        self._mounted_count: dict[str, int] = {}
-        self._overflow_count: dict[str, int] = {}
+    def __init__(self) -> None:
         self._last_tool: dict[str, Optional[str]] = {}
         self._seen_tool_calls: set[str] = set()
 
@@ -208,40 +165,25 @@ class SubagentProgressConsumer:
         mount_nested_tool: Callable[..., None],
         finish_nested_tool: Callable[..., None],
         mount_nested_prose: Callable[..., None],
-        nested_overflow: Callable[..., None],
         parent_heartbeat: Callable[..., None],
         show_ask_human: Callable[..., None] | None = None,
         hide_ask_human: Callable[..., None] | None = None,
     ) -> None:
-        # plan с учётом уже накопленного счётчика: скармливаем синтетически
-        # через расширение mounted в plan — проще применить локально.
         for ev in events:
             pid = ev.parent_call_id
             if ev.kind == "tool_start":
                 if ev.tool_name:
                     self._last_tool[pid] = ev.tool_name
-                count = self._mounted_count.get(pid, 0)
-                if count >= self._nested_cap:
-                    self._overflow_count[pid] = self._overflow_count.get(pid, 0) + 1
-                    nested_overflow(
-                        parent_call_id=pid,
-                        overflow_count=self._overflow_count[pid],
-                        step=ev.step,
-                        max_steps=ev.max_steps,
-                        last_tool=self._last_tool.get(pid),
-                    )
-                else:
-                    self._mounted_count[pid] = count + 1
-                    if ev.tool_call_id:
-                        self._seen_tool_calls.add(ev.tool_call_id)
-                    mount_nested_tool(
-                        parent_call_id=pid,
-                        tool_name=ev.tool_name or "<tool>",
-                        tool_call_id=ev.tool_call_id or "",
-                        args_summary=ev.args_summary or "",
-                        step=ev.step,
-                        max_steps=ev.max_steps,
-                    )
+                if ev.tool_call_id:
+                    self._seen_tool_calls.add(ev.tool_call_id)
+                mount_nested_tool(
+                    parent_call_id=pid,
+                    tool_name=ev.tool_name or "<tool>",
+                    tool_call_id=ev.tool_call_id or "",
+                    args_summary=ev.args_summary or "",
+                    step=ev.step,
+                    max_steps=ev.max_steps,
+                )
                 parent_heartbeat(
                     parent_call_id=pid,
                     step=ev.step,
@@ -267,25 +209,13 @@ class SubagentProgressConsumer:
                     last_tool=self._last_tool.get(pid),
                 )
             elif ev.kind == "intermediate_reply":
-                count = self._mounted_count.get(pid, 0)
-                if count >= self._nested_cap:
-                    self._overflow_count[pid] = self._overflow_count.get(pid, 0) + 1
-                    nested_overflow(
-                        parent_call_id=pid,
-                        overflow_count=self._overflow_count[pid],
-                        step=ev.step,
-                        max_steps=ev.max_steps,
-                        last_tool=self._last_tool.get(pid),
-                    )
-                else:
-                    self._mounted_count[pid] = count + 1
-                    mount_nested_prose(
-                        parent_call_id=pid,
-                        prose=ev.prose or "",
-                        tool_name=ev.tool_name,
-                        step=ev.step,
-                        max_steps=ev.max_steps,
-                    )
+                mount_nested_prose(
+                    parent_call_id=pid,
+                    prose=ev.prose or "",
+                    tool_name=ev.tool_name,
+                    step=ev.step,
+                    max_steps=ev.max_steps,
+                )
                 parent_heartbeat(
                     parent_call_id=pid,
                     step=ev.step,
@@ -320,14 +250,9 @@ class SubagentProgressConsumer:
                     last_tool=self._last_tool.get(pid),
                 )
                 if ev.kind in ("finished", "error", "cancelled"):
-                    # Счётчики drain'а сбрасываем; виджеты не трогаем.
-                    self._mounted_count.pop(pid, None)
-                    self._overflow_count.pop(pid, None)
                     self._last_tool.pop(pid, None)
 
     def reset(self) -> None:
-        self._mounted_count.clear()
-        self._overflow_count.clear()
         self._last_tool.clear()
         self._seen_tool_calls.clear()
 
