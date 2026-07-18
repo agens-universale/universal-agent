@@ -12,7 +12,6 @@ from typing import Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from tui.widgets.ask_human_banner import AskHumanBanner
-    from tui.widgets.trace_row import TraceRow
 
 from textual import events
 from textual.app import ComposeResult
@@ -42,6 +41,16 @@ from tui.services.path_display import truncate_path
 from tui.services.git_info import current_branch
 from tui.services.session_lock import BUSY_MESSAGE, heartbeat, release, try_acquire
 from tui.services.stores.file_store import FileTaskStore
+from tui.services.subagent_progress import (
+    SubagentProgressConsumer,
+    format_parent_live_status,
+    reconcile_batch_phases,
+)
+from tui.services.subagent_sidecar_mapper import (
+    CHILD_SUMMARY_LABEL,
+    apply_sidecar_nested_actions,
+    plan_sidecar_nested_actions,
+)
 from tui.services.trace_mapper import collect_skipped_call_ids, map_message
 from tui.services.trace_render import build_compaction_label
 from tui.widgets.command_input import CommandTextArea
@@ -52,6 +61,7 @@ from tui.widgets.thinking_indicator import (
     is_terminal_indicator_state,
 )
 from tui.widgets.tool_call_row import ToolCallRow
+from tui.widgets.trace_row import TraceRow
 from tui import branding
 from tui.services.terminal_title import format_terminal_title, set_terminal_title
 from tui.services.reasoning_clock import COGNITIVE_TOOLS, ReasoningClock
@@ -159,12 +169,13 @@ class TraceScreen(Screen):
         self._last_mcp_card_line: Optional[str] = None
         # Phase 2: tool-row mutation state
         self._active_calls: dict[str, ToolCallRow] = {}
-        # Nested progress под subagent_*: live-only, не из jsonl.
-        from tui.services.subagent_progress import SubagentProgressConsumer
+        # Nested progress под subagent_*: live sink + reopen из data_subagents_*.
         self._subagent_progress = SubagentProgressConsumer()
         self._nested_tool_rows: dict[str, ToolCallRow] = {}  # child tool_call_id → row
         self._nested_widgets_by_parent: dict[str, list] = {}  # parent_call_id → widgets
         self._nested_anchor: dict[str, ToolCallRow] = {}  # parent_call_id → last mounted nested
+        # Durable parent rows for subagent_* (survive pop from _active_calls on result).
+        self._subagent_parent_rows: dict[str, ToolCallRow] = {}
         self._reasoning_clock = ReasoningClock()
         self._submit_solution_call_ids: set[str] = set()
         # Track submit_solution agent-line widgets, чтобы при повторе свернуть предыдущие.
@@ -563,6 +574,7 @@ class TraceScreen(Screen):
         self._nested_tool_rows.clear()
         self._nested_widgets_by_parent.clear()
         self._nested_anchor.clear()
+        self._subagent_parent_rows.clear()
         self._submit_solution_call_ids.clear()
         self._submit_solution_widgets.clear()
         self._summary_body_widgets.clear()
@@ -685,6 +697,7 @@ class TraceScreen(Screen):
             self._render_segments(self._store.read_segments(task_id))
         else:
             self._render_records(records)
+        self._merge_sidecar_nested(task_id)
         self._refresh_header()
         self._refresh_footer()
         sp = self._session_last_prompt()
@@ -1305,6 +1318,9 @@ class TraceScreen(Screen):
             if is_tool_group_start(self.query_one("#trace", VerticalScroll)):
                 row.add_class("tool-group-start")
             self._active_calls[row.call_id] = row
+            # Durable anchor for nested (reopen / after parent result pop).
+            if (ev.tool_name or "").startswith("subagent_") and row.call_id:
+                self._subagent_parent_rows[row.call_id] = row
             self._trace_mount(row)
             self._reconcile_active_tool_phases()
             return
@@ -1392,7 +1408,6 @@ class TraceScreen(Screen):
 
     def _reconcile_active_tool_phases(self) -> None:
         """В незавершённом batch: первая строка active (▸), остальные waiting (·)."""
-        from tui.services.subagent_progress import reconcile_batch_phases
         reconcile_batch_phases(list(self._active_calls.values()))
 
     def _drain_subagent_progress(self) -> None:
@@ -1416,10 +1431,33 @@ class TraceScreen(Screen):
             hide_ask_human=self._hide_child_ask_human,
         )
 
+    def _nested_parent_row(self, parent_call_id: str):
+        """Parent ToolCallRow for nested mount: active or durable subagent_*."""
+        return (
+            self._active_calls.get(parent_call_id)
+            or self._subagent_parent_rows.get(parent_call_id)
+        )
+
+    def _merge_sidecar_nested(self, task_id: str) -> None:
+        """После rebuild parent-трейса: смонтировать nested из data_subagents_*."""
+        if self._store is None or not task_id:
+            return
+        records = self._store.read_subagent_trace(task_id)
+        if not records:
+            return
+        actions = plan_sidecar_nested_actions(records)
+        apply_sidecar_nested_actions(
+            actions,
+            mount_nested_tool=self._mount_nested_tool,
+            finish_nested_tool=self._finish_nested_tool,
+            mount_nested_prose=self._mount_nested_prose,
+            mount_nested_summary=self._mount_nested_child_summary,
+        )
+
     def _nested_mount_after(self, parent_call_id: str, widget) -> None:
         """Смонтировать nested-виджет сразу после parent или последнего nested."""
         from textual.containers import VerticalScroll
-        parent = self._active_calls.get(parent_call_id)
+        parent = self._nested_parent_row(parent_call_id)
         if parent is None:
             return
         trace = self.query_one("#trace", VerticalScroll)
@@ -1442,7 +1480,7 @@ class TraceScreen(Screen):
         max_steps: int = 0,
         **_kw,
     ) -> None:
-        if parent_call_id not in self._active_calls:
+        if self._nested_parent_row(parent_call_id) is None:
             return
         row = ToolCallRow(
             call_id=tool_call_id or f"_nested_{tool_name}_{step}",
@@ -1477,9 +1515,8 @@ class TraceScreen(Screen):
         prose: str,
         **_kw,
     ) -> None:
-        if parent_call_id not in self._active_calls:
+        if self._nested_parent_row(parent_call_id) is None:
             return
-        from tui.widgets.trace_row import TraceRow
         text = (prose or "").strip()
         if not text:
             return
@@ -1492,6 +1529,18 @@ class TraceScreen(Screen):
         )
         self._nested_mount_after(parent_call_id, row)
 
+    def _mount_nested_child_summary(
+        self,
+        *,
+        parent_call_id: str,
+        prose: str = "",
+        **_kw,
+    ) -> None:
+        self._mount_nested_prose(
+            parent_call_id=parent_call_id,
+            prose=prose or CHILD_SUMMARY_LABEL,
+        )
+
     def _parent_subagent_heartbeat(
         self,
         *,
@@ -1501,10 +1550,9 @@ class TraceScreen(Screen):
         last_tool: str | None = None,
         **_kw,
     ) -> None:
-        row = self._active_calls.get(parent_call_id)
+        row = self._nested_parent_row(parent_call_id)
         if row is None:
             return
-        from tui.services.subagent_progress import format_parent_live_status
         row.set_live_status(
             format_parent_live_status(
                 step=step, max_steps=max_steps, last_tool=last_tool,
@@ -2243,6 +2291,7 @@ class TraceScreen(Screen):
                 self._render_segments(self._store.read_segments(self._active_task_id))
             else:
                 self._render_records(records)
+            self._merge_sidecar_nested(self._active_task_id)
             # После компакции (stream_reset) баннер мог пере-монтироваться для уже
             # отвеченного вопроса — снять, иначе ввод уйдёт в stdin «вникуда».
             self._reconcile_ask_human_after_render(allow_remnant=False)

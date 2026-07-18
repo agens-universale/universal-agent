@@ -16,7 +16,7 @@ from message_policy.user_message_policy import (
     is_dialog_summary_user_message_text,
     user_content_to_text,
 )
-from thread_store import delete_thread, discard_message_by_id
+from thread_store import delete_thread, discard_message_by_id, read_subagent_trace
 from tui.models import TailResult, TaskCursor, TaskSummary
 from tui.services.trace_mapper import _clean_summary
 
@@ -115,6 +115,13 @@ class FileTaskStore:
         """Удалить одно сообщение из треда по id (откат осиротевшей реплики)."""
         sys_ = system or self._system
         return discard_message_by_id(str(self._dir), sys_, task_id, message_id)
+
+    def read_subagent_trace(
+        self, task_id: str, system: Optional[str] = None
+    ) -> list[dict]:
+        """Sidecar nested-трейс: data_subagents_{system}_{task_id}.jsonl."""
+        sys_ = system or self._system
+        return read_subagent_trace(str(self._dir), sys_, task_id)
 
     # ---- read & tail --------------------------------------------------
 
