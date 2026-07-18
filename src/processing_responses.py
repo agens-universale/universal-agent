@@ -609,6 +609,7 @@ def process_tool_calls(
         elapsed_ms = int((time.monotonic() - started_at) * 1000)
         ok, error_brief = parse_tool_result_status(tool_res_raw)
         if is_intermediate:
+            prose = extract_intermediate_prose(tool_arguments, tool_res_raw)
             emit_progress(
                 ctx,
                 state,
@@ -616,9 +617,15 @@ def process_tool_calls(
                 elapsed_ms=elapsed_ms,
                 tool_name=tool_name,
                 tool_call_id=call_id_str,
-                prose=extract_intermediate_prose(tool_arguments, tool_res_raw),
+                prose=prose,
                 ok=ok if ok is not None else True,
                 error_brief=error_brief,
+            )
+            ir_payload: Dict[str, Any] = {"prose": prose or ""}
+            if call_id_str:
+                ir_payload["call_id"] = call_id_str
+            persist_subagent_trace(
+                ctx, kind="intermediate_reply", payload=ir_payload
             )
         else:
             emit_progress(

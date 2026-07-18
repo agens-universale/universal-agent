@@ -32,10 +32,31 @@ from utils.generate_message_id import generate_msg_id_sha256 as generate_message
 from utils.local_render_system_prompt import render_system_prompt
 from utils.logging_module import create_run_logger, generate_run_id
 from tools.subagents.progress import emit_progress
-from tools.subagents.sidecar import bind_thread_identity, clear_thread_identity
+from tools.subagents.sidecar import (
+    bind_thread_identity,
+    clear_thread_identity,
+    persist_subagent_trace,
+)
 from message_policy.user_stop import cancelled_by_user_output
 
 _log = logging.getLogger(__name__)
+
+
+def _synthesis_from_summary_event(event: Dict[str, Any]) -> str:
+    """Текст суммаризации для sidecar child_summary."""
+    trace = event.get("summary_trace") if isinstance(event, dict) else None
+    final = trace.get("final_output") if isinstance(trace, dict) else None
+    if isinstance(final, dict):
+        for key in ("agent_summary_text", "raw_summary"):
+            text = final.get(key)
+            if isinstance(text, str) and text.strip():
+                return text
+    payload = event.get("summary_payload") if isinstance(event, dict) else None
+    if isinstance(payload, dict):
+        content = payload.get("summary_message_content")
+        if isinstance(content, str):
+            return content
+    return ""
 
 
 class SubagentRunner:
@@ -175,6 +196,19 @@ class SubagentRunner:
                 pre_backend_trigger_reason="subagent_pre_backend",
                 logger=_log,
             )
+            # Sidecar marker when child compaction applies (append-only; no rewrite).
+            _orig_on_summary = summary.on_summary_applied
+
+            def _on_summary_applied_with_sidecar(event: Dict[str, Any]) -> None:
+                _orig_on_summary(event)
+                synthesis = _synthesis_from_summary_event(event)
+                persist_subagent_trace(
+                    child_ctx,
+                    kind="child_summary",
+                    payload={"synthesis": synthesis},
+                )
+
+            summary.on_summary_applied = _on_summary_applied_with_sidecar
             pre_backend_compaction_hook = summary.pre_backend_compaction_hook
 
         self._usage_pushed = UsageAccount()
@@ -198,6 +232,12 @@ class SubagentRunner:
                     "steps": child_state.steps,
                     "error_code": "subagent_run_failed",
                 },
+            )
+            self._persist_finished(
+                child_ctx,
+                child_state,
+                ok=False,
+                finish_reason="error",
             )
             return self._error_response(
                 tool_name=tool_name,
@@ -227,6 +267,12 @@ class SubagentRunner:
                 ok=False,
                 error_brief="stopped by user",
             )
+            self._persist_finished(
+                child_ctx,
+                child_state,
+                ok=False,
+                finish_reason="stopped_by_user",
+            )
             return self._cancelled_by_user_response(
                 tool_name=tool_name,
                 steps=child_state.steps,
@@ -248,6 +294,12 @@ class SubagentRunner:
                 ok=False,
                 error_brief="step limit",
             )
+            self._persist_finished(
+                child_ctx,
+                child_state,
+                ok=False,
+                finish_reason="step_limit",
+            )
             return self._step_limit_response(
                 tool_name=tool_name,
                 steps=child_state.steps,
@@ -263,6 +315,12 @@ class SubagentRunner:
             child_ctx=child_ctx,
             extra={"steps": child_state.steps, "finish_reason": "completed"},
         )
+        self._persist_finished(
+            child_ctx,
+            child_state,
+            ok=True,
+            finish_reason="completed",
+        )
         return self._success_response(
             tool_name=tool_name,
             result=result_payload,
@@ -274,6 +332,24 @@ class SubagentRunner:
 
     def _check_stop_requested(self) -> bool:
         return self._orchestrator_state.stop_requested
+
+    def _persist_finished(
+        self,
+        child_ctx: Any,
+        child_state: State,
+        *,
+        ok: bool,
+        finish_reason: str,
+    ) -> None:
+        persist_subagent_trace(
+            child_ctx,
+            kind="finished",
+            payload={
+                "ok": ok,
+                "finish_reason": finish_reason,
+                "steps": int(getattr(child_state, "steps", 0) or 0),
+            },
+        )
 
     def _push_usage_delta(self, child_state: State, child_ctx: Optional[Any] = None) -> None:
         """Влить в parent только прирост child.usage с последнего tick (категория subagent)."""
