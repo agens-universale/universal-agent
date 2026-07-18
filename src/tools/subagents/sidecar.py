@@ -1,11 +1,22 @@
-"""Sidecar nested-trace gate: identity on ctx, independent of live progress sink."""
+"""Sidecar nested-trace: gate, append writer, mid-session detail cache.
+
+Persist is independent of the live progress sink (CLI / no-op sink still writes
+when thread identity is present).
+"""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any, Dict, Optional
 
-from thread_store import sanitize_system_id, validate_thread_id
+from thread_store import (
+    append_subagent_trace_record,
+    sanitize_system_id,
+    validate_thread_id,
+)
+
+# call_id → {"call": function_call wire, "result": function_call_output wire}
+_DETAIL_CACHE: Dict[str, Dict[str, Any]] = {}
 
 
 @dataclass(frozen=True)
@@ -68,9 +79,58 @@ def resolve_sidecar_identity(ctx: Any) -> Optional[SidecarIdentity]:
     )
 
 
+def clear_detail_cache() -> None:
+    _DETAIL_CACHE.clear()
+
+
+def lookup_tool_detail(call_id: str) -> Optional[Dict[str, Any]]:
+    """In-memory detail для Ctrl+click mid-session; None если нет."""
+    if not call_id:
+        return None
+    entry = _DETAIL_CACHE.get(str(call_id))
+    if not entry:
+        return None
+    return dict(entry)
+
+
+def _update_detail_cache(kind: str, payload: Dict[str, Any]) -> None:
+    call_id = payload.get("call_id")
+    if not isinstance(call_id, str) or not call_id:
+        return
+    entry = _DETAIL_CACHE.setdefault(call_id, {})
+    if kind == "call":
+        entry["call"] = payload
+    elif kind in ("result", "error"):
+        entry["result"] = payload
+        entry["result_kind"] = kind
+
+
+def persist_subagent_trace(
+    ctx: Any, *, kind: str, payload: Dict[str, Any]
+) -> Optional[Dict[str, Any]]:
+    """Append sidecar record when gate passes; update detail cache. Else no-op."""
+    ident = resolve_sidecar_identity(ctx)
+    if ident is None:
+        return None
+    record = append_subagent_trace_record(
+        ident.threads_dir,
+        ident.system_id,
+        ident.thread_id,
+        parent_call_id=ident.parent_call_id,
+        child_run_id=ident.child_run_id,
+        kind=kind,
+        payload=payload,
+    )
+    _update_detail_cache(kind, payload)
+    return record
+
+
 __all__ = [
     "SidecarIdentity",
     "bind_thread_identity",
+    "clear_detail_cache",
     "clear_thread_identity",
+    "lookup_tool_detail",
+    "persist_subagent_trace",
     "resolve_sidecar_identity",
 ]

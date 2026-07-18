@@ -35,6 +35,7 @@ from tools.subagents.progress import (
     extract_intermediate_prose,
     parse_tool_result_status,
 )
+from tools.subagents.sidecar import persist_subagent_trace
 from utils.connect_backend import create_call_headers
 from utils.connect_backend import request_backend_responses as request_backend
 from utils.ssl_config import get_backend_client_cert
@@ -551,6 +552,10 @@ def process_tool_calls(
         started_at = time.monotonic()
 
         # Live-прогресс субагента: «тул пошёл». На обычном parent-прогоне — no-op.
+        # Sidecar persist параллельно (нужен thread identity; sink не требуется).
+        persist_tool_trace = (
+            not is_intermediate and tool_name != ASK_HUMAN_TOOL_NAME
+        )
         if not is_intermediate:
             emit_progress(
                 ctx,
@@ -560,6 +565,8 @@ def process_tool_calls(
                 tool_call_id=call_id_str,
                 args_summary=brief_args_summary(tool_arguments),
             )
+        if persist_tool_trace:
+            persist_subagent_trace(ctx, kind="call", payload=dict(m))
         try:
             # call_id для субагента: чтобы вложенные строки в TUI знали,
             # под какой корневой subagent_* они относятся.
@@ -586,6 +593,16 @@ def process_tool_calls(
                 ok=False,
                 error_brief=str(exc),
             )
+            if persist_tool_trace:
+                persist_subagent_trace(
+                    ctx,
+                    kind="error",
+                    payload={
+                        "type": "function_call_output",
+                        "call_id": tool_call_id,
+                        "output": str(exc),
+                    },
+                )
             raise
         # Live-прогресс: тул закончил — или текст intermediate_reply.
         # В историю треда это не пишется.
@@ -614,6 +631,21 @@ def process_tool_calls(
                 ok=ok if ok is not None else True,
                 error_brief=error_brief,
             )
+            if persist_tool_trace:
+                out_text = (
+                    tool_res_raw
+                    if isinstance(tool_res_raw, str)
+                    else json.dumps(tool_res_raw, ensure_ascii=False)
+                )
+                persist_subagent_trace(
+                    ctx,
+                    kind="error" if ok is False else "result",
+                    payload={
+                        "type": "function_call_output",
+                        "call_id": tool_call_id,
+                        "output": out_text,
+                    },
+                )
 
         if is_unknown_tool_output(tool_res_raw):
             unknown_in_batch += 1
