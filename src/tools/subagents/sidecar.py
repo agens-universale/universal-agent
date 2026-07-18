@@ -7,7 +7,7 @@ when thread identity is present).
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Sequence
 
 from thread_store import (
     append_subagent_trace_record,
@@ -105,6 +105,17 @@ def _update_detail_cache(kind: str, payload: Dict[str, Any]) -> None:
         entry["result_kind"] = kind
 
 
+def warm_detail_cache_from_records(records: Sequence[Dict[str, Any]]) -> None:
+    """Прогреть in-memory detail cache из sidecar (reopen / Ctrl+click)."""
+    for rec in records:
+        if not isinstance(rec, dict):
+            continue
+        kind = rec.get("kind")
+        payload = rec.get("payload")
+        if kind in ("call", "result", "error") and isinstance(payload, dict):
+            _update_detail_cache(str(kind), payload)
+
+
 def persist_subagent_trace(
     ctx: Any, *, kind: str, payload: Dict[str, Any]
 ) -> Optional[Dict[str, Any]]:
@@ -133,4 +144,5 @@ __all__ = [
     "lookup_tool_detail",
     "persist_subagent_trace",
     "resolve_sidecar_identity",
+    "warm_detail_cache_from_records",
 ]

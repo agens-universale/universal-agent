@@ -8,7 +8,12 @@ from pathlib import Path
 import pytest
 
 from thread_store import append_subagent_trace_record
-from tools.subagents.sidecar import clear_detail_cache, persist_subagent_trace
+from tools.subagents.sidecar import (
+    clear_detail_cache,
+    lookup_tool_detail,
+    persist_subagent_trace,
+    warm_detail_cache_from_records,
+)
 from tui.services.subagent_sidecar_mapper import (
     detail_from_sidecar_records,
     resolve_nested_tool_detail,
@@ -84,6 +89,37 @@ def test_resolve_prefers_cache_over_records():
     )
     assert detail is not None
     assert "cached.py" in detail["call"]["arguments"]
+    clear_detail_cache()
+
+
+def test_warm_detail_cache_from_records():
+    clear_detail_cache()
+    records = [
+        {
+            "seq": 1,
+            "kind": "call",
+            "payload": {
+                "type": "function_call",
+                "name": "shell",
+                "arguments": '{"cmd":"pwd"}',
+                "call_id": "warm1",
+            },
+        },
+        {
+            "seq": 2,
+            "kind": "result",
+            "payload": {
+                "type": "function_call_output",
+                "call_id": "warm1",
+                "output": "/tmp\n",
+            },
+        },
+    ]
+    warm_detail_cache_from_records(records)
+    detail = lookup_tool_detail("warm1")
+    assert detail is not None
+    assert detail["call"]["name"] == "shell"
+    assert detail["result"]["output"] == "/tmp\n"
     clear_detail_cache()
 
 

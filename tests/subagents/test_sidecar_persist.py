@@ -150,14 +150,21 @@ class TestSidecarPersistCallResult:
         assert "bad args" in rows[1]["payload"]["output"]
 
     def test_ask_human_not_persisted(self, tmp_path, monkeypatch):
+        from tools.subagents.progress import QueueSubagentProgressSink
+
         pr = _patch_process(monkeypatch, apply_return='{"ok": true, "answer": "yes"}')
+        sink = QueueSubagentProgressSink()
         pr.process_tool_calls(
             messages=[_fc("turn_ask_human", "ah1", '{"question": "ok?"}'),],
             state=_state(),
-            ctx=_child_ctx(tmp_path),
+            ctx=_child_ctx(tmp_path, sink=sink),
             run_agent_func=None,
         )
         assert read_subagent_trace(str(tmp_path), "cli", "task-1") == []
+        # Nested tool-row для HITL не монтируем (нет detail → Ctrl+click no-op).
+        kinds = [e.kind for e in sink.drain()]
+        assert "tool_start" not in kinds
+        assert "tool_end" not in kinds
 
     def test_nested_not_appended_to_state_messages(self, tmp_path, monkeypatch):
         pr = _patch_process(monkeypatch)

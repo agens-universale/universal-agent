@@ -200,6 +200,9 @@ class TraceScreen(Screen):
         # Раннер, задавший текущий ask_human (владелец вопроса). None, если плашка
         # воспроизведена из истории — тогда ответ идёт новым ходом, а не в stdin.
         self._ask_human_owner_runner = None
+        # Child HITL: parent_call_id субагента, пока висит его ask_human-баннер.
+        # Ответ → stdin child, без parent pending / user-строки в data_*.
+        self._ask_human_child_parent_call_id: Optional[str] = None
         # Spec 2026-05-26: pending user-replies (in-memory dict by client_id, FIFO ordered).
         self._pending_user_widgets: dict[str, "UserReplyContainer"] = {}
         # Кэш wire_content для reconciliation — независим от состояния meta-файла,
@@ -598,6 +601,7 @@ class TraceScreen(Screen):
                 self.app.tui_state.ask_human_state = None
         self._ask_human_question_row = None  # виджет ушёл вместе с trace-очисткой
         self._ask_human_owner_runner = None
+        self._ask_human_child_parent_call_id = None
         # I2: cancel_confirm всегда (даже если баннер не монтировался).
         _reset_runner = getattr(self.app, "active_runner", None)
         if _reset_runner is not None and hasattr(_reset_runner, "cancel_confirm"):
@@ -1449,6 +1453,9 @@ class TraceScreen(Screen):
         records = self._store.read_subagent_trace(task_id)
         if not records:
             return
+        from tools.subagents.sidecar import warm_detail_cache_from_records
+
+        warm_detail_cache_from_records(records)
         actions = plan_sidecar_nested_actions(records)
         apply_sidecar_nested_actions(
             actions,
@@ -1607,6 +1614,7 @@ class TraceScreen(Screen):
         self._ask_human_banner = banner
         self._ask_human_call_id = tool_call_id or parent_call_id
         self._ask_human_owner_runner = self.app.active_runner
+        self._ask_human_child_parent_call_id = parent_call_id or None
         self.app.tui_state.ask_human_state = AskHumanState(
             call_id=self._ask_human_call_id or "",
             question=prose,
@@ -1689,6 +1697,7 @@ class TraceScreen(Screen):
 
     def _unmount_ask_human_banner(self) -> None:
         self._ask_human_owner_runner = None
+        self._ask_human_child_parent_call_id = None
         if self._ask_human_banner is None:
             return
         # Плашка схлопывается → раскрываем трейс-строку вопроса (история).
@@ -3108,8 +3117,21 @@ class TraceScreen(Screen):
             target = self._ask_human_target_runner()
             if target is not None:
                 # Живой in-run диалог: владелец вопроса тот же и работает → stdin.
-                client_id = self._track_pending(display_text=text, wire_content=text)
-                self._mount_user_reply(text, state="pending", client_id=client_id)
+                child_pid = self._ask_human_child_parent_call_id
+                if child_pid:
+                    # Child HITL: ответ только в stdin субагента. Parent pending /
+                    # user-строка в data_* — нет (иначе orphan в meta + «уехало к агенту»).
+                    self._mount_nested_user(parent_call_id=child_pid, prose=text)
+                    parent_row = self._active_calls.get(child_pid)
+                    if parent_row is not None:
+                        parent_row.resume()
+                else:
+                    client_id = self._track_pending(
+                        display_text=text, wire_content=text
+                    )
+                    self._mount_user_reply(
+                        text, state="pending", client_id=client_id
+                    )
                 target.submit_ask_human_reply(text)
                 # Optimistic: снимаем баннер сразу после ответа, не ждём
                 # function_call_output в полле (иначе 5–10с «висящего» вопроса
@@ -4234,6 +4256,10 @@ class TraceScreen(Screen):
         if call_ev is None:
             call_ev, result_ev = self._resolve_nested_detail_events(message.call_id)
         if call_ev is None:
+            if message.call_id and message.call_id in self._nested_tool_rows:
+                self._show_footer_hint(
+                    "нет args/output для этого nested-тула", seconds=3.0
+                )
             return
         self.app.push_screen(ToolCallDetailScreen(
             call_event=call_ev, result_event=result_ev,
@@ -4246,6 +4272,10 @@ class TraceScreen(Screen):
         records = None
         if self._store is not None and self._active_task_id:
             records = self._store.read_subagent_trace(self._active_task_id)
+            if records:
+                from tools.subagents.sidecar import warm_detail_cache_from_records
+
+                warm_detail_cache_from_records(records)
         detail = resolve_nested_tool_detail(call_id, sidecar_records=records)
         if not detail or not isinstance(detail.get("call"), dict):
             return None, None

@@ -553,10 +553,13 @@ def process_tool_calls(
 
         # Live-прогресс субагента: «тул пошёл». На обычном parent-прогоне — no-op.
         # Sidecar persist параллельно (нужен thread identity; sink не требуется).
+        # ask_human: только banner (ask_human/ask_human_done); nested tool-row
+        # без sidecar/cache → Ctrl+click молча no-op — не монтируем.
         persist_tool_trace = (
             not is_intermediate and tool_name != ASK_HUMAN_TOOL_NAME
         )
-        if not is_intermediate:
+        emit_tool_row = persist_tool_trace
+        if emit_tool_row:
             emit_progress(
                 ctx,
                 state,
@@ -583,16 +586,17 @@ def process_tool_calls(
                 exc.call_id = tool_call_id
             # Даже при ошибке аргументов закрыть «бегущую» строку в TUI.
             elapsed_ms = int((time.monotonic() - started_at) * 1000)
-            emit_progress(
-                ctx,
-                state,
-                "tool_end",
-                elapsed_ms=elapsed_ms,
-                tool_name=tool_name,
-                tool_call_id=call_id_str,
-                ok=False,
-                error_brief=str(exc),
-            )
+            if emit_tool_row:
+                emit_progress(
+                    ctx,
+                    state,
+                    "tool_end",
+                    elapsed_ms=elapsed_ms,
+                    tool_name=tool_name,
+                    tool_call_id=call_id_str,
+                    ok=False,
+                    error_brief=str(exc),
+                )
             if persist_tool_trace:
                 persist_subagent_trace(
                     ctx,
@@ -628,16 +632,17 @@ def process_tool_calls(
                 ctx, kind="intermediate_reply", payload=ir_payload
             )
         else:
-            emit_progress(
-                ctx,
-                state,
-                "tool_end",
-                elapsed_ms=elapsed_ms,
-                tool_name=tool_name,
-                tool_call_id=call_id_str,
-                ok=ok if ok is not None else True,
-                error_brief=error_brief,
-            )
+            if emit_tool_row:
+                emit_progress(
+                    ctx,
+                    state,
+                    "tool_end",
+                    elapsed_ms=elapsed_ms,
+                    tool_name=tool_name,
+                    tool_call_id=call_id_str,
+                    ok=ok if ok is not None else True,
+                    error_brief=error_brief,
+                )
             if persist_tool_trace:
                 out_text = (
                     tool_res_raw
