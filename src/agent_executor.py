@@ -39,6 +39,7 @@ from thread_store import (
     resolve_threads_dir,
     update_runtime_meta,
 )
+from tools.subagents.sidecar import bind_thread_identity, clear_thread_identity
 from tools.connect_mcp.persistent_stdio import PersistentStdioRegistry
 from tools.connect_mcp.stream_client import _SESSION_MANAGER as _STREAM_SESSION_MANAGER
 from tools.skills.registry import get_skills_registry
@@ -120,8 +121,16 @@ class AgentExecutor:
                 previous_response_id = thread_session.previous_response_id
             meta = getattr(thread_session, "meta", None) or {}
             thread_shared = ThreadMetaMapper.shared_from_meta(meta)
+            # Sidecar nested-trace: identity для child ctx (независимо от TUI sink).
+            bind_thread_identity(
+                self._ctx,
+                threads_dir=thread_session.threads_dir,
+                system_id=thread_session.system_id,
+                thread_id=thread_session.thread_id,
+            )
         else:
             system_id = system or "cli"
+            clear_thread_identity(self._ctx)
         is_cli_mode = system_id == "cli"
 
         # Снять протухший флаг компакции от прерванного прошлого run'а: на старте

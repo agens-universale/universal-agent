@@ -32,6 +32,7 @@ from utils.generate_message_id import generate_msg_id_sha256 as generate_message
 from utils.local_render_system_prompt import render_system_prompt
 from utils.logging_module import create_run_logger, generate_run_id
 from tools.subagents.progress import emit_progress
+from tools.subagents.sidecar import bind_thread_identity, clear_thread_identity
 from message_policy.user_stop import cancelled_by_user_output
 
 _log = logging.getLogger(__name__)
@@ -444,6 +445,26 @@ class SubagentRunner:
             self._ctx, "subagent_progress_sink", None
         )
         child_ctx.parent_call_id = self._parent_call_id
+        # Sidecar identity: parent thread path (independent of sink). No thread → clear.
+        parent_threads_dir = getattr(self._ctx, "threads_dir", None)
+        parent_system_id = getattr(self._ctx, "system_id", None)
+        parent_thread_id = getattr(self._ctx, "thread_id", None)
+        if (
+            isinstance(parent_threads_dir, str)
+            and parent_threads_dir.strip()
+            and isinstance(parent_system_id, str)
+            and parent_system_id.strip()
+            and isinstance(parent_thread_id, str)
+            and parent_thread_id.strip()
+        ):
+            bind_thread_identity(
+                child_ctx,
+                threads_dir=parent_threads_dir,
+                system_id=parent_system_id,
+                thread_id=parent_thread_id,
+            )
+        else:
+            clear_thread_identity(child_ctx)
         # HITL: тот же confirm-баннер родителя + имя субагента для метки via.
         child_ctx.tui_confirm = getattr(self._ctx, "tui_confirm", None)
         child_ctx.permission_store = getattr(self._ctx, "permission_store", None)
