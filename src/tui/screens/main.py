@@ -50,9 +50,12 @@ from tui.services.subagent_sidecar_mapper import (
     CHILD_SUMMARY_LABEL,
     apply_sidecar_nested_actions,
     plan_sidecar_nested_actions,
+    resolve_nested_tool_detail,
+    trace_events_from_nested_detail,
 )
 from tui.services.trace_mapper import collect_skipped_call_ids, map_message
 from tui.services.trace_render import build_compaction_label
+from tui.screens.tool_call_detail import ToolCallDetailScreen
 from tui.widgets.command_input import CommandTextArea
 from tui.widgets.command_palette import CommandPalette
 from tui.widgets.thinking_indicator import (
@@ -4180,7 +4183,11 @@ class TraceScreen(Screen):
                 marker.set_prefix("▸ ")
 
     def on_open_tool_call_detail_request(self, message) -> None:
-        """Двойной клик / Enter по row → детальный экран call + output."""
+        """Ctrl+click / Enter по row → детальный экран call + output.
+
+        Parent-тулы — из ``_task_events`` (data_*). Nested child — из
+        in-memory cache writer'а или sidecar ``data_subagents_*``.
+        """
         call_ev = None
         result_ev = None
         for ev in self._task_events:
@@ -4191,11 +4198,24 @@ class TraceScreen(Screen):
             elif ev.kind in ("result", "error"):
                 result_ev = ev
         if call_ev is None:
+            call_ev, result_ev = self._resolve_nested_detail_events(message.call_id)
+        if call_ev is None:
             return
-        from tui.screens.tool_call_detail import ToolCallDetailScreen
         self.app.push_screen(ToolCallDetailScreen(
             call_event=call_ev, result_event=result_ev,
         ))
+
+    def _resolve_nested_detail_events(self, call_id: str):
+        """TraceEvent pair для nested tool; нет данных → (None, None)."""
+        if not call_id:
+            return None, None
+        records = None
+        if self._store is not None and self._active_task_id:
+            records = self._store.read_subagent_trace(self._active_task_id)
+        detail = resolve_nested_tool_detail(call_id, sidecar_records=records)
+        if not detail or not isinstance(detail.get("call"), dict):
+            return None, None
+        return trace_events_from_nested_detail(call_id, detail)
 
     def _load_skills_safe(self) -> list[dict]:
         """Загрузить список скиллов из core-реестра; на ошибке вернуть []."""

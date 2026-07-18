@@ -1,4 +1,4 @@
-"""Map persisted data_subagents_* records → nested TUI mount actions.
+"""Map persisted data_subagents_* records → nested TUI mount actions / detail.
 
 Display/audit only — does not touch agent state or parent LLM history.
 """
@@ -7,9 +7,11 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Literal, Optional, Sequence
+from typing import Any, Callable, Dict, List, Literal, Optional, Sequence, Tuple
 
 from tools.subagents.progress import brief_args_summary, parse_tool_result_status
+from tools.subagents.sidecar import lookup_tool_detail
+from tui.models import TraceEvent
 
 CHILD_SUMMARY_LABEL = "контекст субагента сжат"
 
@@ -162,9 +164,90 @@ def apply_sidecar_nested_actions(
             )
 
 
+def detail_from_sidecar_records(
+    records: Sequence[Dict[str, Any]], call_id: str
+) -> Optional[Dict[str, Any]]:
+    """Собрать call/result pair по child call_id из sidecar records."""
+    if not call_id:
+        return None
+    call_payload: Optional[Dict[str, Any]] = None
+    result_payload: Optional[Dict[str, Any]] = None
+    result_kind: Optional[str] = None
+    for rec in records:
+        if not isinstance(rec, dict):
+            continue
+        payload = rec.get("payload")
+        if not isinstance(payload, dict):
+            continue
+        if payload.get("call_id") != call_id:
+            continue
+        kind = rec.get("kind")
+        if kind == "call":
+            call_payload = payload
+        elif kind in ("result", "error"):
+            result_payload = payload
+            result_kind = kind
+    if call_payload is None:
+        return None
+    out: Dict[str, Any] = {"call": call_payload}
+    if result_payload is not None:
+        out["result"] = result_payload
+        out["result_kind"] = result_kind or "result"
+    return out
+
+
+def resolve_nested_tool_detail(
+    call_id: str, *, sidecar_records: Sequence[Dict[str, Any]] | None = None
+) -> Optional[Dict[str, Any]]:
+    """cache (mid-session) → sidecar records (reopen)."""
+    cached = lookup_tool_detail(call_id)
+    if cached and isinstance(cached.get("call"), dict):
+        return cached
+    if sidecar_records is not None:
+        return detail_from_sidecar_records(sidecar_records, call_id)
+    return None
+
+
+def trace_events_from_nested_detail(
+    call_id: str, detail: Dict[str, Any]
+) -> Tuple[TraceEvent, Optional[TraceEvent]]:
+    """Синтетические TraceEvent для ToolCallDetailScreen."""
+    call_payload = detail.get("call")
+    if not isinstance(call_payload, dict):
+        raise ValueError("detail.call required")
+    name = str(call_payload.get("name") or "")
+    call_ev = TraceEvent(
+        no=0,
+        event_ts_utc_iso="",
+        kind="call",
+        title=name,
+        summary=brief_args_summary(call_payload.get("arguments")),
+        full_payload=call_payload,
+        call_id=call_id,
+        tool_name=name,
+    )
+    result_ev: Optional[TraceEvent] = None
+    result_payload = detail.get("result")
+    if isinstance(result_payload, dict):
+        rk = detail.get("result_kind") or "result"
+        result_ev = TraceEvent(
+            no=0,
+            event_ts_utc_iso="",
+            kind="error" if rk == "error" else "result",
+            title="",
+            summary="",
+            full_payload=result_payload,
+            call_id=call_id,
+        )
+    return call_ev, result_ev
+
+
 __all__ = [
     "CHILD_SUMMARY_LABEL",
     "SidecarNestedAction",
     "apply_sidecar_nested_actions",
+    "detail_from_sidecar_records",
     "plan_sidecar_nested_actions",
+    "resolve_nested_tool_detail",
+    "trace_events_from_nested_detail",
 ]
