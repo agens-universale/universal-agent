@@ -1325,7 +1325,7 @@ class TraceScreen(Screen):
                     summary=ev.summary,
                     error=(ev.kind == "error"),
                 )
-                self._collapse_nested_under(ev.call_id)
+                # Nested под subagent_* оставляем в живой сессии (иерархия под ✓/✗).
                 self._active_calls.pop(ev.call_id, None)
                 self._reconcile_active_tool_phases()
                 return
@@ -1383,7 +1383,7 @@ class TraceScreen(Screen):
         row = self._active_calls.get(ev.call_id) if ev.call_id else None
         if row is not None:
             row.set_result(summary=ev.summary, error=True)
-            self._collapse_nested_under(ev.call_id)
+            # Nested под subagent_* оставляем в живой сессии (иерархия под ✓/✗).
             self._active_calls.pop(ev.call_id, None)
             self._reconcile_active_tool_phases()
             return
@@ -1415,7 +1415,6 @@ class TraceScreen(Screen):
             mount_nested_prose=self._mount_nested_prose,
             nested_overflow=self._mount_nested_overflow,
             parent_heartbeat=self._parent_subagent_heartbeat,
-            collapse_nested=self._collapse_nested_under,
             show_ask_human=self._show_child_ask_human,
             hide_ask_human=self._hide_child_ask_human,
         )
@@ -1590,22 +1589,6 @@ class TraceScreen(Screen):
         if parent_row is not None:
             parent_row.resume()
         self._unmount_ask_human_banner()
-
-    def _collapse_nested_under(self, parent_call_id: str | None) -> None:
-        """Убрать nested-виджеты под субагентом (после output / stop / finished)."""
-        if not parent_call_id:
-            return
-        widgets = self._nested_widgets_by_parent.pop(parent_call_id, [])
-        for w in widgets:
-            try:
-                w.remove()
-            except Exception:
-                pass
-            cid = getattr(w, "call_id", None)
-            if cid:
-                self._nested_tool_rows.pop(cid, None)
-        self._nested_overflow_row.pop(parent_call_id, None)
-        self._nested_anchor.pop(parent_call_id, None)
 
     
     def _diff_service_for_preview(self):

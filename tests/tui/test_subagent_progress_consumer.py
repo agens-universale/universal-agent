@@ -68,14 +68,17 @@ class TestPlanProgressActions:
         assert len(overflows) == 3
         assert overflows[-1].overflow_count == 3
 
-    def test_finished_collapses_nested(self):
+    def test_finished_keeps_nested_no_collapse(self):
         actions = plan_progress_actions(
             [
                 _ev(kind="tool_start", tool_name="fs_read_file", tool_call_id="tc1"),
                 _ev(kind="finished", step=5),
             ]
         )
-        assert any(a.kind == "collapse_nested" for a in actions)
+        kinds = [a.kind for a in actions]
+        assert "collapse_nested" not in kinds
+        assert kinds[-1] == "parent_heartbeat"
+        assert any(a.kind == "mount_nested_tool" for a in actions)
 
 
 class TestConsumerApply:
@@ -98,7 +101,6 @@ class TestConsumerApply:
             mount_nested_prose=lambda **kw: None,
             nested_overflow=lambda **kw: None,
             parent_heartbeat=lambda **kw: heartbeats.append(kw),
-            collapse_nested=lambda **kw: None,
         )
         assert len(mounted) == 1
         assert mounted[0]["tool_call_id"] == "tc1"

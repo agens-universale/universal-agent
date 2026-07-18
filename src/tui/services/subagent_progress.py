@@ -18,7 +18,6 @@ ProgressActionKind = Literal[
     "mount_nested_prose",
     "nested_overflow",
     "parent_heartbeat",
-    "collapse_nested",
     "show_ask_human",
     "hide_ask_human",
 ]
@@ -185,18 +184,9 @@ def plan_progress_actions(
         elif ev.kind in ("confirm", "confirm_done"):
             # Баннер confirm уже открывает tui_confirm(via=…); здесь только heartbeat.
             actions.append(_heartbeat(ev))
-        elif ev.kind in ("finished", "error", "cancelled"):
-            actions.append(
-                ProgressAction(
-                    kind="collapse_nested",
-                    parent_call_id=pid,
-                    step=ev.step,
-                    max_steps=ev.max_steps,
-                    ok=ev.ok,
-                    error_brief=ev.error_brief,
-                )
-            )
-        elif ev.kind in ("started", "heartbeat", "usage"):
+        elif ev.kind in ("finished", "error", "cancelled", "started", "heartbeat", "usage"):
+            # Nested в живой сессии оставляем под parent (✓/✗); collapse — только
+            # при clear/смене треда. После reopen nested всё равно нет (не в jsonl).
             actions.append(_heartbeat(ev))
     return actions
 
@@ -220,7 +210,6 @@ class SubagentProgressConsumer:
         mount_nested_prose: Callable[..., None],
         nested_overflow: Callable[..., None],
         parent_heartbeat: Callable[..., None],
-        collapse_nested: Callable[..., None],
         show_ask_human: Callable[..., None] | None = None,
         hide_ask_human: Callable[..., None] | None = None,
     ) -> None:
@@ -314,18 +303,27 @@ class SubagentProgressConsumer:
             elif ev.kind == "ask_human_done":
                 if hide_ask_human is not None:
                     hide_ask_human(parent_call_id=pid)
-            elif ev.kind in ("confirm", "confirm_done", "started", "heartbeat", "usage"):
+            elif ev.kind in (
+                "confirm",
+                "confirm_done",
+                "started",
+                "heartbeat",
+                "usage",
+                "finished",
+                "error",
+                "cancelled",
+            ):
                 parent_heartbeat(
                     parent_call_id=pid,
                     step=ev.step,
                     max_steps=ev.max_steps,
                     last_tool=self._last_tool.get(pid),
                 )
-            elif ev.kind in ("finished", "error", "cancelled"):
-                collapse_nested(parent_call_id=pid)
-                self._mounted_count.pop(pid, None)
-                self._overflow_count.pop(pid, None)
-                self._last_tool.pop(pid, None)
+                if ev.kind in ("finished", "error", "cancelled"):
+                    # Счётчики drain'а сбрасываем; виджеты не трогаем.
+                    self._mounted_count.pop(pid, None)
+                    self._overflow_count.pop(pid, None)
+                    self._last_tool.pop(pid, None)
 
     def reset(self) -> None:
         self._mounted_count.clear()
