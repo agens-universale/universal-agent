@@ -55,6 +55,7 @@ def test_default_registry_is_exactly_keep_set():
     assert names == sorted([
         "sessions", "new", "stop", "skill", "skills",
         "status", "config", "settings", "mcp", "notices", "diff", "view", "export", "help", "init", "compact", "quit",
+        "gate", "answers",
     ])
 
 
@@ -108,6 +109,7 @@ def test_command_hotkeys():
         "export": "", "compact": "", "init": "", "view": "",
         "skills": "", "skill": "", "status": "",
         "stop": "Ctrl+C", "mcp": "", "quit": "Esc",
+        "gate": "", "answers": "",
     }
     reg = build_default_registry()
     for name, key in expected.items():
@@ -119,7 +121,7 @@ def test_default_registry_frequency_order():
     assert names == [
         "help", "sessions", "diff", "view", "notices", "new", "config", "settings",
         "export", "compact", "init", "skills", "skill", "status",
-        "stop", "mcp", "quit",
+        "stop", "mcp", "quit", "gate", "answers",
     ]
 
 
@@ -167,6 +169,28 @@ def test_view_command_has_arg_file_flag():
     reg = build_default_registry()
     assert reg.lookup("view").arg_file is True
     assert reg.lookup("help").arg_file is False   # дефолт не разлился
+
+
+def test_arg_file_and_is_toggle_are_mutually_exclusive():
+    """arg_file и is_toggle — взаимоисключающие режимы команды.
+
+    Роутинг предполагает это молча: arg_file открывает файловый пикер в
+    on_text_area_changed, is_toggle уводит Enter/←/→ в тоггл-ветку — команда
+    с обоими флагами получила бы оба поведения сразу. Гвоздь фиксирует контракт.
+    """
+    reg = build_default_registry()
+    for cmd in reg.list_commands():
+        assert not (cmd.arg_file and cmd.is_toggle), cmd.name
+
+
+def test_toggle_descriptions_generated_from_specs():
+    from tui.commands import build_default_registry
+    from tui.toggles import TOGGLES
+    reg = build_default_registry()
+    for name in ("gate", "answers"):
+        cmd = reg.lookup(name)
+        spec = TOGGLES[name]
+        assert cmd.description == f"{spec.label}: {spec.summary}"
 
 
 async def test_f6_opens_settings_with_input_focused():

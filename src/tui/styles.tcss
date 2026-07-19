@@ -234,6 +234,10 @@ ToolCallRow.tool-group-start { margin-top: 1; }
 .palette-hint  { color: $deep-dim; padding: 0 1; }
 .palette-keys  { margin-top: 1; }   /* воздух перед строкой клавиш — как .set-hint */
 
+/* Toggle-подвал палитры (/gate, /answers — спека 2026-07-16 §4): докнут вне скролла. */
+.palette-footer     { dock: bottom; height: auto; }
+.palette-separator  { color: $deep-dim; padding: 0 1; height: 1; margin: 0; }
+
 /* Строки HelpScreen — реестр команд + доп. хоткеи */
 .help-section  { color: $deep-dim; padding: 0 1; }
 .help-row      { height: auto; width: 1fr; color: $ink; }

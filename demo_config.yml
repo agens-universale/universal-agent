@@ -114,6 +114,7 @@ tui:
   #   allow — всегда принимать текст (ни bounce, ни судьи).
   # Default: judge. Не зависит от backend.stream.
   text_answer_mode: judge
+  finish_gate_mode: "on"        # /gate: on — проверка полноты ответа судьёй; off — отключить (только TUI)
   # Только TUI: оставить лишь корневой AGENTS.md (L3), отбросив global (~/.config/gc)
   # и .gc/AGENTS.md. Игнорируется, если задан paths.agent_md_path (путь главнее).
   agentsmd_override: false

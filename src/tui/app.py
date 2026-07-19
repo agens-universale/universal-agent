@@ -351,6 +351,8 @@ class TuiApp(App):
         # TUI adaptive bounce: сигнал в общий run_agent (только TUI ставит его).
         # CLI/server/swarm не ставят → строгий контракт. Управляется tui.text_answer_mode.
         cfg["text_answer_mode"] = cfg.get("tui_text_answer_mode", "judge")
+        from tui.toggles import apply_finish_gate_mode
+        apply_finish_gate_mode(cfg)   # /gate: off глушит судью только в TUI (спека §3)
         auth = build_auth_connector(cfg)
         progress = McpProgress()
         progress.begin(list((cfg.get("mcp-servers") or {}).keys()))

@@ -10,8 +10,10 @@ def test_palette_shows_all_commands_no_limit():
     reg = build_default_registry()
     palette = CommandPalette(reg, initial_filter="")
     rows = palette._visible_rows()
-    # All registry commands present — no truncation.
-    assert len(rows) == len(reg.list_commands())
+    # Все обычные (не-toggle) команды реестра — без усечения. Toggle-команды
+    # (/gate, /answers) живут в отдельном подвале, не в этой (скроллируемой) зоне.
+    non_toggle = [c for c in reg.list_commands() if not c.is_toggle]
+    assert len(rows) == len(non_toggle)
     assert len(rows) >= 9
 
 
@@ -240,6 +242,26 @@ async def test_palette_first_row_selected_on_open(tmp_path):
         assert len(rows) >= 2
         assert rows[0].has_class("selected")
         assert not rows[1].has_class("selected")
+
+
+def test_descriptions_align_to_common_name_column():
+    """Спека 2026-07-18 §4: описания всех строк начинаются в общей колонке —
+    имя паддируется до самого длинного имени среди видимых строк + 3 пробела."""
+    pytest.importorskip("textual")
+    from tui.commands import Command, CommandRegistry
+    from tui.widgets.command_palette import CommandPalette
+
+    reg = CommandRegistry()
+    reg.register(Command("s", (), "", "короткое"))
+    reg.register(Command("verylongname", (), "", "длинное"))
+    palette = CommandPalette(reg, initial_filter="")
+
+    short_row = palette._format_row(reg.lookup("s"))
+    long_row = palette._format_row(reg.lookup("verylongname"))
+
+    assert short_row.index("короткое") == long_row.index("длинное")
+    # Ровно 3 пробела после самого длинного имени (спека §4).
+    assert long_row == " /verylongname   длинное"
 
 
 def test_registry_does_not_contain_main():

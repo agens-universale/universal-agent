@@ -201,6 +201,12 @@ def flatten_app_config(app_cfg: AppConfig) -> Dict[str, Any]:
         "tui_stream": app_cfg.tui.stream,
         "tui_stream_display": app_cfg.tui.stream_display,
         "tui_text_answer_mode": app_cfg.tui.text_answer_mode,
+        "tui_finish_gate_mode": app_cfg.tui.finish_gate_mode,
+        "tui_finish_gate_mode_explicit": "finish_gate_mode" in app_cfg.tui.model_fields_set,
+        "strict_turn_finish_explicit_false": (
+            "strict_turn_finish_validation" in app_cfg.agent.model_fields_set
+            and not app_cfg.agent.strict_turn_finish_validation
+        ),
         "update": app_cfg.update.model_dump(),  # спека D: check/extra_args
         "tui_bang_shell": app_cfg.tui.bang_shell.model_dump(),
         "tui_file_view": app_cfg.tui.file_view.model_dump(),

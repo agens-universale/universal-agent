@@ -11,6 +11,8 @@ from dataclasses import dataclass
 from difflib import get_close_matches
 from typing import Optional
 
+from tui.toggles import TOGGLES
+
 
 @dataclass(frozen=True)
 class Command:
@@ -25,6 +27,9 @@ class Command:
     # Аргумент — путь к файлу: при вводе `/<cmd> ` открывается файловый пикер
     # (fuzzy по проекту, как @-аттач). Папки в нём — только навигация.
     arg_file: bool = False
+    # Тоггл палитры (/gate, /answers): Enter циклит значение вместо запуска
+    # команды; состояние живёт в tui/toggles.py, не здесь (§ CLAUDE.md Architecture).
+    is_toggle: bool = False
 
     @property
     def requires_args(self) -> bool:
@@ -101,6 +106,8 @@ def build_default_registry() -> CommandRegistry:
         Command("stop", (), "", "остановить активную задачу", hotkey="Ctrl+C"),
         Command("mcp", (), "", "MCP-серверы и их тулы"),
         Command("quit", (), "", "выход", hotkey="Esc"),
+        Command("gate", (), "", f"{TOGGLES['gate'].label}: {TOGGLES['gate'].summary}", is_toggle=True),
+        Command("answers", (), "", f"{TOGGLES['answers'].label}: {TOGGLES['answers'].summary}", is_toggle=True),
     ]
     for c in cmds:
         reg.register(c)

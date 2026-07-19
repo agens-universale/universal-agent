@@ -56,6 +56,7 @@ from tui.services.subagent_sidecar_mapper import (
 from tui.services.trace_mapper import collect_skipped_call_ids, map_message
 from tui.services.trace_render import build_compaction_label
 from tui.screens.tool_call_detail import ToolCallDetailScreen
+from tui.toggles import apply_toggle, cycle_value, toggle_state
 from tui.widgets.command_input import CommandTextArea
 from tui.widgets.command_palette import CommandPalette
 from tui.widgets.thinking_indicator import (
@@ -1058,9 +1059,12 @@ class TraceScreen(Screen):
             if cap <= 0:
                 return
             overlay.styles.max_height = cap            # потолок оверлея → дальше его скролл
-            # Желаемая высота = строки+хинт (дети, по 1 строке) + рамка .palette (2).
+            # Желаемая высота: все наши оверлеи (CommandPalette, SkillPicker,
+            # ArgPicker, FilePicker) отдают честный `desired_height` (дети +
+            # margin hint'а + рамка; у палитры — ещё докнутый подвал). Фолбэк
+            # `len(children)+2` — только для гипотетического оверлея без свойства.
             # len(children) обновляется при фильтре сразу, а virtual_size залипает.
-            desired = min(len(overlay.children) + 2, cap)
+            desired = min(getattr(overlay, "desired_height", len(overlay.children) + 2), cap)
             available = self.size.height - chrome_with_banner - desired
         else:
             available = self.size.height - chrome_with_banner
@@ -2729,6 +2733,22 @@ class TraceScreen(Screen):
             self._palette.move_selection(-1 if event.key == "up" else 1)
             event.stop()
             event.prevent_default()
+        elif event.key in ("left", "right"):
+            cmd = self._palette.selected_command()
+            if cmd is not None and cmd.is_toggle:
+                # Мгновенная модель (спека 2026-07-18 §1): ←/→ применяет значение
+                # СРАЗУ (запись config.yml + hot-reload), черновика нет.
+                current = toggle_state(self.app, cmd.name)
+                new_value = cycle_value(cmd.name, current, -1 if event.key == "left" else 1)
+                try:
+                    apply_toggle(self.app, cmd.name, new_value)
+                except (ValueError, OSError) as exc:
+                    self._show_footer_hint(f"✗ не сохранено: {exc}")
+                else:
+                    self._palette.refresh_toggle_state()
+                event.stop()
+                event.prevent_default()
+            # иначе — обычная строка: не перехватываем, ←/→ уходит в TextArea (каретка)
         elif event.key == "tab":
             cmd = self._palette.selected_command()
             if cmd is not None:
@@ -2897,7 +2917,10 @@ class TraceScreen(Screen):
     def _open_palette(self, *, prefix: str) -> None:
         if self._palette is not None:
             return
-        palette = CommandPalette(self._registry, initial_filter=prefix)
+        palette = CommandPalette(
+            self._registry, initial_filter=prefix,
+            toggle_state=lambda name: toggle_state(self.app, name),
+        )
         self._palette = palette
         self._mount_input_overlay(palette)
 
@@ -3083,6 +3106,19 @@ class TraceScreen(Screen):
         # выполнение (с дефолтом, если args опциональны) — следующим Enter в поле.
         if self._palette is not None:
             cmd = self._palette.selected_command()
+            if cmd is not None and cmd.is_toggle:
+                # Toggle-строка: Enter не сабмитит текст — циклит (+1) и
+                # применяет мгновенно, тот же путь, что ←/→ (спека 2026-07-18
+                # §1). Палитра остаётся открытой.
+                current = toggle_state(self.app, cmd.name)
+                new_value = cycle_value(cmd.name, current, 1)
+                try:
+                    apply_toggle(self.app, cmd.name, new_value)
+                except (ValueError, OSError) as exc:
+                    self._show_footer_hint(f"✗ не сохранено: {exc}")
+                else:
+                    self._palette.refresh_toggle_state()
+                return
             typed = event.value.strip()
             has_args = len(typed.split()) > 1
             if cmd is not None and not has_args:
@@ -4192,6 +4228,22 @@ class TraceScreen(Screen):
         if name == "compact":
             self._cmd_compact()
             return
+        if name in ("gate", "answers"):
+            self._toggle_info_command(name)
+            return
+
+    def _toggle_info_command(self, name: str) -> None:
+        """`/gate` или `/answers`, набранные и подтверждённые текстом (не через
+        стрелки палитры — у toggle-команд нет args-схемы, поэтому пробел после
+        имени закрывает палитру и Enter доходит сюда как обычная команда):
+        ничего не меняет (иначе набор команды был бы неочевидным side-effect'ом) —
+        показывает текущее значение и как переключать (←/→ и Enter в открытой
+        палитре)."""
+        current = toggle_state(self.app, name)
+        self._show_footer_hint(
+            f"/{name} — текущее значение: {current} · для переключения: ←/→ и Enter в меню команд",
+            seconds=5.0,
+        )
 
     def _open_event_by_no(self, no: int) -> None:
         """Открыть полный payload события №no в Viewer.
