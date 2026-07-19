@@ -22,6 +22,15 @@ _DEFAULT_FINISH_GATE_MAIN = 10
 _DEFAULT_FINISH_GATE_SUB = 3
 
 
+def judge_available(cfg: dict) -> bool:
+    """Доступна ли машинерия судейства (finish-gate validator) — инфраструктурное
+    условие: только ``backend_api_mode == "chat_completions"``. БЕЗ пользовательских
+    ручек (``strict_turn_finish_validation`` — ручка finish-gate, сюда не входит)."""
+    if not isinstance(cfg, dict):
+        return False
+    return str(cfg.get("backend_api_mode") or "").strip().lower() == "chat_completions"
+
+
 def resolve_finish_gate_max_rejections(cfg: dict | None, state: Any) -> int:
     """Макс. число reject за turn/run (§10); всегда >= 1."""
     if not isinstance(cfg, dict):
@@ -88,8 +97,7 @@ class FinishGateGuard:
         if not isinstance(cfg, dict):
             return False
         strict = bool(cfg.get("strict_turn_finish_validation", True))
-        backend = str(cfg.get("backend_api_mode") or "").strip().lower()
-        return strict and backend == "chat_completions"
+        return strict and judge_available(cfg)
 
     def evaluate_turn_finish(
         self,

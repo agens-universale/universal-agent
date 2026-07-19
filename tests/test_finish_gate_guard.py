@@ -25,6 +25,46 @@ class ResolveFinishGateMaxRejectionsTest(unittest.TestCase):
         )
 
 
+class JudgeAvailableTest(unittest.TestCase):
+    def test_matches_backend_only(self) -> None:
+        from intent_guard.guard import judge_available
+        self.assertTrue(judge_available({"backend_api_mode": "chat_completions"}))
+        self.assertFalse(judge_available({"backend_api_mode": "responses"}))
+        self.assertFalse(judge_available({}))
+        self.assertFalse(judge_available(None))
+        # strict_turn_finish_validation — пользовательская ручка finish-gate,
+        # judge_available её не читает вообще.
+        self.assertTrue(judge_available({
+            "backend_api_mode": "chat_completions",
+            "strict_turn_finish_validation": False,
+        }))
+
+
+class FinishGateGuardEnabledMatrixTest(unittest.TestCase):
+    """(f) регрессия: FinishGateGuard.enabled == (strict AND chat_completions);
+    прежняя матрица цела после выноса judge_available."""
+
+    def _enabled(self, *, strict: bool, backend: str) -> bool:
+        ctx = SimpleNamespace(config_dict={
+            "backend_api_mode": backend,
+            "strict_turn_finish_validation": strict,
+        })
+        state = SimpleNamespace(parent_state_id=None)
+        return FinishGateGuard(ctx=ctx, state=state).enabled
+
+    def test_strict_true_chat_completions_enabled(self) -> None:
+        self.assertTrue(self._enabled(strict=True, backend="chat_completions"))
+
+    def test_strict_false_chat_completions_disabled(self) -> None:
+        self.assertFalse(self._enabled(strict=False, backend="chat_completions"))
+
+    def test_strict_true_other_backend_disabled(self) -> None:
+        self.assertFalse(self._enabled(strict=True, backend="responses"))
+
+    def test_strict_false_other_backend_disabled(self) -> None:
+        self.assertFalse(self._enabled(strict=False, backend="responses"))
+
+
 class FinishGateGuardTest(unittest.TestCase):
     def test_disabled_returns_skipped(self) -> None:
         ctx = SimpleNamespace(

@@ -1,7 +1,8 @@
 """Решение «принять текст-ответ?» по режиму text_answer_mode (юниты) + интеграция
 в run_agent (текст-ответ возвращается как ответ хода). prose+tool не затрагивается:
-хук живёт только в ветке mode == text_response. judge активен только при включённом
-finish-gate (chat_completions + strict_turn_finish_validation)."""
+хук живёт только в ветке mode == text_response. judge активен, только если доступна
+машинерия судейства (backend_api_mode == chat_completions) — от тоггла /gate
+(strict_turn_finish_validation, finish-gate) НЕ зависит."""
 from intent_guard.text_answer_judge import should_return_text_answer
 
 
@@ -64,25 +65,77 @@ def test_no_key_returns_false_without_judge(monkeypatch):
     assert judged["n"] == 0
 
 
-# --- gate: judge активен только при включённом finish-gate --------------------
+# --- gate: judge зависит только от инфраструктуры (chat_completions), --------
+# --- НЕ от тоггла /gate (strict_turn_finish_validation) ------------------------
+
+def test_judge_gate_on_calls_judge(monkeypatch):
+    """(a) gate=on (strict=True) + judge → судья зовётся."""
+    import intent_guard.text_answer_judge as taj
+    from types import SimpleNamespace
+    judged = {"n": 0}
+    monkeypatch.setattr(taj, "judge_text_answer",
+                        lambda ctx, state, text: judged.__setitem__("n", judged["n"] + 1)
+                        or SimpleNamespace(action="accept"))
+    d = should_return_text_answer(_ctx("judge", strict=True), _S(), "привет")
+    assert judged["n"] == 1 and d.accept is True
+
+
+def test_judge_gate_off_still_calls_judge(monkeypatch):
+    """(b) gate=off (strict=False) + judge → судья ВСЁ РАВНО зовётся (/gate не
+    должен молча деградировать judge в deny; было: FinishGateGuard.enabled склеивал
+    strict_turn_finish_validation с backend_api_mode)."""
+    import intent_guard.text_answer_judge as taj
+    from types import SimpleNamespace
+    judged = {"n": 0}
+    monkeypatch.setattr(taj, "judge_text_answer",
+                        lambda ctx, state, text: judged.__setitem__("n", judged["n"] + 1)
+                        or SimpleNamespace(action="accept"))
+    d = should_return_text_answer(_ctx("judge", strict=False), _S(), "привет")
+    assert judged["n"] == 1 and d.accept is True
+
 
 def test_judge_without_chat_completions_is_strict(monkeypatch):
-    """responses-режим: finish-gate выключен → судья не зван → строго."""
+    """(e) backend != chat_completions + judge → deny без судьи, при gate=on."""
     import intent_guard.text_answer_judge as taj
     judged = {"n": 0}
     monkeypatch.setattr(taj, "judge_text_answer",
                         lambda ctx, state, text: judged.__setitem__("n", judged["n"] + 1) or True)
-    assert should_return_text_answer(_ctx("judge", backend="responses"), _S(), "привет").accept is False
+    assert should_return_text_answer(_ctx("judge", backend="responses", strict=True), _S(), "привет").accept is False
     assert judged["n"] == 0
 
 
-def test_judge_with_strict_validation_off_is_strict(monkeypatch):
-    """strict_turn_finish_validation=false → судью не на чём строить → строго."""
+def test_judge_without_chat_completions_is_strict_even_with_gate_off(monkeypatch):
+    """(e) backend != chat_completions + judge → deny без судьи, тоже при gate=off
+    (инфраструктурное условие не подменяется пользовательской ручкой)."""
     import intent_guard.text_answer_judge as taj
     judged = {"n": 0}
     monkeypatch.setattr(taj, "judge_text_answer",
                         lambda ctx, state, text: judged.__setitem__("n", judged["n"] + 1) or True)
-    assert should_return_text_answer(_ctx("judge", strict=False), _S(), "привет").accept is False
+    assert should_return_text_answer(_ctx("judge", backend="responses", strict=False), _S(), "привет").accept is False
+    assert judged["n"] == 0
+
+
+def test_allow_accepts_without_judge_regardless_of_gate(monkeypatch):
+    """(c) allow → accept без судьи при любом gate."""
+    import intent_guard.text_answer_judge as taj
+    judged = {"n": 0}
+    monkeypatch.setattr(taj, "judge_text_answer",
+                        lambda ctx, state, text: judged.__setitem__("n", judged["n"] + 1) or True)
+    assert should_return_text_answer(_ctx("allow", strict=True), _S(), "привет").accept is True
+    assert should_return_text_answer(_ctx("allow", strict=False), _S(), "привет").accept is True
+    assert judged["n"] == 0
+
+
+def test_deny_rejects_regardless_of_gate(monkeypatch):
+    """(d) deny/нет ключа → reject при любом gate."""
+    import intent_guard.text_answer_judge as taj
+    judged = {"n": 0}
+    monkeypatch.setattr(taj, "judge_text_answer",
+                        lambda ctx, state, text: judged.__setitem__("n", judged["n"] + 1) or True)
+    assert should_return_text_answer(_ctx("deny", strict=True), _S(), "привет").accept is False
+    assert should_return_text_answer(_ctx("deny", strict=False), _S(), "привет").accept is False
+    assert should_return_text_answer(_ctx(None, strict=True), _S(), "привет").accept is False
+    assert should_return_text_answer(_ctx(None, strict=False), _S(), "привет").accept is False
     assert judged["n"] == 0
 
 
