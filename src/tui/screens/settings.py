@@ -16,9 +16,9 @@ from rich.text import Text
 from tui.palette import ACCENT, DEEP_DIM, DIM, ERR, INK, OK, WARN
 from tui.widgets.loading_wave import WAVE_INTERVAL, WAVE_SEQ, wave_glyph
 
-SECTIONS = ("Подключение", "Модель", "MCP-серверы", "Обновление")
+SECTIONS = ("Подключение", "Модель", "MCP-серверы", "Режимы работы", "Обновление")
 
-_CONNECTION, _MODEL, _MCP, _UPDATE = 0, 1, 2, 3
+_CONNECTION, _MODEL, _MCP, _MODES, _UPDATE = 0, 1, 2, 3, 4
 _EDITOR_SECTIONS = {_CONNECTION, _MODEL}   # редакторные: writable, dirty-tracked, submit
 _PROBE_SECTIONS = {_CONNECTION}            # server-probe: Tab-проверка, глиф из config-probe
 
@@ -27,11 +27,31 @@ _FOOTERS = {
     0: "↑/↓ — навигация  ·  Enter — сохранить  ·  Tab — проверить соединение  ·  PgUp/PgDn — секции  ·  Esc — меню",
     1: "↑/↓ — выбор  ·  Enter — сохранить  ·  PgUp/PgDn — секции  ·  Esc — меню",
     2: "↑/↓ · Enter — установить · Space — вкл/выкл · Ctrl+U — обновить · Ctrl+D — удалить · PgUp/PgDn — секции · Esc",
-    3: "↑/↓ · Enter — выполнить · PgUp/PgDn — секции · Esc — меню",
+    _MODES: "↑/↓ — выбор · ←/→/Enter — переключить · PgUp/PgDn — секции · Esc — меню",
+    4: "↑/↓ · Enter — выполнить · PgUp/PgDn — секции · Esc — меню",
 }
 _FOOTER_READONLY = "PgUp/PgDn — секции  ·  Esc — меню"
 
 _TITLE_NOTE_SEC = 3.0     # «ничего не изменено» у заголовка гаснет само
+
+
+def fit_mode_pairs(pairs: list[str], width: int) -> str:
+    """Превью секции «Режимы работы»: пары `label: value`, соединённые ` · `,
+    усечённые ЦЕЛЫМИ парами под `width` (дизайн §2) — показываем столько
+    полных пар, сколько влезает вместе с хвостом ` · …`, пара не режется
+    посередине. `width <= 0` (строка ещё не смонтирована) — без усечения."""
+    full = " · ".join(pairs)
+    if width <= 0 or len(full) <= width:
+        return full
+    tail = " · …"
+    out: list[str] = []
+    for pair in pairs:
+        candidate = " · ".join(out + [pair])
+        if len(candidate) + len(tail) <= width:
+            out.append(pair)
+        else:
+            break
+    return " · ".join(out) + tail if out else "…"
 
 
 class SettingsScreen(Screen):
@@ -45,6 +65,7 @@ class SettingsScreen(Screen):
         self._pending_env_save = None   # (section, values, warn_detail) — ждёт confirm перезаписи ссылки
         self._view: object = "menu"     # "menu" | int(0..4)
         self._menu_idx = 0
+        self._modes_idx = 0             # курсор строки подэкрана «Режимы работы»
         from tui.services.settings_probe import probe as _default_probe
         self._probe_fn = probe_fn or _default_probe
         self._probe_config = None       # ProbeResult сохранённых значений → глифы хаба
@@ -173,9 +194,23 @@ class SettingsScreen(Screen):
                 v.append(f"{n} подключено", style=OK)
             else:
                 v.append("нет подключённых", style=DIM)
+        elif i == _MODES:
+            from tui.toggles import TOGGLES, toggle_state
+            pairs = [f"{spec.label}: {toggle_state(self.app, name)}" for name, spec in TOGGLES.items()]
+            v.append(fit_mode_pairs(pairs, self._modes_preview_width()), style=DIM)
         else:
             v.append(self._version_text().split("·", 1)[-1].strip(), style=DIM)
         return v
+
+    def _modes_preview_width(self) -> int:
+        """Ширина региона `.set-rowtext` строки «Режимы работы» — граница усечения
+        превью целыми парами (fit_mode_pairs). До монтирования этой строки меню
+        (первый рендер) региона ещё нет — 0, что трактуется как «без усечения»."""
+        try:
+            rows = list(self.query(".set-menurow"))
+            return rows[_MODES].query_one(".set-rowtext", Static).region.width
+        except (NoMatches, IndexError):
+            return 0
 
     def _menu_rowtext(self, i: int, selected: bool) -> Text:
         """Левая часть строки меню: маркер + имя секции + значение (глиф — отдельно,
@@ -316,9 +351,17 @@ class SettingsScreen(Screen):
             title.update("Настройки")
             for i in range(len(SECTIONS)):
                 self._mount_menu_row(frame, i)
+            # Carry-fix (ревью T2, Low): строки монтируются в ЭТОМ же такте — региона
+            # у ещё не смонтированной строки i при подсчёте _row_value(i) нет (см.
+            # _modes_preview_width), превью «Режимы работы» не усекается на первом
+            # кадре. call_after_refresh форсит второй проход ПОСЛЕ layout, когда
+            # регионы строк уже посчитаны — тот же паттерн, что и scroll_visible ниже.
+            self.call_after_refresh(self._refresh_menu_rows)
         else:
             self._mount_section_body(frame, self._view)
             self._update_dirty()
+            if self._view == _MODES:
+                self.call_after_refresh(self._refresh_modes_hint)
 
     # --- dirty-маркер заголовка (спека v2 §3.1, Task 7) ---
     def _update_dirty(self) -> None:
@@ -420,6 +463,12 @@ class SettingsScreen(Screen):
         if self._view != "menu":
             return
         for i, row in enumerate(self.query(".set-menurow")):
+            if i >= len(SECTIONS):
+                # Транзиентный двойной комплект строк: отложенный call_after_refresh
+                # (carry-fix выше) может сработать ДО того, как Prune старых 5 строк
+                # применится — query видит старые+новые вперемешку (до 10), а
+                # SECTIONS всего len(SECTIONS) — без guard это IndexError.
+                continue
             try:
                 row.query_one(".set-rowtext", Static).update(
                     self._menu_rowtext(i, i == self._menu_idx))
@@ -651,8 +700,109 @@ class SettingsScreen(Screen):
             from tui.services.mcp_manager import McpManager
             mgr = McpManager(user_config=self._config)
             frame.mount(McpSectionEditor(manager=mgr, on_change=self._mcp_changed))
+        elif section == _MODES:
+            self._mount_modes_section(frame)
         else:
             self._mount_update_section(frame)
+
+    # --- секция «Режимы работы» (дизайн 2026-07-18-settings-work-modes-design §3-4) ---
+    def _modes_columns(self) -> tuple[int, int]:
+        """(label_w, track_w) — общие колонки строк подэкрана: `label_w` — ширина
+        самого длинного `ToggleSpec.label` + 3 (как имя-колонка палитры, канон §4)
+        + 2 на курсор `▸ `/`  ` (конвенция меню/«Обновления» — курсор перед label,
+        колонки трека остаются общими для всех строк); `track_w` — ширина самого
+        широкого трека (`render_track`) среди TOGGLES — короткие треки внутри поля
+        прижимаются вправо (канон §4)."""
+        from tui.toggles import TOGGLES, render_track
+        specs = list(TOGGLES.values())
+        label_w = max(len(spec.label) for spec in specs) + 3 + 2
+        track_w = max(len(render_track(spec, spec.names[0]).plain) for spec in specs)
+        return label_w, track_w
+
+    def _mode_row_text(self, name: str, selected: bool) -> Text:
+        from tui.toggles import TOGGLES, render_track, toggle_state
+        spec = TOGGLES[name]
+        current = toggle_state(self.app, name)
+        label_w, track_w = self._modes_columns()
+        track = render_track(spec, current)
+        t = Text()
+        t.append("▸ " if selected else "  ", style=ACCENT)   # курсор — конвенция меню/«Обновления»
+        t.append(spec.label.ljust(label_w - 2), style=INK)
+        t.append(" " * (track_w - len(track.plain)))   # трек прижат вправо в общем поле
+        t.append_text(track)
+        t.append("  ")
+        t.append(current, style=INK)
+        return t
+
+    def _mount_modes_section(self, frame: Vertical) -> None:
+        from tui.toggles import TOGGLES
+        names = list(TOGGLES.keys())
+        if self._modes_idx >= len(names):
+            self._modes_idx = 0
+        for i, name in enumerate(names):
+            selected = i == self._modes_idx
+            # set-spaced — воздух между строками, тот же класс/паттерн, что и в
+            # секции «Обновление» (margin-bottom: 1 на каждой строке).
+            cls = "set-row set-dyn set-spaced" + (" selected" if selected else "")
+            frame.mount(Static(self._mode_row_text(name, selected), classes=cls))
+        # Подсказка выделенного тоггла — ВНУТРИ рамки (конвенция «Обновления»:
+        # пояснительная строка в карточке под строками-опциями, класс set-hint).
+        # Без id: frame.remove() старых детей отложенный (не синхронный) — id тут
+        # же коллизировал бы с ещё не отсоединённым предыдущим Static (DuplicateIds).
+        frame.mount(Static(self._modes_hint_text(), classes="set-hint set-dyn set-modes-hint"))
+
+    def _modes_hint_width(self) -> int:
+        """Ширина hint-строки внутри рамки (padding 0 1 — минус 2). Строка монтируется
+        заново на КАЖДЫЙ рендер (frame полностью перебирается) — региона нет до
+        layout-прохода этого же кадра; carry-fix `_refresh_modes_hint` (тот же приём,
+        что и `_refresh_menu_rows`) досчитывает усечение постфактум. Последний матч
+        по классу — свежесмонтированный (транзиентный старый ещё не отсоединён)."""
+        widgets = list(self.query(".set-modes-hint"))
+        if not widgets:
+            return 0
+        return max(0, widgets[-1].region.width - 2)
+
+    def _modes_hint_text(self) -> str:
+        """Подсказка выделенного тоггла внутри рамки (канон §6, без клавишной части —
+        клавиши показывает статичный футер вне рамки): значение + подсказка
+        ПРИМЕНЁННОГО состояния, приоритетно усечённые `_fit_value_hint`."""
+        from tui.toggles import _fit_value_hint, TOGGLES, toggle_state
+        names = list(TOGGLES.keys())
+        if not names:
+            return ""
+        name = names[self._modes_idx] if self._modes_idx < len(names) else names[0]
+        spec = TOGGLES[name]
+        current = toggle_state(self.app, name)
+        idx = spec.names.index(current) if current in spec.names else 0
+        val = spec.values[idx]
+        return _fit_value_hint(val.value, val.hint, self._modes_hint_width())
+
+    def _refresh_modes_hint(self) -> None:
+        """Carry-fix (тот же приём, что и `_refresh_menu_rows`): досчитать усечение
+        hint-строки ПОСЛЕ layout-прохода, когда регион уже известен."""
+        if self._view != _MODES:
+            return
+        widgets = list(self.query(".set-modes-hint"))
+        if widgets:
+            widgets[-1].update(self._modes_hint_text())
+
+    def _modes_apply(self, direction: int) -> None:
+        """←/→/Enter на строке тоггла (канон §1/§3): мгновенное применение — цикл
+        значения ОТ ТЕКУЩЕГО отображаемого состояния + запись+hot-reload; ошибка
+        записи — флеш «✗ не сохранено: …», подэкран остаётся открытым (не закрывается)."""
+        from tui.toggles import apply_toggle, cycle_value, TOGGLES, toggle_state
+        names = list(TOGGLES.keys())
+        if not names:
+            return
+        name = names[self._modes_idx] if self._modes_idx < len(names) else names[0]
+        current = toggle_state(self.app, name)
+        new_value = cycle_value(name, current, direction)
+        try:
+            apply_toggle(self.app, name, new_value)
+        except (ValueError, OSError) as exc:
+            self._notice(f"✗ не сохранено: {exc}")
+            return
+        self._render_view()
 
     _UPDATE_ACTION_UPDATE = "Обновить агента"
     _UPDATE_ACTION_CHECK = "Проверить обновления"
@@ -1188,6 +1338,18 @@ class SettingsScreen(Screen):
             if n > 1:
                 self._update_idx = (self._update_idx + (1 if event.key == "down" else -1)) % n
                 self._render_view()
+            return
+        if event.key in ("up", "down") and self._view == _MODES:
+            event.stop()
+            from tui.toggles import TOGGLES
+            n = len(TOGGLES)
+            if n > 1:
+                self._modes_idx = (self._modes_idx + (1 if event.key == "down" else -1)) % n
+                self._render_view()
+            return
+        if event.key in ("left", "right", "enter") and self._view == _MODES:
+            event.stop()
+            self._modes_apply(-1 if event.key == "left" else 1)
             return
         if self._view == _MCP and self._writable_or_mcp():
             ed = self._mcp_editor()
