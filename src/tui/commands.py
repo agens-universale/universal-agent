@@ -78,36 +78,49 @@ def closest_command(name: str, registry: CommandRegistry) -> Optional[str]:
 def build_default_registry() -> CommandRegistry:
     """Каноничный набор MVP-команд (§4 спеки), по убыванию частоты."""
     reg = CommandRegistry()
+
+    def _cap(s: str) -> str:
+        return s[:1].upper() + s[1:] if s else s
+
     cmds = [
-        Command("help", (), "", "справка по командам", hotkey="F1 · Ctrl+/"),
-        Command("sessions", (), "", "список сессий — выбрать и продолжить",
+        Command("help", (), "", "Справка по командам", hotkey="F1 · Ctrl+/"),
+        Command("sessions", (), "", "Список сессий — выбрать и продолжить",
                 hotkey="F2 · Ctrl+S"),
-        Command("diff", (), "", "просмотр pending-диффов, принять/откатить",
+        Command("diff", (), "", "Просмотр pending-диффов, принять/откатить",
                 hotkey="F3 · Ctrl+D"),
-        Command("view", (), "<path>", "постраничный просмотр текстового файла",
+        Command("view", (), "<path>", "Постраничный просмотр текстового файла",
                 arg_file=True),
-        Command("notices", (), "", "уведомления (старт + runtime)",
+        Command("notices", (), "", "Уведомления (старт + runtime)",
                 hotkey="F4 · Ctrl+O"),
-        Command("new", (), "", "новая сессия в этом окне", hotkey="Ctrl+N"),
-        Command("config", (), "", "конфиг сессии + пути к файлам",
+        Command("new", (), "", "Новая сессия в этом окне", hotkey="Ctrl+N"),
+        Command("config", (), "", "Конфиг сессии + пути к файлам",
                 hotkey="F5 · Ctrl+G"),
-        Command("settings", (), "", "настройки: подключение, модель, MCP, обновление",
+        Command("settings", (), "", "Настройки: подключение, модель, MCP, обновление",
                 hotkey="F6"),
-        Command("export", (), "[txt|json|log-txt|log-json]", "экспорт сессии",
-                arg_options=(("txt", "вся сессия в читаемом виде"),
-                             ("json", "структурированные данные сессии"),
-                             ("log-txt", "лог-файл агента, текущий запуск (.log)"),
-                             ("log-json", "jsonl-файл треда (вся сессия)"))),
-        Command("compact", ("сжать",), "", "сжать контекст сессии сейчас"),
-        Command("init", (), "", "анализ проекта и генерация AGENTS.md"),
-        Command("skills", (), "", "обзор навыков"),
-        Command("skill", (), "<id>", "использовать навык"),
-        Command("status", (), "", "состояние текущей сессии"),
-        Command("stop", (), "", "остановить активную задачу", hotkey="Ctrl+C"),
+        Command("export", (), "[txt|json|log-txt|log-json]", "Экспорт сессии",
+                arg_options=(("txt", "Вся сессия в читаемом виде"),
+                             ("json", "Структурированные данные сессии"),
+                             ("log-txt", "Лог-файл агента, текущий запуск (.log)"),
+                             ("log-json", "JSONL-файл треда (вся сессия)"))),
+        Command("compact", ("сжать",), "", "Сжать контекст сессии сейчас"),
+        Command("init", (), "", "Анализ проекта и генерация AGENTS.md"),
+        Command("skills", (), "", "Обзор навыков"),
+        Command("skill", (), "<id>", "Использовать навык"),
+        Command("status", (), "", "Состояние текущей сессии"),
+        Command("stop", (), "", "Остановить активную задачу", hotkey="Ctrl+C"),
         Command("mcp", (), "", "MCP-серверы и их тулы"),
-        Command("quit", (), "", "выход", hotkey="Esc"),
-        Command("gate", (), "", f"{TOGGLES['gate'].label}: {TOGGLES['gate'].summary}", is_toggle=True),
-        Command("answers", (), "", f"{TOGGLES['answers'].label}: {TOGGLES['answers'].summary}", is_toggle=True),
+        Command("quit", (), "", "Выход", hotkey="Esc"),
+        # Переключатели палитры (←/→/Enter): самопроверка хода и формат финала.
+        Command(
+            "gate", (), "",
+            _cap(f"{TOGGLES['gate'].label}: {TOGGLES['gate'].summary}"),
+            is_toggle=True,
+        ),
+        Command(
+            "answers", (), "",
+            _cap(f"{TOGGLES['answers'].label}: {TOGGLES['answers'].summary}"),
+            is_toggle=True,
+        ),
     ]
     for c in cmds:
         reg.register(c)

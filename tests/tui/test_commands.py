@@ -61,13 +61,13 @@ def test_default_registry_is_exactly_keep_set():
 
 def test_skill_descriptions_use_navyk_not_skill_word():
     reg = build_default_registry()
-    assert reg.lookup("skill").description == "использовать навык"
-    assert reg.lookup("skills").description == "обзор навыков"
+    assert reg.lookup("skill").description == "Использовать навык"
+    assert reg.lookup("skills").description == "Обзор навыков"
 
 
 def test_init_description_is_analysis_and_generation():
     reg = build_default_registry()
-    assert reg.lookup("init").description == "анализ проекта и генерация AGENTS.md"
+    assert reg.lookup("init").description == "Анализ проекта и генерация AGENTS.md"
 
 
 def test_sessions_command_has_no_aliases():
@@ -151,14 +151,14 @@ def test_hotkeys_match_app_bindings():
 
 def test_settings_command_description_mentions_server_address():
     reg = build_default_registry()
-    assert reg.lookup("settings").description == "настройки: подключение, модель, MCP, обновление"
+    assert reg.lookup("settings").description == "Настройки: подключение, модель, MCP, обновление"
 
 
 def test_compact_command_registered_with_alias():
     reg = build_default_registry()
     cmd = reg.lookup("compact")
     assert cmd is not None
-    assert cmd.description == "сжать контекст сессии сейчас"
+    assert cmd.description == "Сжать контекст сессии сейчас"
     # алиас /сжать ведёт на ту же команду
     assert reg.lookup("сжать") is cmd
 
@@ -190,7 +190,8 @@ def test_toggle_descriptions_generated_from_specs():
     for name in ("gate", "answers"):
         cmd = reg.lookup(name)
         spec = TOGGLES[name]
-        assert cmd.description == f"{spec.label}: {spec.summary}"
+        raw = f"{spec.label}: {spec.summary}"
+        assert cmd.description == raw[:1].upper() + raw[1:]
 
 
 async def test_f6_opens_settings_with_input_focused():
