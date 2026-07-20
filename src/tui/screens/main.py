@@ -15,6 +15,7 @@ if TYPE_CHECKING:
 
 from textual import events
 from textual.app import ComposeResult
+from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import Screen
 from textual.widget import Widget
@@ -152,6 +153,12 @@ class TraceScreen(Screen):
     """Главный экран: трейс, ввод пользователя, команды и сопровождение run'а."""
 
     # Ctrl+A — select-all в #cmdinput (CommandTextArea); approve-all только на /diff.
+    # Ctrl+V: priority — иначе при фокусе в трейсе (клик по строке во время run)
+    # хоткей никуда не доходит: у TraceRow/ToolCallRow нет action_paste.
+    BINDINGS = [
+        Binding("ctrl+v", "paste_to_input", "вставить", show=False, priority=True),
+        Binding("ctrl+м", "paste_to_input", "вставить", show=False, priority=True),
+    ]
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
@@ -341,6 +348,38 @@ class TraceScreen(Screen):
             return
         if not trace.has_focus and trace.region.contains(event.screen_x, event.screen_y):
             trace.focus()
+
+    def action_paste_to_input(self) -> None:
+        """Ctrl+V → всегда в #cmdinput, даже если фокус ушёл в трейс (клик/Tab
+        во время run). Иначе хоткей «мёртв»: у строк трейса нет action_paste."""
+        try:
+            inp = self.query_one("#cmdinput", CommandTextArea)
+        except Exception:
+            return
+        if inp.disabled:
+            return
+        if not inp.has_focus:
+            inp.focus()
+        inp.action_paste()
+
+    async def _on_paste(self, event: events.Paste) -> None:
+        """Bracketed-paste при фокусе не в инпуте (трейс) → вставить в #cmdinput.
+
+        Иначе events.Paste уходит в TraceRow/VerticalScroll и пропадает."""
+        focused = self.focused
+        if isinstance(focused, CommandTextArea):
+            return  # CommandTextArea._on_paste сам разберёт
+        try:
+            inp = self.query_one("#cmdinput", CommandTextArea)
+        except Exception:
+            return
+        if inp.disabled or inp.read_only:
+            return
+        event.stop()
+        event.prevent_default()
+        if not inp.has_focus:
+            inp.focus()
+        inp._handle_paste(event.text)
 
     def _compose_footer_right(self) -> "Text":
         """Правый край футера: модель · контекст · запрос · сессия.
@@ -2586,7 +2625,9 @@ class TraceScreen(Screen):
                 self._clear_footer_hint()
                 if kind == "clear":
                     try:
-                        self.query_one("#cmdinput").text = ""
+                        inp = self.query_one("#cmdinput", CommandTextArea)
+                        inp.text = ""
+                        inp._clear_chip_state()
                     except Exception:
                         pass
                 elif kind == "stop":

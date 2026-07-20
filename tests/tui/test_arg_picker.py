@@ -15,10 +15,10 @@ def test_export_command_has_arg_options():
     from tui.commands import build_default_registry
     export = build_default_registry().lookup("export")
     assert export.arg_options == (
-        ("txt", "вся сессия в читаемом виде"),
-        ("json", "структурированные данные сессии"),
-        ("log-txt", "лог-файл агента, текущий запуск (.log)"),
-        ("log-json", "jsonl-файл треда (вся сессия)"),
+        ("txt", "Вся сессия в читаемом виде"),
+        ("json", "Структурированные данные сессии"),
+        ("log-txt", "Лог-файл агента, текущий запуск (.log)"),
+        ("log-json", "JSONL-файл треда (вся сессия)"),
     )
 
 

@@ -11,7 +11,7 @@ async def test_help_screen_lists_commands_from_registry():
         inp.text = "/help"
         await pilot.press("enter")
         await pilot.pause()
-        rows = pilot.app.screen.query(".help-row-main")
+        rows = pilot.app.screen.query(".help-row-cmd")
         names = "\n".join(str(r.render()) for r in rows)
         for n in ["/sessions", "/stop", "/skills", "/quit", "/notices", "/diff", "/view"]:
             assert n in names

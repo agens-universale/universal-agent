@@ -117,11 +117,17 @@ class CommandTextArea(TextArea):
         # иначе многострочная \r-вставка не сворачивается (уходит инлайн).
         text = text.replace("\r\n", "\n").replace("\r", "\n")
         # 1. та же паста в окне «развернуть» → развернуть последнюю плашку инлайн
+        #    (только если плашка ещё в буфере; иначе — обычная вставка ниже:
+        #    Esc/очистка могли стереть label, оставив orphan expand-окно)
         if self._expand_chip_id is not None \
                 and text == self._chips.get(self._expand_chip_id):
-            self._expand_chip_inline(self._expand_chip_id)
+            chip_id = self._expand_chip_id
+            if any(cid == chip_id for cid, *_ in token_spans(self.text, self._chips)):
+                self._expand_chip_inline(chip_id)
+                self._close_expand_window()
+                return
+            self._chips.remove(chip_id)
             self._close_expand_window()
-            return
         # 2. большая вставка → плашка + окно + подсказка
         if should_collapse(text):
             chip_id, label = self._chips.add(text)

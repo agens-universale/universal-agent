@@ -52,6 +52,9 @@ async def test_help_header_and_hotkeys():
         assert "/view <path>" in cmds
         assert "! git status" in cmds
         assert "сразу в буфер" in descs
+        assert "плашка" in descs.casefold()
+        assert "целиком" in descs.casefold()
+        assert "Ctrl+V" in cmds
         assert descs.index("URL, токен, модель") < cmds.index("/help")
         assert "F6" in cmds and "F3" in cmds and "F2" in cmds
         assert "log-txt" in descs and "log-json" in descs

@@ -175,3 +175,50 @@ async def test_expand_works_always_no_timer():
         await pilot.pause()
         assert inp.text == BIG5
         assert inp._chips.get(1) is None
+
+
+@pytest.mark.asyncio
+async def test_paste_after_chip_cleared_from_buffer():
+    """Если плашку стёрли из буфера (Esc-clear / text=\"\"), повторный Ctrl+V тем же
+    текстом не должен молча no-op'ить в ветке «развернуть» — снова плашка."""
+    pytest.importorskip("textual")
+    from tui.app import TuiApp
+    async with TuiApp().run_test() as pilot:
+        inp = await _input(pilot)
+        inp._handle_paste(BIG5)
+        await pilot.pause()
+        assert inp._expand_chip_id == 1
+        inp.text = ""                                         # как Esc-clear: без _clear_chip_state
+        await pilot.pause()
+        inp._handle_paste(BIG5)
+        await pilot.pause()
+        assert inp.text.startswith("[Вставка #")
+        assert "5 строк]" in inp.text
+        assert BIG5 in inp._chips._chips.values()
+
+
+@pytest.mark.asyncio
+async def test_ctrl_v_pastes_when_focus_on_trace(tmp_path, monkeypatch):
+    """Кликнули трейс во время run → фокус не в инпуте; Ctrl+V всё равно вставляет."""
+    pytest.importorskip("textual")
+    from tui.app import TuiApp
+    from tui.widgets.command_input import CommandTextArea
+    from tui.widgets.trace_row import TraceRow
+    import tui.services.os_ops as os_ops
+
+    monkeypatch.setattr(os_ops, "read_clipboard", lambda: "из трейса")
+
+    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    async with app.run_test() as pilot:
+        scr = pilot.app.screen
+        row = TraceRow(prefix=">", content="строка", kind_class="line-agent", event_no=1)
+        scr.query_one("#trace").mount(row)
+        await pilot.pause()
+        row.focus()
+        await pilot.pause()
+        assert not scr.query_one("#cmdinput", CommandTextArea).has_focus
+        await pilot.press("ctrl+v")
+        await pilot.pause()
+        inp = scr.query_one("#cmdinput", CommandTextArea)
+        assert inp.text == "из трейса"
+        assert inp.has_focus

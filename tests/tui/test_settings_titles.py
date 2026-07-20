@@ -20,7 +20,7 @@ async def test_section_titles_show_section_name(tmp_path, monkeypatch):
     async with app.run_test() as pilot:
         scr = SettingsScreen(config={}, config_path=str(cfg), on_apply=lambda: None,
                              probe_fn=lambda *a, **k: None)
-        await _open(pilot, scr, app, 3)                       # Обновление
+        await _open(pilot, scr, app, 4)                       # Обновление
         assert str(scr.query_one("#set-title", Static).render()) == "Обновление"
         scr._open_section(2); await pilot.pause()             # MCP
         assert str(scr.query_one("#set-title", Static).render()) == "MCP-серверы"
