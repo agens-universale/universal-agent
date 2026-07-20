@@ -45,13 +45,28 @@ def test_judge_reject_carries_feedback(monkeypatch):
     res = ValidationResult(ok=False, action="continue_work", trace_ok=False, report_ok=True,
                            trace_gaps=["need to run tests"], missing_requirements=[],
                            report_mismatches=[], conflicts=[], coverage_score=0.0,
-                           feedback_for_agent="")
+                           feedback_for_agent="", is_question=False)
     monkeypatch.setattr(taj, "judge_text_answer", lambda *a, **k: res)
     d = should_return_text_answer(_ctx("judge"), object(), "answer")
     assert d.accept is False
     assert d.reject_feedback is not None
     assert "need to run tests" in d.reject_feedback         # причина судьи присутствует
     assert "turn_finish" not in d.reject_feedback           # tool-agnostic
+    assert "next step" in d.reject_feedback.lower()         # tool hint при is_question=false
+
+
+def test_judge_reject_is_question_omits_tool_hint(monkeypatch):
+    res = ValidationResult(ok=False, action="continue_work", trace_ok=False, report_ok=True,
+                           trace_gaps=["need user choice"], missing_requirements=[],
+                           report_mismatches=[], conflicts=[], coverage_score=0.0,
+                           feedback_for_agent="", is_question=True)
+    monkeypatch.setattr(taj, "judge_text_answer", lambda *a, **k: res)
+    d = should_return_text_answer(_ctx("judge"), object(), "1 или 2?")
+    assert d.accept is False
+    assert d.reject_feedback is not None
+    assert "need user choice" in d.reject_feedback
+    assert "next step" not in d.reject_feedback.lower()
+    assert "ask_human" not in d.reject_feedback.lower()
 
 
 def test_judge_error_falls_back_to_generic(monkeypatch):

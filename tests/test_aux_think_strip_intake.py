@@ -161,6 +161,7 @@ def test_load_config_extras_strip_on_aux_sinks(tmp_path, monkeypatch):
         "action": "accept",
         "trace_ok": True,
         "report_ok": True,
+        "is_question": False,
         "trace_gaps": [],
         "report_mismatches": [],
         "coverage_score": 1.0,

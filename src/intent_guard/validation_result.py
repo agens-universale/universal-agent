@@ -25,6 +25,7 @@ class ValidationResult:
     conflicts: list[str]
     coverage_score: float
     feedback_for_agent: str
+    is_question: bool = False
 
 
 def fail_open_validation_result() -> ValidationResult:
@@ -40,6 +41,7 @@ def fail_open_validation_result() -> ValidationResult:
         conflicts=[],
         coverage_score=1.0,
         feedback_for_agent="",
+        is_question=False,
     )
 
 
@@ -84,7 +86,8 @@ def parse_validator_response(raw: str) -> ValidationResult | None:
 
     trace_ok = _parse_bool(parsed.get("trace_ok"))
     report_ok = _parse_bool(parsed.get("report_ok"))
-    if trace_ok is None or report_ok is None:
+    is_question = _parse_bool(parsed.get("is_question"))
+    if trace_ok is None or report_ok is None or is_question is None:
         return None
 
     raw_action = parsed.get("action")
@@ -138,4 +141,5 @@ def parse_validator_response(raw: str) -> ValidationResult | None:
         conflicts=conflicts,
         coverage_score=_parse_coverage(parsed.get("coverage_score", 0.0)),
         feedback_for_agent=str(parsed.get("feedback_for_agent") or "").strip(),
+        is_question=is_question,
     )

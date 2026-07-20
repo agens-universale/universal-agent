@@ -12,6 +12,7 @@ def _validator_json(**overrides: object) -> str:
         "action": "accept",
         "trace_ok": True,
         "report_ok": True,
+        "is_question": False,
         "trace_gaps": [],
         "report_mismatches": [],
     }

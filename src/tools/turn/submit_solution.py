@@ -120,6 +120,7 @@ class SubmitSolution(AbstractSimpleTool):
             "ok": validation.ok,
             "trace_ok": validation.trace_ok,
             "report_ok": validation.report_ok,
+            "is_question": bool(getattr(validation, "is_question", False)),
             "trace_gaps": list(validation.trace_gaps),
             "report_mismatches": list(validation.report_mismatches),
             "missing_requirements": list(validation.missing_requirements),

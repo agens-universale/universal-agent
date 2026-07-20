@@ -512,7 +512,7 @@ def test_finish_gate_builds_trace_digest_from_state_messages(monkeypatch):
     )
     validator_json = (
         '{"action":"accept","trace_ok":true,"report_ok":true,'
-        '"trace_gaps":[],"report_mismatches":[]}'
+        '"is_question":false,"trace_gaps":[],"report_mismatches":[]}'
     )
 
     with patch(
