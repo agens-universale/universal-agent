@@ -8,6 +8,21 @@ from textual.widgets import Static
 
 from tui.commands import build_default_registry
 
+# Мини-туториал сверху Help (канон: docs_md/tui/mini-tutorial/SPEC.md).
+# (hotkey, текст) — hotkey справа; пустой hotkey = только описание.
+_QUICKSTART_HELP: tuple[tuple[str, str], ...] = (
+    ("F6", "URL, токен, модель — /settings (MCP при необходимости)"),
+    ("Enter", "опишите задачу в поле — сессия создастся сама"),
+    ("F2", "список диалогов · /new (Ctrl+N) — новый диалог"),
+    ("F3", "диффы правок агента — принять или откатить"),
+    ("", "/view <path> — постраничный просмотр файла"),
+    ("", "! git status — локальный shell; Esc — отмена"),
+    ("", "/ или . — палитра команд · @ — приложить файл"),
+    ("мышь", "копировать: выделил — сразу в буфер · Ctrl+V — вставить"),
+    ("Ctrl+C", "стоп агента (если нет выделения) · Esc — назад / выход"),
+    ("Ctrl+J", "перенос строки · [asking] — ответ в поле · Y/S/N — опасные операции"),
+)
+
 # Хоткеи, которых нет у отдельной /команды (F1–F6 / Ctrl+… уже в реестре).
 # Перенос строки: Ctrl+J надёжен везде; Shift/Ctrl+Enter — только если терминал
 # отдаёт отдельную последовательность (Kitty / modifyOtherKeys).
@@ -25,8 +40,8 @@ _EXTRA_HOTKEYS: tuple[tuple[str, str], ...] = (
 
 # Буфер обмена — не slash-команда; короткая секция в /help.
 _CLIPBOARD_HELP: tuple[tuple[str, str], ...] = (
-    ("", "Linux: поставьте wl-clipboard или xclip, чтобы вставлять в другие программы"),
-    ("", "без них: Ctrl+V в поле → Shift+мышь → Ctrl+Shift+C в окне терминала"),
+    ("", "Linux: поставьте wl-clipboard или xclip, чтобы вставлять скопированный текст в другие программы"),
+    ("", "без них: сначала Ctrl+V в поле ввода → затем Shift+мышь → Ctrl+Shift+C в окне ввода чтобы скопировать в буфер обмена."),
 )
 
 # Shell (`!`) — не slash-команда; отдельная секция в /help.
@@ -56,6 +71,14 @@ class HelpScreen(Screen):
         reg = build_default_registry()
         trace = self.query_one("#trace", VerticalScroll)
         row_i = 0
+
+        trace.mount(Static("как работать", classes="help-section", markup=False))
+        for key, desc in _QUICKSTART_HELP:
+            self._mount_row(trace, row_i, desc, key)
+            row_i += 1
+
+        trace.mount(Static(""))
+        trace.mount(Static("команды", classes="help-section", markup=False))
         for cmd in reg.list_commands():
             args_str = f" {cmd.args}" if cmd.args else ""
             self._mount_row(

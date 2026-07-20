@@ -216,7 +216,7 @@ def _cmd_remove(name: Optional[str], keep_package: bool, remove_all: bool = Fals
                     print(f"[wiped] {d}")
                 except OSError as exc:
                     print(f"[warn] не удалось удалить {d}: {exc} "
-                          f"(закрой gc-ua -a, если daemon держит файлы, и повтори)")
+                          f"(закрой gc-ua, если daemon держит файлы, и повтори)")
         print("[note] Chromium (общий кэш ms-playwright, вне ~/.gc) не трогаем — "
               "убрать вручную: playwright uninstall")
         print("[done] все MCP удалены, артефакты под ~/.gc вычищены")

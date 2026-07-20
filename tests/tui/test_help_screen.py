@@ -35,10 +35,22 @@ async def test_help_header_and_hotkeys():
         assert "Сберчат" not in body and "Телеграм" not in body
         assert "Связь с разработчиками" not in body
         assert "хоткеи" in body
+        assert "как работать" in body
+        assert "команды" in body
+        # туториал выше списка /команд
+        assert body.index("как работать") < body.index("команды")
         mains = "\n".join(str(s.render()) for s in scr.query(".help-row-main"))
         assert "/notices" in mains and "/diff" in mains and "/compact" in mains
         # порядок по частоте: help раньше sessions раньше diff
         assert mains.index("/help") < mains.index("/sessions") < mains.index("/diff")
+        # якоря мини-туториала (секция «как работать»)
+        assert "URL, токен, модель" in mains
+        assert "/view <path>" in mains
+        assert "! git status" in mains
+        assert "сразу в буфер" in mains
+        assert mains.index("URL, токен, модель") < mains.index("/help")
+        keys_quick = " ".join(str(s.render()) for s in scr.query(".help-row-key"))
+        assert "F6" in keys_quick and "F3" in keys_quick and "F2" in keys_quick
         assert "log-txt" in mains and "log-json" in mains
         assert "упомянуть файл" in mains
         assert "палитра команд" in mains

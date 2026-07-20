@@ -65,13 +65,14 @@ gc-mcp remove duckduckgo_search    # удалить по имени
 gc-mcp remove --all                # снести все подключённые
 ```
 
-`gc-mcp remove` с флагом `--keep-package` только отключает сервер (un-wire), оставляя пакет в venv для быстрой повторной активации. Запуск агента сразу со всеми установленными — флаг `-a` (`gc-ua -a`). Подробнее — [`recommended_mcp/README.md`](../recommended_mcp/README.md).
+`gc-mcp remove` с флагом `--keep-package` только отключает сервер (un-wire), оставляя пакет в venv для быстрой повторной активации. В `gc-ua` HTTP/SSE MCP-daemon'ы для серверов из конфига поднимаются по умолчанию; в `gc-cli` — флаг `-a` / `--auto-mcp`. Отключить в TUI: `gc-ua --no-auto-mcp`. Подробнее — [`recommended_mcp/README.md`](../recommended_mcp/README.md).
 
 ## Запуск
 
 ```bash
-gc-ua                 # текстовый интерфейс (основной режим)
-gc-ua -a              # TUI со всеми установленными MCP
+gc-ua                 # TUI (HTTP/SSE MCP-daemon'ы из конфига — по умолчанию)
+gc-ua --no-auto-mcp   # TUI без автозапуска daemon'ов
+gc-cli -a -q "запрос" # CLI с автозапуском HTTP/SSE MCP-daemon'ов
 gc-cli -q "запрос"    # разовый запрос без интерфейса
 ```
 

@@ -56,15 +56,26 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         action="store_true",
         help="Создать ~/.gc/config.yml из шаблона и выйти (TUI не запускается)",
     )
+    # По умолчанию поднимаем HTTP/SSE-daemon'ы для MCP из конфига
+    # (пересечение с манифестом recommended_mcp). Отключить: --no-auto-mcp.
+    # -a/--auto-mcp оставлены для совместимости (no-op при default=True).
+    parser.set_defaults(auto_mcp=True)
     parser.add_argument(
         "-a",
         "--auto-mcp",
         action="store_true",
+        dest="auto_mcp",
         help=(
-            "Поднять HTTP/SSE MCP-daemon'ы из recommended_mcp/ перед запуском "
-            "(если каталог есть в cwd); по завершении gc-ua гасятся только "
-            "процессы, запущенные этим вызовом"
+            "Поднять HTTP/SSE MCP-daemon'ы для серверов из mcp-servers "
+            "(по умолчанию включено; пересечение с манифестом recommended_mcp); "
+            "по завершении гасятся только процессы этого запуска"
         ),
+    )
+    parser.add_argument(
+        "--no-auto-mcp",
+        action="store_false",
+        dest="auto_mcp",
+        help="Не поднимать HTTP/SSE MCP-daemon'ы при старте",
     )
     args, _unknown = parser.parse_known_args(
         list(argv) if argv is not None else sys.argv[1:]
