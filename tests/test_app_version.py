@@ -2,7 +2,7 @@
 import app_version
 
 GIT_PINNED = '{"url": "https://github.com/pypa/sampleproject", "vcs_info": {"vcs": "git", "commit_id": "621e497", "requested_revision": "main"}}'
-GIT_DEFAULT = '{"url": "https://gitverse.ru/gigacode-ai/background-agent", "vcs_info": {"vcs": "git", "commit_id": "a1b2c3d"}}'
+GIT_DEFAULT = '{"url": "https://gitverse.ru/gigacode-ai/universal-agent", "vcs_info": {"vcs": "git", "commit_id": "a1b2c3d"}}'
 EDITABLE = '{"url": "file:///D:/dev/sber/background-agent", "dir_info": {"editable": true}}'
 
 

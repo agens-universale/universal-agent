@@ -68,14 +68,14 @@ ARG GC_REF=master
 # gc-cli ставится рядом с harbor → harbor может импортить и фреймворк, и gc-cli.
 RUN --mount=type=ssh \
     uv tool install harbor \
-      --with "gc-ua @ git+ssh://git@gitverse.ru/gigacode-ai/background-agent@${GC_REF}"
+      --with "gc-ua @ git+ssh://git@gitverse.ru/gigacode-ai/universal-agent@${GC_REF}"
 
 # Адаптер запекаем в образ: клонируем и чекаутим тот же GC_REF (ветка ИЛИ SHA),
 # кладём harbor/adapters на PYTHONPATH. PYTHONPATH наследуется и venv-питоном harbor →
 # harbor видит --agent-import-path adapters.gc_cli_external:GcCliExternal
 RUN --mount=type=ssh \
     git clone --filter=blob:none \
-      ssh://git@gitverse.ru/gigacode-ai/background-agent.git /opt/gc-cli-src \
+      ssh://git@gitverse.ru/gigacode-ai/universal-agent.git /opt/gc-cli-src \
     && git -C /opt/gc-cli-src checkout "${GC_REF}" \
     && mkdir -p /opt/gc-harbor-adapters \
     && cp -r /opt/gc-cli-src/harbor/adapters /opt/gc-harbor-adapters/adapters \
