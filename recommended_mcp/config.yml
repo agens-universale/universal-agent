@@ -8,7 +8,7 @@
 # Репо для установки source-MCP из git в method-2 (без клона):
 #   pip install "git+<repo_url>[@repo_ref]#subdirectory=external/<name>"
 # Публичный https → ставится анонимно, в т.ч. через корп-прокси.
-repo_url: https://gitverse.ru/gigacode-ai/background-agent
+repo_url: https://gitverse.ru/gigacode-ai/universal-agent
 # repo_ref:   # опц. пин ветки/тега; пусто = дефолтная ветка
 mcps:
   - name: computer
