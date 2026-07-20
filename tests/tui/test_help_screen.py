@@ -50,6 +50,11 @@ async def test_help_header_and_hotkeys():
         assert "! git status" in mains
         assert "! clear" in mains
         assert "локальный shell" in mains
+        assert "буфер обмена" in body
+        assert "wl-clipboard" in mains or "xclip" in mains
+        assert "сразу в буфер" in mains
+        assert "Ctrl+Shift+C" in keys
+        assert "не стопает" in mains
         keys_all = " ".join(str(s.render()) for s in scr.query(".help-row-key"))
         assert "." in keys_all.split()
 

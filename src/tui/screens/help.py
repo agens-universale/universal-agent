@@ -15,10 +15,18 @@ _EXTRA_HOTKEYS: tuple[tuple[str, str], ...] = (
     ("Enter", "отправить сообщение"),
     ("Ctrl+J", "перенос строки"),
     ("Ctrl+A", "выделить всё в поле ввода"),
+    ("мышь", "в трейсе: выделил — сразу в буфер обмена"),
+    ("Ctrl+Shift+C", "то же по клавише; в отличие от Ctrl+C не стопает агента"),
     ("↑ / ↓", "история ввода"),
     ("@", "упомянуть файл в сообщении"),
     (".", "палитра команд (как /, без смены раскладки)"),
     ("F6", "настройки"),
+)
+
+# Буфер обмена — не slash-команда; короткая секция в /help.
+_CLIPBOARD_HELP: tuple[tuple[str, str], ...] = (
+    ("", "Linux: поставьте wl-clipboard или xclip, чтобы вставлять в другие программы"),
+    ("", "без них: Ctrl+V в поле → Shift+мышь → Ctrl+Shift+C в окне терминала"),
 )
 
 # Shell (`!`) — не slash-команда; отдельная секция в /help.
@@ -69,6 +77,13 @@ class HelpScreen(Screen):
         trace.mount(Static("хоткеи", classes="help-section", markup=False))
         for key, desc in _EXTRA_HOTKEYS:
             self._mount_row(trace, row_i, desc, key)
+            row_i += 1
+
+        trace.mount(Static(""))
+        trace.mount(Static("буфер обмена", classes="help-section", markup=False))
+        for example, desc in _CLIPBOARD_HELP:
+            main = f"{example}   {desc}" if example else desc
+            self._mount_row(trace, row_i, main, "")
             row_i += 1
 
     @staticmethod
