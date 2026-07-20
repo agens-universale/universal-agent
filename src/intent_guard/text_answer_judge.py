@@ -12,7 +12,7 @@ from typing import Any
 
 from intent_log import deserialize_list, records_to_jsonl_lines
 from intent_guard.final_report_consistency import validate_final_report_vs_user_intent
-from intent_guard.guard import FinishGateGuard
+from intent_guard.guard import judge_available
 from intent_guard.feedback import build_text_answer_reject_feedback
 from intent_guard.validation_result import ValidationResult
 
@@ -47,9 +47,10 @@ def should_return_text_answer(ctx: Any, state: Any, assistant_text: str) -> Text
     """Принять ли текст-ответ как ответ хода — по режиму ``text_answer_mode``.
 
     Пустой текст → reject (любой режим). ``allow`` → accept без судьи. ``judge`` →
-    судья (только если finish-gate включён; иначе deny-путь): accept → accept;
-    reject → reject c фидбэком судьи; ошибка судьи → reject generic. ``deny`` / нет
-    ключа → reject generic."""
+    судья (только если доступна машинерия судейства, т.е. ``backend_api_mode ==
+    "chat_completions"``; иначе deny-путь) — от тоггла /gate (finish-gate) НЕ зависит:
+    accept → accept; reject → reject c фидбэком судьи; ошибка судьи → reject generic.
+    ``deny`` / нет ключа → reject generic."""
     if not (assistant_text or "").strip():
         return TextAnswerDecision(False)
     cfg = getattr(ctx, "config_dict", {}) or {}
@@ -57,7 +58,7 @@ def should_return_text_answer(ctx: Any, state: Any, assistant_text: str) -> Text
     if mode == "allow":
         return TextAnswerDecision(True)
     if mode == "judge":
-        if not FinishGateGuard(ctx=ctx, state=state).enabled:
+        if not judge_available(cfg):
             return TextAnswerDecision(False)
         result = judge_text_answer(ctx, state, assistant_text)
         if result is None:

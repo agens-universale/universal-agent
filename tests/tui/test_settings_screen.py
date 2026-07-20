@@ -76,7 +76,7 @@ async def test_settings_menu_lists_sections_with_values(tmp_path):
         app.push_screen(_mk_screen(config_path=str(cfg_file)))
         await pilot.pause()
         rows = _menu_lines(app.screen)
-        assert len(rows) == 4
+        assert len(rows) == 5
         assert any("Подключение" in r and "http://host" in r and "Bearer" in r for r in rows)
         assert not any("secret-token" in r for r in rows)  # маска!
         assert any("Модель" in r and "test-model" in r for r in rows)
@@ -112,12 +112,14 @@ async def test_settings_ctrl_pgup_pgdn_switch_sections():
         scr = app.screen
         await pilot.press("down", "down", "enter")   # секция MCP
         assert scr._view == 2
-        await pilot.press("ctrl+pagedown")                   # → Обновление (4/4)
+        await pilot.press("ctrl+pagedown")                   # → Режимы работы
         assert scr._view == 3
+        await pilot.press("ctrl+pagedown")                   # → Обновление (5/5)
+        assert scr._view == 4
         await pilot.press("ctrl+pagedown")                   # край: остаёмся (без wrap)
-        assert scr._view == 3
+        assert scr._view == 4
         await pilot.press("ctrl+pageup")
-        assert scr._view == 2
+        assert scr._view == 3
 
 
 async def test_ctrl_pgdn_works_with_focus_in_input():
@@ -309,7 +311,7 @@ async def test_update_section_shows_version_and_sync_row(tmp_path, monkeypatch):
                                        on_apply=lambda: None,
                                        probe_fn=_fake_probe(_probe_ok())))
         await pilot.pause()
-        await pilot.press("down", "down", "down", "enter")   # меню → Обновление (4/4)
+        await pilot.press("down", "down", "down", "down", "enter")   # меню → Обновление (5/5)
         await pilot.pause()
         body = " ".join(str(w.render()) for w in app.screen.query(".set-dyn"))
         assert "v0.3.0" in body and "master" in body
@@ -344,7 +346,7 @@ async def test_update_section_sync_runs_and_reports(tmp_path, monkeypatch):
                                        on_apply=lambda: applied.append(1),
                                        probe_fn=_fake_probe(_probe_ok())))
         await pilot.pause()
-        await pilot.press("down", "down", "down", "enter", "enter")  # секция → выполнить sync
+        await pilot.press("down", "down", "down", "down", "enter", "enter")  # секция → выполнить sync
         await pilot.pause()
         assert called["path"] == str(cfg_file)
         assert applied == [1]                          # конфиг перечитан после sync
@@ -384,7 +386,7 @@ async def test_update_section_dev_install_hides_source(monkeypatch, tmp_path):
                                        on_apply=lambda: None,
                                        probe_fn=_fake_probe(_probe_ok())))
         await pilot.pause()
-        await pilot.press("down", "down", "down", "enter")
+        await pilot.press("down", "down", "down", "down", "enter")
         body = " ".join(str(w.render()) for w in app.screen.query(".set-dyn"))
         assert "установка из исходников" in body
         assert "Обновить config.yml" in body           # sync доступен и для dev
@@ -697,7 +699,7 @@ async def test_run_sync_on_apply_error_shows_notice(tmp_path, monkeypatch):
             probe_fn=_fake_probe(_probe_ok())))
         await pilot.pause()
         scr = app.screen
-        await pilot.press("down", "down", "down", "enter", "enter")
+        await pilot.press("down", "down", "down", "down", "enter", "enter")
         await pilot.pause()
         body = " ".join(str(w.render()) for w in scr.query(".set-dyn"))
         assert "не перечитан" in body and "reload failed" in body
@@ -725,7 +727,7 @@ async def test_esc_from_editor_section_clears_editor_and_restores_menu(tmp_path)
         await pilot.press("escape")                    # назад в меню
         await pilot.pause()
         assert not scr.query(ConnectionEditor)         # редактор удалён (баг 2)
-        assert len(scr.query(".set-menurow")) == 4         # меню восстановлено во фрейме
+        assert len(scr.query(".set-menurow")) == 5         # меню восстановлено во фрейме
         # мусор редактора (hint/input) не остался
         from textual.widgets import Input
         assert not scr.query(Input)
@@ -1440,7 +1442,7 @@ async def test_update_menu_glyph_arrow_when_available(tmp_path, monkeypatch):
                              probe_fn=lambda *a, **k: None)
         app.push_screen(scr); await pilot.pause()
         app._update_available = True
-        glyph, _ = scr._menu_glyph(3)
+        glyph, _ = scr._menu_glyph(4)
         assert glyph == "↑"
 
 
@@ -1961,12 +1963,268 @@ async def test_save_without_session_does_not_warn_about_counters(tmp_path):
 
 
 def test_sections_composition_merged():
-    """После объединения: 4 секции, «Подключение» первая, редакторные {conn,model}, probe {conn}."""
+    """5 секций, «Подключение» первая, «Режимы работы» между MCP и Обновлением;
+    редакторные {conn,model}, probe {conn}."""
     from tui.screens import settings as s
-    assert s.SECTIONS == ("Подключение", "Модель", "MCP-серверы", "Обновление")
-    assert s._CONNECTION == 0 and s._MODEL == 1 and s._MCP == 2 and s._UPDATE == 3
+    assert s.SECTIONS == ("Подключение", "Модель", "MCP-серверы", "Режимы работы", "Обновление")
+    assert (s._CONNECTION == 0 and s._MODEL == 1 and s._MCP == 2
+            and s._MODES == 3 and s._UPDATE == 4)
     assert s._EDITOR_SECTIONS == {s._CONNECTION, s._MODEL}
     assert s._PROBE_SECTIONS == {s._CONNECTION}
+
+
+def test_sections_order_contains_modes():
+    from tui.screens.settings import SECTIONS
+    assert SECTIONS == ("Подключение", "Модель", "MCP-серверы", "Режимы работы", "Обновление")
+
+
+def test_fit_mode_pairs_whole_pairs_only():
+    from tui.screens.settings import fit_mode_pairs
+    pairs = ["самопроверка выполнения задачи: off", "формат ответа: allow"]
+    full = fit_mode_pairs(pairs, width=200)
+    assert full == "самопроверка выполнения задачи: off · формат ответа: allow"
+    tight = fit_mode_pairs(pairs, width=40)
+    assert tight == "самопроверка выполнения задачи: off · …"
+    assert "формат" not in tight                      # пара не режется посередине
+    tiny = fit_mode_pairs(pairs, width=10)
+    assert tiny == "…"                                # не влезла ни одна пара
+
+
+async def test_modes_section_preview_shows_toggle_pairs():
+    """Превью строки «Режимы работы» в меню — пары label: value в порядке TOGGLES
+    (первая пара — «gate», всегда целиком; вторая — целиком либо усечена в `· …`,
+    смотря по фактической ширине региона в тестовом терминале)."""
+    import tui.app as app_mod
+    app = app_mod.TuiApp(config=_cfg())
+    async with app.run_test() as pilot:
+        app.push_screen(_mk_screen())
+        await pilot.pause()
+        rows = _menu_lines(app.screen)
+        modes_row = next(r for r in rows if "Режимы работы" in r)
+        assert "самопроверка выполнения задачи: on" in modes_row
+        assert ("формат ответа: judge" in modes_row) or ("· …" in modes_row)
+
+
+async def test_modes_preview_truncated_on_first_frame_of_narrow_menu(tmp_path):
+    """Carry-fix ревью T2 (Low): `_modes_preview_width` не должен читать регион СВОЕЙ ЖЕ
+    ещё не смонтированной строки — превью «Режимы работы» усечено парами (`…`) уже на
+    первом кадре узкого терминала, без единого нажатия клавиши. Без фикса ширина региона
+    неизвестна (0) на первом полном ре-рендере меню → fit_mode_pairs не усекает вовсе."""
+    import tui.app as app_mod
+    cfg_file = tmp_path / "config.yml"
+    cfg_file.write_text('tui:\n  finish_gate_mode: "on"\n  text_answer_mode: "judge"\n',
+                        encoding="utf-8")
+    app = app_mod.TuiApp(config={})
+    app._config_path = str(cfg_file)
+    app.reload_config()
+    async with app.run_test(size=(60, 24)) as pilot:
+        app.push_screen(_mk_screen(config=app._config, config_path=str(cfg_file)))
+        await pilot.pause()
+        rows = _menu_lines(app.screen)
+        modes_row = next(r for r in rows if "Режимы работы" in r)
+        assert "…" in modes_row
+
+
+async def test_modes_subscreen_rows_and_instant_apply(tmp_path):
+    """Подэкран «Режимы работы»: строка на тоггл (label + трек + значение, общие
+    колонки), ←/→/Enter применяют значение МГНОВЕННО (реальный config.yml, без моков),
+    Esc возвращает в меню с обновлённым превью."""
+    import yaml
+    import tui.app as app_mod
+    cfg_file = tmp_path / "config.yml"
+    cfg_file.write_text('tui:\n  finish_gate_mode: "on"\n  text_answer_mode: "judge"\n',
+                        encoding="utf-8")
+    app = app_mod.TuiApp(config={})
+    app._config_path = str(cfg_file)
+    app.reload_config()
+    async with app.run_test() as pilot:
+        scr = await _open_settings(app, pilot, cfg_file, app._config)
+        scr._menu_idx = 3
+        scr._open_section(3)                     # «Режимы работы»
+        await pilot.pause()
+        assert scr._view == 3
+
+        # 1) строки: курсор + label + трек + значение, подписи в общей колонке (label_w общий)
+        rows_w = list(scr.query(".set-row"))
+        rows = [str(w.render()) for w in rows_w]
+        assert any("самопроверка выполнения задачи" in r and "on" in r for r in rows)
+        assert any("формат ответа" in r and "judge" in r for r in rows)
+        label_w, _ = scr._modes_columns()
+        assert label_w == max(len("самопроверка выполнения задачи"), len("формат ответа")) + 3 + 2
+
+        # выделенная строка (gate, курсор 0) начинается с «▸ », остальные — с двух пробелов
+        assert rows[0].startswith("▸ ")
+        assert all(r.startswith("  ") for r in rows[1:])
+        # воздух между тоггл-строками — тот же класс/паттерн, что и в «Обновлении»
+        assert all(w.has_class("set-spaced") for w in rows_w)
+
+        # 2) → на выделенной строке gate: config.yml меняется СРАЗУ, трек перерисован
+        await pilot.press("right")
+        await pilot.pause()
+        data = yaml.safe_load(cfg_file.read_text(encoding="utf-8"))
+        assert data["tui"]["finish_gate_mode"] == "off"
+        rows = [str(w.render()) for w in scr.query(".set-row")]
+        assert any("самопроверка выполнения задачи" in r and "off" in r for r in rows)
+
+        # 3) Enter на строке answers: значение циклится (judge -> allow) и записано
+        await pilot.press("down")
+        await pilot.pause()
+        # курсор перешёл на строку answers (индекс 1) — перерисовка после ↑/↓ его сохраняет
+        rows = [str(w.render()) for w in scr.query(".set-row")]
+        assert rows[1].startswith("▸ ")
+        assert rows[0].startswith("  ")
+        await pilot.press("enter")
+        await pilot.pause()
+        data = yaml.safe_load(cfg_file.read_text(encoding="utf-8"))
+        assert data["tui"]["text_answer_mode"] == "allow"
+
+        # 4) Esc: возврат в меню, превью строки обновилось новыми значениями
+        await pilot.press("escape")
+        await pilot.pause()
+        assert scr._view == "menu"
+        modes_row = next(r for r in _menu_lines(scr) if "Режимы работы" in r)
+        assert "самопроверка выполнения задачи: off" in modes_row
+
+
+async def test_modes_subscreen_error_flash_keeps_screen(tmp_path, monkeypatch):
+    """apply_toggle падает (OSError) → флеш «✗ не сохранено: …», подэкран не закрывается,
+    config.yml не меняется."""
+    import tui.app as app_mod
+    cfg_file = tmp_path / "config.yml"
+    cfg_file.write_text('tui:\n  finish_gate_mode: "on"\n  text_answer_mode: "judge"\n',
+                        encoding="utf-8")
+    app = app_mod.TuiApp(config={})
+    app._config_path = str(cfg_file)
+    app.reload_config()
+    original = cfg_file.read_text(encoding="utf-8")
+
+    def boom(app_, name, value):
+        raise OSError("disk full")
+    monkeypatch.setattr("tui.toggles.apply_toggle", boom)
+
+    async with app.run_test() as pilot:
+        scr = await _open_settings(app, pilot, cfg_file, app._config)
+        scr._menu_idx = 3
+        scr._open_section(3)
+        await pilot.pause()
+        await pilot.press("right")
+        await pilot.pause()
+        assert scr._view == 3
+        assert cfg_file.read_text(encoding="utf-8") == original
+        notice = " ".join(str(w.render()) for w in scr.query(Static))
+        assert "не сохранено" in notice
+
+
+async def test_modes_footer_shows_value_hint(tmp_path):
+    """Подэкран «Режимы работы» (ревизия 2026-07-19 по смоуку юзера, дизайн §3):
+    hint выделенного тоггла («<значение> — <подсказка>», БЕЗ клавишной части) —
+    ВНУТРИ рамки секции (класс set-hint/set-modes-hint, конвенция «Обновления»),
+    меняется при смене выделения и после переключения значения; футер ВНЕ рамки —
+    статичный клавишный, как у других секций (_FOOTERS)."""
+    import tui.app as app_mod
+    cfg_file = tmp_path / "config.yml"
+    cfg_file.write_text('tui:\n  finish_gate_mode: "on"\n  text_answer_mode: "judge"\n',
+                        encoding="utf-8")
+    app = app_mod.TuiApp(config={})
+    app._config_path = str(cfg_file)
+    app.reload_config()
+    async with app.run_test() as pilot:
+        scr = await _open_settings(app, pilot, cfg_file, app._config)
+        scr._menu_idx = 3
+        scr._open_section(3)
+        await pilot.pause()
+
+        # футер — статичный клавишный, тот же для любой выделенной строки
+        footer = str(scr.query_one("#set-footer", Static).render())
+        assert footer == ("↑/↓ — выбор · ←/→/Enter — переключить · "
+                           "PgUp/PgDn — секции · Esc — меню")
+
+        # hint — внутри рамки, у выделенного тоггла gate ("on")
+        hint = str(scr.query_one(".set-modes-hint", Static).render())
+        assert hint.startswith("on —")
+        assert "Enter" not in hint            # клавиши — только в футере
+
+        await pilot.press("down")
+        await pilot.pause()
+        footer2 = str(scr.query_one("#set-footer", Static).render())
+        assert footer2 == footer              # футер не зависит от выделения
+        hint2 = str(scr.query_one(".set-modes-hint", Static).render())
+        assert hint2.startswith("judge —")
+        assert hint2 != hint
+
+        # переключение значения (Enter) — hint выделенной строки обновляется
+        await pilot.press("enter")
+        await pilot.pause()
+        hint3 = str(scr.query_one(".set-modes-hint", Static).render())
+        assert hint3.startswith("allow —")
+        assert hint3 != hint2
+
+
+async def test_modes_generic_toggle_appears_and_cycles_without_code_changes(tmp_path, monkeypatch):
+    """Generic-гвоздь (design §4/§7 «Расширяемость», carry-⚠️ ревью T3): фиктивный
+    4-значный тоггл, добавленный в TOGGLES ОДНОЙ записью (без правок рендера/палитры/
+    подэкрана), появляется строкой в подэкране «Режимы работы» и парой в превью
+    секции; ←/→ ходит по всем 4 значениям по кругу. Command в реестр палитры не
+    регистрируем — подэкран и превью строятся из TOGGLES напрямую (config.py их
+    не видит).
+
+    state-провайдер фиктивного тоггла читает мутабельный holder (monkeypatch-friendly
+    паттерн test_palette_toggles.py::test_five_value_toggle_works_generically, где
+    state тоже не читает реальный cfg); apply_toggle тоже монкипатчится — реальная
+    схема config.yml (extra=forbid) не знает ключ tui.fake_mode, поэтому пишем в
+    holder напрямую, как это уже делает test_modes_subscreen_error_flash_keeps_screen
+    для error-пути того же apply_toggle."""
+    import tui.app as app_mod
+    from tui import palette as p
+    from tui import toggles as tg
+
+    state_holder = {"value": "f0"}
+    fake = tg.ToggleSpec(
+        dotted="tui.fake_mode",
+        values=tuple(tg.ToggleValue(f"f{i}", f"подсказка {i}", p.ACCENT) for i in range(4)),
+        state=lambda cfg: state_holder["value"],
+        label="фиктивный режим",
+        summary="генерик-проверка",
+    )
+    monkeypatch.setitem(tg.TOGGLES, "fake", fake)
+
+    def _fake_apply(app_, name, value):
+        state_holder["value"] = value
+        return value
+    monkeypatch.setattr(tg, "apply_toggle", _fake_apply)
+
+    cfg_file = tmp_path / "config.yml"
+    cfg_file.write_text('tui:\n  finish_gate_mode: "on"\n  text_answer_mode: "judge"\n',
+                        encoding="utf-8")
+    app = app_mod.TuiApp(config={})
+    app._config_path = str(cfg_file)
+    app.reload_config()
+    async with app.run_test(size=(200, 24)) as pilot:
+        scr = await _open_settings(app, pilot, cfg_file, app._config)
+
+        # 1) превью секции «Режимы работы» — пара фиктивного тоггла присутствует
+        rows = _menu_lines(scr)
+        modes_row = next(r for r in rows if "Режимы работы" in r)
+        assert "фиктивный режим: f0" in modes_row
+
+        # 2) подэкран: строка фиктивного тоггла смонтирована
+        scr._menu_idx = 3
+        scr._open_section(3)
+        await pilot.pause()
+        assert scr._view == 3
+        names = list(tg.TOGGLES.keys())
+        fake_idx = names.index("fake")
+        row_texts = [str(w.render()) for w in scr.query(".set-row")]
+        assert any("фиктивный режим" in r and "f0" in r for r in row_texts)
+
+        # 3) ←/→ на строке фиктивного тоггла ходит по кругу через все 4 значения
+        scr._modes_idx = fake_idx
+        for expected in ("f1", "f2", "f3", "f0"):
+            await pilot.press("right")
+            await pilot.pause()
+            assert state_holder["value"] == expected
+        row_texts = [str(w.render()) for w in scr.query(".set-row")]
+        assert any("фиктивный режим" in r and "f0" in r for r in row_texts)
 
 
 async def test_connection_section_mounts_connection_editor(tmp_path):

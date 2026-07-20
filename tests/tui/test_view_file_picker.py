@@ -236,3 +236,56 @@ async def test_at_segment_empty_matches_hide_picker(tmp_path):
         inp.insert("@zzz")
         await pilot.pause(0.1)
         assert scr._file_picker is None
+
+
+@pytest.mark.asyncio
+async def test_hint_has_keys_margin_and_honest_desired_height(tmp_path):
+    """Hint FilePicker — докнутый footer (.palette-footer) с воздухом (.palette-keys),
+    desired_height включает строку margin (шов main.py::_sync_trace_max_height:
+    недосчёт = рамка за экраном)."""
+    pytest.importorskip("textual")
+    from tui.app import TuiApp
+    _mk(tmp_path)
+    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    async with app.run_test() as pilot:
+        scr = pilot.app.screen
+        scr._project_root = lambda: str(tmp_path)
+        inp = pilot.app.query_one("#cmdinput")
+        inp.focus()
+        inp.insert("/view ")
+        await pilot.pause(0.1)
+        picker = scr._file_picker
+        assert picker is not None
+        hint = picker.query(".palette-keys")
+        assert len(hint) == 1
+        assert picker.query_one(".palette-footer").query(".palette-keys")  # hint внутри докнутого подвала
+        assert picker.desired_height == len(picker.children) + 3
+        assert hint[0].region.bottom <= picker.region.bottom
+
+
+@pytest.mark.asyncio
+async def test_hint_visible_on_open_with_long_list_no_scroll(tmp_path):
+    """Регрессия c0622c9a: длинный список (> высоты клэмпа) — hint-строка видна СРАЗУ
+    при открытии, без скролла (докнутый .palette-footer, а не последний FLOW-ребёнок,
+    которого упирает max-height и хоронит за скроллом)."""
+    pytest.importorskip("textual")
+    from tui.app import TuiApp
+    (tmp_path / "agents").mkdir()
+    for i in range(45):
+        (tmp_path / "agents" / f"agent{i:03d}.py").write_text("x", encoding="utf-8")
+    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    async with app.run_test(size=(80, 24)) as pilot:
+        scr = pilot.app.screen
+        scr._project_root = lambda: str(tmp_path)
+        inp = pilot.app.query_one("#cmdinput")
+        inp.focus()
+        inp.insert("/view agents/agent")
+        await pilot.pause(0.1)
+        picker = scr._file_picker
+        assert picker is not None
+        assert len(picker._entries) > 20                       # список длиннее клэмпа
+        assert picker.region.height < picker.desired_height    # клэмп реально сработал — скролл включён
+        hint = picker.query(".palette-keys")
+        assert len(hint) == 1
+        assert hint[0].region.bottom <= 24                      # на экране
+        assert hint[0].region.bottom <= picker.region.bottom    # внутри рамки пикера, видна без скролла

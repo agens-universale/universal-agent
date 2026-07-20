@@ -61,8 +61,9 @@ class McpSectionEditor(Vertical):
 
     def compose(self) -> ComposeResult:
         for i, row in enumerate(self._managed):
-            yield Static(self._row_text(row, i), classes="mcp-row mcp-row-managed onb-dyn set-spaced",
-                        markup=False)
+            selected = i == self._idx and self._action_kind is None
+            cls = "mcp-row mcp-row-managed onb-dyn set-spaced" + (" selected" if selected else "")
+            yield Static(self._row_text(row, i), classes=cls, markup=False)
         manual = self._manual
         if manual:
             yield Static("─" * 40, classes="mcp-divider onb-dyn", markup=False)
@@ -149,6 +150,10 @@ class McpSectionEditor(Vertical):
         for i, (w, row) in enumerate(zip(rows, managed)):
             try:
                 w.update(self._row_text(row, i))
+                if i == self._idx and self._action_kind is None:
+                    w.add_class("selected")
+                else:
+                    w.remove_class("selected")
             except Exception:
                 continue
 
@@ -250,8 +255,8 @@ class McpSectionEditor(Vertical):
             anchor = None
         widgets = [Static("─" * 40, classes="mcp-action onb-dyn", markup=False)]
         for kind in kinds:
-            w = Static(self._action_row_text(kind), classes="mcp-action mcp-action-row onb-dyn set-spaced",
-                       markup=False)
+            cls = "mcp-action mcp-action-row onb-dyn set-spaced" + (" selected" if self._action_kind == kind else "")
+            w = Static(self._action_row_text(kind), classes=cls, markup=False)
             w._action_kind = kind
             widgets.append(w)
         for w in widgets:
@@ -266,6 +271,10 @@ class McpSectionEditor(Vertical):
             kind = getattr(w, "_action_kind", None)
             if kind is not None:
                 w.update(self._action_row_text(kind))
+                if self._action_kind == kind:
+                    w.add_class("selected")
+                else:
+                    w.remove_class("selected")
 
     def toggle(self) -> str | None:
         """Space: wired→unwire, installed→wire. Возвращает хинт-строку, если действие

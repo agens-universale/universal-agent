@@ -43,6 +43,9 @@ class TuiConfig(BaseModel):
     # deny — всегда bounce (как CLI); judge — судья intent_guard решает;
     # allow — всегда принять текст (ни bounce, ни судьи).
     text_answer_mode: Literal["deny", "judge", "allow"] = "judge"
+    # /gate в палитре: on — судья на turn_finish всегда; off — не зовётся (только TUI;
+    # CLI/server рулит agent.strict_turn_finish_validation). Этап 2 добавит "smart".
+    finish_gate_mode: Literal["on", "off"] = "on"
     # Только TUI: оставить лишь корневой AGENTS.md (L3), отбросив global
     # (~/.config/gc) и .gc/AGENTS.md. Игнорируется, если задан
     # paths.agent_md_path (путь главнее флага).

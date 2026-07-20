@@ -277,6 +277,51 @@ async def test_move_reaches_action_rows():
         assert ed.current_row is None
 
 
+async def test_selected_class_follows_cursor():
+    """Регресс: строка курсора не подсвечивалась фоном — _refresh_rows обновлял только
+    текст, не класс `selected` (см. .mcp-row-managed.selected в styles.tcss)."""
+    import tui.app as app_mod
+    from tui.editors.mcp_section import McpSectionEditor
+    from tests.tui.conftest import wait_until
+    mgr = FakeManager(_rows(), {"office": McpState(True, "0.3.1", None),
+                                "playwright": McpState(False, None, None)})
+    app = app_mod.TuiApp(config={})
+    async with app.run_test() as pilot:
+        ed = McpSectionEditor(manager=mgr)
+        await app.mount(ed)
+        await wait_until(pilot, lambda: ed.status_ready("playwright"), "loaded")
+        rows = list(ed.query(".mcp-row-managed"))
+        assert rows[0].has_class("selected")
+        assert not rows[1].has_class("selected")
+        ed.move(1)                                        # office → playwright
+        assert not rows[0].has_class("selected")
+        assert rows[1].has_class("selected")
+
+
+async def test_selected_class_follows_action_cursor():
+    """Курсор на строке-действии — тоже с классом `selected` (то же правило CSS,
+    .mcp-action-row.selected); управляемая строка при этом теряет класс."""
+    import tui.app as app_mod
+    from tui.editors.mcp_section import McpSectionEditor
+    from tests.tui.conftest import wait_until
+    mgr = FakeManager(_rows(), {"office": McpState(True, "0.3.1", "0.4.0"),
+                                "playwright": McpState(False, None, None)})
+    app = app_mod.TuiApp(config={})
+    async with app.run_test() as pilot:
+        ed = McpSectionEditor(manager=mgr)
+        await app.mount(ed)
+        await wait_until(pilot, lambda: ed.status_ready("office") and ed.status_ready("playwright"),
+                         "loaded")
+        ed.move(1)                                        # office → playwright
+        ed.move(1)                                        # playwright → ⤓ (missing)
+        assert ed.current_action == "missing"
+        rows = list(ed.query(".mcp-row-managed"))
+        assert not any(w.has_class("selected") for w in rows)
+        actions = list(ed.query(".mcp-action-row"))
+        assert actions[0].has_class("selected")
+        assert not actions[1].has_class("selected")
+
+
 async def test_action_rows_updated_in_place_on_move():
     """Минор: move() обновляет строки-действия НА МЕСТЕ (те же виджеты), не пересоздаёт
     remove+mount — иначе при частых move возможно накопление (async-remove)."""

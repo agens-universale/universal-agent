@@ -95,3 +95,40 @@ async def test_trace_regrows_when_palette_filtered_down(tmp_path):
         scr._palette.set_filter("co")               # → 2 команды (compact, config)
         await pilot.pause(0.4)                       # poll пересчитает desired
         assert scr._trace_max_height > full_palette  # палитра сузилась → #trace вырос
+
+
+@pytest.mark.asyncio
+async def test_palette_border_fits_on_screen_with_toggle_footer(tmp_path):
+    """Геометрический баг: у CommandPalette дети overlay = N строк + ОДИН докнутый
+    `.palette-footer`-контейнер (внутри — разделитель + toggle-строки + hint, т.е.
+    3-5 строк, не 1). `_sync_trace_max_height` считал desired = len(children)+2,
+    недосчитывая высоту подвала → #trace получал лишние строки, выдавливая нижнюю
+    рамку палитры за экран (полный список команд, трейс — почти весь экран)."""
+    pytest.importorskip("textual")
+    tid = "ov5"; _write_task(tmp_path, tid)
+    async with _app(tmp_path).run_test(size=(80, 60)) as pilot:
+        scr = await _tall(pilot, tid)
+        scr._open_palette(prefix="")                 # полный список + toggle-подвал
+        await pilot.pause(0.4)
+        palette = scr._palette
+        footer = pilot.app.query_one("#footer")
+        assert palette is not None
+        assert palette.region.bottom <= 60             # нижняя рамка палитры на экране
+        assert footer.region.bottom <= 60               # футер не выдавлен под экран
+
+
+@pytest.mark.asyncio
+async def test_palette_border_fits_on_screen_filtered_to_toggle_only(tmp_path):
+    """Тот же геометрический баг, но фильтр отсекает все обычные команды (верхняя
+    зона пуста, виден только toggle-подвал) — «/g» матчит /gate в подвале."""
+    pytest.importorskip("textual")
+    tid = "ov6"; _write_task(tmp_path, tid)
+    async with _app(tmp_path).run_test(size=(80, 24)) as pilot:
+        scr = await _tall(pilot, tid)
+        scr._open_palette(prefix="g")                 # только /gate (toggle) матчит
+        await pilot.pause(0.4)
+        palette = scr._palette
+        footer = pilot.app.query_one("#footer")
+        assert palette is not None
+        assert palette.region.bottom <= 24
+        assert footer.region.bottom <= 24

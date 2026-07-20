@@ -5,8 +5,10 @@ from intent_guard.text_answer_judge import should_return_text_answer, TextAnswer
 from intent_guard.validation_result import ValidationResult
 
 
-def _ctx(mode=None):
-    cfg = {"text_answer_mode": mode} if mode is not None else {}
+def _ctx(mode=None, backend="chat_completions"):
+    cfg = {"backend_api_mode": backend}
+    if mode is not None:
+        cfg["text_answer_mode"] = mode
     return SimpleNamespace(config_dict=cfg, logger=None)
 
 
@@ -33,7 +35,6 @@ def test_deny_rejects_generic():
 
 
 def test_judge_accept(monkeypatch):
-    monkeypatch.setattr(taj, "FinishGateGuard", lambda **kw: SimpleNamespace(enabled=True))
     monkeypatch.setattr(taj, "judge_text_answer",
                         lambda *a, **k: SimpleNamespace(action="accept"))
     d = should_return_text_answer(_ctx("judge"), object(), "answer")
@@ -41,7 +42,6 @@ def test_judge_accept(monkeypatch):
 
 
 def test_judge_reject_carries_feedback(monkeypatch):
-    monkeypatch.setattr(taj, "FinishGateGuard", lambda **kw: SimpleNamespace(enabled=True))
     res = ValidationResult(ok=False, action="continue_work", trace_ok=False, report_ok=True,
                            trace_gaps=["need to run tests"], missing_requirements=[],
                            report_mismatches=[], conflicts=[], coverage_score=0.0,
@@ -55,10 +55,18 @@ def test_judge_reject_carries_feedback(monkeypatch):
 
 
 def test_judge_error_falls_back_to_generic(monkeypatch):
-    monkeypatch.setattr(taj, "FinishGateGuard", lambda **kw: SimpleNamespace(enabled=True))
     monkeypatch.setattr(taj, "judge_text_answer", lambda *a, **k: None)
     d = should_return_text_answer(_ctx("judge"), object(), "answer")
     assert d.accept is False and d.reject_feedback is None
+
+
+def test_judge_not_available_without_chat_completions_backend(monkeypatch):
+    """judge_available инфраструктурный: backend != chat_completions → deny без судьи."""
+    called = {"n": 0}
+    monkeypatch.setattr(taj, "judge_text_answer",
+                        lambda *a, **k: called.__setitem__("n", called["n"] + 1))
+    d = should_return_text_answer(_ctx("judge", backend="responses"), object(), "answer")
+    assert d.accept is False and called["n"] == 0
 
 
 # ── старые тесты переведены на новую сигнатуру ───────────────────────────────

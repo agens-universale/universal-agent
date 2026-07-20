@@ -120,3 +120,44 @@ async def test_mutex_with_command_palette(tmp_path):
         await pilot.pause(0.1)
         assert len(pilot.app.query(CommandPalette)) == 1
         assert len(pilot.app.query(ArgPicker)) == 0
+
+
+@pytest.mark.asyncio
+async def test_hint_has_keys_margin_and_honest_desired_height(tmp_path):
+    """Hint-строка пикера — докнутый footer (.palette-footer) с воздухом
+    (.palette-keys margin-top) + desired_height честно включает эту строку margin
+    (иначе main.py недосчитывал бы высоту и нижняя рамка уезжала за экран —
+    класс бага palette desired_height)."""
+    pytest.importorskip("textual")
+    from tui.widgets.arg_picker import ArgPicker
+    async with _mk_app(tmp_path).run_test() as pilot:
+        inp = pilot.app.query_one("#cmdinput")
+        inp.text = "/export "
+        await pilot.pause(0.1)
+        picker = pilot.app.query_one(ArgPicker)
+        hint = picker.query(".palette-keys")
+        assert len(hint) == 1
+        assert picker.query_one(".palette-footer").query(".palette-keys")  # hint внутри докнутого подвала
+        assert picker.desired_height == len(picker.children) + 3
+        # рамка обнимает контент: регион hint внутри региона пикера
+        assert hint[0].region.bottom <= picker.region.bottom
+
+
+@pytest.mark.asyncio
+async def test_hint_visible_on_open_with_small_screen_no_scroll(tmp_path):
+    """Регрессия c0622c9a на маленьком экране: /export с 4 опциями на 16-строчном
+    экране упирается в клэмп overlay (main.py::_sync_trace_max_height режет
+    picker.region до 4 строк — 2 border + 2 контента) — hint видна СРАЗУ при
+    открытии, без скролла (докнутый .palette-footer, а не последний FLOW-ребёнок)."""
+    pytest.importorskip("textual")
+    from tui.widgets.arg_picker import ArgPicker
+    async with _mk_app(tmp_path).run_test(size=(80, 16)) as pilot:
+        inp = pilot.app.query_one("#cmdinput")
+        inp.text = "/export "
+        await pilot.pause(0.1)
+        picker = pilot.app.query_one(ArgPicker)
+        assert picker.region.height < picker.desired_height   # клэмп реально сработал
+        hint = picker.query(".palette-keys")
+        assert len(hint) == 1
+        assert hint[0].region.bottom <= 16                     # на экране
+        assert hint[0].region.bottom <= picker.region.bottom   # внутри рамки пикера, видна без скролла

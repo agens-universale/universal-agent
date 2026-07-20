@@ -9,7 +9,7 @@ from __future__ import annotations
 from typing import Optional
 
 from textual.app import ComposeResult
-from textual.containers import VerticalScroll
+from textual.containers import Vertical, VerticalScroll
 from textual.widgets import Static
 
 
@@ -31,6 +31,7 @@ class SkillPicker(VerticalScroll):
         self._skills = skills
         self._filter = initial_filter
         self._selected = 0
+        self._apply_size()  # честная высота с самого первого layout-прохода (см. _apply_size)
 
     def compose(self) -> ComposeResult:
         rows = self._visible_rows()
@@ -40,7 +41,15 @@ class SkillPicker(VerticalScroll):
             for i, skill in enumerate(rows):
                 classes = "palette-row selected" if i == self._selected else "palette-row"
                 yield Static(self._format_row(skill), classes=classes, markup=False)
-        yield Static(_HINT, classes="palette-hint", markup=False)
+        yield self._build_footer()
+
+    def _build_footer(self) -> Vertical:
+        """Докнутый подвал (паттерн CommandPalette._build_footer): hint — ПОСЛЕДНИЙ
+        FLOW-ребёнок в старой раскладке упирался в max-height-клэмп длинного списка
+        и прятался за скроллом (регрессия воздуха .palette-keys, коммит c0622c9a).
+        Докнутый контейнер вне скролла держит hint видимым при открытии всегда."""
+        return Vertical(Static(_HINT, classes="palette-hint palette-keys", markup=False),
+                         classes="palette-footer")
 
     def _format_row(self, skill: dict) -> str:
         return f" {skill.get('id', '?')}"
@@ -50,6 +59,24 @@ class SkillPicker(VerticalScroll):
         if not f:
             return list(self._skills)
         return [s for s in self._skills if f in str(s.get("id", "")).lower()]
+
+    def _apply_size(self) -> None:
+        """Textual не учитывает докнутых детей (`.palette-footer`, `dock: bottom`)
+        в auto-высоте контейнера (см. подробный докстринг CommandPalette._apply_size) —
+        без резервации подвал либо схлопывает контейнер, либо рисуется поверх хвоста
+        списка. `min-height` поднимает итоговый размер до честного, не трогая
+        declared `height: auto`."""
+        self.styles.min_height = self.desired_height
+
+    @property
+    def desired_height(self) -> int:
+        """Честная желаемая высота: строки списка (или одна no-match-строка) +
+        докнутый footer (margin-top hint'а(1) + строка hint'а(1)) + рамка .palette(2).
+        main.py::_sync_trace_max_height берёт это значение напрямую — недосчёт
+        выдавливал бы нижнюю рамку пикера за экран."""
+        rows = self._visible_rows()
+        flow = len(rows) if rows else 1
+        return flow + 2 + 2
 
     def set_filter(self, query: str) -> None:
         self._filter = query
@@ -74,7 +101,7 @@ class SkillPicker(VerticalScroll):
         if not self.is_mounted:
             return
         rows = self._visible_rows()
-        new_widgets: list[Static] = []
+        new_widgets: list = []
         selected_widget: Optional[Static] = None
         if not rows:
             new_widgets.append(Static(_NO_MATCH, classes="palette-hint", markup=False))
@@ -85,7 +112,8 @@ class SkillPicker(VerticalScroll):
                 if i == self._selected:
                     selected_widget = w
                 new_widgets.append(w)
-        new_widgets.append(Static(_HINT, classes="palette-hint", markup=False))
+        new_widgets.append(self._build_footer())
+        self._apply_size()
         self.remove_children()
         self.mount_all(new_widgets)
         if selected_widget is not None:

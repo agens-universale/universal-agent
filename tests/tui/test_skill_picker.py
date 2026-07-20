@@ -186,3 +186,55 @@ async def test_skills_loaded_only_once_per_session(tmp_path, monkeypatch):
         assert len(pilot.app.query(SkillPicker)) == 1
         # Реестр загружен один раз на всю сессию.
         assert calls["n"] == 1
+
+
+@pytest.mark.asyncio
+async def test_hint_has_keys_margin_and_honest_desired_height(tmp_path, monkeypatch):
+    """Hint SkillPicker — докнутый footer (.palette-footer) с воздухом (.palette-keys),
+    desired_height включает строку margin (шов main.py::_sync_trace_max_height)."""
+    pytest.importorskip("textual")
+    _patch_registry(monkeypatch)
+    from tui.app import TuiApp
+    from tui.widgets.skill_picker import SkillPicker
+
+    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    async with app.run_test() as pilot:
+        inp = pilot.app.query_one("#cmdinput")
+        inp.text = "/skill "
+        await pilot.pause(0.1)
+        picker = pilot.app.query_one(SkillPicker)
+        hint = picker.query(".palette-keys")
+        assert len(hint) == 1
+        assert picker.query_one(".palette-footer").query(".palette-keys")  # hint внутри докнутого подвала
+        assert picker.desired_height == len(picker.children) + 3
+        assert hint[0].region.bottom <= picker.region.bottom
+
+
+@pytest.mark.asyncio
+async def test_hint_visible_on_open_with_long_list_no_scroll(tmp_path, monkeypatch):
+    """Регрессия c0622c9a: длинный список скиллов (> высоты клэмпа) — hint-строка
+    видна СРАЗУ при открытии, без скролла (докнутый .palette-footer)."""
+    pytest.importorskip("textual")
+
+    class _BigReg:
+        def list_skills(self, *, pack=None, include_all=False):
+            return [{"id": f"pack:skill{i:03d}"} for i in range(45)]
+
+    import tools.skills.registry as reg_mod
+    monkeypatch.setattr(reg_mod, "get_skills_registry", lambda cfg=None: _BigReg())
+
+    from tui.app import TuiApp
+    from tui.widgets.skill_picker import SkillPicker
+
+    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    async with app.run_test(size=(80, 24)) as pilot:
+        inp = pilot.app.query_one("#cmdinput")
+        inp.text = "/skill "
+        await pilot.pause(0.1)
+        picker = pilot.app.query_one(SkillPicker)
+        assert len(picker._visible_rows()) > 20                 # список длиннее клэмпа
+        assert picker.region.height < picker.desired_height     # клэмп реально сработал — скролл включён
+        hint = picker.query(".palette-keys")
+        assert len(hint) == 1
+        assert hint[0].region.bottom <= 24                      # на экране
+        assert hint[0].region.bottom <= picker.region.bottom    # внутри рамки пикера, видна без скролла

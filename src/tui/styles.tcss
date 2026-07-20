@@ -234,6 +234,10 @@ ToolCallRow.tool-group-start { margin-top: 1; }
 .palette-hint  { color: $deep-dim; padding: 0 1; }
 .palette-keys  { margin-top: 1; }   /* воздух перед строкой клавиш — как .set-hint */
 
+/* Toggle-подвал палитры (/gate, /answers — спека 2026-07-16 §4): докнут вне скролла. */
+.palette-footer     { dock: bottom; height: auto; }
+.palette-separator  { color: $deep-dim; padding: 0 1; height: 1; margin: 0; }
+
 /* Строки HelpScreen — реестр команд + доп. хоткеи */
 .help-section  { color: $deep-dim; padding: 0 1; }
 .help-row      { height: auto; width: 1fr; color: $ink; }
@@ -329,6 +333,7 @@ TextArea.ask-human-mode { border: solid $run-color; }
 .mcp-summary { padding: 0 1; }
 .mcp-confirm { background: $band-bg; border-left: outer $warn; padding: 0 1; }
 .mcp-row { width: 1fr; text-wrap: nowrap; text-overflow: ellipsis; }   /* описание обрезается … */
+.mcp-row-managed.selected, .mcp-action-row.selected { background: $focus-bg; }   /* контраст как у палитры/трейса */
 
 /* ConfigScreen — fieldset-панели (spec 2026-06-10) */
 .config-caption { color: $dim; padding: 0 1; margin: 0 0 1 0; }
