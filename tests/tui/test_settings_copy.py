@@ -18,8 +18,8 @@ async def test_ctrl_c_copies_selection_on_settings(tmp_path, monkeypatch):
         app.push_screen(scr); await pilot.pause()
         monkeypatch.setattr(app, "_current_selection", lambda: "http://x/v1")
         monkeypatch.setattr(app, "copy_to_clipboard", lambda s: copied.update(v=s))
-        import tui.services.os_ops as os_ops
-        monkeypatch.setattr(os_ops, "write_clipboard", lambda s: None)
+        import tui.services.clipboard_ops as clipboard_ops
+        monkeypatch.setattr(clipboard_ops, "write_clipboard", lambda s: True)
         app.action_interrupt()                      # прямой вызов action — без реального ctrl+c
         assert copied.get("v") == "http://x/v1"     # выделение скопировано
         assert app.is_running                       # приложение не вышло

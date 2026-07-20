@@ -120,9 +120,10 @@ def write_clipboard(text: str) -> bool:
     if sys.platform == "darwin":
         return _run_feed(["pbcopy"], text)
     if sys.platform.startswith("linux"):
+        # xclip без -loops 1 может держать процесс; timeout → ложный False.
         for cmd in (
             ["wl-copy"],
-            ["xclip", "-selection", "clipboard", "-i"],
+            ["xclip", "-selection", "clipboard", "-i", "-loops", "1"],
             ["xsel", "-b", "-i"],
         ):
             if _run_feed(cmd, text):

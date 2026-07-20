@@ -40,12 +40,13 @@ def test_write_clipboard_linux_falls_through_tools(monkeypatch):
     seen: list = []
 
     def fake_run(cmd, **kw):
-        seen.append(cmd[0])
+        seen.append(cmd)
         return SimpleNamespace(returncode=0 if cmd[0] == "xclip" else 1)
 
     monkeypatch.setattr(os_ops.subprocess, "run", fake_run)
     assert os_ops.write_clipboard("x") is True
-    assert seen[0] == "wl-copy" and "xclip" in seen   # перебор до первого успешного
+    assert seen[0] == ["wl-copy"]
+    assert ["xclip", "-selection", "clipboard", "-i", "-loops", "1"] in seen
 
 
 def test_write_clipboard_graceful_on_missing_tool(monkeypatch):

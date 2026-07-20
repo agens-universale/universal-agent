@@ -17,6 +17,7 @@ from runtime_notices import (
 from startup_notices import Notice, collect_startup_notices
 from tui import branding, palette
 from tui.screens.main import TraceScreen
+from tui.services.clipboard_ops import copy_out
 from tui.services.stream_sink import StreamSink
 from tools.registry import all_builtin_tool_names
 
@@ -110,6 +111,9 @@ class TuiApp(App):
         # Ctrl+C: есть выделение → копировать; нет → отменить текущий run.
         # priority — перебивает копирование TextArea и системный help_quit.
         Binding("ctrl+c", "interrupt", "копировать/стоп", show=False, priority=True),
+        # Страховка: терминал часто съедает хоткей — основной UX = copy-on-select.
+        Binding("ctrl+shift+c", "copy_selection", "копировать", show=False, priority=True),
+        Binding("super+c", "copy_selection", "копировать", show=False, priority=True),
     ]
 
     def __init__(
@@ -148,6 +152,7 @@ class TuiApp(App):
         self.view_positions = ViewPositionStore()
         # Один id на процесс TUI — для exclusive session lock (session-lock SPEC).
         self.tui_id = uuid.uuid4().hex
+        self._clipboard_warn_shown = False  # native-fail hint раз за сессию (clipboard_ops)
 
     def get_css_variables(self) -> dict:
         """Питаем TCSS палитрой из tui.palette — единый источник цветов для CSS и
@@ -589,13 +594,26 @@ class TuiApp(App):
         except Exception:
             return ""
 
+    def action_copy_selection(self) -> None:
+        """Ctrl+Shift+C / Super+C: copy selection; пусто → no-op (не stop)."""
+        sel = self._current_selection()
+        if sel:
+            copy_out(self, sel, toast=True)
+
+    def on_text_selected(self, event) -> None:
+        """Copy-on-select: drag без Shift → внешний буфер (тихий успех).
+
+        TextSelected не шлётся из Input/TextArea — дубля с focused.selected_text нет.
+        """
+        sel = self._current_selection()
+        if sel:
+            copy_out(self, sel, toast=False)
+
     def action_interrupt(self) -> None:
         """Ctrl+C: выделение → копировать; активный run → стоп; вхолостую → exit-модалка (как Esc)."""
         sel = self._current_selection()
         if sel:
-            self.copy_to_clipboard(sel)  # OSC 52 + внутренний app.clipboard (SSH/удалённые)
-            from tui.services.os_ops import write_clipboard
-            write_clipboard(sel)         # нативный ОС-буфер (локальные терминалы без OSC 52)
+            copy_out(self, sel, toast=True)
             return
         scr = self.screen
         runner = getattr(self, "active_runner", None)
