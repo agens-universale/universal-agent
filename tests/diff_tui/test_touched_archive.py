@@ -1,14 +1,14 @@
-"""Archive rename для touched journal (spec step 6)."""
+"""Суммаризация не трогает touched journal (только delete/reset треда)."""
 from __future__ import annotations
 
 import json
 from pathlib import Path
 
 from diff_tui.touched import TouchedJournal
-from thread_store import ThreadSession, touched_journal_path
+from thread_store import ThreadSession, delete_thread, touched_journal_path
 
 
-def test_archive_renames_touched_with_same_suffix(tmp_path):
+def test_summary_leaves_touched_journal_intact(tmp_path):
     threads = tmp_path / "threads"
     threads.mkdir()
     tid = "arch1"
@@ -16,8 +16,8 @@ def test_archive_renames_touched_with_same_suffix(tmp_path):
     j.add("src/a.py")
     touched = Path(touched_journal_path(str(threads), "tui", tid))
     assert touched.is_file()
+    before = touched.read_text(encoding="utf-8")
 
-    # минимальная live session
     data = threads / f"data_tui_{tid}.jsonl"
     meta = threads / f"meta_tui_{tid}.json"
     data.write_text(
@@ -50,11 +50,30 @@ def test_archive_renames_touched_with_same_suffix(tmp_path):
             "dialog_steps_offset": 0,
         }
     )
-    assert result["archive_touched_path"] is not None
-    assert Path(result["archive_touched_path"]).is_file()
+    assert "archive_touched_path" not in result
+    assert touched.is_file()
+    assert touched.read_text(encoding="utf-8") == before
+    assert TouchedJournal(str(threads), "tui", tid).paths() == {"src/a.py"}
+    assert not list(threads.glob(f"touched_tui_{tid}__pre_summary__*.json"))
+
+
+def test_delete_thread_removes_touched_and_legacy_archives(tmp_path):
+    threads = tmp_path / "threads"
+    threads.mkdir()
+    tid = "del1"
+    j = TouchedJournal(str(threads), "tui", tid)
+    j.add("src/a.py")
+    touched = Path(touched_journal_path(str(threads), "tui", tid))
+    legacy = threads / f"touched_tui_{tid}__pre_summary__20260101_000000.json"
+    legacy.write_text('{"paths": {}}\n', encoding="utf-8")
+    (threads / f"data_tui_{tid}.jsonl").write_text("", encoding="utf-8")
+    (threads / f"meta_tui_{tid}.json").write_text("{}", encoding="utf-8")
+
+    deleted = delete_thread(str(threads), "tui", tid)
+    assert str(touched) in deleted
+    assert str(legacy) in deleted
     assert not touched.exists()
-    # live journal убран; после archive новый пустой не создаём автоматически
-    assert TouchedJournal(str(threads), "tui", tid).paths() == set()
+    assert not legacy.exists()
 
 
 def test_legacy_gc_touched_json_ignored(tmp_path, monkeypatch):
