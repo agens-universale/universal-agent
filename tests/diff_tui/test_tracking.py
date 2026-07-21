@@ -1,6 +1,6 @@
-"""Tracking hook: snapshot через реальные FS text-тулы (spec2 T1–T2, T7).
+"""TrackingFsBackend: snapshot + journal через обёртку Local (spec S11).
 
-Только TUI (``ctx.is_tui=True``); CLI/server — no-op.
+Тулы не импортируют diff_tui; только TUI + thread identity.
 """
 from __future__ import annotations
 
@@ -13,7 +13,11 @@ import pytest
 from config_modules import env_vars
 from diff_tui.paths import orig_key
 from diff_tui.store import DiffStore
+from diff_tui.touched import TouchedJournal
+from diff_tui.tracking import TrackingFsBackend, wrap_local_for_tui
+from execution_workspace import build_execution_workspace
 from tests.helpers.tool_ctx import local_ctx
+from tools.backends.local import LocalFsBackend
 from tools.fs.append_to_file import AppendToFile
 from tools.fs.apply_file_edits import ApplyFileEdits
 from tools.fs.search_and_replace import SearchAndReplace
@@ -33,9 +37,11 @@ def launch_root(tmp_path, monkeypatch):
     root = tmp_path / "proj"
     root.mkdir()
     (root / "src").mkdir()
+    threads = tmp_path / "threads"
+    threads.mkdir()
     monkeypatch.setattr(env_vars.env, "gc_home", tmp_path / "gc_home")
     monkeypatch.chdir(root)
-    return root
+    return root, threads
 
 
 def _cfg(launch_root: Path) -> dict:
@@ -50,118 +56,128 @@ def _cfg(launch_root: Path) -> dict:
     }
 
 
-def _tool_ctx(launch_root: Path, *, is_tui: bool = True):
-    ctx = local_ctx(_cfg(launch_root))
+def _tool_ctx(
+    launch_root: Path,
+    threads: Path,
+    *,
+    is_tui: bool = True,
+    thread_id: str = "t1",
+):
+    cfg = _cfg(launch_root)
+    ctx = local_ctx(cfg)
     ctx.is_tui = is_tui
+    if is_tui:
+        ctx.threads_dir = str(threads)
+        ctx.system_id = "tui"
+        ctx.thread_id = thread_id
+        wrapped = wrap_local_for_tui(ctx.os_backend, ctx)
+        ctx.os_backend = wrapped
+        ctx.workspace = build_execution_workspace(wrapped, cfg)
     return ctx
 
 
-def _write_tool(launch_root: Path, *, is_tui: bool = True) -> WriteToFile:
-    return WriteToFile(ctx=_tool_ctx(launch_root, is_tui=is_tui))
+def _write_tool(launch_root: Path, threads: Path, **kw) -> WriteToFile:
+    return WriteToFile(ctx=_tool_ctx(launch_root, threads, **kw))
 
 
 def _orig(launch_root: Path, key: str) -> Path:
     return DiffStore(str(launch_root)).diffs_dir / f"{orig_key(key)}.orig"
 
 
-# --- TUI gate ---
-
-
 def test_cli_mode_does_not_track(launch_root):
-    """CLI/server: is_tui=False → snapshot no-op, .gc/diffs не создаётся."""
-    target = launch_root / "src" / "foo.py"
+    root, threads = launch_root
+    target = root / "src" / "foo.py"
     target.write_text("baseline\n", encoding="utf-8")
-    tool = _write_tool(launch_root, is_tui=False)
+    tool = _write_tool(root, threads, is_tui=False)
 
     res = json.loads(tool(path=str(target), content="changed\n"))
     assert res["ok"] is True
-    assert target.read_text(encoding="utf-8") == "changed\n"
-    assert DiffStore(str(launch_root)).load_index() == {}
-    assert not (launch_root / ".gc" / "diffs").exists()
-
-
-# --- T1 / T2 via WriteToFile ---
+    assert DiffStore(str(root)).load_index() == {}
+    assert not (root / ".gc" / "diffs").exists()
+    assert TouchedJournal(str(threads), "tui", "t1").paths() == set()
 
 
 def test_t1_write_existing_creates_orig(launch_root):
-    target = launch_root / "src" / "foo.py"
+    root, threads = launch_root
+    target = root / "src" / "foo.py"
     target.write_text("baseline\n", encoding="utf-8")
-    tool = _write_tool(launch_root)
+    tool = _write_tool(root, threads)
 
     res = json.loads(tool(path=str(target), content="changed\n"))
     assert res["ok"] is True
-    assert target.read_text(encoding="utf-8") == "changed\n"
-    assert _orig(launch_root, "src/foo.py").read_text(encoding="utf-8") == "baseline\n"
-    index = DiffStore(str(launch_root)).load_index()
+    assert _orig(root, "src/foo.py").read_text(encoding="utf-8") == "baseline\n"
+    index = DiffStore(str(root)).load_index()
     assert index["src/foo.py"]["status"] == "modified"
-    assert index["src/foo.py"]["baseline_exists"] is True
+    assert "src/foo.py" in TouchedJournal(str(threads), "tui", "t1").paths()
 
 
 def test_t1_write_new_file_registers_created(launch_root):
-    target = launch_root / "src" / "new.py"
-    tool = _write_tool(launch_root)
+    root, threads = launch_root
+    target = root / "src" / "new.py"
+    tool = _write_tool(root, threads)
 
     res = json.loads(tool(path=str(target), content="hello\n"))
     assert res["ok"] is True
-    assert not _orig(launch_root, "src/new.py").exists()
-    index = DiffStore(str(launch_root)).load_index()
+    assert not _orig(root, "src/new.py").exists()
+    index = DiffStore(str(root)).load_index()
     assert index["src/new.py"]["status"] == "created"
-    assert index["src/new.py"]["baseline_exists"] is False
+    assert "src/new.py" in TouchedJournal(str(threads), "tui", "t1").paths()
 
 
 def test_t2_second_write_does_not_overwrite_orig(launch_root):
-    target = launch_root / "src" / "foo.py"
+    root, threads = launch_root
+    target = root / "src" / "foo.py"
     target.write_text("v1\n", encoding="utf-8")
-    tool = _write_tool(launch_root)
+    tool = _write_tool(root, threads)
 
     assert json.loads(tool(path=str(target), content="v2\n"))["ok"] is True
     assert json.loads(tool(path=str(target), content="v3\n"))["ok"] is True
-    assert _orig(launch_root, "src/foo.py").read_text(encoding="utf-8") == "v1\n"
-
-
-# --- append / apply / search_and_replace ---
+    assert _orig(root, "src/foo.py").read_text(encoding="utf-8") == "v1\n"
 
 
 def test_append_existing_snapshots_orig(launch_root):
-    target = launch_root / "src" / "a.py"
+    root, threads = launch_root
+    target = root / "src" / "a.py"
     target.write_text("head\n", encoding="utf-8")
-    tool = AppendToFile(ctx=_tool_ctx(launch_root))
+    tool = AppendToFile(ctx=_tool_ctx(root, threads))
 
     res = json.loads(tool(path=str(target), content="tail", separator="\n"))
     assert res["ok"] is True
-    assert _orig(launch_root, "src/a.py").read_text(encoding="utf-8") == "head\n"
+    assert _orig(root, "src/a.py").read_text(encoding="utf-8") == "head\n"
 
 
 def test_search_and_replace_snapshots_orig(launch_root):
-    target = launch_root / "src" / "b.py"
+    root, threads = launch_root
+    target = root / "src" / "b.py"
     target.write_text("foo = 1\n", encoding="utf-8")
-    tool = SearchAndReplace(ctx=_tool_ctx(launch_root))
+    tool = SearchAndReplace(ctx=_tool_ctx(root, threads))
 
     res = json.loads(
         tool(path=str(target), search="foo = 1", replace="foo = 2")
     )
     assert res["ok"] is True
-    assert _orig(launch_root, "src/b.py").read_text(encoding="utf-8") == "foo = 1\n"
-    assert target.read_text(encoding="utf-8") == "foo = 2\n"
+    assert _orig(root, "src/b.py").read_text(encoding="utf-8") == "foo = 1\n"
 
 
 def test_search_and_replace_dry_run_does_not_track(launch_root):
-    target = launch_root / "src" / "b.py"
+    root, threads = launch_root
+    target = root / "src" / "b.py"
     target.write_text("foo = 1\n", encoding="utf-8")
-    tool = SearchAndReplace(ctx=_tool_ctx(launch_root))
+    tool = SearchAndReplace(ctx=_tool_ctx(root, threads))
 
     res = json.loads(
         tool(path=str(target), search="foo = 1", replace="foo = 2", dry_run=True)
     )
     assert res["ok"] is True
-    assert DiffStore(str(launch_root)).load_index() == {}
-    assert list(DiffStore(str(launch_root)).diffs_dir.glob("*.orig")) == []
+    assert DiffStore(str(root)).load_index() == {}
+    assert TouchedJournal(str(threads), "tui", "t1").paths() == set()
 
 
 def test_apply_file_edits_snapshots_orig(launch_root):
-    target = launch_root / "src" / "c.py"
+    root, threads = launch_root
+    target = root / "src" / "c.py"
     target.write_text("alpha\n", encoding="utf-8")
-    tool = ApplyFileEdits(ctx=_tool_ctx(launch_root))
+    tool = ApplyFileEdits(ctx=_tool_ctx(root, threads))
 
     res = json.loads(
         tool(
@@ -170,63 +186,90 @@ def test_apply_file_edits_snapshots_orig(launch_root):
         )
     )
     assert res["ok"] is True
-    assert _orig(launch_root, "src/c.py").read_text(encoding="utf-8") == "alpha\n"
-
-
-# --- T7 binary ---
+    assert _orig(root, "src/c.py").read_text(encoding="utf-8") == "alpha\n"
 
 
 def test_t7_binary_write_not_tracked_via_overwrite_of_binary(launch_root):
-    """Существующий binary: register_mutation видит is_binary → не трекаем."""
-    target = launch_root / "src" / "blob.bin"
+    root, threads = launch_root
+    target = root / "src" / "blob.bin"
     target.write_bytes(b"\x00\x01\xffbinary")
-    tool = _write_tool(launch_root)
+    tool = _write_tool(root, threads)
 
     res = json.loads(tool(path=str(target), content="now text\n"))
     assert res["ok"] is True
-    assert DiffStore(str(launch_root)).load_index() == {}
-    assert list(DiffStore(str(launch_root)).diffs_dir.glob("*.orig")) == []
+    assert DiffStore(str(root)).load_index() == {}
 
 
-# --- git-mode no-op ---
-
-
-def test_git_mode_tracking_is_noop_for_tracked(launch_root):
-    """git-mode + non-ignored → snapshot no-op (baseline = git index)."""
+def test_git_mode_tracked_adds_journal_not_cache(launch_root):
+    root, threads = launch_root
     if not _has_git():
         pytest.skip("git недоступен")
     subprocess.run(
         ["git", "init", "-b", "main"],
-        cwd=launch_root,
+        cwd=root,
         check=True,
         capture_output=True,
     )
-    target = launch_root / "src" / "foo.py"
+    target = root / "src" / "foo.py"
     target.write_text("base\n", encoding="utf-8")
-    tool = _write_tool(launch_root)
+    tool = _write_tool(root, threads)
 
     assert json.loads(tool(path=str(target), content="new\n"))["ok"] is True
-    assert DiffStore(str(launch_root)).load_index() == {}
-    assert not (launch_root / ".gc" / "diffs").exists() or list(
-        (launch_root / ".gc" / "diffs").glob("*")
-    ) == []
+    assert DiffStore(str(root)).load_index() == {}
+    assert "src/foo.py" in TouchedJournal(str(threads), "tui", "t1").paths()
 
 
 def test_git_mode_ignored_is_tracked_via_cache(launch_root):
-    """git-mode + ignored → snapshot в ``.gc/diffs/``."""
+    root, threads = launch_root
     if not _has_git():
         pytest.skip("git недоступен")
     subprocess.run(
         ["git", "init", "-b", "main"],
-        cwd=launch_root,
+        cwd=root,
         check=True,
         capture_output=True,
     )
-    (launch_root / ".gitignore").write_text("src/secret.md\n", encoding="utf-8")
-    target = launch_root / "src" / "secret.md"
+    (root / ".gitignore").write_text("src/secret.md\n", encoding="utf-8")
+    target = root / "src" / "secret.md"
     target.write_text("base\n", encoding="utf-8")
-    tool = _write_tool(launch_root)
+    tool = _write_tool(root, threads)
 
     assert json.loads(tool(path=str(target), content="new\n"))["ok"] is True
-    assert _orig(launch_root, "src/secret.md").read_text(encoding="utf-8") == "base\n"
-    assert DiffStore(str(launch_root)).load_index()["src/secret.md"]["status"] == "modified"
+    assert _orig(root, "src/secret.md").read_text(encoding="utf-8") == "base\n"
+    assert "src/secret.md" in TouchedJournal(str(threads), "tui", "t1").paths()
+
+
+def test_exec_delta_adds_journal(launch_root):
+    root, threads = launch_root
+    if not _has_git():
+        pytest.skip("git недоступен")
+    subprocess.run(
+        ["git", "init", "-b", "main"],
+        cwd=root,
+        check=True,
+        capture_output=True,
+    )
+    ctx = _tool_ctx(root, threads)
+    assert isinstance(ctx.os_backend, TrackingFsBackend)
+    ctx.os_backend.exec("echo hello > shell_out.txt", cwd=str(root))
+    assert "shell_out.txt" in TouchedJournal(str(threads), "tui", "t1").paths()
+
+
+def test_wrap_skips_non_local():
+    class HarborLike:
+        pass
+
+    ctx = type("C", (), {"is_tui": True})()
+    sentinel = HarborLike()
+    assert wrap_local_for_tui(sentinel, ctx) is sentinel
+
+
+def test_tools_do_not_import_diff_tui():
+    import tools.fs.write_to_file_tool as w
+    import tools.fs.append_to_file as a
+    import tools.fs.search_and_replace as s
+    import tools.fs.apply_file_edits as e
+
+    for mod in (w, a, s, e):
+        src = Path(mod.__file__).read_text(encoding="utf-8")
+        assert "diff_tui" not in src

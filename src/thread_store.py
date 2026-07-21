@@ -140,6 +140,13 @@ def subagent_trace_path(threads_dir: str, system_id: str, thread_id: str) -> str
     return os.path.join(threads_dir, f"data_subagents_{sys_norm}_{tid}.jsonl")
 
 
+def touched_journal_path(threads_dir: str, system_id: str, thread_id: str) -> str:
+    """Путь per-trace Diff journal: touched_<system>_<thread_id>.json."""
+    sys_norm = sanitize_system_id(system_id)
+    tid = validate_thread_id(thread_id)
+    return os.path.join(threads_dir, f"touched_{sys_norm}_{tid}.json")
+
+
 def ensure_threads_dir(threads_dir: str) -> None:
     os.makedirs(threads_dir, exist_ok=True)
     os.makedirs(os.path.join(threads_dir, "locks"), exist_ok=True)
@@ -163,6 +170,7 @@ def reset_thread_files(threads_dir: str, system_id: str, thread_id: str) -> List
     paths.extend(_thread_paths(threads_dir, sys_norm, normalized_thread_id))
     paths.extend(_thread_paths_legacy(threads_dir, normalized_thread_id))
     paths.append(subagent_trace_path(threads_dir, sys_norm, normalized_thread_id))
+    paths.append(touched_journal_path(threads_dir, sys_norm, normalized_thread_id))
     paths.append(_lock_path(threads_dir, sys_norm, normalized_thread_id))
 
     deleted: List[str] = []
@@ -174,16 +182,23 @@ def reset_thread_files(threads_dir: str, system_id: str, thread_id: str) -> List
 
 
 def _thread_archive_paths(threads_dir: str, system_id: str, thread_id: str) -> List[str]:
-    """Пути __pre_summary__-архивов треда (data+meta), созданных суммаризацией."""
+    """Пути __pre_summary__-архивов треда (data+meta+touched), созданных суммаризацией."""
     sys_norm = sanitize_system_id(system_id)
     tid = validate_thread_id(thread_id)
     data_glob = os.path.join(threads_dir, f"data_{sys_norm}_{tid}__pre_summary__*.jsonl")
     meta_glob = os.path.join(threads_dir, f"meta_{sys_norm}_{tid}__pre_summary__*.json")
-    return sorted(glob.glob(data_glob)) + sorted(glob.glob(meta_glob))
+    touched_glob = os.path.join(
+        threads_dir, f"touched_{sys_norm}_{tid}__pre_summary__*.json"
+    )
+    return (
+        sorted(glob.glob(data_glob))
+        + sorted(glob.glob(meta_glob))
+        + sorted(glob.glob(touched_glob))
+    )
 
 
 def delete_thread(threads_dir: str, system_id: str, thread_id: str) -> List[str]:
-    """Полностью удалить тред: canonical + legacy + lock + sidecar + __pre_summary__.
+    """Полностью удалить тред: canonical + legacy + lock + sidecar + touched + __pre_summary__.
 
     Возвращает список удалённых путей. Отсутствие файла — no-op.
     """
@@ -192,6 +207,7 @@ def delete_thread(threads_dir: str, system_id: str, thread_id: str) -> List[str]
     paths.extend(_thread_paths_legacy(threads_dir, thread_id))
     paths.extend(_thread_archive_paths(threads_dir, system_id, thread_id))
     paths.append(subagent_trace_path(threads_dir, system_id, thread_id))
+    paths.append(touched_journal_path(threads_dir, system_id, thread_id))
     paths.append(_lock_path(threads_dir, system_id, thread_id))
 
     deleted: List[str] = []
@@ -673,6 +689,9 @@ class ThreadSession:
         user_intent_log = summary_payload.get("user_intent_log")
         dialog_steps_offset = summary_payload.get("dialog_steps_offset", 0)
         data_path, meta_path = _thread_paths(self.threads_dir, self.system_id, self.thread_id)
+        touched_path = touched_journal_path(
+            self.threads_dir, self.system_id, self.thread_id
+        )
         # До переноса meta в архив: снимок disk tui/runtime (TUI-ключи не клобберить).
         disk_meta = load_thread_meta(self.threads_dir, self.system_id, self.thread_id) or {}
         disk_tui = dict(disk_meta.get("tui") or {})
@@ -680,11 +699,16 @@ class ThreadSession:
         ts_suffix = _utc_now_suffix()
         archive_data_path = data_path.replace(".jsonl", f"__pre_summary__{ts_suffix}.jsonl")
         archive_meta_path = meta_path.replace(".json", f"__pre_summary__{ts_suffix}.json")
+        archive_touched_path = touched_path.replace(
+            ".json", f"__pre_summary__{ts_suffix}.json"
+        )
 
         data_exists = os.path.exists(data_path)
         meta_exists = os.path.exists(meta_path)
+        touched_exists = os.path.exists(touched_path)
         moved_data = False
         moved_meta = False
+        moved_touched = False
         try:
             if data_exists:
                 atomic_replace(data_path, archive_data_path)
@@ -692,7 +716,12 @@ class ThreadSession:
             if meta_exists:
                 atomic_replace(meta_path, archive_meta_path)
                 moved_meta = True
+            if touched_exists:
+                atomic_replace(touched_path, archive_touched_path)
+                moved_touched = True
         except Exception:
+            if moved_touched and not os.path.exists(touched_path):
+                atomic_replace(archive_touched_path, touched_path)
             if moved_meta and not os.path.exists(meta_path):
                 atomic_replace(archive_meta_path, meta_path)
             if moved_data and not os.path.exists(data_path):
@@ -801,6 +830,7 @@ class ThreadSession:
             "archive_suffix": ts_suffix,
             "archive_data_path": archive_data_path if data_exists else None,
             "archive_meta_path": archive_meta_path if meta_exists else None,
+            "archive_touched_path": archive_touched_path if touched_exists else None,
             "new_messages_count": len(compact_messages),
             "newly_summarized_message_id": summary_message.get("id"),
         }

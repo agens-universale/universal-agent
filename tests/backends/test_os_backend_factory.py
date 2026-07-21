@@ -51,6 +51,19 @@ def test_resolve_harbor_with_env_and_loop():
 def test_create_run_context_sets_local_os_backend():
     ctx = create_run_context({"backend_api_mode": "chat_completions", "save_logs": False})
     assert isinstance(ctx.os_backend, LocalFsBackend)
+    assert getattr(ctx, "is_tui", False) is False
+
+
+def test_create_run_context_tui_wraps_tracking():
+    from diff_tui.tracking import TrackingFsBackend
+
+    ctx = create_run_context(
+        {"backend_api_mode": "chat_completions", "save_logs": False},
+        is_tui=True,
+    )
+    assert isinstance(ctx.os_backend, TrackingFsBackend)
+    assert isinstance(ctx.os_backend.inner, LocalFsBackend)
+    assert ctx.is_tui is True
 
 
 def test_create_run_context_explicit_override():
@@ -58,6 +71,8 @@ def test_create_run_context_explicit_override():
     ctx = create_run_context(
         {"save_logs": False},
         os_backend=sentinel,  # type: ignore[arg-type]
+        is_tui=True,
     )
+    # explicit override: не оборачиваем Tracking
     assert ctx.os_backend is sentinel
     assert ctx.workspace.backend is sentinel

@@ -82,7 +82,14 @@ def _kind_badge(entry: DiffFileEntry) -> str:
     return f"[{_kind_label(entry)}]"
 
 
-def _service_from_config(launch_root: str, config: dict) -> DiffService:
+def _service_from_config(
+    launch_root: str,
+    config: dict,
+    *,
+    threads_dir: Optional[str] = None,
+    system_id: Optional[str] = None,
+    thread_id: Optional[str] = None,
+) -> DiffService:
     wg = config.get("write_guard") or {}
     dt = config.get("diff_tui") or {}
     protected = config.get("protected_paths") or {}
@@ -94,6 +101,9 @@ def _service_from_config(launch_root: str, config: dict) -> DiffService:
         preview_context_lines=int(dt.get("preview_context_lines", 3)),
         max_diff_chars=int(dt.get("max_diff_chars", 100_000)),
         emit_notices=True,
+        threads_dir=threads_dir,
+        system_id=system_id,
+        thread_id=thread_id,
     )
 
 
@@ -161,10 +171,19 @@ class DiffScreen(Screen):
         service: Optional[DiffService] = None,
         on_undo_feedback: Optional[UndoFeedbackFn] = None,
         on_ui_ack: Optional[UiAckFn] = None,
+        threads_dir: Optional[str] = None,
+        system_id: Optional[str] = None,
+        thread_id: Optional[str] = None,
     ) -> None:
         super().__init__()
         self._config = config or {}
-        self._svc = service or _service_from_config(launch_root, self._config)
+        self._svc = service or _service_from_config(
+            launch_root,
+            self._config,
+            threads_dir=threads_dir,
+            system_id=system_id,
+            thread_id=thread_id,
+        )
         self._on_undo_feedback = on_undo_feedback
         self._on_ui_ack = on_ui_ack
         self._entries: list[DiffFileEntry] = []

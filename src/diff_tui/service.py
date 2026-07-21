@@ -23,6 +23,7 @@ from diff_tui.store import (
     DiffStore,
     UndoResult,
 )
+from diff_tui.touched import TouchedJournal
 from diff_tui.visual import (
     build_created_file_diff,
     build_unified_diff,
@@ -66,7 +67,12 @@ _KIND_MARK = {
 
 
 class DiffService:
-    """Единый порт операций для TUI. Mode выбирается по ``launch_root``."""
+    """Единый порт операций для TUI. Mode выбирается по ``launch_root``.
+
+    Listing и approve/undo scoped по per-trace ``TouchedJournal``
+    (``threads_dir`` + ``system_id`` + ``thread_id``). Без identity —
+    пустой list (чужой dirty не показываем).
+    """
 
     def __init__(
         self,
@@ -78,6 +84,9 @@ class DiffService:
         preview_context_lines: int = DEFAULT_PREVIEW_CONTEXT_LINES,
         max_diff_chars: int = DEFAULT_MAX_DIFF_CHARS,
         emit_notices: bool = True,
+        threads_dir: str | None = None,
+        system_id: str | None = None,
+        thread_id: str | None = None,
     ) -> None:
         self.launch_root = str(Path(launch_root))
         self.extra_paths = list(extra_paths or ())
@@ -86,6 +95,9 @@ class DiffService:
         self.preview_context_lines = preview_context_lines
         self.max_diff_chars = max_diff_chars
         self.emit_notices = emit_notices
+        self.threads_dir = threads_dir
+        self.system_id = system_id
+        self.thread_id = thread_id
         self._locks: dict[str, threading.Lock] = {}
         self._locks_guard = threading.Lock()
         self._cache_cleared = False
@@ -95,6 +107,19 @@ class DiffService:
             protected_extra=self.protected_extra,
             cache_max_orig=self.cache_max_orig,
         )
+        self._journal: TouchedJournal | None = None
+        if (
+            isinstance(threads_dir, str)
+            and threads_dir.strip()
+            and isinstance(system_id, str)
+            and system_id.strip()
+            and isinstance(thread_id, str)
+            and thread_id.strip()
+        ):
+            try:
+                self._journal = TouchedJournal(threads_dir, system_id, thread_id)
+            except ValueError:
+                self._journal = None
 
     @property
     def mode(self) -> str:
@@ -162,19 +187,42 @@ class DiffService:
             return "git"
         return None
 
+    def _touched_paths(self) -> set[str]:
+        if self._journal is None:
+            return set()
+        return self._journal.paths()
+
+    def _discard_own(self, *keys: str) -> None:
+        if self._journal is None or not keys:
+            return
+        self._journal.discard_many(keys)
+
     # --- list ---
 
     def list_entries(self, *, pending_only: bool = False) -> list[DiffFileEntry]:
         self.ensure_mode_ready()
+        touched = self._touched_paths()
+        if not touched:
+            return []
         if self.mode == "git-mode":
-            return self._list_hybrid(pending_only=pending_only)
-        return self._list_cache(pending_only=pending_only)
+            raw = self._list_hybrid(pending_only=pending_only, touched=touched)
+        else:
+            raw = self._list_cache(pending_only=pending_only, touched=touched)
+        shown = {e.key for e in raw}
+        stale = touched - shown
+        if stale:
+            self._discard_own(*stale)
+        return raw
 
-    def _list_hybrid(self, *, pending_only: bool) -> list[DiffFileEntry]:
+    def _list_hybrid(
+        self, *, pending_only: bool, touched: set[str]
+    ) -> list[DiffFileEntry]:
         git_entries = list(git_ops.git_status(self.launch_root))
         # protected / вне perimeter (.gc и т.п.) — не показываем в /diff
         trackable_git = [
-            e for e in git_entries if self._cache_key(e.path) is not None
+            e
+            for e in git_entries
+            if e.path in touched and self._cache_key(e.path) is not None
         ]
         git_keys = {e.path for e in trackable_git}
         # конфликт → git побеждает; stale cache удаляем при refresh
@@ -194,7 +242,7 @@ class DiffService:
                 )
             )
 
-        for entry in self._list_cache(pending_only=pending_only):
+        for entry in self._list_cache(pending_only=pending_only, touched=touched):
             if entry.key in git_keys:
                 continue
             out.append(
@@ -208,9 +256,13 @@ class DiffService:
             )
         return out
 
-    def _list_cache(self, *, pending_only: bool) -> list[DiffFileEntry]:
+    def _list_cache(
+        self, *, pending_only: bool, touched: set[str]
+    ) -> list[DiffFileEntry]:
         out: list[DiffFileEntry] = []
         for e in self._store.list_entries(cleanup_stale=True):
+            if e.key not in touched:
+                continue
             disk = self._store._disk_path(e.key)
             orig = self._store._orig_path(e.key)
             kind: FileKind
@@ -260,10 +312,14 @@ class DiffService:
         self.ensure_mode_ready()
         backend = self.backend_for(path)
         if backend == "git":
-            return self._approve_git(path)
-        if backend == "cache":
-            return self._approve_cache(path)
-        return OpResult(ok=False, reason="not_trackable")
+            result = self._approve_git(path)
+        elif backend == "cache":
+            result = self._approve_cache(path)
+        else:
+            result = OpResult(ok=False, reason="not_trackable")
+        if result.ok and result.key:
+            self._discard_own(result.key)
+        return result
 
     def approve_all(self) -> OpResult:
         self.ensure_mode_ready()
@@ -275,6 +331,8 @@ class DiffService:
                 if r.ok:
                     ok_any = True
                     cache_n += 1
+                    if r.key:
+                        self._discard_own(r.key)
             return OpResult(
                 ok=ok_any or not self.list_entries(pending_only=True),
                 cache_count=cache_n,
@@ -287,13 +345,19 @@ class DiffService:
         git_n = 0
         for entry in git_pending:
             # Поштучный add: не трогаем protected/.gc (в отличие от ``git add -A``).
-            if self._approve_git(entry.key).ok:
+            r = self._approve_git(entry.key)
+            if r.ok:
                 git_n += 1
+                if r.key:
+                    self._discard_own(r.key)
 
         cache_n = 0
         for entry in cache_pending:
-            if self._approve_cache(entry.key).ok:
+            r = self._approve_cache(entry.key)
+            if r.ok:
                 cache_n += 1
+                if r.key:
+                    self._discard_own(r.key)
 
         return OpResult(
             ok=True,
@@ -338,17 +402,23 @@ class DiffService:
             result = self._undo_cache(path)
         else:
             result = OpResult(ok=False, reason="not_trackable")
-        return self._with_undone_keys(result)
+        result = self._with_undone_keys(result)
+        if result.ok and result.key:
+            self._discard_own(result.key)
+        return result
 
     def undo_all(self) -> OpResult:
+        """Откат только файлов текущего list (после ∩ journal). Per-path restore."""
         self.ensure_mode_ready()
+        pending = self.list_entries(pending_only=True)
         if self.mode == "cache-mode":
             restored: list[str] = []
             deleted: list[str] = []
-            for entry in list(self.list_entries(pending_only=True)):
+            for entry in list(pending):
                 r = self._undo_cache(entry.key)
                 if not r.ok or not r.key:
                     continue
+                self._discard_own(r.key)
                 if r.reason == "deleted_created":
                     deleted.append(r.key)
                 else:
@@ -362,26 +432,23 @@ class DiffService:
                 cache_count=len(undone),
             )
 
-        pending = self.list_entries(pending_only=True)
         git_pending = [e for e in pending if e.backend == "git"]
         cache_pending = [e for e in pending if e.backend == "cache"]
 
         status = {e.path: e for e in git_ops.git_status(self.launch_root)}
-        untracked = [
-            e.key
-            for e in git_pending
-            if status.get(e.key) is not None and status[e.key].xy == "??"
-        ]
-        tracked = [e.key for e in git_pending if e.key not in set(untracked)]
-        for rel in untracked:
-            self._delete_path(Path(self.launch_root) / rel)
-
-        git_n = len(untracked)
-        if tracked:
-            result = git_ops.git_restore_worktree_all(self.launch_root)
-            if not result.ok:
-                return OpResult(ok=False, reason=result.stderr)
-            git_n += len(tracked)
+        restored_git: list[str] = []
+        deleted_git: list[str] = []
+        for entry in git_pending:
+            st = status.get(entry.key)
+            if st is not None and st.xy == "??":
+                self._delete_path(Path(self.launch_root) / entry.key)
+                deleted_git.append(entry.key)
+                self._discard_own(entry.key)
+                continue
+            result = git_ops.git_restore_worktree(self.launch_root, entry.key)
+            if result.ok:
+                restored_git.append(entry.key)
+                self._discard_own(entry.key)
 
         cache_restored: list[str] = []
         cache_deleted: list[str] = []
@@ -389,20 +456,21 @@ class DiffService:
             r = self._undo_cache(entry.key)
             if not r.ok or not r.key:
                 continue
+            self._discard_own(r.key)
             if r.reason == "deleted_created":
                 cache_deleted.append(r.key)
             else:
                 cache_restored.append(r.key)
 
-        restored = tuple(tracked) + tuple(cache_restored)
-        deleted = tuple(untracked) + tuple(cache_deleted)
+        restored = tuple(restored_git) + tuple(cache_restored)
+        deleted = tuple(deleted_git) + tuple(cache_deleted)
         all_undone = restored + deleted
         return OpResult(
             ok=bool(all_undone) or (not git_pending and not cache_pending),
             undone_keys=all_undone,
             restored_keys=restored,
             deleted_keys=deleted,
-            git_count=git_n,
+            git_count=len(restored_git) + len(deleted_git),
             cache_count=len(cache_restored) + len(cache_deleted),
         )
 

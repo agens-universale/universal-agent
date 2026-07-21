@@ -1683,6 +1683,21 @@ class TraceScreen(Screen):
         self._unmount_ask_human_banner()
 
     
+    def _diff_thread_identity(self) -> tuple[Optional[str], Optional[str], Optional[str]]:
+        """(threads_dir, system_id, thread_id) текущей сессии для DiffService."""
+        threads_dir = getattr(self.app, "_threads_dir", None)
+        system_id = getattr(self.app, "_system", None)
+        thread_id = self._active_task_id or getattr(
+            getattr(self.app, "tui_state", None), "active_task_id", None
+        )
+        if not isinstance(threads_dir, str) or not threads_dir.strip():
+            threads_dir = None
+        if not isinstance(system_id, str) or not system_id.strip():
+            system_id = None
+        if not isinstance(thread_id, str) or not thread_id.strip():
+            thread_id = None
+        return threads_dir, system_id, thread_id
+
     def _diff_service_for_preview(self):
         cfg = getattr(self.app, "_config", None) or {}
         launch_root = cfg.get("launch_root")
@@ -1690,7 +1705,14 @@ class TraceScreen(Screen):
             return None
         from tui.screens.diff import _service_from_config
 
-        return _service_from_config(str(launch_root), cfg)
+        threads_dir, system_id, thread_id = self._diff_thread_identity()
+        return _service_from_config(
+            str(launch_root),
+            cfg,
+            threads_dir=threads_dir,
+            system_id=system_id,
+            thread_id=thread_id,
+        )
 
     def _on_ask_human_event(self, ev, *, live: bool = False) -> None:
         from tui.widgets.ask_human_banner import AskHumanBanner
@@ -3415,12 +3437,16 @@ class TraceScreen(Screen):
                 kind_class="line-meta",
             )
             return
+        threads_dir, system_id, thread_id = self._diff_thread_identity()
         self.app.push_screen(
             DiffScreen(
                 launch_root=str(launch_root),
                 config=cfg,
                 on_undo_feedback=self._on_diff_undo_feedback,
                 on_ui_ack=self._on_diff_ui_ack,
+                threads_dir=threads_dir,
+                system_id=system_id,
+                thread_id=thread_id,
             )
         )
 

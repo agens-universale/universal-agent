@@ -10,6 +10,7 @@ from config_modules import env_vars
 from diff_tui.paths import orig_key
 from diff_tui.service import DiffService
 from diff_tui.store import DiffStore
+from diff_tui.touched import TouchedJournal
 from runtime_notices import clear_runtime_notices
 
 
@@ -36,9 +37,11 @@ def cache_proj(tmp_path, monkeypatch):
     root = tmp_path / "proj"
     root.mkdir()
     (root / "src").mkdir()
+    threads = tmp_path / "threads"
+    threads.mkdir()
     monkeypatch.setattr(env_vars.env, "gc_home", tmp_path / "gc_home")
     clear_runtime_notices()
-    return root
+    return root, threads
 
 
 @pytest.fixture
@@ -47,6 +50,8 @@ def git_repo(tmp_path, monkeypatch):
         pytest.skip("git недоступен")
     root = tmp_path / "repo"
     root.mkdir()
+    threads = tmp_path / "threads"
+    threads.mkdir()
     monkeypatch.setattr(env_vars.env, "gc_home", tmp_path / "gc_home")
     _git(root, "init", "-b", "main")
     _git(root, "config", "user.email", "t@t")
@@ -55,7 +60,23 @@ def git_repo(tmp_path, monkeypatch):
     _git(root, "add", "a.txt")
     _git(root, "commit", "-m", "init")
     clear_runtime_notices()
-    return root
+    return root, threads
+
+
+def _svc(root, threads, tid="t1", **kw):
+    return DiffService(
+        str(root),
+        threads_dir=str(threads),
+        system_id="tui",
+        thread_id=tid,
+        **kw,
+    )
+
+
+def _touch(threads, *keys, tid="t1"):
+    j = TouchedJournal(str(threads), "tui", tid)
+    for k in keys:
+        j.add(k)
 
 
 def _orig(store: DiffStore, key: str) -> Path:
@@ -66,38 +87,43 @@ def _orig(store: DiffStore, key: str) -> Path:
 
 
 def test_t3_cache_approve_via_service(cache_proj):
-    target = cache_proj / "src" / "foo.py"
+    root, threads = cache_proj
+    target = root / "src" / "foo.py"
     target.write_text("old\n", encoding="utf-8")
-    store = DiffStore(str(cache_proj))
+    store = DiffStore(str(root))
     store.register_mutation(str(target))
     target.write_text("approved\n", encoding="utf-8")
+    _touch(threads, "src/foo.py")
 
-    svc = DiffService(str(cache_proj), emit_notices=True)
+    svc = _svc(root, threads, emit_notices=True)
     assert svc.mode == "cache-mode"
     assert svc.approve(str(target)).ok
     assert _orig(store, "src/foo.py").read_text(encoding="utf-8") == "approved\n"
-    # disk == baseline → не pending
     pending = svc.list_entries(pending_only=True)
     assert all(e.key != "src/foo.py" for e in pending)
 
 
 def test_t4_cache_undo_via_service(cache_proj):
-    target = cache_proj / "src" / "foo.py"
+    root, threads = cache_proj
+    target = root / "src" / "foo.py"
     target.write_text("base\n", encoding="utf-8")
-    DiffStore(str(cache_proj)).register_mutation(str(target))
+    DiffStore(str(root)).register_mutation(str(target))
     target.write_text("changed\n", encoding="utf-8")
+    _touch(threads, "src/foo.py")
 
-    svc = DiffService(str(cache_proj))
+    svc = _svc(root, threads)
     assert svc.undo(str(target)).ok
     assert target.read_text(encoding="utf-8") == "base\n"
 
 
 def test_t5_cache_undo_created_deletes_file(cache_proj):
-    target = cache_proj / "src" / "new.py"
-    DiffStore(str(cache_proj)).register_mutation(str(target))
+    root, threads = cache_proj
+    target = root / "src" / "new.py"
+    DiffStore(str(root)).register_mutation(str(target))
     target.write_text("brand\n", encoding="utf-8")
+    _touch(threads, "src/new.py")
 
-    svc = DiffService(str(cache_proj), emit_notices=False)
+    svc = _svc(root, threads, emit_notices=False)
     result = svc.undo(str(target))
     assert result.ok
     assert result.undone_keys == ("src/new.py",)
@@ -109,13 +135,15 @@ def test_t5_cache_undo_created_deletes_file(cache_proj):
 
 def test_cache_external_delete_shows_deleted_diff(cache_proj):
     """Файл удалён с диска (rm), .orig жив → kind=deleted и visual_diff не пустой."""
-    target = cache_proj / "src" / "gone.py"
+    root, threads = cache_proj
+    target = root / "src" / "gone.py"
     target.write_text("keep-me\n", encoding="utf-8")
-    DiffStore(str(cache_proj)).register_mutation(str(target))
+    DiffStore(str(root)).register_mutation(str(target))
     target.write_text("changed\n", encoding="utf-8")
     target.unlink()
+    _touch(threads, "src/gone.py")
 
-    svc = DiffService(str(cache_proj), emit_notices=False)
+    svc = _svc(root, threads, emit_notices=False)
     entries = {e.key: e for e in svc.list_entries(pending_only=True)}
     assert "src/gone.py" in entries
     assert entries["src/gone.py"].kind == "deleted"
@@ -127,18 +155,20 @@ def test_cache_external_delete_shows_deleted_diff(cache_proj):
 
 def test_cache_approve_deleted_clears_pending_and_orig(cache_proj):
     """Approve deleted: pending уходит, .orig и index чистятся (не no-op)."""
-    target = cache_proj / "src" / "gone.py"
-    store = DiffStore(str(cache_proj))
+    root, threads = cache_proj
+    target = root / "src" / "gone.py"
+    store = DiffStore(str(root))
     target.write_text("base\n", encoding="utf-8")
     store.register_mutation(str(target))
     target.write_text("changed\n", encoding="utf-8")
     target.unlink()
+    _touch(threads, "src/gone.py")
 
     key = "src/gone.py"
     orig = store.diffs_dir / f"{orig_key(key)}.orig"
     assert orig.is_file()
 
-    svc = DiffService(str(cache_proj), emit_notices=False)
+    svc = _svc(root, threads, emit_notices=False)
     assert svc.approve(key).ok
     assert all(e.key != key for e in svc.list_entries(pending_only=True))
     assert key not in store.load_index()
@@ -149,37 +179,44 @@ def test_cache_approve_deleted_clears_pending_and_orig(cache_proj):
 
 
 def test_t11_git_approve_and_undo_keeps_staging(git_repo):
-    (git_repo / "a.txt").write_text("staged\n", encoding="utf-8")
-    svc = DiffService(str(git_repo))
+    root, threads = git_repo
+    (root / "a.txt").write_text("staged\n", encoding="utf-8")
+    _touch(threads, "a.txt")
+    svc = _svc(root, threads)
     assert svc.mode == "git-mode"
     assert svc.approve("a.txt").ok
 
-    (git_repo / "a.txt").write_text("dirty\n", encoding="utf-8")
+    (root / "a.txt").write_text("dirty\n", encoding="utf-8")
+    _touch(threads, "a.txt")
     assert svc.undo("a.txt").ok
-    assert (git_repo / "a.txt").read_text(encoding="utf-8") == "staged\n"
+    assert (root / "a.txt").read_text(encoding="utf-8") == "staged\n"
 
+    _touch(threads, "a.txt")
     entries = {e.key: e for e in svc.list_entries()}
     assert entries["a.txt"].state == "approved"
-    # staging ≠ HEAD: файл всё ещё в списке как approved
     pending = svc.list_entries(pending_only=True)
     assert all(e.key != "a.txt" for e in pending)
 
 
 def test_t11_git_untracked_undo_deletes_file(git_repo):
-    (git_repo / "new.txt").write_text("x\n", encoding="utf-8")
-    svc = DiffService(str(git_repo), emit_notices=False)
+    root, threads = git_repo
+    (root / "new.txt").write_text("x\n", encoding="utf-8")
+    _touch(threads, "new.txt")
+    svc = _svc(root, threads, emit_notices=False)
     result = svc.undo("new.txt")
     assert result.ok
     assert result.undone_keys == ("new.txt",)
     assert result.deleted_keys == ("new.txt",)
     assert result.restored_keys == ()
-    assert not (git_repo / "new.txt").exists()
+    assert not (root / "new.txt").exists()
 
 
 def test_git_untracked_visual_diff_shows_file_content(git_repo):
     """``git diff`` пуст для ``??`` — visual_diff показывает содержимое как addition."""
-    (git_repo / "fresh.py").write_text("hello created\n", encoding="utf-8")
-    svc = DiffService(str(git_repo), emit_notices=False)
+    root, threads = git_repo
+    (root / "fresh.py").write_text("hello created\n", encoding="utf-8")
+    _touch(threads, "fresh.py")
+    svc = _svc(root, threads, emit_notices=False)
     entries = {e.key: e for e in svc.list_entries(pending_only=True)}
     assert entries["fresh.py"].kind == "created"
     body = svc.visual_diff("fresh.py")
@@ -190,11 +227,12 @@ def test_git_untracked_visual_diff_shows_file_content(git_repo):
 
 
 def test_cache_created_visual_diff_shows_file_content(cache_proj):
-    target = cache_proj / "src" / "new.py"
-    DiffStore(str(cache_proj)).register_mutation(str(target))
+    root, threads = cache_proj
+    target = root / "src" / "new.py"
+    DiffStore(str(root)).register_mutation(str(target))
     target.write_text("brand new\n", encoding="utf-8")
 
-    svc = DiffService(str(cache_proj), emit_notices=False)
+    svc = DiffService(str(root), emit_notices=False)
     body = svc.visual_diff("src/new.py")
     assert body.strip()
     assert "/dev/null" in body
@@ -202,11 +240,12 @@ def test_cache_created_visual_diff_shows_file_content(cache_proj):
 
 
 def test_cache_created_empty_file_visual_diff_not_blank(cache_proj):
-    target = cache_proj / "src" / "empty.py"
-    DiffStore(str(cache_proj)).register_mutation(str(target))
+    root, threads = cache_proj
+    target = root / "src" / "empty.py"
+    DiffStore(str(root)).register_mutation(str(target))
     target.write_text("", encoding="utf-8")
 
-    svc = DiffService(str(cache_proj), emit_notices=False)
+    svc = DiffService(str(root), emit_notices=False)
     body = svc.visual_diff("src/empty.py")
     assert body.strip()
     assert "/dev/null" in body
@@ -214,22 +253,26 @@ def test_cache_created_empty_file_visual_diff_not_blank(cache_proj):
 
 
 def test_t12_git_deleted_unstaged_undo_restores(git_repo):
-    (git_repo / "a.txt").unlink()
-    svc = DiffService(str(git_repo))
+    root, threads = git_repo
+    (root / "a.txt").unlink()
+    _touch(threads, "a.txt")
+    svc = _svc(root, threads)
     entries = svc.list_entries(pending_only=True)
     assert entries[0].kind == "deleted"
     assert svc.undo("a.txt").ok
-    assert (git_repo / "a.txt").read_text(encoding="utf-8") == "base\n"
+    assert (root / "a.txt").read_text(encoding="utf-8") == "base\n"
 
 
 def test_t12_git_deleted_staged_undo_keeps_deleted(git_repo):
-    (git_repo / "a.txt").unlink()
-    svc = DiffService(str(git_repo))
+    root, threads = git_repo
+    (root / "a.txt").unlink()
+    _touch(threads, "a.txt")
+    svc = _svc(root, threads)
     assert svc.approve("a.txt").ok
-    assert not (git_repo / "a.txt").exists()
-    # undo после staged delete → worktree←index → файл не появляется
+    assert not (root / "a.txt").exists()
+    _touch(threads, "a.txt")
     assert svc.undo("a.txt").ok
-    assert not (git_repo / "a.txt").exists()
+    assert not (root / "a.txt").exists()
 
 
 # --- T10 / T13 mode + cache clear ---
@@ -257,7 +300,6 @@ def test_t13_cache_to_git_keeps_ignored_cache(tmp_path, monkeypatch):
     root = tmp_path / "proj"
     root.mkdir()
     (root / "src").mkdir()
-    # накопить cache
     target = root / "src" / "foo.py"
     target.write_text("x\n", encoding="utf-8")
     store = DiffStore(str(root))
@@ -265,7 +307,6 @@ def test_t13_cache_to_git_keeps_ignored_cache(tmp_path, monkeypatch):
     assert store.index_path.is_file()
     assert list(store.diffs_dir.glob("*.orig"))
 
-    # появился .git → git-mode, но ignored cache сохраняется
     _git(root, "init", "-b", "main")
     _git(root, "config", "user.email", "t@t")
     _git(root, "config", "user.name", "t")

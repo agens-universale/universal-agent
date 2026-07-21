@@ -115,10 +115,6 @@ def git_restore_worktree(launch_root: PathLike, path: str) -> GitRunResult:
     return _run_git(launch_root, ["restore", "--worktree", "--", path])
 
 
-def git_restore_worktree_all(launch_root: PathLike) -> GitRunResult:
-    return _run_git(launch_root, ["restore", "--worktree", "--", "."])
-
-
 def git_diff_worktree(launch_root: PathLike, path: str) -> GitRunResult:
     """Unstaged / pending diff vs index для одного файла."""
     return _run_git(launch_root, ["diff", "--", path])

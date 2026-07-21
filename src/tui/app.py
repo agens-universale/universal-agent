@@ -371,6 +371,7 @@ class TuiApp(App):
         ctx = create_run_context(
             cfg, auth_connector=auth, on_progress=progress.update,
             on_stream_delta=self._stream_pump.on_delta,
+            is_tui=True,
         )
         self._session_log_path = ctx.logging_path
         # Live nested progress субагентов: очередь на app, копия на ctx → child.
@@ -385,7 +386,6 @@ class TuiApp(App):
         # Проводка confirm-канала: TUI-раннер умеет показывать баннер; CLI/server — нет.
         runner = self.active_runner
         if runner is not None and hasattr(runner, "make_tui_confirm"):
-            ctx.is_tui = True
             ctx.tui_confirm = runner.make_tui_confirm(self._present_confirm)
         register_runtime_notices_listener(self._on_runtime_notice)
         return AgentExecutor(ctx)

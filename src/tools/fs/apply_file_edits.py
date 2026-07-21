@@ -13,8 +13,6 @@ from tools.schema_optional import coalesce_optional_string
 from tools.simple_tool_base import AbstractSimpleTool
 from utils.tool_report_paths import tool_report_abspath
 from utils.atomic_io import atomic_replace
-from diff_tui.tracking import snapshot_before_text_mutation
-
 
 class ApplyFileEdits(AbstractSimpleTool):
     max_file_size_bytes = 100 * 1024 * 1024
@@ -483,7 +481,6 @@ class ApplyFileEdits(AbstractSimpleTool):
                 )
 
         try:
-            snapshot_before_text_mutation(self, path)
             self._backend.write(path, current, encoding="utf-8")
         except Exception as e:
             return _result(

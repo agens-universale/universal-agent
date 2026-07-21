@@ -290,10 +290,17 @@ Visual review правок агента по файлам (pending → прин�
 и хвост `[F3]/diff` (при N>5 — `(5 из N) [F3]/diff`).
 
 В git-репозитории `/diff` гибридный: tracked / untracked non-ignored — через
-git index (`approve` = `git add`, `undo` = `git restore --worktree`); пути из
-`.gitignore` внутри tracking-perimeter — через локальный cache (`.gc/diffs/`,
-маркер `i` в списке). `approve` ignored **не** делает `git add -f`. При смеси
-слоёв bulk-ack: `git: N; cache: M`. Без `.git` — прежний cache-mode.
+git index (`approve` = `git add`, `undo` = `git restore --worktree` по путям);
+пути из `.gitignore` внутри tracking-perimeter — через локальный cache
+(`.gc/diffs/`, маркер `i` в списке). `approve` ignored **не** делает `git add -f`.
+При смеси слоёв bulk-ack: `git: N; cache: M`. Без `.git` — cache-mode.
+
+Список `/diff` — только правки **текущей сессии**: пути из per-trace journal
+(`touched_<system>_<thread_id>.json` рядом с data/meta треда), пересечённые с
+реальной дельтой (git status и/или DiffStore). Чужой dirty / untracked без
+записи в journal сессии не показывается. Approve/undo чистят только свой journal;
+`undo all` откатывает по путям текущего списка, без `git restore -- .` на весь
+worktree.
 
 Экран `/diff` (F3):
 

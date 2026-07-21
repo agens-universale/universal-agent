@@ -5,8 +5,6 @@ from tools.simple_tool_base import AbstractSimpleTool
 from utils.tool_report_paths import tool_report_abspath
 from utils.atomic_io import atomic_replace
 from security.path_policy import enforce_write_guard
-from diff_tui.tracking import snapshot_before_text_mutation
-
 class WriteToFile(AbstractSimpleTool):
 
     @classmethod
@@ -243,7 +241,6 @@ Usage:
                 )
 
         try:
-            snapshot_before_text_mutation(self, path)
             self._backend.write(path, normalized, encoding=encoding)
         except Exception as e:
             return self._result(

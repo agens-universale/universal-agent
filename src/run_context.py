@@ -66,6 +66,7 @@ def create_run_context(
     loop: Optional[Any] = None,
     os_backend: Optional[FsBackend] = None,
     on_stream_delta=None,
+    is_tui: bool = False,
 ) -> RunContext:
     """
     Создать RunContext для одного запуска агента.
@@ -76,6 +77,7 @@ def create_run_context(
     - Логгер создаётся заново для каждого запуска (своё имя файла логов).
     - ``os_backend`` собирается фабрикой из ``config_dict['os_backend']`` (default: local).
       Для ``harbor`` нужны ``environment`` и ``loop``; тесты могут передать ``os_backend=``.
+    - ``is_tui=True`` + LocalFsBackend → ``TrackingFsBackend`` (Diff journal/snapshot).
     """
     effective_run_id = run_id or generate_run_id()
     tools_data, tools_spec, tools_description, mcp_status = build_tools_data(config_dict, on_progress=on_progress)
@@ -134,13 +136,22 @@ def create_run_context(
         workspace=workspace,
         on_stream_delta=on_stream_delta,
     )
+    ctx.is_tui = bool(is_tui)
+
+    if is_tui and os_backend is None:
+        from diff_tui.tracking import wrap_local_for_tui
+
+        wrapped = wrap_local_for_tui(backend, ctx)
+        if wrapped is not backend:
+            ctx.os_backend = wrapped
+            ctx.workspace = build_execution_workspace(wrapped, config_dict)
 
     run_logger.debug(
         "Created RunContext (run_id=%s, logging_path=%s, os_backend=%s, workspace_root=%s)",
         effective_run_id,
         logging_path,
-        type(backend).__name__,
-        workspace.root,
+        type(ctx.os_backend).__name__,
+        ctx.workspace.root,
     )
 
     return ctx

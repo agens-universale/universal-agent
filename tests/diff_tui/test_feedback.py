@@ -160,6 +160,7 @@ async def test_t15_diff_undo_appends_technical_to_thread(tmp_path, cache_proj):
     from tui.app import TuiApp
     from tui.screens.diff import DiffScreen
     from thread_store import append_new_thread_messages
+    from diff_tui.touched import TouchedJournal
 
     threads_dir = tmp_path / "threads"
     threads_dir.mkdir()
@@ -176,6 +177,7 @@ async def test_t15_diff_undo_appends_technical_to_thread(tmp_path, cache_proj):
     target.write_text("base\n", encoding="utf-8")
     DiffStore(str(cache_proj)).register_mutation(str(target))
     target.write_text("changed\n", encoding="utf-8")
+    TouchedJournal(str(threads_dir), "cli", tid).add("src/foo.py")
 
     cfg = {
         "launch_root": str(cache_proj),
@@ -204,6 +206,9 @@ async def test_t15_diff_undo_appends_technical_to_thread(tmp_path, cache_proj):
             config=cfg,
             on_undo_feedback=_capture,
             on_ui_ack=trace._on_diff_ui_ack,
+            threads_dir=str(threads_dir),
+            system_id="cli",
+            thread_id=tid,
         )
         await pilot.app.push_screen(scr)
         await pilot.pause()

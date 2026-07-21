@@ -5,8 +5,6 @@ from tools.schema_optional import X_PRESERVE_EMPTY_STRING
 from tools.simple_tool_base import AbstractSimpleTool
 from utils.tool_report_paths import tool_report_abspath
 from security.path_policy import enforce_write_guard
-from diff_tui.tracking import snapshot_before_text_mutation
-
 class AppendToFile(AbstractSimpleTool):
 
     @classmethod
@@ -210,7 +208,6 @@ Usage:
 
         try:
             before = self._backend.getsize(path) if self._backend.exists(path) else 0
-            snapshot_before_text_mutation(self, path)
             self._backend.append(path, separator + content, encoding=encoding)
             after = self._backend.getsize(path)
             appended = max(0, after - before)
