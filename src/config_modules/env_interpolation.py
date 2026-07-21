@@ -1,7 +1,8 @@
-"""Резолв ${ENV:VAR} в строках конфига из переменных окружения.
+"""Резолв ${ENV:VAR} и ${FILE:path} в строках конфига.
 
-Применяется к file-конфигу (после merge, до валидации) и к CLI-override значениям.
-Отсутствующая переменная → пустая строка + warning с именем (не значением).
+Применяется к file-конфигу (после merge, до валидации) и к CLI-override
+значениям. Отсутствующий источник → пустая строка + warning с именем/путём
+(никогда с содержимым).
 """
 from __future__ import annotations
 
@@ -13,32 +14,57 @@ from typing import Any
 _logger = logging.getLogger(__name__)
 
 _ENV_MARKER = re.compile(r"\$\{ENV:([A-Za-z_][A-Za-z0-9_]*)\}")
+_FILE_MARKER = re.compile(r"\$\{FILE:([^}]+)\}")
 
 
-def _resolve(obj: Any, missing: set[str]) -> Any:
+def _read_secret_file(path_raw: str, cache: dict[str, str]) -> str:
+    """Прочитать файл-кред; ошибка → "" + один warning на уникальный путь."""
+    if path_raw in cache:
+        return cache[path_raw]
+    path = os.path.expanduser(path_raw)
+    try:
+        with open(path, encoding="utf-8") as fd:
+            value = fd.read().rstrip("\r\n")
+    except (OSError, UnicodeDecodeError) as exc:
+        _logger.warning(
+            "credential file not readable, substituted empty string: %s (%s)",
+            path_raw,
+            type(exc).__name__,
+        )
+        value = ""
+    cache[path_raw] = value
+    return value
+
+
+def _resolve(obj: Any, missing_env: set[str], file_cache: dict[str, str]) -> Any:
     if isinstance(obj, dict):
-        return {k: _resolve(v, missing) for k, v in obj.items()}
+        return {k: _resolve(v, missing_env, file_cache) for k, v in obj.items()}
     if isinstance(obj, list):
-        return [_resolve(v, missing) for v in obj]
+        return [_resolve(v, missing_env, file_cache) for v in obj]
     if isinstance(obj, str):
-        def repl(m: "re.Match[str]") -> str:
+        def repl_env(m: "re.Match[str]") -> str:
             var = m.group(1)
             if var in os.environ:
                 return os.environ[var]
-            missing.add(var)
+            missing_env.add(var)
             return ""
-        return _ENV_MARKER.sub(repl, obj)
+
+        def repl_file(m: "re.Match[str]") -> str:
+            return _read_secret_file(m.group(1), file_cache)
+
+        return _FILE_MARKER.sub(repl_file, _ENV_MARKER.sub(repl_env, obj))
     return obj
 
 
 def resolve_env_placeholders(obj: Any) -> Any:
-    """Рекурсивная немутирующая копия с подстановкой ``${ENV:VAR}``.
+    """Рекурсивная немутирующая копия с подстановкой ``${ENV:VAR}`` и ``${FILE:path}``.
 
-    Отсутствующая переменная → ``""`` + один warning на уникальное имя.
+    Отсутствующий источник → ``""`` + один warning на уникальное имя/путь.
     """
-    missing: set[str] = set()
-    resolved = _resolve(obj, missing)
-    for var in sorted(missing):
+    missing_env: set[str] = set()
+    file_cache: dict[str, str] = {}
+    resolved = _resolve(obj, missing_env, file_cache)
+    for var in sorted(missing_env):
         _logger.warning("env var not set, substituted empty string: %s", var)
     return resolved
 
