@@ -1,8 +1,9 @@
-"""Harbor-injected skills surfacing in gc_cli_external.
+"""Native registration of harbor-injected task skills in gc_cli_external.
 
-Mirrors terminus_2: harbor drops task skills into the container at ``skills_dir`` and the
-adapter must advertise them to the agent. These tests exercise the discovery/formatting
-logic against a fake environment (no real container needed).
+harbor uploads a task's skills into the container at ``skills_dir``; the adapter mirrors
+them to the runner at the same path and points gc-cli's registry (skills_data_path) there
+so skills_list / skills_load(skill_id) resolve them. These tests exercise that wiring
+against a fake environment (no real container needed).
 """
 import sys
 from pathlib import Path
@@ -11,10 +12,12 @@ import pytest
 
 _REPO = Path(__file__).resolve().parents[2]
 
-# Expose `adapters/` (which lives inside ./harbor) and `src/` for the adapter import.
-# The installed `harbor` pip lib is a regular package, so it wins over the repo's
-# ./harbor namespace dir regardless of sys.path order. In the real bench
-# PYTHONPATH=/opt/gc-harbor-adapters, so `adapters` is top-level anyway.
+# The repo's ./harbor dir (no __init__.py) is a namespace package that shadows the
+# installed `harbor` pip lib whenever the repo root is on sys.path — which pytest adds
+# for `tests.harbor.*`. Appending (not prepending) lets the installed regular `harbor`
+# package win, then exposes `adapters/` (inside ./harbor) and `src/` for the adapter
+# import. In the real bench PYTHONPATH=/opt/gc-harbor-adapters, so `adapters` is
+# top-level with no `harbor/` parent and this collision never happens.
 for p in (str(_REPO / "harbor"), str(_REPO / "src")):
     if p not in sys.path:
         sys.path.append(p)
@@ -22,34 +25,18 @@ for p in (str(_REPO / "harbor"), str(_REPO / "src")):
 from adapters.gc_cli_external import GcCliExternal  # noqa: E402
 
 
-class _ExecResult:
-    def __init__(self, return_code=0, stdout=""):
-        self.return_code = return_code
-        self.stdout = stdout
-
-
 class _FakeEnv:
-    """Minimal BaseEnvironment stand-in: a virtual FS of {path: content}."""
+    """Records download_dir calls; is_dir true only for the injected skills path."""
 
-    def __init__(self, skills_dir, files):
+    def __init__(self, skills_dir):
         self._skills_dir = skills_dir
-        self._files = files  # {abs_path: content}
+        self.downloads = []  # list[(source_dir, str(target_dir))]
 
     async def is_dir(self, path, user=None):
         return path == self._skills_dir
 
-    async def exec(self, command, timeout_sec=None, **kw):
-        if command.startswith("find "):
-            found = "\n".join(
-                sorted(p for p in self._files if p.endswith("/SKILL.md"))
-            )
-            return _ExecResult(0, found)
-        if command.startswith("cat "):
-            path = command.split(" ", 1)[1].strip().strip("'")
-            if path in self._files:
-                return _ExecResult(0, self._files[path])
-            return _ExecResult(1, "")
-        return _ExecResult(1, "")
+    async def download_dir(self, source_dir, target_dir):
+        self.downloads.append((source_dir, str(target_dir)))
 
 
 def _agent(skills_dir):
@@ -58,63 +45,58 @@ def _agent(skills_dir):
     return a
 
 
-SKILL_MD = (
-    "---\n"
-    "name: mesh-analysis\n"
-    "description: Analyze STL meshes and compute mass by material.\n"
-    "---\n\n"
-    "# Mesh analysis\nRun scripts/mesh_tool.py ...\n"
-)
-
-
-def test_frontmatter_parses_name_and_description():
-    fm = GcCliExternal._parse_skill_frontmatter(SKILL_MD)
-    assert fm == {
-        "name": "mesh-analysis",
-        "description": "Analyze STL meshes and compute mass by material.",
-    }
-
-
-def test_frontmatter_rejects_missing_fields():
-    assert GcCliExternal._parse_skill_frontmatter("no frontmatter here") is None
-    assert GcCliExternal._parse_skill_frontmatter("---\nname: x\n---") is None
+@pytest.mark.asyncio
+async def test_mirror_downloads_to_runner_temp_and_returns_it():
+    env = _FakeEnv("/harbor/skills")
+    result = await _agent("/harbor/skills")._mirror_injected_skills(env)
+    assert result is not None
+    assert len(env.downloads) == 1
+    src, dst = env.downloads[0]
+    assert src == "/harbor/skills"     # copied FROM the container path
+    assert dst == result               # TO the returned runner-local dir
+    # a fresh writable runner path, NOT the container /harbor path (which the host lacks)
+    assert result != "/harbor/skills"
 
 
 @pytest.mark.asyncio
-async def test_build_skills_section_advertises_injected_skill():
-    env = _FakeEnv(
-        "/skills", {"/skills/mesh-analysis/SKILL.md": SKILL_MD}
-    )
-    section = await _agent("/skills")._build_skills_section(env)
-    assert section is not None
-    assert "<available_skills>" in section
-    assert "mesh-analysis" in section
-    assert "Analyze STL meshes" in section
-    # the model needs the absolute in-container path to read the skill on demand
-    assert "/skills/mesh-analysis/SKILL.md" in section
+async def test_mirror_no_skills_dir_returns_none_and_no_download():
+    env = _FakeEnv("/harbor/skills")
+    assert await _agent(None)._mirror_injected_skills(env) is None
+    assert env.downloads == []
 
 
 @pytest.mark.asyncio
-async def test_no_skills_dir_returns_none():
-    assert await _agent(None)._build_skills_section(_FakeEnv("/skills", {})) is None
+async def test_mirror_absent_dir_returns_none():
+    # skills_dir set but the container has no such dir → nothing to mirror
+    env = _FakeEnv("/other")
+    assert await _agent("/harbor/skills")._mirror_injected_skills(env) is None
+    assert env.downloads == []
 
 
-@pytest.mark.asyncio
-async def test_empty_skills_dir_returns_none():
-    # dir exists but holds no SKILL.md -> nothing to advertise
-    section = await _agent("/skills")._build_skills_section(_FakeEnv("/skills", {}))
-    assert section is None
+def test_apply_injected_skills_overrides_data_path():
+    cfg = {"skills_data_path": "/opt/gc-harbor-adapters/skills"}
+    GcCliExternal._apply_injected_skills(cfg, "/harbor/skills")
+    assert cfg["skills_data_path"] == "/harbor/skills"
+
+
+def test_apply_injected_skills_noop_when_none():
+    cfg = {"skills_data_path": "/opt/gc-harbor-adapters/skills"}
+    GcCliExternal._apply_injected_skills(cfg, None)
+    assert cfg["skills_data_path"] == "/opt/gc-harbor-adapters/skills"
+
+
+def test_native_nudge_added_only_when_skills():
+    assert "skills_list" in GcCliExternal._nudge_instruction("do X", "/harbor/skills")
+    assert GcCliExternal._nudge_instruction("do X", None) == "do X"
 
 
 if __name__ == "__main__":
-    # Runnable without pytest: `python tests/harbor/test_gc_cli_external_skills.py`.
-    # (Local pytest collection can trip over the ./harbor namespace vs installed-harbor
-    # sys.path ordering; direct execution and the bench PYTHONPATH do not.)
     import asyncio
 
-    test_frontmatter_parses_name_and_description()
-    test_frontmatter_rejects_missing_fields()
-    asyncio.run(test_build_skills_section_advertises_injected_skill())
-    asyncio.run(test_no_skills_dir_returns_none())
-    asyncio.run(test_empty_skills_dir_returns_none())
+    asyncio.run(test_mirror_downloads_to_runner_temp_and_returns_it())
+    asyncio.run(test_mirror_no_skills_dir_returns_none_and_no_download())
+    asyncio.run(test_mirror_absent_dir_returns_none())
+    test_apply_injected_skills_overrides_data_path()
+    test_apply_injected_skills_noop_when_none()
+    test_native_nudge_added_only_when_skills()
     print("ok")
