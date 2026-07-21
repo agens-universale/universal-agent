@@ -26,6 +26,9 @@ backend:
   request_timeout_sec: 600
   chat_completion_headers:
     Authorization: "Bearer <ВПИШИТЕ_ТОКЕН>"
+    # Можно не хранить токен в файле:
+    #   Authorization: "Bearer ${ENV:GC_API_KEY}"                # затем: export GC_API_KEY=sk-...
+    # Или из файла (chmod 600): Authorization: "Bearer ${FILE:~/.secrets/gc_api_key}"
 
 agent:
   model: "gigacode_agent_v1.6_rc"

@@ -54,6 +54,7 @@ backend:
   # подставляется из окружения перед валидацией. Удобно, чтобы не держать секрет
   # в файле. Отсутствующая переменная → пустая строка + warning (без значения).
   #   Authorization: "Bearer ${ENV:GC_API_KEY}"     # затем: export GC_API_KEY=sk-...
+  #   Или из файла (chmod 600): Authorization: "Bearer ${FILE:~/.secrets/gc_api_key}"
   #
   # use_ssl: bool ИЛИ строка-путь к CA-bundle (self-signed / корп-CA):
   #   true | false | "/path/ca-bundle.pem"
