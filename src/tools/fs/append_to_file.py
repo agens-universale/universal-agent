@@ -35,9 +35,8 @@ class AppendToFile(AbstractSimpleTool):
                         "type": "string",
                         X_PRESERVE_EMPTY_STRING: True,
                         "description": (
-                            "String inserted before appended content. Always pass this field. "
-                            "Use \"\\n\\n\" for a blank line between old and new content. "
-                            "Pass empty string \"\" for no separator (append flush to file end)."
+                            "Text put between the current file end and the new content. "
+                            "Prefer two newlines unless another separator is needed; empty string means no separation."
                         ),
                     },
                     "create_if_missing": {
@@ -64,12 +63,11 @@ class AppendToFile(AbstractSimpleTool):
     def prompt_description(cls):
         description = '''Tool name: fs_append_file
 Tool description: Appends content to an existing file (e.g., for notes, logs, analysis results).
-Input schema: {"type": "object", "properties": {"path": {"type": "string", "description": "Absolute path to an existing file."}, "content": {"type": "string", "description": "Content to append."}, "separator": {"type": "string", "description": "Inserted before content; always pass. Use \\n\\n for a blank line, or \"\" for flush append."}}, "required": ["path", "content", "separator"], "additionalProperties": false}
+Input schema: {"type": "object", "properties": {"path": {"type": "string", "description": "Absolute path to an existing file."}, "content": {"type": "string", "description": "Content to append."}, "separator": {"type": "string", "description": "Text put between the current file end and the new content. Prefer two newlines unless another separator is needed; empty string means no separation."}}, "required": ["path", "content", "separator"], "additionalProperties": false}
 
 Usage:
 - The target file MUST exist. If the file does not exist, write the file first (use a short initial write for new long files).
 - **Chunking:** for large bodies, append in multiple steps; each `content` should be modest. Do not send an entire article or huge blob in one call.
-- Always pass `separator`: `"\\n\\n"` (blank line) or `""` (flush, no separator).
 - Ideal for accumulating analysis notes, debugging logs, or review comments without overwriting previous data.
 - Do not use for modifying source code logic.
 '''

@@ -91,7 +91,7 @@ class FileViewerScreen(Screen):
                 id="file-view-body",
                 classes="viewer-body",
                 read_only=True,
-                soft_wrap=False,
+                soft_wrap=True,
                 show_line_numbers=False,
                 show_cursor=True,
                 highlight_cursor_line=False,
