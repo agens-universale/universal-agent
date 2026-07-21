@@ -170,3 +170,13 @@ def test_file_marker_same_path_read_once(tmp_path, monkeypatch):
     out = resolve_env_placeholders({"a": f"${{FILE:{f}}}", "b": f"${{FILE:{f}}}"})
     assert out == {"a": "v", "b": "v"}
     assert len(opens) == 1
+
+
+def test_file_path_can_come_from_env(tmp_path, monkeypatch):
+    """ENV резолвится раньше FILE: путь к файлу можно собрать из переменной."""
+    f = tmp_path / "tok"
+    f.write_text("combo\n")
+    if _os.name == "posix":
+        _os.chmod(f, 0o600)
+    monkeypatch.setenv("SECRET_DIR", str(tmp_path))
+    assert resolve_env_placeholders("${FILE:${ENV:SECRET_DIR}/tok}") == "combo"

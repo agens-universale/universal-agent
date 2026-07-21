@@ -38,11 +38,24 @@ def _read_secret_file(path_raw: str, cache: dict[str, str]) -> str:
     if path_raw in cache:
         return cache[path_raw]
     path = os.path.expanduser(path_raw)
+
+    # Проверка размера отдельно с собственным warning
     try:
         if os.path.getsize(path) > _MAX_FILE_BYTES:
-            raise OSError(f"file larger than {_MAX_FILE_BYTES} bytes")
+            _logger.warning(
+                "credential file too large (> %d bytes), substituted empty string: %s",
+                _MAX_FILE_BYTES,
+                path_raw,
+            )
+            cache[path_raw] = ""
+            return ""
+    except OSError:
+        # Файл не существует или иная ошибка доступа - попробуем прочитать и залогируем там
+        pass
+
+    try:
         _warn_if_lax_permissions(path, path_raw)
-        with open(path, encoding="utf-8") as fd:
+        with open(path, encoding="utf-8-sig") as fd:
             value = fd.read().rstrip("\r\n")
     except (OSError, UnicodeDecodeError) as exc:
         _logger.warning(
