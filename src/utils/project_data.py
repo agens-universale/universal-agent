@@ -35,7 +35,7 @@ def _slice_level(
     return shown, len(shown) < total, len(shown), total
 
 stop_folders = {
-        '.git', '.hg', '.svn', '.osc',
+        '.git', '.hg', '.svn', '.osc', '.gc',
         '__pycache__', 'venv', '.venv', '.env',
         'node_modules', 'bower_components',
         'dist', 'build', 'out', 'target', 'bin', 'obj',

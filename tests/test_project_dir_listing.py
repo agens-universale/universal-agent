@@ -73,6 +73,19 @@ def test_cut_second_at_least_120():
     assert cut_second >= 120, f"cut_second={cut_second}, expected >= 120"
 
 
+def test_gc_dir_excluded_from_listing(tmp_path):
+    """``.gc`` is project-local state (denied except skills via tools) — hide from map."""
+    (tmp_path / ".gc").mkdir()
+    (tmp_path / ".gc" / "skills").mkdir()
+    (tmp_path / "src").mkdir()
+    (tmp_path / "README.md").touch()
+
+    listing = get_listing(str(tmp_path))
+    assert ".gc" not in listing
+    assert "src/" in listing
+    assert "README.md" in listing
+
+
 # ---------------------------------------------------------------------------
 # D2 — stable sort: dirs first, casefold, repeatable
 # ---------------------------------------------------------------------------
