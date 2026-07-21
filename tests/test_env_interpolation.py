@@ -1,4 +1,7 @@
 import logging
+import os as _os
+
+import pytest
 
 from config_modules.env_interpolation import resolve_env_placeholders
 
@@ -92,6 +95,8 @@ def test_file_marker_warning_has_no_content(tmp_path, caplog):
 def test_file_marker_empty_file_no_warning(tmp_path, caplog):
     f = tmp_path / "empty"
     f.write_text("")
+    if _os.name == "posix":
+        _os.chmod(f, 0o600)
     with caplog.at_level(logging.WARNING):
         assert resolve_env_placeholders(f"${{FILE:{f}}}") == ""
     assert not any(str(f) in r.getMessage() for r in caplog.records)
@@ -110,3 +115,58 @@ def test_env_marker_unchanged(monkeypatch, tmp_path):
     f.write_text("fileval")
     out = resolve_env_placeholders(f"${{ENV:T}}/${{FILE:{f}}}")
     assert out == "envval/fileval"
+
+
+def test_file_marker_size_cap(tmp_path, caplog):
+    f = tmp_path / "big"
+    f.write_bytes(b"a" * (65536 + 1))
+    with caplog.at_level(logging.WARNING):
+        assert resolve_env_placeholders(f"${{FILE:{f}}}") == ""
+    assert any(str(f) in r.getMessage() for r in caplog.records)
+
+
+def test_file_marker_size_cap_boundary_ok(tmp_path):
+    f = tmp_path / "max"
+    f.write_bytes(b"a" * 65536)
+    assert resolve_env_placeholders(f"${{FILE:{f}}}") == "a" * 65536
+
+
+@pytest.mark.skipif(_os.name != "posix", reason="POSIX file modes only")
+def test_file_marker_lax_permissions_warn(tmp_path, caplog):
+    f = tmp_path / "tok"
+    f.write_text("v\n")
+    _os.chmod(f, 0o644)
+    with caplog.at_level(logging.WARNING):
+        assert resolve_env_placeholders(f"${{FILE:{f}}}") == "v"
+    assert any(
+        "accessible" in r.getMessage() and str(f) in r.getMessage()
+        for r in caplog.records
+    )
+
+
+@pytest.mark.skipif(_os.name != "posix", reason="POSIX file modes only")
+def test_file_marker_strict_permissions_no_warn(tmp_path, caplog):
+    f = tmp_path / "tok"
+    f.write_text("v\n")
+    _os.chmod(f, 0o600)
+    with caplog.at_level(logging.WARNING):
+        assert resolve_env_placeholders(f"${{FILE:{f}}}") == "v"
+    assert not any(str(f) in r.getMessage() for r in caplog.records)
+
+
+def test_file_marker_same_path_read_once(tmp_path, monkeypatch):
+    f = tmp_path / "tok"
+    f.write_text("v")
+    import builtins
+    real_open = builtins.open
+    opens: list[str] = []
+
+    def counting_open(file, *args, **kwargs):
+        if str(file) == str(f):
+            opens.append(str(file))
+        return real_open(file, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "open", counting_open)
+    out = resolve_env_placeholders({"a": f"${{FILE:{f}}}", "b": f"${{FILE:{f}}}"})
+    assert out == {"a": "v", "b": "v"}
+    assert len(opens) == 1

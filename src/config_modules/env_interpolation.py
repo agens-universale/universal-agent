@@ -15,6 +15,22 @@ _logger = logging.getLogger(__name__)
 
 _ENV_MARKER = re.compile(r"\$\{ENV:([A-Za-z_][A-Za-z0-9_]*)\}")
 _FILE_MARKER = re.compile(r"\$\{FILE:([^}]+)\}")
+_MAX_FILE_BYTES = 65536  # креды маленькие; защита от указания на большой файл
+
+
+def _warn_if_lax_permissions(path: str, path_raw: str) -> None:
+    """POSIX: файл с кредом доступен group/other → warning (аналогично ssh)."""
+    if os.name != "posix":
+        return
+    try:
+        mode = os.stat(path).st_mode
+    except OSError:
+        return
+    if mode & 0o077:
+        _logger.warning(
+            "credential file is group/world accessible, consider chmod 600: %s",
+            path_raw,
+        )
 
 
 def _read_secret_file(path_raw: str, cache: dict[str, str]) -> str:
@@ -23,6 +39,9 @@ def _read_secret_file(path_raw: str, cache: dict[str, str]) -> str:
         return cache[path_raw]
     path = os.path.expanduser(path_raw)
     try:
+        if os.path.getsize(path) > _MAX_FILE_BYTES:
+            raise OSError(f"file larger than {_MAX_FILE_BYTES} bytes")
+        _warn_if_lax_permissions(path, path_raw)
         with open(path, encoding="utf-8") as fd:
             value = fd.read().rstrip("\r\n")
     except (OSError, UnicodeDecodeError) as exc:
