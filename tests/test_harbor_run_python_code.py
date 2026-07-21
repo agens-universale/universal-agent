@@ -10,7 +10,7 @@ and asserts it forwards the RAW code/cwd/timeout/validated-env dict to
 import json
 from types import SimpleNamespace
 
-from tests.harbor.fakes import bind_os_backend
+from tests.harbor_support.fakes import bind_os_backend
 from tools.backends.protocol import ExecResult
 from tools.exec.run_python_code import RunPythonCode
 

@@ -1,4 +1,4 @@
-from tests.harbor.fakes import FakeBackend, strip_path_fields
+from tests.harbor_support.fakes import FakeBackend, strip_path_fields
 
 
 def test_fake_backend_roundtrip():

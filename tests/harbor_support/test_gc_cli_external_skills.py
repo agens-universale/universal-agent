@@ -12,12 +12,11 @@ import pytest
 
 _REPO = Path(__file__).resolve().parents[2]
 
-# The repo's ./harbor dir (no __init__.py) is a namespace package that shadows the
-# installed `harbor` pip lib whenever the repo root is on sys.path — which pytest adds
-# for `tests.harbor.*`. Appending (not prepending) lets the installed regular `harbor`
-# package win, then exposes `adapters/` (inside ./harbor) and `src/` for the adapter
-# import. In the real bench PYTHONPATH=/opt/gc-harbor-adapters, so `adapters` is
-# top-level with no `harbor/` parent and this collision never happens.
+# Expose `adapters/` (inside ./harbor) and `src/` for the adapter import. Append, do
+# not prepend: repo-root `./harbor` must not shadow the installed `harbor` pip package
+# on sys.path. These tests live under tests/harbor_support/ (not tests/harbor/) for the
+# same reason — a package named `harbor` would collide with the pip lib. In the real
+# bench PYTHONPATH=/opt/gc-harbor-adapters, so `adapters` is top-level with no collision.
 for p in (str(_REPO / "harbor"), str(_REPO / "src")):
     if p not in sys.path:
         sys.path.append(p)

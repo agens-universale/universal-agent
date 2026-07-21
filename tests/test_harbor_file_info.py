@@ -17,7 +17,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from tests.harbor.fakes import FakeBackend, bind_os_backend
+from tests.harbor_support.fakes import FakeBackend, bind_os_backend
 from tools.backends.local import LocalFsBackend
 from tools.fs.file_info import FileInfo
 
