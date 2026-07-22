@@ -135,6 +135,41 @@ def _registry_entry(
     return {"tool": normalized["_spec"], "metadata": normalized["_metadata"]}
 
 
+def _apply_tools_whitelist(
+    server_name: str, server_cfg: Dict[str, Any], tools_raw: list
+) -> list:
+    """Отфильтровать tools_raw по mcp.servers.<name>.whitelist (если enabled)."""
+    wl = server_cfg.get("whitelist") if isinstance(server_cfg, dict) else None
+    if not isinstance(wl, dict) or not wl.get("enabled"):
+        return tools_raw
+    allowed = {
+        str(t).strip() for t in (wl.get("tools") or []) if str(t).strip()
+    }
+    present = {
+        str(t.get("name")) for t in tools_raw if isinstance(t, dict)
+    }
+    missing = sorted(allowed - present)
+    if missing:
+        logger.warning(
+            "[MCP] %s: whitelist names not provided by server: %s",
+            server_name,
+            ", ".join(missing),
+        )
+    filtered = [
+        t
+        for t in tools_raw
+        if isinstance(t, dict) and str(t.get("name")) in allowed
+    ]
+    if len(filtered) != len(tools_raw):
+        logger.info(
+            "[MCP] %s: %d of %d tools whitelisted",
+            server_name,
+            len(filtered),
+            len(tools_raw),
+        )
+    return filtered
+
+
 def _discover_one(
     server_name: str,
     server_cfg: Dict[str, Any],
@@ -242,6 +277,8 @@ def _discover_one(
                 tools_raw = _tools_list_request(
                     url, session_id=session_id, server_cfg=server_cfg, token=token
                 )
+
+        tools_raw = _apply_tools_whitelist(server_name, server_cfg, tools_raw)
 
         tools: list = []
         for tool in tools_raw:
