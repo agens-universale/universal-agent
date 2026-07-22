@@ -19,17 +19,11 @@ def test_edit_item_marks_nullable_fields_optional():
     assert set(item["x-optional-keys"]) == {
         "expected_matches",
         "occurrence",
-        "start_line",
-        "end_line",
     }
     assert item["required"] == [
         "search",
         "replace",
-        "expected_matches",
-        "occurrence",
-        "start_line",
-        "end_line",
-    ]   # API schema unchanged
+    ]
 
 
 def test_minimal_edit_validates():
@@ -56,8 +50,6 @@ def test_full_edit_still_validates():
                     "replace": "b",
                     "expected_matches": 1,
                     "occurrence": "first",
-                    "start_line": 3,
-                    "end_line": 9,
                 }
             ],
         },

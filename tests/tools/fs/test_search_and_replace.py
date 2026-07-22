@@ -111,41 +111,6 @@ def test_occurrence_all_dry_run(tmp_path):
     assert p.read_text(encoding="utf-8") == "x\nx\nx\n"
 
 
-def test_range_limits_replacement_scope(tmp_path):
-    p = tmp_path / "range.txt"
-    p.write_text("TODO a\nTODO b\nTODO c\n", encoding="utf-8")
-    res = json.loads(
-        with_local_ctx(SearchAndReplace)(
-            path=str(p),
-            search="TODO",
-            replace="DONE",
-            occurrence="all",
-            expected_matches=2,
-            start_line=2,
-            end_line=3,
-        )
-    )
-    assert res["ok"] is True and res["applied"] is True
-    assert res["replaced"] == 2 and res["match_count"] == 2
-    assert p.read_text(encoding="utf-8") == "TODO a\nDONE b\nDONE c\n"
-
-
-def test_range_not_found_message(tmp_path):
-    p = tmp_path / "range_miss.txt"
-    p.write_text("TODO a\nTODO b\n", encoding="utf-8")
-    miss = json.loads(
-        with_local_ctx(SearchAndReplace)(
-            path=str(p),
-            search="TODO a",
-            replace="DONE",
-            start_line=2,
-            end_line=2,
-        )
-    )
-    assert miss["ok"] is False and miss["matched"] is False
-    assert "specified line range 2-2" in miss["message"]
-
-
 def test_expected_matches_guard(tmp_path):
     p = tmp_path / "gm.txt"
     p.write_text("a a a", encoding="utf-8")

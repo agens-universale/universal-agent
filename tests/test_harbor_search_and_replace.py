@@ -42,7 +42,6 @@ _CASES = [
     ("no_match", CONTENT, {"search": "NOPE", "replace": "X"}),
     ("dry_run", CONTENT, {"search": "beta", "replace": "X", "dry_run": True}),
     ("expected_mismatch", CONTENT, {"search": "alpha", "replace": "Z", "occurrence": "all", "expected_matches": 1}),
-    ("scope_lines", CONTENT, {"search": "alpha", "replace": "Z", "start_line": 2, "end_line": 4}),
     ("sha_ok", CONTENT, {"search": "beta", "replace": "X", "expected_file_sha256": SHA}),
     ("sha_stale", CONTENT, {"search": "beta", "replace": "X", "expected_file_sha256": "0" * 64}),
     ("not_found", None, {"search": "a", "replace": "b"}),

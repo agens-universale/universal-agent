@@ -141,8 +141,6 @@ def test_strict_schema_parse_strips_empty_optional(tmp_path):
             "replace": "hi",
             "dry_run": True,
             "expected_matches": 1,
-            "start_line": 1,
-            "end_line": 1,
             "occurrence": "first",
             "backup": False,
             "return_diff": False,
@@ -202,8 +200,6 @@ def test_strict_apply_file_edits_omits_top_level_flags_ok():
                     "replace": "b",
                     "expected_matches": None,
                     "occurrence": None,
-                    "start_line": None,
-                    "end_line": None,
                 }
             ],
         },
@@ -213,32 +209,6 @@ def test_strict_apply_file_edits_omits_top_level_flags_ok():
     assert "atomic" not in args
     assert "dry_run" not in args
     assert args["path"] == "/tmp/f.txt"
-
-
-def test_strict_apply_file_edits_omit_nested_start_line_validates():
-    """Nullable refinements of an edit are semantically optional: omitting them is allowed."""
-    spec = copy.deepcopy(ApplyFileEdits.tool_description())
-    apply_openai_strict_parameters(spec["parameters"])
-    args = parse_and_validate_tool_arguments(
-        tool_name="fs_apply_file_edits",
-        arguments={
-            "path": "/tmp/f.txt",
-            "edits": [
-                {
-                    "search": "a",
-                    "replace": "b",
-                    "expected_matches": None,
-                    "occurrence": None,
-                    "end_line": None,
-                }
-            ],
-        },
-        tool_spec=spec,
-        allow_empty_for_empty_schema=False,
-    )
-    assert "start_line" not in args["edits"][0]
-    # API schema still demands every field of the edit item.
-    assert "start_line" in spec["parameters"]["properties"]["edits"]["items"]["required"]
 
 
 def test_strict_api_schema_keeps_full_required():

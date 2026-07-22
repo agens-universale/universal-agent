@@ -38,7 +38,10 @@ class ApplyFileEdits(AbstractSimpleTool):
                         "items": {
                             "type": "object",
                             "properties": {
-                                "search": {"type": "string"},
+                                "search": {
+                                    "type": "string",
+                                    "description": "The exact content to find and replace. Use a unique multi-line snippet to avoid accidental matches elsewhere in the file."
+                                },
                                 "replace": {"type": "string"},
                                 "expected_matches": {
                                     "anyOf": [
@@ -53,32 +56,14 @@ class ApplyFileEdits(AbstractSimpleTool):
                                         {"type": "null"},
                                     ]
                                 },
-                                "start_line": {
-                                    "anyOf": [
-                                        {"type": "integer", "minimum": 1},
-                                        {"type": "null"},
-                                    ]
-                                },
-                                "end_line": {
-                                    "anyOf": [
-                                        {"type": "integer", "minimum": 1},
-                                        {"type": "null"},
-                                    ]
-                                },
                             },
                             "required": [
                                 "search",
                                 "replace",
-                                "expected_matches",
-                                "occurrence",
-                                "start_line",
-                                "end_line",
                             ],
                             "x-optional-keys": [
                                 "expected_matches",
                                 "occurrence",
-                                "start_line",
-                                "end_line",
                             ],
                             "additionalProperties": False,
                         },
@@ -108,8 +93,13 @@ class ApplyFileEdits(AbstractSimpleTool):
         return (
             "Tool name: fs_apply_file_edits\n"
             "Apply multiple exact literal edits to one file atomically.\n"
+            "Matching is done across the ENTIRE file — there are no start_line/end_line scope args.\n"
+            "For disambiguation use a wide enough unique snippet in search (with surrounding context),\n"
+            "or use occurrence/first/last/all and expected_matches.\n"
+            "Short search like 'i += 1' may match unseen duplicates in file parts not in current read page;\n"
+            "prefer broader unique fragments and guard with expected_matches=1 when appropriate.\n"
             "If any edit fails validation or matching, no file changes are written.\n"
-            "edits_would_apply/total_would_replace count in-memory simulation; "
+            "edits_would_apply/total_would_replace count in-memory simulation;\n"
             "edits_applied/total_replaced are non-zero only when applied=true.\n"
             "Pass expected_file_sha256 from file_info(include_hash=true) to detect stale readback.\n"
         )
@@ -194,14 +184,8 @@ class ApplyFileEdits(AbstractSimpleTool):
     def _collect_matches(
         content: str,
         search: str,
-        *,
-        start_line: int | None,
-        end_line: int | None,
     ) -> list[Tuple[int, int, int]]:
-        total_lines = content.count("\n") + 1
-        effective_start = 1 if start_line is None else start_line
-        effective_end = total_lines if end_line is None else end_line
-
+        """Collect all matches of search in content. Returns list of (char_index, start_line, end_line)."""
         entries: list[Tuple[int, int, int]] = []
         pos = 0
         while True:
@@ -211,8 +195,7 @@ class ApplyFileEdits(AbstractSimpleTool):
             fragment = content[idx:idx + len(search)]
             s_line = content.count("\n", 0, idx) + 1
             e_line = s_line + fragment.count("\n")
-            if s_line >= effective_start and e_line <= effective_end:
-                entries.append((idx, s_line, e_line))
+            entries.append((idx, s_line, e_line))
             pos = idx + len(search)
         return entries
 
@@ -228,15 +211,7 @@ class ApplyFileEdits(AbstractSimpleTool):
         if occurrence is None:
             occurrence = "first"
         expected_matches = edit.get("expected_matches")
-        start_line = edit.get("start_line")
-        end_line = edit.get("end_line")
-
-        matches = self._collect_matches(
-            content,
-            search,
-            start_line=start_line,
-            end_line=end_line,
-        )
+        matches = self._collect_matches(content, search)
         match_count = len(matches)
         if match_count == 0:
             suggestions, _suggestions_total = build_edit_miss_suggestions(
