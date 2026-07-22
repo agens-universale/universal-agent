@@ -540,6 +540,11 @@ def process_tool_calls(
             break
 
         tool_name = str(m.get("name") or "")
+        # smart-гейт (спека §3): считаем КАЖДЫЙ исполняемый вызов, кроме завершителя
+        # хода. До try — упавший вызов (неверные аргументы) тоже считается. turn_finish
+        # сюда не попадает (его путь — check_trace_finished мимо process_tool_calls).
+        if tool_name not in TURN_FINALIZING_TOOLS:
+            state.turn_tool_calls += 1
         prior = list(tools_outputs) + skip_outputs
         if prior and (i > 0 or tool_name == ASK_HUMAN_TOOL_NAME):
             _maybe_persist(persist_messages_callback, prior, state)
@@ -769,6 +774,7 @@ def run_agent(
     check_stop: Optional[Callable[[], bool]] = None,
     session_meta: Optional[Dict[str, Any]] = None,
     mark_finalizing: Optional[Callable[[bool], None]] = None,
+    mark_finish_gate_checking: Optional[Callable[[bool], None]] = None,
 ) -> Union[str, None]:
     tool_error_cnt = 0
     context_overflow_retries = 0
@@ -984,9 +990,19 @@ def run_agent(
                         )
                         if backend_mode == "chat_completions":
                             gate = FinishGateGuard(ctx=ctx, state=state, logger=run_logger)
-                            decision = gate.evaluate_turn_finish(
-                                finish_handoff_arguments=finish_arguments,
-                            )
+                            # Судья реально работает (LLM-вызов) только внутри этого блока →
+                            # TUI-индикатор «сверяюсь…» на время оценки (mark_finish_gate_checking
+                            # пишет runtime.finish_gate_checking в meta; снимаем строго в finally,
+                            # даже если evaluate_turn_finish бросит исключение).
+                            if mark_finish_gate_checking is not None:
+                                mark_finish_gate_checking(True)
+                            try:
+                                decision = gate.evaluate_turn_finish(
+                                    finish_handoff_arguments=finish_arguments,
+                                )
+                            finally:
+                                if mark_finish_gate_checking is not None:
+                                    mark_finish_gate_checking(False)
                             apply_finish_gate_to_turn_finish_output_in_state(
                                 state=state,
                                 finish_call_id=finish_call_id,

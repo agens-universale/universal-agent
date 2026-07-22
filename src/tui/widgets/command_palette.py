@@ -7,7 +7,7 @@ Toggle-подвал (/gate, /answers — спека 2026-07-16-palette-toggles-g
 """
 from __future__ import annotations
 
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 
 from rich.text import Text
 from textual._context import NoActiveAppError
@@ -15,8 +15,9 @@ from textual.app import ComposeResult
 from textual.containers import Vertical, VerticalScroll
 from textual.widgets import Rule, Static
 
+from tui import palette as _pal
 from tui.commands import Command, CommandRegistry
-from tui.toggles import TOGGLES, _fit_hint, _HINT_KEYS_TOGGLE, render_track
+from tui.toggles import TOGGLES, _fit_hint, _HINT_KEYS_TOGGLE, padded_track
 
 _HINT_NO_ARGS = "↑↓ выбрать · Enter выполнить · Esc закрыть"
 _HINT_WITH_ARGS = "↑↓ выбрать · Enter ввести аргумент · Esc закрыть"
@@ -48,13 +49,39 @@ class CommandPalette(VerticalScroll):
         registry: CommandRegistry,
         initial_filter: str = "",
         toggle_state: Optional[Callable[[str], str]] = None,
+        toggle_extra: Optional[Callable[[str], Any]] = None,
+        toggle_custom_hint: Optional[Callable[[str], str]] = None,
     ) -> None:
         super().__init__(classes="palette")
         self._registry = registry
         self._filter = initial_filter
         self._selected = 0
         self._toggle_state = toggle_state
+        self._toggle_extra = toggle_extra
+        self._toggle_custom_hint = toggle_custom_hint
         self._apply_size()  # честная высота с самого первого layout-прохода (см. _apply_size)
+
+    def _toggle_children(self, name: str) -> list[str]:
+        """Дети пресета `name` (спека §4.1): тоггл-имена, чей `dotted` входит в
+        его `preset_keys`, в порядке `preset_keys`. Generic по данным TOGGLES —
+        не знает про /rigor/gate/answers по имени."""
+        spec = TOGGLES[name]
+        by_dotted = {s.dotted: n for n, s in TOGGLES.items() if s.dotted}
+        return [by_dotted[d] for d in spec.preset_keys if d in by_dotted]
+
+    def _owning_preset(self, name: str) -> Optional[str]:
+        """Имя preset-тоггла, чей ребёнок — `name`, иначе `None` (ревизия 7,
+        спека §2). Чистое data-родство по `preset_keys` — БЕЗ гейта видимости
+        родителя (ревизия 6 его несла как условие DIM/отступа; ревизия 7 сняла
+        видимость-по-выделению вовсе — серый сигнал ребёнка действует ВЕЗДЕ,
+        включая одиночного ребёнка, найденного фильтром при невидимом
+        родителе)."""
+        for preset_name, spec in TOGGLES.items():
+            if not spec.preset_keys:
+                continue
+            if name in self._toggle_children(preset_name):
+                return preset_name
+        return None
 
     def compose(self) -> ComposeResult:
         rows = self._visible_rows()
@@ -64,16 +91,28 @@ class CommandPalette(VerticalScroll):
         footer, _ = self._build_footer(offset=len(rows))
         yield footer
 
+    def _group_sep_count(self, toggles: list[Command]) -> int:
+        """Число разделителей групп (ревизия 7, спека §4.1): один `Rule` перед
+        КАЖДЫМ preset-родителем (`spec.preset_keys` непусто), который не
+        первый в списке видимых toggle-строк — generic по `preset_keys`, не
+        по конкретному имени. Сегодня в TOGGLES ровно одна preset-группа
+        (`/rigor`) → 0; механизм рассчитан на будущие независимые группы.
+        Общий источник для `_footer_reserved_height` и `_build_footer`."""
+        return sum(
+            1 for j, c in enumerate(toggles) if j > 0 and TOGGLES[c.name].preset_keys
+        )
+
     def _footer_reserved_height(self) -> int:
         """Высота докнутого `.palette-footer` (в строках): разделитель(1) + N
-        toggle-строк, если есть (§4 «пустой подвал прячется вместе с разделителем»),
-        всегда — margin-top(1) hint'а + сама строка hint'а(1). Синхронно с составом
-        `_build_footer`."""
+        toggle-строк + разделители групп между ними, если есть (§4 «пустой
+        подвал прячется вместе с разделителем»), всегда — margin-top(1)
+        hint'а + сама строка hint'а(1). Синхронно с составом `_build_footer`."""
         toggles = self._visible_toggle_rows()
         hint_block = 2  # .palette-keys margin-top(1) + строка hint'а(1)
         if not toggles:
             return hint_block
-        return 1 + len(toggles) + hint_block  # разделитель(1) + N строк + hint_block
+        # разделитель(1) + N строк + разделители групп + hint_block
+        return 1 + len(toggles) + self._group_sep_count(toggles) + hint_block
 
     def _apply_size(self) -> None:
         """Честная высота контейнера: `.palette` держит `height: auto` (важно для
@@ -114,15 +153,20 @@ class CommandPalette(VerticalScroll):
         — правило §4 «пустой подвал прячется вместе с разделителем») и hint ПОСЛЕДНИМ
         элементом. Hint живёт внутри докнутого контейнера, а не рядом с ним снаружи —
         иначе он выпадает из потока раньше подвала и рендерится выше него (dock: bottom
-        вырывает только сам контейнер, не соседей по yield-порядку). Возвращает
-        (контейнер для монтирования, выделенная toggle-строка или None) — второе нужно
-        _rebuild для scroll_visible (children контейнера пусты до реального mount)."""
+        вырывает только сам контейнер, не соседей по yield-порядку). Разделитель ГРУППЫ
+        (ревизия 7, спека §4.1) — `Rule(classes="palette-group-sep")` перед КАЖДЫМ
+        preset-родителем, который не первая toggle-строка (`_group_sep_count`, тот же
+        источник, что и `_footer_reserved_height`). Возвращает (контейнер для
+        монтирования, выделенная toggle-строка или None) — второе нужно _rebuild для
+        scroll_visible (children контейнера пусты до реального mount)."""
         toggles = self._visible_toggle_rows()
         children: list = []
         selected_row: Optional[Static] = None
         if toggles:
             children.append(Rule(classes="palette-separator"))
             for j, cmd in enumerate(toggles):
+                if j > 0 and TOGGLES[cmd.name].preset_keys:
+                    children.append(Rule(classes="palette-group-sep"))
                 idx = offset + j
                 classes = "palette-row palette-toggle-row selected" if idx == self._selected \
                     else "palette-row palette-toggle-row"
@@ -159,16 +203,23 @@ class CommandPalette(VerticalScroll):
     def _toggle_hint(self, cmd: Command) -> str:
         """Hint выделенной toggle-строки (спека §6): значение + его смысл из
         TOGGLES для ПРИМЕНЁННОГО значения (черновика не существует — модель
-        мгновенная), приоритетно усечённые под ширину подвала (`_fit_hint`)."""
+        мгновенная), приоритетно усечённые под ширину подвала (`_fit_hint`).
+        Применённое значение вне `spec.names` (ревизия 4 — отображаемый
+        custom, custom сам не выбирается) — хинт берёт динамический провайдер
+        `toggle_custom_hint` (спека §5, два состояния)."""
         spec = TOGGLES[cmd.name]
         if self._toggle_state is not None:
             current = self._toggle_state(cmd.name)
         else:
             current = spec.names[0]
-        idx = spec.names.index(current) if current in spec.names else 0
-        val = spec.values[idx]
         width = self._content_width() - 4 if self._content_width() else 0
-        return _fit_hint(val.value, val.hint, _HINT_KEYS_TOGGLE, width)
+        if current in spec.names:
+            hint = spec.values[spec.names.index(current)].hint
+        elif self._toggle_custom_hint is not None:
+            hint = self._toggle_custom_hint(cmd.name)     # /rigor custom, отображаемый (спека §5)
+        else:
+            hint = spec.values[0].hint
+        return _fit_hint(current, hint, _HINT_KEYS_TOGGLE, width)
 
     def _name_col_w(self) -> int:
         """Ширина имени-колонки (спека 2026-07-18 §4): описания ВСЕХ строк
@@ -183,7 +234,9 @@ class CommandPalette(VerticalScroll):
     def _row_head(self, cmd: Command, name_w: Optional[int] = None) -> str:
         """Строка "имя-колонка + описание" с общей шириной имени-колонки (§4).
         Обычные строки рендерятся этим как есть; тоггл-строки используют её
-        как основу перед слайдером (`_format_toggle_row`)."""
+        как основу перед слайдером (`_format_toggle_row`). Flat (ревизия 7) —
+        никакого отступа: иерархия ребёнок/родитель несётся только цветом
+        (DIM), не позицией."""
         if name_w is None:
             name_w = self._name_col_w()
         return f" {f'/{cmd.name}'.ljust(name_w)}{cmd.description}"
@@ -191,34 +244,58 @@ class CommandPalette(VerticalScroll):
     def _format_row(self, cmd: Command) -> str:
         return self._row_head(cmd)
 
-    def _toggle_columns(self) -> tuple[int, int, int]:
-        """(col, track_w, label_w) — общая раскладка слайдеров тоггл-подвала
-        (спека 2026-07-18 §4). `col` — колонка, с которой слайдер начинается
-        ОДИНАКОВО во всех тоггл-строках: длина самой длинной ВЫРОВНЕННОЙ
-        строки "имя-колонка+описание" (`_row_head`, общая имя-колонка по ОБЕИМ
-        зонам) среди ВИДИМЫХ тогглов + 3 пробела. `track_w` — ширина общего
-        поля слайдера: самый широкий слайдер (`_slider_width`) среди них —
-        короткие слайдеры (включая 1-ячеечный индикатор) внутри поля
-        прижимаются вправо в `_format_toggle_row`. `label_w` — ширина колонки
-        подписи значения: самое длинное имя значения среди ВСЕХ видимых
-        тогглов (не только текущей строки) — иначе усечение узкого терминала
-        в `_format_toggle_row` считает РАЗНЫЙ head_w на разных строках и
-        слайдеры съезжают по колонкам между ними (находка ревью Task 2)."""
+    def _my_base_w(self, name: str) -> int:
+        """Собственная ширина БАЗОВОГО трека тоггла `name` (без extra-резерва)."""
+        return _slider_width(len(TOGGLES[name].values))
+
+    def _my_extra_w(self, name: str) -> int:
+        """Собственная ширина extra-зоны тоггла `name`: 0 — extra не
+        задействован (`toggle_extra` не инъецирован или вернул `None`, обычный
+        single-key тоггл); иначе фиксированные 3 ячейки (двойной пробел +
+        глиф custom-резерва, спека §6)."""
+        extra = self._toggle_extra(name) if self._toggle_extra is not None else None
+        return 3 if extra is not None else 0
+
+    def _toggle_columns(self) -> tuple[int, int, int, int]:
+        """(col, base_w, extra_w, label_w) — общая раскладка тоггл-подвала
+        (спека 2026-07-18 §4, выравнивание — ревизия 5 §6). `col` — колонка,
+        с которой начинается трек ОДИНАКОВО во всех тоггл-строках: длина
+        самой длинной ВЫРОВНЕННОЙ строки "имя-колонка+описание" (`_row_head`,
+        общая имя-колонка по ОБЕИМ зонам) среди ВИДИМЫХ тогглов + 3 пробела.
+        `base_w`/`extra_w` — общее поле трека РАЗДЕЛЬНО по зонам (левый край,
+        не единое право-прижатое поле, как было): самый широкий базовый трек
+        и самый широкий extra-резерв среди видимых строк — короткие базовые
+        треки (включая 1-ячеечный индикатор) паддятся пробелами СПРАВА в
+        `_format_toggle_row` (через `padded_track`, tui/toggles.py), custom-
+        резерв — правее троек, тоже паддится справа. `label_w` — ширина
+        колонки подписи значения: самое длинное имя значения среди ВСЕХ
+        видимых тогглов (не только текущей строки) — иначе усечение узкого
+        терминала в `_format_toggle_row` считает РАЗНЫЙ head_w на разных
+        строках и слайдеры съезжают по колонкам между ними (находка ревью
+        Task 2)."""
         toggles = self._visible_toggle_rows()
         name_w = self._name_col_w()
         col = max(len(self._row_head(c, name_w)) for c in toggles) + 3
-        track_w = max(_slider_width(len(TOGGLES[c.name].values)) for c in toggles)
+        base_w = max(self._my_base_w(c.name) for c in toggles)
+        extra_w = max(self._my_extra_w(c.name) for c in toggles)
         label_w = max(len(n) for c in toggles for n in TOGGLES[c.name].names)
-        return col, track_w, label_w
+        return col, base_w, extra_w, label_w
 
     def _format_toggle_row(self, cmd: Command) -> Text:
-        """Слайдер-рендер тоггл-строки (спека 2026-07-18 §2-4): трек для ВСЕХ
-        тогглов (2*n-1 ячеек), глиф на позицию каждого значения — ползунок
-        `●` цветом СВОЕГО значения (семантика, не позиция), пустые позиции —
+        """Слайдер-рендер тоггл-строки (спека 2026-07-18 §2-4, выравнивание —
+        ревизия 5 §6, flat/серый — ревизия 7 §2): трек для ВСЕХ тогглов (2*n-1
+        ячеек), глиф на позицию каждого значения — ползунок `●` цветом
+        СВОЕГО значения (семантика, не позиция), пустые позиции —
         незакрашенный `○` (DEEP_DIM). Колонки слайдера/подписи общие для всех
-        тоггл-строк подвала. Применённое значение всегда — модель мгновенная
+        тоггл-строк подвала, выровнены по ЛЕВОМУ краю (`padded_track`,
+        tui/toggles.py). Применённое значение всегда — модель мгновенная
         (§1), черновика нет. Подпись значения — без своего style (наследует
-        цвет строки — `.palette-row` уже красит текст в INK, см. styles.tcss)."""
+        цвет строки — `.palette-row` уже красит текст в INK, см. styles.tcss).
+        Ребёнок preset-тоггла (`_owning_preset`, ревизия 7 — видим ВСЕГДА, без
+        отступа) — имя и описание стилем DIM (весь `head`), И подпись
+        значения тоже DIM (у детей — только их слайдер семантическим цветом,
+        никакого другого акцента); трек/подпись в тех же общих колонках, что
+        и у всех тоггл-строк."""
         spec = TOGGLES[cmd.name]
         if self._toggle_state is not None:
             current = self._toggle_state(cmd.name)
@@ -226,8 +303,10 @@ class CommandPalette(VerticalScroll):
             current = spec.names[0]
 
         name_w = self._name_col_w()
-        col, track_w, label_w = self._toggle_columns()
+        col, base_w, extra_w, label_w = self._toggle_columns()
+        is_child = self._owning_preset(cmd.name) is not None
         head = self._row_head(cmd, name_w)
+        track_w = base_w + extra_w
 
         # Узкий терминал (§4): слайдер+подпись не жертвуются — усекаем описание.
         # head_w/col считаем от ОБЩИХ track_w/label_w и общего prefix_floor
@@ -241,18 +320,22 @@ class CommandPalette(VerticalScroll):
         avail = self._content_width() - 2 if self._content_width() else 0
         need = col + track_w + 2 + label_w
         if avail and need > avail:
-            prefix_floor = 1 + name_w + 1  # отступ имени-колонки + хотя бы 1 символ описания
+            prefix_floor = 1 + name_w + 1  # имя-колонка + хотя бы 1 символ описания
             head_w = max(prefix_floor, avail - (track_w + 2 + label_w) - 3)
             if len(head) > head_w:
                 head = head[: head_w - 1] + "…"
             col = head_w + 3
 
         text = Text(head.ljust(col))
-        my_w = _slider_width(len(spec.values))
-        text.append(" " * (track_w - my_w))  # слайдер прижат вправо в общем поле
-        text.append_text(render_track(spec, current))
+        if is_child:
+            text.stylize(_pal.DIM, 0, len(head))
+        extra = self._toggle_extra(cmd.name) if self._toggle_extra is not None else None
+        text.append_text(padded_track(spec, current, extra_lit=extra, base_w=base_w, extra_w=extra_w))
         text.append("  ")
+        value_start = len(text)
         text.append(current)
+        if is_child:
+            text.stylize(_pal.DIM, value_start, len(text))
         return text
 
     def _visible_rows(self) -> list[Command]:
@@ -266,9 +349,54 @@ class CommandPalette(VerticalScroll):
     def _filtered(self, *, toggle: bool) -> list[Command]:
         f = self._filter.lower()
         cmds = [c for c in self._registry.list_commands() if c.is_toggle == toggle]
-        if not f:
-            return cmds
-        return [c for c in cmds if c.name.startswith(f)]
+        if not toggle:
+            # Обычные команды — фильтр как был: startswith по набранному.
+            return [c for c in cmds if c.name.startswith(f)] if f else cmds
+        # Toggle-подвал (ревизия 7, спека §2, §4.1): база — пустой фильтр =
+        # `palette_default`-тогглы, непустой = startswith (то же правило, что
+        # и раньше). Для КАЖДОГО preset-родителя из базы сразу после него
+        # вставляются его дети (`_toggle_children`, резолвящиеся в реестре),
+        # ВСЕГДА — без условия выделения (композиция статична, высота не
+        # скачет при навигации).
+        #
+        # Дедуп: если ребёнок совпал с фильтром САМ (уже присутствует в базе
+        # на своей естественной позиции) — не добавляется второй раз
+        # родительской вставкой; рисуется ОДИН раз, сразу после родителя, как
+        # ребёнок группы (не отдельной строкой на своём месте в базе).
+        # `owned` предвычисляется ДО основного прохода — порядко-независимо
+        # (находка ревью Z1): если Command ребёнка зарегистрирован в реестре
+        # РАНЬШЕ родителя, наивная отметка "injected по факту вставки" ещё
+        # не сработала бы к моменту встречи ребёнка на его собственной
+        # позиции в базе → дубликат. `owned` знает про родство заранее (по
+        # ЛЮБОМУ preset-родителю, реально присутствующему в базе), поэтому
+        # прямая встреча ребёнка в базе пропускается независимо от порядка
+        # регистрации — он всё равно будет вставлен инъекцией под настоящим
+        # родителем. Ребёнок, чей родитель фильтром НЕ пойман (отсутствует в
+        # базе), в `owned` не попадает — остаётся обычной строкой на своём месте.
+        base = [c for c in cmds if c.name.startswith(f)] if f else \
+            [c for c in cmds if TOGGLES[c.name].palette_default]
+        owned: set[str] = set()
+        for c in base:
+            if TOGGLES[c.name].preset_keys:
+                owned.update(self._toggle_children(c.name))
+        injected: set[str] = set()
+        result: list[Command] = []
+        for c in base:
+            if c.name in owned:
+                continue
+            result.append(c)
+            spec = TOGGLES[c.name]
+            if not spec.preset_keys:
+                continue
+            for child_name in self._toggle_children(c.name):
+                if child_name in injected:
+                    continue
+                child = self._registry.lookup(child_name)
+                if child is None:
+                    continue
+                result.append(child)
+                injected.add(child_name)
+        return result
 
     def _selectable_rows(self) -> list[Command]:
         """Сквозной список для навигации/выбора: команды, затем тогглы (разделитель

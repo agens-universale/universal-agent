@@ -112,6 +112,11 @@ def build_default_registry() -> CommandRegistry:
         Command("quit", (), "", "Выход", hotkey="Esc"),
         # Переключатели палитры (←/→/Enter): самопроверка хода и формат финала.
         Command(
+            "rigor", (), "",
+            _cap(f"{TOGGLES['rigor'].label}: {TOGGLES['rigor'].summary}"),
+            is_toggle=True,
+        ),
+        Command(
             "gate", (), "",
             _cap(f"{TOGGLES['gate'].label}: {TOGGLES['gate'].summary}"),
             is_toggle=True,

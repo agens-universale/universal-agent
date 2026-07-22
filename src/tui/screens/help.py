@@ -86,6 +86,8 @@ class HelpScreen(Screen):
             self._mount_row(trace, row_i, cmd, desc)
             row_i += 1
 
+        from tui.toggles import owning_preset_name
+
         row_i = self._mount_section(trace, "команды", row_i)
         for cmd in reg.list_commands():
             label = f"/{cmd.name}"
@@ -93,6 +95,11 @@ class HelpScreen(Screen):
             if cmd.args:
                 parts.append(cmd.args.strip())
             parts.append(cmd.description)
+            # Дочерний тоггл пресета (/gate,/answers) — связь с родителем словом,
+            # а не цветом (серый в плоском каталоге читался бы как «выключено»).
+            owner = owning_preset_name(cmd.name)
+            if owner is not None:
+                parts.append(f"настройка /{owner}")
             if cmd.hotkey:
                 parts.append(cmd.hotkey)
             self._mount_row(trace, row_i, label, "  ·  ".join(parts))

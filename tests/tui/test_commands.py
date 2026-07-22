@@ -55,7 +55,7 @@ def test_default_registry_is_exactly_keep_set():
     assert names == sorted([
         "sessions", "new", "stop", "skill", "skills",
         "status", "config", "settings", "mcp", "notices", "diff", "view", "export", "help", "init", "compact", "quit",
-        "gate", "answers",
+        "rigor", "gate", "answers",
     ])
 
 
@@ -121,7 +121,7 @@ def test_default_registry_frequency_order():
     assert names == [
         "help", "sessions", "diff", "view", "notices", "new", "config", "settings",
         "export", "compact", "init", "skills", "skill", "status",
-        "stop", "mcp", "quit", "gate", "answers",
+        "stop", "mcp", "quit", "rigor", "gate", "answers",
     ]
 
 

@@ -57,7 +57,14 @@ from tui.services.subagent_sidecar_mapper import (
 from tui.services.trace_mapper import collect_skipped_call_ids, map_message
 from tui.services.trace_render import build_compaction_label
 from tui.screens.tool_call_detail import ToolCallDetailScreen
-from tui.toggles import apply_toggle, cycle_value, toggle_state
+from tui.session_settings import read_from_meta
+from tui.toggles import (
+    apply_toggle,
+    next_toggle_value,
+    preset_custom_hint,
+    preset_track_extra,
+    toggle_state,
+)
 from tui.widgets.command_input import CommandTextArea
 from tui.widgets.command_palette import CommandPalette
 from tui.widgets.thinking_indicator import (
@@ -115,10 +122,21 @@ def select_indicator_mode(*, err, is_running, ask_human, confirm):
     return "terminal"
 
 
-def select_active_substate(*, summarizing, finalizing, last_event_kind, since_last, soft_hide_kinds):
+def select_active_substate(
+    *,
+    summarizing,
+    finalizing,
+    last_event_kind,
+    since_last,
+    soft_hide_kinds,
+    finish_gate_checking=False,
+):
     """Под-состояние индикатора в режиме "active". Порядок = приоритет.
 
     - summarizing (компакция истории) → "compressing" (сжимаю контекст…);
+    - finish_gate_checking (судья turn_finish реально сейчас вызывается) →
+      "processing" (сверяюсь…) — ВЫШЕ защёлки _finalized/finalizing, иначе
+      «завершаю» перебивает и судья работает невидимо;
     - finalizing (принят финальный ответ — turn_finish ИЛИ финальная проза —
       идёт запись/саммари/flush/cleanup) → "validating" (завершаю…);
     - последнее событие скрыто (agent/system) и висит ≥1.5с (finish-gate сверяет
@@ -127,6 +145,8 @@ def select_active_substate(*, summarizing, finalizing, last_event_kind, since_la
     """
     if summarizing:
         return "compressing"
+    if finish_gate_checking:
+        return "processing"
     if finalizing or last_event_kind == "_finalized":
         return "validating"
     if last_event_kind in soft_hide_kinds and since_last >= 1.5:
@@ -727,6 +747,14 @@ class TraceScreen(Screen):
             threads_dir=self.app._threads_dir or "",
             system=self.app._system,
         )
+        # Настройки режимов принадлежат треду (спека 2026-07-20-session-scoped-settings):
+        # берём его значения; их нет (старый тред) — сессия возвращается к умолчанию.
+        saved = read_from_meta(self._store.get_task_meta(task_id))
+        # Пересобираем executor только при РЕАЛЬНОЙ смене набора: attach идёт и на
+        # каждом автосозданном треде, и на возврате к тому же — прогретый раннер
+        # (с уже пройденным MCP-дискавери) выбрасывать зря нельзя.
+        if self.app.load_session_overrides(saved or {}):
+            self.app.invalidate_runner()
         # read_all_events — атомарный снимок live-файла + cursor (как раньше).
         # Была ли компакция, определяем по голове live-снимка (после turn_end
         # первая запись = сводка) — без доп. I/O. Тред без компакции рендерим
@@ -2014,6 +2042,22 @@ class TraceScreen(Screen):
             self._store.update_tui_meta(tid, {"pending_user_messages": new_list})
         self._pending_user_widgets.clear()
 
+    def _begin_auto_created_task(self) -> str:
+        """Автосоздание треда под первое сообщение: id, store, наследование
+        сессионных настроек режимов. Единая точка для всех входов
+        (свободный текст, inline /skill, /init)."""
+        tid = uuid.uuid4().hex
+        self.app.tui_state.active_task_id = tid
+        self._active_task_id = tid
+        # Открываем store сейчас, чтобы _track_pending мог писать meta.
+        self._store = FileTaskStore(
+            threads_dir=self.app._threads_dir or "",
+            system=self.app._system,
+        )
+        # /new и автосоздание: новый тред наследует то, с чем работаем сейчас.
+        self.app.persist_session_overrides()
+        return tid
+
     def _prepare_for_new_run(self) -> None:
         """Подготовить TUI к новому запуску runner.start:
         сбросить error-флаг, очистить last_runner_error,
@@ -2229,6 +2273,7 @@ class TraceScreen(Screen):
         self._drain_subagent_progress()
         summarizing = False
         finalizing = False
+        finish_gate_checking = False
         _tmeta: dict = {}
         if self._store is not None and self._active_task_id is not None:
             try:
@@ -2236,9 +2281,11 @@ class TraceScreen(Screen):
                 _rt = _tmeta.get("runtime") or {}
                 summarizing = bool(_rt.get("summarizing"))
                 finalizing = bool(_rt.get("finalizing"))
+                finish_gate_checking = bool(_rt.get("finish_gate_checking"))
             except Exception:
                 summarizing = False
                 finalizing = False
+                finish_gate_checking = False
                 _tmeta = {}
         # Завершение сжатия (summarizing True→False) → baseline =
         # снимок meta.runtime.live_msg_count (persist уже пересчитал live_* на compact).
@@ -2293,7 +2340,9 @@ class TraceScreen(Screen):
         elif _indicator_mode == "active":
             import time as _time
             since_last = _time.monotonic() - self._last_event_at
-            # summarizing → «сжимаю контекст…»; finalizing (принят финальный ответ:
+            # summarizing → «сжимаю контекст…»; finish_gate_checking (судья turn_finish
+            # реально сейчас вызывается) → «сверяюсь…» — ВЫШЕ защёлки _finalized, иначе
+            # судья работает невидимо под «завершаю…»; finalizing (принят финальный ответ:
             # submit_solution ИЛИ финальная проза — идёт запись/саммари/flush/cleanup)
             # → «✓ завершаю…»; скрытое событие ≥1.5с (finish-gate сверяет / bounce /
             # доделка) → «сверяюсь…»; иначе «думаю…». Sentinel «_finalized» и флаг
@@ -2301,6 +2350,7 @@ class TraceScreen(Screen):
             substate = select_active_substate(
                 summarizing=summarizing,
                 finalizing=finalizing,
+                finish_gate_checking=finish_gate_checking,
                 last_event_kind=self._last_event_kind,
                 since_last=since_last,
                 soft_hide_kinds=_SOFT_HIDE_KINDS,
@@ -2799,10 +2849,11 @@ class TraceScreen(Screen):
         elif event.key in ("left", "right"):
             cmd = self._palette.selected_command()
             if cmd is not None and cmd.is_toggle:
-                # Мгновенная модель (спека 2026-07-18 §1): ←/→ применяет значение
-                # СРАЗУ (запись config.yml + hot-reload), черновика нет.
-                current = toggle_state(self.app, cmd.name)
-                new_value = cycle_value(cmd.name, current, -1 if event.key == "left" else 1)
+                # Мгновенная модель (спека §1): ←/→ применяет в сессию сразу.
+                # custom не выбирается (ревизия 4) — /rigor крутит только
+                # low/medium/high, ровно как Settings.
+                d = -1 if event.key == "left" else 1
+                new_value = next_toggle_value(self.app, cmd.name, d)
                 try:
                     apply_toggle(self.app, cmd.name, new_value)
                 except (ValueError, OSError) as exc:
@@ -2983,6 +3034,8 @@ class TraceScreen(Screen):
         palette = CommandPalette(
             self._registry, initial_filter=prefix,
             toggle_state=lambda name: toggle_state(self.app, name),
+            toggle_extra=lambda name: preset_track_extra(self.app, name),
+            toggle_custom_hint=lambda name: preset_custom_hint(self.app, name),
         )
         self._palette = palette
         self._mount_input_overlay(palette)
@@ -3172,9 +3225,9 @@ class TraceScreen(Screen):
             if cmd is not None and cmd.is_toggle:
                 # Toggle-строка: Enter не сабмитит текст — циклит (+1) и
                 # применяет мгновенно, тот же путь, что ←/→ (спека 2026-07-18
-                # §1). Палитра остаётся открытой.
-                current = toggle_state(self.app, cmd.name)
-                new_value = cycle_value(cmd.name, current, 1)
+                # §1). custom не выбирается (ревизия 4) — тот же роутинг, что
+                # и ←/→ выше. Палитра остаётся открытой.
+                new_value = next_toggle_value(self.app, cmd.name, 1)
                 try:
                     apply_toggle(self.app, cmd.name, new_value)
                 except (ValueError, OSError) as exc:
@@ -3269,14 +3322,7 @@ class TraceScreen(Screen):
             # AUTO-CREATE: первый свободный текст → новая задача.
             # Применяем pre-stage: pending_skill_id встраиваем в первое
             # сообщение и фиксируем в meta.tui.
-            tid = uuid.uuid4().hex
-            self.app.tui_state.active_task_id = tid
-            self._active_task_id = tid
-            # Открываем store сейчас, чтобы _track_pending мог писать meta.
-            self._store = FileTaskStore(
-                threads_dir=self.app._threads_dir or "",
-                system=self.app._system,
-            )
+            tid = self._begin_auto_created_task()
             full_query, patch = self._consume_pending_prefix(text)
             display_query, skill_loaded = self._skill_display_args(text)
             technical = self._build_attachment_technical(text)
@@ -3387,8 +3433,9 @@ class TraceScreen(Screen):
 
     def _cmd_settings(self) -> None:
         from tui.screens.settings import SettingsScreen
+        self.app.reload_config_if_changed()   # свежесть глобала — только на пути Settings (дизайн 2026-07-21 §4)
         self.app.push_screen(SettingsScreen(
-            config=getattr(self.app, "_config", None) or {},
+            config=self.app.screen_config(),
             config_path=getattr(self.app, "_config_path", None),
             on_apply=self.app.reload_config,
         ))
@@ -3396,7 +3443,7 @@ class TraceScreen(Screen):
     def _cmd_config(self) -> None:
         from tui.screens.config import ConfigScreen
         self.app.push_screen(ConfigScreen(
-            config=getattr(self.app, "_config", None) or {},
+            config=self.app.screen_config(),
             config_path=getattr(self.app, "_config_path", None),
             project_local=getattr(self.app, "_config_project_local", None),
         ))
@@ -3406,7 +3453,7 @@ class TraceScreen(Screen):
         from tui.services.file_view import FileViewSettings
         from tui.screens.file_view import FileViewerScreen
 
-        cfg = getattr(self.app, "_config", None) or {}
+        cfg = self.app.screen_config()
         store = getattr(self.app, "view_positions", None)
         if store is None:
             from tui.services.file_view import ViewPositionStore
@@ -3422,13 +3469,13 @@ class TraceScreen(Screen):
     def _cmd_mcp(self) -> None:
         from tui.screens.mcp import McpScreen
         self.app.push_screen(McpScreen(
-            config=getattr(self.app, "_config", None) or {},
+            config=self.app.screen_config(),
             tools_snapshot=self._mcp_screen_snapshot(),
         ))
 
     def _cmd_diff(self) -> None:
         from tui.screens.diff import DiffScreen
-        cfg = getattr(self.app, "_config", None) or {}
+        cfg = self.app.screen_config()
         launch_root = cfg.get("launch_root")
         if not launch_root:
             self._mount_trace_row(
@@ -3946,14 +3993,7 @@ class TraceScreen(Screen):
 
         if self.app.tui_state.active_task_id is None:
             # AUTO-CREATE: зеркалим порядок auto-create в on_command_text_area_submitted.
-            tid = uuid.uuid4().hex
-            self.app.tui_state.active_task_id = tid
-            self._active_task_id = tid
-            # Открываем store сейчас, чтобы _track_pending мог писать meta.
-            self._store = FileTaskStore(
-                threads_dir=self.app._threads_dir or "",
-                system=self.app._system,
-            )
+            tid = self._begin_auto_created_task()
             runner = self.app.get_runner()
             self._prepare_for_new_run()
             self._reset_thinking_timer()
@@ -4259,7 +4299,7 @@ class TraceScreen(Screen):
             from tui.screens.skills import SkillsScreen
             self.app.push_screen(SkillsScreen(
                 skills=self._load_skills_safe(),
-                config=getattr(self.app, "_config", None) or {},
+                config=self.app.screen_config(),
             ))
             return
         if name == "config":
@@ -4295,7 +4335,7 @@ class TraceScreen(Screen):
         if name == "compact":
             self._cmd_compact()
             return
-        if name in ("gate", "answers"):
+        if cmd.is_toggle:
             self._toggle_info_command(name)
             return
 
@@ -4587,12 +4627,7 @@ class TraceScreen(Screen):
         self._last_user_message_id = msg_id
 
         if self.app.tui_state.active_task_id is None:
-            tid = uuid.uuid4().hex
-            self.app.tui_state.active_task_id = tid
-            self._active_task_id = tid
-            self._store = FileTaskStore(
-                threads_dir=self.app._threads_dir or "", system=self.app._system,
-            )
+            tid = self._begin_auto_created_task()
             runner = self.app.get_runner()
             self._prepare_for_new_run()
             self._reset_thinking_timer()
