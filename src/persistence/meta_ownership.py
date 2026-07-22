@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, Mapping, MutableMapping
 
-RUNTIME_FLAG_NAMES = frozenset({"summarizing", "finalizing"})
+RUNTIME_FLAG_NAMES = frozenset({"summarizing", "finalizing", "finish_gate_checking"})
 RUNTIME_LIVE_KEYS = frozenset({"live_history_chars", "live_msg_count"})
 
 

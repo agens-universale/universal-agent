@@ -100,6 +100,19 @@ def set_tui_finalizing(thread_session, active: bool) -> None:
     _set_runtime_flag(thread_session, "finalizing", active)
 
 
+def set_tui_finish_gate_checking(thread_session, active: bool) -> None:
+    """TUI-индикатор: ``meta.runtime.finish_gate_checking`` (+ flush).
+
+    Ставится строго на время вызова ``FinishGateGuard.evaluate_turn_finish`` (turn_finish-
+    ветка run_agent) — судья реально работает (LLM-вызов) только внутри этого окна,
+    снимается строго в finally. ``active=False`` также снимает протухший флаг на старте
+    run'а. ``thread_session=None`` (CLI без треда) → no-op.
+    """
+    if thread_session is None:
+        return
+    _set_runtime_flag(thread_session, "finish_gate_checking", active)
+
+
 def _messages_tail_matches(messages: list[dict], suffix: list[dict]) -> bool:
     """True, если ``messages`` заканчивается на ``suffix`` (поэлементное ``==``)."""
     if not suffix or len(messages) < len(suffix):
