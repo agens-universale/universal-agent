@@ -3,6 +3,33 @@ from typing import Literal
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
 
 
+class McpToolsWhitelistConfig(BaseModel):
+    """Whitelist тулов сервера: enabled=True → модель видит строго `tools`."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = False
+    tools: list[str] = Field(default_factory=list)
+
+    @field_validator("tools", mode="before")
+    @classmethod
+    def normalize_tools(cls, value: object) -> list[str]:
+        if value is None:
+            return []
+        if not isinstance(value, list):
+            raise ValueError(
+                "mcp.servers.<name>.whitelist.tools должен быть списком строк"
+            )
+        seen: set[str] = set()
+        out: list[str] = []
+        for item in value:
+            text = str(item).strip()
+            if text and text not in seen:
+                seen.add(text)
+                out.append(text)
+        return out
+
+
 class McpServerConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
@@ -21,6 +48,10 @@ class McpServerConfig(BaseModel):
     env: dict[str, str] = Field(default_factory=dict)
     persistent_session: bool = False
     persistent_session_close_tool: str | None = None
+    # Whitelist тулов сервера. Нет блока / enabled=False → все тулы доступны;
+    # enabled=True → строго tools (пустой список = ноль тулов). Имена базовые,
+    # как в tools/list, без префикса mcp_<server>_.
+    whitelist: McpToolsWhitelistConfig | None = None
     # mTLS / TLS для http-транспортов: значения читает рантайм utils/ssl_config.py
     # (get_verify_ssl / get_client_cert) через config_dict["mcp-servers"].
     # Унифицировано с backend: на входе принимаются use-ssl / use_ssl / verify-ssl,
