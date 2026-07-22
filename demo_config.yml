@@ -483,6 +483,10 @@ mcp:
       args: ["--transport", "stdio", "--allow-any"]
       server-name: office
       description: Read office documents (pdf, docx, xls, xlsx, pptx, csv, html, msg) as markdown
+      # Whitelist тулов сервера (нет блока / enabled: false → все тулы):
+      # whitelist:
+      #   enabled: true
+      #   tools: [read_document, list_sheets]   # базовые имена из tools/list; [] = ноль тулов
     science:
       transport: stream_http
       url: http://127.0.0.1:8765/mcp
