@@ -19,6 +19,9 @@ def test_tui_main_snapshots_launch_root(tmp_path, monkeypatch):
             self._config_path = None
             self._config_project_local = None
 
+        def set_config_path(self, path):   # как у настоящего TuiApp: путь + снимок mtime
+            self._config_path = path
+
         def run(self):
             return None
 
@@ -69,6 +72,9 @@ def test_tui_main_launch_root_not_live_cwd(tmp_path, monkeypatch):
             captured["config"] = config
             self._config_path = None
             self._config_project_local = None
+
+        def set_config_path(self, path):   # как у настоящего TuiApp: путь + снимок mtime
+            self._config_path = path
 
         def run(self):
             return None

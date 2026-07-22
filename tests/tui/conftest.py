@@ -57,6 +57,22 @@ async def wait_until(
     raise AssertionError(f"timeout: {what}")
 
 
+def settings_section_index(name: str) -> int:
+    """Индекс секции SettingsScreen по отображаемому имени (SECTIONS), а не
+    хардкод-номером: вставка новой секции в SECTIONS сдвигает номера соседей,
+    но не имена — тест, прибитый к номеру, тихо открывает не ту секцию."""
+    from tui.screens.settings import SECTIONS
+    return SECTIONS.index(name)
+
+
+def open_settings_section(scr, name: str) -> None:
+    """Открыть секцию SettingsScreen хаба настроек ПО ИМЕНИ вместо хардкод-индекса
+    (см. settings_section_index) — драйвер для scr._menu_idx/_open_section."""
+    idx = settings_section_index(name)
+    scr._menu_idx = idx
+    scr._open_section(idx)
+
+
 @pytest.fixture(scope="session", autouse=True)
 def _copy_raw_snapshots_to_svg():
     """After tests, copy every __snapshots__/**/*.raw to a sibling .svg.

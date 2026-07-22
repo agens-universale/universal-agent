@@ -21,6 +21,14 @@ def _mk_app(tmp_path):
     return app
 
 
+def _bump_mtime(path, seconds=5.0):
+    """Гарантированно другой mtime — не полагаемся на разрешение файловой системы."""
+    import os
+    import time
+    t = time.time() + seconds
+    os.utime(path, (t, t))
+
+
 def test_reload_config_rereads_and_resets_idle_runner(tmp_path):
     app = _mk_app(tmp_path)
     app.active_runner = _FakeRunner(running=False)
@@ -100,3 +108,208 @@ async def test_reload_config_preserves_runtime_fields(tmp_path, monkeypatch):
         app.reload_config()
         assert app._config["launch_root"] == "D:/proj/snapshot-at-start"
         assert app._config["console_trace"] is False
+
+
+# --- reload_config_if_changed: гейт свежести по mtime (два окна, один файл) ---
+
+
+def test_reload_config_if_changed_noop_without_config_path():
+    """_config_path не задан (типично для тестов/раннего старта) — тихий
+    no-op, ни чтения, ни падения."""
+    app = app_mod.TuiApp(config={"completions_url": "old"})
+    app.reload_config_if_changed()
+    assert app._config["completions_url"] == "old"
+
+
+def test_reload_config_if_changed_first_check_after_startup_is_noop(tmp_path, monkeypatch):
+    """Самая первая проверка сразу после старта окна — БЕЗ единого явного
+    reload_config() до неё, ровно как в main(): конфиг уже загружен в
+    конструктор, set_config_path только связывает путь — не должна
+    перечитывать конфиг и не должна инвалидировать раннер. База и так
+    только что загружена из этого самого файла; если снимок mtime не взят
+    сразу при связывании пути, первая проверка видит «файл изменился» и
+    зря перечитывает + инвалидирует прогретый раннер."""
+    cfg_file = tmp_path / "config.yml"
+    cfg_file.write_text("backend:\n  completions_url: \"http://x/v1\"\n", encoding="utf-8")
+    app = app_mod.TuiApp(config={"completions_url": "http://x/v1"})
+    app.set_config_path(str(cfg_file))   # ровно то, что делает main() сразу после конструктора
+    app.active_runner = _FakeRunner(running=False)
+
+    calls = {"load": 0, "invalidate": 0}
+    monkeypatch.setattr("config.load_config", lambda *_a, **_k: (
+        calls.__setitem__("load", calls["load"] + 1) or {}
+    ))
+    orig_invalidate = app.invalidate_runner
+
+    def counting_invalidate():
+        calls["invalidate"] += 1
+        orig_invalidate()
+
+    app.invalidate_runner = counting_invalidate
+
+    app.reload_config_if_changed()
+
+    assert calls == {"load": 0, "invalidate": 0}
+
+
+def test_reload_config_if_changed_skips_when_file_untouched(tmp_path, monkeypatch):
+    """Файл не менялся с последнего известного снимка mtime — НИЧЕГО не
+    происходит: ни load_config, ни invalidate_runner (I1 — пересборка
+    раннера тянет MCP-дискавери и держит юзера на старте хода)."""
+    app = _mk_app(tmp_path)
+    app.reload_config()   # устанавливает базовый снимок mtime
+
+    calls = {"load": 0, "invalidate": 0}
+    monkeypatch.setattr("config.load_config", lambda *_a, **_k: (
+        calls.__setitem__("load", calls["load"] + 1) or {}
+    ))
+    orig_invalidate = app.invalidate_runner
+
+    def counting_invalidate():
+        calls["invalidate"] += 1
+        orig_invalidate()
+
+    app.invalidate_runner = counting_invalidate
+
+    app.reload_config_if_changed()
+
+    assert calls == {"load": 0, "invalidate": 0}
+    assert app._config["completions_url"] == "http://x/v1"
+
+
+def test_reload_config_if_changed_reloads_when_file_changed(tmp_path):
+    """Файл реально изменился (другое окно сохранило умолчание) — база
+    перечитывается и раннер инвалидируется, как обычный reload_config."""
+    app = _mk_app(tmp_path)
+    app.reload_config()
+    app.active_runner = _FakeRunner(running=False)
+
+    cfg_path = tmp_path / "config.yml"
+    cfg_path.write_text("backend:\n  completions_url: \"http://y/v2\"\n", encoding="utf-8")
+    _bump_mtime(cfg_path)
+
+    app.reload_config_if_changed()
+
+    assert app._config["completions_url"] == "http://y/v2"
+    assert app.active_runner is None   # инвалидация реально произошла
+
+
+def test_reload_config_if_changed_keeps_old_base_on_broken_file(tmp_path):
+    """Юзер сохранил config.yml в промежуточном/битом состоянии — чтение
+    кидает, окно не падает и продолжает работать на прежней базе. Молчать при
+    этом нельзя: причина уходит в runtime-уведомления (/notices), иначе
+    регрессия загрузки конфига незаметна."""
+    from runtime_notices import collect_runtime_notices
+
+    app = _mk_app(tmp_path)
+    app.reload_config()
+    good_config = dict(app._config)
+
+    cfg_path = tmp_path / "config.yml"
+    cfg_path.write_text("backend: [this is not, valid: yaml:", encoding="utf-8")
+    _bump_mtime(cfg_path)
+
+    app.reload_config_if_changed()   # не должно бросить исключение
+
+    assert app._config == good_config
+    assert [n.code for n in collect_runtime_notices()] == ["config_reload_failed"]
+
+
+def test_reload_config_if_changed_own_write_does_not_retrigger(tmp_path, monkeypatch):
+    """Собственное сохранение (reload_config уже перечитал и обновил снимок
+    mtime) не должно вызвать повторное перечитывание на следующей проверке —
+    иначе executor пересобирался бы впустую сразу после /settings → Сохранить
+    как умолчание."""
+    app = _mk_app(tmp_path)
+    app.reload_config()   # «сохранение» — сам конфиг тоже перечитан этим вызовом
+
+    calls = {"load": 0}
+    monkeypatch.setattr("config.load_config", lambda *_a, **_k: (
+        calls.__setitem__("load", calls["load"] + 1) or {}
+    ))
+
+    app.reload_config_if_changed()
+
+    assert calls == {"load": 0}
+
+
+def test_build_real_executor_does_not_reload_config(tmp_path, monkeypatch):
+    """Сборка executor больше НЕ перечитывает config.yml (дизайн 2026-07-21 §4):
+    свежесть глобала перенесена на путь Settings. Ход агента идёт по текущей базе
+    окна; чужая правка файла подхватывается при следующем открытии Settings."""
+    app = _mk_app(tmp_path)
+    app.reload_config()   # база = http://x/v1
+
+    cfg_path = tmp_path / "config.yml"
+    cfg_path.write_text("backend:\n  completions_url: \"http://y/v2\"\n", encoding="utf-8")
+    _bump_mtime(cfg_path)
+
+    class _Ctx:
+        tools_data = {}
+        mcp_status = {}
+        logging_path = "/tmp/agent_main_test.log"
+
+    class _Ex:
+        def __init__(self, ctx):
+            pass
+        def stop_run(self):
+            pass
+
+    seen_cfg = {}
+
+    def _fake_create_run_context(cfg, **kw):
+        seen_cfg.update(cfg)
+        return _Ctx()
+
+    monkeypatch.setattr("config.build_auth_connector", lambda cfg: None)
+    monkeypatch.setattr("run_context.create_run_context", _fake_create_run_context)
+    monkeypatch.setattr("agent_executor.AgentExecutor", _Ex)
+
+    app._build_real_executor()
+
+    assert seen_cfg["completions_url"] == "http://x/v1"   # база НЕ перечитана из файла
+
+
+# --- screen_config: единая точка получения базы для ОТКРЫТИЯ экрана ---
+
+
+def test_screen_config_does_not_reload_when_file_changed(tmp_path):
+    """screen_config() больше НЕ гоняет гейт свежести (дизайн 2026-07-21 §4):
+    отдаёт текущую базу как есть. Перечитку по mtime вызывают явно только на
+    пути Settings (main._cmd_settings / settings._sync_config_from_app)."""
+    app = _mk_app(tmp_path)
+    app.reload_config()
+    app.active_runner = _FakeRunner(running=False)
+
+    cfg_path = tmp_path / "config.yml"
+    cfg_path.write_text("backend:\n  completions_url: \"http://y/v2\"\n", encoding="utf-8")
+    _bump_mtime(cfg_path)
+
+    cfg = app.screen_config()
+
+    assert cfg["completions_url"] == "http://x/v1"   # база не перечитана
+    assert app.active_runner is not None              # раннер не тронут
+
+
+def test_screen_config_noop_when_file_untouched(tmp_path, monkeypatch):
+    """Файл не менялся — screen_config() не перечитывает и не инвалидирует
+    раннер (I1: пересборка раннера тянет MCP-дискавери и держит пользователя на
+    старте хода)."""
+    app = _mk_app(tmp_path)
+    app.reload_config()
+
+    calls = {"load": 0, "invalidate": 0}
+    monkeypatch.setattr("config.load_config", lambda *_a, **_k: (
+        calls.__setitem__("load", calls["load"] + 1) or {}
+    ))
+    orig_invalidate = app.invalidate_runner
+
+    def counting_invalidate():
+        calls["invalidate"] += 1
+        orig_invalidate()
+
+    app.invalidate_runner = counting_invalidate
+
+    app.screen_config()
+
+    assert calls == {"load": 0, "invalidate": 0}

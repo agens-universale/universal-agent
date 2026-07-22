@@ -409,7 +409,7 @@ def patch_runtime_flag(
 ) -> None:
     """Точечный patch ``meta.runtime.<flag>`` без clobber ``meta.tui`` (I1).
 
-    ``flag``: ``summarizing``|``finalizing``.
+    ``flag``: ``summarizing``|``finalizing``|``finish_gate_checking``.
     """
     sys_norm = sanitize_system_id(system_id)
     name = resolve_runtime_flag_name(flag)
