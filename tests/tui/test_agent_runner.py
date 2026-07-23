@@ -191,6 +191,61 @@ def test_run_exception_calls_on_error_with_exception():
     assert not runner.is_running()
 
 
+def test_marked_stopped_skips_on_error():
+    """После replace (_marked_stopped) хвостовой Exception не зовёт on_error —
+    иначе ✗ Ошибка залипает поверх нового живого прогона."""
+    seen: list[BaseException] = []
+    entered = threading.Event()
+    release = threading.Event()
+
+    class _BoomAfterHold:
+        def run(self, messages, *, thread_id, **kw):
+            entered.set()
+            assert release.wait(timeout=5.0)
+            raise RuntimeError("хвост после replace")
+        def stop_run(self): pass
+        def add_message(self, m): pass
+
+    def on_error(exc):
+        seen.append(exc)
+
+    runner = AgentRunner(executor=_BoomAfterHold(), on_error=on_error)
+    assert runner.start(query="x", thread_id="t1") is True
+    assert entered.wait(timeout=2.0)
+    runner.stop()
+    runner._marked_stopped = True
+    release.set()
+    runner.wait(timeout=2.0)
+    assert seen == []
+
+
+def test_stop_requested_skips_on_error():
+    """stop() без mark: исключение после stop_requested не пишет on_error
+    (иначе /stop превращается в ✗ Ошибка вместо ■ Отменено)."""
+    seen: list[BaseException] = []
+    entered = threading.Event()
+    release = threading.Event()
+
+    class _BoomAfterHold:
+        def run(self, messages, *, thread_id, **kw):
+            entered.set()
+            assert release.wait(timeout=5.0)
+            raise RuntimeError("ошибка во время stop")
+        def stop_run(self): pass
+        def add_message(self, m): pass
+
+    runner = AgentRunner(
+        executor=_BoomAfterHold(),
+        on_error=lambda exc: seen.append(exc),
+    )
+    assert runner.start(query="x", thread_id="t1") is True
+    assert entered.wait(timeout=2.0)
+    runner.stop()
+    release.set()
+    runner.wait(timeout=2.0)
+    assert seen == []
+
+
 def test_stop_during_factory_build_skips_run():
     """stop() пока фабрика ещё строит executor → после сборки run НЕ запускается."""
     factory_entered = threading.Event()

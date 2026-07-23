@@ -330,16 +330,29 @@ class TuiApp(App):
         from tui.services.agent_runner import AgentRunner
         factory = self._executor_factory or self._build_real_executor
 
+        # runner_ref заполняется сразу после конструктора: callback должен
+        # игнорировать ошибки чужого/заменённого runner (см. AgentRunner._emit_error).
+        runner_ref: list = []
+
         def _on_runner_error(exc: BaseException) -> None:
+            runner = runner_ref[0] if runner_ref else None
+            if runner is None or runner is not self.active_runner:
+                return
+            if getattr(runner, "_marked_stopped", False):
+                return
             self.last_runner_error = str(exc) or exc.__class__.__name__
 
         def _on_runner_complete(outcome: Optional[str]) -> None:
+            runner = runner_ref[0] if runner_ref else None
+            if runner is None or runner is not self.active_runner:
+                return
             self.last_terminal_outcome = outcome
 
         self.active_runner = AgentRunner(
             executor_factory=factory, on_error=_on_runner_error,
             on_complete=_on_runner_complete,
         )
+        runner_ref.append(self.active_runner)
         self._runner_stale = False
         return self.active_runner
 

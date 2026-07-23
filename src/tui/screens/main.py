@@ -103,15 +103,19 @@ def resolve_live_terminal_indicator_state(*, last_indicator_kind, status, stop_r
 def select_indicator_mode(*, err, is_running, ask_human, confirm):
     """Режим строки-индикатора в _poll_active. Порядок важен.
 
-    err (краш раннера) имеет ПРИОРИТЕТ → "failed": терминальный ✗ Ошибка сразу,
-    не дожидаясь reaping воркера / falling-edge. Иначе при быстром следующем
-    сообщении статус теряется, а idle-ветка уничтожает индикатор."""
-    if err:
-        return "failed"
-    if is_running and not ask_human and not confirm:
-        return "active"
+    Human-wait (ask_human/confirm) выше err: агент ждёт ответ юзера — баннер
+    уже говорит об этом; ✗ Ошибка поверх «АГЕНТ СПРАШИВАЕТ» путает (в т.ч. когда
+    stale last_runner_error от заменённого runner ещё не сброшен).
+
+    Иначе err (краш текущего раннера) → "failed" сразу, не дожидаясь reaping /
+    falling-edge: при быстром следующем сообщении статус иначе теряется, а
+    idle-ветка уничтожает индикатор."""
     if ask_human or confirm:
         return "hide"
+    if err:
+        return "failed"
+    if is_running:
+        return "active"
     return "terminal"
 
 
