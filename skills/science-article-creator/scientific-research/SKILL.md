@@ -2,7 +2,7 @@
 id: scientific-research
 name: Scientific Research
 description: "Multi-source ACADEMIC research through science-mcp: optionally sharpens vague intent using 10 cognitive lenses (problem-first, abstraction ladder, tension hunting, cross-pollination, what-changed, failure analysis, simplicity, stakeholder rotation, composition/decomposition, explain-to-someone), then queries literature_search + preprint_search + open_access_search across OpenAlex/PubMed/arXiv/bioRxiv/medRxiv/Semantic Scholar/CORE, dedups, normalizes every result via work_lookup, returns a confidence-rated list of papers with DOI/PMID/arXiv IDs. Use when the user asks to investigate a scientific topic, find peer-reviewed papers, build a literature overview, locate preprints. Do NOT use for non-academic web research — use `topic-research` instead."
-version: 0.1.0
+version: 0.1.1
 ---
 
 # Skill: Scientific Research
@@ -73,7 +73,12 @@ Lenses are a tool, not a mandatory step. If the request already names key terms,
 
 ## Output format
 
-**Delivery: always include the annotated list in your chat reply** — even when you also save an artifact to disk. The chat message must contain the compact grouped list (papers + gaps note), not only a path or "saved to file". You may optionally save the same content as a `*_literature_review.md` file when useful, but the inline chat list is mandatory. This skill produces a short annotated source list, not a full review or article. No cover page in the chat version.
+**Delivery (MANDATORY — both channels):**
+
+1. **File** — write the full annotated list (same skeleton below) to a Markdown artifact under the writable project dir, name like `*_literature_review.md`. Prefer create early (skeleton), then append verified entries after each meaningful search/normalize block — do not keep the accumulating list only in the dialog/trace until the end (dialog may be summarized and drop detail). Create/overwrite via a filesystem write tool; verify success (tool `ok` / readback). The skill is **not complete** until this file exists.
+2. **Chat** — include the same compact grouped list (papers + gaps note) inline in the chat reply, **and** the absolute path to the file. Do not reply with only a path, and do not leave results only in the trace/chat without a file.
+
+This skill produces a short annotated source list, not a full review or article. No cover page in the chat version.
 
 Russian Markdown with this skeleton:
 
@@ -129,7 +134,8 @@ Build the link by substituting the real id from the MCP response into BOTH the b
 - Do not invent titles / DOIs / authors — every record must come from a real MCP response.
 - Do not substitute web search for MCP — this is an academic skill; the source of truth is science-mcp.
 - Do not write a full review or article in the output — return the annotated source list only. Article writing is the job of `scientific-article-creator`.
-- Do not treat a saved file as sufficient delivery only — always include the annotated list inline in the chat response too, even if you also wrote an artifact.
+- Do not deliver via only one channel: chat-only (no file) is incomplete; file-only (path without the annotated list inline) is incomplete. Both are required before claiming the skill done.
+- Do not keep the accumulating source list only in the dialog until the end — persist to the file as you go.
 
 ## Examples
 

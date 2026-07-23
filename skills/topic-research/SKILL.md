@@ -2,7 +2,7 @@
 id: "topic-research"
 name: "topic-research"
 description: "Conducts deep research on a topic using multiple independent sources, primary evidence, competing viewpoints, reliability assessment, and confidence-rated recommendations. Use when the user asks to investigate, research, compare, benchmark vendors/products/markets/models, find sources, or prepare an evidence-backed overview. Best for external or domain questions, market, technology, regulatory, vendor research, and uncertain claims. Do not use for automated benchmark/eval task instances requiring no-HITL execution and machine-checkable artifacts; use autonomous-benchmark-agent. Do not use for writing full articles, software architecture design, or code implementation."
-version: "0.1.0"
+version: "0.1.1"
 ---
 
 # Skill: Topic Research
@@ -11,7 +11,7 @@ version: "0.1.0"
 Use this skill to investigate a topic and produce a decision-ready research brief.
 Focus on depth, independent evidence, competing viewpoints, and practical recommendations.
 
-Default outcome: deep research artifact with findings, confidence, risks, and next actions.
+Default outcome: deep research artifact (file + chat) with findings, confidence, risks, and next actions.
 
 ## Use When
 - The user asks to research an unfamiliar topic or compare approaches.
@@ -136,17 +136,23 @@ Exit criteria:
   - hypotheses requiring validation.
 
 ### 7) Decision-Ready Output
-Produce a compact research brief:
+
+**Delivery (MANDATORY — both channels):**
+
+1. **File** — write the full research brief (template below) to a Markdown artifact under the writable project dir, name like `*_research_brief.md`. Create the file early (skeleton/outline is fine), then **append verified findings after each meaningful research block** — do not keep the accumulating brief only in the dialog/trace until the end (dialog may be summarized and drop detail). Verify writes (tool `ok` / readback). The skill is **not complete** until this file exists with the full brief.
+2. **Chat** — include a compact decision-ready summary (executive summary, key findings, recommendations, uncertainty) **and** the absolute path to the file. Do not reply with only a path, and do not leave the full brief only in chat/trace without a file.
+
+Brief contents:
 - Executive summary.
 - Key findings.
 - Option comparison (if applicable).
 - Recommendations and next experiments.
 - Source list and evidence notes.
 
-Keep the final answer concise enough to be useful, but do not omit important uncertainty, conflicting evidence, or source rationale for brevity.
+Keep the chat summary concise enough to be useful, but do not omit important uncertainty, conflicting evidence, or source rationale for brevity. The file holds the full structured brief.
 
 ## Output Template
-Use this structure unless the user requests another format:
+Use this structure in the **file** (and mirror the same sections compactly in chat) unless the user requests another format:
 
 ```markdown
 # Research Brief: <Topic>
@@ -212,6 +218,7 @@ Before finalizing, verify:
 - Confidence levels are stated for key findings.
 - Recommendations include risks and failure conditions.
 - Sources are traceable, relevant, and reasonably fresh for the topic.
+- File artifact exists and was updated incrementally; chat includes path + compact summary.
 
 ## Anti-Patterns
 - Presenting unsourced claims as facts.
@@ -222,3 +229,5 @@ Before finalizing, verify:
 - Cherry-picking only sources that support one conclusion.
 - Hiding uncertainty when evidence is weak.
 - Delivering generic recommendations with no actionable next step.
+- Chat-only or file-only delivery (both channels required).
+- Keeping the full brief only in the dialog until the end — risk of loss when context is summarized.
