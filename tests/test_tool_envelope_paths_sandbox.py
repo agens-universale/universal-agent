@@ -1,7 +1,7 @@
 import json
 
 from tests.harbor_support.fakes import bind_os_backend
-from tools.backends.protocol import FsBackend
+from backends.protocol import FsBackend
 from tools.fs.write_to_file_tool import WriteToFile
 
 

@@ -17,7 +17,7 @@ from config_modules.project_memory import (
 
 _logger = logging.getLogger(__name__)
 
-DEFAULT_TOOL_USAGE_NOTICE_STEP_MESSAGES = 10
+DEFAULT_TOOL_USAGE_NOTICE_STEP_MESSAGES = 16
 
 
 class ToolUsageNoticeRule(BaseModel):

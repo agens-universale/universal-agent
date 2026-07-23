@@ -4,9 +4,9 @@ from __future__ import annotations
 import asyncio
 from typing import Any, Optional
 
-from tools.backends.protocol import FsBackend
-from tools.backends.local import LocalFsBackend
-from tools.backends.harbor import HarborBackend
+from backends.protocol import FsBackend
+from backends.local import LocalFsBackend
+from backends.harbor import HarborBackend
 
 _SUPPORTED = frozenset({"local", "harbor"})
 

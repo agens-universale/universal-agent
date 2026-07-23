@@ -29,6 +29,8 @@ def maybe_store_and_wrap_tool_output(
 ) -> str:
     log = logger if isinstance(logger, logging.Logger) else _fallback_logger
     inline_limit = get_tool_output_inline_max_chars(config)
+    if tool_name == "skills_load":
+        inline_limit = max(inline_limit, 40000)
     if state.tool_call_outputs_store.is_disabled():
         return tool_res
     if tool_name == READ_STORED_TOOL_OUTPUT_NAME:

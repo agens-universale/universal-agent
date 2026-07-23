@@ -17,7 +17,7 @@ from diff_tui.touched import TouchedJournal
 from diff_tui.tracking import TrackingFsBackend, wrap_local_for_tui
 from execution_workspace import build_execution_workspace
 from tests.helpers.tool_ctx import local_ctx
-from tools.backends.local import LocalFsBackend
+from backends.local import LocalFsBackend
 from tools.fs.append_to_file import AppendToFile
 from tools.fs.apply_file_edits import ApplyFileEdits
 from tools.fs.search_and_replace import SearchAndReplace

@@ -193,7 +193,7 @@ def _coerce_workspace(
     if backend is not None and getattr(backend, "is_sandbox", False):
         return build_execution_workspace(backend, workspace_config)
     # Lazy: avoids tools → security → project_data import cycle.
-    from tools.backends.local import LocalFsBackend
+    from backends.local import LocalFsBackend
 
     return build_execution_workspace(LocalFsBackend(), workspace_config)
 

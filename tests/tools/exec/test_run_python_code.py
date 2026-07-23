@@ -4,7 +4,7 @@ import stat
 
 import pytest
 
-from tools.backends.local import _sanitize_env
+from backends.local import _sanitize_env
 from tools.exec.run_python_code import RunPythonCode
 
 

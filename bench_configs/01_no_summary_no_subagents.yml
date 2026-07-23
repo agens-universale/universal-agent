@@ -80,7 +80,7 @@ working_memory:
 
 tool_usage_notice:
   - tool_name: session_memory
-    step_messages_count: 12
+    step_messages_count: 16
     notice_message: "You have not used session memory for some steps. If durable facts changed, consider updating memory before finalizing"
 
 project_memory:

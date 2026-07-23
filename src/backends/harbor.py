@@ -12,8 +12,8 @@ import tempfile
 from pathlib import Path
 from typing import Any, Callable, Iterable, Optional
 
-from tools.backends.protocol import ExecResult, FsBackend
-from tools.backends.walk_util import iter_files_from_flat, iter_walk_from_flat
+from backends.protocol import ExecResult, FsBackend
+from backends.walk_util import iter_files_from_flat, iter_walk_from_flat
 
 
 class HarborBackend(FsBackend):

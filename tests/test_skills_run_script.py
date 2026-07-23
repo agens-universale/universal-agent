@@ -4,6 +4,7 @@ import pytest
 
 from tools.skills.registry import SkillsRegistry
 from tools.skills.skills_tools import RunSkillScriptTool
+from tests.helpers.tool_ctx import local_ctx
 
 
 def _write_skill_with_script(root, skill_id: str, script_body: str) -> None:
@@ -34,8 +35,8 @@ def test_skills_run_script_sets_script_ok_false_on_nonzero_exit(reg_with_scripts
         "exit-one",
         "import sys\nsys.exit(1)\n",
     )
-    tool = RunSkillScriptTool(reg_with_scripts)
-    payload = json.loads(tool(skill_id="exit-one"))
+    tool = RunSkillScriptTool(reg_with_scripts, ctx=local_ctx())
+    payload = json.loads(tool(skill_id="exit-one", script_name="main.py"))
     assert payload["ok"] is True
     assert payload["script_ok"] is False
     assert payload["result"]["exit_code"] == 1
@@ -47,8 +48,8 @@ def test_skills_run_script_sets_script_ok_true_on_zero_exit(reg_with_scripts, tm
         "exit-zero",
         "import sys\nprint('done')\nsys.exit(0)\n",
     )
-    tool = RunSkillScriptTool(reg_with_scripts)
-    payload = json.loads(tool(skill_id="exit-zero"))
+    tool = RunSkillScriptTool(reg_with_scripts, ctx=local_ctx())
+    payload = json.loads(tool(skill_id="exit-zero", script_name="main.py"))
     assert payload["ok"] is True
     assert payload["script_ok"] is True
     assert payload["result"]["exit_code"] == 0
@@ -65,13 +66,29 @@ def test_skills_run_script_passes_args_as_stdin_json(reg_with_scripts, tmp_path)
             "print(payload.get('skill_path', ''))\n"
         ),
     )
-    tool = RunSkillScriptTool(reg_with_scripts)
+    tool = RunSkillScriptTool(reg_with_scripts, ctx=local_ctx())
     payload = json.loads(
         tool(
             skill_id="stdin-echo",
+            script_name="main.py",
             args='{"skill_path":"/tmp/my-skill"}',
         )
     )
     assert payload["ok"] is True
     assert payload["script_ok"] is True
     assert payload["result"]["stdout"].strip() == "/tmp/my-skill"
+
+
+def test_skills_run_script_passes_argv(reg_with_scripts, tmp_path):
+    _write_skill_with_script(
+        tmp_path / "system",
+        "argv-echo",
+        "import sys\nprint('|'.join(sys.argv[1:]))\n",
+    )
+    tool = RunSkillScriptTool(reg_with_scripts, ctx=local_ctx())
+    payload = json.loads(
+        tool(skill_id="argv-echo", script_name="main.py", argv='--format json "two words"')
+    )
+    assert payload["ok"] is True
+    assert payload["script_ok"] is True
+    assert payload["result"]["stdout"].strip() == "--format|json|two words"

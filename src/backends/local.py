@@ -7,7 +7,7 @@ import subprocess
 import sys
 from typing import Any, Callable, Dict, Iterable, Optional
 
-from tools.backends.protocol import ExecResult, FsBackend
+from backends.protocol import ExecResult, FsBackend
 from utils.file_text import read_text_for_edit
 
 

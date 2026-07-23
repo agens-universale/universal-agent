@@ -9,7 +9,7 @@ from config import load_config
 from config_modules.agent import DEFAULT_EXEC_TIMEOUT_SEC, AgentConfig
 from config_modules.root import AppConfig
 from tests.helpers.tool_ctx import with_local_ctx
-from tools.backends.protocol import ExecResult
+from backends.protocol import ExecResult
 from tools.exec.execute_command import ExecuteCommand
 from tools.exec.run_python_code import RunPythonCode
 
@@ -64,7 +64,7 @@ def test_execute_command_uses_config_default(monkeypatch):
         return ExecResult(stdout="ok", stderr="", return_code=0, timed_out=False)
 
     monkeypatch.setattr(
-        "tools.backends.local.LocalFsBackend.exec",
+        "backends.local.LocalFsBackend.exec",
         _fake_exec,
     )
     tool = with_local_ctx(ExecuteCommand, config_dict={"exec_timeout_sec": 600})
@@ -81,7 +81,7 @@ def test_run_python_uses_config_default(monkeypatch):
         return ExecResult(stdout="ok", stderr="", return_code=0, timed_out=False)
 
     monkeypatch.setattr(
-        "tools.backends.local.LocalFsBackend.run_python",
+        "backends.local.LocalFsBackend.run_python",
         _fake_run_python,
     )
     tool = with_local_ctx(RunPythonCode, config_dict={"exec_timeout_sec": 600})

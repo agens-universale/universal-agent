@@ -22,6 +22,7 @@ from message_policy.tool_usage_notice.state import persist_tool_usage_notice_sta
 from persistence.state_storage import save_state
 from intent_log.user_turn import append_user_asks_from_messages, init_subagent_open_turn
 from run_context import RunContext
+from tools.skills.registry import get_skills_registry
 from states import State
 from tools import build_tools_data
 from tools.subagents.registry import get_subagent_class
@@ -417,7 +418,10 @@ class SubagentRunner:
     def _build_child_state(self, agent_role: str) -> State:
         """Создать дочерний State, наследуя общие данные от оркестратора."""
         child_config = {**self._config, "use_local_subagents": False}
-        child_tools_data, child_tools_spec, child_tools_descr, _mcp_status = build_tools_data(child_config)
+        parent_backend = getattr(self._ctx, "os_backend", None)
+        child_tools_data, child_tools_spec, child_tools_descr, _mcp_status = build_tools_data(
+            child_config, os_backend=parent_backend
+        )
         child_system_prompt = self._resolve_subagent_system_prompt()
 
         parent = self._orchestrator_state
@@ -509,9 +513,6 @@ class SubagentRunner:
         child_config = {**self._config, "use_local_subagents": False}
         child_run_id = generate_run_id()
         child_agent_kind = tool_name
-        child_tools_data, child_tools_spec, child_tools_descr, _mcp_status = build_tools_data(
-            child_config
-        )
         child_logger, child_log_path, child_summary_trace_path = create_run_logger(
             child_config, run_id=child_run_id, agent_kind=child_agent_kind
         )
@@ -523,6 +524,14 @@ class SubagentRunner:
                 "create_run_context() must assemble ExecutionWorkspace"
             )
         parent_backend = getattr(self._ctx, "os_backend", None) or parent_workspace.backend
+        child_skills_registry = get_skills_registry(
+            child_config, backend=parent_backend
+        )
+        child_tools_data, child_tools_spec, child_tools_descr, _mcp_status = build_tools_data(
+            child_config,
+            os_backend=parent_backend,
+            skills_registry=child_skills_registry,
+        )
 
         child_ctx = RunContext(
             config_dict=child_config,
@@ -537,6 +546,7 @@ class SubagentRunner:
             tools_spec=child_tools_spec,
             tools_description=child_tools_descr,
             os_backend=parent_backend,
+            skills_registry=child_skills_registry,
             workspace=parent_workspace,
             environment=getattr(self._ctx, "environment", None),
             project_gc_dir=getattr(self._ctx, "project_gc_dir", Path(".")),

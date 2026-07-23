@@ -43,7 +43,6 @@ from tools.subagents.active_scope import try_enqueue_user_message
 from tools.subagents.sidecar import bind_thread_identity, clear_thread_identity
 from tools.connect_mcp.persistent_stdio import PersistentStdioRegistry
 from tools.connect_mcp.stream_client import _SESSION_MANAGER as _STREAM_SESSION_MANAGER
-from tools.skills.registry import get_skills_registry
 from message_policy.tool_usage_notice.state import persist_tool_usage_notice_state
 from utils.generate_message_id import generate_msg_id_sha256 as generate_message_id_func
 from utils.logging_module import human_console_enabled
@@ -99,7 +98,7 @@ class AgentExecutor:
         effective_verbose = (
             verbose if verbose is not None else config_dict.get("verbose", False)
         )
-        skills_list = get_skills_registry(config_dict).list_skills()
+        skills_list = self._ctx.skills_registry.list_skills()
 
         thread_session: ThreadSession | None = None
         thread_shared: SharedStateData | None = None

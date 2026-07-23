@@ -17,7 +17,7 @@ def local_ctx(config_dict: Optional[dict] = None) -> SimpleNamespace:
     вычищают ``tools.*`` из ``sys.modules`` и переимпортируют пакет — тогда
     module-level ссылка становится чужим классом относительно monkeypatch.
     """
-    from tools.backends.local import LocalFsBackend
+    from backends.local import LocalFsBackend
 
     cfg = dict(config_dict or {})
     backend = LocalFsBackend()

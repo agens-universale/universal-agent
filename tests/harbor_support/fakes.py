@@ -2,7 +2,7 @@
 import hashlib
 from types import SimpleNamespace
 
-from tools.backends.walk_util import iter_files_from_flat, iter_walk_from_flat
+from backends.walk_util import iter_files_from_flat, iter_walk_from_flat
 
 
 class FakeBackend:

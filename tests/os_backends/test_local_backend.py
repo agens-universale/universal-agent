@@ -4,8 +4,8 @@ import stat as stat_module
 import pytest
 
 from run_context import create_run_context
-from tools.backends.local import LocalFsBackend
-from tools.backends.protocol import ExecResult, FsBackend
+from backends.local import LocalFsBackend
+from backends.protocol import ExecResult, FsBackend
 
 
 @pytest.fixture()

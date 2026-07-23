@@ -1,8 +1,8 @@
 import asyncio
 import threading
 import pytest
-from tools.backends.harbor import HarborBackend
-from tools.backends.protocol import FsBackend
+from backends.harbor import HarborBackend
+from backends.protocol import FsBackend
 
 
 class FakeExecResult:

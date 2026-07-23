@@ -34,7 +34,7 @@ class AgentConfig(BaseModel):
     subagent_finish_gate_max_iterations: int = DEFAULT_SUBAGENT_FINISH_GATE_MAX_ITERATIONS
     finish_gate_use_rule_hints: bool = False
     limit_project_metadata: bool = False
-    tool_output_inline_max_chars: int = 10000
+    tool_output_inline_max_chars: int = 20000
     stored_tool_outputs_max_entries: int = 50
     # Таймаут execute_command / run_python_code, если модель не передала timeout_seconds.
     exec_timeout_sec: int = DEFAULT_EXEC_TIMEOUT_SEC
