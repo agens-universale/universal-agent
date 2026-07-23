@@ -85,7 +85,7 @@ def _stub_tools_modules() -> None:
     sys.modules["tools.skills"] = skills_pkg
 
     registry_mod = types.ModuleType("tools.skills.registry")
-    registry_mod.get_skills_registry = lambda _cfg: _SkillsRegistryStub()
+    registry_mod.get_skills_registry = lambda _cfg, **_kw: _SkillsRegistryStub()
     sys.modules["tools.skills.registry"] = registry_mod
 
 
@@ -133,6 +133,7 @@ class SummaryTriggersTest(unittest.TestCase):
             tools_spec=[],
             tools_description=[],
             project_gc_dir=Path(tmp_dir) / ".gc",
+            skills_registry=_SkillsRegistryStub(),
         )
 
     def test_chat_completions_calls_pre_run_and_pre_backend_summary(self):
@@ -171,8 +172,6 @@ class SummaryTriggersTest(unittest.TestCase):
                 st.messages = [sys_m] if sys_m else []
 
             with patch.object(
-                agent_executor_module, "get_skills_registry", return_value=_SkillsRegistryStub()
-            ), patch.object(
                 agent_executor_module, "run_agent", side_effect=_fake_run_agent
             ), patch.object(
                 run_summary_coordinator_module,
@@ -224,8 +223,6 @@ class SummaryTriggersTest(unittest.TestCase):
                 st.messages = [sys_m] if sys_m else []
 
             with patch.object(
-                agent_executor_module, "get_skills_registry", return_value=_SkillsRegistryStub()
-            ), patch.object(
                 agent_executor_module, "run_agent", side_effect=_fake_run_agent
             ), patch.object(
                 run_summary_coordinator_module,
@@ -247,8 +244,6 @@ class SummaryTriggersTest(unittest.TestCase):
             ctx = self._make_ctx(tmp_dir, backend_api_mode="responses")
 
             with patch.object(
-                agent_executor_module, "get_skills_registry", return_value=_SkillsRegistryStub()
-            ), patch.object(
                 agent_executor_module, "run_agent", return_value="ok"
             ), patch.object(
                 run_summary_coordinator_module, "run_summary_compaction"
@@ -270,8 +265,6 @@ class SummaryTriggersTest(unittest.TestCase):
                 return "ok"
 
             with patch.object(
-                agent_executor_module, "get_skills_registry", return_value=_SkillsRegistryStub()
-            ), patch.object(
                 agent_executor_module, "run_agent", side_effect=_fake_run_agent
             ), patch.object(
                 run_summary_coordinator_module,
@@ -341,8 +334,6 @@ class SummaryTriggersTest(unittest.TestCase):
                 return "ok"
 
             with patch.object(
-                agent_executor_module, "get_skills_registry", return_value=_SkillsRegistryStub()
-            ), patch.object(
                 agent_executor_module, "run_agent", side_effect=_fake_run_agent
             ), patch.object(
                 run_summary_coordinator_module,

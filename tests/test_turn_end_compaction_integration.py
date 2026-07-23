@@ -426,7 +426,6 @@ def test_agent_executor_fail_open_turn_end_compaction(monkeypatch):
 
     recorded: list[str] = []
 
-    monkeypatch.setattr(ae, "get_skills_registry", lambda _cfg: _SkillsRegistryStub())
     monkeypatch.setattr(ae, "save_state", lambda _state: None)
     monkeypatch.setattr(ae, "dump_storage", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(
@@ -451,6 +450,7 @@ def test_agent_executor_fail_open_turn_end_compaction(monkeypatch):
         logger=logging.getLogger("test_agent_executor_turn_end"),
         tools_spec=[],
         tools_description=[],
+        skills_registry=_SkillsRegistryStub(),
     )
     executor = ae.AgentExecutor(ctx)
     result = executor.run(["вопрос"], system="cli", verbose=False)

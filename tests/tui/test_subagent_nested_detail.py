@@ -55,10 +55,14 @@ def test_detail_from_sidecar_records_pairs_call_result():
 
 
 def test_resolve_prefers_cache_over_records():
-    clear_detail_cache()
-    from tools.subagents import sidecar as sc
+    # Пишем в тот же _DETAIL_CACHE, из которого resolve_nested_tool_detail
+    # читает через lookup_tool_detail (после stub/reload tools.* модули
+    # могут разъехаться — top-level import sidecar ≠ binding в mapper).
+    from tui.services.subagent_sidecar_mapper import lookup_tool_detail
 
-    sc._DETAIL_CACHE["c_cache"] = {
+    cache = lookup_tool_detail.__globals__["_DETAIL_CACHE"]
+    cache.clear()
+    cache["c_cache"] = {
         "call": {
             "type": "function_call",
             "name": "fs_read_file",
@@ -72,24 +76,26 @@ def test_resolve_prefers_cache_over_records():
         },
         "result_kind": "result",
     }
-    detail = resolve_nested_tool_detail(
-        "c_cache",
-        sidecar_records=[
-            {
-                "seq": 1,
-                "kind": "call",
-                "payload": {
-                    "type": "function_call",
-                    "name": "fs_read_file",
-                    "arguments": '{"path":"disk.py"}',
-                    "call_id": "c_cache",
-                },
-            }
-        ],
-    )
-    assert detail is not None
-    assert "cached.py" in detail["call"]["arguments"]
-    clear_detail_cache()
+    try:
+        detail = resolve_nested_tool_detail(
+            "c_cache",
+            sidecar_records=[
+                {
+                    "seq": 1,
+                    "kind": "call",
+                    "payload": {
+                        "type": "function_call",
+                        "name": "fs_read_file",
+                        "arguments": '{"path":"disk.py"}',
+                        "call_id": "c_cache",
+                    },
+                }
+            ],
+        )
+        assert detail is not None
+        assert "cached.py" in detail["call"]["arguments"]
+    finally:
+        cache.clear()
 
 
 def test_warm_detail_cache_from_records():

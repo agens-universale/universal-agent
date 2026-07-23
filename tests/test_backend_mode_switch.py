@@ -63,7 +63,7 @@ def _stub_tools_modules() -> None:
 
     registry_mod = types.ModuleType("tools.skills.registry")
 
-    registry_mod.get_skills_registry = lambda _config_dict: _SkillsRegistryStub()
+    registry_mod.get_skills_registry = lambda _config_dict, **_kw: _SkillsRegistryStub()
 
     sys.modules["tools.skills.registry"] = registry_mod
 
@@ -184,6 +184,7 @@ class BackendModeSwitchTest(unittest.TestCase):
                     tools_spec=[],
                     tools_description=[],
                     project_gc_dir=Path(tmp_dir) / ".gc",
+                    skills_registry=_SkillsRegistryStub(),
                 )
 
                 def _mock_chat_completions_policy(**kwargs):
@@ -205,10 +206,6 @@ class BackendModeSwitchTest(unittest.TestCase):
                     ), payload
 
                 with patch.object(
-                    agent_executor_module,
-                    "get_skills_registry",
-                    return_value=_SkillsRegistryStub(),
-                ), patch.object(
                     processing_module, "request_backend", side_effect=_mock_responses_backend
                 ), patch.object(
                     processing_module,
