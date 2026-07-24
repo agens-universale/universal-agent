@@ -1,4 +1,5 @@
 import logging
+import os
 import requests
 import re
 import json
@@ -12,6 +13,7 @@ from message_policy.chat_completions import prepare_chat_completion_messages_for
 from utils.schema_markers import schema_without_internal_markers
 from utils.convertations import output_chat_completion_to_response
 from utils.format_messages import format_message_chat_completions_to_send_backend
+from utils.http_proxy import resolve_proxies
 from utils.retry import retry_with_backoff
 from usage.context import record_usage
 from utils.chat_completions_stream import iter_sse_data_lines, assemble_streamed_completion, OnDelta, BackendStreamError
@@ -109,14 +111,17 @@ def request_backend_responses(
     use_retry: bool = True,
     logger: Optional[logging.Logger] = None,
     timeout: float = DEFAULT_REQUEST_TIMEOUT_SEC,
+    config_proxy: Optional[str] = None,
 ) -> Tuple[Dict, Dict]:
     """
     Отправить запрос в backend responses API.
 
     url и verify передаются явно вызывающим кодом (как правило, из ctx.config_dict).
     timeout — HTTP-таймаут (connect + idle между чанками стрима), секунды.
+    config_proxy — backend.proxy; резолв (config/env/NO_PROXY) на каждый post.
     """
     chunks: List[bytes] = []
+    proxies = resolve_proxies(config_proxy, os.environ, url)
 
     data['stream'] = True
 
@@ -134,6 +139,7 @@ def request_backend_responses(
         verify=verify,
         cert=cert,
         timeout=timeout,
+        proxies=proxies,
     ) as r:
         r.raise_for_status()
         r_headers = r.headers
@@ -186,13 +192,16 @@ def request_backend_chat_completions(
     logger: Optional[logging.Logger] = None,
     on_delta: Optional[OnDelta] = None,
     timeout: float = DEFAULT_REQUEST_TIMEOUT_SEC,
+    config_proxy: Optional[str] = None,
 ):
     """
     Отправить запрос в backend chat completions API.
 
     url передаётся явно вызывающим кодом (как правило, из ctx.config_dict).
     timeout — HTTP-таймаут (connect + idle между чанками стрима), секунды.
+    config_proxy — backend.proxy; резолв (config/env/NO_PROXY) на каждый post.
     """
+    proxies = resolve_proxies(config_proxy, os.environ, url)
     # Стриминг задействован ТОЛЬКО когда caller передал on_delta (его ставит
     # лишь TUI через ctx.on_stream_delta). CLI/server/swarm → on_delta=None →
     # всегда non-stream, независимо от cfg["stream"]. Флаг stream — TUI-only.
@@ -231,6 +240,7 @@ def request_backend_chat_completions(
             verify=verify,
             cert=cert,
             timeout=timeout,
+            proxies=proxies,
         ) as r:
             try:
                 r.raise_for_status()
@@ -293,7 +303,8 @@ def request_backend_chat_completions(
         )
 
     r = _NO_NETRC_SESSION.post(
-        url, json=data, headers=headers, verify=verify, cert=cert, timeout=timeout
+        url, json=data, headers=headers, verify=verify, cert=cert, timeout=timeout,
+        proxies=proxies,
     )
     try:
         r.raise_for_status()

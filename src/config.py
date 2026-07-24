@@ -196,6 +196,7 @@ def flatten_app_config(app_cfg: AppConfig) -> Dict[str, Any]:
         "key_path": app_cfg.backend.key_path,
         "use_retry": app_cfg.backend.use_retry,
         "backend_request_timeout_sec": app_cfg.backend.request_timeout_sec,
+        "proxy": app_cfg.backend.proxy,
         "stream": app_cfg.backend.stream,  # legacy: канонический ключ — tui.stream
         "deprecated_keys_used": _deprecated_keys_used,
         "tui_stream": app_cfg.tui.stream,

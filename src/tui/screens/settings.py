@@ -180,7 +180,9 @@ class SettingsScreen(Screen):
                 mode = display_secret(auth)   # ссылка + статус (переменной нет / подставилась)
             else:
                 mode = "Bearer"
-            v.append(f"{host} · {mode}", style=DIM)
+            proxy = self._raw_value("proxy")
+            proxy_part = f" · прокси" if proxy else ""
+            v.append(f"{host} · {mode}{proxy_part}", style=DIM)
         elif i == _MODEL:
             model = self._raw_value("model")
             v.append(display_value(model) if model else "—", style=DIM)
@@ -531,7 +533,7 @@ class SettingsScreen(Screen):
         from tui.editors.connection import ConnectionEditor
         from onboarding import authorization_header
         endpoint_cfg, auth_cfg, verify, model = self._probe_args_from_config()
-        url, auth_idx, token_raw = self.query_one(ConnectionEditor).peek()
+        url, auth_idx, token_raw, _proxy = self.query_one(ConnectionEditor).peek()
         endpoint = url or endpoint_cfg               # поле пусто → действующий (для ссылок)
         if not endpoint:
             self._set_probe_line(Text("сначала настройте адрес — проверка стучится на него",
@@ -675,9 +677,12 @@ class SettingsScreen(Screen):
             header = None if auth == TOKEN_SENTINEL else auth   # None=сентинел; ""=без авт.; иначе значение
             frame.mount(ConnectionEditor(
                 url_current=self._raw_value("completions_url"),
-                auth_header=header, framed=True))
+                auth_header=header,
+                proxy_current=self._raw_value("proxy"),
+                framed=True))
             self._mount_field_hints(frame, "completions_url")
             self._mount_field_hints(frame, "Authorization")
+            self._mount_field_hints(frame, "proxy")
             frame.mount(Static(self._probe_line_text(self._probe_config, _CONNECTION),
                                classes="set-hint set-dyn set-probe"))
         elif section == _MODEL:
@@ -1092,7 +1097,7 @@ class SettingsScreen(Screen):
         values: dict = {}
         if section == _CONNECTION:
             from tui.editors.connection import ConnectionEditor
-            url, header, error = self.query_one(ConnectionEditor).submit()
+            url, header, error, proxy = self.query_one(ConnectionEditor).submit()
             if error is not None:
                 self._title_note(error)          # блок: «введите адрес» / «нужны http(s)://…»
                 return None
@@ -1100,6 +1105,8 @@ class SettingsScreen(Screen):
                 values["completions_url"] = url
             if header is not None:
                 values["Authorization"] = header
+            if proxy is not None:
+                values["proxy"] = proxy
         elif section == _MODEL:
             from tui.editors.model import ModelEditor
             value = self.query_one(ModelEditor).submit()
