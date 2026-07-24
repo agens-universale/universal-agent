@@ -1,6 +1,7 @@
 """Physical I/O port for the tool layer: LocalFsBackend (host) and HarborBackend
 (task container). Tools keep validation/envelopes; backends only answer "where
 does this byte live / where does this command run"."""
+import shlex
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Callable, Iterable, Optional
@@ -100,6 +101,22 @@ class FsBackend(ABC):
     def exec(self, command: str, *, cwd: Optional[str] = None,
              timeout: Optional[int] = None,
              env: Optional[dict] = None) -> ExecResult: ...
+
+    def exec_argv(self, argv: list, *, stdin: Optional[str] = None,
+                  cwd: Optional[str] = None,
+                  timeout: Optional[int] = None,
+                  env: Optional[dict] = None) -> ExecResult:
+        """Run a program from an argv list, optionally feeding ``stdin``.
+
+        Default builds a POSIX shell string (valid for sandbox backends whose
+        exec runs through a POSIX shell). Backends whose exec shell is not
+        POSIX (e.g. local Windows cmd.exe) must override with a shell-less
+        implementation.
+        """
+        command = " ".join(shlex.quote(str(a)) for a in argv)
+        if stdin is not None:
+            command = f"printf '%s' {shlex.quote(stdin)} | {command}"
+        return self.exec(command, cwd=cwd, timeout=timeout, env=env)
     @abstractmethod
     def run_python(self, code: str, *, cwd: Optional[str] = None,
                    timeout: Optional[int] = None,

@@ -8,6 +8,7 @@ import sys
 from typing import Any, Callable, Dict, Iterable, Optional
 
 from backends.protocol import ExecResult, FsBackend
+from utils.win_console import preserve_console_mode
 from utils.file_text import read_text_for_edit
 
 
@@ -207,7 +208,6 @@ class LocalFsBackend(FsBackend):
              timeout: Optional[int] = None,
              env: Optional[dict] = None) -> ExecResult:
         merged_env = {**os.environ, **{str(k): str(v) for k, v in env.items()}} if env else None
-        from utils.win_console import preserve_console_mode
         try:
             with preserve_console_mode():
                 result = subprocess.run(
@@ -234,10 +234,44 @@ class LocalFsBackend(FsBackend):
             return_code=result.returncode,
         )
 
+    def exec_argv(self, argv: list, *, stdin: Optional[str] = None,
+                  cwd: Optional[str] = None,
+                  timeout: Optional[int] = None,
+                  env: Optional[dict] = None) -> ExecResult:
+        # Shell-less on purpose: the base-class default builds a POSIX shell
+        # string, which breaks under Windows cmd.exe (no printf, single quotes
+        # not honored). An argv list + input goes through CreateProcess /
+        # execvp uniformly on every OS.
+        merged_env = {**os.environ, **{str(k): str(v) for k, v in env.items()}} if env else None
+        try:
+            with preserve_console_mode():
+                result = subprocess.run(
+                    [str(a) for a in argv],
+                    capture_output=True,
+                    text=True,
+                    timeout=timeout,
+                    cwd=cwd,
+                    encoding="utf-8",
+                    errors="replace",
+                    env=merged_env,
+                    input=stdin,
+                )
+        except subprocess.TimeoutExpired as e:
+            return ExecResult(
+                stdout=str(getattr(e, "stdout", "") or ""),
+                stderr=str(getattr(e, "stderr", "") or ""),
+                return_code=None,
+                timed_out=True,
+            )
+        return ExecResult(
+            stdout=result.stdout or "",
+            stderr=result.stderr or "",
+            return_code=result.returncode,
+        )
+
     def run_python(self, code: str, *, cwd: Optional[str] = None,
                    timeout: Optional[int] = None,
                    env: Optional[dict] = None) -> ExecResult:
-        from utils.win_console import preserve_console_mode
         try:
             with preserve_console_mode():
                 result = subprocess.run(

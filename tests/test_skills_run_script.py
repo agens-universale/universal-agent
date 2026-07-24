@@ -1,7 +1,10 @@
 import json
+import sys
 
 import pytest
 
+from backends.local import LocalFsBackend
+from backends.protocol import ExecResult, FsBackend
 from tools.skills.registry import SkillsRegistry
 from tools.skills.skills_tools import RunSkillScriptTool
 from tests.helpers.tool_ctx import local_ctx
@@ -92,3 +95,40 @@ def test_skills_run_script_passes_argv(reg_with_scripts, tmp_path):
     assert payload["ok"] is True
     assert payload["script_ok"] is True
     assert payload["result"]["stdout"].strip() == "--format|json|two words"
+
+
+def test_local_exec_argv_is_shell_less_and_preserves_hostile_tokens(tmp_path):
+    """Tokens that break shell quoting (Windows paths, quotes) pass verbatim.
+
+    This is the cross-platform guarantee: an argv list goes through
+    CreateProcess/execvp without any shell, so there is nothing to misquote.
+    """
+    script = tmp_path / "echo_argv.py"
+    script.write_text(
+        "import sys\nprint('|'.join(sys.argv[1:]))\nprint(sys.stdin.read())\n",
+        encoding="utf-8",
+    )
+    hostile = [r"C:\temp\it's report.pdf", '{"a": "b c"}', "--flag='x'"]
+    res = LocalFsBackend().exec_argv(
+        [sys.executable, str(script), *hostile], stdin="42"
+    )
+    assert res.return_code == 0
+    lines = res.stdout.splitlines()
+    assert lines[0] == "|".join(hostile)
+    assert lines[1] == "42"
+
+
+def test_default_exec_argv_builds_posix_pipe_for_sandbox_backends():
+    """Sandbox backends (harbor) keep the POSIX shell-string contract."""
+    class _Recorder:
+        is_sandbox = True
+
+        def exec(self, command, *, cwd=None, timeout=None, env=None):
+            self.command = command
+            return ExecResult(stdout="", stderr="", return_code=0)
+
+    rec = _Recorder()
+    FsBackend.exec_argv(rec, ["python3", "/harbor/skills/s/scripts/x.py", "a b"], stdin='{"k": 1}')
+    assert rec.command == (
+        "printf '%s' '{\"k\": 1}' | python3 /harbor/skills/s/scripts/x.py 'a b'"
+    )
