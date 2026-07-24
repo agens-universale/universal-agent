@@ -143,7 +143,7 @@ agent:
   model: MiniMax-M2.7
   # Model steering → append в <special_instructions> (для любой активной модели).
   # model_steering: |
-  #   Prefer act over survey. Cap exploratory reads.
+  #   Prefer the next concrete action over a broad survey; targeted reads that unlock that action are fine.
   system_prompt_id: v1
   use_server_subagents: false
   use_local_subagents: true
