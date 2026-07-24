@@ -87,12 +87,12 @@ def _requests_get_ex(
 ) -> HttpReply:
     """GET через backend-сессию: trust_env=False + resolve_proxies."""
     import requests
-    from utils.connect_backend import _NO_NETRC_SESSION
     from utils.http_proxy import resolve_proxies
+    from utils.http_session import NO_NETRC_SESSION
 
     proxies = resolve_proxies(config_proxy, os.environ, url)
     try:
-        resp = _NO_NETRC_SESSION.get(
+        resp = NO_NETRC_SESSION.get(
             url, headers=headers, verify=verify, timeout=5, proxies=proxies,
         )
         try:
@@ -118,12 +118,12 @@ def _requests_post_ex(
 ) -> HttpReply:
     """POST через backend-сессию: trust_env=False + resolve_proxies."""
     import requests
-    from utils.connect_backend import _NO_NETRC_SESSION
     from utils.http_proxy import resolve_proxies
+    from utils.http_session import NO_NETRC_SESSION
 
     proxies = resolve_proxies(config_proxy, os.environ, url)
     try:
-        resp = _NO_NETRC_SESSION.post(
+        resp = NO_NETRC_SESSION.post(
             url, headers=headers, json=body, verify=verify, timeout=5, proxies=proxies,
         )
         try:

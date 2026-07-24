@@ -14,6 +14,7 @@ from utils.schema_markers import schema_without_internal_markers
 from utils.convertations import output_chat_completion_to_response
 from utils.format_messages import format_message_chat_completions_to_send_backend
 from utils.http_proxy import resolve_proxies
+from utils.http_session import NO_NETRC_SESSION as _NO_NETRC_SESSION
 from utils.retry import retry_with_backoff
 from usage.context import record_usage
 from utils.chat_completions_stream import iter_sse_data_lines, assemble_streamed_completion, OnDelta, BackendStreamError
@@ -21,14 +22,6 @@ from utils.backend_errors import is_empty_completion
 
 
 logger = logging.getLogger(__name__)
-
-# Session без чтения ~/.netrc: requests при trust_env=True читает ~/.netrc,
-# и Basic-auth оттуда перетирает явный Authorization-заголовок → 401.
-# trust_env=False также отключает env-прокси и REQUESTS_CA_BUNDLE — CA передаём
-# явно через verify=. Без cookies/auth — общую сессию безопасно звать из разных
-# потоков (server-режим спавнит поток на запуск).
-_NO_NETRC_SESSION = requests.Session()
-_NO_NETRC_SESSION.trust_env = False
 
 
 def normalize_chat_completions_tools(

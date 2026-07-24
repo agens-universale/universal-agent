@@ -3,8 +3,8 @@ import os
 import time
 from typing import Optional
 
-from utils.connect_backend import _NO_NETRC_SESSION
 from utils.http_proxy import resolve_proxies
+from utils.http_session import NO_NETRC_SESSION as _NO_NETRC_SESSION
 
 
 class AuthConnector:
