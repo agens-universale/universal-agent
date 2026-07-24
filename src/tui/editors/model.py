@@ -28,7 +28,8 @@ class ModelEditor(Vertical):
     def __init__(self, *, current: str, endpoint: str, auth: str | None,
                  verify: bool, fetch, input_id: str = "onb-model",
                  active: str = "", on_loaded=None, framed: bool = False,
-                 active_overridden: bool = False) -> None:
+                 active_overridden: bool = False,
+                 config_proxy: str | None = None) -> None:
         super().__init__(classes="onb-dyn")
         self._framed = framed
         self._active_overridden = active_overridden   # модель из файла перекрыта оверлеем
@@ -36,6 +37,7 @@ class ModelEditor(Vertical):
         self._endpoint = endpoint
         self._auth = auth
         self._verify = verify
+        self._config_proxy = config_proxy
         self._fetch = fetch
         self._input_id = input_id
         self._active = active or ""
@@ -58,8 +60,19 @@ class ModelEditor(Vertical):
 
     def _fetch_blocking(self) -> None:
         try:
-            models = self._fetch(self._endpoint, self._auth, verify=self._verify) \
-                if self._endpoint else None
+            if self._endpoint:
+                try:
+                    models = self._fetch(
+                        self._endpoint, self._auth,
+                        verify=self._verify, config_proxy=self._config_proxy,
+                    )
+                except TypeError:
+                    # старые/тестовые fetch без config_proxy
+                    models = self._fetch(
+                        self._endpoint, self._auth, verify=self._verify,
+                    )
+            else:
+                models = None
         except Exception:
             models = None
         self.app.call_from_thread(self._handle_fetch_result, models)

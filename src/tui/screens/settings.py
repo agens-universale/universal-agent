@@ -119,7 +119,7 @@ class SettingsScreen(Screen):
         # Вердикт стартового авто-чека (app) — общий на сессию: хаб показывает статус сразу,
         # а секция не ходит в сеть второй раз (Enter на «Проверить обновления» — форсит).
         self._update_check_result = getattr(self.app, "_update_check_result", None)
-        endpoint, _a, _v, _m = self._probe_args_from_config()
+        endpoint, _a, _v, _m, _p = self._probe_args_from_config()
         self._probe_in_flight = bool(endpoint)   # первый кадр меню сразу с …, без — → ✓ мелькания
         self._render_view()
         self._start_config_probe()
@@ -295,7 +295,7 @@ class SettingsScreen(Screen):
             c = self._config
             if i == _CONNECTION:
                 from onboarding import TOKEN_SENTINEL
-                endpoint, _a, _v, _m = self._probe_args_from_config()
+                endpoint, _a, _v, _m, _p = self._probe_args_from_config()
                 if not endpoint:
                     return "—", DEEP_DIM
                 if r is None:
@@ -431,10 +431,11 @@ class SettingsScreen(Screen):
         auth = (c.get("chat_completion_headers") or {}).get("Authorization")
         if auth in (TOKEN_SENTINEL, ""):
             auth = None
-        return endpoint, auth, bool(c.get("use_ssl", True)), c.get("model") or ""
+        proxy = c.get("proxy") or None
+        return endpoint, auth, bool(c.get("use_ssl", True)), c.get("model") or "", proxy
 
     def _start_config_probe(self) -> None:
-        endpoint, auth, verify, model = self._probe_args_from_config()
+        endpoint, auth, verify, model, proxy = self._probe_args_from_config()
         if not endpoint:
             self._probe_config = None
             return
@@ -446,7 +447,9 @@ class SettingsScreen(Screen):
         def _work() -> None:
             from tui.services.settings_probe import ProbeResult
             try:
-                result = self._probe_fn(endpoint, auth, verify, model)
+                result = self._probe_fn(
+                    endpoint, auth, verify, model, config_proxy=proxy,
+                )
             except Exception as exc:
                 result = ProbeResult("unknown", None, None, 0, f"внутренняя ошибка проверки: {exc}")
             self.app.call_from_thread(self._on_config_probe, result, gen=gen)
@@ -532,8 +535,8 @@ class SettingsScreen(Screen):
         «новый адрес + старый токен»."""
         from tui.editors.connection import ConnectionEditor
         from onboarding import authorization_header
-        endpoint_cfg, auth_cfg, verify, model = self._probe_args_from_config()
-        url, auth_idx, token_raw, _proxy = self.query_one(ConnectionEditor).peek()
+        endpoint_cfg, auth_cfg, verify, model, proxy_cfg = self._probe_args_from_config()
+        url, auth_idx, token_raw, proxy_draft = self.query_one(ConnectionEditor).peek()
         endpoint = url or endpoint_cfg               # поле пусто → действующий (для ссылок)
         if not endpoint:
             self._set_probe_line(Text("сначала настройте адрес — проверка стучится на него",
@@ -546,6 +549,8 @@ class SettingsScreen(Screen):
         else:
             token = auth_cfg                         # поле пусто → действующий токен
         has_token = bool(token)
+        # draft proxy: поле → иначе config; пустое поле = «не задано» → env через резолвер
+        proxy = proxy_draft if proxy_draft else proxy_cfg
         self._draft_gen += 1
         gen = self._draft_gen
         self._set_probe_line(Text("проверяю…", style=DEEP_DIM))
@@ -553,10 +558,14 @@ class SettingsScreen(Screen):
         def _work() -> None:
             from tui.services.settings_probe import ProbeResult, interpret_auth
             try:
-                control = self._probe_fn(endpoint, None, verify, model)
+                control = self._probe_fn(
+                    endpoint, None, verify, model, config_proxy=proxy,
+                )
                 with_token = None
                 if control.verdict == "rejected" and control.http_status == 401 and has_token:
-                    with_token = self._probe_fn(endpoint, token, verify, model)
+                    with_token = self._probe_fn(
+                        endpoint, token, verify, model, config_proxy=proxy,
+                    )
                 result = interpret_auth(control, with_token, has_token)
             except Exception as exc:
                 result = ProbeResult("unknown", None, None, 0, f"внутренняя ошибка проверки: {exc}")
@@ -690,12 +699,13 @@ class SettingsScreen(Screen):
             from model_picker import fetch_models
             # За списком моделей ходим ДЕЙСТВУЮЩИМИ (резолвнутыми) адресом и токеном;
             # current/active — сырые: именно они пишутся в файл.
-            endpoint, auth, verify, _m = self._probe_args_from_config()
+            endpoint, auth, verify, _m, proxy = self._probe_args_from_config()
             model = self._raw_value("model")
             origin = self._origin("model")
             frame.mount(ModelEditor(
                 current=model, endpoint=endpoint, auth=auth, verify=verify,
                 fetch=fetch_models, active=model, on_loaded=self._update_dirty, framed=True,
+                config_proxy=proxy,
                 # Перекрытую модель в списке нельзя звать «текущей»: действует оверлей,
                 # а подпись ниже говорит именно это — экран не должен спорить сам с собой.
                 active_overridden=bool(origin is not None and origin.is_overridden)))

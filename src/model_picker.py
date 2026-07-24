@@ -1,8 +1,13 @@
 """Список моделей с эндпоинта: /config (gigacode) → /models (стандарт) → None.
-HTTP инъектируется (http_get) → тестируется без сети."""
+HTTP инъектируется (http_get) → тестируется без сети.
+
+Дефолтный транспорт — requests Session с trust_env=False и тем же
+resolve_proxies, что у backend (config.proxy / env / NO_PROXY).
+"""
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass
 from typing import Callable, Optional
 
@@ -69,7 +74,73 @@ def api_base(completions_url: str) -> str:
     return u
 
 
+def _payload_dict(raw) -> Optional[dict]:
+    return raw if isinstance(raw, dict) else None
+
+
+def _requests_get_ex(
+    url: str,
+    headers: dict,
+    verify: bool,
+    *,
+    config_proxy: Optional[str] = None,
+) -> HttpReply:
+    """GET через backend-сессию: trust_env=False + resolve_proxies."""
+    import requests
+    from utils.connect_backend import _NO_NETRC_SESSION
+    from utils.http_proxy import resolve_proxies
+
+    proxies = resolve_proxies(config_proxy, os.environ, url)
+    try:
+        resp = _NO_NETRC_SESSION.get(
+            url, headers=headers, verify=verify, timeout=5, proxies=proxies,
+        )
+        try:
+            payload = _payload_dict(resp.json())
+        except ValueError:
+            payload = None
+        return HttpReply(status=resp.status_code, payload=payload)
+    except requests.exceptions.RequestException as exc:
+        return HttpReply(
+            status=None,
+            payload=None,
+            network_error=str(exc) or exc.__class__.__name__,
+        )
+
+
+def _requests_post_ex(
+    url: str,
+    headers: dict,
+    body: dict,
+    verify: bool,
+    *,
+    config_proxy: Optional[str] = None,
+) -> HttpReply:
+    """POST через backend-сессию: trust_env=False + resolve_proxies."""
+    import requests
+    from utils.connect_backend import _NO_NETRC_SESSION
+    from utils.http_proxy import resolve_proxies
+
+    proxies = resolve_proxies(config_proxy, os.environ, url)
+    try:
+        resp = _NO_NETRC_SESSION.post(
+            url, headers=headers, json=body, verify=verify, timeout=5, proxies=proxies,
+        )
+        try:
+            payload = _payload_dict(resp.json())
+        except ValueError:
+            payload = None
+        return HttpReply(status=resp.status_code, payload=payload)
+    except requests.exceptions.RequestException as exc:
+        return HttpReply(
+            status=None,
+            payload=None,
+            network_error=str(exc) or exc.__class__.__name__,
+        )
+
+
 def _urllib_get_ex(url: str, headers: dict, verify: bool) -> HttpReply:
+    """Legacy urllib GET (без proxy). Оставлен для unit-тестов транспорта."""
     import socket
     import ssl
     import urllib.error
@@ -90,6 +161,7 @@ def _urllib_get_ex(url: str, headers: dict, verify: bool) -> HttpReply:
 
 
 def _urllib_post_ex(url: str, headers: dict, body: dict, verify: bool) -> HttpReply:
+    """Legacy urllib POST (без proxy). Оставлен для unit-тестов транспорта."""
     import socket
     import ssl
     import urllib.error
@@ -111,10 +183,15 @@ def _urllib_post_ex(url: str, headers: dict, body: dict, verify: bool) -> HttpRe
 
 
 def probe_fetch(completions_url: str, auth_header: Optional[str], *,
-                verify: bool = True, http_get_ex: Optional[Callable] = None) -> FetchOutcome:
+                verify: bool = True, config_proxy: Optional[str] = None,
+                http_get_ex: Optional[Callable] = None) -> FetchOutcome:
     """models-цепочка (/config → /models) с кодами. 401 приоритетнее прочих кодов."""
     import time
-    get_ex = http_get_ex or _urllib_get_ex
+    if http_get_ex is None:
+        def get_ex(url, headers, verify):
+            return _requests_get_ex(url, headers, verify, config_proxy=config_proxy)
+    else:
+        get_ex = http_get_ex
     base = api_base(completions_url)
     headers = {"Content-Type": "application/json"}
     if auth_header:
@@ -147,10 +224,15 @@ def probe_fetch(completions_url: str, auth_header: Optional[str], *,
 
 
 def probe_post(completions_url: str, auth_header: Optional[str], model: str, *,
-               verify: bool = True, http_post_ex: Optional[Callable] = None) -> tuple[Optional[int], str, int]:
+               verify: bool = True, config_proxy: Optional[str] = None,
+               http_post_ex: Optional[Callable] = None) -> tuple[Optional[int], str, int]:
     """Минимальный POST в сам chat/completions (ступень 2 probe). → (status, net_err, latency_ms)."""
     import time
-    post_ex = http_post_ex or _urllib_post_ex
+    if http_post_ex is None:
+        def post_ex(url, headers, body, verify):
+            return _requests_post_ex(url, headers, body, verify, config_proxy=config_proxy)
+    else:
+        post_ex = http_post_ex
     headers = {"Content-Type": "application/json"}
     if auth_header:
         headers["Authorization"] = auth_header
@@ -171,8 +253,18 @@ def _urllib_get(url: str, headers: dict, verify: bool) -> dict:
 
 
 def fetch_models(completions_url: str, auth_header: Optional[str], *,
-                 verify: bool = True, http_get: Optional[Callable] = None):
-    get = http_get or _urllib_get
+                 verify: bool = True, config_proxy: Optional[str] = None,
+                 http_get: Optional[Callable] = None):
+    if http_get is None:
+        def get(url, headers, verify):
+            reply = _requests_get_ex(url, headers, verify, config_proxy=config_proxy)
+            if reply.status is None:
+                raise OSError(reply.network_error or "нет соединения")
+            if reply.payload is None:
+                raise ValueError(f"bad response status={reply.status}")
+            return reply.payload
+    else:
+        get = http_get
     base = api_base(completions_url)
     if not base:
         return None

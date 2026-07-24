@@ -37,10 +37,13 @@ class ProbeResult:
 
 
 def probe(endpoint: str, auth: Optional[str], verify: bool, model: str, *,
-          fetch_ex=None, post_ex=None) -> ProbeResult:
-    fetch = fetch_ex or model_picker.probe_fetch
-    post = post_ex or model_picker.probe_post
-    out = fetch(endpoint, auth, verify=verify)
+          config_proxy: Optional[str] = None, fetch_ex=None, post_ex=None) -> ProbeResult:
+    if fetch_ex is None:
+        out = model_picker.probe_fetch(
+            endpoint, auth, verify=verify, config_proxy=config_proxy,
+        )
+    else:
+        out = fetch_ex(endpoint, auth, verify=verify)
     if out.models:
         return ProbeResult("ok", out.status, out.models, out.latency_ms, "доступен")
     if out.status == 401:
@@ -52,7 +55,12 @@ def probe(endpoint: str, auth: Optional[str], verify: bool, model: str, *,
     if not model:
         return ProbeResult("unknown", out.status, None, out.latency_ms,
                            "путь не проверен — задайте модель")
-    status, net_err, lat = post(endpoint, auth, model, verify=verify)
+    if post_ex is None:
+        status, net_err, lat = model_picker.probe_post(
+            endpoint, auth, model, verify=verify, config_proxy=config_proxy,
+        )
+    else:
+        status, net_err, lat = post_ex(endpoint, auth, model, verify=verify)
     if status is not None and 200 <= status < 300:
         return ProbeResult("ok", status, None, lat, "доступен")
     if status == 401:

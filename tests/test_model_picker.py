@@ -62,8 +62,9 @@ def test_fetch_prefers_config_then_models_then_none():
 
 def test_probe_fetch_dedups_identical_network_errors(monkeypatch):
     err = "<urlopen error [WinError 10061] отказано>"
-    monkeypatch.setattr(mp, "_urllib_get_ex",
-                        lambda url, headers, verify: mp.HttpReply(status=None, payload=None, network_error=err))
+    monkeypatch.setattr(mp, "_requests_get_ex",
+                        lambda url, headers, verify, *, config_proxy=None: mp.HttpReply(
+                            status=None, payload=None, network_error=err))
     out = mp.probe_fetch("http://x/v1", None, verify=False)
     assert out.status is None
     assert out.network_error.count(err) == 1        # дедуп: не дважды
