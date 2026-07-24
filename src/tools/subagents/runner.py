@@ -29,6 +29,7 @@ from tools.subagents.registry import get_subagent_class
 from usage.account import CATEGORY_SUBAGENT as USAGE_CATEGORY_SUBAGENT
 from usage.account import UsageAccount
 from usage.context import usage_scope
+from config_modules.agent import merge_special_instructions_with_model_steering
 from utils.generate_message_id import generate_msg_id_sha256 as generate_message_id_func
 from utils.local_render_system_prompt import render_system_prompt
 from utils.logging_module import create_run_logger, generate_run_id
@@ -492,11 +493,16 @@ class SubagentRunner:
 
         system_prompt = child_state.chat_completions_system_prompt
         if system_prompt:
+            special_instructions = merge_special_instructions_with_model_steering(
+                None,
+                config_dict=self._config,
+            )
             rendered = render_system_prompt(
                 system_prompt=system_prompt,
                 tools_spec=child_state.tools,
                 project_info=child_state.initial_project_data,
                 specific_role=agent_role,
+                special_instructions=special_instructions,
             )
             messages.append({
                 "role": "system",

@@ -22,11 +22,13 @@ def test_execute_env_timeout_and_truncation(tmp_path):
             env_vars=[{"name": "X", "value": "v"}],
         )
     )
-    assert env["ok"] is True and env["stdout"] == "v"
+    assert env["ok"] is True and env["stdout"].rstrip("\n") == "v"
     timeout = json.loads(tool(command=f'"{sys.executable}" -c "import time; time.sleep(2)"', timeout_seconds=1))
     assert timeout["ok"] is False and timeout["timed_out"] is True
     trunc = json.loads(tool(command=f'"{sys.executable}" -c "print(\'A\'*100)"', max_output_chars=10))
-    assert trunc["truncated"] is True and len(trunc["stdout"]) == 10
+    assert trunc["truncated"] is True
+    assert trunc["stdout_kept_head_chars"] + trunc["stdout_kept_tail_chars"] == 10
+    assert "[omitted" in trunc["stdout"]
 
 
 def test_execute_validation(tmp_path):
@@ -42,7 +44,7 @@ def test_execute_cwd_and_env_conversion(tmp_path):
     marker.write_text("ok", encoding="utf-8")
     cmd = f'"{sys.executable}" -c "from pathlib import Path; print(Path(\'marker.txt\').exists())"'
     in_cwd = json.loads(tool(command=cmd, cwd=str(tmp_path)))
-    assert in_cwd["ok"] is True and in_cwd["stdout"] == "True"
+    assert in_cwd["ok"] is True and in_cwd["stdout"].rstrip("\n") == "True"
 
     env_casted = json.loads(
         tool(

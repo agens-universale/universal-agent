@@ -219,6 +219,8 @@ async def test_diff_screen_enter_opens_viewer(tmp_path, launch_root):
         assert "[a] принять" in footer
         assert "[r] откатить" in footer
         assert "[Ctrl+a] принять все" in footer
+        assert pilot.app.screen.clipboard_source_cite() == ("diff", "src/foo.py")
+
 
 
 @pytest.mark.asyncio

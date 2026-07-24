@@ -92,6 +92,14 @@ class TrackingFsBackend:
         self.default_exec_timeout = getattr(inner, "default_exec_timeout", None)
 
     @property
+    def exec_output_capture_max_chars(self) -> int:
+        return int(getattr(self._inner, "exec_output_capture_max_chars", 60_000))
+
+    @exec_output_capture_max_chars.setter
+    def exec_output_capture_max_chars(self, value: int) -> None:
+        self._inner.exec_output_capture_max_chars = int(value)
+
+    @property
     def inner(self) -> Any:
         return self._inner
 

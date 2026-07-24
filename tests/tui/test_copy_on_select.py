@@ -99,3 +99,26 @@ async def test_text_selected_empty_noop(tmp_path, monkeypatch):
         pilot.app.post_message(events.TextSelected())
         await pilot.pause(0.1)
         assert seen == []
+
+
+@pytest.mark.asyncio
+async def test_clipboard_payload_appends_diff_cite(tmp_path, monkeypatch):
+    """С DiffViewerScreen в буфер уходит суффикс [diff: path]."""
+    from tui.app import TuiApp
+    from tui.screens.diff import DiffViewerScreen
+
+    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    async with app.run_test() as pilot:
+        viewer = DiffViewerScreen(
+            title="дифф · M · src/x.py",
+            content="+hello\n",
+            path="src/x.py",
+            on_approve=lambda: None,
+            on_undo=lambda: None,
+            on_approve_all=lambda: None,
+            on_undo_all=lambda: None,
+        )
+        await pilot.app.push_screen(viewer)
+        await pilot.pause()
+        monkeypatch.setattr(pilot.app, "_current_selection", lambda: "+hello")
+        assert pilot.app._clipboard_payload() == "+hello\n[diff: src/x.py]"

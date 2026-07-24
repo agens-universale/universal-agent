@@ -17,7 +17,7 @@ from runtime_notices import (
 from startup_notices import Notice, collect_startup_notices
 from tui import branding, palette
 from tui.screens.main import TraceScreen
-from tui.services.clipboard_ops import copy_out
+from tui.services.clipboard_ops import copy_out, with_source_cite
 from tui.services.stream_sink import StreamSink
 from tools.registry import all_builtin_tool_names
 
@@ -609,26 +609,43 @@ class TuiApp(App):
         except Exception:
             return ""
 
+    def _clipboard_payload(self) -> str:
+        """Выделение + опциональный суффикс источника с view/diff экранов."""
+        sel = self._current_selection()
+        if not sel:
+            return ""
+        cite = getattr(self.screen, "clipboard_source_cite", None)
+        if not callable(cite):
+            return sel
+        try:
+            info = cite()
+        except Exception:
+            return sel
+        if not info:
+            return sel
+        kind, path = info
+        return with_source_cite(sel, kind=kind, path=path)
+
     def action_copy_selection(self) -> None:
         """Ctrl+Shift+C / Super+C: copy selection; пусто → no-op (не stop)."""
-        sel = self._current_selection()
-        if sel:
-            copy_out(self, sel, toast=True)
+        payload = self._clipboard_payload()
+        if payload:
+            copy_out(self, payload, toast=True)
 
     def on_text_selected(self, event) -> None:
         """Copy-on-select: drag без Shift → внешний буфер (тихий успех).
 
         TextSelected не шлётся из Input/TextArea — дубля с focused.selected_text нет.
         """
-        sel = self._current_selection()
-        if sel:
-            copy_out(self, sel, toast=False)
+        payload = self._clipboard_payload()
+        if payload:
+            copy_out(self, payload, toast=False)
 
     def action_interrupt(self) -> None:
         """Ctrl+C: выделение → копировать; активный run → стоп; вхолостую → exit-модалка (как Esc)."""
-        sel = self._current_selection()
-        if sel:
-            copy_out(self, sel, toast=True)
+        payload = self._clipboard_payload()
+        if payload:
+            copy_out(self, payload, toast=True)
             return
         scr = self.screen
         runner = getattr(self, "active_runner", None)

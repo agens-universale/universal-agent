@@ -119,14 +119,22 @@ class DiffViewerScreen(Screen):
         on_undo: ActionFn,
         on_approve_all: ActionFn,
         on_undo_all: ActionFn,
+        path: str = "",
     ) -> None:
         super().__init__()
         self._title = title
         self._content = content
+        self._path = (path or "").strip()
         self._on_approve = on_approve
         self._on_undo = on_undo
         self._on_approve_all = on_approve_all
         self._on_undo_all = on_undo_all
+
+    def clipboard_source_cite(self) -> Optional[tuple[str, str]]:
+        """Источник для суффикса буфера: ``("diff", path)`` или None."""
+        if not self._path:
+            return None
+        return ("diff", self._path)
 
     def compose(self) -> ComposeResult:
         with Vertical(id="root"):
@@ -426,6 +434,7 @@ class DiffScreen(Screen):
             DiffViewerScreen(
                 title=f"дифф · {_kind_badge(entry)} · {entry.key}",
                 content=body,
+                path=key,
                 on_approve=lambda: self._run_from_viewer(
                     lambda: self._approve_key(key)
                 ),

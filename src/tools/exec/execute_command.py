@@ -2,16 +2,17 @@ from tools.simple_tool_base import AbstractSimpleTool
 import json
 
 from config_modules.agent import DEFAULT_EXEC_TIMEOUT_SEC, exec_timeout_from_config_dict
-from constants.tool_names import EXEC_COMMAND_NAME
+from constants.tool_names import EXEC_COMMAND_NAME, READ_STORED_TOOL_OUTPUT_NAME
 from security.command_guard import enforce_command_guard
 from security.command_moderation import moderate_command_execution
+from tools.exec.stream_preview import clamp_max_output_chars, process_exec_stream
 
 
 class ExecuteCommand(AbstractSimpleTool):
     """
     Tool to execute a CLI command on the system and return its output.
     """
-    # Default max chars per field (stdout/stderr) before truncation.
+    # Preview budget for stdout/stderr (не в tool schema — политика рантайма).
     cut_n = 4000
     # Fallback when config_dict has no exec_timeout_sec (tests / partial wiring).
     timeout = DEFAULT_EXEC_TIMEOUT_SEC
@@ -22,9 +23,7 @@ class ExecuteCommand(AbstractSimpleTool):
             "type": "function",
             "name": "exec_command",
             "description": (
-                "Executes a command synchronously (no background) and returns a JSON string envelope with "
-                "fields: tool, ok, command, cwd, exit_code, timed_out, truncated, error, then stdout/stderr last. "
-                "stdout/stderr are truncated to max_output_chars each."
+                "Run a shell command synchronously. Returns JSON with ok, exit_code, stdout, stderr."
             ),
             "parameters": {
                 "type": "object",
@@ -39,11 +38,6 @@ class ExecuteCommand(AbstractSimpleTool):
                             f"Execution timeout in seconds. Default is {DEFAULT_EXEC_TIMEOUT_SEC} "
                             "(agent.exec_timeout_sec)."
                         ),
-                        "minimum": 1,
-                    },
-                    "max_output_chars": {
-                        "type": "integer",
-                        "description": f"Max number of chars returned for stdout and stderr each. Default is {cls.cut_n}.",
                         "minimum": 1,
                     },
                     "cwd": {
@@ -81,8 +75,8 @@ class ExecuteCommand(AbstractSimpleTool):
     @classmethod
     def prompt_description(cls):
         description = ('''Tool name: exec_command
-Tool description: Executes a CLI command synchronously and returns stdout/stderr/exit_code as JSON.
-Input schema: {"type": "object", "properties": {"command": {"type": "string", "description": "The CLI command to execute."}, "timeout_seconds": {"type": "integer", "description": "Execution timeout in seconds.", "default": ''' + str(DEFAULT_EXEC_TIMEOUT_SEC) + '''}, "max_output_chars": {"type": "integer", "description": "Max chars returned for stdout/stderr each.", "default": 4000}, "cwd": {"type": "string", "description": "Optional working directory (absolute or relative)."}, "env_vars": {"type":"array","description":"Optional env overrides as [{name,value}]","items":{"type":"object","properties":{"name":{"type":"string"},"value":{"type":"string"}},"required":["name","value"],"additionalProperties":false}}}, "required": ["command"], "additionalProperties": false}
+Tool description: Run a shell command synchronously; returns JSON with exit_code, stdout, stderr.
+Input schema: {"type": "object", "properties": {"command": {"type": "string", "description": "The CLI command to execute."}, "timeout_seconds": {"type": "integer", "description": "Execution timeout in seconds.", "default": ''' + str(DEFAULT_EXEC_TIMEOUT_SEC) + '''}, "cwd": {"type": "string", "description": "Optional working directory (absolute or relative)."}, "env_vars": {"type":"array","description":"Optional env overrides as [{name,value}]","items":{"type":"object","properties":{"name":{"type":"string"},"value":{"type":"string"}},"required":["name","value"],"additionalProperties":false}}}, "required": ["command"], "additionalProperties": false}
 
 Return format (JSON string):
 {"tool":"exec_command","ok":true|false,"command":"...","cwd":"...","exit_code":number|null,"timed_out":true|false,"truncated":true|false,"error":null|{"type":"...","message":"..."},"stdout":"...","stderr":"..."}
@@ -97,7 +91,6 @@ Usage:
 - Avoid interactive commands (e.g., `vim`, `python` without args) — they will time out or fail.
 - This tool is essential for inspecting system state, verifying installations, or automating workflows.
 - It is very helpful if you write a clear, concise description of what this command does in 5-10 words.
-- stdout/stderr are truncated to max_output_chars each (default ''' + str(cls.cut_n) + ''').
 
 Important Usage Rules:
 1. Directory Verification:
@@ -125,13 +118,24 @@ Important Usage Rules:
         return description
 
     @staticmethod
-    def _truncate_text(text: str, limit: int) -> tuple[str, bool]:
-        if limit <= 0:
-            return "", False
-        if len(text) <= limit:
-            return text, False
-        cut = text[:limit]
-        return cut, True
+    def _process_stream(
+        captured: str,
+        max_output_chars: int,
+        *,
+        hit_capture_cap: bool,
+        state,
+        call_id,
+        tool_name: str,
+    ) -> dict:
+        """D3+D4+D5: head+tail preview + optional store.put + output_ref."""
+        return process_exec_stream(
+            captured,
+            max_output_chars,
+            hit_capture_cap=hit_capture_cap,
+            state=state,
+            call_id=call_id,
+            tool_name=tool_name,
+        )
 
     @staticmethod
     def _result(
@@ -145,22 +149,42 @@ Important Usage Rules:
         stdout: str,
         stderr: str,
         error: dict | None = None,
+        stdout_meta: dict | None = None,
+        stderr_meta: dict | None = None,
     ) -> str:
-        return json.dumps(
-            {
-                "tool": ExecuteCommand.registered_tool_name(),
-                "ok": ok,
-                "command": command,
-                "cwd": cwd,
-                "exit_code": exit_code,
-                "timed_out": timed_out,
-                "truncated": truncated,
-                "error": error,
-                "stdout": stdout,
-                "stderr": stderr,
-            },
-            ensure_ascii=False,
-        )
+        envelope: dict = {
+            "tool": ExecuteCommand.registered_tool_name(),
+            "ok": ok,
+            "command": command,
+            "cwd": cwd,
+            "exit_code": exit_code,
+            "timed_out": timed_out,
+            "truncated": truncated,
+            "error": error,
+            "stdout": stdout,
+            "stderr": stderr,
+        }
+        if stdout_meta is not None:
+            envelope["stdout_original_chars"] = stdout_meta["original_chars"]
+            envelope["stdout_kept_head_chars"] = stdout_meta["kept_head_chars"]
+            envelope["stdout_kept_tail_chars"] = stdout_meta["kept_tail_chars"]
+            envelope["stdout_omitted_chars"] = stdout_meta["omitted_chars"]
+            envelope["stdout_hit_capture_cap"] = stdout_meta["hit_capture_cap"]
+            envelope["stdout_output_ref"] = stdout_meta["output_ref"]
+        if stderr_meta is not None:
+            envelope["stderr_original_chars"] = stderr_meta["original_chars"]
+            envelope["stderr_kept_head_chars"] = stderr_meta["kept_head_chars"]
+            envelope["stderr_kept_tail_chars"] = stderr_meta["kept_tail_chars"]
+            envelope["stderr_omitted_chars"] = stderr_meta["omitted_chars"]
+            envelope["stderr_hit_capture_cap"] = stderr_meta["hit_capture_cap"]
+            envelope["stderr_output_ref"] = stderr_meta["output_ref"]
+        if envelope.get("stdout_output_ref") or envelope.get("stderr_output_ref"):
+            envelope["hint"] = (
+                "stdout/stderr shown as start+end preview. "
+                f"Page full captured stream via {READ_STORED_TOOL_OUTPUT_NAME} "
+                "using stdout_output_ref / stderr_output_ref."
+            )
+        return json.dumps(envelope, ensure_ascii=False)
 
     def _command_moderation_blocked_result(
         self,
@@ -253,6 +277,7 @@ Important Usage Rules:
                 stderr="",
                 error={"type": "invalid_argument", "field": "max_output_chars"},
             )
+        max_output_chars = clamp_max_output_chars(max_output_chars, self._config_dict)
 
         if cwd_used is not None:
             if not isinstance(cwd_used, str) or not cwd_used.strip():
@@ -369,9 +394,23 @@ Important Usage Rules:
                 error={"type": "execution_failed", "message": err},
             )
 
-        stdout, stdout_trunc = self._truncate_text((res.stdout or "").rstrip(), max_output_chars)
-        stderr, stderr_trunc = self._truncate_text((res.stderr or "").rstrip(), max_output_chars)
-        truncated = stdout_trunc or stderr_trunc
+        stdout_meta = self._process_stream(
+            res.stdout or "",
+            max_output_chars,
+            hit_capture_cap=getattr(res, "stdout_hit_capture_cap", False),
+            state=self._state,
+            call_id=self._call_id,
+            tool_name=ExecuteCommand.registered_tool_name(),
+        )
+        stderr_meta = self._process_stream(
+            res.stderr or "",
+            max_output_chars,
+            hit_capture_cap=getattr(res, "stderr_hit_capture_cap", False),
+            state=self._state,
+            call_id=self._call_id,
+            tool_name=ExecuteCommand.registered_tool_name(),
+        )
+        truncated = stdout_meta["truncated"] or stderr_meta["truncated"]
 
         if res.timed_out:
             return self._result(
@@ -381,9 +420,11 @@ Important Usage Rules:
                 exit_code=None,
                 timed_out=True,
                 truncated=truncated,
-                stdout=stdout,
-                stderr=stderr,
+                stdout=stdout_meta["text"],
+                stderr=stderr_meta["text"],
                 error={"type": "timeout", "message": f"Command timed out after {timeout_seconds} seconds"},
+                stdout_meta=stdout_meta,
+                stderr_meta=stderr_meta,
             )
 
         exit_code = res.return_code
@@ -396,7 +437,9 @@ Important Usage Rules:
             exit_code=exit_code,
             timed_out=False,
             truncated=truncated,
-            stdout=stdout,
-            stderr=stderr,
+            stdout=stdout_meta["text"],
+            stderr=stderr_meta["text"],
             error=error,
+            stdout_meta=stdout_meta,
+            stderr_meta=stderr_meta,
         )

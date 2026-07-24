@@ -10,6 +10,7 @@ class AbstractSimpleTool(ABC):
         self._ctx = kwargs.get("ctx")
         self._state = kwargs.get("state")
         self._config_dict = kwargs.get("config_dict")
+        self._call_id = kwargs.get("call_id")
 
     @property
     def _backend(self):
