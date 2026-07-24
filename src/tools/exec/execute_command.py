@@ -5,7 +5,11 @@ from config_modules.agent import DEFAULT_EXEC_TIMEOUT_SEC, exec_timeout_from_con
 from constants.tool_names import EXEC_COMMAND_NAME, READ_STORED_TOOL_OUTPUT_NAME
 from security.command_guard import enforce_command_guard
 from security.command_moderation import moderate_command_execution
-from tools.exec.stream_preview import clamp_max_output_chars, process_exec_stream
+from tools.exec.stream_preview import (
+    apply_stream_meta_to_envelope,
+    clamp_max_output_chars,
+    process_exec_stream,
+)
 
 
 class ExecuteCommand(AbstractSimpleTool):
@@ -164,20 +168,8 @@ Important Usage Rules:
             "stdout": stdout,
             "stderr": stderr,
         }
-        if stdout_meta is not None:
-            envelope["stdout_original_chars"] = stdout_meta["original_chars"]
-            envelope["stdout_kept_head_chars"] = stdout_meta["kept_head_chars"]
-            envelope["stdout_kept_tail_chars"] = stdout_meta["kept_tail_chars"]
-            envelope["stdout_omitted_chars"] = stdout_meta["omitted_chars"]
-            envelope["stdout_hit_capture_cap"] = stdout_meta["hit_capture_cap"]
-            envelope["stdout_output_ref"] = stdout_meta["output_ref"]
-        if stderr_meta is not None:
-            envelope["stderr_original_chars"] = stderr_meta["original_chars"]
-            envelope["stderr_kept_head_chars"] = stderr_meta["kept_head_chars"]
-            envelope["stderr_kept_tail_chars"] = stderr_meta["kept_tail_chars"]
-            envelope["stderr_omitted_chars"] = stderr_meta["omitted_chars"]
-            envelope["stderr_hit_capture_cap"] = stderr_meta["hit_capture_cap"]
-            envelope["stderr_output_ref"] = stderr_meta["output_ref"]
+        apply_stream_meta_to_envelope(envelope, "stdout", stdout_meta)
+        apply_stream_meta_to_envelope(envelope, "stderr", stderr_meta)
         if envelope.get("stdout_output_ref") or envelope.get("stderr_output_ref"):
             envelope["hint"] = (
                 "stdout/stderr shown as start+end preview. "

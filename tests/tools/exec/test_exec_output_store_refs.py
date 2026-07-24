@@ -42,14 +42,13 @@ class TestExecuteCommandPreview:
         assert r["ok"] is True
         assert r["truncated"] is False
         assert r["stdout"].rstrip("\n") == "123"
-        # No refs for short output
-        assert "stdout_output_ref" not in r or r["stdout_output_ref"] is None
-        # Meta fields present
-        assert r["stdout_original_chars"] == len(r["stdout"])
-        assert r["stdout_kept_head_chars"] == r["stdout_original_chars"]
-        assert r["stdout_kept_tail_chars"] == 0
-        assert r["stdout_omitted_chars"] == 0
-        assert r["stdout_hit_capture_cap"] is False
+        # Short stream: no meta noise, no ref
+        assert "stdout_output_ref" not in r
+        assert "stdout_original_chars" not in r
+        assert "stdout_kept_head_chars" not in r
+        assert "stdout_omitted_chars" not in r
+        assert "stdout_hit_capture_cap" not in r
+        assert "hint" not in r
         # Nothing in store
         assert len(state.tool_call_outputs_store) == 0
 
@@ -108,7 +107,7 @@ class TestExecuteCommandPreview:
         state = _make_state()
         tool = _make_tool(ExecuteCommand, state=state)
         r = json.loads(tool(command=f'"{sys.executable}" -c "print(42)"'))
-        assert r["stdout_output_ref"] is None
+        assert "stdout_output_ref" not in r
         assert len(state.tool_call_outputs_store) == 0
 
     def test_stderr_truncation_and_ref(self):
@@ -193,11 +192,12 @@ class TestExecuteCommandPreview:
         )
         assert r["truncated"] is True
         assert "[omitted" in r["stdout"]
-        # No ref when state is None
-        assert r["stdout_output_ref"] is None
+        # Truncated stats present; no ref when state is None (omit null)
+        assert r["stdout_omitted_chars"] > 0
+        assert "stdout_output_ref" not in r
 
     def test_timeout_partial_output_gets_preview(self):
-        """Timeout: partial stdout still gets preview + meta (not discarded)."""
+        """Timeout: partial stdout still gets preview (not discarded)."""
         state = _make_state()
         tool = _make_tool(ExecuteCommand, state=state)
         # Print before sleeping
@@ -211,7 +211,8 @@ class TestExecuteCommandPreview:
         assert r["ok"] is False
         assert r["timed_out"] is True
         assert "partial_out" in r["stdout"]
-        assert r["stdout_original_chars"] > 0
+        # Short partial fits preview → no stream meta
+        assert "stdout_original_chars" not in r
 
 
 class TestRunPythonCodePreview:
@@ -221,7 +222,8 @@ class TestRunPythonCodePreview:
         r = json.loads(tool(code="print('hello')"))
         assert r["ok"] is True
         assert r["stdout"].rstrip("\n") == "hello"
-        assert r["stdout_output_ref"] is None
+        assert "stdout_output_ref" not in r
+        assert "stdout_original_chars" not in r
         assert len(state.tool_call_outputs_store) == 0
 
     def test_large_output_head_tail_and_ref(self):
@@ -251,9 +253,9 @@ class TestRunPythonCodePreview:
         )
         assert r["ok"] is False
         assert r["timed_out"] is True
-        # partial stdout must be present
+        # partial stdout must be present; short → no stream meta
         assert "before_sleep" in r["stdout"]
-        assert r["stdout_original_chars"] > 0
+        assert "stdout_original_chars" not in r
 
     def test_stderr_large_gets_ref(self):
         state = _make_state()
@@ -275,7 +277,8 @@ class TestRunPythonCodePreview:
         tool = _make_tool(RunPythonCode, state=None)
         r = json.loads(tool(code="print('W' * 500)", max_output_chars=50))
         assert r["truncated"] is True
-        assert r["stdout_output_ref"] is None
+        assert r["stdout_omitted_chars"] > 0
+        assert "stdout_output_ref" not in r
 
 
 # ---------------------------------------------------------------------------

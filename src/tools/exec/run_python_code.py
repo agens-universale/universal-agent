@@ -8,7 +8,11 @@ from constants.tool_names import EXEC_PYTHON_NAME, READ_STORED_TOOL_OUTPUT_NAME
 from security.command_guard import enforce_command_guard
 from security.command_moderation import effective_command_cwd, moderate_command_execution
 from security.path_policy import resolve_tool_context
-from tools.exec.stream_preview import clamp_max_output_chars, process_exec_stream
+from tools.exec.stream_preview import (
+    apply_stream_meta_to_envelope,
+    clamp_max_output_chars,
+    process_exec_stream,
+)
 from tools.simple_tool_base import AbstractSimpleTool
 from utils.directory_write_access import directory_allows_probe_write
 
@@ -159,20 +163,8 @@ Return format (JSON string):
             "stdout": stdout,
             "stderr": stderr,
         }
-        if stdout_meta is not None:
-            envelope["stdout_original_chars"] = stdout_meta["original_chars"]
-            envelope["stdout_kept_head_chars"] = stdout_meta["kept_head_chars"]
-            envelope["stdout_kept_tail_chars"] = stdout_meta["kept_tail_chars"]
-            envelope["stdout_omitted_chars"] = stdout_meta["omitted_chars"]
-            envelope["stdout_hit_capture_cap"] = stdout_meta["hit_capture_cap"]
-            envelope["stdout_output_ref"] = stdout_meta["output_ref"]
-        if stderr_meta is not None:
-            envelope["stderr_original_chars"] = stderr_meta["original_chars"]
-            envelope["stderr_kept_head_chars"] = stderr_meta["kept_head_chars"]
-            envelope["stderr_kept_tail_chars"] = stderr_meta["kept_tail_chars"]
-            envelope["stderr_omitted_chars"] = stderr_meta["omitted_chars"]
-            envelope["stderr_hit_capture_cap"] = stderr_meta["hit_capture_cap"]
-            envelope["stderr_output_ref"] = stderr_meta["output_ref"]
+        apply_stream_meta_to_envelope(envelope, "stdout", stdout_meta)
+        apply_stream_meta_to_envelope(envelope, "stderr", stderr_meta)
         if envelope.get("stdout_output_ref") or envelope.get("stderr_output_ref"):
             envelope["hint"] = (
                 "stdout/stderr shown as start+end preview. "

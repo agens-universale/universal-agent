@@ -59,3 +59,22 @@ def process_exec_stream(
         "hit_capture_cap": hit_capture_cap,
         "output_ref": output_ref,
     }
+
+
+def apply_stream_meta_to_envelope(envelope: dict, prefix: str, meta: dict | None) -> None:
+    """Добавить stream-meta в envelope только когда она нужна агенту.
+
+    Короткий поток без hit_capture_cap — без полей (не шумим нулями/null).
+    При preview-cut или hit_capture_cap — stats; ``*_output_ref`` только если не None.
+    """
+    if meta is None:
+        return
+    if not meta["truncated"] and not meta["hit_capture_cap"]:
+        return
+    envelope[f"{prefix}_original_chars"] = meta["original_chars"]
+    envelope[f"{prefix}_kept_head_chars"] = meta["kept_head_chars"]
+    envelope[f"{prefix}_kept_tail_chars"] = meta["kept_tail_chars"]
+    envelope[f"{prefix}_omitted_chars"] = meta["omitted_chars"]
+    envelope[f"{prefix}_hit_capture_cap"] = meta["hit_capture_cap"]
+    if meta["output_ref"] is not None:
+        envelope[f"{prefix}_output_ref"] = meta["output_ref"]
