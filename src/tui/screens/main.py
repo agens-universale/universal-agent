@@ -69,6 +69,11 @@ from tui.widgets.tool_call_row import ToolCallRow
 from tui.widgets.trace_row import TraceRow
 from tui import branding
 from tui.services.terminal_title import format_terminal_title, set_terminal_title
+from tui.services.session_title import (
+    LAST_ACTUAL_MIN,
+    display_name,
+    normalize_prompt_title,
+)
 from tui.services.reasoning_clock import COGNITIVE_TOOLS, ReasoningClock
 
 
@@ -1174,28 +1179,109 @@ class TraceScreen(Screen):
     def _on_user_text_submitted(self, text: str) -> None:
         """Обработка отправки user query: обнулить счётчик событий с последнего
         user-send и запомнить текст для cancel-with-undo (Tasks 9-10).
-        Дополнительно: append текста в input-history и выход из history-навигации."""
+        Дополнительно: append текста в input-history и выход из history-навигации.
+
+        R6 (in-session-rename): авто-имя сессии. normalize → seed/update
+        ``last_actual`` в ``tui_meta`` (read-merge-write через стор). Первый
+        промпт сеет безусловно; далее — только если ``len(norm) > LAST_ACTUAL_MIN``.
+        **Порядок:** запись meta → затем ``_update_terminal_title`` (OSC видит
+        свежее имя). best-effort (try/except). ``_resumed_prompt`` остаётся сырым
+        для attach/cancel — это НЕ имя сессии (R5: OSC/пикер читают display_name)."""
         self._last_user_send_text = text
-        self._resumed_prompt = text   # send = новое последнее сообщение активной сессии
+        self._resumed_prompt = text   # send = новое последнее сообщение активной сессии (сырой текст)
+        self._seed_or_update_last_actual(text)
         self._update_terminal_title()
         self._events_since_last_user_send = 0
         if self._history is not None:
             self._history.append(text)
         self._reset_history_navigation()
 
-    def _update_terminal_title(self) -> None:
-        """Заголовок терминала = промпт + текущий статус (для таба/таскбара).
+    def _seed_or_update_last_actual(self, text: str) -> None:
+        """R6: авто-запись ``tui.last_actual`` — человекочитаемое имя сессии.
 
-        Промпт: ЕДИНЫЙ источник _resumed_prompt (последнее user-сообщение активной
-        сессии: из стора на attach, = тексту на send). Статус — live
-        (_task_status_badge). Дедуп: OSC пишем только при смене — поллер зовёт каждый тик."""
+        normalize → если пусто skip; иначе seed (last_actual пуст → любая длина)
+        либо update (len(norm) > LAST_ACTUAL_MIN). best-effort: без стора/активной
+        задачи — no-op. Не пишет для slash-команд (путь _dispatch_command).
+        """
+        if self._active_task_id is None or self._store is None:
+            return
+        norm = normalize_prompt_title(text)
+        if not norm:
+            return
+        try:
+            meta = self._store.get_task_meta(self._active_task_id) or {}
+            tui_meta = meta.get("tui") or {}
+            current = tui_meta.get("last_actual")
+            if isinstance(current, str) and current.strip():
+                # уже задано — обновляем только содержательным промптом
+                if len(norm) > LAST_ACTUAL_MIN:
+                    self._store.update_tui_meta(self._active_task_id, {"last_actual": norm})
+            else:
+                # seed: первый промпт безусловно
+                self._store.update_tui_meta(self._active_task_id, {"last_actual": norm})
+        except Exception:
+            pass
+
+    def _update_terminal_title(self) -> None:
+        """Заголовок терминала = имя сессии + текущий статус (для таба/таскбара).
+
+        R5 (in-session-rename): промпт = display_name(meta.tui) (title >
+        last_actual > «Без названия»), а не _resumed_prompt. _resumed_prompt
+        остаётся для attach/cancel и НЕ является именем сессии. Статус — live
+        (_session_status_word). Дедуп: OSC пишем только при смене — поллер зовёт каждый тик."""
         if self._active_task_id is None:
             title = format_terminal_title()
         else:
-            title = format_terminal_title(self._resumed_prompt, self._session_status_word())
+            prompt = self._session_display_name()
+            title = format_terminal_title(prompt, self._session_status_word())
         if title != self._last_terminal_title:
             self._last_terminal_title = title
             set_terminal_title(title)
+
+    def _session_display_name(self) -> str:
+        """display_name(tui_meta) активной задачи — единый источник имени для OSC.
+
+        best-effort: без стора/задачи или при ошибке чтения — фолбэк на
+        ``_resumed_prompt`` (старое поведение), чтобы OSC не гас к «Без названия»
+        в гонке записи. см. R5/R6 (in-session-rename).
+        """
+        if self._store is None or self._active_task_id is None:
+            return self._resumed_prompt or ""
+        try:
+            meta = self._store.get_task_meta(self._active_task_id) or {}
+            return display_name(meta.get("tui"))
+        except Exception:
+            return self._resumed_prompt or ""
+
+    def _rename_active_session(self) -> None:
+        """R2 (in-session-rename): открыть RenameScreen(current=display_name) активной сессии.
+
+        Гейт: ``_active_task_id`` и ``_store`` не None. Текущее имя =
+        ``_session_display_name()`` (title > last_actual > «Без названия»).
+        Результат → ``_on_rename_result`` (R3).
+        """
+        if self._active_task_id is None or self._store is None:
+            return
+        from tui.screens.rename import RenameScreen
+        current = self._session_display_name()
+        self.app.push_screen(RenameScreen(current=current), self._on_rename_result)
+
+    def _on_rename_result(self, value: Optional[str]) -> None:
+        """R3 (in-session-rename): применить результат RenameScreen.
+
+        ``None`` (Esc) → no-op. Иначе ``update_tui_meta(tid, {"title": value})``
+        (``""`` = сброс к авто-имени из last_actual), затем ``_update_terminal_title``
+        (OSC сразу видит новое имя). best-effort: без стора/задачи — no-op.
+        """
+        if value is None:
+            return
+        if self._active_task_id is None or self._store is None:
+            return
+        try:
+            self._store.update_tui_meta(self._active_task_id, {"title": value})
+        except Exception:
+            return
+        self._update_terminal_title()
 
     def _session_last_prompt(self) -> "Optional[str]":
         """Последний user-промпт активной сессии из стора (для заголовка при resume).
@@ -2569,7 +2655,22 @@ class TraceScreen(Screen):
             self._palette, self._skill_picker, self._arg_picker, self._file_picker,
         ))
 
+    # R1: алиасы Ctrl+R для ручного переименования активной сессии.
+    # Локальный маппинг (образец — diff.py _KEY_ALIASES); diff-модуль не тащим.
+    # ctrl+к / ctrl+К — русская раскладка (клавиша «R» на той же физ. кнопке).
+    _RENAME_KEYS = frozenset({"ctrl+r", "ctrl+R", "ctrl+к", "ctrl+К"})
+
     def on_key(self, event: events.Key) -> None:
+        # R1: Ctrl+R (и алиасы раскладки) — переименование активной сессии.
+        # Гейт _active_task_id + _store; до confirm-banner/pickers (как в спеке).
+        if event.key in self._RENAME_KEYS \
+                and self._active_task_id is not None \
+                and self._store is not None:
+            self._rename_active_session()
+            event.stop()
+            event.prevent_default()
+            return
+
         # Confirm-баннер имеет наивысший приоритет: одиночный y/N перехватываем
         # до истории, Esc-лестницы и любых пикеров. TextArea скрыта, клавиши
         # не потребляются ею и доходят сюда.

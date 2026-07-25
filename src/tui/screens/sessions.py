@@ -1,7 +1,6 @@
 """SessionsScreen — picker сессий текущего проекта (Ctrl+R / /sessions)."""
 from __future__ import annotations
 
-import json
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -14,7 +13,6 @@ from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import Screen
 from textual.widgets import Input, Static
 
-from message_policy.user_message_policy import extract_real_user_message_text
 from tui.palette import (
     BRIGHT, CODE, DEEP_DIM, DIM, ERR, INK, MUTED, OK, RUN_COLOR,
 )
@@ -22,6 +20,7 @@ from tui.services.git_info import current_branch
 from tui.services.notices_ui import format_notices_badge
 from tui.services.relative_time import format_relative_local
 from tui.services.session_lock import BUSY_MESSAGE, is_held_by_other
+from tui.services.session_title import display_name
 from tui.services.skill_view import truncate_path_left
 from tui.services.stores.file_store import FileTaskStore
 from tui.services.usage_meter import format_nonzero_cost
@@ -68,7 +67,6 @@ class SessionsScreen(Screen):
         self._page: int = 0
         self._branch_filter: str = "all"   # "all" | "current"
         self._current_branch: Optional[str] = None
-        self._prompt_cache: dict[str, str] = {}  # thread_id → первый промпт (immutable)
 
     # ---- compose / mount ---------------------------------------------
 
@@ -130,42 +128,10 @@ class SessionsScreen(Screen):
         return out
 
     def _title_of(self, task) -> str:
-        custom = (task.tui_meta or {}).get("title")
-        if isinstance(custom, str) and custom.strip():
-            return custom.strip()
-        return self._first_prompt(task.thread_id)
-
-    def _first_prompt(self, thread_id: str) -> str:
-        # Кэш: первый промпт неизменен; иначе файл читался бы на каждый кадр.
-        if thread_id in self._prompt_cache:
-            return self._prompt_cache[thread_id]
-        base = Path(self._threads_dir)
-        # Исходный промпт может жить в самом старом __pre_summary__ архиве:
-        # после суммаризации live-файл начинается с dialog_summary. Идём по
-        # файлам в хронологии (архивы по суффиксу → live) и берём первое
-        # РЕАЛЬНОЕ user-сообщение, пропуская технические (dialog_summary и пр.).
-        archives = sorted(
-            base.glob(f"data_{self._system}_{thread_id}__pre_summary__*.jsonl")
-        )
-        files = [*archives, base / f"data_{self._system}_{thread_id}.jsonl"]
-        result = ""
-        for path in files:
-            if not path.exists():
-                continue
-            try:
-                with open(path, "r", encoding="utf-8") as f:
-                    for line in f:
-                        rec = json.loads(line)
-                        text = extract_real_user_message_text(rec.get("payload", {}))
-                        if text:
-                            result = " ".join(text.split())
-                            break
-            except (OSError, json.JSONDecodeError):
-                continue
-            if result:
-                break
-        self._prompt_cache[thread_id] = result
-        return result
+        # R7: единый источник имён — display_name(meta.tui): title > last_actual
+        # > «Без названия». Сканирование логов архивов/live удалено (бэкфил
+        # last_actual вне scope спеки §4).
+        return display_name(task.tui_meta or {})
 
     def _page_items(self) -> list:
         start = self._page * _PAGE_SIZE
@@ -215,7 +181,7 @@ class SessionsScreen(Screen):
         return task.status
 
     def _title_line(self, task, *, selected: bool) -> Text:
-        title = self._title_of(task) or "(без заголовка)"
+        title = self._title_of(task)
         t = Text(no_wrap=True, overflow="ellipsis")
         t.append(title, style=BRIGHT if selected else INK)
         return t
@@ -318,7 +284,17 @@ class SessionsScreen(Screen):
             return
         inp.action_select_all()
 
+    # R10: алиасы Ctrl+R для переименования выбранной сессии (паритет с
+    # TraceScreen/diff). ctrl+к / ctrl+К — русская раскладка (физ. кнопка «R»).
+    # Локальный маппинг (не тащим diff-модуль).
+    _RENAME_KEYS = frozenset({"ctrl+r", "ctrl+R", "ctrl+к", "ctrl+К"})
+
     def on_key(self, event: events.Key) -> None:
+        # R10: Ctrl+R и алиасы раскладки → переименование (до навигации).
+        if event.key in self._RENAME_KEYS:
+            self._rename_selected()
+            event.stop()
+            return
         page_len = len(self._page_items())
         if event.key == "up":
             if page_len:   # круговой в пределах страницы: с первой ↑ → на последнюю
@@ -345,9 +321,6 @@ class SessionsScreen(Screen):
             event.stop()
         elif event.key == "ctrl+p":
             self._preview_selected()
-            event.stop()
-        elif event.key == "ctrl+r":
-            self._rename_selected()
             event.stop()
         elif event.key == "ctrl+b":
             self._toggle_branch_filter()
@@ -462,7 +435,8 @@ class SessionsScreen(Screen):
         self.app.push_screen(RenameScreen(current=self._title_of(task)), _on_result)
 
     def _apply_rename(self, thread_id: str, value: str) -> None:
-        # пустое значение → откат к промпту (title="" falsy в _title_of)
+        # пустое значение → откат к авто-имени: title="" сброшен, display_name
+        # отдаёт last_actual (R7), а при его отсутствии — «Без названия».
         self._store.update_tui_meta(thread_id, {"title": value})
         self._reload()
 
