@@ -149,30 +149,25 @@ class ReadFile(AbstractSimpleTool):
                     },
                     "offset": {
                         "type": "integer",
-                        "description": (
-                            "Optional 1-based index of the first line to return. "
-                            "Defaults to 1 when used together with 'limit'."
-                        )
+                        "description": "1-based first line of the range to read. Default 1.",
                     },
                     "limit": {
                         "type": "integer",
                         "description": (
-                            "Optional maximum number of lines to return starting from 'offset'. "
-                            "If omitted but 'offset' is provided, defaults to 500. "
-                            "If both 'offset' and 'limit' are omitted, a preview (first 500 lines) is returned."
-                        )
+                            "Max lines to read starting from offset. "
+                            "Default: to end of file."
+                        ),
                     },
                     "char_offset": {
                         "type": "integer",
                         "description": (
-                            "0-based character offset into the concatenated text of the selected line range "
-                            "(Unicode code points). Default 0."
+                            "0-based character offset within the line range. Default 0."
                         ),
                     },
                     "char_limit": {
                         "type": "integer",
                         "description": (
-                            f"Max characters to return from char_offset within the selected lines. "
+                            f"Max characters to return from char_offset. "
                             f"Default {DEFAULT_READ_FILE_CHAR_LIMIT}."
                         ),
                     },
@@ -197,19 +192,19 @@ Input schema: {
     },
     "offset": {
       "type": "integer",
-      "description": "1-based index of the first line to read. Use together with 'limit'."
+      "description": "1-based first line of the range to read. Default 1."
     },
     "limit": {
       "type": "integer",
-      "description": "Maximum number of lines to return starting from 'offset'. If omitted when 'offset' is provided, defaults to 500."
+      "description": "Max lines to read starting from offset. Default: to end of file."
     },
     "char_offset": {
       "type": "integer",
-      "description": "0-based character offset within the selected line range."
+      "description": "0-based character offset within the line range. Default 0."
     },
     "char_limit": {
       "type": "integer",
-      "description": "Max characters returned from char_offset (default 100000)."
+      "description": "Max characters to return from char_offset. Default 100000."
     }
   },
   "required": ["path"],
@@ -225,8 +220,8 @@ Return format:
   - "total_lines": integer — total number of lines in the file.
   - "truncated": boolean — true if more lines exist after this page.
   - "next_offset": integer or null — suggested 1-based line offset for the next page.
-  - "char_offset", "char_limit": applied character slice within the selected lines.
-  - "total_chars": integer — length of the selected line range before char slicing.
+  - "char_offset", "char_limit": applied character slice within the line range.
+  - "total_chars": integer — length of the line range before char slicing.
   - "returned_chars": integer — length of "content" in this response.
   - "content_truncated": boolean — true if more characters remain in that range.
   - "next_char_offset": integer or null — next char_offset when content_truncated is true.
@@ -235,7 +230,8 @@ Return format:
 
 Usage:
 - Always use this tool to inspect the contents of any file before modifying it.
-- For large files, page by lines (offset/limit) and by characters (char_offset/char_limit) when content_truncated is true.
+- Line range defaults to offset=1 through end of file; narrow with offset/limit when needed.
+- Page long ranges with char_offset/char_limit when content_truncated is true.
 - On file_too_large: file_size_bytes is set; error.max_bytes has the limit; follow error.message.
 '''
         return description
@@ -376,22 +372,17 @@ Usage:
         lines = full_text.splitlines(keepends=True)
         total_lines = len(lines)
 
-        if offset is not None or limit is not None:
-            if offset is None:
-                offset = 1
-            if limit is None:
-                limit = 500
+        # Line range: offset default 1, limit default = rest of file.
+        start_1_based = 1 if offset is None else offset
+        if start_1_based < 1:
+            start_1_based = 1
 
-            if offset < 1:
-                offset = 1
+        if limit is None:
+            end_1_based = total_lines
+        else:
             if limit < 1:
                 limit = 1
-
-            start_1_based = offset
-            end_1_based = offset + limit - 1
-        else:
-            start_1_based = 1
-            end_1_based = 500
+            end_1_based = start_1_based + limit - 1
 
         if start_1_based > total_lines:
             start_1_based = total_lines

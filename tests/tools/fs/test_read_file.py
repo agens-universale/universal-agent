@@ -21,24 +21,71 @@ def test_read_returns_sha256_for_full_file(tmp_path):
     assert res["sha256"] == info["sha256"]
 
 
-def test_read_default_preview_and_pagination(tmp_path):
+def test_read_default_selects_whole_file(tmp_path):
+    """Without offset/limit: whole file selected; preview is char_limit, not 500 lines."""
+    lines = [f"line {i}" for i in range(1, 601)]
+    text = "\n".join(lines)
     p = tmp_path / "big.txt"
-    p.write_text("\n".join(f"line {i}" for i in range(1, 601)), encoding="utf-8")
+    p.write_text(text, encoding="utf-8")
     res = json.loads(with_local_ctx(ReadFile)(path=str(p)))
     assert res["file_size_bytes"] == p.stat().st_size
     assert res["start_line"] == 1
-    assert res["end_line"] == 500
-    assert res["truncated"] is True
-    assert res["next_offset"] == 501
+    assert res["end_line"] == 600
+    assert res["total_lines"] == 600
+    assert res["truncated"] is False
+    assert res["next_offset"] is None
+    assert res["total_chars"] == len(text)
+    # 600 short lines fit in default char_limit
     assert res["content_truncated"] is False
     assert res["next_char_offset"] is None
+    assert res["content"] == text
 
 
-def test_read_offset_limit(tmp_path):
+def test_read_offset_without_limit_reads_to_eof(tmp_path):
+    p = tmp_path / "big.txt"
+    p.write_text("\n".join(f"line {i}" for i in range(1, 601)), encoding="utf-8")
+    res = json.loads(with_local_ctx(ReadFile)(path=str(p), offset=501))
+    assert res["start_line"] == 501
+    assert res["end_line"] == 600
+    assert res["truncated"] is False
+    assert res["next_offset"] is None
+
+
+def test_char_offset_reaches_past_former_500_line_cap(tmp_path):
+    """Char pagination without line args must cover the whole file, including past line 500."""
+    # Lines 1–500: 10 chars each ("aaaaaaaaa\n"); lines 501–516: marker prefix
+    head = ["a" * 9 for _ in range(500)]
+    tail = [f"TAIL{i:03d}" + "x" * 5 for i in range(16)]
+    lines = head + tail
+    text = "\n".join(lines) + "\n"
+    p = tmp_path / "wide.jsonl"
+    p.write_text(text, encoding="utf-8")
+
+    head_chars = sum(len(l) + 1 for l in head)  # include newlines
+    assert head_chars == 5000
+
+    res = json.loads(
+        with_local_ctx(ReadFile)(
+            path=str(p), char_offset=head_chars, char_limit=50
+        )
+    )
+    assert res["ok"] is True
+    assert res["total_lines"] == 516
+    assert res["end_line"] == 516
+    assert res["truncated"] is False
+    assert res["total_chars"] == len(text)
+    assert res["content"].startswith("TAIL000")
+    assert res["content"] == text[head_chars : head_chars + 50]
+
+
+def test_explicit_line_slice_unchanged(tmp_path):
     p = tmp_path / "f.txt"
     p.write_text("a\nb\nc\nd\ne\n", encoding="utf-8")
     by_page = json.loads(with_local_ctx(ReadFile)(path=str(p), offset=2, limit=2))
     assert by_page["content"] == "b\nc\n"
+    assert by_page["total_chars"] == 4  # "b\nc\n"
+    assert by_page["truncated"] is True
+    assert by_page["next_offset"] == 4
 
 
 def test_read_errors_and_type_validation(tmp_path):
