@@ -137,7 +137,9 @@ class ReadFile(AbstractSimpleTool):
             "type": "function",
             "name": "fs_read_file",
             "description": (
-                "Read a text file from the local filesystem. "
+                "Read a text file with line and character pagination. "
+                "Without offset/limit the line range is the whole file; page long content with "
+                "char_offset/char_limit when content_truncated is true (continue from next_char_offset). "
                 "Always includes full-file sha256 (for expected_file_sha256 in edit tools)."
             ),
             "parameters": {
@@ -161,7 +163,8 @@ class ReadFile(AbstractSimpleTool):
                     "char_offset": {
                         "type": "integer",
                         "description": (
-                            "0-based character offset within the line range. Default 0."
+                            "0-based character offset within the line range. Default 0. "
+                            "When content_truncated is true, continue with next_char_offset."
                         ),
                     },
                     "char_limit": {
@@ -182,7 +185,7 @@ class ReadFile(AbstractSimpleTool):
     @classmethod
     def prompt_description(cls):
         description = '''Tool name: fs_read_file
-Tool description: Reads the contents of a text file from the local filesystem with line and character pagination.
+Tool description: Read a text file with line and character pagination. Without offset/limit the line range is the whole file; page with char_offset/char_limit when content_truncated (continue from next_char_offset). Always includes full-file sha256.
 Input schema: {
   "type": "object",
   "properties": {
@@ -200,7 +203,7 @@ Input schema: {
     },
     "char_offset": {
       "type": "integer",
-      "description": "0-based character offset within the line range. Default 0."
+      "description": "0-based character offset within the line range. Default 0. When content_truncated is true, continue with next_char_offset."
     },
     "char_limit": {
       "type": "integer",
@@ -221,7 +224,7 @@ Return format:
   - "truncated": boolean — true if more lines exist after this page.
   - "next_offset": integer or null — suggested 1-based line offset for the next page.
   - "char_offset", "char_limit": applied character slice within the line range.
-  - "total_chars": integer — length of the line range before char slicing.
+  - "total_chars": integer — length of the current line range (not always the whole file).
   - "returned_chars": integer — length of "content" in this response.
   - "content_truncated": boolean — true if more characters remain in that range.
   - "next_char_offset": integer or null — next char_offset when content_truncated is true.
