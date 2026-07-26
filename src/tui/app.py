@@ -101,6 +101,7 @@ class TuiApp(App):
         Binding("f4", "notices", "/notices"),
         Binding("f5", "config", "/config"),
         Binding("f6", "settings", "/settings", priority=True),  # у TextArea свой f6=select_line — без priority хоткей мёртв при фокусе в инпуте
+        Binding("f7", "buffer", "Буфер сессии", priority=True),  # TextArea f7=select_all — без priority F7 в инпуте не откроет буфер
         Binding("ctrl+slash", "help", "Help"),
         Binding("ctrl+s", "sessions", "/sessions"),
         # priority: TextArea перехватывает Ctrl+D как delete-right.
@@ -558,6 +559,25 @@ class TuiApp(App):
             return
         main._cmd_settings()
 
+    def action_buffer(self) -> None:
+        """B5: открыть буфер сессии (F7 / /buffer). No-op если уже открыт.
+
+        Нет активной сессии — короткое сообщение, экран не открываем.
+        """
+        from tui.screens.copy_buffer import CopyBufferScreen
+
+        if isinstance(self.screen, CopyBufferScreen):
+            return  # повторный F7 на открытом буфере — no-op
+        main = self._main_screen()
+        if main is None:
+            return
+        store = getattr(main, "_store", None)
+        task_id = getattr(main, "_active_task_id", None)
+        if store is None or not task_id:
+            self.notify("Нет активной сессии — буфер недоступен")
+            return
+        self.push_screen(CopyBufferScreen(store=store, task_id=task_id))
+
     def action_notices(self) -> None:
         from tui.screens.notices import NoticesScreen
         if isinstance(self.screen, NoticesScreen):
@@ -641,11 +661,41 @@ class TuiApp(App):
         if payload:
             copy_out(self, payload, toast=False)
 
+    def _push_session_copy_buffer(self, payload: str) -> None:
+        """B2: дописать payload сверху в буфер сессии (tui.copy_buffer) через meta.
+
+        Тот же payload, что ушёл наружу (включая cite, если он был). Не вызываем
+        на экране буфера (B8 — иначе буфер дописывал бы сам в себя). Best-effort:
+        без store/active task — no-op. Только из UI-потока Textual.
+        """
+        # B8: на экране буфера не self-push (иначе буфер дописывал бы сам в себя)
+        if getattr(self.screen, "_is_copy_buffer_screen", False):
+            return
+        # Store/task_id — из базового TraceScreen (как action_buffer): у diff/view
+        # экранов своих _store/_active_task_id нет, без этого фикс push молча no-op.
+        main = self._main_screen()
+        if main is None:
+            return
+        store = getattr(main, "_store", None)
+        task_id = getattr(main, "_active_task_id", None)
+        if store is None or not task_id:
+            return
+        try:
+            from tui.services.copy_buffer import push_copy_buffer
+
+            meta = store.get_task_meta(task_id) or {}
+            existing = (meta.get("tui") or {}).get("copy_buffer") or ""
+            new_buf = push_copy_buffer(existing, payload)
+            store.update_tui_meta(task_id, {"copy_buffer": new_buf})
+        except Exception:
+            pass  # best-effort: буфер сессии не должен ронять copy-жест
+
     def action_interrupt(self) -> None:
-        """Ctrl+C: выделение → копировать; активный run → стоп; вхолостую → exit-модалка (как Esc)."""
+        """Ctrl+C: выделение → копировать (+ буфер сессии); активный run → стоп; вхолостую → exit-модалка (как Esc)."""
         payload = self._clipboard_payload()
         if payload:
             copy_out(self, payload, toast=True)
+            self._push_session_copy_buffer(payload)  # B2: тем же payload сверху
             return
         scr = self.screen
         runner = getattr(self, "active_runner", None)

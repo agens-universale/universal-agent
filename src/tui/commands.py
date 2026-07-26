@@ -109,6 +109,7 @@ def build_default_registry() -> CommandRegistry:
         Command("status", (), "", "Состояние текущей сессии"),
         Command("stop", (), "", "Остановить активную задачу", hotkey="Ctrl+C"),
         Command("mcp", (), "", "MCP-серверы и их тулы"),
+        Command("buffer", (), "", "Буфер сессии — текст собранных копий", hotkey="F7"),
         Command("quit", (), "", "Выход", hotkey="Esc"),
         # Переключатели палитры (←/→/Enter): самопроверка хода и формат финала.
         Command(

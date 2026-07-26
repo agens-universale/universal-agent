@@ -237,6 +237,9 @@ class TraceScreen(Screen):
         self._trace_max_height = None  # type: Optional[int]
         self._stick_bottom = True   # автоскролл-намерение «липнуть к низу» трейса
         self._last_auto_y = 0       # куда мы в прошлый раз программно прижали трейс
+        # Freeze UI на время app-select (§3.2 F1): time.monotonic() первого тика,
+        # где увидели Screen._selecting; None когда не selecting.
+        self._select_freeze_since: Optional[float] = None
         # Эфемерный StreamBlock — live-вывод текущего chat_completions-шага;
         # снимается, когда приходит каноничная assistant-строка / run завершён.
         self._stream_block = None  # type: Optional["StreamBlock"]
@@ -1008,6 +1011,11 @@ class TraceScreen(Screen):
         """Освежить контент уже смонтированного стрим-виджета из снапшота sink.
         Зовётся poll-веткой (после mount/switch) и событийно (StreamPump → app →
         call_from_thread). НЕ монтирует/снимает/переключает — это poll."""
+        # F3: freeze UI на время app-select — не красим стрим и не двигаем stick
+        # (здесь зовутся _update_stick_state/_scroll_trace_end). Гейт железный:
+        # покрывает и poll, и событийный путь _stream_signal → call_from_thread.
+        if self._ui_frozen_for_select():
+            return
         sink = getattr(self.app, "_stream_sink", None)
         if sink is None:
             return
@@ -2210,15 +2218,40 @@ class TraceScreen(Screen):
         else:
             self._reasoning_clock.stop("stream")
 
+    def _ui_frozen_for_select(self) -> bool:
+        """F1: заморожен ли UI из-за app-select. Сигнал — Screen._selecting."""
+        return bool(getattr(self, "_selecting", False))
+
     def _poll_active(self) -> None:
         # Потолок #trace = экран минус хром. Зависит только от стабильных высот
         # (header/indicator-bar[зарезервирован]/input/footer) → пересчёт синхронный и
         # без гонки (на гарде ставит max-height лишь при ресайзе / росте ввода).
         self._sync_trace_max_height()
+        # Freeze UI на время app-select (§3.2 F2–F5). Пока Screen._selecting —
+        # точечно глушим UI-мутации трейса (stick/scroll/stream paint/wipe),
+        # но НЕ весь poll: footer/OSC/title/runner-логика/orphan/tail-события
+        # без мутаций экрана продолжаются (F6 — runner жив, UI не тупеет целиком).
+        _frozen = self._ui_frozen_for_select()
+        if _frozen:
+            if self._select_freeze_since is None:
+                self._select_freeze_since = time.monotonic()
+            # F5: timeout ~5с → снять выделение принудительно (runner не стопаем).
+            if time.monotonic() - self._select_freeze_since > 5.0:
+                try:
+                    self.clear_selection()
+                except Exception:
+                    pass
+                self._select_freeze_since = None
+                self._selecting = False
+                _frozen = False
+        else:
+            self._select_freeze_since = None
         # Липкость к низу: детект ручного скролла + повторное прижатие.
-        self._update_stick_state()
-        if self._stick_bottom:
-            self._scroll_trace_end()
+        # F2: при freeze — не обновляем stick и не прижимаем (текст стоит на месте).
+        if not _frozen:
+            self._update_stick_state()
+            if self._stick_bottom:
+                self._scroll_trace_end()
         # Отложенное удаление осиротевших реплик (cancel-with-undo), когда idle.
         self._run_orphan_cleanups()
         # Индикатор загрузки MCP — на старте (до появления активной задачи) тоже.
@@ -2363,7 +2396,8 @@ class TraceScreen(Screen):
                     or not is_terminal_indicator_state(self._thinking._state)
                 ):
                     self._destroy_thinking_indicator()
-            self._clear_stream_block()
+            if not _frozen:
+                self._clear_stream_block()
             self._refresh_footer()
             self._update_terminal_title()
             return
@@ -2379,7 +2413,8 @@ class TraceScreen(Screen):
             # falling-edge/idle и не зависим от reaping воркера. _show создаёт
             # индикатор, если его нет.
             self._show_thinking_indicator(state="failed")
-            self._clear_stream_block()
+            if not _frozen:
+                self._clear_stream_block()
         elif _indicator_mode == "active":
             import time as _time
             since_last = _time.monotonic() - self._last_event_at
@@ -2404,7 +2439,9 @@ class TraceScreen(Screen):
             # не показываем — иначе строка-мысль висит после финального ответа (баг B).
             _thinking_phase = (not summarizing) and (not finalizing) and (self._last_event_kind != "_finalized")
             sink = getattr(self.app, "_stream_sink", None)
-            if _thinking_phase and sink is not None and sink.has_content():
+            # F3: при freeze не монтируем/не красим стрим-виджеты (mount/switch/
+            # set_content дрожали бы экран под выделением). Контент догонит после MouseUp.
+            if _thinking_phase and sink is not None and sink.has_content() and not _frozen:
                 from tui.services.stream_sink import (
                     format_stream_block, format_reasoning_line, select_stream_render,
                 )
@@ -2437,7 +2474,7 @@ class TraceScreen(Screen):
                     self._refresh_stream_content()
                 else:
                     self._clear_stream_block(reset_sink=False)
-            elif not _thinking_phase:
+            elif not _thinking_phase and not _frozen:
                 self._clear_stream_block()
         elif _indicator_mode == "hide":
             # Агент заблокирован — ждёт ответа пользователя. Скрываем (не destroy),
@@ -2464,7 +2501,8 @@ class TraceScreen(Screen):
                 self._thinking.set_state(term_state)
             else:
                 self._destroy_thinking_indicator()
-            self._clear_stream_block()
+            if not _frozen:
+                self._clear_stream_block()
         # Footer-left зависит от is_running — обновляем каждый тик, чтобы
         # /stop появлялся/исчезал без отдельных вызовов из start/stop путей.
         self._refresh_footer()
@@ -2473,6 +2511,12 @@ class TraceScreen(Screen):
             self._flush_diff_pending_cta()
             return
         tail = self._store.tail_events(self._active_task_id, self._cursor)
+        # F3: при freeze НЕ перерисовываем трейс (wipe/clear_trace/render_records
+        # дрожали бы экраном под выделением). Курсор двигаем, чтобы не копить
+        # хвост — отрисовка догонит на следующем тике после MouseUp.
+        if _frozen:
+            self._cursor = tail.next_cursor
+            return
         if tail.stream_reset:
             self._clear_trace()
             self._reset_render_state()
@@ -4375,6 +4419,9 @@ class TraceScreen(Screen):
             return
         if name == "mcp":
             self._cmd_mcp()
+            return
+        if name == "buffer":
+            self.app.action_buffer()
             return
         if name == "diff":
             self.app.action_diff()

@@ -124,6 +124,12 @@ class ToolCallRow(ClickModelMixin, Widget):
 
     def _pulse_tick(self) -> None:
         """Кадр дыхания ▸. Waiting / done / interrupted — не тикаем."""
+        # F4: freeze UI на время app-select — не тикаем анимацию (Screen._selecting).
+        try:
+            if getattr(self.screen, "_selecting", False):
+                return
+        except Exception:
+            pass
         if self._waiting or self._result is not None or self._interrupted:
             return
         self._pulse_frame += 1
