@@ -48,9 +48,6 @@ INTENTIONAL_TEMPLATE_OVERRIDES: set = {
     "security.read_guard.denied_file_patterns", # защита от чтения .env, id_rsa и т.п.
     "security.read_guard.denied_extensions",    # защита от чтения .key/.pfx/.jks
 
-    # --- Пришло из master вместе с фичами; шаблон там разошёлся со схемой ---
-    # Значения не трогаем (шаблон — зона master), но фиксируем расхождение явно.
-    "diff_tui.preview_context_lines",           # 6 в шаблоне против 3 в схеме и demo_config.yml
     "pricing.enabled",                          # true при нулевых ставках ниже
     "pricing.input",                            # 0 — шаблон предлагает вписать реальные ставки
     "pricing.output",                           # 0 — но включённый pricing с нулями даёт startup-notice

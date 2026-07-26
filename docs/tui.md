@@ -452,7 +452,8 @@ Enter — агент продолжит. Esc при пустом поле ост
 | Ключ | По умолчанию | Что делает |
 |---|---|---|
 | `diff_tui.cache_max_orig` | `500` | LRU-лимит `.orig` в cache-mode |
-| `diff_tui.preview_context_lines` | `3` (в `config.default.yml` часто `6`) | Контекст строк в visual diff / trace-preview |
+| `diff_tui.preview_context_lines` | `50` | Контекст строк в visual diff / trace-preview |
+| `diff_tui.full_file_max_lines` | `300` | Порог «весь файл» vs preview (adaptive); `f` — игнорирует порог |
 | `diff_tui.max_diff_chars` | `100000` | Усечение больших visual diff (`0` — без лимита) |
 
 ## Внешний вид

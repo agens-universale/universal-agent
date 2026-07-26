@@ -11,6 +11,7 @@ from typing import Literal, Optional, Sequence, Union
 
 from config_modules.diff_tui import (
     DEFAULT_CACHE_MAX_ORIG,
+    DEFAULT_FULL_FILE_MAX_LINES,
     DEFAULT_MAX_DIFF_CHARS,
     DEFAULT_PREVIEW_CONTEXT_LINES,
 )
@@ -26,8 +27,7 @@ from diff_tui.store import (
 from diff_tui.touched import TouchedJournal
 from diff_tui.visual import (
     build_created_file_diff,
-    build_unified_diff,
-    truncate_diff,
+    build_visual_diff,
 )
 
 PathLike = Union[str, Path]
@@ -82,6 +82,7 @@ class DiffService:
         protected_extra: Sequence[str] | None = None,
         cache_max_orig: int = DEFAULT_CACHE_MAX_ORIG,
         preview_context_lines: int = DEFAULT_PREVIEW_CONTEXT_LINES,
+        full_file_max_lines: int = DEFAULT_FULL_FILE_MAX_LINES,
         max_diff_chars: int = DEFAULT_MAX_DIFF_CHARS,
         emit_notices: bool = True,
         threads_dir: str | None = None,
@@ -93,6 +94,7 @@ class DiffService:
         self.protected_extra = list(protected_extra or ())
         self.cache_max_orig = cache_max_orig
         self.preview_context_lines = preview_context_lines
+        self.full_file_max_lines = full_file_max_lines
         self.max_diff_chars = max_diff_chars
         self.emit_notices = emit_notices
         self.threads_dir = threads_dir
@@ -553,42 +555,70 @@ class DiffService:
         self._store.clear_all()
         return OpResult(ok=True)
 
-    def visual_diff(self, path: PathLike) -> str:
+    def visual_diff(self, path: PathLike, *, mode: str = "adaptive") -> str:
         """Pending visual diff; пустая строка если не pending / ошибка.
 
-        Context/truncation — из ``diff_tui.preview_context_lines`` / ``max_diff_chars``
-        (``0`` = без лимита).
-        Для created/untracked (``git diff`` пуст) — unified diff содержимого файла.
+        ``mode``: ``adaptive`` (Enter — порог 300/50) или ``full`` (``f`` — весь
+        файл без порога). Context/truncation — из ``diff_tui.*``. Git- и cache-
+        backend ведут себя одинаково (D1) — baseline↔disk через ``build_visual_diff``,
+        без сырого ``git diff``.
         """
         self.ensure_mode_ready()
         backend = self.backend_for(path)
         if backend == "git":
-            return self._visual_diff_git(path)
+            return self._visual_diff_git(path, mode=mode)
         if backend != "cache":
             return ""
-        return self._visual_diff_cache(path)
+        return self._visual_diff_cache(path, mode=mode)
 
-    def _visual_diff_git(self, path: PathLike) -> str:
+    def _visual_diff_git(
+        self, path: PathLike, *, mode: str = "adaptive"
+    ) -> str:
         rel = self._git_rel(path)
         if rel is None:
             return ""
-        raw = git_ops.git_diff_worktree(self.launch_root, rel).stdout
-        if raw.strip():
-            return truncate_diff(raw, self.max_diff_chars)
-        # Untracked / created: ``git diff`` не видит ``??`` — показываем файл как addition
+        # baseline из index (``git show :<path>``); для untracked/deleted — нет в index.
+        baseline_res = git_ops.git_show_index(self.launch_root, rel)
+        disk = Path(self.launch_root) / rel
         by_path = {e.path: e for e in git_ops.git_status(self.launch_root)}
         entry = by_path.get(rel)
-        if entry is None or entry.kind != "created":
-            return ""
-        return self._visual_diff_as_created(rel, Path(self.launch_root) / rel)
 
-    def _visual_diff_as_created(self, key: str, disk: Path) -> str:
-        """Unified diff ``/dev/null`` → содержимое нового файла на диске."""
+        if baseline_res.ok:
+            # index↔disk (modified или staged-add с worktree-изм.)
+            old = baseline_res.stdout
+            new = self._read_disk(disk)
+            if new is None:
+                # файл удалён с диска, но index жив → deleted
+                return self._build_deleted(key=rel, orig_text=old, mode=mode)
+            return build_visual_diff(
+                old,
+                new,
+                mode=mode,
+                full_file_max_lines=self.full_file_max_lines,
+                preview_context_lines=self.preview_context_lines,
+                max_diff_chars=self.max_diff_chars,
+                fromfile=f"a/{rel}",
+                tofile=f"b/{rel}",
+            )
+        # Нет в index: untracked (created) или staged-delete (worktree удалён).
+        if entry is not None and entry.kind == "created":
+            return self._visual_diff_as_created(rel, disk)
+        # staged-delete: index пуст, но git status помечает deleted → покажем
+        # удаление от последнего staged не можем (нет baseline в index).
+        return ""
+
+    def _visual_diff_as_created(
+        self, key: str, disk: Path
+    ) -> str:
+        """Unified diff ``/dev/null`` → содержимое нового файла на диске.
+
+        ``mode`` не нужен: созданный файл всегда показывается целиком как
+        addition (difflib ``/dev/null`` → content; контекст не релевантен).
+        """
         if not disk.is_file():
             return "(файл был создан, затем удалён с диска)"
-        try:
-            content = disk.read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError):
+        content = self._read_disk(disk)
+        if content is None:
             return ""
         return build_created_file_diff(
             content,
@@ -597,7 +627,31 @@ class DiffService:
             max_diff_chars=self.max_diff_chars,
         )
 
-    def _visual_diff_cache(self, path: PathLike) -> str:
+    def _build_deleted(self, *, key: str, orig_text: str, mode: str = "adaptive") -> str:
+        """disk↔``/dev/null`` удаление через ``build_visual_diff``."""
+        return build_visual_diff(
+            orig_text,
+            "",
+            mode=mode,
+            full_file_max_lines=self.full_file_max_lines,
+            preview_context_lines=self.preview_context_lines,
+            max_diff_chars=self.max_diff_chars,
+            fromfile=f"a/{key}",
+            tofile="/dev/null",
+        )
+
+    @staticmethod
+    def _read_disk(path: Path) -> Optional[str]:
+        if not path.is_file():
+            return None
+        try:
+            return path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            return None
+
+    def _visual_diff_cache(
+        self, path: PathLike, *, mode: str = "adaptive"
+    ) -> str:
         key = self._cache_key(path)
         if key is None:
             return ""
@@ -608,21 +662,25 @@ class DiffService:
         if meta.get("status") == STATUS_CREATED and not meta.get("baseline_exists"):
             return self._visual_diff_as_created(key, disk)
         if orig.is_file() and not disk.is_file():
-            return build_unified_diff(
+            return build_visual_diff(
                 orig.read_text(encoding="utf-8"),
                 "",
+                mode=mode,
+                full_file_max_lines=self.full_file_max_lines,
+                preview_context_lines=self.preview_context_lines,
+                max_diff_chars=self.max_diff_chars,
                 fromfile=f"a/{key}",
                 tofile="/dev/null",
-                context_lines=self.preview_context_lines,
-                max_diff_chars=self.max_diff_chars,
             )
         if not orig.is_file() or not disk.is_file():
             return ""
-        return build_unified_diff(
+        return build_visual_diff(
             orig.read_text(encoding="utf-8"),
             disk.read_text(encoding="utf-8"),
+            mode=mode,
+            full_file_max_lines=self.full_file_max_lines,
+            preview_context_lines=self.preview_context_lines,
+            max_diff_chars=self.max_diff_chars,
             fromfile=f"a/{key}",
             tofile=f"b/{key}",
-            context_lines=self.preview_context_lines,
-            max_diff_chars=self.max_diff_chars,
         )
