@@ -12,7 +12,12 @@ import tempfile
 from pathlib import Path
 from typing import Any, Callable, Iterable, Optional
 
-from backends.protocol import ExecResult, FsBackend
+from backends.protocol import (
+    DEFAULT_EXEC_OUTPUT_CAPTURE_MAX_CHARS,
+    ExecResult,
+    FsBackend,
+    bound_exec_result,
+)
 from backends.walk_util import iter_files_from_flat, iter_walk_from_flat
 
 
@@ -21,12 +26,22 @@ class HarborBackend(FsBackend):
     # Дефолт берётся из agent.exec_timeout_sec (harbor bench_defaults → 600).
     default_exec_timeout = None
 
-    def __init__(self, environment: Any, loop: asyncio.AbstractEventLoop) -> None:
+    def __init__(
+        self,
+        environment: Any,
+        loop: asyncio.AbstractEventLoop,
+        *,
+        exec_output_capture_max_chars: int = DEFAULT_EXEC_OUTPUT_CAPTURE_MAX_CHARS,
+    ) -> None:
         self._env = environment
         self._loop = loop
+        self.exec_output_capture_max_chars = exec_output_capture_max_chars
 
     def _await(self, coro):
         return asyncio.run_coroutine_threadsafe(coro, self._loop).result()
+
+    def _bound(self, result: ExecResult) -> ExecResult:
+        return bound_exec_result(result, self.exec_output_capture_max_chars)
 
     @staticmethod
     def _is_exec_timeout(exc: BaseException) -> bool:
@@ -54,15 +69,21 @@ class HarborBackend(FsBackend):
         except Exception as exc:
             if not self._is_exec_timeout(exc):
                 raise
-            return ExecResult(
-                stdout=self._partial_stream(exc, "stdout"),
-                stderr=self._partial_stream(exc, "stderr"),
-                return_code=None,
-                timed_out=True,
+            return self._bound(
+                ExecResult(
+                    stdout=self._partial_stream(exc, "stdout"),
+                    stderr=self._partial_stream(exc, "stderr"),
+                    return_code=None,
+                    timed_out=True,
+                )
             )
-        return ExecResult(
-            stdout=res.stdout or "", stderr=res.stderr or "", return_code=res.return_code,
-            timed_out=bool(getattr(res, "timed_out", False)),
+        return self._bound(
+            ExecResult(
+                stdout=res.stdout or "",
+                stderr=res.stderr or "",
+                return_code=res.return_code,
+                timed_out=bool(getattr(res, "timed_out", False)),
+            )
         )
 
     def run_python(self, code: str, *, cwd: Optional[str] = None, timeout: Optional[int] = None,

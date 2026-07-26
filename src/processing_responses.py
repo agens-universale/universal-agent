@@ -285,6 +285,7 @@ def _request_backend_canonical_once(
                 use_retry=use_retry,
                 logger=getattr(ctx, "logger", None),
                 timeout=request_timeout_sec,
+                config_proxy=cfg.get("proxy"),
             )
         resp_messages = res["output"]
         response_id = str(res["id"])
@@ -338,6 +339,7 @@ def _request_backend_canonical_once(
             runtime_notices_enabled=bool(getattr(ctx, "is_tui", False)),
             notice_url=url,
             timeout=request_timeout_sec,
+            config_proxy=cfg.get("proxy"),
         )
     if not isinstance(res, dict):
         raise ValueError("chat/completions backend response must be an object")

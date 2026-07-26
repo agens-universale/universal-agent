@@ -65,6 +65,9 @@ backend:
   # HTTP-таймаут одного запроса к LLM (секунды). Дефолт 600 (10 минут).
   # При стриме лимит — на connect и на паузу между чанками, не на весь ответ.
   request_timeout_sec: 600
+  # HTTP/SOCKS-прокси для backend-вызовов. null/пусто → из env
+  # (HTTPS_PROXY/HTTP_PROXY/ALL_PROXY). Пример: "socks5h://proxy.example:1080"
+  proxy: null
 
 # Динамическая авторизация GigaCode (альтернатива статическому Bearer в
 # backend.chat_completion_headers). Токен запрашивается у auth_endpoint и
@@ -138,6 +141,9 @@ diff_tui:
 
 agent:
   model: MiniMax-M2.7
+  # Model steering → append в <special_instructions> (для любой активной модели).
+  # model_steering: |
+  #   Prefer the next concrete action over a broad survey; targeted reads that unlock that action are fine.
   system_prompt_id: v1
   use_server_subagents: false
   use_local_subagents: true
@@ -166,6 +172,8 @@ agent:
   # Дефолтный таймаут execute_command / run_python_code (сек), если модель
   # не передала timeout_seconds. Harbor/длинные бенчи обычно ставят 600.
   exec_timeout_sec: 120
+  # Потолок RAM-буфера stdout/stderr на поток (decoded UTF-8 chars) для exec.
+  exec_output_capture_max_chars: 60000
   inject_tool_fields:
     reason: "Brief rationale (1–2 sentences): goal, why now, expected outcome."
 

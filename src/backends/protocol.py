@@ -6,6 +6,9 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Callable, Iterable, Optional
 
+# Потолок captured-буфера на поток (decoded UTF-8 chars). Spec D2 / D8.
+DEFAULT_EXEC_OUTPUT_CAPTURE_MAX_CHARS = 60_000
+
 
 @dataclass
 class ExecResult:
@@ -13,6 +16,33 @@ class ExecResult:
     stderr: str
     return_code: Optional[int]
     timed_out: bool = False
+    # True когда соответствующий поток превысил capture-cap (D2): процесс НЕ убит,
+    # лишний вывод слит и отброшен (drain & discard). Preview/refs — слой тулы.
+    stdout_hit_capture_cap: bool = False
+    stderr_hit_capture_cap: bool = False
+
+
+def bound_captured_stream(text: str, max_chars: int) -> tuple[str, bool]:
+    """Обрезать поток до ``max_chars``; вернуть ``(text, hit_capture_cap)``."""
+    if max_chars < 0:
+        max_chars = 0
+    if len(text) <= max_chars:
+        return text, False
+    return text[:max_chars], True
+
+
+def bound_exec_result(result: ExecResult, max_chars: int) -> ExecResult:
+    """D8: captured в ExecResult ≤ cap на агенте (local/harbor один контракт)."""
+    stdout, stdout_hit = bound_captured_stream(result.stdout or "", max_chars)
+    stderr, stderr_hit = bound_captured_stream(result.stderr or "", max_chars)
+    return ExecResult(
+        stdout=stdout,
+        stderr=stderr,
+        return_code=result.return_code,
+        timed_out=result.timed_out,
+        stdout_hit_capture_cap=bool(result.stdout_hit_capture_cap) or stdout_hit,
+        stderr_hit_capture_cap=bool(result.stderr_hit_capture_cap) or stderr_hit,
+    )
 
 
 class FsBackend(ABC):
@@ -21,6 +51,8 @@ class FsBackend(ABC):
     is_sandbox: bool = False
     # Backend-preferred default exec timeout; None → tool class default.
     default_exec_timeout: Optional[int] = None
+    # Потолок RAM-буфера stdout/stderr на поток (spec D2/D8).
+    exec_output_capture_max_chars: int = DEFAULT_EXEC_OUTPUT_CAPTURE_MAX_CHARS
 
     # --- stat ---
     @abstractmethod
@@ -117,6 +149,7 @@ class FsBackend(ABC):
         if stdin is not None:
             command = f"printf '%s' {shlex.quote(stdin)} | {command}"
         return self.exec(command, cwd=cwd, timeout=timeout, env=env)
+
     @abstractmethod
     def run_python(self, code: str, *, cwd: Optional[str] = None,
                    timeout: Optional[int] = None,

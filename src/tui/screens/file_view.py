@@ -44,8 +44,8 @@ _FOOTER_ERR = "[Esc] назад"
 class FileViewerScreen(Screen):
     """Просмотр файла: TextArea(read_only) — скролл, подсветка, выделение мышью.
 
-    Ctrl+C: app._current_selection → focused.selected_text, иначе get_selected_text
-    (вся текущая страница как fallback).
+    Ctrl+C: app._clipboard_payload → selected_text / get_selected_text
+    (вся текущая страница как fallback) + суффикс ``[file: path]``.
     """
 
     BINDINGS = [
@@ -330,6 +330,25 @@ class FileViewerScreen(Screen):
         if self._error is not None or self._path is None:
             return
         self._store.set(self._path, self._start_line)
+
+    def clipboard_source_cite(self) -> Optional[tuple[str, str]]:
+        """Источник для суффикса буфера: ``("file", path)`` или None.
+
+        path — относительно cwd TUI, если файл внутри; иначе абсолютный.
+        """
+        if self._error is not None:
+            return None
+        if self._path is None:
+            return None
+        try:
+            cwd = Path(self._cwd).resolve()
+            rel = self._path.resolve().relative_to(cwd)
+            return ("file", rel.as_posix())
+        except (OSError, ValueError):
+            path = (self._display_path or "").strip()
+            if not path or path == "view":
+                return None
+            return ("file", path)
 
     def get_selected_text(self) -> str:
         """Выделение TextArea или, если пусто, текст текущей страницы."""

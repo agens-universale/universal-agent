@@ -80,6 +80,34 @@ def test_is_sandbox_and_default_exec_timeout(loop_in_thread):
     assert backend.is_sandbox is True
     # Timeout comes from agent.exec_timeout_sec; backend does not hardcode one.
     assert backend.default_exec_timeout is None
+    assert backend.exec_output_capture_max_chars == 60_000
+
+
+def test_exec_bounds_large_stdout_to_capture_cap(loop_in_thread):
+    """D8: Harbor ExecResult on agent is capped; hit_capture_cap set."""
+    env = FakeEnv()
+    huge = "X" * 1000
+
+    async def big_exec(command, **kw):
+        env.calls.append(command)
+        return FakeExecResult(stdout=huge, return_code=0)
+
+    env.exec = big_exec
+    backend = HarborBackend(env, loop_in_thread)
+    backend.exec_output_capture_max_chars = 100
+    result = backend.exec("echo huge")
+    assert len(result.stdout) == 100
+    assert result.stdout_hit_capture_cap is True
+    assert result.stderr_hit_capture_cap is False
+    assert result.return_code == 0
+
+
+def test_exec_small_output_no_cap_hit(loop_in_thread):
+    env = FakeEnv()
+    backend = HarborBackend(env, loop_in_thread)
+    result = backend.exec("echo hi")
+    assert result.stdout_hit_capture_cap is False
+    assert result.stderr_hit_capture_cap is False
 
 
 def test_implements_full_fsbackend_protocol(loop_in_thread):

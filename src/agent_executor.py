@@ -46,6 +46,7 @@ from tools.connect_mcp.stream_client import _SESSION_MANAGER as _STREAM_SESSION_
 from message_policy.tool_usage_notice.state import persist_tool_usage_notice_state
 from utils.generate_message_id import generate_msg_id_sha256 as generate_message_id_func
 from utils.logging_module import human_console_enabled
+from config_modules.agent import merge_special_instructions_with_model_steering
 from utils.local_render_system_prompt import render_system_prompt
 from security.permission_store import PermissionStore
 
@@ -184,6 +185,10 @@ class AgentExecutor:
                         special_instructions = fd.read().strip() or None
                 except OSError:
                     special_instructions = None
+            special_instructions = merge_special_instructions_with_model_steering(
+                special_instructions,
+                config_dict=config_dict,
+            )
 
         state_data = {
             "limit_project_metadata": config_dict.get("limit_project_metadata", False),

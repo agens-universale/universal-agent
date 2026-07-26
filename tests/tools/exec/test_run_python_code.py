@@ -13,7 +13,7 @@ from tests.helpers.tool_ctx import with_local_ctx
 def test_run_python_success_non_zero_and_timeout():
     tool = with_local_ctx(RunPythonCode)
     ok = json.loads(tool(code="print('ok')"))
-    assert ok["ok"] is True and ok["stdout"] == "ok"
+    assert ok["ok"] is True and ok["stdout"].rstrip("\n") == "ok"
     bad = json.loads(tool(code="import sys; sys.exit(3)"))
     assert bad["ok"] is False and bad["return_code"] == 3
     timeout = json.loads(tool(code="import time; time.sleep(2)", timeout_seconds=1))
@@ -25,7 +25,9 @@ def test_run_python_validation_and_truncation():
     assert json.loads(tool(code=""))["error"]["field"] == "code"
     assert json.loads(tool(code="print(1)", max_output_chars=0))["error"]["field"] == "max_output_chars"
     trunc = json.loads(tool(code="print('A'*100)", max_output_chars=10))
-    assert trunc["truncated"] is True and len(trunc["stdout"]) == 10
+    assert trunc["truncated"] is True
+    assert trunc["stdout_kept_head_chars"] + trunc["stdout_kept_tail_chars"] == 10
+    assert "[omitted" in trunc["stdout"]
     bad_cwd = json.loads(tool(code="print(1)", cwd=""))
     assert bad_cwd["ok"] is False and bad_cwd["error"]["field"] == "cwd"
 

@@ -196,6 +196,7 @@ def flatten_app_config(app_cfg: AppConfig) -> Dict[str, Any]:
         "key_path": app_cfg.backend.key_path,
         "use_retry": app_cfg.backend.use_retry,
         "backend_request_timeout_sec": app_cfg.backend.request_timeout_sec,
+        "proxy": app_cfg.backend.proxy,
         "stream": app_cfg.backend.stream,  # legacy: канонический ключ — tui.stream
         "deprecated_keys_used": _deprecated_keys_used,
         "tui_stream": app_cfg.tui.stream,
@@ -290,7 +291,9 @@ def flatten_app_config(app_cfg: AppConfig) -> Dict[str, Any]:
         "tool_output_inline_max_chars": app_cfg.agent.tool_output_inline_max_chars,
         "stored_tool_outputs_max_entries": app_cfg.agent.stored_tool_outputs_max_entries,
         "exec_timeout_sec": app_cfg.agent.exec_timeout_sec,
+        "exec_output_capture_max_chars": app_cfg.agent.exec_output_capture_max_chars,
         "inject_tool_fields": dict(app_cfg.agent.inject_tool_fields),
+        "model_steering": app_cfg.agent.model_steering,
         "mcp-servers": {
             name: server.model_dump(by_alias=True) for name, server in app_cfg.mcp.servers.items()
         },

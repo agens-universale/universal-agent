@@ -67,16 +67,37 @@ def test_read_offset_limit_validation_and_clamp(tmp_path):
 
 def test_single_huge_line_char_truncated(tmp_path):
     p = tmp_path / "one_line.log"
-    p.write_text("x" * 50_000, encoding="utf-8")
+    oversized = DEFAULT_READ_FILE_CHAR_LIMIT + 50_000
+    p.write_text("x" * oversized, encoding="utf-8")
     res = json.loads(with_local_ctx(ReadFile)(path=str(p)))
     assert res["total_lines"] == 1
     assert res["truncated"] is False
-    assert res["total_chars"] == 50_000
+    assert res["total_chars"] == oversized
+    assert res["returned_chars"] == DEFAULT_READ_FILE_CHAR_LIMIT
     assert len(res["content"]) == DEFAULT_READ_FILE_CHAR_LIMIT
     assert res["content_truncated"] is True
     assert res["next_char_offset"] == DEFAULT_READ_FILE_CHAR_LIMIT
     assert res["char_offset"] == 0
     assert res["char_limit"] == DEFAULT_READ_FILE_CHAR_LIMIT
+    assert "returned 100000 of 150000" in res["hint"]
+    assert "50000 remain" in res["hint"]
+    assert f"char_offset={DEFAULT_READ_FILE_CHAR_LIMIT}" in res["hint"]
+
+
+def test_mid_size_file_fits_default_char_limit(tmp_path):
+    """Files in the old 10k–100k band must not be silently truncated."""
+    p = tmp_path / "mid.txt"
+    text = "y" * 50_000
+    p.write_text(text, encoding="utf-8")
+    res = json.loads(with_local_ctx(ReadFile)(path=str(p)))
+    assert res["ok"] is True
+    assert res["total_chars"] == 50_000
+    assert res["returned_chars"] == 50_000
+    assert res["content"] == text
+    assert res["content_truncated"] is False
+    assert res["next_char_offset"] is None
+    assert res["char_limit"] == DEFAULT_READ_FILE_CHAR_LIMIT
+    assert "hint" not in res
 
 
 def test_char_offset_pagination_within_line_range(tmp_path):
@@ -94,6 +115,10 @@ def test_char_offset_pagination_within_line_range(tmp_path):
     third = json.loads(with_local_ctx(ReadFile)(path=str(p), char_offset=20_000, char_limit=10_000))
     assert third["content"] == "a" * 5_000
     assert third["content_truncated"] is False
+
+
+def test_default_char_limit_constant():
+    assert DEFAULT_READ_FILE_CHAR_LIMIT == 100_000
 
 
 def test_char_limit_applies_after_line_selection(tmp_path):
