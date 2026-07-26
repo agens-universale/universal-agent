@@ -149,3 +149,85 @@ async def test_push_session_buffer_from_diff_screen(tmp_path):
         pilot.app._push_session_copy_buffer("фрагмент")
         await pilot.pause()
         assert store.writes == [("T1", {"copy_buffer": "фрагмент\n\nстарый"})]
+
+
+
+@pytest.mark.asyncio
+async def test_buffer_ctrl_a_selects_all(tmp_path):
+    """B11: Ctrl+A на экране буфера выделяет весь текст.
+
+    Штатный TextArea биндит ctrl+a → cursor_line_start, а select_all на f7,
+    который перехватывается app-уровнем (action_buffer priority=True).
+    Нужен явный ctrl+a → select_all в BufferTextArea.
+    """
+    from tui.app import TuiApp
+    from tui.screens.copy_buffer import CopyBufferScreen
+
+    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    async with app.run_test() as pilot:
+        store = _MockStore(existing_buffer="первая\nвторая\nтретья")
+        pilot.app.screen._store = store
+        pilot.app.screen._active_task_id = "T1"
+        pilot.app.action_buffer()
+        await pilot.pause()
+        assert isinstance(pilot.app.screen, CopyBufferScreen)
+        ta = pilot.app.screen.query_one("#buffer_text")
+        # До выделения — пустой selection
+        assert ta.selection is None or ta.selection.end == ta.selection.start
+        await pilot.press("ctrl+a")
+        await pilot.pause()
+        # После Ctrl+A — выделен весь текст
+        assert ta.selection is not None
+        assert ta.selection.start == (0, 0)
+        assert ta.selection.end[0] >= 2  # до последней строки
+
+
+@pytest.mark.asyncio
+async def test_save_strips_whitespace_only_to_empty(tmp_path):
+    """B11: при сохранении чистый whitespace (переносы/пробелы) сжимается до пустой.
+
+    Если в поле остались только переносы строк и пробелы — сохраняем пустую
+    строку (= очистили буфер), не пишем висячий whitespace.
+    """
+    from tui.app import TuiApp
+    from tui.screens.copy_buffer import CopyBufferScreen
+
+    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    async with app.run_test() as pilot:
+        store = _MockStore(existing_buffer="старый")
+        pilot.app.screen._store = store
+        pilot.app.screen._active_task_id = "T1"
+        pilot.app.action_buffer()
+        await pilot.pause()
+        screen = pilot.app.screen
+        assert isinstance(screen, CopyBufferScreen)
+        ta = screen.query_one("#buffer_text")
+        # Только переносы и пробелы
+        ta.text = "  \n\n   \n  \t \n"
+        screen.action_save_and_close()
+        await pilot.pause()
+        # Записали пустую строку (= очистили), а не висячий whitespace
+        assert store.writes == [("T1", {"copy_buffer": ""})]
+
+
+@pytest.mark.asyncio
+async def test_save_preserves_real_text_with_strip_edges(tmp_path):
+    """B11: реальный текст сохраняется, краевые пустые строки/хвосты пробелов стрипаются."""
+    from tui.app import TuiApp
+    from tui.screens.copy_buffer import CopyBufferScreen
+
+    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    async with app.run_test() as pilot:
+        store = _MockStore(existing_buffer="")
+        pilot.app.screen._store = store
+        pilot.app.screen._active_task_id = "T1"
+        pilot.app.action_buffer()
+        await pilot.pause()
+        screen = pilot.app.screen
+        assert isinstance(screen, CopyBufferScreen)
+        ta = screen.query_one("#buffer_text")
+        ta.text = "\n\n  реальный текст  \n\n  ещё строка  \n\n"
+        screen.action_save_and_close()
+        await pilot.pause()
+        saved = store.writes[0][1]["copy_buffer"]
+        assert saved == "реальный текст\n\n  ещё строка"

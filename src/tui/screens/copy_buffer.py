@@ -30,6 +30,9 @@ class BufferTextArea(TextArea):
     BINDINGS = [
         Binding("ctrl+v", "paste", "вставить", show=False),
         Binding("ctrl+shift+v", "paste", "вставить", show=False),
+        # B11: Ctrl+A — выделить всё. Штатный TextArea биндит ctrl+a → cursor_line_start,
+        # а select_all на f7 (который перехватывается app-уровнем action_buffer).
+        Binding("ctrl+a", "select_all", "выделить всё", show=False),
     ]
 
     def _paste_from_os_clipboard(self) -> bool:
@@ -111,11 +114,28 @@ class CopyBufferScreen(Screen):
     def on_mount(self) -> None:
         self.query_one("#buffer_text", BufferTextArea).focus()
 
+    @staticmethod
+    def _normalize_for_save(text: str) -> str:
+        """B11: strip краёв и сжать чистый whitespace до пустой.
+
+        Если остались только переносы строк и пробелы — пустая строка
+        (= очистили буфер). Иначе — strip краевых пустых строк (общий strip)
+        и хвостовых пробелов каждой строки; лидирующие отступы сохраняем.
+        """
+        # rstrip каждой строки убирает хвостовые пробелы/табы; общий strip
+        # убирает краевые пустые строки. Чистый whitespace → "".
+        lines = [ln.rstrip() for ln in text.splitlines()]
+        return "\n".join(lines).strip()
+
     def action_save_and_close(self) -> None:
-        """B7: сохранить если меняли (пусто = очистили); без изменений — no-write."""
+        """B7+B11: сохранить если меняли (пусто = очистили); без изменений — no-write.
+
+        Чистый whitespace (переносы/пробелы) сжимается до пустой строки.
+        """
         ta = self.query_one("#buffer_text", BufferTextArea)
-        current = ta.text
-        if current == self._initial_text:
+        current = self._normalize_for_save(ta.text)
+        normalized_initial = self._normalize_for_save(self._initial_text)
+        if current == normalized_initial:
             self.app.pop_screen()
             return
         if self._store is not None and self._active_task_id:
