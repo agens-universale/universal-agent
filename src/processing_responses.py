@@ -992,18 +992,21 @@ def run_agent(
                         )
                         if backend_mode == "chat_completions":
                             gate = FinishGateGuard(ctx=ctx, state=state, logger=run_logger)
-                            # Судья реально работает (LLM-вызов) только внутри этого блока →
-                            # TUI-индикатор «сверяюсь…» на время оценки (mark_finish_gate_checking
-                            # пишет runtime.finish_gate_checking в meta; снимаем строго в finally,
-                            # даже если evaluate_turn_finish бросит исключение).
-                            if mark_finish_gate_checking is not None:
+                            # Индикатор «сверяюсь…» — только когда судья реально пойдёт
+                            # (gate.enabled). Smart-skip / strict=off / не-chat → без LLM,
+                            # флаг не поднимаем (иначе ложный flash + лишний runtime-meta).
+                            # Снимаем строго в finally, даже если evaluate бросит.
+                            checking = (
+                                mark_finish_gate_checking is not None and gate.enabled
+                            )
+                            if checking:
                                 mark_finish_gate_checking(True)
                             try:
                                 decision = gate.evaluate_turn_finish(
                                     finish_handoff_arguments=finish_arguments,
                                 )
                             finally:
-                                if mark_finish_gate_checking is not None:
+                                if checking:
                                     mark_finish_gate_checking(False)
                             apply_finish_gate_to_turn_finish_output_in_state(
                                 state=state,

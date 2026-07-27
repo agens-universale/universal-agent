@@ -103,10 +103,10 @@ def set_tui_finalizing(thread_session, active: bool) -> None:
 def set_tui_finish_gate_checking(thread_session, active: bool) -> None:
     """TUI-индикатор: ``meta.runtime.finish_gate_checking`` (+ flush).
 
-    Ставится строго на время вызова ``FinishGateGuard.evaluate_turn_finish`` (turn_finish-
-    ветка run_agent) — судья реально работает (LLM-вызов) только внутри этого окна,
-    снимается строго в finally. ``active=False`` также снимает протухший флаг на старте
-    run'а. ``thread_session=None`` (CLI без треда) → no-op.
+    В turn_finish-ветке run_agent ставится только при ``FinishGateGuard.enabled``
+    (судья реально пойдёт в LLM); smart-skip / выключенный гейт флаг не трогают.
+    Снимается строго в finally. ``active=False`` также снимает протухший флаг на
+    старте run'а. ``thread_session=None`` (CLI без треда) → no-op.
     """
     if thread_session is None:
         return
