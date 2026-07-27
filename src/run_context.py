@@ -17,6 +17,7 @@ from execution_workspace import ExecutionWorkspace, build_execution_workspace
 from tools.backends.factory import resolve_os_backend
 from tools.backends.protocol import FsBackend
 from config_modules.env_vars import project_gc_dir as _resolve_project_gc_dir
+from trace_id import trace_id_from_config, trace_header_name
 
 
 @dataclass
@@ -50,6 +51,10 @@ class RunContext:
     tools_description: List[str]
     os_backend: FsBackend
     workspace: ExecutionWorkspace
+    # Внешний trace_id этого рана; "" = отсутствует. Производное чтение
+    # config_dict["trace_id"] — источник правды один, вычисление в одном месте
+    # (create_run_context), чтобы значения не разъехались.
+    trace_id: str = ""
     mcp_status: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     project_gc_dir: Path = field(default_factory=lambda: Path("."))
     environment: Optional[Any] = None
@@ -106,6 +111,21 @@ def create_run_context(
         },
     )
 
+    _trace_id = trace_id_from_config(config_dict)
+    if _trace_id:
+        # Одна явная запись «под какими именами этот ран шлёт trace». Заголовки
+        # нигде не логируются, а имя заголовка конфигурируемо, поэтому это
+        # единственное место, где аудит видит фактическую привязку.
+        run_logger.info(
+            "trace_binding",
+            extra={
+                "event": "trace_binding",
+                "trace_id": _trace_id,
+                "model_header": trace_header_name(config_dict, "x_trace_id"),
+                "mcp_header": trace_header_name(config_dict, "trace_id"),
+            },
+        )
+
     chat_completions_llm = chat_completions_llm_from_config_dict(config_dict)
     backend = resolve_os_backend(
         config_dict,
@@ -118,6 +138,7 @@ def create_run_context(
     ctx = RunContext(
         config_dict=config_dict,
         run_id=effective_run_id,
+        trace_id=_trace_id,
         auth_connector=auth_connector,
         logger=run_logger,
         logging_path=logging_path,
