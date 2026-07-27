@@ -150,14 +150,16 @@ class RunSkillScriptTool:
                 raise RuntimeError("skills_run_script requires a run context with os_backend")
             backend = self._ctx.os_backend
             python = "python3" if backend.is_sandbox else sys.executable
-            command = f"{shlex.quote(python)} {shlex.quote(resolved['path'])}"
+            run_argv = [python, resolved["path"]]
+            stdin: str | None = None
             if argv is not None:
-                command += " " + " ".join(shlex.quote(token) for token in shlex.split(argv))
+                run_argv += shlex.split(argv)
             elif args_data is not None:
-                payload = json.dumps(args_data, ensure_ascii=False)
-                command = f"printf '%s' {shlex.quote(payload)} | {command}"
-            exec_result = backend.exec(
-                command, timeout=exec_timeout_from_config_dict(self._config_dict)
+                stdin = json.dumps(args_data, ensure_ascii=False)
+            exec_result = backend.exec_argv(
+                run_argv,
+                stdin=stdin,
+                timeout=exec_timeout_from_config_dict(self._config_dict),
             )
             result = {
                 "stdout": exec_result.stdout,

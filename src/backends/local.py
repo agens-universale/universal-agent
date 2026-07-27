@@ -230,6 +230,25 @@ class LocalFsBackend(FsBackend):
             capture_max_chars=self.exec_output_capture_max_chars,
         )
 
+    def exec_argv(self, argv: list, *, stdin: Optional[str] = None,
+                  cwd: Optional[str] = None,
+                  timeout: Optional[int] = None,
+                  env: Optional[dict] = None) -> ExecResult:
+        # Shell-less on purpose: the base-class default builds a POSIX shell
+        # string, which breaks under Windows cmd.exe (no printf, single quotes
+        # not honored). An argv list + stdin goes through CreateProcess /
+        # execvp uniformly on every OS.
+        merged_env = {**os.environ, **{str(k): str(v) for k, v in env.items()}} if env else None
+        return _run_bounded_process(
+            [str(a) for a in argv],
+            shell=False,
+            cwd=cwd,
+            timeout=timeout,
+            env=merged_env,
+            stdin_text=stdin,
+            capture_max_chars=self.exec_output_capture_max_chars,
+        )
+
     def run_python(self, code: str, *, cwd: Optional[str] = None,
                    timeout: Optional[int] = None,
                    env: Optional[dict] = None) -> ExecResult:
