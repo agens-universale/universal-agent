@@ -47,6 +47,12 @@ agent:
   # max_tool_calls: 100           # макс. вызовов инструментов на один ран
   no_tool_call_max_count: 3
   strict_turn_finish_validation: true
+  # Имя HTTP-заголовка для внешнего trace_id (флаг gc-cli --trace-id или поле
+  # trace_id в теле вебхука). Не задано — заголовок к модели называется
+  # x_trace_id, заголовок к MCP-серверам — trace_id.
+  # Задайте X-Trace-Id, если между агентом и бэкендом стоит nginx: он по
+  # умолчанию выбрасывает заголовки с подчёркиванием (underscores_in_headers off).
+  # trace_id_header_name: X-Trace-Id
 
 # TUI: что рендерить во время стриминга (действует только при backend.stream: true;
 # на счётчик токенов и индикатор не влияет — только контент).
