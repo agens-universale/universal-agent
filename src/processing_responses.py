@@ -56,6 +56,7 @@ from utils.generate_message_id import generate_msg_id_sha256 as generate_message
 
 from states import State
 from usage.account import CATEGORY_MAIN as USAGE_CATEGORY_MAIN
+from usage.account import UsageAccount
 from usage.context import usage_scope
 from typing import List, Dict, Union, Tuple, Any, Callable, Optional
 from message_policy.no_tool_call_bounce import (
@@ -573,6 +574,7 @@ def process_tool_calls(
         try:
             # call_id для субагента: чтобы вложенные строки в TUI знали,
             # под какой корневой subagent_* они относятся.
+            state.tool_calls += 1
             tool_res_raw = apply_tool(
                 tool_name=tool_name,
                 arguments=tool_arguments,
@@ -776,6 +778,8 @@ def run_agent(
     cfg = getattr(ctx, "config_dict", {}) or {}
     console_human = human_console_enabled(cfg)
     max_tool_errors = cfg.get("no_tool_call_max_count", 0)
+    session_token_limit = cfg.get("session_token_limit")
+    max_tool_calls_limit = cfg.get("max_tool_calls")
     max_unknown_tool_repeats = int(cfg.get("max_unknown_tool_repeats", 5) or 5)
     state.last_unknown_tool_name = None
     state.unknown_tool_repeat_count = 0
@@ -865,6 +869,25 @@ def run_agent(
             if tool_error_cnt > max_tool_errors:
                 state.terminal_outcome = "tool_errors"
                 return f'Agent tools call errors.'
+
+            if max_tool_calls_limit is not None and state.tool_calls >= max_tool_calls_limit:
+                state.terminal_outcome = "tool_call_limit"
+                return (
+                    f"Agent executed {state.tool_calls} tool calls of "
+                    f"{max_tool_calls_limit} limit and doesn't finish his work."
+                )
+
+            if session_token_limit is not None:
+                _baseline = UsageAccount.from_meta(
+                    getattr(state, "run_start_usage_meta", None)
+                )
+                _spent = state.usage.delta_from(_baseline).totals()["total"]
+                if _spent >= session_token_limit:
+                    state.terminal_outcome = "token_limit"
+                    return (
+                        f"Agent spent {_spent} tokens of {session_token_limit} "
+                        f"session token limit and doesn't finish his work."
+                    )
 
             mode = check_mode(messages, run_logger)
             mode_for_step_count = mode

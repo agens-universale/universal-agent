@@ -96,13 +96,14 @@ class State:
         self.call_id = call_id
         self.max_steps = max_steps
         self.steps = 0
+        self.tool_calls = 0
         self.stop_requested = False
         self.discard_writes_after_stop = False  # TUI ставит True; пропускает persist
         self.user_intent_log: list[IntentRecord] = []
         self.current_user_intent: list[IntentRecord] = []
         self.user_turn_seq: int = 0
         self.finish_gate_rejection_count: int = 0
-        self.terminal_outcome: Optional[str] = None  # None | "step_limit" | "tool_errors"
+        self.terminal_outcome: Optional[str] = None  # None | "step_limit" | "tool_errors" | "token_limit" | "tool_call_limit"
         self.last_unknown_tool_name: Optional[str] = None
         self.unknown_tool_repeat_count: int = 0
         self.last_batch_unknown_tool_count: int = 0
