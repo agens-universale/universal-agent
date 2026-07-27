@@ -1,5 +1,6 @@
 import difflib
 import functools
+import hashlib
 import json
 from typing import Any, Dict, List, Tuple
 
@@ -120,6 +121,7 @@ class ApplyFileEdits(AbstractSimpleTool):
         diff: str | None = None,
         diff_truncated: bool = False,
         error: Dict[str, Any] | None = None,
+        sha256: str | None = None,
     ) -> str:
         return json.dumps(
             {
@@ -137,6 +139,7 @@ class ApplyFileEdits(AbstractSimpleTool):
                 "diff": diff,
                 "diff_truncated": diff_truncated,
                 "message": message,
+                "sha256": sha256,
                 "error": error,
             },
             ensure_ascii=False,
@@ -473,9 +476,13 @@ class ApplyFileEdits(AbstractSimpleTool):
                 error={"type": "write_failed", "message": str(e)},
             )
 
+        content_sha256 = hashlib.sha256(
+            current.encode("utf-8", errors="replace")
+        ).hexdigest()
         return _result(
             ok=True,
             applied=True,
+            sha256=content_sha256,
             edits_would_apply=edits_would_apply,
             total_would_replace=total_would_replace,
             edits_applied=edits_would_apply,

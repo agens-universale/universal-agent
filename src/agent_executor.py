@@ -221,6 +221,7 @@ class AgentExecutor:
             get_stored_tool_outputs_max_entries(config_dict)
         )
         state.backend_api_mode = backend_api_mode
+        state.on_messages_evicted = getattr(self._ctx, "on_messages_evicted", None)
         state.dialog_steps_offset = 0
         if thread_session is not None:
             meta = getattr(thread_session, "meta", None) or {}

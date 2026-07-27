@@ -242,7 +242,10 @@ class GcCliExternal(BaseAgent):
         Returns the number of steps written (0 if nothing was dumped).
         """
         try:
-            messages = list(getattr(state, "messages", None) or []) if state is not None else []
+            archived = list(getattr(self, "_evicted_messages", None) or [])
+            current = list(getattr(state, "messages", None) or []) if state is not None else []
+            # Full trajectory: compaction-evicted steps (via callback) + compacted tail.
+            messages = archived + current
             steps = _messages_to_steps(messages)
             if not steps:
                 return 0
@@ -281,10 +284,20 @@ class GcCliExternal(BaseAgent):
         instruction = self._nudge_instruction(instruction, container_skills)
 
         executor = None
+        self._evicted_messages: list = []
+
+        def _on_messages_evicted(dropped: list) -> None:
+            # Host-side archive for ATIF dump; core State does not retain these.
+            self._evicted_messages.extend(dropped)
 
         def _run_loop():
             nonlocal executor
-            ctx = create_run_context(config_dict, environment=environment, loop=loop)
+            ctx = create_run_context(
+                config_dict,
+                environment=environment,
+                loop=loop,
+                on_messages_evicted=_on_messages_evicted,
+            )
             executor = AgentExecutor(ctx)
             executor.run([instruction])
             return executor.get_state()

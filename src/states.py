@@ -89,6 +89,9 @@ class State:
         self.instruction_warnings: list[str] = []
         self.call_metadata = self.set_call_metadata()
         self.messages = []
+        # Optional sink for messages dropped by context compaction.
+        # Core does not retain them; harbor/other hosts may archive for trajectory.
+        self.on_messages_evicted: Optional[Any] = None
         self.backend_api_mode = "responses"
         self.previous_response_id = None
         self.last_backend_response_id = None

@@ -1,3 +1,4 @@
+import hashlib
 import json
 import functools
 import difflib
@@ -204,6 +205,7 @@ Update version string:
         error: Dict[str, Any] | None = None,
         suggestions: list[Dict[str, Any]] | None = None,
         suggestions_total: int = 0,
+        sha256: str | None = None,
     ) -> str:
         return json.dumps(
             {
@@ -221,6 +223,7 @@ Update version string:
                 "diff_truncated": diff_truncated,
                 "suggestions": suggestions or [],
                 "suggestions_total": suggestions_total,
+                "sha256": sha256,
                 "error": error,
                 "message": message,
             },
@@ -706,9 +709,13 @@ Update version string:
                 error={"type": "write_failed", "message": str(e)},
             )
 
+        content_sha256 = hashlib.sha256(
+            new_content.encode("utf-8", errors="replace")
+        ).hexdigest()
         return _result(
             ok=True,
             applied=True,
+            sha256=content_sha256,
             matched=True,
             replaced=replaced_count,
             match_count=match_count,

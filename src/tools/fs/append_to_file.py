@@ -80,6 +80,7 @@ Usage:
         separator: str,
         created: bool = False,
         bytes_appended: int = 0,
+        sha256: str | None = None,
         error: dict | None = None,
     ) -> str:
         return json.dumps(
@@ -89,6 +90,7 @@ Usage:
                 "path": tool_report_abspath(path, workspace=self._workspace),
                 "created": created,
                 "bytes_appended": bytes_appended,
+                "sha256": sha256,
                 "separator": separator,
                 "error": error,
             },
@@ -217,11 +219,18 @@ Usage:
                 error={"type": "append_failed", "message": str(e)},
             )
 
+        # Only the delta is in memory, so hash the file via the backend.
+        try:
+            content_sha256 = self._backend.sha256_bytes(path)
+        except Exception:
+            content_sha256 = None
+
         return self._result(
             ok=True,
             path=path,
             separator=separator,
             created=not exists,
             bytes_appended=appended,
+            sha256=content_sha256,
             error=None,
         )

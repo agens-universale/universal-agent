@@ -1,4 +1,5 @@
 import base64
+import hashlib
 import json
 import os
 
@@ -59,13 +60,14 @@ class SaveBase64File(AbstractSimpleTool):
             "- On decode_failed, check for non-ASCII characters or incorrect padding.\n"
         )
 
-    def _result(self, *, ok: bool, path: str, bytes_written: int = 0, error=None) -> str:
+    def _result(self, *, ok: bool, path: str, bytes_written: int = 0, sha256=None, error=None) -> str:
         return json.dumps(
             {
                 "tool": SaveBase64File.registered_tool_name(),
                 "ok": ok,
                 "path": tool_report_abspath(path, workspace=self._workspace),
                 "bytes_written": bytes_written,
+                "sha256": sha256,
                 "error": error,
             },
             ensure_ascii=False,
@@ -106,4 +108,9 @@ class SaveBase64File(AbstractSimpleTool):
         except Exception as e:
             return self._result(ok=False, path=path, error={"type": "write_failed", "message": str(e)})
 
-        return self._result(ok=True, path=path, bytes_written=len(raw))
+        return self._result(
+            ok=True,
+            path=path,
+            bytes_written=len(raw),
+            sha256=hashlib.sha256(raw).hexdigest(),
+        )

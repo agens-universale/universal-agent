@@ -443,4 +443,3 @@ Return format (JSON string):
             stdout_meta=stdout_meta,
             stderr_meta=stderr_meta,
         )
-
