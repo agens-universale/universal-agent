@@ -18,6 +18,10 @@ class AgentConfig(BaseModel):
     subagent_max_steps: int = 100
     client_name: str = "mini_cli_pub_agent_1"
     x_cl_id: str = "12345"
+    # Имя HTTP-заголовка для внешнего trace_id. None → дефолты по назначению:
+    # x_trace_id для бэкенда модели, trace_id для MCP. Сам trace_id схемным
+    # ключом НЕ является: это свойство вызова, а не конфигурации.
+    trace_id_header_name: str | None = None
     verbose: bool = True
     stop_tools: list[str] = Field(default_factory=list)
     # Список canonical id скиллов / паков, которые исключаются из SkillsRegistry
@@ -51,6 +55,22 @@ class AgentConfig(BaseModel):
         if value is not None and value < 1:
             raise ValueError("лимит должен быть None или целым >= 1")
         return value
+
+    @field_validator("trace_id_header_name", mode="before")
+    @classmethod
+    def normalize_trace_id_header_name(cls, value: Any) -> str | None:
+        if value is None:
+            return None
+        text = str(value).strip()
+        if not text:
+            return None
+        for ch in text:
+            if ch.isspace() or ord(ch) < 0x20 or ch == ":":
+                raise ValueError(
+                    "agent.trace_id_header_name: имя заголовка без пробелов, "
+                    "управляющих символов и ':'"
+                )
+        return text
 
     @field_validator("exec_timeout_sec", mode="before")
     @classmethod

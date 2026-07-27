@@ -269,6 +269,7 @@ def flatten_app_config(app_cfg: AppConfig) -> Dict[str, Any]:
         "subagent_max_steps": app_cfg.agent.subagent_max_steps,
         "client_name": app_cfg.agent.client_name,
         "x_cl_id": app_cfg.agent.x_cl_id,
+        "trace_id_header_name": app_cfg.agent.trace_id_header_name,
         "verbose": app_cfg.agent.verbose,
         "stop_tools": app_cfg.agent.stop_tools,
         "disable_skills": app_cfg.agent.disable_skills,
