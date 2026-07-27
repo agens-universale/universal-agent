@@ -132,7 +132,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         ensure_mcp_daemons(config_dict)
 
     app = _app_mod.TuiApp(threads_dir=threads_dir, system="cli", config=config_dict)
-    app._config_path = onb_write_path if onboarding_mode else resolve_config_path(args.config)
+    app.set_config_path(onb_write_path if onboarding_mode else resolve_config_path(args.config))
     app._config_project_local = _project_local_config_path()  # str | None
     app._onboarding_mode = onboarding_mode
     app._onboarding_config_path = onb_write_path

@@ -142,7 +142,7 @@ class OnboardingScreen(Screen):
             self.call_after_refresh(ed.focus_input)
         elif self._step == 1:
             from tui.editors.auth import AuthEditor
-            chosen = self._values.get("Authorization")   # выбор в этой сессии (напр. "" — без авторизации)
+            chosen = self._values.get("Authorization")   # выбор в текущей сессии (напр. "" — без авторизации)
             if chosen is not None:
                 cur_hdr = chosen
             elif self._review_all:

@@ -20,6 +20,7 @@ from run_summary_coordinator import (
     RunSummaryCoordinator,
     reset_stale_summarizing_flag,
     set_tui_finalizing,
+    set_tui_finish_gate_checking,
 )
 from summarize.config import (
     parse_summary_trigger_chars,
@@ -139,6 +140,8 @@ class AgentExecutor:
         reset_stale_summarizing_flag(thread_session)
         # Снять протухший флаг финализации от прерванного прошлого run'а.
         set_tui_finalizing(thread_session, False)
+        # Снять протухший флаг «судья работает» от прерванного прошлого run'а.
+        set_tui_finish_gate_checking(thread_session, False)
 
         # Снимок MCP «сервер→тулы» для TUI-экрана /mcp (необязателен — не валим run).
         if thread_id is not None and config_dict.get("mcp-servers"):
@@ -439,6 +442,9 @@ class AgentExecutor:
                 ),
                 mark_finalizing=(
                     lambda active: set_tui_finalizing(thread_session, active)
+                ),
+                mark_finish_gate_checking=(
+                    lambda active: set_tui_finish_gate_checking(thread_session, active)
                 ),
             )
             self.last_terminal_outcome = getattr(state, "terminal_outcome", None)

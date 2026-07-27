@@ -10,6 +10,7 @@ import pytest
 pytest.importorskip("textual")
 
 from updater.check import CheckResult
+from tests.tui.conftest import open_settings_section, settings_section_index
 
 
 def _screen(tmp_path):
@@ -31,7 +32,8 @@ async def test_hub_glyph_current_from_startup_check(tmp_path):
         scr = _screen(tmp_path)
         app.push_screen(scr)
         await pilot.pause()
-        assert scr._menu_glyph(4) == ("✓", __import__("tui.palette", fromlist=["OK"]).OK)
+        assert scr._menu_glyph(settings_section_index("Обновление")) == (
+            "✓", __import__("tui.palette", fromlist=["OK"]).OK)
 
 
 @pytest.mark.asyncio
@@ -45,7 +47,7 @@ async def test_hub_glyph_wave_while_startup_check_in_flight(tmp_path):
         scr = _screen(tmp_path)
         app.push_screen(scr)
         await pilot.pause()
-        glyph, _ = scr._menu_glyph(4)
+        glyph, _ = scr._menu_glyph(settings_section_index("Обновление"))
         assert glyph == "…"
 
 
@@ -63,8 +65,7 @@ async def test_section_reuses_startup_verdict_without_network(tmp_path, monkeypa
         scr = _screen(tmp_path)
         app.push_screen(scr)
         await pilot.pause()
-        scr._menu_idx = 4
-        scr._open_section(4)
+        open_settings_section(scr, "Обновление")
         await pilot.pause(); await pilot.pause()
         assert calls == []                                   # сеть не трогали — вердикт уже есть
         assert "установлена последняя версия" in str(scr._checked_line_text())

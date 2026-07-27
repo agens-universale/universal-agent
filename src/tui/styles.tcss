@@ -236,7 +236,7 @@ ToolCallRow.tool-group-start { margin-top: 1; }
 
 /* Toggle-подвал палитры (/gate, /answers — спека 2026-07-16 §4): докнут вне скролла. */
 .palette-footer     { dock: bottom; height: auto; }
-.palette-separator  { color: $deep-dim; padding: 0 1; height: 1; margin: 0; }
+.palette-separator, .palette-group-sep { color: $deep-dim; padding: 0 1; height: 1; margin: 0; }
 
 /* HelpScreen: блоки с разделителями; колонки «команда | пояснение» рядом */
 .help-section {
@@ -279,6 +279,19 @@ FileViewerScreen #root { height: 1fr; }
     color: $ink;
 }
 #file-view-body:focus { border: none; }
+
+/* CopyBufferScreen: TextArea на весь экран — шапка+футер как у ViewerScreen,
+ * рамка — тихая палитровая (не дефолт Textual), акцент при фокусе. */
+CopyBufferScreen #root { height: 1fr; }
+#buffer_text {
+    height: 1fr;
+    width: 1fr;
+    border: solid $deep-dim;
+    padding: 0 1;
+    background: $bg;
+    color: $ink;
+}
+#buffer_text:focus { border: solid $accent; }
 
 /* Строки списков (TasksScreen, SkillsScreen) */
 .list-row      { color: $ink; padding: 0 1; }
@@ -429,6 +442,8 @@ TextArea.ask-human-mode { border: solid $run-color; }
 .set-glyph { width: 3; height: auto; text-align: right; }
 .set-row { height: auto; padding: 0 1; }
 .set-row.selected { background: $focus-bg; }   /* контраст как у палитры/трейса */
+/* Разделитель групп секции «Режимы работы» (ревизия 7) — тот же приём, что .palette-group-sep. */
+.set-group-sep { color: $deep-dim; padding: 0 1; height: 1; margin: 0; }
 .set-hint { color: $deep-dim; padding: 0 1; margin-top: 1; }   /* воздух перед контекст-подсказкой */
 .set-info { height: auto; padding: 0 1; }   /* инфо-строки (Версия/Источник) — тот же отступ */
 /* Подписи редакторов (Модель/Подключение) несут .onb-hint/.onb-warn из онбординга

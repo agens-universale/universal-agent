@@ -1,6 +1,7 @@
 """TuiApp — Textual application."""
 from __future__ import annotations
 
+import os
 import uuid
 from pathlib import Path
 from typing import List, Optional
@@ -12,6 +13,7 @@ from textual.screen import Screen
 from runtime_notices import (
     collect_runtime_notices,
     collect_unread_runtime_notices,
+    push_runtime_notice,
     register_runtime_notices_listener,
 )
 from startup_notices import Notice, collect_startup_notices
@@ -128,6 +130,10 @@ class TuiApp(App):
         self._threads_dir = threads_dir
         self._system = system
         self._config = config or {}
+        # Сессионные переопределения конфига (спека 2026-07-20-session-scoped-settings):
+        # база — self._config (файл), это — то, что переключено в текущем треде.
+        # Хранятся по dotted-именам; накладываются в effective_config().
+        self._session_overrides: dict = {}
         self._executor_factory = None  # callable returning an executor; for tests
         self._stream_sink = StreamSink()
         self._subagent_progress_sink = None  # QueueSubagentProgressSink; set in executor build
@@ -142,6 +148,7 @@ class TuiApp(App):
         self.last_stop_requested: bool = False   # юзер /stop по живому прогону → терминал «stopped»
         self._onboarding_mode = None          # None | "auto" | "review"; ставит tui/__init__.py
         self._config_path = None              # путь к конфигу на диске; задаётся снаружи после __init__
+        self._config_mtime = None             # снимок mtime config.yml на момент последнего чтения базы
         self._onboarding_config_path = None   # куда писать конфиг (user_config_path)
         self._upgrade_info = None             # upgrade_gate.UpgradeInfo | None; ставит tui/__init__.py
         self._update_available = False        # async авто-чек нашёл новую версию (brand-строка + /notices)
@@ -268,6 +275,19 @@ class TuiApp(App):
             config_path=self._config_path,
         ))
 
+    def set_config_path(self, path: Optional[str]) -> None:
+        """Единая точка присвоения `_config_path`: путь + снимок его mtime одним
+        движением. Вызывать ровно тогда, когда self._config уже фактически
+        соответствует файлу по этому пути (main() — конфиг только что загружен
+        из него; финал онбординга — следом сразу идёт reload_config()).
+
+        Без немедленного снимка первая же проверка reload_config_if_changed()
+        в новом окне видит файл как «изменившийся» (снимка ещё нет) и зря
+        перечитывает конфиг и инвалидирует раннер — хотя окно только что само
+        прочитало этот же файл."""
+        self._config_path = path
+        self._config_mtime = self._config_file_mtime()
+
     def reload_config(self) -> None:
         """Hot-apply (спека B, B3): перечитать конфиг с диска и применить к app.
 
@@ -286,19 +306,167 @@ class TuiApp(App):
         carry_over_runtime_fields(self._config or {}, cfg)
         self._config = cfg
         self._threads_dir = resolve_threads_dir(cfg)
-        runner = self.active_runner
-        if runner is None:
+        # Снимок обновлён ЗДЕСЬ же: собственное сохранение (reload_config уже
+        # перечитал файл) не должно выглядеть «изменившимся» для следующей
+        # проверки reload_config_if_changed и триггерить повторное чтение.
+        self._config_mtime = self._config_file_mtime()
+        self.invalidate_runner()
+
+    def _config_file_mtime(self) -> Optional[float]:
+        """mtime текущего файла конфига или None (путь не задан / файл недоступен)."""
+        path = self._config_path
+        if not path:
+            return None
+        try:
+            return os.path.getmtime(path)
+        except OSError:
+            return None
+
+    def reload_config_if_changed(self) -> None:
+        """Гейт свежести окна: перечитать базу (reload_config), только если сам
+        файл `self._config_path` реально изменился с последнего известного снимка
+        mtime — другое окно могло сохранить своё умолчание, пока это окно живёт
+        на конфиге, прочитанном при старте.
+
+        Зовётся ЯВНО и только на пути открытия Settings (main._cmd_settings при
+        открытии экрана, settings._sync_config_from_app при входе в секцию) —
+        там, где редактируется глобальный дефолт; больше ниоткуда
+        (дизайн 2026-07-21 §4). Поток вызова — только UI, поэтому замок не нужен.
+
+        Граница: следим ровно за одним файлом. Оверлеи, которые подмешивает
+        load_config (managed `~/.gc/config.local.yml`, project-local
+        `.gc/config.yml`), не отслеживаются — их правку другим окном гейт не
+        заметит.
+
+        Файл не менялся — не делаем НИЧЕГО: ни чтения, ни invalidate_runner.
+
+        Битый/пропавший файл (юзер сохранил config.yml в промежуточном
+        состоянии) не должен ронять окно — остаёмся на прежней базе, а причину
+        кладём в runtime-уведомления (/notices)."""
+        mtime = self._config_file_mtime()
+        if mtime is None or mtime == self._config_mtime:
             return
-        if runner.is_running():
+        try:
+            self.reload_config()
+        except Exception as exc:
+            push_runtime_notice(Notice(
+                "warning", "config_reload_failed",
+                f"config.yml не перечитан, окно осталось на прежней базе: {exc}",
+                ("config.yml",),
+            ))
+
+    def screen_config(self) -> dict:
+        """Единая точка доступа к базе для ОТКРЫТИЯ экранов (/config, /mcp, /diff,
+        /skills, /settings — и вход в секцию /settings): отдаёт актуальную базу
+        БЕЗ автоперечитки. Свежесть config.yml нужна только там, где он
+        редактируется (Settings), и вызывается ЯВНО на пути его открытия
+        (main._cmd_settings, settings._sync_config_from_app) — иначе два окна
+        правили бы файл вслепую (дизайн 2026-07-21 §4).
+
+        НЕ для рендера — effective_config() (база + сессионные переопределения)
+        зовётся на каждый кадр; здесь — только выдача базы при открытии экрана."""
+        return self._config or {}
+
+    def effective_config(self) -> dict:
+        """Конфиг, который видят и UI, и агент: база + сессионные переопределения.
+
+        Единая точка чтения: витрины (палитра, секция настроек) и сборка
+        executor обязаны брать конфиг отсюда, а не из `self._config` — иначе
+        переключённое в сессии значение не доедет."""
+        from tui.session_settings import apply_overrides
+        cfg = dict(self._config or {})
+        apply_overrides(cfg, self._session_overrides)
+        return cfg
+
+    def set_session_override(self, dotted: str, value) -> None:
+        """Переопределить ключ в текущей сессии (в файл конфига НЕ пишет)."""
+        self._session_overrides[dotted] = value
+
+    def apply_session_override(self, dotted: str, value) -> None:
+        """Переопределить ключ и сохранить набор в метаданные треда — атомарно.
+
+        Не записалось (каталог тредов недоступен, диск полон, отвалившийся сетевой
+        путь) — откатываем: вызывающий показывает «✗ не сохранено» и оставляет на
+        экране прежнее значение, поэтому effective_config() обязан отдавать ровно
+        его, иначе следующий ход агента пойдёт в необъявленном пользователю режиме."""
+        prev = dict(self._session_overrides)
+        self.set_session_override(dotted, value)
+        try:
+            self.persist_session_overrides()
+        except OSError:
+            self._session_overrides = prev
+            raise
+
+    def apply_session_overrides(self, overrides: dict) -> None:
+        """Переопределить НЕСКОЛЬКО ключей разом и сохранить в метаданные треда —
+        атомарно (для пары /rigor). Не записалось — откатываем ВЕСЬ набор к
+        прежнему, как одиночный apply_session_override: объявленное пользователю и
+        то, с чем пойдёт следующий ход, обязаны совпасть."""
+        prev = dict(self._session_overrides)
+        self._session_overrides.update(overrides or {})
+        try:
+            self.persist_session_overrides()
+        except OSError:
+            self._session_overrides = prev
+            raise
+
+    def clear_session_overrides(self, keys) -> None:
+        """Снять НЕСКОЛЬКО ключей сессии разом — generic primitive для отката
+        целой группы оверрайдов (парой и больше) к глобальному дефолту.
+        Нечего снимать — тихий no-op без persist. Ошибка записи — откат, как в
+        apply_session_overrides."""
+        prev = dict(self._session_overrides)
+        for k in keys:
+            self._session_overrides.pop(k, None)
+        if self._session_overrides == prev:
+            return
+        try:
+            self.persist_session_overrides()
+        except OSError:
+            self._session_overrides = prev
+            raise
+
+    def load_session_overrides(self, overrides: dict) -> bool:
+        """Заменить набор переопределений целиком — при открытии треда.
+        Пустой набор возвращает сессию к умолчаниям конфига.
+
+        Возвращает True, если набор реально изменился: пересборка executor стоит
+        MCP-дискавери в worker-потоке (пользователь ждёт её до начала хода), и
+        платить за неё, когда у треда те же значения, незачем."""
+        new = dict(overrides or {})
+        changed = new != self._session_overrides
+        self._session_overrides = new
+        return changed
+
+    def persist_session_overrides(self) -> None:
+        """Сохранить переопределения в метаданные текущего треда (meta.tui).
+
+        Тред может быть ещё не создан (пустая сессия) — тогда тихо выходим:
+        значения живут в памяти и запишутся при следующем персисте, когда тред
+        появится. Ошибки записи не гасим — вызывающий показывает флеш."""
+        task_id = getattr(self.tui_state, "active_task_id", None)
+        if not task_id or not self._threads_dir:
+            return
+        from tui.services.stores.file_store import FileTaskStore
+        from tui.session_settings import to_meta_patch
+        store = FileTaskStore(threads_dir=self._threads_dir, system=self._system)
+        store.update_tui_meta(task_id, to_meta_patch(self._session_overrides))
+
+    def invalidate_runner(self) -> None:
+        """Конфиг сессии изменился — следующий run должен собраться заново.
+        Живой run не трогаем: помечаем stale, пересборка после завершения.
+        Единая точка сброса раннера: сюда же делегирует reload_config."""
+        runner = self.active_runner
+        if runner is not None and runner.is_running():
             self._runner_stale = True
-        else:
-            self.active_runner = None
-            self._runner_stale = False
+            return
+        self.active_runner = None
+        self._runner_stale = False
 
     def _finish_onboarding(self) -> None:
         """Финал онбординга (auto и review одинаково): reload_config + переход
         на главный экран — «завершил настройку → стартует агент»."""
-        self._config_path = self._onboarding_config_path
+        self.set_config_path(self._onboarding_config_path)
         self.reload_config()
         self._onboarding_mode = None
         # OnboardingScreen — базовый экран (get_default_screen), у него нет result-callback,
@@ -363,7 +531,7 @@ class TuiApp(App):
         from config import build_auth_connector
         from run_context import create_run_context
         from tui.services.mcp_progress import McpProgress
-        cfg = dict(self._config) if self._config else {}
+        cfg = self.effective_config()
         cfg["console_trace"] = False
         from tui.services.prompt_assets import tui_special_instructions_path
         cfg["chat_completions_special_instructions_path"] = tui_special_instructions_path()

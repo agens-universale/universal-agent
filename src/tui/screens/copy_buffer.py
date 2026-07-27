@@ -14,9 +14,9 @@ from typing import Optional
 from textual import events
 from textual.app import ComposeResult
 from textual.binding import Binding
-from textual.containers import Vertical
+from textual.containers import Horizontal, Vertical
 from textual.screen import Screen
-from textual.widgets import TextArea
+from textual.widgets import Static, TextArea
 
 from tui.services.copy_buffer import COPY_BUFFER_MAX, clamp_copy_buffer
 
@@ -102,14 +102,16 @@ class CopyBufferScreen(Screen):
 
     def compose(self) -> ComposeResult:
         self._initial_text = self._load_existing()
-        with Vertical():
+        with Vertical(id="root"):
+            with Horizontal(id="header"):
+                yield Static("Буфер сессии", id="header-left", markup=False)
             yield BufferTextArea(
                 self._initial_text,
                 id="buffer_text",
                 show_line_numbers=False,
                 soft_wrap=True,
             )
-            yield _footer_static(self._footer_hint)
+            yield Static(self._footer_hint, id="footer", markup=False)
 
     def on_mount(self) -> None:
         self.query_one("#buffer_text", BufferTextArea).focus()
@@ -147,10 +149,3 @@ class CopyBufferScreen(Screen):
             except Exception:
                 pass  # best-effort: не роняем закрытие экрана
         self.app.pop_screen()
-
-
-def _footer_static(hint: str):
-    """Нижняя подсказка — Static, без тиков/анимаций (B6)."""
-    from textual.widgets import Static
-
-    return Static(hint, id="buffer_footer", markup=False)

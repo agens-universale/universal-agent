@@ -10,7 +10,7 @@ from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.css.query import NoMatches
 from textual.screen import Screen
-from textual.widgets import Input, Static
+from textual.widgets import Input, Rule, Static
 from rich.text import Text
 
 from tui.palette import ACCENT, DEEP_DIM, DIM, ERR, INK, OK, WARN
@@ -197,8 +197,11 @@ class SettingsScreen(Screen):
             else:
                 v.append("нет подключённых", style=DIM)
         elif i == _MODES:
-            from tui.toggles import TOGGLES, toggle_state
-            pairs = [f"{spec.label}: {toggle_state(self.app, name)}" for name, spec in TOGGLES.items()]
+            from tui.toggles import TOGGLES, toggle_state_base
+            # Превью меню — детальные пары (preset-тоггл rigor показывается витриной
+            # в самой секции, не дублируется в одну строку меню).
+            pairs = [f"{spec.label}: {toggle_state_base(self.app, name)}"
+                     for name, spec in TOGGLES.items() if not spec.preset_keys]
             v.append(fit_mode_pairs(pairs, self._modes_preview_width()), style=DIM)
         else:
             v.append(self._version_text().split("·", 1)[-1].strip(), style=DIM)
@@ -364,6 +367,7 @@ class SettingsScreen(Screen):
             self._update_dirty()
             if self._view == _MODES:
                 self.call_after_refresh(self._refresh_modes_hint)
+                self.call_after_refresh(self._refresh_modes_rows)
 
     # --- dirty-маркер заголовка (спека v2 §3.1, Task 7) ---
     def _update_dirty(self) -> None:
@@ -721,49 +725,149 @@ class SettingsScreen(Screen):
             self._mount_update_section(frame)
 
     # --- секция «Режимы работы» (дизайн 2026-07-18-settings-work-modes-design §3-4) ---
-    def _modes_columns(self) -> tuple[int, int]:
-        """(label_w, track_w) — общие колонки строк подэкрана: `label_w` — ширина
-        самого длинного `ToggleSpec.label` + 3 (как имя-колонка палитры, канон §4)
-        + 2 на курсор `▸ `/`  ` (конвенция меню/«Обновления» — курсор перед label,
-        колонки трека остаются общими для всех строк); `track_w` — ширина самого
-        широкого трека (`render_track`) среди TOGGLES — короткие треки внутри поля
-        прижимаются вправо (канон §4)."""
-        from tui.toggles import TOGGLES, render_track
-        specs = list(TOGGLES.values())
-        label_w = max(len(spec.label) for spec in specs) + 3 + 2
-        track_w = max(len(render_track(spec, spec.names[0]).plain) for spec in specs)
-        return label_w, track_w
+    def _modes_is_child(self, name: str) -> bool:
+        """Ребёнок пресета (`spec.dotted` ∈ чьего-то `preset_keys`) — родовой
+        сигнал ревизии 7 (флэт: иерархия только цветом, без маркера/отступа —
+        `_modes_tree_glyph` упразднён). Мирроринг
+        `command_palette.py::_owning_preset` (тот же приём, без общего
+        модуля — см. `_modes_columns`/`command_palette.py::_toggle_columns`)."""
+        from tui.toggles import TOGGLES
+        spec = TOGGLES[name]
+        if spec.preset_keys:
+            return False
+        return any(spec.dotted in pspec.preset_keys
+                   for pspec in TOGGLES.values() if pspec.preset_keys)
+
+    def _modes_columns(self) -> tuple[int, int, int, int]:
+        """(label_w, base_w, extra_w, value_w) — общие колонки строк секции
+        (выравнивание ревизия 5, спека §4.2/§6: тот же контракт и тот же
+        split базы/резерва, что у палитры — `command_palette.py::_toggle_columns`).
+        label_w — макс. ширина головы строки: «name · label» и у пресета, и у
+        ребёнка (ревизия 7 — flat, маркера/отступа нет, оба head в одном
+        формате) / голый `spec.label` у прочих (standalone, не пресет и не
+        чей-либо ребёнок) + 3 + 2 на курсор; base_w — макс. ширина БАЗОВОГО
+        трека (2*n-1 ячеек, без 4-й позиции); extra_w — макс. ширина custom-
+        резерва (3 ячейки у preset-тоггла — 4-я позиция зарезервирована в
+        Settings всегда, спека §4.2; 0 у single-key тогглов — у них 4-й
+        позиции нет вовсе); value_w (ревизия 6 п.3) — фикс-ширина колонки
+        подписи значения: макс. длина имени значения по ВСЕМ тогглам секции,
+        ПЛЮС `PRESET_CUSTOM` — пресет-строка может показать «custom», хотя
+        оно не входит в `spec.names` ни одного тоггла. Точный контракт брал
+        бы max только по строкам, где custom реально достижим (preset-
+        тогглы); здесь — упрощённо max по ВСЕМ именам+custom сразу (custom
+        никогда не оказывается ДЛИННЕЕ реальных имён значений — упрощение не
+        сужает колонку ни для одной строки, только потенциально резервирует
+        на символ-два больше, чем строго необходимо, зато без разбора
+        preset/не-preset)."""
+        from tui.toggles import PRESET_CUSTOM, TOGGLES
+        widths = []
+        for name, spec in TOGGLES.items():
+            if spec.preset_keys or self._modes_is_child(name):
+                widths.append(len(f"{name} · {spec.label}"))
+            else:
+                widths.append(len(spec.label))
+        label_w = max(widths) + 3 + 2
+        base_w = 0
+        extra_w = 0
+        value_names = [PRESET_CUSTOM]
+        for spec in TOGGLES.values():
+            base_w = max(base_w, 2 * len(spec.values) - 1)
+            if spec.preset_keys:
+                extra_w = max(extra_w, 3)
+            value_names.extend(spec.names)
+        value_w = max(len(v) for v in value_names)
+        return label_w, base_w, extra_w, value_w
+
+    def _modes_row_width(self) -> int:
+        """Ширина строки тоггла внутри рамки (padding 0 1 — минус 2), тот же приём,
+        что и `_modes_hint_width`: при монтировании региона ещё нет (0 → хвост
+        оверрайда попадает в текст целиком), carry-fix `_refresh_modes_rows`
+        досчитывает all-or-nothing усечение после layout-прохода. Последний матч
+        по классу — свежесмонтированная строка (на случай транзиентного двойного
+        комплекта, как в `_refresh_menu_rows`)."""
+        widgets = list(self.query(".set-row"))
+        if not widgets:
+            return 0
+        return max(0, widgets[-1].region.width - 2)
 
     def _mode_row_text(self, name: str, selected: bool) -> Text:
-        from tui.toggles import TOGGLES, render_track, toggle_state
+        from tui.toggles import (
+            TOGGLES, padded_track, toggle_state, toggle_state_base, PRESET_CUSTOM,
+        )
         spec = TOGGLES[name]
-        current = toggle_state(self.app, name)
-        label_w, track_w = self._modes_columns()
-        track = render_track(spec, current)
+        current = toggle_state_base(self.app, name)   # секция правит глобал → трек = глобал
+        label_w, base_w, extra_w, value_w = self._modes_columns()
+        is_child = self._modes_is_child(name)
+        if spec.preset_keys:
+            head = f"{name} · {spec.label}"
+            extra = True if current == PRESET_CUSTOM else False
+        elif is_child:
+            # Голова ребёнка несёт СВОЁ имя команды по образцу родителя
+            # («gate · <label>»), не голый label.
+            head = f"{name} · {spec.label}"
+            extra = None
+        else:
+            head = spec.label
+            extra = None
+        track = padded_track(spec, current, extra_lit=extra, base_w=base_w, extra_w=extra_w)
         t = Text()
         t.append("▸ " if selected else "  ", style=ACCENT)   # курсор — конвенция меню/«Обновления»
-        t.append(spec.label.ljust(label_w - 2), style=INK)
-        t.append(" " * (track_w - len(track.plain)))   # трек прижат вправо в общем поле
+        # Ревизия 7 (спека §4.2): пресет — head целиком bold INK (без слеша);
+        # ребёнок — flat, БЕЗ маркера и БЕЗ отступа (тот же левый край, что и
+        # родитель) — имя+описание целиком DIM, иерархия только цветом.
+        if spec.preset_keys:
+            t.append(head.ljust(label_w - 2), style=f"bold {INK}")
+        elif is_child:
+            t.append(head.ljust(label_w - 2), style=DIM)
+        else:
+            t.append(head.ljust(label_w - 2), style=INK)
+        # Выравнивание ревизия 5 (спека §6): базовые треки — по ЛЕВОМУ краю
+        # общего поля (тройки друг под другом), custom-резерв правее них;
+        # паддинг у `padded_track` целиком справа — прежний left-pad перед
+        # треком (право-прижатое поле) убран.
         t.append_text(track)
         t.append("  ")
-        t.append(current, style=INK)
+        # Ревизия 6 п.3: фикс-ширина колонки подписи значения (`value_w`) —
+        # хвост «в текущей сессии» ниже стартует в одной колонке у всех строк
+        # секции, независимо от длины САМОГО значения этой строки. Ревизия 7:
+        # подпись значения ребёнка — тоже DIM (трек между head и подписью —
+        # семантические цвета, не задет), мирроринг
+        # `command_palette.py::_format_toggle_row`.
+        t.append(current.ljust(value_w), style=DIM if is_child else INK)
+        # §6.2 (ревизия 2026-07-21 вечер): сессионный оверрайд — хвостом В ЭТОЙ ЖЕ
+        # строке, не отдельной (живая примерка: отдельная строка не читалась —
+        # непонятно, к какому тогглу относится). Слова «глобально» нет: значение
+        # выше — уже глобал (секция его редактор). All-or-nothing по ширине (тот
+        # же канон, что и scope-хвост палитры §6.1): не влезло — хвост уходит
+        # целиком, ядро строки (курсор+label+трек+значение) видимо всегда.
+        # На пресете effective = резолв сессионной пары (low/medium/high/custom).
+        effective = toggle_state(self.app, name)
+        if effective != current:
+            tail = f"   · в текущей сессии: {effective}"
+            width = self._modes_row_width()
+            if width <= 0 or len(t.plain) + len(tail) <= width:
+                t.append(tail, style=DEEP_DIM)
         return t
 
     def _mount_modes_section(self, frame: Vertical) -> None:
         from tui.toggles import TOGGLES
         names = list(TOGGLES.keys())
-        if self._modes_idx >= len(names):
-            self._modes_idx = 0
+        self._modes_idx = min(self._modes_idx, len(names) - 1)
         for i, name in enumerate(names):
             selected = i == self._modes_idx
+            # Разделитель групп (ревизия 7, спека §4.2): родовой по
+            # `preset_keys`, ОБЩИЙ приём с палитрой
+            # (`command_palette.py::_group_sep_count`/`_build_footer`) — черта
+            # перед КАЖДЫМ preset-родителем, который не первая строка секции.
+            # Сегодня в TOGGLES одна preset-группа (`rigor`) → не рисуется.
+            if i > 0 and TOGGLES[name].preset_keys:
+                frame.mount(Rule(classes="set-group-sep"))
             # set-spaced — воздух между строками, тот же класс/паттерн, что и в
             # секции «Обновление» (margin-bottom: 1 на каждой строке).
             cls = "set-row set-dyn set-spaced" + (" selected" if selected else "")
             frame.mount(Static(self._mode_row_text(name, selected), classes=cls))
         # Подсказка выделенного тоггла — ВНУТРИ рамки (конвенция «Обновления»:
         # пояснительная строка в карточке под строками-опциями, класс set-hint).
-        # Без id: frame.remove() старых детей отложенный (не синхронный) — id тут
-        # же коллизировал бы с ещё не отсоединённым предыдущим Static (DuplicateIds).
         frame.mount(Static(self._modes_hint_text(), classes="set-hint set-dyn set-modes-hint"))
 
     def _modes_hint_width(self) -> int:
@@ -778,18 +882,26 @@ class SettingsScreen(Screen):
         return max(0, widgets[-1].region.width - 2)
 
     def _modes_hint_text(self) -> str:
-        """Подсказка выделенного тоггла внутри рамки (канон §6, без клавишной части —
-        клавиши показывает статичный футер вне рамки): значение + подсказка
-        ПРИМЕНЁННОГО состояния, приоритетно усечённые `_fit_value_hint`."""
-        from tui.toggles import _fit_value_hint, TOGGLES, toggle_state
+        """Подсказка выделенного тоггла внутри рамки (канон §6, без клавиш): значение
+        + подсказка ГЛОБАЛЬНОГО состояния. Для строки-пресета в состоянии custom —
+        динамический custom-хинт (спека §5)."""
+        from tui.toggles import (
+            _fit_value_hint, TOGGLES, toggle_state_base, preset_custom_hint, PRESET_CUSTOM,
+        )
         names = list(TOGGLES.keys())
         if not names:
             return ""
-        name = names[self._modes_idx] if self._modes_idx < len(names) else names[0]
+        name = names[self._modes_idx]
         spec = TOGGLES[name]
-        current = toggle_state(self.app, name)
-        idx = spec.names.index(current) if current in spec.names else 0
-        val = spec.values[idx]
+        current = toggle_state_base(self.app, name)
+        if current in spec.names:
+            val = spec.values[spec.names.index(current)]
+            return _fit_value_hint(val.value, val.hint, self._modes_hint_width())
+        if spec.preset_keys and current == PRESET_CUSTOM:
+            return _fit_value_hint(
+                current, preset_custom_hint(self.app, name, scope="global"),
+                self._modes_hint_width())
+        val = spec.values[0]
         return _fit_value_hint(val.value, val.hint, self._modes_hint_width())
 
     def _refresh_modes_hint(self) -> None:
@@ -801,21 +913,60 @@ class SettingsScreen(Screen):
         if widgets:
             widgets[-1].update(self._modes_hint_text())
 
-    def _modes_apply(self, direction: int) -> None:
-        """←/→/Enter на строке тоггла (канон §1/§3): мгновенное применение — цикл
-        значения ОТ ТЕКУЩЕГО отображаемого состояния + запись+hot-reload; ошибка
-        записи — флеш «✗ не сохранено: …», подэкран остаётся открытым (не закрывается)."""
-        from tui.toggles import apply_toggle, cycle_value, TOGGLES, toggle_state
-        names = list(TOGGLES.keys())
-        if not names:
+    def _refresh_modes_rows(self) -> None:
+        """Carry-fix (тот же приём, что и `_refresh_modes_hint`/`_refresh_menu_rows`):
+        досчитать all-or-nothing усечение хвоста «· в текущей сессии: …» (§6.2) ПОСЛЕ
+        layout-прохода, когда регион строки уже известен. Последние `len(names)`
+        матчей по классу — свежесмонтированный комплект (то же соглашение
+        «последний = свежий», что у `_modes_row_width`/`_modes_hint_width`/
+        `_refresh_modes_hint`: в транзиентном двойном комплекте старые строки
+        смонтированы раньше и ещё не отсоединены, новые — смонтированы позже и
+        идут последними)."""
+        if self._view != _MODES:
             return
-        name = names[self._modes_idx] if self._modes_idx < len(names) else names[0]
-        current = toggle_state(self.app, name)
-        new_value = cycle_value(name, current, direction)
+        from tui.toggles import TOGGLES
+        names = list(TOGGLES.keys())
+        widgets = list(self.query(".set-row"))
+        for i, row in enumerate(widgets[-len(names):]):
+            row.update(self._mode_row_text(names[i], i == self._modes_idx))
+
+    def _modes_apply(self, direction: int) -> None:
+        """←/→/Enter на строке тоггла (канон §1/§3): мгновенно записать
+        переключённое ГЛОБАЛЬНОЕ значение в config.yml (Settings = глобальный
+        дефолт, дизайн 2026-07-21 §3). Цикл значения — от ТЕКУЩЕГО глобального
+        состояния. Guard записи — как у остальных секций (_writable): пакетный
+        шаблон не пишем. Ошибка — флеш, значение не меняется. Сессионные
+        переопределения НЕ трогаем — их перекрытие показывает пометка §6.2."""
+        import onboarding_config_writer as w
+        from config import _default_config_path, validate_config_text
+        from tui.toggles import cycle_value, TOGGLES, toggle_state_base, PRESETS
+        names = list(TOGGLES.keys())
+        name = names[self._modes_idx]
+        spec = TOGGLES[name]
+        current = toggle_state_base(self.app, name)
+        new_value = cycle_value(name, current, direction)   # пресет: по low/medium/high
+        if not self._writable():
+            self._notice("✗ не сохранено: конфиг недоступен для записи — используется "
+                         "пакетный шаблон (настройте GC_HOME или запустите gc-ua --init-config)")
+            return
+        values = PRESETS[new_value] if spec.preset_keys else {spec.dotted: new_value}
         try:
-            apply_toggle(self.app, name, new_value)
+            w.write_values(
+                self._config_path, values,
+                template_path=_default_config_path(),
+                validate=validate_config_text,
+            )
         except (ValueError, OSError) as exc:
             self._notice(f"✗ не сохранено: {exc}")
+            return
+        # Хвост записи — как у соседних секций (_do_save): перечитать сырые значения
+        # файла и применить через инъектированный _on_apply, а не звать reload мимо него.
+        self._raw = self._read_raw()
+        try:
+            self._on_apply()
+            self._config = getattr(self.app, "_config", None) or self._config
+        except Exception as exc:
+            self._notice(f"сохранено, но конфиг не перечитан: {exc}")
             return
         self._render_view()
 
@@ -1236,7 +1387,36 @@ class SettingsScreen(Screen):
         self._menu_idx = (self._menu_idx + delta) % len(SECTIONS)
         self._refresh_menu_rows()
 
+    def _sync_config_from_app(self) -> None:
+        """Подтянуть self._config из app при входе в секцию (см. _open_section):
+        сама явно зовёт гейт свежести config.yml (reload_config_if_changed) —
+        другое окно могло сохранить умолчание, пока этот экран уже открыт — и
+        только потом берёт актуальную базу через screen_config() (тот её лишь
+        отдаёт, без собственной автоперечитки).
+
+        Совпадение по ссылке — файл не менялся с прошлой синхронизации
+        (reload_config всегда создаёт новый dict, см. TuiApp.reload_config),
+        сырые значения/происхождение перечитывать незачем: тот же приём хвоста
+        записи, что и в _do_save/_modes_apply, только без своего
+        reload — здесь его уже выполнил гейт.
+
+        Пустая база — особый случай identity-сверки: и screen_config()
+        (`self._config or {}`), и конструктор этого экрана (`config or {}`) на
+        falsy-ветке аллоцируют НОВЫЙ {} при каждом обращении, так что `is` между
+        двумя пустыми базами лжёт «изменилось», хотя на диске (или в тестовом
+        конфиге) ничего не менялось. Ловим это явно, не ослабляя identity-ветку
+        для настоящих конфигов: там reload_config даёт новый объект РОВНО когда
+        файл реально изменился, и это по-прежнему единственный сигнал."""
+        self.app.reload_config_if_changed()   # вход в секцию: подхватить чужую правку глобала (дизайн 2026-07-21 §4)
+        fresh = self.app.screen_config()
+        if fresh is self._config or (not fresh and not self._config):
+            return
+        self._config = fresh
+        self._raw = self._read_raw()
+        self._origins = self._read_origins()
+
     def _open_section(self, i: int) -> None:
+        self._sync_config_from_app()
         self._view = i
         self._reset_draft_state()   # бампает gen — стухший воркер прежней секции отбрасывается
         if i == _UPDATE:
@@ -1356,14 +1536,14 @@ class SettingsScreen(Screen):
                 self._update_idx = (self._update_idx + (1 if event.key == "down" else -1)) % n
                 self._render_view()
             return
-        if event.key in ("up", "down") and self._view == _MODES:
-            event.stop()
+        if self._view == _MODES:
             from tui.toggles import TOGGLES
-            n = len(TOGGLES)
-            if n > 1:
-                self._modes_idx = (self._modes_idx + (1 if event.key == "down" else -1)) % n
+            rows = list(TOGGLES.keys())
+            if event.key in ("up", "down"):
+                step = -1 if event.key == "up" else 1
+                self._modes_idx = (self._modes_idx + step) % len(rows)
                 self._render_view()
-            return
+                event.prevent_default(); event.stop(); return
         if event.key in ("left", "right", "enter") and self._view == _MODES:
             event.stop()
             self._modes_apply(-1 if event.key == "left" else 1)
