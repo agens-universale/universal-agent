@@ -35,6 +35,7 @@ from server_cleanup_threads import (  # type: ignore  # noqa: E402
     register_cleanup_threads_on_startup,
     register_swarm_cleanup_on_startup,
 )
+from trace_id import normalize_trace_id  # type: ignore  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
@@ -306,6 +307,16 @@ async def events_webhook(request: Request):
 
     task_id = ensure_task_id(payload)
 
+    # trace_id — поле контекста задачи, а не часть запроса к модели: снимаем его
+    # ДО json.dumps(payload) ниже, иначе значение уедет в промпт модели.
+    try:
+        trace_id = normalize_trace_id(payload.pop("trace_id", None))
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={"status": "error", "payload": f"invalid trace_id: {exc}"},
+        )
+
     # Определяем/нормализуем system: берём из payload["system"] или defaults.system.
     source_value = payload.get("system")
     defaults = SERVER_CONFIG.get("defaults") or {}
@@ -328,6 +339,20 @@ async def events_webhook(request: Request):
         make_message=_make_user_message,
         content=message_str,
     ):
+        if trace_id:
+            # Единственное место в дизайне, где trace может быть легитимно
+            # потерян: запрос подмешан в живой ран, чьи ctx, логгер, имя
+            # лог-файла и конфиг MCP-серверов уже зафиксированы. Поэтому у
+            # потери есть именованное событие, а не молчание.
+            logger.warning(
+                "trace_id_ignored",
+                extra={
+                    "event": "trace_id_ignored",
+                    "system": system,
+                    "task_id": task_id,
+                    "trace_id": trace_id,
+                },
+            )
         return {
             "status": "queued",
             "payload": payload,
@@ -336,6 +361,10 @@ async def events_webhook(request: Request):
         }
 
     config_dict = dict(BASE_AGENT_CONFIG)
+    if trace_id:
+        # Shallow copy достаточно: значение — скаляр. Мутировать
+        # BASE_AGENT_CONFIG нельзя, он процесс-глобальный.
+        config_dict["trace_id"] = trace_id
     auth_connector = build_auth_connector(config_dict)
     ctx = create_run_context(config_dict, auth_connector=auth_connector)
 
