@@ -122,9 +122,10 @@
 
     <li class="step">
       <div class="step-h"><span class="num">2</span><h3>Установить агента</h3></div>
-      <div class="code"><button class="cp" onclick="cp(this)">⧉</button><span class="tok-cmd">uv</span> tool install "git+https://gitverse.ru/gigacode-ai/universal-agent"</div>
+      <div class="code"><button class="cp" onclick="cp(this)">⧉</button><span class="tok-cmd">uv</span> tool install "git+ssh://git@gitverse.ru/gigacode-ai/universal-agent"</div>
       <div class="note warn"><span class="ic">!</span><div>В <b>корпоративной сети Сбера</b> добавьте в конец флаг <span class="inl">--system-certs</span> — иначе установка прервётся на проверке сертификатов.</div></div>
       <p>Устанавливаются две команды: <span class="inl">gc-ua</span> — основной режим с интерфейсом, и <span class="inl">gc-cli</span> — командная строка без интерфейса (разовые запросы, скрипты, автоматизация).</p>
+      <div class="note info"><span class="ic">i</span><div>Если после установки команда <span class="inl">gc-ua</span> не находится — каталог <span data-os="win"><span class="inl">%USERPROFILE%\.local\bin</span></span><span data-os="nix"><span class="inl">~/.local/bin</span></span> ещё не в PATH: выполните <span class="inl">uv tool update-shell</span> и <b>перезапустите терминал</b>. На одну сессию без перезапуска: <span data-os="win">cmd <span class="inl">set PATH=%USERPROFILE%\.local\bin;%PATH%</span>, PowerShell <span class="inl">$env:Path = "$env:USERPROFILE\.local\bin;$env:Path"</span></span><span data-os="nix"><span class="inl">source ~/.local/bin/env</span></span>.</div></div>
     </li>
 
     <li class="step">
@@ -182,7 +183,7 @@
   <div class="note info"><span class="ic">i</span><div><b>Если не работает.</b>
   <ul style="margin:8px 0 0;padding-left:20px;line-height:1.75">
     <li><span class="inl">git</span>/<span class="inl">uv</span> не найдены → повторите шаг&nbsp;1, перезапустите терминал.</li>
-    <li><span class="inl">uv</span>/<span class="inl">gc-ua</span> не видны → <span class="inl">uv tool update-shell</span> + перезапуск (все ОС). Без перезапуска: macOS/Linux <span class="inl">source ~/.local/bin/env</span>; Windows (PowerShell) <span class="inl">$env:Path = "$env:USERPROFILE\.local\bin;$env:Path"</span>.</li>
+    <li><span class="inl">uv</span>/<span class="inl">gc-ua</span> не видны → <span class="inl">uv tool update-shell</span> + перезапуск (все ОС). Без перезапуска: macOS/Linux <span class="inl">source ~/.local/bin/env</span>; Windows (cmd) <span class="inl">set PATH=%USERPROFILE%\.local\bin;%PATH%</span>, (PowerShell) <span class="inl">$env:Path = "$env:USERPROFILE\.local\bin;$env:Path"</span>.</li>
     <li>Падает на сертификатах → флаг <span class="inl">--system-certs</span>.</li>
     <li>Ошибка&nbsp;401 → проверьте адрес и токен в конфиге.</li>
   </ul></div></div>
