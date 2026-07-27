@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 from bundled_assets import bundled_root
+from trace_id import trace_id_from_config
 from config_modules.stored_outputs import get_stored_tool_outputs_max_entries
 from config_modules.chat_completions import chat_completions_llm_from_config_dict
 from config_modules.intent_scope import intent_scope_from_config_dict
@@ -529,6 +530,10 @@ class SubagentRunner:
         child_ctx = RunContext(
             config_dict=child_config,
             run_id=child_run_id,
+            # config_dict наследуется дословно через child_config, но поле ctx
+            # собирается руками и НЕ наследуется автоматически — без этой строки
+            # ctx.trace_id ребёнка разъедется с его же config_dict.
+            trace_id=trace_id_from_config(child_config),
             auth_connector=getattr(self._ctx, "auth_connector", None),
             logger=child_logger,
             logging_path=child_log_path,
