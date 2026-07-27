@@ -27,6 +27,10 @@ class AgentConfig(BaseModel):
     disable_skills: list[str] = Field(default_factory=list)
     server_tool_prefix: str = "system"
     max_steps: int = 1000
+    # Per-run лимиты надёжности (None = выключено). Область — один ран,
+    # как max_steps; сабагент наследует те же значения на свой ран.
+    session_token_limit: int | None = None
+    max_tool_calls: int | None = None
     no_tool_call_max_count: int = 5
     max_unknown_tool_repeats: int = 5
     strict_turn_finish_validation: bool = True
@@ -40,6 +44,13 @@ class AgentConfig(BaseModel):
     exec_timeout_sec: int = DEFAULT_EXEC_TIMEOUT_SEC
     # Синтетические поля tool schema: имя → description. Отсутствует или {} — без инжекта.
     inject_tool_fields: dict[str, str] = Field(default_factory=dict)
+
+    @field_validator("session_token_limit", "max_tool_calls")
+    @classmethod
+    def validate_optional_positive(cls, value: int | None) -> int | None:
+        if value is not None and value < 1:
+            raise ValueError("лимит должен быть None или целым >= 1")
+        return value
 
     @field_validator("exec_timeout_sec", mode="before")
     @classmethod

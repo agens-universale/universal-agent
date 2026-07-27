@@ -274,6 +274,8 @@ def flatten_app_config(app_cfg: AppConfig) -> Dict[str, Any]:
         "disable_skills": app_cfg.agent.disable_skills,
         "server_tool_prefix": app_cfg.agent.server_tool_prefix,
         "max_steps": app_cfg.agent.max_steps,
+        "session_token_limit": app_cfg.agent.session_token_limit,
+        "max_tool_calls": app_cfg.agent.max_tool_calls,
         "no_tool_call_max_count": app_cfg.agent.no_tool_call_max_count,
         "max_unknown_tool_repeats": app_cfg.agent.max_unknown_tool_repeats,
         "strict_turn_finish_validation": app_cfg.agent.strict_turn_finish_validation,

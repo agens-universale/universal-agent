@@ -42,6 +42,9 @@ agent:
   stop_tools: []
   server_tool_prefix: system
   max_steps: 1000
+  # Per-run лимиты надёжности (закомментировано = выключено):
+  # session_token_limit: 200000   # бюджет input+output токенов на один ран
+  # max_tool_calls: 100           # макс. вызовов инструментов на один ран
   no_tool_call_max_count: 3
   strict_turn_finish_validation: true
 
