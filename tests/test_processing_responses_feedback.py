@@ -42,6 +42,7 @@ def _stub_tools_modules() -> None:
 
     tools_pkg.apply_tool = _apply_tool
     tools_pkg.WrongFunctionArgumentsException = _WrongFunctionArgumentsException
+    tools_pkg.is_unknown_tool_output = lambda _output: False
     root = Path(__file__).resolve().parents[1]
     tools_dir = root / "src" / "tools"
     tools_pkg.__path__ = [str(tools_dir)]

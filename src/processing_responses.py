@@ -866,10 +866,6 @@ def run_agent(
                 state.terminal_outcome = "step_limit"
                 return f'Agent executed {state.max_steps} steps and doesn\'t finish his work because of step limits.'
 
-            if tool_error_cnt > max_tool_errors:
-                state.terminal_outcome = "tool_errors"
-                return f'Agent tools call errors.'
-
             if max_tool_calls_limit is not None and state.tool_calls >= max_tool_calls_limit:
                 state.terminal_outcome = "tool_call_limit"
                 return (
@@ -888,6 +884,10 @@ def run_agent(
                         f"Agent spent {_spent} tokens of {session_token_limit} "
                         f"session token limit and doesn't finish his work."
                     )
+
+            if tool_error_cnt > max_tool_errors:
+                state.terminal_outcome = "tool_errors"
+                return f'Agent tools call errors.'
 
             mode = check_mode(messages, run_logger)
             mode_for_step_count = mode
