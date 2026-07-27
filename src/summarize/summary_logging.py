@@ -7,6 +7,8 @@ import os
 from dataclasses import dataclass
 from typing import Any, Mapping
 
+from trace_id import trace_id_from_config
+
 _TRIGGER_REASON_LABELS: dict[str, str] = {
     "turn_end": "конец хода после turn_finish",
     "pre_run": "старт сессии",
@@ -60,6 +62,12 @@ def append_summary_trace_record(
         "summary_trace": dict(trace_data or {}),
         "newly_summarized_message_id": newly_summarized_message_id,
     }
+    # Этот сток пишется сырым open()/json.dumps, мимо фильтра и форматтера, и у
+    # него есть фолбэк в общий summary_trace.jsonl без kind и run_id — то есть
+    # переименование файла его не покрывает.
+    trace_id = trace_id_from_config(getattr(ctx, "config_dict", None))
+    if trace_id:
+        payload["trace_id"] = trace_id
     with open(trace_path, "a", encoding="utf-8") as fd:
         fd.write(json.dumps(payload, ensure_ascii=False))
         fd.write("\n")

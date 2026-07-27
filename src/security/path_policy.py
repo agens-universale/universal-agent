@@ -9,6 +9,8 @@ from pathlib import Path
 import sys
 from typing import Any, Callable, Iterable
 
+from trace_id import trace_id_from_config
+
 
 @dataclass(frozen=True)
 class WriteGuardConfig:
@@ -357,6 +359,14 @@ def audit_policy_decision(
     }
     if error_type:
         event["error_type"] = error_type
+    # Внутрь payload, а не в extra=: событие сериализуется в текст сообщения,
+    # поэтому только так аудит-объект остаётся самодостаточным. В jsonl фильтр
+    # логгера дополнительно ставит trace_id верхним полем записи.
+    trace_id = trace_id_from_config(
+        getattr(getattr(context, "ctx", None), "config_dict", None)
+    )
+    if trace_id:
+        event["trace_id"] = trace_id
     try:
         logger.info(
             "security_policy_decision %s",
