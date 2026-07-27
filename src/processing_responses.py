@@ -574,7 +574,7 @@ def process_tool_calls(
         try:
             # call_id для субагента: чтобы вложенные строки в TUI знали,
             # под какой корневой subagent_* они относятся.
-            state.tool_calls = getattr(state, "tool_calls", 0) + 1
+            state.tool_calls += 1
             tool_res_raw = apply_tool(
                 tool_name=tool_name,
                 arguments=tool_arguments,

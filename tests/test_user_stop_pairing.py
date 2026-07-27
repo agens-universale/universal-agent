@@ -26,6 +26,7 @@ def _state(**kw):
 
         def __init__(self):
             self.session_compact_applied = False
+            self.tool_calls = 0
             self.messages = []
             for k, v in kw.items():
                 setattr(self, k, v)

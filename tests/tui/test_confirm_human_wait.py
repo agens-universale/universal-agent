@@ -145,6 +145,7 @@ def test_flush_outputs_before_confirm_blocking_tool(monkeypatch):
 
         def __init__(self):
             self.session_compact_applied = False
+            self.tool_calls = 0
 
     messages = [
         {
