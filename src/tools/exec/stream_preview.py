@@ -10,14 +10,12 @@ from tools.exec.truncate_output import truncate_head_tail
 from tools.session.stored_outputs.tool_call_outputs_store import ToolCallOutputRecord
 
 
-# Ceiling for an explicitly requested max_output_chars.
-EXPLICIT_MAX_OUTPUT_CHARS_CEILING = 40_000
-
-
 def clamp_max_output_chars(max_output_chars: int, config_dict: Optional[dict] = None) -> int:
-    """Cap the preview budget at max(inline limit, explicit-request ceiling)."""
+    """D7: preview budget ≤ tool_output_inline_max_chars, чтобы envelope обычно не wrap-ился."""
     inline = get_tool_output_inline_max_chars(config_dict or {})
-    return min(max_output_chars, max(inline, EXPLICIT_MAX_OUTPUT_CHARS_CEILING))
+    if max_output_chars > inline:
+        return inline
+    return max_output_chars
 
 
 def process_exec_stream(

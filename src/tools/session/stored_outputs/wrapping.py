@@ -7,11 +7,7 @@ from uuid import uuid4
 from config_modules.stored_outputs import (
     get_tool_output_inline_max_chars,
 )
-from constants.tool_names import (
-    EXEC_COMMAND_NAME,
-    EXEC_PYTHON_NAME,
-    READ_STORED_TOOL_OUTPUT_NAME,
-)
+from constants.tool_names import READ_STORED_TOOL_OUTPUT_NAME
 from states import State
 from tools.session.stored_outputs.envelope import (
     PAGINATION_EOF_MARKER_DOC,
@@ -38,10 +34,6 @@ def maybe_store_and_wrap_tool_output(
     if state.tool_call_outputs_store.is_disabled():
         return tool_res
     if tool_name == READ_STORED_TOOL_OUTPUT_NAME:
-        return tool_res
-    if tool_name in (EXEC_COMMAND_NAME, EXEC_PYTHON_NAME):
-        # Exec envelopes self-truncate (head+tail preview + own output refs);
-        # a second generic wrap would cut the envelope JSON mid-string.
         return tool_res
 
     total_chars = len(tool_res)

@@ -57,15 +57,6 @@ class RunPythonCode(AbstractSimpleTool):
                         "default": DEFAULT_EXEC_TIMEOUT_SEC,
                         "minimum": 1,
                     },
-                    "max_output_chars": {
-                        "type": "integer",
-                        "description": (
-                            "Max preview characters per stream (stdout/stderr). Default 4000, "
-                            "ceiling 40000. Output beyond the preview stays fully available via "
-                            "stdout_output_ref/stderr_output_ref."
-                        ),
-                        "minimum": 1,
-                    },
                     "cwd": {
                         "type": "string",
                         "description": (
@@ -452,4 +443,3 @@ Return format (JSON string):
             stdout_meta=stdout_meta,
             stderr_meta=stderr_meta,
         )
-
