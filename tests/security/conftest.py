@@ -48,25 +48,6 @@ class _StubbedToolsModule(Module):
     def _getobj(self):
         saved = _stub_packages()
         try:
-            if self.path.name == "test_trace_id_audit.py":
-                # В tests/ (корень) есть одноимённый файл (вторая половина
-                # после разделения теста trace_id на security/summary части).
-                # Обычный mode=prepend требует уникальный basename по всему
-                # дереву тестов и падает с "import file mismatch" при
-                # совместном запуске. importlib-режим строит имя модуля по
-                # полному пути, так что коллизии нет; ограничиваем его этим
-                # файлом, чтобы не менять поведение импорта для остальных
-                # тестов каталога.
-                from _pytest.pathlib import import_path
-
-                return import_path(
-                    self.path,
-                    mode="importlib",
-                    root=self.config.rootpath,
-                    consider_namespace_packages=self.config.getini(
-                        "consider_namespace_packages"
-                    ),
-                )
             return super()._getobj()
         finally:
             _restore_packages(saved)
