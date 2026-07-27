@@ -142,6 +142,10 @@ def apply_summary_state_patch(
         if str(msg.get("role", "")).strip().lower() == "system":
             system_message = msg
             break
+    dropped = [m for m in previous_messages if m is not system_message]
+    state.archived_messages = (
+        list(getattr(state, "archived_messages", []) or []) + dropped
+    )
     if isinstance(system_message, dict):
         state.messages = [system_message, summary_message]
     else:

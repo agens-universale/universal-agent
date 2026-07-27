@@ -51,6 +51,15 @@ class ExecuteCommand(AbstractSimpleTool):
                             "When unset, uses the current working directory."
                         ),
                     },
+                    "max_output_chars": {
+                        "type": "integer",
+                        "description": (
+                            f"Max preview characters per stream (stdout/stderr). Default {cls.cut_n}, "
+                            "ceiling 40000. Output beyond the preview stays fully available via "
+                            "stdout_output_ref/stderr_output_ref."
+                        ),
+                        "minimum": 1,
+                    },
                     "env_vars": {
                         "type": "array",
                         "description": (

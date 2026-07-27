@@ -242,7 +242,12 @@ class GcCliExternal(BaseAgent):
         Returns the number of steps written (0 if nothing was dumped).
         """
         try:
-            messages = list(getattr(state, "messages", None) or []) if state is not None else []
+            archived = (
+                list(getattr(state, "archived_messages", None) or []) if state is not None else []
+            )
+            current = list(getattr(state, "messages", None) or []) if state is not None else []
+            # Full trajectory: compaction-evicted steps + the compacted tail.
+            messages = archived + current
             steps = _messages_to_steps(messages)
             if not steps:
                 return 0

@@ -286,8 +286,8 @@ class TestRunPythonCodePreview:
 # ---------------------------------------------------------------------------
 
 class TestExecEnvelopeUnifiedWrap:
-    def test_envelope_with_ref_wraps_when_large(self):
-        """D7-updated: exec-envelope с stdout_output_ref врапляется если > inline_limit."""
+    def test_envelope_with_ref_exempt_from_wrap(self):
+        """Exec envelopes self-truncate and pass through the generic wrap as-is."""
         state = _make_state()
         config = {"tool_output_inline_max_chars": 50}
         tool_res = json.dumps({
@@ -300,13 +300,7 @@ class TestExecEnvelopeUnifiedWrap:
             tool_res, call_id="c1", tool_name="exec_command",
             state=state, config=config,
         )
-        assert result != tool_res
-        parsed = json.loads(result)
-        assert parsed.get("type") == "stored_tool_output"
-        assert parsed.get("output_ref") is not None
-        # exec-envelope is inside content (truncated to inline_limit)
-        assert "exec_command" in parsed["content"]
-        assert parsed["truncated"] is True
+        assert result == tool_res
 
     def test_envelope_with_ref_passes_through_if_short(self):
         """D7-updated: exec-envelope с ref, но короткий — проходит as-is (no wrap)."""
@@ -324,8 +318,8 @@ class TestExecEnvelopeUnifiedWrap:
         )
         assert result == tool_res
 
-    def test_stderr_ref_envelope_wraps_when_large(self):
-        """D7-updated: exec-envelope с stderr_output_ref врапляется если > inline_limit."""
+    def test_stderr_ref_envelope_exempt_from_wrap(self):
+        """An envelope carrying stderr_output_ref is not re-wrapped either."""
         state = _make_state()
         config = {"tool_output_inline_max_chars": 50}
         tool_res = json.dumps({
@@ -338,9 +332,7 @@ class TestExecEnvelopeUnifiedWrap:
             tool_res, call_id="c3", tool_name="exec_command",
             state=state, config=config,
         )
-        assert result != tool_res
-        parsed = json.loads(result)
-        assert parsed.get("type") == "stored_tool_output"
+        assert result == tool_res
 
     def test_non_json_tool_res_wraps_if_large(self):
         """Non-JSON large output → normal wrapping."""
@@ -366,9 +358,9 @@ class TestExecEnvelopeUnifiedWrap:
         assert result == tool_res
 
 
-class TestClampPreviewToInline:
-    def test_max_output_chars_clamped_to_inline_limit(self):
-        """D7: max_output_chars > inline → clamp, preview ≤ inline."""
+class TestClampPreviewCeiling:
+    def test_explicit_request_honored_above_inline(self):
+        """An explicit max_output_chars above the inline limit is honored."""
         state = _make_state()
         tool = _make_tool(
             ExecuteCommand,
@@ -381,13 +373,28 @@ class TestClampPreviewToInline:
                 max_output_chars=10_000,
             )
         )
+        assert r["truncated"] is False
+        assert "Q" * 500 in r["stdout"]
+
+    def test_explicit_request_still_truncates_below_output(self):
+        """A budget below the output size truncates at the requested budget."""
+        state = _make_state()
+        tool = _make_tool(
+            ExecuteCommand,
+            state=state,
+            config_dict={"tool_output_inline_max_chars": 80},
+        )
+        r = json.loads(
+            tool(
+                command=f'"{sys.executable}" -c "print(\'Q\'*500)"',
+                max_output_chars=100,
+            )
+        )
         assert r["truncated"] is True
-        # head+tail = clamped inline budget; маркер сверху не вжимаем.
-        assert r["stdout_kept_head_chars"] + r["stdout_kept_tail_chars"] == 80
-        assert "[omitted" in r["stdout"]
+        assert r["stdout_kept_head_chars"] + r["stdout_kept_tail_chars"] == 100
         assert r["stdout_output_ref"] is not None
 
-    def test_run_python_clamps_the_same_way(self):
+    def test_run_python_honors_explicit_request(self):
         state = _make_state()
         tool = _make_tool(
             RunPythonCode,
@@ -395,5 +402,5 @@ class TestClampPreviewToInline:
             config_dict={"tool_output_inline_max_chars": 60},
         )
         r = json.loads(tool(code="print('R' * 400)", max_output_chars=5000))
-        assert r["truncated"] is True
-        assert r["stdout_kept_head_chars"] + r["stdout_kept_tail_chars"] == 60
+        assert r["truncated"] is False
+        assert "R" * 400 in r["stdout"]

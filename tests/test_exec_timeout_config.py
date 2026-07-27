@@ -140,8 +140,8 @@ def test_tool_descriptions_stay_lean():
     for cls in (ExecuteCommand, RunPythonCode):
         desc = cls.tool_description()
         props = desc["parameters"]["properties"]
-        assert "max_output_chars" not in props
+        assert "max_output_chars" in props
+        assert "40000" in props["max_output_chars"]["description"]
         text = desc["description"]
         assert "stdout_output_ref" not in text
         assert "session_read_stored_tool_output" not in text
-        assert "max_output_chars" not in cls.prompt_description()
