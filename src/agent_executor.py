@@ -39,6 +39,7 @@ from thread_store import (
     resolve_threads_dir,
     update_runtime_meta,
 )
+from trace_id import trace_id_from_config
 from tools.subagents.active_scope import try_enqueue_user_message
 from tools.subagents.sidecar import bind_thread_identity, clear_thread_identity
 from tools.connect_mcp.persistent_stdio import PersistentStdioRegistry
@@ -59,6 +60,38 @@ ORCHESTRATOR_SPECIFIC_ROLE = (
     "or via a review subagent when quality or risk warrants it.\n"
     "- At the start of a large task, use a planner subagent only when planning overhead is justified.\n"
 )
+
+
+def _append_trace_id_to_meta(thread_session: Any, trace_id: str) -> None:
+    """Дописать trace_id в ``meta.runtime.trace_ids`` (append + дедуп).
+
+    Через ``update_runtime_meta`` (read-merge-write по диску), а НЕ через
+    ``thread_session.meta``: ``persist_batch`` пересобирает base_meta с диска и
+    переносит из ``self.meta`` только whitelist ключей, в который ``runtime`` не
+    входит — запись в память была бы потеряна.
+
+    Отвечает на вопрос аудита «какие шаги оркестратора трогали этот тред».
+    Ошибки бухгалтерии меты не должны ронять ран.
+    """
+    from persistence.meta_ownership import runtime_section
+    from thread_store import load_thread_meta, sanitize_system_id, update_runtime_meta
+
+    threads_dir = getattr(thread_session, "threads_dir", None)
+    system_id = getattr(thread_session, "system_id", None)
+    thread_id = getattr(thread_session, "thread_id", None)
+    if not threads_dir or not system_id or not thread_id:
+        return
+    try:
+        sys_norm = sanitize_system_id(system_id)
+        meta = load_thread_meta(threads_dir, sys_norm, thread_id) or {}
+        existing = runtime_section(meta).get("trace_ids")
+        ids = [str(x) for x in existing] if isinstance(existing, list) else []
+        if trace_id in ids:
+            return
+        ids.append(trace_id)
+        update_runtime_meta(threads_dir, sys_norm, thread_id, {"trace_ids": ids})
+    except Exception:
+        return
 
 
 class AgentExecutor:
@@ -449,6 +482,11 @@ class AgentExecutor:
                 thread_session.persist_batch(
                     [], previous_response_id=state.previous_response_id
                 )
+                _run_trace_id = trace_id_from_config(config_dict)
+                if _run_trace_id:
+                    # После persist_batch: он пересобирает мету с диска, поэтому
+                    # запись должна быть последней, иначе её затрёт.
+                    _append_trace_id_to_meta(thread_session, _run_trace_id)
         finally:
             # Закрываем долгоживущие stdio MCP-сессии (напр. @playwright/mcp + Chromium),
             # чтобы они не переживали конкретный запуск агента.
