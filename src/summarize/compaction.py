@@ -50,6 +50,26 @@ def without_system_messages(messages_list: List[dict]) -> List[dict]:
     return out
 
 
+def _emit_messages_evicted(state: Any, dropped: List[dict]) -> None:
+    """Best-effort notify host about messages leaving the model context.
+
+    State does not retain ``dropped``; optional ``state.on_messages_evicted``
+    may archive them (harbor trajectory journal, tests, etc.). Callback errors
+    never fail compaction.
+    """
+    if not dropped:
+        return
+    callback = getattr(state, "on_messages_evicted", None)
+    if callback is None:
+        return
+    try:
+        callback(list(dropped))
+    except Exception:
+        logger = getattr(state, "logger", None)
+        if logger is not None:
+            logger.exception("on_messages_evicted failed")
+
+
 def _intent_log_preview_chars_from_ctx(ctx: Any | None) -> int:
     if ctx is None:
         return resolve_intent_log_preview_chars(None)
@@ -143,9 +163,7 @@ def apply_summary_state_patch(
             system_message = msg
             break
     dropped = [m for m in previous_messages if m is not system_message]
-    state.archived_messages = (
-        list(getattr(state, "archived_messages", []) or []) + dropped
-    )
+    _emit_messages_evicted(state, dropped)
     if isinstance(system_message, dict):
         state.messages = [system_message, summary_message]
     else:

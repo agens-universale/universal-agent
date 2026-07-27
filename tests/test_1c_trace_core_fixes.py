@@ -13,7 +13,13 @@ from tests.helpers.tool_ctx import with_local_ctx
 def _fresh_state():
     state = State.__new__(State)
     state.messages = []
-    state.archived_messages = []
+    state.on_messages_evicted = None
+    state.logger = None
+    state.dialog_steps_offset = 0
+    state.previous_response_id = None
+    state.shared = None
+    state.user_intent_log = []
+    state.current_user_intent = []
     from tools.session.stored_outputs.tool_call_outputs_store import (
         ToolCallOutputsStore,
     )
@@ -23,10 +29,13 @@ def _fresh_state():
 
 # ---------- D-2 ----------
 
-def test_compaction_archives_dropped_messages():
+def test_compaction_emits_dropped_messages_via_callback():
     from summarize.compaction import apply_summary_state_patch
 
     state = _fresh_state()
+    archived: list = []
+    state.on_messages_evicted = archived.extend
+
     system = {"role": "system", "content": "sys"}
     step1 = {"role": "user", "content": "u1"}
     step2 = {"role": "assistant", "content": "a1"}
@@ -44,9 +53,9 @@ def test_compaction_archives_dropped_messages():
         intent_log_preview_chars=1000,
     )
 
-    assert state.archived_messages == [step1, step2]
+    assert archived == [step1, step2]
     assert state.messages[0] is system
-    # second compaction appends, not overwrites
+    # second compaction appends via callback, not overwrite
     step3 = {"role": "user", "content": "u2"}
     state.messages.append(step3)
     apply_summary_state_patch(
@@ -60,8 +69,60 @@ def test_compaction_archives_dropped_messages():
         summarized_messages_count=2,
         intent_log_preview_chars=1000,
     )
-    assert state.archived_messages[:2] == [step1, step2]
-    assert step3 in state.archived_messages
+    assert archived[:2] == [step1, step2]
+    assert step3 in archived
+
+
+def test_compaction_without_callback_does_not_retain_dropped():
+    from summarize.compaction import apply_summary_state_patch
+
+    state = _fresh_state()
+    system = {"role": "system", "content": "sys"}
+    step1 = {"role": "user", "content": "u1"}
+    state.messages = [system, step1]
+
+    apply_summary_state_patch(
+        state=state,
+        raw_summary="summary text",
+        last_dialog_steps="",
+        memory_append_deltas=None,
+        memory_replace_deltas=None,
+        memory_append_touched=None,
+        memory_replace_touched=None,
+        summarized_messages_count=1,
+        intent_log_preview_chars=1000,
+    )
+
+    assert not hasattr(state, "archived_messages")
+    assert state.messages[0] is system
+    assert len(state.messages) == 2
+
+
+def test_compaction_callback_errors_do_not_fail_patch():
+    from summarize.compaction import apply_summary_state_patch
+
+    state = _fresh_state()
+
+    def _boom(_dropped):
+        raise RuntimeError("sink failed")
+
+    state.on_messages_evicted = _boom
+    system = {"role": "system", "content": "sys"}
+    state.messages = [system, {"role": "user", "content": "u1"}]
+
+    apply_summary_state_patch(
+        state=state,
+        raw_summary="summary text",
+        last_dialog_steps="",
+        memory_append_deltas=None,
+        memory_replace_deltas=None,
+        memory_append_touched=None,
+        memory_replace_touched=None,
+        summarized_messages_count=1,
+        intent_log_preview_chars=1000,
+    )
+    assert state.messages[0] is system
+    assert len(state.messages) == 2
 
 
 # ---------- D-3 ----------

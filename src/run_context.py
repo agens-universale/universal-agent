@@ -56,6 +56,8 @@ class RunContext:
     project_gc_dir: Path = field(default_factory=lambda: Path("."))
     environment: Optional[Any] = None
     on_stream_delta: Optional[Callable[[str, str], None]] = None
+    # Optional: messages dropped by context compaction (not retained in State).
+    on_messages_evicted: Optional[Callable[[List[Dict[str, Any]]], None]] = None
 
 
 def create_run_context(
@@ -68,6 +70,7 @@ def create_run_context(
     loop: Optional[Any] = None,
     os_backend: Optional[FsBackend] = None,
     on_stream_delta=None,
+    on_messages_evicted: Optional[Callable[[List[Dict[str, Any]]], None]] = None,
     is_tui: bool = False,
 ) -> RunContext:
     """
@@ -144,6 +147,7 @@ def create_run_context(
         skills_registry=skills_registry,
         workspace=workspace,
         on_stream_delta=on_stream_delta,
+        on_messages_evicted=on_messages_evicted,
     )
     ctx.is_tui = bool(is_tui)
 
