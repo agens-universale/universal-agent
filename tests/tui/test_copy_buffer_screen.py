@@ -24,6 +24,28 @@ class _MockStore:
 
 
 @pytest.mark.asyncio
+async def test_copy_buffer_screen_chrome(tmp_path):
+    """Канон ViewerScreen: шапка с заголовком, футер-подсказка, палитровая рамка
+
+    (не дефолтная Textual — она рисуется box-глифами, которые на Windows
+    консоли превращаются в мусорные квадратики по периметру, см. дефект)."""
+    from textual.widgets import Static
+    from tui.app import TuiApp
+    from tui.screens.copy_buffer import BufferTextArea, CopyBufferScreen
+
+    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    async with app.run_test() as pilot:
+        store = _MockStore()
+        await pilot.app.push_screen(CopyBufferScreen(store=store, task_id="TCHROME"))
+        await pilot.pause()
+        scr = pilot.app.screen
+        assert "Буфер сессии" in str(scr.query_one("#header-left", Static).render())
+        assert scr.query_one("#footer", Static) is not None
+        ta = scr.query_one("#buffer_text", BufferTextArea)
+        assert ta.styles.border_top[0] == "solid"  # не дефолт Textual (tall/…)
+
+
+@pytest.mark.asyncio
 async def test_copy_buffer_screen_marker(tmp_path):
     from tui.screens.copy_buffer import CopyBufferScreen
 

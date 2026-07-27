@@ -280,6 +280,19 @@ FileViewerScreen #root { height: 1fr; }
 }
 #file-view-body:focus { border: none; }
 
+/* CopyBufferScreen: TextArea на весь экран — шапка+футер как у ViewerScreen,
+ * рамка — тихая палитровая (не дефолт Textual), акцент при фокусе. */
+CopyBufferScreen #root { height: 1fr; }
+#buffer_text {
+    height: 1fr;
+    width: 1fr;
+    border: solid $deep-dim;
+    padding: 0 1;
+    background: $bg;
+    color: $ink;
+}
+#buffer_text:focus { border: solid $accent; }
+
 /* Строки списков (TasksScreen, SkillsScreen) */
 .list-row      { color: $ink; padding: 0 1; }
 
