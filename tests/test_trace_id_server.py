@@ -60,10 +60,12 @@ def test_invalid_trace_id_is_rejected(client):
     assert resp.status_code == 400
 
 
-def test_second_webhook_into_live_run_keeps_first_trace(client, caplog):
+def test_second_webhook_into_live_run_drops_trace_and_logs_it(client, caplog):
     api, captured = client
     captured["live_run"] = True
     with caplog.at_level("WARNING"):
         resp = api.post("/events/webhook", json={"task_id": "t1", "trace_id": "wf-99"})
     assert resp.json()["status"] == "queued"
     assert "trace_id_ignored" in caplog.text
+    assert "wf-99" in caplog.text
+    assert "t1" in caplog.text

@@ -345,7 +345,10 @@ async def events_webhook(request: Request):
             # лог-файла и конфиг MCP-серверов уже зафиксированы. Поэтому у
             # потери есть именованное событие, а не молчание.
             logger.warning(
-                "trace_id_ignored",
+                "trace_id_ignored: trace_id=%s system=%s task_id=%s",
+                trace_id,
+                system,
+                task_id,
                 extra={
                     "event": "trace_id_ignored",
                     "system": system,
