@@ -65,7 +65,8 @@ class AgentConfig(BaseModel):
         if not text:
             return None
         for ch in text:
-            if ch.isspace() or ord(ch) < 0x20 or ch == ":":
+            code = ord(ch)
+            if ch.isspace() or code < 0x20 or code == 0x7F or ch == ":":
                 raise ValueError(
                     "agent.trace_id_header_name: имя заголовка без пробелов, "
                     "управляющих символов и ':'"

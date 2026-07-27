@@ -27,6 +27,10 @@ class TestTraceIdHeaderName:
             with pytest.raises(ValidationError):
                 _app({"agent": {"trace_id_header_name": bad}})
 
+    def test_rejects_del_character(self):
+        with pytest.raises(ValidationError):
+            _app({"agent": {"trace_id_header_name": "X-Trace\x7fId"}})
+
 
 class TestMcpTraceHeaderFlag:
     def test_default_true(self):
