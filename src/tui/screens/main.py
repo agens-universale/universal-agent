@@ -83,6 +83,10 @@ def resolve_terminal_outcome(*, runner_error, stop_requested, terminal_outcome):
         return "stopped_steps"
     if terminal_outcome == "tool_errors":
         return "stopped_errors"
+    if terminal_outcome == "token_limit":
+        return "stopped_tokens"
+    if terminal_outcome == "tool_call_limit":
+        return "stopped_tool_calls"
     return "completed"
 
 
@@ -92,7 +96,7 @@ def resolve_live_terminal_indicator_state(*, last_indicator_kind, status, stop_r
     тогда как meta.tui.status схлопнут в Status-литерал ("stopped"). Для лимитных
     исходов предпочитаем kind; для прочих — прежняя логика status→state с guard
     прямого stop в обход _cmd_stop."""
-    if last_indicator_kind in ("stopped_steps", "stopped_errors"):
+    if last_indicator_kind in ("stopped_steps", "stopped_errors", "stopped_tokens", "stopped_tool_calls"):
         return last_indicator_kind
     outcome = status
     if outcome == "completed" and stop_requested:
@@ -2174,9 +2178,11 @@ class TraceScreen(Screen):
             if outcome == "completed" and getattr(runner, "_stop_requested", False):
                 outcome = "stopped"
             _STATUS = {"completed": "completed", "stopped": "stopped", "failed": "failed",
-                       "stopped_steps": "stopped", "stopped_errors": "stopped"}
+                       "stopped_steps": "stopped", "stopped_errors": "stopped",
+                       "stopped_tokens": "stopped", "stopped_tool_calls": "stopped"}
             _KIND = {"completed": "done", "stopped": "cancelled", "failed": "failed",
-                     "stopped_steps": "stopped_steps", "stopped_errors": "stopped_errors"}
+                     "stopped_steps": "stopped_steps", "stopped_errors": "stopped_errors",
+                     "stopped_tokens": "stopped_tokens", "stopped_tool_calls": "stopped_tool_calls"}
             _elapsed = None
             if outcome == "completed" and self._thinking_started_at is not None:
                 _elapsed = int(time.monotonic() - self._thinking_started_at)

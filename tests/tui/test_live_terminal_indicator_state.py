@@ -9,6 +9,14 @@ def test_tool_errors_kind_preferred():
     assert R(last_indicator_kind="stopped_errors", status="stopped", stop_requested=False) == "stopped_errors"
 
 
+def test_token_limit_kind_preferred():
+    assert R(last_indicator_kind="stopped_tokens", status="stopped", stop_requested=False) == "stopped_tokens"
+
+
+def test_tool_call_limit_kind_preferred():
+    assert R(last_indicator_kind="stopped_tool_calls", status="stopped", stop_requested=False) == "stopped_tool_calls"
+
+
 def test_completed_maps_to_done():
     assert R(last_indicator_kind="done", status="completed", stop_requested=False) == "done"
 
