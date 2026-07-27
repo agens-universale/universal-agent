@@ -62,7 +62,9 @@ ORCHESTRATOR_SPECIFIC_ROLE = (
 )
 
 
-def _append_trace_id_to_meta(thread_session: Any, trace_id: str) -> None:
+def _append_trace_id_to_meta(
+    thread_session: Any, trace_id: str, logger: Any | None = None
+) -> None:
     """Дописать trace_id в ``meta.runtime.trace_ids`` (append + дедуп).
 
     Через ``update_runtime_meta`` (read-merge-write по диску), а НЕ через
@@ -71,7 +73,10 @@ def _append_trace_id_to_meta(thread_session: Any, trace_id: str) -> None:
     входит — запись в память была бы потеряна.
 
     Отвечает на вопрос аудита «какие шаги оркестратора трогали этот тред».
-    Ошибки бухгалтерии меты не должны ронять ран.
+    Ошибки бухгалтерии меты не должны ронять ран, но раз это единственный путь
+    записи trace_id в мету — молчаливый swallow оставляем, а факт и причину
+    ошибки пишем в debug (``logger`` опционален, чтобы не менять контракт
+    вызывающих сторон).
     """
     from persistence.meta_ownership import runtime_section
     from thread_store import load_thread_meta, sanitize_system_id, update_runtime_meta
@@ -90,7 +95,12 @@ def _append_trace_id_to_meta(thread_session: Any, trace_id: str) -> None:
             return
         ids.append(trace_id)
         update_runtime_meta(threads_dir, sys_norm, thread_id, {"trace_ids": ids})
-    except Exception:
+    except Exception as exc:
+        if logger is not None:
+            try:
+                logger.debug("trace_id_meta_write_failed error=%s", exc, exc_info=True)
+            except Exception:
+                pass
         return
 
 
@@ -520,7 +530,7 @@ class AgentExecutor:
                 if _run_trace_id:
                     # После persist_batch: он пересобирает мету с диска, поэтому
                     # запись должна быть последней, иначе её затрёт.
-                    _append_trace_id_to_meta(thread_session, _run_trace_id)
+                    _append_trace_id_to_meta(thread_session, _run_trace_id, logger)
         finally:
             # Закрываем долгоживущие stdio MCP-сессии (напр. @playwright/mcp + Chromium),
             # чтобы они не переживали конкретный запуск агента.
