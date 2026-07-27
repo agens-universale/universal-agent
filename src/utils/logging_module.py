@@ -7,6 +7,8 @@ import time
 import uuid
 from typing import Tuple, Dict, Any, Optional
 
+from trace_id import trace_id_from_config, trace_id_slug
+
 
 class FlushFileHandler(logging.FileHandler):
     def emit(self, record: logging.LogRecord) -> None:
@@ -23,18 +25,26 @@ _RESERVED_LOGRECORD_KEYS = {
 
 
 class RunContextFilter(logging.Filter):
-    """Проставляет run_id / agent_kind на каждую запись per-run логгера."""
+    """Проставляет run_id / agent_kind / trace_id на каждую запись per-run логгера.
 
-    def __init__(self, run_id: str, agent_kind: str) -> None:
+    ``trace_id`` опционален и с дефолтом: класс публичный (в ``__all__``) и
+    конструируется позиционно. Пустое значение не ставится вообще — «отсутствует»
+    должно означать отсутствие ключа, а не пустую строку.
+    """
+
+    def __init__(self, run_id: str, agent_kind: str, trace_id: str = "") -> None:
         super().__init__()
         self._run_id = run_id
         self._agent_kind = agent_kind
+        self._trace_id = trace_id or ""
 
     def filter(self, record: logging.LogRecord) -> bool:
         if not hasattr(record, "run_id"):
             record.run_id = self._run_id
         if not hasattr(record, "agent_kind"):
             record.agent_kind = self._agent_kind
+        if self._trace_id and not hasattr(record, "trace_id"):
+            record.trace_id = self._trace_id
         return True
 
 
@@ -145,6 +155,14 @@ def build_run_log_paths(
         )
     suffix = run_id or generate_run_id()
     kind = _normalize_agent_kind(agent_kind)
+    trace = trace_id_from_config(config_dict)
+    if trace:
+        # Слаг, а не сырое значение: os.makedirs ниже работает по уже собранному
+        # пути, поэтому '/' в trace создал бы подкаталог, а '..' вышел бы из
+        # logs_dump_dir. run_id остаётся: trace не уникален на ран (ретрай
+        # оркестратора переиспользует его, сабагент наследует дословно), а файл
+        # открывается в mode="a" — без run_id раны слиплись бы в один файл.
+        suffix = f"{trace_id_slug(trace)}_{suffix}"
     logging_path = os.path.join(base_dir, f"agent_{kind}_{suffix}.{log_ext}")
     summary_trace_path = os.path.join(base_dir, f"summary_trace_{kind}_{suffix}.jsonl")
     return logging_path, summary_trace_path
@@ -154,32 +172,44 @@ _DISABLED_LOG_PATH = (
     "Null. Логи отключены. Включите логи в файле config.yml если они необходимы"
 )
 _TEXT_FMT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+# Отдельная строка формата, а не условная подстановка: '%(trace_id)s' падает на
+# любой записи без атрибута, и строка теряется через handleError. Поэтому формат
+# с trace выбирается только вместе с фильтром, который атрибут гарантирует.
+_TEXT_FMT_TRACE = (
+    "%(asctime)s - %(name)s - %(levelname)s - [trace=%(trace_id)s] %(message)s"
+)
 
 
 def _build_text_logger(logger, config_dict, run_id, kind, redactor):
     # Историческое поведение main: DEBUG-уровень, .log файл, stderr ERROR-хендлер.
     logger.setLevel(logging.DEBUG)
+    trace = trace_id_from_config(config_dict)
+    if trace:
+        logger.addFilter(RunContextFilter(run_id, kind, trace))
+        text_fmt = _TEXT_FMT_TRACE
+    else:
+        text_fmt = _TEXT_FMT
     if config_dict.get("save_logs", False):
         logging_path, summary_trace_path = build_run_log_paths(
             config_dict, run_id=run_id, agent_kind=kind, log_ext="log"
         )
         os.makedirs(os.path.dirname(logging_path), exist_ok=True)
         handler = FlushFileHandler(logging_path, encoding="utf-8", mode="a")
-        handler.setFormatter(RedactingTextFormatter(_TEXT_FMT, redactor=redactor))
+        handler.setFormatter(RedactingTextFormatter(text_fmt, redactor=redactor))
         logger.addHandler(handler)
     else:
         logging_path = _DISABLED_LOG_PATH
         summary_trace_path = ""
     err_handler = logging.StreamHandler()
     err_handler.setLevel(logging.ERROR)
-    err_handler.setFormatter(RedactingTextFormatter(_TEXT_FMT, redactor=redactor))
+    err_handler.setFormatter(RedactingTextFormatter(text_fmt, redactor=redactor))
     logger.addHandler(err_handler)
     return logger, logging_path, summary_trace_path
 
 
 def _build_jsonl_logger(logger, config_dict, run_id, kind, redactor):
     logger.setLevel(resolve_log_level(config_dict.get("log_level")))
-    logger.addFilter(RunContextFilter(run_id, kind))
+    logger.addFilter(RunContextFilter(run_id, kind, trace_id_from_config(config_dict)))
     formatter = JsonlFormatter(redactor=redactor)
     logging_path = _DISABLED_LOG_PATH
     summary_trace_path = ""
