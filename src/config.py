@@ -25,6 +25,7 @@ from config_modules import env_vars
 from bundled_assets import bundled_root
 from mcp_runtime.paths import managed_config_path
 from message_projection import configure_for_model_tags
+from trace_id import normalize_trace_id
 
 # Backward compatibility for existing imports.
 _DEFAULT_LAST_DIALOG_STEP_MESSAGE_MAX_CHARS = (
@@ -147,6 +148,7 @@ def apply_cli_overrides(
     no_read_guard: bool = False,
     read_guard_mode: Optional[str] = None,
     agentsmd_override: bool = False,
+    trace_id: Optional[str] = None,
 ) -> None:
     if extra_overrides:
         config_dict.update(resolve_env_placeholders(extra_overrides))
@@ -161,6 +163,17 @@ def apply_cli_overrides(
     )
     if agentsmd_override:
         config_dict["agentsmd_override"] = True
+    # Внешний trace_id: значение могло приехать и настоящим флагом, и generic
+    # `--param`-оверрайдом (там оно прошло через yaml.safe_load и может быть не
+    # строкой). Нормализуем в одной точке; пусто → ключа нет вовсе, чтобы
+    # «отсутствует» было отсутствием ключа, а не пустой строкой.
+    if trace_id is not None:
+        config_dict["trace_id"] = trace_id
+    normalized_trace_id = normalize_trace_id(config_dict.get("trace_id"))
+    if normalized_trace_id:
+        config_dict["trace_id"] = normalized_trace_id
+    else:
+        config_dict.pop("trace_id", None)
     sync_logging_flat_and_params(config_dict)
 
 

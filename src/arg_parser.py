@@ -244,6 +244,18 @@ parser.add_argument(
     ),
 )
 
+parser.add_argument(
+    "--trace-id",
+    type=str,
+    default=None,
+    dest="trace_id",
+    help=(
+        "Внешний trace_id для корреляции с оркестратором: попадает в имя лог-файла, "
+        "в записи логов, в заголовок к бэкенду модели и в MCP-заголовки. "
+        "Не задан — ничего не меняется"
+    ),
+)
+
 
 parsed_args, unknown_args = parser.parse_known_args()
 if (
