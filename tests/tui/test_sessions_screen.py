@@ -8,10 +8,10 @@ from thread_store import append_new_thread_messages
 from tui.services.stores.file_store import FileTaskStore
 
 
-def _seed(threads_dir, tid, prompt, *, branch=None, title=None,
+def _seed(threads_dir, tid, prompt, *, branch=None, title=None, last_actual=None,
           updated_at="2026-05-30T10:00:00+00:00", msgs=1, token_usage=None):
     """Сессия = data-файл (реальный writer) + meta с messages_count/updated_at
-    (как пишет thread_store), плюс tui.branch/title при необходимости."""
+    (как пишет thread_store), плюс tui.branch/title/last_actual при необходимости."""
     append_new_thread_messages(str(threads_dir), "cli", tid,
                                [{"role": "user", "content": prompt, "id": f"m_{tid}"}], set())
     meta = {"thread_id": tid, "system": "cli", "status": "stopped",
@@ -21,6 +21,8 @@ def _seed(threads_dir, tid, prompt, *, branch=None, title=None,
         tui["branch"] = branch
     if title is not None:
         tui["title"] = title
+    if last_actual is not None:
+        tui["last_actual"] = last_actual
     if tui:
         meta["tui"] = tui
     if token_usage is not None:
@@ -83,7 +85,7 @@ async def test_long_prompt_card_stays_two_lines(tmp_path):
 @pytest.mark.asyncio
 async def test_card_shows_title_branch_msgs(tmp_path):
     pytest.importorskip("textual")
-    _seed(tmp_path, "aaaaaaaa", "первый вопрос", branch="feat/x")
+    _seed(tmp_path, "aaaaaaaa", "первый вопрос", branch="feat/x", last_actual="первый вопрос")
     from tui.screens.sessions import SessionsScreen
     from tui.app import TuiApp
     app = TuiApp(threads_dir=str(tmp_path), system="cli")
@@ -175,8 +177,8 @@ async def test_custom_title_overrides_prompt(tmp_path):
 @pytest.mark.asyncio
 async def test_branch_filter_ctrl_b(tmp_path, monkeypatch):
     pytest.importorskip("textual")
-    _seed(tmp_path, "onbranch0", "на ветке", branch="feature-x")
-    _seed(tmp_path, "offbranch", "другая ветка", branch="master")
+    _seed(tmp_path, "onbranch0", "на ветке", branch="feature-x", last_actual="на ветке")
+    _seed(tmp_path, "offbranch", "другая ветка", branch="master", last_actual="другая ветка")
     import tui.screens.sessions as sessions_mod
     monkeypatch.setattr(sessions_mod, "current_branch", lambda cwd: "feature-x")
     from tui.screens.sessions import SessionsScreen
@@ -195,8 +197,8 @@ async def test_branch_filter_ctrl_b(tmp_path, monkeypatch):
 @pytest.mark.asyncio
 async def test_search_filters(tmp_path):
     pytest.importorskip("textual")
-    _seed(tmp_path, "find1111", "уникальный маркер альфа")
-    _seed(tmp_path, "find2222", "совсем другое")
+    _seed(tmp_path, "find1111", "уникальный маркер альфа", last_actual="уникальный маркер альфа")
+    _seed(tmp_path, "find2222", "совсем другое", last_actual="совсем другое")
     from tui.screens.sessions import SessionsScreen
     from textual.widgets import Input
     from tui.app import TuiApp
@@ -228,9 +230,9 @@ async def test_rename_saves_title(tmp_path):
 
 @pytest.mark.asyncio
 async def test_dialog_summary_skipped_in_title(tmp_path):
-    """Суммаризированный тред: первая запись live-файла — dialog_summary
-    (technical user-message). Заголовок должен быть РЕАЛЬНЫМ промптом, а не
-    дампом саммари (регрессия на реальном payload)."""
+    """R7: заголовок = display_name(meta.tui) — сканирование логов удалено.
+    Суммаризированный тред БЕЗ last_actual → «Без названия» (не дамп саммари,
+    не сканирование live-файла). С last_actual → он, приоритет над логами."""
     pytest.importorskip("textual")
     from message_policy.user_message_policy import (
         TECHNICAL_TYPE_DIALOG_SUMMARY, wrap_technical_user_content,
@@ -243,9 +245,11 @@ async def test_dialog_summary_skipped_in_title(tmp_path):
                    technical_type=TECHNICAL_TYPE_DIALOG_SUMMARY)}
     real = {"role": "user", "content": "реальный вопрос после саммари", "id": "m_real"}
     append_new_thread_messages(str(tmp_path), "cli", tid, [summary, real], set())
+    # last_actual задан → именно он в заголовке, не саммари и не сканирование
     (Path(tmp_path) / f"meta_cli_{tid}.json").write_text(
         json.dumps({"thread_id": tid, "system": "cli", "status": "stopped",
-                    "updated_at": "2026-05-30T10:00:00+00:00", "messages_count": 2}),
+                    "updated_at": "2026-05-30T10:00:00+00:00", "messages_count": 2,
+                    "tui": {"last_actual": "реальный вопрос после саммари"}}),
         encoding="utf-8")
     from tui.screens.sessions import SessionsScreen
     from tui.app import TuiApp
@@ -260,26 +264,24 @@ async def test_dialog_summary_skipped_in_title(tmp_path):
 
 @pytest.mark.asyncio
 async def test_first_prompt_from_archive(tmp_path):
-    """Суммаризированный тред: исходный промпт в __pre_summary__ архиве,
-    live-файл начинается с dialog_summary. Заголовок = исходный промпт, а не
-    «(без заголовка)»."""
+    """R7: сканирование архивов удалено. Без last_actual в meta → «Без названия»
+    (бэкфил логов вне scope спеки §4). С last_actual → он в заголовке."""
     pytest.importorskip("textual")
     from message_policy.user_message_policy import (
         TECHNICAL_TYPE_DIALOG_SUMMARY, wrap_technical_user_content,
     )
     tid = "arch0001"
-    # Старый архив = исходная сырая история (тут первый реальный промпт).
     append_new_thread_messages(str(tmp_path), "cli", tid,
                                [{"role": "user", "content": "исходный вопрос из архива",
                                  "id": "m_o"}], set())
     live = Path(tmp_path) / f"data_cli_{tid}.jsonl"
     live.replace(Path(tmp_path) / f"data_cli_{tid}__pre_summary__20260530_101200.jsonl")
-    # Live начинается с dialog_summary (как после компакции).
     summary = {"role": "user", "id": "m_sum",
                "content": wrap_technical_user_content(
                    "Summarized context from previous dialogue.\n<summary>x</summary>",
                    technical_type=TECHNICAL_TYPE_DIALOG_SUMMARY)}
     append_new_thread_messages(str(tmp_path), "cli", tid, [summary], set())
+    # БЕЗ last_actual → «Без названия» (сканирование архивов не выполняется)
     (Path(tmp_path) / f"meta_cli_{tid}.json").write_text(
         json.dumps({"thread_id": tid, "system": "cli", "status": "stopped",
                     "updated_at": "2026-05-30T10:00:00+00:00", "messages_count": 5}),
@@ -290,7 +292,7 @@ async def test_first_prompt_from_archive(tmp_path):
         await pilot.app.push_screen(SessionsScreen(threads_dir=str(tmp_path), system="cli"))
         await pilot.pause()
         text = _rows_text(pilot)
-        assert "исходный вопрос из архива" in text
+        assert "Без названия" in text
         assert "(без заголовка)" not in text
 
 
@@ -436,3 +438,87 @@ async def test_mass_delete_keep_last_cycle(tmp_path):
         await pilot.press("y")
         await pilot.pause()
         assert len(scr._store.list_tasks(limit=100)) == 1
+
+
+# ---------------------------------------------------------------------------
+# Шаг 6: R7 (_title_of → display_name, без _first_prompt) + R10 (ctrl+к/К)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_r7_title_uses_last_actual(tmp_path):
+    """R7: meta.tui.last_actual задан → заголовок = last_actual (не сканирует логи)."""
+    pytest.importorskip("textual")
+    _seed(tmp_path, "la000001", "сырой промпт в логе", last_actual="реализуй спеку X")
+    from tui.screens.sessions import SessionsScreen
+    from tui.app import TuiApp
+    async with TuiApp(threads_dir=str(tmp_path), system="cli").run_test() as pilot:
+        await pilot.app.push_screen(SessionsScreen(threads_dir=str(tmp_path), system="cli"))
+        await pilot.pause()
+        text = _rows_text(pilot)
+        assert "реализуй спеку X" in text
+        assert "сырой промпт в логе" not in text  # логи не сканируются
+
+
+@pytest.mark.asyncio
+async def test_r7_manual_title_over_last_actual(tmp_path):
+    """R7: title приоритетнее last_actual в пикере (как в OSC)."""
+    pytest.importorskip("textual")
+    _seed(tmp_path, "prio0001", "лог-промпт", title="parser bugfix",
+          last_actual="реализуй спеку")
+    from tui.screens.sessions import SessionsScreen
+    from tui.app import TuiApp
+    async with TuiApp(threads_dir=str(tmp_path), system="cli").run_test() as pilot:
+        await pilot.app.push_screen(SessionsScreen(threads_dir=str(tmp_path), system="cli"))
+        await pilot.pause()
+        text = _rows_text(pilot)
+        assert "parser bugfix" in text
+        assert "реализуй спеку" not in text
+
+
+@pytest.mark.asyncio
+async def test_r7_empty_meta_unnamed(tmp_path):
+    """R7: пустой tui (нет title, нет last_actual) → «Без названия» (не «(без заголовка)»)."""
+    pytest.importorskip("textual")
+    _seed(tmp_path, "empty0001", "какой-то промпт")
+    from tui.screens.sessions import SessionsScreen
+    from tui.app import TuiApp
+    async with TuiApp(threads_dir=str(tmp_path), system="cli").run_test() as pilot:
+        await pilot.app.push_screen(SessionsScreen(threads_dir=str(tmp_path), system="cli"))
+        await pilot.pause()
+        text = _rows_text(pilot)
+        assert "Без названия" in text
+        assert "(без заголовка)" not in text
+
+
+@pytest.mark.asyncio
+async def test_r10_ctrl_cyrillic_k_lower_renames(tmp_path):
+    """R10: ctrl+к (русская раскладка) → _rename_selected (паритет с TraceScreen)."""
+    pytest.importorskip("textual")
+    _seed(tmp_path, "rk000001", "промпт", last_actual="имя сессии")
+    from tui.screens.sessions import SessionsScreen
+    from tui.app import TuiApp
+    async with TuiApp(threads_dir=str(tmp_path), system="cli").run_test() as pilot:
+        scr = SessionsScreen(threads_dir=str(tmp_path), system="cli")
+        await pilot.app.push_screen(scr)
+        await pilot.pause()
+        called = []
+        scr._rename_selected = lambda: called.append(1)  # type: ignore[assignment]
+        await pilot.press("ctrl+к")
+        assert called == [1], called
+
+
+@pytest.mark.asyncio
+async def test_r10_ctrl_cyrillic_k_upper_renames(tmp_path):
+    """R10: ctrl+К (Shift, русская раскладка) → _rename_selected."""
+    pytest.importorskip("textual")
+    _seed(tmp_path, "rk000002", "промпт", last_actual="имя сессии")
+    from tui.screens.sessions import SessionsScreen
+    from tui.app import TuiApp
+    async with TuiApp(threads_dir=str(tmp_path), system="cli").run_test() as pilot:
+        scr = SessionsScreen(threads_dir=str(tmp_path), system="cli")
+        await pilot.app.push_screen(scr)
+        await pilot.pause()
+        called = []
+        scr._rename_selected = lambda: called.append(1)  # type: ignore[assignment]
+        await pilot.press("ctrl+К")
+        assert called == [1], called

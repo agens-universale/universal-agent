@@ -11,7 +11,7 @@ import json
 from types import SimpleNamespace
 
 from tests.harbor_support.fakes import bind_os_backend
-from tools.backends.protocol import ExecResult
+from backends.protocol import ExecResult
 from tools.exec.run_python_code import RunPythonCode
 
 
@@ -76,7 +76,9 @@ def test_code_forwarded_raw_no_heredoc_wrapping():
 
 def test_truncation():
     env = json.loads(_tool(_RecordingFakeBackend(stdout="A" * 9000))(code="x", max_output_chars=50))
-    assert len(env["stdout"]) <= 50 and env["truncated"] is True
+    assert env["truncated"] is True
+    assert env["stdout_kept_head_chars"] + env["stdout_kept_tail_chars"] == 50
+    assert "[omitted" in env["stdout"]
 
 
 def test_invalid_code_rejected():

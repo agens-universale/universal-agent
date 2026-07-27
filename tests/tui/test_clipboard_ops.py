@@ -109,3 +109,18 @@ def test_is_ssh_session_env(monkeypatch):
     assert clipboard_ops.is_ssh_session() is False
     monkeypatch.setenv("SSH_CONNECTION", "1 2 3 4")
     assert clipboard_ops.is_ssh_session() is True
+
+
+def test_with_source_cite_file_and_diff():
+    assert clipboard_ops.with_source_cite("code", kind="file", path="a.py") == (
+        "code\n[file: a.py]"
+    )
+    assert clipboard_ops.with_source_cite("+x\n", kind="diff", path="b.py") == (
+        "+x\n[diff: b.py]"
+    )
+
+
+def test_with_source_cite_empty_noop():
+    assert clipboard_ops.with_source_cite("", kind="file", path="a.py") == ""
+    assert clipboard_ops.with_source_cite("code", kind="file", path="") == "code"
+    assert clipboard_ops.with_source_cite("code", kind="file", path="  ") == "code"

@@ -5,6 +5,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 from typing import Any, Optional, Type, TypeVar
 
+from config_modules.agent import exec_output_capture_max_chars_from_config_dict
 from execution_workspace import build_execution_workspace
 
 T = TypeVar("T")
@@ -17,10 +18,12 @@ def local_ctx(config_dict: Optional[dict] = None) -> SimpleNamespace:
     вычищают ``tools.*`` из ``sys.modules`` и переимпортируют пакет — тогда
     module-level ссылка становится чужим классом относительно monkeypatch.
     """
-    from tools.backends.local import LocalFsBackend
+    from backends.local import LocalFsBackend
 
     cfg = dict(config_dict or {})
-    backend = LocalFsBackend()
+    backend = LocalFsBackend(
+        exec_output_capture_max_chars=exec_output_capture_max_chars_from_config_dict(cfg)
+    )
     return SimpleNamespace(
         config_dict=cfg,
         os_backend=backend,

@@ -1,19 +1,32 @@
 """Host implementation of FsBackend (os / open() / subprocess); the host-I/O
 details that used to live inline in the tools are concentrated here."""
+import codecs
 import hashlib
 import os
 import stat as stat_module
 import subprocess
 import sys
+import threading
 from typing import Any, Callable, Dict, Iterable, Optional
 
-from tools.backends.protocol import ExecResult, FsBackend
+from backends.protocol import (
+    DEFAULT_EXEC_OUTPUT_CAPTURE_MAX_CHARS,
+    ExecResult,
+    FsBackend,
+)
 from utils.file_text import read_text_for_edit
 
 
 class LocalFsBackend(FsBackend):
     is_sandbox = False
     default_exec_timeout = None
+
+    def __init__(
+        self,
+        *,
+        exec_output_capture_max_chars: int = DEFAULT_EXEC_OUTPUT_CAPTURE_MAX_CHARS,
+    ) -> None:
+        self.exec_output_capture_max_chars = exec_output_capture_max_chars
 
     # --- stat ---
     def exists(self, path: str) -> bool:
@@ -207,58 +220,214 @@ class LocalFsBackend(FsBackend):
              timeout: Optional[int] = None,
              env: Optional[dict] = None) -> ExecResult:
         merged_env = {**os.environ, **{str(k): str(v) for k, v in env.items()}} if env else None
-        from utils.win_console import preserve_console_mode
-        try:
-            with preserve_console_mode():
-                result = subprocess.run(
-                    command,
-                    shell=True,
-                    capture_output=True,
-                    text=True,
-                    timeout=timeout,
-                    cwd=cwd,
-                    encoding="utf-8",
-                    errors="replace",
-                    env=merged_env,
-                )
-        except subprocess.TimeoutExpired as e:
-            return ExecResult(
-                stdout=str(getattr(e, "stdout", "") or ""),
-                stderr=str(getattr(e, "stderr", "") or ""),
-                return_code=None,
-                timed_out=True,
-            )
-        return ExecResult(
-            stdout=result.stdout or "",
-            stderr=result.stderr or "",
-            return_code=result.returncode,
+        return _run_bounded_process(
+            command,
+            shell=True,
+            cwd=cwd,
+            timeout=timeout,
+            env=merged_env,
+            stdin_text=None,
+            capture_max_chars=self.exec_output_capture_max_chars,
         )
 
     def run_python(self, code: str, *, cwd: Optional[str] = None,
                    timeout: Optional[int] = None,
                    env: Optional[dict] = None) -> ExecResult:
-        from utils.win_console import preserve_console_mode
-        try:
-            with preserve_console_mode():
-                result = subprocess.run(
-                    [sys.executable, "-"],
-                    capture_output=True,
-                    text=True,
-                    timeout=timeout,
-                    env=_sanitize_env(env),
-                    cwd=cwd,
-                    input=code,
-                )
-        except subprocess.TimeoutExpired:
-            return ExecResult(stdout="", stderr="", return_code=None, timed_out=True)
-        return ExecResult(
-            stdout=result.stdout or "",
-            stderr=result.stderr or "",
-            return_code=result.returncode,
+        return _run_bounded_process(
+            [sys.executable, "-u", "-"],
+            shell=False,
+            cwd=cwd,
+            timeout=timeout,
+            env=_sanitize_env(env),
+            stdin_text=code,
+            capture_max_chars=self.exec_output_capture_max_chars,
         )
 
     def default_cwd(self) -> Optional[str]:
         return os.getcwd()
+
+
+# --- bounded process runner (spec D1/D2/D6/D9) ---
+# Потоки stdout/stderr читаются параллельно (thread-per-pipe), иначе большой
+# вывод в один pipe заблокирует другой (deadlock). Буфер ≤ capture_max_chars на
+# поток; после cap — drain & discard (НЕ kill). Без записи на диск.
+
+_READ_CHUNK = 8192
+# После proc.wait: ждём только публикацию captured (≤60k). Обычно уже готово
+# (hit_cap по ходу) или EOF по мелкому остатку в pipe — мгновенно.
+_CAPTURED_READY_TIMEOUT_SEC = 30
+# Discard после cap — fire-and-forget: данные уже в sink. Короткий join, чтобы
+# не копить зомби-треды на типичном хвосте; если discard долгий — уходим с
+# captured, reader дочитает в фоне (non-daemon).
+_DRAIN_JOIN_TIMEOUT_SEC = 2
+
+
+def _drain_pipe(pipe, capture_max_chars: int, on_captured=None) -> tuple[str, bool]:
+    """Прочитать ``pipe`` в строку ≤ ``capture_max_chars``; дальше слить в никуда.
+
+    ``on_captured(text, hit_cap)`` вызывается ровно один раз — сразу после заполнения
+    буфера (в т.ч. при hit_cap, *до* конца discard), чтобы caller не ждал drain.
+
+    Возвращает ``(text, hit_cap)``. Инкрементальный UTF-8 декодер (errors=replace)
+    безопасно обрабатывает многобайтовые границы чанков.
+    """
+    decoder = codecs.lookup("utf-8").incrementaldecoder(errors="replace")
+    parts: list[str] = []
+    total = 0
+    hit_cap = False
+    published = False
+
+    def _publish() -> None:
+        nonlocal published
+        if published:
+            return
+        published = True
+        if on_captured is not None:
+            on_captured("".join(parts), hit_cap)
+
+    try:
+        while True:
+            chunk = pipe.read(_READ_CHUNK)
+            if not chunk:
+                break
+            if not hit_cap:
+                decoded = decoder.decode(chunk)
+                room = capture_max_chars - total
+                if room <= 0:
+                    hit_cap = True
+                    _publish()
+                elif len(decoded) <= room:
+                    parts.append(decoded)
+                    total += len(decoded)
+                else:
+                    parts.append(decoded[:room])
+                    total = capture_max_chars
+                    hit_cap = True
+                    _publish()
+            # после hit_cap продолжаем читать (drain & discard), чтобы pipe не
+            # заблокировал процесс и не повесил его запись.
+    finally:
+        try:
+            pipe.close()
+        except Exception:
+            pass
+        # финализируем декодер (flush возможного неполного остатка — только если
+        # не hit cap; при hit cap хвост отброшен по определению).
+        if not hit_cap:
+            parts.append(decoder.decode(b"", final=True))
+        _publish()
+    return "".join(parts), hit_cap
+
+
+def _run_bounded_process(
+    args,
+    *,
+    shell: bool,
+    cwd: Optional[str],
+    timeout: Optional[int],
+    env: Optional[Dict[str, str]],
+    stdin_text: Optional[str],
+    capture_max_chars: int,
+) -> ExecResult:
+    """Запустить процесс с bounded-буфером на stdout/stderr (thread-per-pipe).
+
+    ``stdin_text`` — опциональный ввод (run_python); ``None`` → stdin=DEVNULL.
+    Timeout: kill процесса, ``timed_out=True``, ``return_code=None``, partial-буфер.
+    Captured публикуется сразу по заполнению cap — не ждём конца discard.
+    """
+    from utils.win_console import preserve_console_mode
+
+    stdin_arg = subprocess.PIPE if stdin_text is not None else subprocess.DEVNULL
+    with preserve_console_mode():
+        proc = subprocess.Popen(
+            args,
+            shell=shell,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            stdin=stdin_arg,
+            cwd=cwd,
+            env=env,
+            bufsize=0,
+        )
+
+    stdout_buf: list[str] = []
+    stderr_buf: list[str] = []
+    stdout_hit = [False]
+    stderr_hit = [False]
+    stdout_ready = threading.Event()
+    stderr_ready = threading.Event()
+
+    def _reader(
+        pipe,
+        sink: list[str],
+        hit_flag: list[bool],
+        ready: threading.Event,
+    ) -> None:
+        def on_captured(text: str, hit: bool) -> None:
+            if not sink:
+                sink.append(text)
+                hit_flag[0] = hit
+            ready.set()
+
+        try:
+            _drain_pipe(pipe, capture_max_chars, on_captured=on_captured)
+        finally:
+            if not sink:
+                sink.append("")
+            ready.set()
+
+    t_out = threading.Thread(
+        target=_reader, args=(proc.stdout, stdout_buf, stdout_hit, stdout_ready)
+    )
+    t_err = threading.Thread(
+        target=_reader, args=(proc.stderr, stderr_buf, stderr_hit, stderr_ready)
+    )
+    t_out.start()
+    t_err.start()
+
+    try:
+        if stdin_text is not None and proc.stdin is not None:
+            try:
+                proc.stdin.write(stdin_text.encode("utf-8"))
+            except (BrokenPipeError, OSError):
+                pass
+            finally:
+                try:
+                    proc.stdin.close()
+                except Exception:
+                    pass
+
+        proc.wait(timeout=timeout)
+        return_code: Optional[int] = proc.returncode
+        timed_out = False
+    except subprocess.TimeoutExpired:
+        timed_out = True
+        return_code = None
+        try:
+            proc.kill()
+        except Exception:
+            pass
+        try:
+            proc.wait(timeout=5)
+        except Exception:
+            pass
+
+    # Captured уже в sink после on_captured — не блокируемся на discard гигабайта.
+    stdout_ready.wait(timeout=_CAPTURED_READY_TIMEOUT_SEC)
+    stderr_ready.wait(timeout=_CAPTURED_READY_TIMEOUT_SEC)
+    # Параллельный короткий join: типичный хвост pipe дочитается; долгий discard
+    # не удерживает tool-call (reader продолжит в фоне).
+    t_out.join(timeout=_DRAIN_JOIN_TIMEOUT_SEC)
+    t_err.join(timeout=_DRAIN_JOIN_TIMEOUT_SEC)
+
+    return ExecResult(
+        stdout=stdout_buf[0] if stdout_buf else "",
+        stderr=stderr_buf[0] if stderr_buf else "",
+        return_code=return_code,
+        timed_out=timed_out,
+        stdout_hit_capture_cap=stdout_hit[0],
+        stderr_hit_capture_cap=stderr_hit[0],
+    )
 
 
 # --- python-subprocess env allowlist (moved from run_python_code.py) ---

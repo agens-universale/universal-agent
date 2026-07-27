@@ -11,7 +11,7 @@ from types import SimpleNamespace
 import pytest
 
 from tests.harbor_support.fakes import FakeBackend, bind_os_backend, strip_path_fields
-from tools.backends.local import LocalFsBackend
+from backends.local import LocalFsBackend
 from tools.fs.append_to_file import AppendToFile
 
 EXISTING_CONTENT = "hello world"

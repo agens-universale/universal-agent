@@ -4,10 +4,15 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from config_modules.agent import DEFAULT_EXEC_TIMEOUT_SEC, exec_timeout_from_config_dict
-from constants.tool_names import EXEC_PYTHON_NAME
+from constants.tool_names import EXEC_PYTHON_NAME, READ_STORED_TOOL_OUTPUT_NAME
 from security.command_guard import enforce_command_guard
 from security.command_moderation import effective_command_cwd, moderate_command_execution
 from security.path_policy import resolve_tool_context
+from tools.exec.stream_preview import (
+    apply_stream_meta_to_envelope,
+    clamp_max_output_chars,
+    process_exec_stream,
+)
 from tools.simple_tool_base import AbstractSimpleTool
 from utils.directory_write_access import directory_allows_probe_write
 
@@ -30,9 +35,8 @@ class RunPythonCode(AbstractSimpleTool):
             "type": "function",
             "name": "exec_python",
             "description": (
-                "Runs Python code synchronously (no background) in a subprocess and returns a JSON string envelope "
-                "with: tool, ok, return_code, timed_out, truncated, error, then stdout/stderr last. "
-                "stdout/stderr are truncated to max_output_chars each."
+                "Run Python code synchronously in a subprocess. "
+                "Returns JSON with ok, return_code, stdout, stderr."
             ),
             "parameters": {
                 "type": "object",
@@ -51,12 +55,6 @@ class RunPythonCode(AbstractSimpleTool):
                             f"Default is {DEFAULT_EXEC_TIMEOUT_SEC} (agent.exec_timeout_sec)."
                         ),
                         "default": DEFAULT_EXEC_TIMEOUT_SEC,
-                        "minimum": 1,
-                    },
-                    "max_output_chars": {
-                        "type": "integer",
-                        "description": "Max chars returned for stdout and stderr each.",
-                        "default": 4000,
                         "minimum": 1,
                     },
                     "cwd": {
@@ -94,10 +92,10 @@ class RunPythonCode(AbstractSimpleTool):
     def prompt_description(cls):
         description = (
             '''Tool name: exec_python
-Tool description: Runs a Python code snippet in a subprocess and returns stdout/stderr as JSON.
+Tool description: Run Python in a subprocess; returns JSON with return_code, stdout, stderr.
 Input schema: {"type": "object", "properties": {"code": {"type": "string", "description": "Python code to execute."}, "timeout_seconds": {"type": "integer", "description": "Execution timeout in seconds.", "default": '''
             + str(DEFAULT_EXEC_TIMEOUT_SEC)
-            + '''}, "max_output_chars": {"type":"integer","description":"Max chars for stdout/stderr each.","default": 4000}, "cwd": {"type":"string","description":"Working directory (optional)"}, "env_vars": {"type":"array","description":"Env overrides as [{'name','value'}]","items":{"type":"object","properties":{"name":{"type":"string"},"value":{"type":"string"}},"required":["name","value"],"additionalProperties":false}}} , "required": ["code"], "additionalProperties": false}
+            + '''}, "cwd": {"type":"string","description":"Working directory (optional)"}, "env_vars": {"type":"array","description":"Env overrides as [{'name','value'}]","items":{"type":"object","properties":{"name":{"type":"string"},"value":{"type":"string"}},"required":["name","value"],"additionalProperties":false}}} , "required": ["code"], "additionalProperties": false}
 
 Usage:
 - Use this tool to execute small, self-contained Python scripts that do not require interaction.
@@ -123,12 +121,24 @@ Return format (JSON string):
         return description
 
     @staticmethod
-    def _truncate_text(text: str, limit: int) -> tuple[str, bool]:
-        if limit <= 0:
-            return "", False
-        if len(text) <= limit:
-            return text, False
-        return text[:limit], True
+    def _process_stream(
+        captured: str,
+        max_output_chars: int,
+        *,
+        hit_capture_cap: bool,
+        state,
+        call_id,
+        tool_name: str,
+    ) -> dict:
+        """D3+D4+D5: head+tail preview + optional store.put + output_ref."""
+        return process_exec_stream(
+            captured,
+            max_output_chars,
+            hit_capture_cap=hit_capture_cap,
+            state=state,
+            call_id=call_id,
+            tool_name=tool_name,
+        )
 
     @staticmethod
     def _result(
@@ -140,20 +150,28 @@ Return format (JSON string):
         stdout: str,
         stderr: str,
         error: Optional[Dict[str, Any]] = None,
+        stdout_meta: Optional[dict] = None,
+        stderr_meta: Optional[dict] = None,
     ) -> str:
-        return json.dumps(
-            {
-                "tool": RunPythonCode.registered_tool_name(),
-                "ok": ok,
-                "return_code": return_code,
-                "timed_out": timed_out,
-                "truncated": truncated,
-                "error": error,
-                "stdout": stdout,
-                "stderr": stderr,
-            },
-            ensure_ascii=False,
-        )
+        envelope: dict = {
+            "tool": RunPythonCode.registered_tool_name(),
+            "ok": ok,
+            "return_code": return_code,
+            "timed_out": timed_out,
+            "truncated": truncated,
+            "error": error,
+            "stdout": stdout,
+            "stderr": stderr,
+        }
+        apply_stream_meta_to_envelope(envelope, "stdout", stdout_meta)
+        apply_stream_meta_to_envelope(envelope, "stderr", stderr_meta)
+        if envelope.get("stdout_output_ref") or envelope.get("stderr_output_ref"):
+            envelope["hint"] = (
+                "stdout/stderr shown as start+end preview. "
+                f"Page full captured stream via {READ_STORED_TOOL_OUTPUT_NAME} "
+                "using stdout_output_ref / stderr_output_ref."
+            )
+        return json.dumps(envelope, ensure_ascii=False)
 
     def _command_moderation_blocked_result(
         self,
@@ -234,6 +252,7 @@ Return format (JSON string):
                 stderr="",
                 error={"type": "invalid_argument", "field": "max_output_chars"},
             )
+        max_output_chars = clamp_max_output_chars(max_output_chars, self._config_dict)
 
         if cwd is not None and (not isinstance(cwd, str) or not cwd.strip()):
             return self._result(
@@ -375,22 +394,36 @@ Return format (JSON string):
                 stderr="",
                 error={"type": "execution_failed", "message": str(e)},
             )
+        stdout_meta = self._process_stream(
+            res.stdout or "",
+            max_output_chars,
+            hit_capture_cap=getattr(res, "stdout_hit_capture_cap", False),
+            state=self._state,
+            call_id=self._call_id,
+            tool_name=RunPythonCode.registered_tool_name(),
+        )
+        stderr_meta = self._process_stream(
+            res.stderr or "",
+            max_output_chars,
+            hit_capture_cap=getattr(res, "stderr_hit_capture_cap", False),
+            state=self._state,
+            call_id=self._call_id,
+            tool_name=RunPythonCode.registered_tool_name(),
+        )
+        truncated = stdout_meta["truncated"] or stderr_meta["truncated"]
+
         if res.timed_out:
             return self._result(
                 ok=False,
                 return_code=None,
                 timed_out=True,
-                truncated=False,
-                stdout="",
-                stderr="",
+                truncated=truncated,
+                stdout=stdout_meta["text"],
+                stderr=stderr_meta["text"],
                 error={"type": "timeout", "message": f"Execution timed out after {effective_timeout} seconds"},
+                stdout_meta=stdout_meta,
+                stderr_meta=stderr_meta,
             )
-
-        stdout_raw = res.stdout or ""
-        stderr_raw = res.stderr or ""
-        stdout, stdout_trunc = self._truncate_text(stdout_raw.rstrip(), max_output_chars)
-        stderr, stderr_trunc = self._truncate_text(stderr_raw.rstrip(), max_output_chars)
-        truncated = stdout_trunc or stderr_trunc
 
         return_code = res.return_code
         ok = return_code == 0
@@ -404,8 +437,10 @@ Return format (JSON string):
             return_code=return_code,
             timed_out=False,
             truncated=truncated,
-            stdout=stdout,
-            stderr=stderr,
+            stdout=stdout_meta["text"],
+            stderr=stderr_meta["text"],
             error=error,
+            stdout_meta=stdout_meta,
+            stderr_meta=stderr_meta,
         )
 

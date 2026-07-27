@@ -219,6 +219,8 @@ async def test_diff_screen_enter_opens_viewer(tmp_path, launch_root):
         assert "[a] принять" in footer
         assert "[r] откатить" in footer
         assert "[Ctrl+a] принять все" in footer
+        assert pilot.app.screen.clipboard_source_cite() == ("diff", "src/foo.py")
+
 
 
 @pytest.mark.asyncio
@@ -697,3 +699,229 @@ async def test_diff_screen_esc_returns(tmp_path, launch_root):
         await pilot.press("escape")
         await pilot.pause()
         assert isinstance(pilot.app.screen, TraceScreen)
+
+
+# --- SPEC §5 шаг 4: `f` → push full-viewer, Esc=pop, footer [f] ----------
+
+@pytest.mark.asyncio
+async def test_diff_viewer_footer_has_f_hint(tmp_path, launch_root):
+    """На адаптивном viewer footer содержит подсказку [f]."""
+    pytest.importorskip("textual")
+    from tui.app import TuiApp
+    from tui.screens.diff import DiffScreen, DiffViewerScreen
+    from textual.widgets import Static
+
+    _seed_pending(launch_root, str(tmp_path / "threads"))
+    cfg = _cfg(launch_root)
+    async with TuiApp(
+        threads_dir=str(tmp_path / "threads"), system="cli", config=cfg
+    ).run_test() as pilot:
+        await pilot.app.push_screen(
+            DiffScreen(launch_root=str(launch_root), config=cfg, **_diff_kwargs(tmp_path))
+        )
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+        assert isinstance(pilot.app.screen, DiffViewerScreen)
+        footer = str(pilot.app.screen.query_one("#footer", Static).render())
+        assert "[f]" in footer
+
+
+@pytest.mark.asyncio
+async def test_f_pushes_full_viewer_and_not_again(tmp_path, launch_root):
+    """`f` на адаптивном → push full-viewer; повторный `f` на full не пушит (D3)."""
+    pytest.importorskip("textual")
+    from tui.app import TuiApp
+    from tui.screens.diff import DiffScreen, DiffViewerScreen
+
+    _seed_pending(launch_root, str(tmp_path / "threads"))
+    cfg = _cfg(launch_root)
+    async with TuiApp(
+        threads_dir=str(tmp_path / "threads"), system="cli", config=cfg
+    ).run_test() as pilot:
+        await pilot.app.push_screen(
+            DiffScreen(launch_root=str(launch_root), config=cfg, **_diff_kwargs(tmp_path))
+        )
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+        first = pilot.app.screen
+        assert isinstance(first, DiffViewerScreen)
+        assert first.mode == "adaptive"
+        await pilot.press("f")
+        await pilot.pause()
+        second = pilot.app.screen
+        assert isinstance(second, DiffViewerScreen)
+        assert second.mode == "full"
+        assert second is not first
+        # повторный `f` на full — не пушим ещё один слой
+        await pilot.press("f")
+        await pilot.pause()
+        assert pilot.app.screen is second
+
+
+@pytest.mark.asyncio
+async def test_esc_from_full_returns_to_adaptive(tmp_path, launch_root):
+    """Esc на full → pop на адаптивный; ещё Esc → список (стек pop, не toggle)."""
+    pytest.importorskip("textual")
+    from tui.app import TuiApp
+    from tui.screens.diff import DiffScreen, DiffViewerScreen
+
+    _seed_pending(launch_root, str(tmp_path / "threads"))
+    cfg = _cfg(launch_root)
+    async with TuiApp(
+        threads_dir=str(tmp_path / "threads"), system="cli", config=cfg
+    ).run_test() as pilot:
+        await pilot.app.push_screen(
+            DiffScreen(launch_root=str(launch_root), config=cfg, **_diff_kwargs(tmp_path))
+        )
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+        await pilot.press("f")
+        await pilot.pause()
+        assert pilot.app.screen.mode == "full"
+        await pilot.press("escape")
+        await pilot.pause()
+        assert isinstance(pilot.app.screen, DiffViewerScreen)
+        assert pilot.app.screen.mode == "adaptive"
+        await pilot.press("escape")
+        await pilot.pause()
+        assert isinstance(pilot.app.screen, DiffScreen)
+
+
+@pytest.mark.asyncio
+async def test_full_viewer_approve_closes_stack(tmp_path, launch_root):
+    """a/r на full → действие + закрытие viewer-стека до списка (D3)."""
+    pytest.importorskip("textual")
+    from tui.app import TuiApp
+    from tui.screens.diff import DiffScreen, DiffViewerScreen
+
+    _seed_pending(launch_root, str(tmp_path / "threads"))
+    cfg = _cfg(launch_root)
+    async with TuiApp(
+        threads_dir=str(tmp_path / "threads"), system="cli", config=cfg
+    ).run_test() as pilot:
+        scr = DiffScreen(launch_root=str(launch_root), config=cfg, **_diff_kwargs(tmp_path))
+        await pilot.app.push_screen(scr)
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+        await pilot.press("f")
+        await pilot.pause()
+        assert pilot.app.screen.mode == "full"
+        await pilot.press("a")
+        await pilot.pause()
+        # viewer-стек закрыт полностью → DiffScreen
+        assert isinstance(pilot.app.screen, DiffScreen)
+        assert scr._entries == []
+        assert (launch_root / "src" / "foo.py").read_text(encoding="utf-8") == "changed\n"
+
+
+@pytest.mark.asyncio
+async def test_full_viewer_undo_restores(tmp_path, launch_root):
+    pytest.importorskip("textual")
+    from tui.app import TuiApp
+    from tui.screens.diff import DiffScreen, DiffViewerScreen
+
+    _seed_pending(launch_root, str(tmp_path / "threads"))
+    cfg = _cfg(launch_root)
+    target = launch_root / "src" / "foo.py"
+    async with TuiApp(
+        threads_dir=str(tmp_path / "threads"), system="cli", config=cfg
+    ).run_test() as pilot:
+        await pilot.app.push_screen(
+            DiffScreen(launch_root=str(launch_root), config=cfg, **_diff_kwargs(tmp_path))
+        )
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+        await pilot.press("f")
+        await pilot.pause()
+        await pilot.press("r")
+        await pilot.pause()
+        assert isinstance(pilot.app.screen, DiffScreen)
+        assert target.read_text(encoding="utf-8") == "base\n"
+
+
+@pytest.mark.asyncio
+async def test_full_viewer_ctrl_a_approves_all(tmp_path, launch_root):
+    pytest.importorskip("textual")
+    from tui.app import TuiApp
+    from tui.screens.diff import DiffScreen, DiffViewerScreen
+    from diff_tui.store import DiffStore
+
+    _seed_pending(launch_root, str(tmp_path / "threads"))
+    other = launch_root / "src" / "bar.py"
+    other.write_text("base2\n", encoding="utf-8")
+    DiffStore(str(launch_root)).register_mutation(str(other))
+    other.write_text("changed2\n", encoding="utf-8")
+    from diff_tui.touched import TouchedJournal
+    TouchedJournal(str(tmp_path / "threads"), "cli", "t1").add("src/bar.py")
+
+    cfg = _cfg(launch_root)
+    async with TuiApp(
+        threads_dir=str(tmp_path / "threads"), system="cli", config=cfg
+    ).run_test() as pilot:
+        scr = DiffScreen(launch_root=str(launch_root), config=cfg, **_diff_kwargs(tmp_path))
+        await pilot.app.push_screen(scr)
+        await pilot.pause()
+        assert len(scr._entries) == 2
+        await pilot.press("enter")
+        await pilot.pause()
+        await pilot.press("f")
+        await pilot.pause()
+        await pilot.press("ctrl+a")
+        await pilot.pause()
+        assert isinstance(pilot.app.screen, DiffScreen)
+        assert scr._entries == []
+
+
+@pytest.mark.asyncio
+async def test_f_ru_layout_alias(tmp_path, launch_root):
+    """ЙЦУКЕН: «а» (физическая клавиша F) = `f` → push full-viewer."""
+    pytest.importorskip("textual")
+    from tui.app import TuiApp
+    from tui.screens.diff import DiffScreen, DiffViewerScreen
+
+    _seed_pending(launch_root, str(tmp_path / "threads"))
+    cfg = _cfg(launch_root)
+    async with TuiApp(
+        threads_dir=str(tmp_path / "threads"), system="cli", config=cfg
+    ).run_test() as pilot:
+        await pilot.app.push_screen(
+            DiffScreen(launch_root=str(launch_root), config=cfg, **_diff_kwargs(tmp_path))
+        )
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+        # «а» в ЙЦУКЕН на физической клавише F
+        await pilot.press("а")
+        await pilot.pause()
+        assert isinstance(pilot.app.screen, DiffViewerScreen)
+        assert pilot.app.screen.mode == "full"
+
+
+@pytest.mark.asyncio
+async def test_full_viewer_header_marks_full(tmp_path, launch_root):
+    """Header на full-viewer содержит «полный файл»."""
+    pytest.importorskip("textual")
+    from tui.app import TuiApp
+    from tui.screens.diff import DiffScreen, DiffViewerScreen
+    from textual.widgets import Static
+
+    _seed_pending(launch_root, str(tmp_path / "threads"))
+    cfg = _cfg(launch_root)
+    async with TuiApp(
+        threads_dir=str(tmp_path / "threads"), system="cli", config=cfg
+    ).run_test() as pilot:
+        await pilot.app.push_screen(
+            DiffScreen(launch_root=str(launch_root), config=cfg, **_diff_kwargs(tmp_path))
+        )
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+        await pilot.press("f")
+        await pilot.pause()
+        header = str(pilot.app.screen.query_one("#header-left", Static).render())
+        assert "полный файл" in header

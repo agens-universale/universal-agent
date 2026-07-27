@@ -146,7 +146,7 @@ def minimal_config_dict(monkeypatch, tmp_path):
     monkeypatch.setattr(
         rc,
         "build_tools_data",
-        lambda cfg, on_progress=None: (
+        lambda cfg, on_progress=None, **_kwargs: (
             {"tool_a": {}, "tool_b": {}},
             [],
             [],

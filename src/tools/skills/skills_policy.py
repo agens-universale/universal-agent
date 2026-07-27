@@ -16,9 +16,8 @@ def render_skills_catalog(skills_list: list[dict]) -> str:
     whole-task candidates alongside standalone skills, without ranking one
     above the other.
 
-    Only id + description (+ pack_size for bootstraps) are surfaced: the
-    agent routes by id and judges fit by description. name/source/pack_id
-    are intentionally omitted (not needed to route; avoid prompt bloat).
+    Each entry also exposes its backend-visible location so the agent can read
+    skill files through ordinary filesystem tools when needed.
     """
     bootstraps = sorted(
         (s for s in skills_list if s.get("is_pack_bootstrap")),
@@ -58,6 +57,9 @@ def render_skills_catalog(skills_list: list[dict]) -> str:
         )
         for s in bootstraps:
             line = f"- {s.get('id', '')} — {s.get('description', '')}"
+            location = s.get("location", "")
+            if location:
+                line += f" <location>{location}</location>"
             size = s.get("pack_size")
             if size is not None:
                 line += f" (pack size: {size})"
@@ -67,6 +69,10 @@ def render_skills_catalog(skills_list: list[dict]) -> str:
         lines.append("")
         lines.append("## Standalone skills")
         for s in flats:
-            lines.append(f"- {s.get('id', '')} — {s.get('description', '')}")
+            line = f"- {s.get('id', '')} — {s.get('description', '')}"
+            location = s.get("location", "")
+            if location:
+                line += f" <location>{location}</location>"
+            lines.append(line)
 
     return "\n".join(lines)

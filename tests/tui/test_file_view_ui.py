@@ -199,7 +199,7 @@ async def test_view_get_selected_text_returns_window_lines(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_view_get_selected_text_uses_mouse_selection(tmp_path):
+async def test_view_get_selected_text_uses_mouse_selection(tmp_path, monkeypatch):
     """Мышиное/программное выделение в TextArea имеет приоритет над fallback."""
     pytest.importorskip("textual")
     f = tmp_path / "sel.txt"
@@ -218,6 +218,11 @@ async def test_view_get_selected_text_uses_mouse_selection(tmp_path):
         body.selection = Selection((0, 0), (0, 5))
         assert body.selected_text == "alpha"
         assert viewer.get_selected_text() == "alpha"
+        # cwd экрана = каталог файла → относительный cite (как у diff).
+        viewer._cwd = str(tmp_path)
+        assert viewer.clipboard_source_cite() == ("file", "sel.txt")
+        monkeypatch.setattr(pilot.app, "_current_selection", lambda: "alpha")
+        assert pilot.app._clipboard_payload() == "alpha\n[file: sel.txt]"
 
 
 @pytest.mark.asyncio
@@ -239,6 +244,7 @@ async def test_view_get_selected_text_empty_when_no_window(tmp_path):
         app.push_screen(viewer)
         await pilot.pause()
         assert viewer.get_selected_text() == ""
+        assert viewer.clipboard_source_cite() is None
 
 
 @pytest.mark.asyncio

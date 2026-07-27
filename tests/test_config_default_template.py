@@ -48,9 +48,6 @@ INTENTIONAL_TEMPLATE_OVERRIDES: set = {
     "security.read_guard.denied_file_patterns", # защита от чтения .env, id_rsa и т.п.
     "security.read_guard.denied_extensions",    # защита от чтения .key/.pfx/.jks
 
-    # --- Пришло из master вместе с фичами; шаблон там разошёлся со схемой ---
-    # Значения не трогаем (шаблон — зона master), но фиксируем расхождение явно.
-    "diff_tui.preview_context_lines",           # 6 в шаблоне против 3 в схеме и demo_config.yml
     "pricing.enabled",                          # true при нулевых ставках ниже
     "pricing.input",                            # 0 — шаблон предлагает вписать реальные ставки
     "pricing.output",                           # 0 — но включённый pricing с нулями даёт startup-notice
@@ -71,12 +68,15 @@ EXPERT_ONLY_KEYS: set = {
     "agent.tool_output_inline_max_chars",     # лимит инлайн-вывода тула (байты контекста)
     "agent.stored_tool_outputs_max_entries",  # размер стора больших tool-outputs
     "agent.exec_timeout_sec",                # таймаут execute_command / run_python_code
+    "agent.exec_output_capture_max_chars",   # RAM-cap stdout/stderr на поток для exec
     "agent.limit_project_metadata",           # скрыть проектные метаданные из системного промпта
     # Списки по умолчанию пусты; наполнение — проектный оверлей (.gc/config.yml)
     "agent.disable_skills",
     # Синтетические поля tool schema — инжект description к параметру «reason»;
     # задаётся под конкретную модель / промпт.
     "agent.inject_tool_fields",
+    # Model steering → special_instructions; строка специфичных инструкций для модели.
+    "agent.model_steering",
 
     # --- agent_auth: корпоративная сертификатная авторизация ---
     # Секция целиком — корп-сценарий mTLS; wiring через runbook, не для публичного шаблона.

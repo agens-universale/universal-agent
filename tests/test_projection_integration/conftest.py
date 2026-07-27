@@ -108,6 +108,7 @@ def capture_outbound(monkeypatch):
         runtime_notices_enabled=False,
         notice_url=None,
         timeout=600,
+        config_proxy=None,
     ):
         payload = payload_factory(initial_max_tokens)
         captured["payload"] = payload

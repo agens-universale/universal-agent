@@ -65,6 +65,9 @@ backend:
   # HTTP-таймаут одного запроса к LLM (секунды). Дефолт 600 (10 минут).
   # При стриме лимит — на connect и на паузу между чанками, не на весь ответ.
   request_timeout_sec: 600
+  # HTTP/SOCKS-прокси для backend-вызовов. null/пусто → из env
+  # (HTTPS_PROXY/HTTP_PROXY/ALL_PROXY). Пример: "socks5h://proxy.example:1080"
+  proxy: null
 
 # Динамическая авторизация GigaCode (альтернатива статическому Bearer в
 # backend.chat_completion_headers). Токен запрашивается у auth_endpoint и
@@ -133,11 +136,15 @@ update:
 # Diff-TUI: visual review/approve/undo правок агента в /diff (не параметры fs return_diff).
 diff_tui:
   cache_max_orig: 500          # LRU лимит .orig в cache-mode
-  preview_context_lines: 3     # контекст в TUI visual diff / trace-preview
+  preview_context_lines: 50    # контекст в TUI visual diff / trace-preview
+  full_file_max_lines: 300     # порог «весь файл» vs preview (adaptive)
   max_diff_chars: 100000       # усечение больших visual diff (0 = без лимита)
 
 agent:
   model: MiniMax-M2.7
+  # Model steering → append в <special_instructions> (для любой активной модели).
+  # model_steering: |
+  #   Prefer the next concrete action over a broad survey; targeted reads that unlock that action are fine.
   system_prompt_id: v1
   use_server_subagents: false
   use_local_subagents: true
@@ -166,6 +173,8 @@ agent:
   # Дефолтный таймаут execute_command / run_python_code (сек), если модель
   # не передала timeout_seconds. Harbor/длинные бенчи обычно ставят 600.
   exec_timeout_sec: 120
+  # Потолок RAM-буфера stdout/stderr на поток (decoded UTF-8 chars) для exec.
+  exec_output_capture_max_chars: 60000
   inject_tool_fields:
     reason: "Brief rationale (1–2 sentences): goal, why now, expected outcome."
 
@@ -232,7 +241,7 @@ working_memory:
 # Technical hints о памяти (tool_usage_notice, long memory)
 tool_usage_notice:
   - tool_name: session_memory
-    step_messages_count: 10
+    step_messages_count: 16
     notice_message: "You have not used session memory for some steps. Review/update thread memory if needed."
 project_memory:
   enable_project_memory_notice: true

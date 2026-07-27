@@ -13,9 +13,10 @@ from utils.prod_auth import AuthConnector
 from utils.logging_module import create_run_logger
 from utils.logging_module import generate_run_id
 from tools import build_tools_data
+from tools.skills.registry import SkillsRegistry, get_skills_registry
 from execution_workspace import ExecutionWorkspace, build_execution_workspace
-from tools.backends.factory import resolve_os_backend
-from tools.backends.protocol import FsBackend
+from backends.factory import resolve_os_backend
+from backends.protocol import FsBackend
 from config_modules.env_vars import project_gc_dir as _resolve_project_gc_dir
 
 
@@ -49,6 +50,7 @@ class RunContext:
     tools_spec: List[Dict[str, Any]]
     tools_description: List[str]
     os_backend: FsBackend
+    skills_registry: SkillsRegistry
     workspace: ExecutionWorkspace
     mcp_status: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     project_gc_dir: Path = field(default_factory=lambda: Path("."))
@@ -80,7 +82,19 @@ def create_run_context(
     - ``is_tui=True`` + LocalFsBackend → ``TrackingFsBackend`` (Diff journal/snapshot).
     """
     effective_run_id = run_id or generate_run_id()
-    tools_data, tools_spec, tools_description, mcp_status = build_tools_data(config_dict, on_progress=on_progress)
+    backend = resolve_os_backend(
+        config_dict,
+        environment=environment,
+        loop=loop,
+        override=os_backend,
+    )
+    skills_registry = get_skills_registry(config_dict, backend=backend)
+    tools_data, tools_spec, tools_description, mcp_status = build_tools_data(
+        config_dict,
+        on_progress=on_progress,
+        os_backend=backend,
+        skills_registry=skills_registry,
+    )
 
     run_logger, logging_path, summary_trace_path = create_run_logger(
         config_dict, run_id=effective_run_id, agent_kind="main"
@@ -109,12 +123,6 @@ def create_run_context(
     )
 
     chat_completions_llm = chat_completions_llm_from_config_dict(config_dict)
-    backend = resolve_os_backend(
-        config_dict,
-        environment=environment,
-        loop=loop,
-        override=os_backend,
-    )
     workspace = build_execution_workspace(backend, config_dict)
 
     ctx = RunContext(
@@ -133,6 +141,7 @@ def create_run_context(
         project_gc_dir=_resolve_project_gc_dir(),
         environment=environment,
         os_backend=backend,
+        skills_registry=skills_registry,
         workspace=workspace,
         on_stream_delta=on_stream_delta,
     )

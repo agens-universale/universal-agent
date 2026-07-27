@@ -107,7 +107,7 @@ def test_search_alternation_cyrillic(tmp_path):
     assert [m["line"] for m in data["matches"]] == [1, 2, 3]
 
 
-def test_search_validation_and_directory_error(tmp_path):
+def test_search_validation_and_file_path(tmp_path):
     tool = with_local_ctx(SearchFiles)
     bad_regex_type = json.loads(tool(path=str(tmp_path), regex=123))  # type: ignore[arg-type]
     assert bad_regex_type["ok"] is False and bad_regex_type["error"]["field"] == "regex"
@@ -115,9 +115,16 @@ def test_search_validation_and_directory_error(tmp_path):
     coalesced_pattern = json.loads(tool(path=str(tmp_path), regex="x", file_pattern=1))  # type: ignore[arg-type]
     assert coalesced_pattern["ok"] is True and coalesced_pattern["file_pattern"] is None
     f = tmp_path / "single.txt"
-    f.write_text("x", encoding="utf-8")
-    not_dir = json.loads(tool(path=str(f), regex="x"))
-    assert not_dir["ok"] is False and not_dir["error"]["type"] == "not_a_directory"
+    f.write_text("alpha\nbeta x\ngamma\n", encoding="utf-8")
+    # path may be a single file (no not_a_directory)
+    hit = json.loads(tool(path=str(f), regex="x"))
+    assert hit["ok"] is True
+    assert hit["total_matches"] == 1
+    assert hit["matches"][0]["line"] == 2
+    assert hit["matches"][0]["file"].endswith("single.txt")
+    # file_pattern is ignored for a file path
+    ignored_pattern = json.loads(tool(path=str(f), regex="alpha", file_pattern="*.md"))
+    assert ignored_pattern["ok"] is True and ignored_pattern["total_matches"] == 1
 
 
 def test_search_binary_file_does_not_crash(tmp_path):
@@ -128,4 +135,64 @@ def test_search_binary_file_does_not_crash(tmp_path):
     assert res["total_matches"] >= 1
     files = {m["file"] for m in res["matches"]}
     assert any("text.txt" in f for f in files)
+
+
+def test_search_context_symmetric_before_and_after(tmp_path):
+    """context = up to 5 lines before + match line + up to 5 lines after."""
+    lines = [f"L{i}\n" for i in range(1, 16)]
+    lines[7] = "TARGET_LINE\n"  # line 8
+    (tmp_path / "c.txt").write_text("".join(lines), encoding="utf-8")
+    data = json.loads(with_local_ctx(SearchFiles)(path=str(tmp_path), regex="TARGET_LINE"))
+    assert data["ok"] is True and data["total_matches"] == 1
+    m = data["matches"][0]
+    assert m["line"] == 8
+    ctx_lines = m["context"].splitlines(keepends=True)
+    assert ctx_lines == [
+        "L3\n",
+        "L4\n",
+        "L5\n",
+        "L6\n",
+        "L7\n",
+        "TARGET_LINE\n",
+        "L9\n",
+        "L10\n",
+        "L11\n",
+        "L12\n",
+        "L13\n",
+    ]
+
+
+def test_search_context_edges_and_nearby_matches(tmp_path):
+    (tmp_path / "e.txt").write_text(
+        "A\nB\nHIT1\nC\nHIT2\nD\nE\nF\nG\nH\nI\n",
+        encoding="utf-8",
+    )
+    data = json.loads(with_local_ctx(SearchFiles)(path=str(tmp_path), regex="HIT[12]"))
+    assert data["ok"] is True and data["total_matches"] == 2
+    m1, m2 = data["matches"]
+    assert m1["line"] == 3
+    # HIT1 near top: only 2 lines before, full 5 after
+    assert m1["context"].splitlines(keepends=True) == [
+        "A\n",
+        "B\n",
+        "HIT1\n",
+        "C\n",
+        "HIT2\n",
+        "D\n",
+        "E\n",
+        "F\n",
+    ]
+    assert m2["line"] == 5
+    assert m2["context"].splitlines(keepends=True) == [
+        "A\n",
+        "B\n",
+        "HIT1\n",
+        "C\n",
+        "HIT2\n",
+        "D\n",
+        "E\n",
+        "F\n",
+        "G\n",
+        "H\n",
+    ]
 

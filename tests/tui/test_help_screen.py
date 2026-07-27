@@ -24,7 +24,8 @@ async def test_help_header_and_hotkeys():
 
         assert "F1" in descs and "F2" in descs and "F3" in descs
         assert "F4" in descs and "F5" in descs and "F6" in cmds
-        assert "F7" not in body.split()
+        # B10: F7 и секция «буфер сессии» явно описаны в /help
+        assert "F7" in body
 
         assert "Ctrl+C" in cmds and "Esc" in descs
         assert "Ctrl+A" in cmds
@@ -75,6 +76,11 @@ async def test_help_header_and_hotkeys():
         assert "Ctrl+Shift+C" in cmds
         assert "не стопает" in descs_l
         assert "." in {c.strip() for c in cmds.splitlines()}
+        # B10: секция про буфер сессии — три буфера, Esc=сохранить, Ctrl+C дописывает
+        assert "── буфер сессии ──" in body
+        assert "три буфера" in body_l
+        assert "сохранить и закрыть" in descs_l
+        assert "дописывает" in descs_l or "копирует" in descs_l
 
 
 @pytest.mark.asyncio

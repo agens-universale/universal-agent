@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Dict, Optional
 
 if TYPE_CHECKING:
-    from tools.backends.protocol import FsBackend
+    from backends.protocol import FsBackend
 
 
 @dataclass(frozen=True)

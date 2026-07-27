@@ -30,17 +30,22 @@ class SearchFiles(AbstractSimpleTool):
             "type": "function",
             "name": "fs_search_files",
             "description": (
-                "Recursively searches for a regex pattern in file contents under a directory, optionally filtered "
-                "by a glob pattern. Returns paginated hits: metadata includes total_matches, offset, limit, truncated, "
-                "next_offset, then matches (slice for this page). Field count is the number of matches in this "
-                "response (same as len(matches)); total_matches is the full hit count across the directory."
+                "Searches for a regex pattern in file contents. "
+                "`path` may be a directory (recursive search, optional file_pattern filter) "
+                "or a single file. Returns paginated hits: metadata includes total_matches, "
+                "offset, limit, truncated, next_offset, then matches (slice for this page). "
+                "Field count is the number of matches in this response (same as len(matches)); "
+                "total_matches is the full hit count for the search scope."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "path": {
                         "type": "string",
-                        "description": "The directory to search in. Must be a valid absolute path."
+                        "description": (
+                            "Directory to search recursively, or a single file to search. "
+                            "Must be a valid absolute path."
+                        ),
                     },
                     "regex": {
                         "type": "string",
@@ -49,8 +54,9 @@ class SearchFiles(AbstractSimpleTool):
                     "file_pattern": {
                         "type": "string",
                         "description": (
-                            "Glob pattern to filter files (e.g., '*.py', 'src/**/*.rs'). "
-                            "When unset, all files are searched."
+                            "Glob pattern to filter files when path is a directory "
+                            "(e.g., '*.py', 'src/**/*.rs'). Ignored when path is a file. "
+                            "When unset, all files under the directory are searched."
                         ),
                     },
                     "offset": {
@@ -79,18 +85,19 @@ class SearchFiles(AbstractSimpleTool):
     @classmethod
     def prompt_description(cls):
         description = '''Tool name: fs_search_files  
-Tool description: Recursively searches for a regex pattern in all files within a specified directory, optionally filtered by a glob pattern.
-Input schema: {"type": "object", "properties": {"path": {"type": "string", "description": "The directory to search in."}, "regex": {"type": "string", "description": "The Rust-style regex pattern to search for."}, "file_pattern": {"type": "string", "description": "Glob pattern to filter files (e.g., \'*.py\')."}, "offset": {"type": "integer", "description": "1-based index of the first match to return."}, "limit": {"type": "integer", "description": "Max matches returned for this page."}}, "required": ["path", "regex"], "additionalProperties": false}
+Tool description: Searches for a regex pattern in file contents under a directory (recursive) or in a single file; directories may be filtered by a glob pattern.
+Input schema: {"type": "object", "properties": {"path": {"type": "string", "description": "Directory to search recursively, or a single file."}, "regex": {"type": "string", "description": "The Rust-style regex pattern to search for."}, "file_pattern": {"type": "string", "description": "Glob pattern to filter files when path is a directory (e.g., \'*.py\'). Ignored when path is a file."}, "offset": {"type": "integer", "description": "1-based index of the first match to return."}, "limit": {"type": "integer", "description": "Max matches returned for this page."}}, "required": ["path", "regex"], "additionalProperties": false}
 
 Usage:
-- Searches **all files** recursively under the given directory.
-- Filters files using a **glob pattern** (e.g., `"*.py"`, `"src/**/*.rs"`).
+- `path` may be a **directory** (search all files recursively) or a **single file**.
+- When `path` is a directory, filters files using a **glob pattern** (e.g., `"*.py"`, `"src/**/*.rs"`). `file_pattern` is ignored for a file path.
 - Matches lines using a **Rust-style regular expression**.
-- Returns a **paginated** list of matches with file paths and line contents.
+- Returns a **paginated** list of matches with file paths, line contents, and ±5 lines of `context`.
 - **`count`** = matches in **this response** (page size). **`total_matches`** = all hits in the scan.
 - If **`truncated`** is true, call again with **`offset` = `next_offset`** (and same or new `limit`) to get more.
 - Omitting **`offset`** and **`limit`** is equivalent to the first page: offset 1 and default **`limit`** (same default window idea as **fs_read_file** preview).
 - Returns an empty **`matches`** list if none found.
+- Prefer **`fs_read_file`** when you need the full file; use this tool to locate matches.
 
 Important Usage Rules
 - **ALWAYS** use `fs_search_files` for searching text or code.
@@ -103,7 +110,7 @@ Important Usage Rules
 - **No multiline matching**: patterns must match within a **single line**.
 - Use **simple, efficient regex patterns** to avoid performance issues or excessive results.
 - Always escape special sequences with **double backslashes**: use `\\d`, `\\s`, `\\w`, `\\.` instead of `\\d`, `\\s`, etc.
-- Use `file_pattern` to narrow scope (e.g., `"*.ts"`, `"tests/**/*"`) when possible.
+- Use `file_pattern` to narrow scope (e.g., `"*.ts"`, `"tests/**/*"`) when searching a directory.
 
 Supported Glob Patterns in `file_pattern`
 - `*` — Matches any sequence of characters except `/`.
@@ -120,6 +127,12 @@ Find all function definitions in Python files:
  "file_pattern": "*.py"
 }
    
+Search one known file (no shell grep):
+{
+ "path": "/home/user/project/tests/test_foo.py",
+ "regex": "def fake_"
+}
+
 Search for error logs in Rust source files:
 {
   "path": "/home/user/project/src",
@@ -148,49 +161,81 @@ Search for error logs in Rust source files:
 
         literal_hints = self._extract_literals(regex)
 
-        results = []
-        buffer = []
-        found_data = None
+        results: List[Dict[str, Any]] = []
+        before: List[str] = []
+        # Matches waiting for up to context_num lines after the hit.
+        pending: List[Dict[str, Any]] = []
         max_line_length = 1000
         line_context_window = 500
 
+        def _cut_line(line: str) -> str:
+            if len(line) > max_line_length:
+                return (
+                    line[:max_line_length]
+                    + f"...[line_cutted. Show first {max_line_length}, "
+                    f"cut last {len(line) - max_line_length}]\n"
+                )
+            return line
+
+        def _emit_pending(item: Dict[str, Any]) -> None:
+            item["data"]["context"] = "".join(
+                item["before"] + [item["match_line"]] + item["after"]
+            )
+            results.append(item["data"])
+
         try:
             for line_num, line in enumerate(lines, start=1):
-                line_cutted = line[:max_line_length] + f'...[line_cutted. Show first {max_line_length}, cut last {len(line) - max_line_length}]\n' if len(line) > max_line_length else line
-                buffer.append(line_cutted)
-                if found_data is not None:
-                    found_data['context'] = ''.join(buffer)
-                    results.append(found_data)
-                    found_data = None
+                line_cutted = _cut_line(line)
 
-                if literal_hints and not any(hint in line for hint in literal_hints):
-                    buffer = buffer[-context_num:]
-                    continue
-
-                res = compiled_regex.search(line)
-                if res:
-                    span = res.span()
-                    left = max(0,span[0] - line_context_window)
-                    right = min(len(line), span[1] + line_context_window)
-                    found_content = line[left:right]
-                    if left > 0 :
-                        found_content = f'[...cutted first {left}]' + found_content
-                    if right < len(line):
-                        found_content += f'[cutted last {len(line) - right}...]'
-                    if left > 0 or right < len(line):
-                        found_content += f'(shown from {left} to {right} symbols)'
+                still_pending: List[Dict[str, Any]] = []
+                for item in pending:
+                    item["after"].append(line_cutted)
+                    if len(item["after"]) >= context_num:
+                        _emit_pending(item)
                     else:
-                        found_content = found_content.strip()
-                    found_data = {
-                        "file": tool_report_abspath(file_path, workspace=self._workspace),
-                        "line": line_num,
-                        "line_content": found_content
-                    }
-                buffer = buffer[-context_num:]
-            if found_data is not None:
-                found_data['context'] = ''.join(buffer)
-                results.append(found_data)
-                found_data = None
+                        still_pending.append(item)
+                pending = still_pending
+
+                run_regex = True
+                if literal_hints and not any(hint in line for hint in literal_hints):
+                    run_regex = False
+
+                if run_regex:
+                    res = compiled_regex.search(line)
+                    if res:
+                        span = res.span()
+                        left = max(0, span[0] - line_context_window)
+                        right = min(len(line), span[1] + line_context_window)
+                        found_content = line[left:right]
+                        if left > 0:
+                            found_content = f"[...cutted first {left}]" + found_content
+                        if right < len(line):
+                            found_content += f"[cutted last {len(line) - right}...]"
+                        if left > 0 or right < len(line):
+                            found_content += f"(shown from {left} to {right} symbols)"
+                        else:
+                            found_content = found_content.strip()
+                        pending.append(
+                            {
+                                "data": {
+                                    "file": tool_report_abspath(
+                                        file_path, workspace=self._workspace
+                                    ),
+                                    "line": line_num,
+                                    "line_content": found_content,
+                                },
+                                "before": list(before),
+                                "match_line": line_cutted,
+                                "after": [],
+                            }
+                        )
+
+                before.append(line_cutted)
+                if len(before) > context_num:
+                    before = before[-context_num:]
+
+            for item in pending:
+                _emit_pending(item)
         except Exception:
             pass
 
@@ -306,12 +351,6 @@ Search for error logs in Rust source files:
 
         if not self._backend.exists(path):
             return _result(ok=False, error={"type": "not_found"})
-        if not self._backend.is_dir(path):
-            return _result(ok=False, error={"type": "not_a_directory"})
-
-        file_matcher = self._create_file_matcher(file_pattern, base_path=path)
-
-        results = []
 
         # Per-entry read_guard: пропускаем dir'и/файлы которые денилисчены,
         # включая symlinks ведущие наружу launch_root. Резолвим конфиг один раз.
@@ -342,24 +381,38 @@ Search for error logs in Rust source files:
                 return False
             return True
 
-        # --- Walk files via backend.iter_files (streaming os.walk on local) ---
-        try:
-            file_iter = self._backend.iter_files(path, should_descend=_rg_pass)
-        except FileNotFoundError:
-            return _result(ok=False, error={"type": "not_found"})
+        results: List[Dict[str, Any]] = []
 
-        for relpath in file_iter:
-            abs_path = self._backend.join(path, relpath)
-            if file_pattern and not file_matcher(abs_path, path):
-                continue
-            if not _rg_pass(abs_path):
-                continue
+        if self._backend.is_file(path):
+            # Single-file search (models often pass a file like `rg pattern file.py`).
+            # file_pattern does not apply — the path already names the file.
             try:
-                file_result = self._search_lines(abs_path, self._backend.iter_lines(abs_path), regex)
+                results = self._search_lines(path, self._backend.iter_lines(path), regex)
             except (OSError, FileNotFoundError):
-                continue
-            if len(file_result) > 0:
-                results += file_result
+                return _result(ok=False, error={"type": "not_found"})
+        elif self._backend.is_dir(path):
+            file_matcher = self._create_file_matcher(file_pattern, base_path=path)
+            try:
+                file_iter = self._backend.iter_files(path, should_descend=_rg_pass)
+            except FileNotFoundError:
+                return _result(ok=False, error={"type": "not_found"})
+
+            for relpath in file_iter:
+                abs_path = self._backend.join(path, relpath)
+                if file_pattern and not file_matcher(abs_path, path):
+                    continue
+                if not _rg_pass(abs_path):
+                    continue
+                try:
+                    file_result = self._search_lines(
+                        abs_path, self._backend.iter_lines(abs_path), regex
+                    )
+                except (OSError, FileNotFoundError):
+                    continue
+                if file_result:
+                    results += file_result
+        else:
+            return _result(ok=False, error={"type": "not_a_directory"})
 
         total_matches = len(results)
         slice_ok, slice_err, start_0, lim_eff, off_eff = self._resolve_slice(

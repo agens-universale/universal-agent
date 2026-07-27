@@ -17,7 +17,6 @@ Usage:
 """
 import asyncio
 import os
-import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -214,38 +213,20 @@ class GcCliExternal(BaseAgent):
             overrides=self._overrides,
         )
 
-    async def _mirror_injected_skills(self, environment: BaseEnvironment) -> str | None:
-        """Copy harbor-injected task skills from the container to a runner-local temp
-        dir and return its path (else None).
+    @staticmethod
+    def _apply_injected_skills(config_dict: dict, skills_path: str | None) -> None:
+        """Configure a single backend-visible skills root.
 
-        gc-cli's registry both parses SKILL.md and runs the skill's scripts
-        (`skills_run_script` → subprocess with the runner's interpreter) on the
-        runner-local FS, so a writable runner path is all that is needed — no
-        container-path mirror. Distinct from ``_SKILLS_DIR`` (bundled repo skills).
+        Harbor must never retain the adapter's bundled host path: the backend
+        can only see container paths. A nonexistent container sentinel produces
+        an intentionally empty single-source registry.
         """
-        skills_dir = getattr(self, "skills_dir", None)
-        if not skills_dir or not await environment.is_dir(skills_dir):
-            return None
-        target = tempfile.mkdtemp(prefix="gc_injected_skills_")
-        await environment.download_dir(source_dir=skills_dir, target_dir=Path(target))
-        return target
+        config_dict["skills_data_path"] = skills_path or "/harbor/.gc_no_skills"
 
     @staticmethod
-    def _apply_injected_skills(config_dict: dict, mirrored_path: str | None) -> None:
-        """Single-source the skills registry on the injected skills when present.
-
-        gc-cli's get_skills_registry reads config['skills_data_path']; overriding it
-        with the mirrored injected path makes skills_list / skills_load(skill_id)
-        resolve the task's skills (the native path gc-cli's system prompt promotes).
-        No-op when no skills were injected — bundled _SKILLS_DIR stays in effect.
-        """
-        if mirrored_path:
-            config_dict["skills_data_path"] = mirrored_path
-
-    @staticmethod
-    def _nudge_instruction(instruction: str, mirrored_path: str | None) -> str:
+    def _nudge_instruction(instruction: str, skills_path: str | None) -> str:
         """Append a one-line, model-agnostic hint to discover skills natively."""
-        if not mirrored_path:
+        if not skills_path:
             return instruction
         return (
             f"{instruction}\n\n"
@@ -291,10 +272,13 @@ class GcCliExternal(BaseAgent):
         from agent_executor import AgentExecutor
 
         loop = asyncio.get_running_loop()
-        mirrored = await self._mirror_injected_skills(environment)
         config_dict = self._build_config()
-        self._apply_injected_skills(config_dict, mirrored)
-        instruction = self._nudge_instruction(instruction, mirrored)
+        skills_dir = getattr(self, "skills_dir", None)
+        container_skills = (
+            skills_dir if skills_dir and await environment.is_dir(skills_dir) else None
+        )
+        self._apply_injected_skills(config_dict, container_skills)
+        instruction = self._nudge_instruction(instruction, container_skills)
 
         executor = None
 

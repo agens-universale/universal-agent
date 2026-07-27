@@ -18,8 +18,12 @@ from diff_tui.feedback import (
     format_undo_ack,
     format_undo_noop_ack,
 )
+from config_modules.diff_tui import (
+    DEFAULT_FULL_FILE_MAX_LINES,
+    DEFAULT_PREVIEW_CONTEXT_LINES,
+)
 from diff_tui.service import DiffFileEntry, DiffService, OpResult
-from diff_tui.visual import build_created_file_diff
+from diff_tui.visual import VISUAL_MODES, build_created_file_diff
 from tui.palette import ACCENT, ERR, OK, MUTED, INK
 from tui.services.diff_render import render_unified_diff_widget
 
@@ -27,7 +31,11 @@ _FOOTER = (
     "[↑↓] выбрать  [Enter] дифф  [a] принять  [r] откатить  "
     "[Ctrl+a] принять все  [Ctrl+r] откатить все  [Esc] назад"
 )
-_VIEWER_FOOTER = (
+_VIEWER_FOOTER_ADAPTIVE = (
+    "[a] принять  [r] откатить  [Ctrl+a] принять все  [Ctrl+r] откатить все  "
+    "[f] файл целиком  [↑↓ / PgUp PgDn] прокрутка  [Esc] назад"
+)
+_VIEWER_FOOTER_FULL = (
     "[a] принять  [r] откатить  [Ctrl+a] принять все  [Ctrl+r] откатить все  "
     "[↑↓ / PgUp PgDn] прокрутка  [Esc] назад"
 )
@@ -55,6 +63,11 @@ _KEY_ALIASES = {
     "ctrl+R": "ctrl+r",
     "ctrl+к": "ctrl+r",
     "ctrl+К": "ctrl+r",
+    # `f` — полный файл; ЙЦУКЕН-псевдоним «а» (физическая клавиша F в RU-раскладке).
+    "f": "f",
+    "F": "f",
+    "а": "f",
+    "А": "f",
 }
 
 
@@ -98,7 +111,8 @@ def _service_from_config(
         extra_paths=list(wg.get("extra_paths") or []),
         protected_extra=list(protected.get("extra") or []),
         cache_max_orig=int(dt.get("cache_max_orig", 500)),
-        preview_context_lines=int(dt.get("preview_context_lines", 3)),
+        preview_context_lines=int(dt.get("preview_context_lines", DEFAULT_PREVIEW_CONTEXT_LINES)),
+        full_file_max_lines=int(dt.get("full_file_max_lines", DEFAULT_FULL_FILE_MAX_LINES)),
         max_diff_chars=int(dt.get("max_diff_chars", 100_000)),
         emit_notices=True,
         threads_dir=threads_dir,
@@ -108,7 +122,12 @@ def _service_from_config(
 
 
 class DiffViewerScreen(Screen):
-    """Просмотр pending-диффа одного файла: a/r/Ctrl+a/r работают здесь же."""
+    """Просмотр pending-диффа одного файла: a/r/Ctrl+a/r работают здесь же.
+
+    ``mode``: ``adaptive`` (Enter — превью с порогом 300/50) или ``full``
+    (``f`` — весь файл). На adaptive клавиша ``f`` push-ит full-viewer;
+    на full ``f`` игнорируется (повторный push не нужен — D3).
+    """
 
     def __init__(
         self,
@@ -119,14 +138,31 @@ class DiffViewerScreen(Screen):
         on_undo: ActionFn,
         on_approve_all: ActionFn,
         on_undo_all: ActionFn,
+        on_open_full: Optional[ActionFn] = None,
+        path: str = "",
+        mode: str = "adaptive",
     ) -> None:
         super().__init__()
         self._title = title
         self._content = content
+        self._path = (path or "").strip()
         self._on_approve = on_approve
         self._on_undo = on_undo
         self._on_approve_all = on_approve_all
         self._on_undo_all = on_undo_all
+        self._on_open_full = on_open_full
+        self._mode = mode if mode in VISUAL_MODES else "adaptive"
+
+    @property
+    def mode(self) -> str:
+        """Режим viewer: ``adaptive`` или ``full``."""
+        return self._mode
+
+    def clipboard_source_cite(self) -> Optional[tuple[str, str]]:
+        """Источник для суффикса буфера: ``("diff", path)`` или None."""
+        if not self._path:
+            return None
+        return ("diff", self._path)
 
     def compose(self) -> ComposeResult:
         with Vertical(id="root"):
@@ -138,7 +174,10 @@ class DiffViewerScreen(Screen):
                 )
                 body.add_class("viewer-body")
                 yield body
-            yield Static(_VIEWER_FOOTER, id="footer", markup=False)
+            footer = (
+                _VIEWER_FOOTER_FULL if self._mode == "full" else _VIEWER_FOOTER_ADAPTIVE
+            )
+            yield Static(footer, id="footer", markup=False)
 
     def on_key(self, event: events.Key) -> None:
         key = _norm_key(event.key)
@@ -153,6 +192,11 @@ class DiffViewerScreen(Screen):
             event.stop()
         elif key == "ctrl+r":
             self._on_undo_all()
+            event.stop()
+        elif key == "f":
+            # D3: `f` push-ит full-viewer только с adaptive; на full — no-op.
+            if self._mode == "adaptive" and self._on_open_full is not None:
+                self._on_open_full()
             event.stop()
         elif key == "escape":
             event.stop()
@@ -394,38 +438,60 @@ class DiffScreen(Screen):
         self._reload()
 
     def _run_from_viewer(self, fn: ActionFn) -> None:
-        """Approve/undo из viewer: выполнить, закрыть viewer, обновить список."""
+        """Approve/undo из viewer: выполнить, закрыть viewer-слой, обновить список.
+
+        D3: действие с adaptive или full закрывает весь viewer-стек до списка
+        (full → adaptive → DiffScreen), а не только текущий viewer.
+        """
         fn()
-        if isinstance(self.app.screen, DiffViewerScreen):
+        while isinstance(self.app.screen, DiffViewerScreen):
             self.app.pop_screen()
         self._reload()
 
-    def _open_viewer(self) -> None:
-        entry = self._selected()
-        if entry is None:
-            return
-        key = entry.key
-        body = self._svc.visual_diff(key)
-        if not body.strip() and entry.kind == "created":
-            # Страховка: created всегда показываем как addition с диска
-            disk = Path(key) if key.startswith("/") else Path(self._svc.launch_root) / key
-            if disk.is_file():
-                try:
-                    body = build_created_file_diff(
-                        disk.read_text(encoding="utf-8"),
-                        tofile=key,
-                        context_lines=self._svc.preview_context_lines,
-                        max_diff_chars=self._svc.max_diff_chars,
-                    )
-                except (OSError, UnicodeDecodeError):
-                    body = ""
-        if not body.strip():
-            body = "(нет содержимого диффа — файл вне учёта или baseline недоступен)"
+    def _created_body_from_disk(self, key: str) -> str:
+        """Страховка: created-файл показать как addition, читая содержимое с диска.
 
+        Используется, когда ``visual_diff`` вернул пустое body (например, git
+        index пуст для untracked, а cache-meta ещё не видит created). Логика
+        общая для adaptive и full — не дублируется (remark 4).
+        """
+        disk = (
+            Path(key)
+            if key.startswith("/")
+            else Path(self._svc.launch_root) / key
+        )
+        if not disk.is_file():
+            return ""
+        try:
+            return build_created_file_diff(
+                disk.read_text(encoding="utf-8"),
+                tofile=key,
+                context_lines=self._svc.preview_context_lines,
+                max_diff_chars=self._svc.max_diff_chars,
+            )
+        except (OSError, UnicodeDecodeError):
+            return ""
+
+    def _push_viewer(
+        self,
+        *,
+        key: str,
+        title: str,
+        content: str,
+        mode: str,
+        on_open_full: Optional[ActionFn] = None,
+    ) -> None:
+        """Push ``DiffViewerScreen`` с единым набором action-ламбд.
+
+        on_approve/on_undo/on_approve_all/on_undo_all одинаковы для adaptive
+        и full — собираются здесь, без дублирования (remark 4, косметика)."""
         self.app.push_screen(
             DiffViewerScreen(
-                title=f"дифф · {_kind_badge(entry)} · {entry.key}",
-                content=body,
+                title=title,
+                content=content,
+                path=key,
+                mode=mode,
+                on_open_full=on_open_full,
                 on_approve=lambda: self._run_from_viewer(
                     lambda: self._approve_key(key)
                 ),
@@ -435,6 +501,39 @@ class DiffScreen(Screen):
                 on_approve_all=lambda: self._run_from_viewer(self._approve_all),
                 on_undo_all=lambda: self._run_from_viewer(self._undo_all),
             )
+        )
+
+    def _open_viewer(self) -> None:
+        entry = self._selected()
+        if entry is None:
+            return
+        key = entry.key
+        body = self._svc.visual_diff(key)
+        if not body.strip() and entry.kind == "created":
+            body = self._created_body_from_disk(key)
+        if not body.strip():
+            body = "(нет содержимого диффа — файл вне учёта или baseline недоступен)"
+
+        def _open_full() -> None:
+            # D3: `f` с adaptive → push full-viewer (весь файл без порога 300).
+            full_body = self._svc.visual_diff(key, mode="full")
+            if not full_body.strip() and entry.kind == "created":
+                full_body = self._created_body_from_disk(key)
+            if not full_body.strip():
+                full_body = body
+            self._push_viewer(
+                key=key,
+                title=f"дифф · {_kind_badge(entry)} · {entry.key} · полный файл",
+                content=full_body,
+                mode="full",
+            )
+
+        self._push_viewer(
+            key=key,
+            title=f"дифф · {_kind_badge(entry)} · {entry.key}",
+            content=body,
+            mode="adaptive",
+            on_open_full=_open_full,
         )
 
     def _approve_key(self, key: str) -> None:

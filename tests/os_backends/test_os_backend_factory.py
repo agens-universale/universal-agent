@@ -3,9 +3,9 @@ import asyncio
 import pytest
 
 from run_context import create_run_context
-from tools.backends.factory import parse_os_backend_kind, resolve_os_backend
-from tools.backends.harbor import HarborBackend
-from tools.backends.local import LocalFsBackend
+from backends.factory import parse_os_backend_kind, resolve_os_backend
+from backends.harbor import HarborBackend
+from backends.local import LocalFsBackend
 
 
 def test_parse_os_backend_defaults_to_local():

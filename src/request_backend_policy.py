@@ -35,6 +35,7 @@ def request_chat_completions_with_policy(
     runtime_notices_enabled: bool = False,
     notice_url: Optional[str] = None,
     timeout: float = DEFAULT_REQUEST_TIMEOUT_SEC,
+    config_proxy: Optional[str] = None,
 ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     """
     Execute chat/completions request with the minimal adaptive max_tokens policy.
@@ -59,6 +60,7 @@ def request_chat_completions_with_policy(
             logger=logger,
             on_delta=on_delta,
             timeout=timeout,
+            config_proxy=config_proxy,
         )
         return response, payload
 

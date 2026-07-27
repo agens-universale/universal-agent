@@ -2,7 +2,7 @@
 import hashlib
 from types import SimpleNamespace
 
-from tools.backends.walk_util import iter_files_from_flat, iter_walk_from_flat
+from backends.walk_util import iter_files_from_flat, iter_walk_from_flat
 
 
 class FakeBackend:
@@ -167,6 +167,12 @@ def bind_os_backend(tool, backend, *, config_dict=None):
         os_backend=backend,
         workspace=build_execution_workspace(backend, cfg),
     )
+    # Mirror AbstractSimpleTool.__init__ defaults for attributes accessed by
+    # tool methods (e.g. exec tools read self._state / self._call_id).
+    if not hasattr(tool, "_state"):
+        tool._state = None
+    if not hasattr(tool, "_call_id"):
+        tool._call_id = None
     return tool
 
 

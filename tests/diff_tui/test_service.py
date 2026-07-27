@@ -317,3 +317,109 @@ def test_t13_cache_to_git_keeps_ignored_cache(tmp_path, monkeypatch):
     assert store.index_path.exists()
     assert list(store.diffs_dir.glob("*.orig"))
     assert "src/foo.py" in store.load_index()
+
+
+
+# --- spec §5 step 3: git_show_index + visual_diff baseline↔disk ---
+
+
+def test_git_show_index_returns_staged_content(git_repo):
+    from diff_tui import git_ops
+
+    root, _threads = git_repo
+    # a.txt staged with "base\n"
+    res = git_ops.git_show_index(str(root), "a.txt")
+    assert res.ok
+    assert res.stdout == "base\n"
+
+
+def test_git_show_index_untracked_fails(git_repo):
+    from diff_tui import git_ops
+
+    root, _threads = git_repo
+    (root / "fresh.py").write_text("x\n", encoding="utf-8")
+    res = git_ops.git_show_index(str(root), "fresh.py")
+    assert not res.ok
+
+
+def test_git_modified_visual_diff_uses_index_baseline(git_repo):
+    """Modified unstaged: visual_diff = index↔disk через difflib, не сырой git diff."""
+    root, threads = git_repo
+    (root / "a.txt").write_text("base\nCHANGED\n", encoding="utf-8")
+    _touch(threads, "a.txt")
+    svc = _svc(root, threads, emit_notices=False)
+    entries = {e.key: e for e in svc.list_entries(pending_only=True)}
+    assert entries["a.txt"].kind == "modified"
+    body = svc.visual_diff("a.txt")
+    assert body.strip()
+    assert "+++ b/a.txt" in body or "+++ a.txt" in body
+    assert "-base" in body or "base" in body
+    assert "+CHANGED" in body
+
+
+def test_git_modified_visual_diff_short_shows_whole_file(git_repo):
+    """Adaptive: короткий modified → весь файл в контексте (без @@ разрывов)."""
+    root, threads = git_repo
+    content = "".join(f"line-{i}\n" for i in range(10))
+    (root / "a.txt").write_text(content, encoding="utf-8")
+    _git(root, "add", "a.txt")
+    (root / "a.txt").write_text(content + "EXTRA\n", encoding="utf-8")
+    _touch(threads, "a.txt")
+    svc = _svc(root, threads, emit_notices=False, full_file_max_lines=300,
+               preview_context_lines=50)
+    body = svc.visual_diff("a.txt")
+    # вся база видна: line-9 в контексте
+    assert "line-9" in body
+    assert "+EXTRA" in body
+
+
+def test_git_modified_visual_diff_long_uses_preview_context(git_repo):
+    """Adaptive: длинный modified → preview_context_lines, far строки не видны."""
+    root, threads = git_repo
+    base_lines = [f"line-{i}\n" for i in range(400)]
+    (root / "a.txt").write_text("".join(base_lines), encoding="utf-8")
+    _git(root, "add", "a.txt")
+    new_lines = ["line-0\n", "CHANGED\n"] + base_lines[2:]
+    (root / "a.txt").write_text("".join(new_lines), encoding="utf-8")
+    _touch(threads, "a.txt")
+    svc = _svc(root, threads, emit_notices=False, full_file_max_lines=300,
+               preview_context_lines=2)
+    body = svc.visual_diff("a.txt")
+    assert "+CHANGED" in body
+    assert "line-399" not in body  # far от изменения
+
+
+def test_visual_diff_accepts_mode_full(git_repo):
+    """visual_diff(path, mode='full') → весь файл даже при >300 строк."""
+    root, threads = git_repo
+    base_lines = [f"line-{i}\n" for i in range(400)]
+    (root / "a.txt").write_text("".join(base_lines), encoding="utf-8")
+    _git(root, "add", "a.txt")
+    new_lines = ["line-0\n", "CHANGED\n"] + base_lines[2:]
+    (root / "a.txt").write_text("".join(new_lines), encoding="utf-8")
+    _touch(threads, "a.txt")
+    svc = _svc(root, threads, emit_notices=False, full_file_max_lines=300,
+               preview_context_lines=50)
+    body = svc.visual_diff("a.txt", mode="full")
+    assert "line-399" in body
+    assert "+CHANGED" in body
+
+
+def test_visual_diff_invalid_mode_raises(git_repo):
+    root, threads = git_repo
+    (root / "a.txt").write_text("base\nCHANGED\n", encoding="utf-8")
+    _touch(threads, "a.txt")
+    svc = _svc(root, threads, emit_notices=False)
+    with pytest.raises(ValueError):
+        svc.visual_diff("a.txt", mode="side")
+
+
+def test_visual_diff_truncates_max_diff_chars(git_repo):
+    root, threads = git_repo
+    (root / "a.txt").write_text("base\n", encoding="utf-8")
+    big = "".join(f"x-{i}\n" for i in range(2000))
+    (root / "a.txt").write_text(big, encoding="utf-8")
+    _touch(threads, "a.txt")
+    svc = _svc(root, threads, emit_notices=False, max_diff_chars=50)
+    body = svc.visual_diff("a.txt")
+    assert "[diff truncated]" in body

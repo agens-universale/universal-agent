@@ -2,7 +2,7 @@ import json
 from types import SimpleNamespace
 
 from tests.harbor_support.fakes import bind_os_backend
-from tools.backends.protocol import ExecResult
+from backends.protocol import ExecResult
 from tools.exec.execute_command import ExecuteCommand
 
 
@@ -63,7 +63,9 @@ def test_explicit_timeout_seconds_forwarded():
 def test_output_truncated_to_max_output_chars():
     b = _RecordingFakeBackend(stdout="A" * 10000)
     env = json.loads(_tool(b)(command="x", max_output_chars=100))
-    assert len(env["stdout"]) <= 100 and env["truncated"] is True
+    assert env["truncated"] is True
+    assert env["stdout_kept_head_chars"] + env["stdout_kept_tail_chars"] == 100
+    assert "[omitted" in env["stdout"]
 
 
 def test_nonzero_exit_sets_error():

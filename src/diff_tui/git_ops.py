@@ -120,6 +120,15 @@ def git_diff_worktree(launch_root: PathLike, path: str) -> GitRunResult:
     return _run_git(launch_root, ["diff", "--", path])
 
 
+def git_show_index(launch_root: PathLike, path: str) -> GitRunResult:
+    """``git show :<path>`` — содержимое файла из index (baseline для viewer).
+
+    Для untracked / staged-delete — ``ok=False`` (нет в index).
+    Используется visual-diff builder'ом вместо сырого ``git diff`` (D1).
+    """
+    return _run_git(launch_root, ["show", f":{path}"])
+
+
 def check_ignore(launch_root: PathLike, path: str) -> Optional[bool]:
     """``git check-ignore -q -- <path>``.
 

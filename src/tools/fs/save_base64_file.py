@@ -2,6 +2,7 @@ import base64
 import json
 import os
 
+from security.path_policy import enforce_write_guard
 from tools.simple_tool_base import AbstractSimpleTool
 from utils.tool_report_paths import tool_report_abspath
 from utils.atomic_io import atomic_replace
@@ -70,6 +71,17 @@ class SaveBase64File(AbstractSimpleTool):
             ensure_ascii=False,
         )
 
+    def _write_guard_blocked_result(
+        self,
+        error: dict,
+        path: str,
+        data: str,
+        *args,
+        **kwargs,
+    ) -> str:
+        return self._result(ok=False, path=path, error=error)
+
+    @enforce_write_guard(path_arg="path", operation="write")
     def __call__(self, path: str, data: str, **kwargs) -> str:
         if not isinstance(path, str) or not path.strip():
             return self._result(ok=False, path=str(path), error={"type": "invalid_argument", "field": "path"})

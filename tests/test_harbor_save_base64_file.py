@@ -17,7 +17,7 @@ import pytest
 
 from tools.fs.save_base64_file import SaveBase64File
 from tests.harbor_support.fakes import FakeBackend, bind_os_backend, strip_path_fields
-from tools.backends.local import LocalFsBackend
+from backends.local import LocalFsBackend
 
 
 # ---------------------------------------------------------------------------

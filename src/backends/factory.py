@@ -4,9 +4,10 @@ from __future__ import annotations
 import asyncio
 from typing import Any, Optional
 
-from tools.backends.protocol import FsBackend
-from tools.backends.local import LocalFsBackend
-from tools.backends.harbor import HarborBackend
+from backends.protocol import FsBackend
+from backends.local import LocalFsBackend
+from backends.harbor import HarborBackend
+from config_modules.agent import exec_output_capture_max_chars_from_config_dict
 
 _SUPPORTED = frozenset({"local", "harbor"})
 
@@ -32,21 +33,24 @@ def resolve_os_backend(
 ) -> FsBackend:
     """Build the physical I/O backend for a run.
 
-    ``override`` wins (tests). ``harbor`` requires ``environment`` and ``loop``.
+    ``override`` wins (tests) and keeps its own ``exec_output_capture_max_chars``.
+    ``harbor`` requires ``environment`` and ``loop``.
     """
     if override is not None:
         return override
 
+    cap = exec_output_capture_max_chars_from_config_dict(config_dict)
     kind = parse_os_backend_kind(config_dict)
     if kind == "local":
-        return LocalFsBackend()
+        return LocalFsBackend(exec_output_capture_max_chars=cap)
 
     if kind == "harbor":
         if environment is None or loop is None:
             raise ValueError(
                 "os_backend=harbor requires environment and loop in create_run_context"
             )
-
-        return HarborBackend(environment, loop)
+        return HarborBackend(
+            environment, loop, exec_output_capture_max_chars=cap
+        )
 
     raise ValueError(f"unsupported os_backend: {kind!r}")

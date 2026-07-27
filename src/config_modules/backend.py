@@ -50,6 +50,8 @@ class BackendConfig(BaseModel):
     # HTTP-таймаут одного запроса к LLM (connect + idle между чанками при stream).
     request_timeout_sec: int = DEFAULT_REQUEST_TIMEOUT_SEC
     stream: bool = True
+    # HTTP/SOCKS-прокси для backend-вызовов. Пусто → из env (HTTPS_PROXY/HTTP_PROXY/ALL_PROXY).
+    proxy: str | None = None
 
     @field_validator("api_mode")
     @classmethod
@@ -116,3 +118,13 @@ class BackendConfig(BaseModel):
                 continue
             normalized[key_clean] = val_clean
         return normalized
+
+    @field_validator("proxy", mode="before")
+    @classmethod
+    def normalize_proxy(cls, value: Any) -> str | None:
+        if value is None:
+            return None
+        if isinstance(value, str):
+            stripped = value.strip()
+            return stripped or None
+        return None

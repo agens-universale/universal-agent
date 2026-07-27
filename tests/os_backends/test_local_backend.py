@@ -1,11 +1,12 @@
 import os
 import stat as stat_module
+import sys
 
 import pytest
 
 from run_context import create_run_context
-from tools.backends.local import LocalFsBackend
-from tools.backends.protocol import ExecResult, FsBackend
+from backends.local import LocalFsBackend
+from backends.protocol import ExecResult, FsBackend
 
 
 @pytest.fixture()
@@ -170,3 +171,150 @@ def test_read_head_bytes_binary(be, tmp_path):
     with open(p, "wb") as fd:
         fd.write(data)
     assert be.read_head_bytes(p, 8) == data[:8]
+
+
+# --- bounded exec runner (spec D1/D2/D9/D10) ---
+
+def test_exec_result_has_capture_cap_flags(be):
+    res = be.exec("echo hi", timeout=10)
+    assert isinstance(res, ExecResult)
+    assert res.stdout_hit_capture_cap is False
+    assert res.stderr_hit_capture_cap is False
+
+
+def test_exec_default_capture_cap_is_60k(be):
+    assert be.exec_output_capture_max_chars == 60_000
+
+
+def test_exec_bounded_stdout_not_killed(be):
+    """Output exceeding cap is bounded; process is NOT killed (drain & discard)."""
+    be.exec_output_capture_max_chars = 200
+    # Print ~5000 chars to stdout; process must finish on its own (exit 0).
+    res = be.exec("yes A | head -c 5000", timeout=15)
+    assert res.return_code == 0
+    assert not res.timed_out
+    assert len(res.stdout) <= 200
+    assert res.stdout_hit_capture_cap is True
+    assert res.stderr_hit_capture_cap is False
+
+
+def test_exec_bounded_stderr(be):
+    be.exec_output_capture_max_chars = 150
+    # Redirect to stderr only.
+    res = be.exec("yes B | head -c 5000 >&2", timeout=15)
+    assert res.return_code == 0
+    assert len(res.stderr) <= 150
+    assert res.stderr_hit_capture_cap is True
+    assert res.stdout_hit_capture_cap is False
+
+
+def test_exec_both_pipes_large_no_deadlock(be):
+    """Both stdout and stderr large simultaneously must not deadlock the runner."""
+    be.exec_output_capture_max_chars = 100
+    cmd = "yes O | head -c 8000 & yes E | head -c 8000 >&2 & wait"
+    res = be.exec(cmd, timeout=20)
+    assert res.return_code == 0
+    assert len(res.stdout) <= 100
+    assert len(res.stderr) <= 100
+    assert res.stdout_hit_capture_cap is True
+    assert res.stderr_hit_capture_cap is True
+
+
+def test_exec_small_output_no_cap_hit(be):
+    be.exec_output_capture_max_chars = 60_000
+    res = be.exec("echo small", timeout=10)
+    assert res.return_code == 0
+    assert res.stdout.strip() == "small"
+    assert res.stdout_hit_capture_cap is False
+    assert res.stderr_hit_capture_cap is False
+
+
+def test_exec_timeout_partial_buffer(be):
+    """On timeout: timed_out=True, exit_code=None, partial buffer preserved."""
+    be.exec_output_capture_max_chars = 60_000
+    res = be.exec("echo started; sleep 5", timeout=1)
+    assert res.timed_out is True
+    assert res.return_code is None
+    assert "started" in res.stdout
+
+
+def test_run_python_bounded_output(be):
+    be.exec_output_capture_max_chars = 120
+    code = "print('A' * 5000)"
+    res = be.run_python(code, timeout=15)
+    assert res.return_code == 0
+    assert len(res.stdout) <= 120
+    assert res.stdout_hit_capture_cap is True
+
+
+def test_run_python_small_output_no_cap(be):
+    be.exec_output_capture_max_chars = 60_000
+    res = be.run_python("print('py-ok')", timeout=10)
+    assert res.return_code == 0
+    assert res.stdout.strip() == "py-ok"
+    assert res.stdout_hit_capture_cap is False
+
+
+def test_run_python_bounded_stderr(be):
+    be.exec_output_capture_max_chars = 100
+    code = "import sys; sys.stderr.write('E' * 4000)"
+    res = be.run_python(code, timeout=15)
+    assert res.return_code == 0
+    assert len(res.stderr) <= 100
+    assert res.stderr_hit_capture_cap is True
+
+
+def test_run_python_timeout(be, tmp_path):
+    res = be.run_python("import time; print('go'); time.sleep(5)", cwd=str(tmp_path), timeout=1)
+    assert res.timed_out is True
+    assert res.return_code is None
+    assert "go" in res.stdout
+
+
+def test_drain_pipe_publishes_captured_before_discard_finishes():
+    """on_captured fires at hit_cap while remaining bytes are still being drained."""
+    import threading
+    from backends.local import _drain_pipe
+
+    class SlowAfterCapPipe:
+        def __init__(self):
+            self._chunks = [b"A" * 50, b"B" * 50]  # first fills cap=40, second drains
+            self._i = 0
+            self.second_started = threading.Event()
+            self.release_second = threading.Event()
+
+        def read(self, n):
+            if self._i >= len(self._chunks):
+                return b""
+            chunk = self._chunks[self._i]
+            self._i += 1
+            if self._i == 2:
+                self.second_started.set()
+                self.release_second.wait(timeout=5)
+            return chunk
+
+        def close(self):
+            pass
+
+    pipe = SlowAfterCapPipe()
+    published = threading.Event()
+    seen = {}
+
+    def on_captured(text, hit):
+        seen["text"] = text
+        seen["hit"] = hit
+        published.set()
+
+    def run():
+        _drain_pipe(pipe, 40, on_captured=on_captured)
+
+    t = threading.Thread(target=run)
+    t.start()
+    assert published.wait(timeout=2), "captured must publish before discard completes"
+    assert pipe.second_started.wait(timeout=2)
+    assert seen["hit"] is True
+    assert len(seen["text"]) == 40
+    assert seen["text"] == "A" * 40
+    pipe.release_second.set()
+    t.join(timeout=5)
+    assert not t.is_alive()

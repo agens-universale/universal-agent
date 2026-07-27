@@ -1,18 +1,24 @@
 from __future__ import annotations
 
-import json
 import logging
 import os
-import subprocess
-import sys
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 import yaml
 
+from backends.local import LocalFsBackend
+from backends.protocol import FsBackend
 from bundled_assets import bundled_root
 
+if TYPE_CHECKING:
+    from tools.skills.skill_arg_resolver import SkillCatalog
+
 logger = logging.getLogger(__name__)
+
+
+def _basename(path: str) -> str:
+    return path.rstrip("/\\").replace("\\", "/").rsplit("/", 1)[-1]
 
 
 class AmbiguousSkillId(Exception):
@@ -60,14 +66,13 @@ def _project_skills_root() -> str:
     return str(project_gc_dir() / "skills")
 
 
-def _parse_skill_markdown(path: str) -> tuple[Dict[str, Any], str]:
+def _parse_skill_markdown(backend: FsBackend, path: str) -> tuple[Dict[str, Any], str]:
     """
     Разобрать SKILL.md на frontmatter (YAML) и тело инструкции.
     Если frontmatter отсутствует или сломан — метаданные пустые, тело = весь файл.
     """
     try:
-        with open(path, "r", encoding="utf-8") as f:
-            text = f.read()
+        text = backend.read(path)
     except FileNotFoundError:
         return {}, ""
 
@@ -98,7 +103,7 @@ def _parse_skill_markdown(path: str) -> tuple[Dict[str, Any], str]:
     return metadata, body
 
 
-def _walk_resource_dir(base_dir: str) -> Dict[str, str]:
+def _walk_resource_dir(backend: FsBackend, base_dir: str) -> Dict[str, str]:
     """
     Построить словарь slug -> абсолютный путь для ресурсов в указанной папке.
 
@@ -107,16 +112,13 @@ def _walk_resource_dir(base_dir: str) -> Dict[str, str]:
     - разделитель каталогов всегда "/", независимо от ОС
     """
     mapping: Dict[str, str] = {}
-    if not os.path.isdir(base_dir):
+    if not backend.is_dir(base_dir):
         return mapping
 
-    for root, _, files in os.walk(base_dir):
-        for filename in files:
-            full_path = os.path.join(root, filename)
-            rel_path = os.path.relpath(full_path, base_dir)
-            rel_no_ext, _ = os.path.splitext(rel_path)
-            slug = rel_no_ext.replace(os.sep, "/")
-            mapping[slug] = full_path
+    for rel_path in backend.iter_files(base_dir):
+        rel_no_ext, _ = os.path.splitext(rel_path)
+        slug = rel_no_ext.replace("\\", "/")
+        mapping[slug] = backend.join(base_dir, rel_path)
     return mapping
 
 
@@ -133,7 +135,9 @@ def _guess_content_type(filename: str) -> str:
     return "text/plain"
 
 
-def _load_pack_manifest(pack_dir: str, dir_name: str) -> Dict[str, Any]:
+def _load_pack_manifest(
+    backend: FsBackend, pack_dir: str, dir_name: str
+) -> Dict[str, Any]:
     """
     Загрузить pack.yaml. Best-effort: при отсутствии файла или ошибке парсинга
     возвращает дефолты на основе имени директории.
@@ -152,13 +156,12 @@ def _load_pack_manifest(pack_dir: str, dir_name: str) -> Dict[str, Any]:
         "source_url": None,
         "bootstrap_skill": None,
     }
-    manifest_path = os.path.join(pack_dir, "pack.yaml")
-    if not os.path.isfile(manifest_path):
+    manifest_path = backend.join(pack_dir, "pack.yaml")
+    if not backend.is_file(manifest_path):
         return defaults
 
     try:
-        with open(manifest_path, "r", encoding="utf-8") as f:
-            raw = yaml.safe_load(f) or {}
+        raw = yaml.safe_load(backend.read(manifest_path)) or {}
     except (OSError, yaml.YAMLError):
         return defaults
 
@@ -210,6 +213,7 @@ class Skill:
     root_path: str
     instructions: str
     has_scripts: bool
+    scripts: List[str] = field(default_factory=list)
     references: Dict[str, str] = field(default_factory=dict)  # slug -> path
     assets: Dict[str, str] = field(default_factory=dict)  # slug -> path
     source: str = "system"
@@ -233,11 +237,13 @@ class SkillsRegistry:
         self,
         skills_root: Optional[str] = None,    # legacy single-source
         *,
+        backend: FsBackend | None = None,
         system_root: Optional[str] = None,
         user_root: Optional[str] = None,
         project_root: Optional[str] = None,
         disable_skills: Optional[List[str]] = None,
     ) -> None:
+        self._backend = backend or LocalFsBackend()
         # Legacy: если передан skills_root и никаких новых — режим single-source.
         # В этом режиме все скиллы помечаются как source="user".
         if (
@@ -291,14 +297,14 @@ class SkillsRegistry:
             ("user", self._user_root),
             ("project", self._project_root),
         ):
-            if not root or not os.path.isdir(root):
+            if not root or not self._backend.is_dir(root):
                 continue
-            for entry in sorted(os.listdir(root)):
-                entry_path = os.path.join(root, entry)
-                if not os.path.isdir(entry_path):
+            for entry, is_dir in self._backend.listdir(root):
+                entry_path = self._backend.join(root, entry)
+                if not is_dir:
                     continue
-                has_pack_yaml = os.path.isfile(os.path.join(entry_path, "pack.yaml"))
-                has_skill_md = os.path.isfile(os.path.join(entry_path, "SKILL.md"))
+                has_pack_yaml = self._backend.is_file(self._backend.join(entry_path, "pack.yaml"))
+                has_skill_md = self._backend.is_file(self._backend.join(entry_path, "SKILL.md"))
                 if has_pack_yaml and self._walk_packs_enabled:
                     if has_skill_md:
                         logger.warning(
@@ -320,11 +326,11 @@ class SkillsRegistry:
         source: str,
         pack_id: Optional[str] = None,
     ) -> Optional[Skill]:
-        skill_md = os.path.join(skill_dir, "SKILL.md")
-        if not os.path.isfile(skill_md):
+        skill_md = self._backend.join(skill_dir, "SKILL.md")
+        if not self._backend.is_file(skill_md):
             return None
 
-        metadata, instructions = _parse_skill_markdown(skill_md)
+        metadata, instructions = _parse_skill_markdown(self._backend, skill_md)
 
         meta_id = metadata.get("id") if isinstance(metadata.get("id"), str) else None
         skill_id_segment = meta_id or dir_name
@@ -348,14 +354,15 @@ class SkillsRegistry:
         elif not isinstance(version, str):
             version = None
 
-        scripts_dir = os.path.join(skill_dir, "scripts")
-        has_scripts = os.path.isdir(scripts_dir)
+        scripts_dir = self._backend.join(skill_dir, "scripts")
+        scripts = sorted(self._backend.iter_files(scripts_dir)) if self._backend.is_dir(scripts_dir) else []
+        has_scripts = bool(scripts)
 
-        references_dir = os.path.join(skill_dir, "references")
-        assets_dir = os.path.join(skill_dir, "assets")
+        references_dir = self._backend.join(skill_dir, "references")
+        assets_dir = self._backend.join(skill_dir, "assets")
 
-        references = _walk_resource_dir(references_dir)
-        assets = _walk_resource_dir(assets_dir)
+        references = _walk_resource_dir(self._backend, references_dir)
+        assets = _walk_resource_dir(self._backend, assets_dir)
 
         return Skill(
             id=canonical_id,
@@ -365,6 +372,7 @@ class SkillsRegistry:
             root_path=skill_dir,
             instructions=instructions,
             has_scripts=has_scripts,
+            scripts=scripts,
             references=references,
             assets=assets,
             source=source,
@@ -378,7 +386,7 @@ class SkillsRegistry:
         '<pack-id>:<inner-id>'. Pack-manifest регистрируется в self._packs_by_id
         под manifest['id'].
         """
-        manifest = _load_pack_manifest(pack_dir, dir_name=dir_name)
+        manifest = _load_pack_manifest(self._backend, pack_dir, dir_name=dir_name)
         manifest["source"] = source
         canonical_pack_id = manifest["id"]
         # Disable целого пакета: ни manifest, ни inner-скиллы не регистрируем.
@@ -386,11 +394,11 @@ class SkillsRegistry:
             return
         self._packs_by_id[canonical_pack_id] = manifest
 
-        for inner_entry in sorted(os.listdir(pack_dir)):
-            inner_path = os.path.join(pack_dir, inner_entry)
-            if not os.path.isdir(inner_path):
+        for inner_entry, is_dir in self._backend.listdir(pack_dir):
+            inner_path = self._backend.join(pack_dir, inner_entry)
+            if not is_dir:
                 continue
-            if not os.path.isfile(os.path.join(inner_path, "SKILL.md")):
+            if not self._backend.is_file(self._backend.join(inner_path, "SKILL.md")):
                 continue
             skill = self._load_skill_dir(
                 inner_path,
@@ -442,7 +450,7 @@ class SkillsRegistry:
             # named "entry/" with frontmatter id "actual-entry" plus
             # bootstrap_skill: entry in pack.yaml would silently make the pack invisible.
             for skill in self._skills_by_id.values():
-                if skill.pack_id == pid and os.path.basename(skill.root_path) == bs:
+                if skill.pack_id == pid and _basename(skill.root_path) == bs:
                     bootstrap_ids[pid] = skill.id
                     break
 
@@ -467,6 +475,8 @@ class SkillsRegistry:
                 "description": skill.description,
                 "source": skill.source,
                 "root_path": skill.root_path,
+                "location": skill.root_path,
+                "scripts": skill.scripts,
                 "pack_id": skill.pack_id,
                 "is_pack_bootstrap": False,
             }
@@ -499,7 +509,7 @@ class SkillsRegistry:
         if direct is not None:
             return direct
         for skill in self._skills_by_id.values():
-            if skill.pack_id == canonical_pid and os.path.basename(skill.root_path) == bs:
+            if skill.pack_id == canonical_pid and _basename(skill.root_path) == bs:
                 return skill
         return None
 
@@ -589,10 +599,12 @@ class SkillsRegistry:
             "version": skill.version,
             "instructions": skill.instructions,
             "has_scripts": skill.has_scripts,
+            "scripts": skill.scripts,
             "references": skill.references_slugs,
             "assets": skill.assets_slugs,
             "source": skill.source,
             "root_path": skill.root_path,
+            "location": skill.root_path,
             "pack_id": skill.pack_id,
         }
 
@@ -630,16 +642,15 @@ class SkillsRegistry:
         skill = self._get_skill(skill_id)
         path = skill.references.get(slug)
         if not path:
-            available = ", ".join(sorted(skill.references)) or "(нет references)"
+            available = ", ".join(sorted(skill.references)) or "(no references)"
             raise KeyError(
                 f"Reference '{slug}' not found for skill '{skill_id}'. "
                 f"Available references: {available}"
             )
 
-        with open(path, "r", encoding="utf-8") as f:
-            content = f.read()
+        content = self._backend.read(path)
 
-        filename = os.path.basename(path)
+        filename = _basename(path)
         content_type = _guess_content_type(filename)
 
         return {
@@ -658,16 +669,15 @@ class SkillsRegistry:
         skill = self._get_skill(skill_id)
         path = skill.assets.get(slug)
         if not path:
-            available = ", ".join(sorted(skill.assets)) or "(нет assets)"
+            available = ", ".join(sorted(skill.assets)) or "(no assets)"
             raise KeyError(
                 f"Asset '{slug}' not found for skill '{skill_id}'. "
                 f"Available assets: {available}"
             )
 
-        with open(path, "r", encoding="utf-8") as f:
-            content = f.read()
+        content = self._backend.read(path)
 
-        filename = os.path.basename(path)
+        filename = _basename(path)
         content_type = _guess_content_type(filename)
 
         return {
@@ -678,65 +688,36 @@ class SkillsRegistry:
             "content": content,
         }
 
-    def run_script(
-        self,
-        skill_id: str,
-        script_name: Optional[str] = None,
-        args: Optional[Dict[str, Any]] = None,
-        timeout: float = 60.0,
-    ) -> Dict[str, Any]:
-        """
-        Выполнить python-скрипт скилла.
-
-        - Если script_name не указан — пробуем scripts/main.py.
-        - Аргументы передаются в stdin как JSON.
-        """
+    def resolve_script(self, skill_id: str, script_name: str) -> Dict[str, Any]:
+        """Resolve an explicitly named script on the backend filesystem."""
         skill = self._get_skill(skill_id)
-        scripts_dir = os.path.join(skill.root_path, "scripts")
-
-        if not os.path.isdir(scripts_dir):
-            raise FileNotFoundError(f"Skill '{skill_id}' has no scripts directory")
-
-        if not script_name:
-            script_name = "main.py"
-
-        script_path = os.path.join(scripts_dir, script_name)
-        if not os.path.isfile(script_path):
+        available_scripts = skill.scripts
+        normalized = (script_name or "").strip().replace("\\", "/")
+        if normalized.startswith("scripts/"):
+            normalized = normalized[len("scripts/"):]
+        if not normalized or normalized not in available_scripts:
             raise FileNotFoundError(
-                f"Script '{script_name}' not found for skill '{skill_id}'"
+                f"Script '{script_name}' not found for skill '{skill_id}'. "
+                f"Available scripts: {available_scripts}"
             )
-
-        python_executable = sys.executable or "python"
-        cmd = [python_executable, script_path]
-
-        input_data: Optional[bytes] = None
-        if args is not None:
-            try:
-                json_payload = json.dumps(args, ensure_ascii=False)
-            except TypeError as exc:
-                raise ValueError(f"Failed to serialize args to JSON: {exc}") from exc
-            input_data = json_payload.encode("utf-8")
-
-        completed = subprocess.run(
-            cmd,
-            input=input_data,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            timeout=timeout,
-            check=False,
-        )
-
-        stdout_text = completed.stdout.decode("utf-8", errors="replace")
-        stderr_text = completed.stderr.decode("utf-8", errors="replace")
-
+        path = self._backend.join(self._backend.join(skill.root_path, "scripts"), normalized)
+        if not self._backend.is_file(path):
+            raise FileNotFoundError(
+                f"Script '{script_name}' not found for skill '{skill_id}'. "
+                f"Available scripts: {available_scripts}"
+            )
         return {
-            "stdout": stdout_text,
-            "stderr": stderr_text,
-            "exit_code": completed.returncode,
+            "path": path,
+            "script_name": normalized,
+            "available_scripts": available_scripts,
         }
 
 
-def get_skills_registry(config_dict: Optional[Dict[str, Any]] = None) -> SkillsRegistry:
+def get_skills_registry(
+    config_dict: Optional[Dict[str, Any]] = None,
+    *,
+    backend: FsBackend | None = None,
+) -> SkillsRegistry:
     """
     Фабрика реестра скиллов.
 
@@ -764,8 +745,10 @@ def get_skills_registry(config_dict: Optional[Dict[str, Any]] = None) -> SkillsR
             ]
 
     if skills_root is not None:
-        return SkillsRegistry(skills_root=skills_root, disable_skills=disable_skills)
-    return SkillsRegistry(disable_skills=disable_skills)
+        return SkillsRegistry(
+            skills_root=skills_root, disable_skills=disable_skills, backend=backend
+        )
+    return SkillsRegistry(disable_skills=disable_skills, backend=backend)
 
 
 __all__ = [

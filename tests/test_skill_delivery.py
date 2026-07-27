@@ -15,7 +15,7 @@ def test_delivery_is_english_and_structured():
     assert "Available references (load by exact name via skills_read_reference): ref_a" in out
     assert "Available assets (load by exact name via skills_read_asset): img_b" in out
     assert "Load auxiliary files by the exact names above" in out
-    assert "Do not read skill files via read_file." in out
+    assert "Do not read skill files via read_file." not in out
     # инструкция скилла сохранена
     assert "DO X" in out
     # никакой кириллицы в wire-тексте

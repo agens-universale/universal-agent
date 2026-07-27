@@ -86,6 +86,11 @@ def test_build_run_usage_dict_empty_account_returns_none():
 # ---------------------------------------------------------------------------
 
 
+class _SkillsRegistryStub:
+    def list_skills(self):
+        return []
+
+
 def _base_ctx(logger, logging_path, thread_dir):
     return SimpleNamespace(
         config_dict={
@@ -112,6 +117,7 @@ def _base_ctx(logger, logging_path, thread_dir):
         logging_path=logging_path,
         tools_spec=[],
         tools_description=[],
+        skills_registry=_SkillsRegistryStub(),
     )
 
 
@@ -123,18 +129,12 @@ def test_run_usage_event_emitted_at_end_of_run(tmp_path):
     with tempfile.TemporaryDirectory() as thread_dir:
         ctx = _base_ctx(logger, logging_path, thread_dir)
 
-        class _SkillsRegistryStub:
-            def list_skills(self):
-                return []
-
         def _fake_run_agent(messages, state, ctx_arg, **kwargs):
             # Simulate the LLM call(s) that would normally accrue usage.
             state.usage.add("main", input_tokens=123, output_tokens=45, cached_tokens=0)
             return "ok"
 
-        with patch.object(
-            agent_executor_module, "get_skills_registry", return_value=_SkillsRegistryStub()
-        ), patch.object(agent_executor_module, "run_agent", side_effect=_fake_run_agent):
+        with patch.object(agent_executor_module, "run_agent", side_effect=_fake_run_agent):
             executor = agent_executor_module.AgentExecutor(ctx)
             result = executor.run(["hello"], thread_id="thr2", system="cli", verbose=False)
             assert result == "ok"
@@ -167,13 +167,7 @@ def test_run_usage_event_not_emitted_when_no_usage(tmp_path):
     with tempfile.TemporaryDirectory() as thread_dir:
         ctx = _base_ctx(logger, logging_path, thread_dir)
 
-        class _SkillsRegistryStub:
-            def list_skills(self):
-                return []
-
-        with patch.object(
-            agent_executor_module, "get_skills_registry", return_value=_SkillsRegistryStub()
-        ), patch.object(agent_executor_module, "run_agent", return_value="ok"):
+        with patch.object(agent_executor_module, "run_agent", return_value="ok"):
             executor = agent_executor_module.AgentExecutor(ctx)
             result = executor.run(["hello"], thread_id="thr3", system="cli", verbose=False)
             assert result == "ok"
