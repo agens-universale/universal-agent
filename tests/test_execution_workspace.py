@@ -4,7 +4,7 @@ from execution_workspace import (
     discover_backend_cwd,
     resolve_execution_root,
 )
-from tools.backends.local import LocalFsBackend
+from backends.local import LocalFsBackend
 from utils.project_data import get_project_data
 from utils.tool_report_paths import tool_report_abspath
 

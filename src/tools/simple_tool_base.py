@@ -10,6 +10,7 @@ class AbstractSimpleTool(ABC):
         self._ctx = kwargs.get("ctx")
         self._state = kwargs.get("state")
         self._config_dict = kwargs.get("config_dict")
+        self._call_id = kwargs.get("call_id")
 
     @property
     def _backend(self):
@@ -18,7 +19,7 @@ class AbstractSimpleTool(ABC):
         if ctx is None:
             raise RuntimeError(
                 f"{type(self).__name__} requires ctx; use apply_tool "
-                f"(tests: with_local_ctx / tests.harbor.fakes.bind_os_backend)"
+                f"(tests: with_local_ctx / tests.harbor_support.fakes.bind_os_backend)"
             )
         backend = getattr(ctx, "os_backend", None)
         if backend is None:
@@ -34,7 +35,7 @@ class AbstractSimpleTool(ABC):
         if ctx is None:
             raise RuntimeError(
                 f"{type(self).__name__} requires ctx; use apply_tool "
-                f"(tests: with_local_ctx / tests.harbor.fakes.bind_os_backend)"
+                f"(tests: with_local_ctx / tests.harbor_support.fakes.bind_os_backend)"
             )
         workspace = getattr(ctx, "workspace", None)
         if not isinstance(workspace, ExecutionWorkspace):

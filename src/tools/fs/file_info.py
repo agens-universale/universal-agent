@@ -9,6 +9,7 @@ from utils.file_text import (
     count_lines_in_text,
     sha256_hex_of_text,
 )
+from security.read_guard import enforce_read_guard
 from tools.simple_tool_base import AbstractSimpleTool
 from utils.tool_report_paths import tool_report_abspath
 
@@ -80,6 +81,23 @@ class FileInfo(AbstractSimpleTool):
 
         return triplet(stat_module.S_IRUSR) + triplet(stat_module.S_IRGRP) + triplet(stat_module.S_IROTH)
 
+    def _read_guard_blocked_result(
+        self,
+        error: Dict[str, Any],
+        path: str,
+        include_hash: bool = False,
+        hash_algorithm: str = "sha256",
+        include_line_count: bool = False,
+        follow_symlinks: bool = False,
+        **kwargs,
+    ) -> str:
+        return self._error(
+            path=path,
+            error=error,
+            message=str(error.get("message") or "Read operation is outside allowed read_guard perimeter."),
+        )
+
+    @enforce_read_guard(path_arg="path")
     def __call__(
         self,
         path: str,

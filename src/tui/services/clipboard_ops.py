@@ -23,6 +23,21 @@ def is_ssh_session() -> bool:
     return bool(os.environ.get("SSH_CONNECTION") or os.environ.get("SSH_TTY"))
 
 
+def with_source_cite(text: str, *, kind: str, path: str) -> str:
+    """Дописать суффикс источника: ``[file: path]`` / ``[diff: path]``.
+
+    Пустой text или path → text без изменений. Trailing whitespace текста
+    срезается перед суффиксом (сам path не трогаем).
+    """
+    if not text:
+        return text
+    path = (path or "").strip()
+    if not path:
+        return text
+    kind = (kind or "").strip() or "file"
+    return f"{text.rstrip()}\n[{kind}: {path}]"
+
+
 def copy_out(app: Any, text: str, *, toast: bool = False) -> bool:
     """Скопировать text: OSC+internal, затем native. return = native ok.
 

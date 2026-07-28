@@ -57,7 +57,14 @@ from tui.services.subagent_sidecar_mapper import (
 from tui.services.trace_mapper import collect_skipped_call_ids, map_message
 from tui.services.trace_render import build_compaction_label
 from tui.screens.tool_call_detail import ToolCallDetailScreen
-from tui.toggles import apply_toggle, cycle_value, toggle_state
+from tui.session_settings import read_from_meta
+from tui.toggles import (
+    apply_toggle,
+    next_toggle_value,
+    preset_custom_hint,
+    preset_track_extra,
+    toggle_state,
+)
 from tui.widgets.command_input import CommandTextArea
 from tui.widgets.command_palette import CommandPalette
 from tui.widgets.thinking_indicator import (
@@ -69,6 +76,11 @@ from tui.widgets.tool_call_row import ToolCallRow
 from tui.widgets.trace_row import TraceRow
 from tui import branding
 from tui.services.terminal_title import format_terminal_title, set_terminal_title
+from tui.services.session_title import (
+    LAST_ACTUAL_MIN,
+    display_name,
+    normalize_prompt_title,
+)
 from tui.services.reasoning_clock import COGNITIVE_TOOLS, ReasoningClock
 
 
@@ -107,22 +119,37 @@ def resolve_live_terminal_indicator_state(*, last_indicator_kind, status, stop_r
 def select_indicator_mode(*, err, is_running, ask_human, confirm):
     """Режим строки-индикатора в _poll_active. Порядок важен.
 
-    err (краш раннера) имеет ПРИОРИТЕТ → "failed": терминальный ✗ Ошибка сразу,
-    не дожидаясь reaping воркера / falling-edge. Иначе при быстром следующем
-    сообщении статус теряется, а idle-ветка уничтожает индикатор."""
-    if err:
-        return "failed"
-    if is_running and not ask_human and not confirm:
-        return "active"
+    Human-wait (ask_human/confirm) выше err: агент ждёт ответ юзера — баннер
+    уже говорит об этом; ✗ Ошибка поверх «АГЕНТ СПРАШИВАЕТ» путает (в т.ч. когда
+    stale last_runner_error от заменённого runner ещё не сброшен).
+
+    Иначе err (краш текущего раннера) → "failed" сразу, не дожидаясь reaping /
+    falling-edge: при быстром следующем сообщении статус иначе теряется, а
+    idle-ветка уничтожает индикатор."""
     if ask_human or confirm:
         return "hide"
+    if err:
+        return "failed"
+    if is_running:
+        return "active"
     return "terminal"
 
 
-def select_active_substate(*, summarizing, finalizing, last_event_kind, since_last, soft_hide_kinds):
+def select_active_substate(
+    *,
+    summarizing,
+    finalizing,
+    last_event_kind,
+    since_last,
+    soft_hide_kinds,
+    finish_gate_checking=False,
+):
     """Под-состояние индикатора в режиме "active". Порядок = приоритет.
 
     - summarizing (компакция истории) → "compressing" (сжимаю контекст…);
+    - finish_gate_checking (судья turn_finish реально сейчас вызывается) →
+      "processing" (сверяюсь…) — ВЫШЕ защёлки _finalized/finalizing, иначе
+      «завершаю» перебивает и судья работает невидимо;
     - finalizing (принят финальный ответ — turn_finish ИЛИ финальная проза —
       идёт запись/саммари/flush/cleanup) → "validating" (завершаю…);
     - последнее событие скрыто (agent/system) и висит ≥1.5с (finish-gate сверяет
@@ -131,6 +158,8 @@ def select_active_substate(*, summarizing, finalizing, last_event_kind, since_la
     """
     if summarizing:
         return "compressing"
+    if finish_gate_checking:
+        return "processing"
     if finalizing or last_event_kind == "_finalized":
         return "validating"
     if last_event_kind in soft_hide_kinds and since_last >= 1.5:
@@ -232,6 +261,9 @@ class TraceScreen(Screen):
         self._trace_max_height = None  # type: Optional[int]
         self._stick_bottom = True   # автоскролл-намерение «липнуть к низу» трейса
         self._last_auto_y = 0       # куда мы в прошлый раз программно прижали трейс
+        # Freeze UI на время app-select (§3.2 F1): time.monotonic() первого тика,
+        # где увидели Screen._selecting; None когда не selecting.
+        self._select_freeze_since: Optional[float] = None
         # Эфемерный StreamBlock — live-вывод текущего chat_completions-шага;
         # снимается, когда приходит каноничная assistant-строка / run завершён.
         self._stream_block = None  # type: Optional["StreamBlock"]
@@ -731,6 +763,14 @@ class TraceScreen(Screen):
             threads_dir=self.app._threads_dir or "",
             system=self.app._system,
         )
+        # Настройки режимов принадлежат треду (спека 2026-07-20-session-scoped-settings):
+        # берём его значения; их нет (старый тред) — сессия возвращается к умолчанию.
+        saved = read_from_meta(self._store.get_task_meta(task_id))
+        # Пересобираем executor только при РЕАЛЬНОЙ смене набора: attach идёт и на
+        # каждом автосозданном треде, и на возврате к тому же — прогретый раннер
+        # (с уже пройденным MCP-дискавери) выбрасывать зря нельзя.
+        if self.app.load_session_overrides(saved or {}):
+            self.app.invalidate_runner()
         # read_all_events — атомарный снимок live-файла + cursor (как раньше).
         # Была ли компакция, определяем по голове live-снимка (после turn_end
         # первая запись = сводка) — без доп. I/O. Тред без компакции рендерим
@@ -1003,6 +1043,11 @@ class TraceScreen(Screen):
         """Освежить контент уже смонтированного стрим-виджета из снапшота sink.
         Зовётся poll-веткой (после mount/switch) и событийно (StreamPump → app →
         call_from_thread). НЕ монтирует/снимает/переключает — это poll."""
+        # F3: freeze UI на время app-select — не красим стрим и не двигаем stick
+        # (здесь зовутся _update_stick_state/_scroll_trace_end). Гейт железный:
+        # покрывает и poll, и событийный путь _stream_signal → call_from_thread.
+        if self._ui_frozen_for_select():
+            return
         sink = getattr(self.app, "_stream_sink", None)
         if sink is None:
             return
@@ -1174,28 +1219,109 @@ class TraceScreen(Screen):
     def _on_user_text_submitted(self, text: str) -> None:
         """Обработка отправки user query: обнулить счётчик событий с последнего
         user-send и запомнить текст для cancel-with-undo (Tasks 9-10).
-        Дополнительно: append текста в input-history и выход из history-навигации."""
+        Дополнительно: append текста в input-history и выход из history-навигации.
+
+        R6 (in-session-rename): авто-имя сессии. normalize → seed/update
+        ``last_actual`` в ``tui_meta`` (read-merge-write через стор). Первый
+        промпт сеет безусловно; далее — только если ``len(norm) > LAST_ACTUAL_MIN``.
+        **Порядок:** запись meta → затем ``_update_terminal_title`` (OSC видит
+        свежее имя). best-effort (try/except). ``_resumed_prompt`` остаётся сырым
+        для attach/cancel — это НЕ имя сессии (R5: OSC/пикер читают display_name)."""
         self._last_user_send_text = text
-        self._resumed_prompt = text   # send = новое последнее сообщение активной сессии
+        self._resumed_prompt = text   # send = новое последнее сообщение активной сессии (сырой текст)
+        self._seed_or_update_last_actual(text)
         self._update_terminal_title()
         self._events_since_last_user_send = 0
         if self._history is not None:
             self._history.append(text)
         self._reset_history_navigation()
 
-    def _update_terminal_title(self) -> None:
-        """Заголовок терминала = промпт + текущий статус (для таба/таскбара).
+    def _seed_or_update_last_actual(self, text: str) -> None:
+        """R6: авто-запись ``tui.last_actual`` — человекочитаемое имя сессии.
 
-        Промпт: ЕДИНЫЙ источник _resumed_prompt (последнее user-сообщение активной
-        сессии: из стора на attach, = тексту на send). Статус — live
-        (_task_status_badge). Дедуп: OSC пишем только при смене — поллер зовёт каждый тик."""
+        normalize → если пусто skip; иначе seed (last_actual пуст → любая длина)
+        либо update (len(norm) > LAST_ACTUAL_MIN). best-effort: без стора/активной
+        задачи — no-op. Не пишет для slash-команд (путь _dispatch_command).
+        """
+        if self._active_task_id is None or self._store is None:
+            return
+        norm = normalize_prompt_title(text)
+        if not norm:
+            return
+        try:
+            meta = self._store.get_task_meta(self._active_task_id) or {}
+            tui_meta = meta.get("tui") or {}
+            current = tui_meta.get("last_actual")
+            if isinstance(current, str) and current.strip():
+                # уже задано — обновляем только содержательным промптом
+                if len(norm) > LAST_ACTUAL_MIN:
+                    self._store.update_tui_meta(self._active_task_id, {"last_actual": norm})
+            else:
+                # seed: первый промпт безусловно
+                self._store.update_tui_meta(self._active_task_id, {"last_actual": norm})
+        except Exception:
+            pass
+
+    def _update_terminal_title(self) -> None:
+        """Заголовок терминала = имя сессии + текущий статус (для таба/таскбара).
+
+        R5 (in-session-rename): промпт = display_name(meta.tui) (title >
+        last_actual > «Без названия»), а не _resumed_prompt. _resumed_prompt
+        остаётся для attach/cancel и НЕ является именем сессии. Статус — live
+        (_session_status_word). Дедуп: OSC пишем только при смене — поллер зовёт каждый тик."""
         if self._active_task_id is None:
             title = format_terminal_title()
         else:
-            title = format_terminal_title(self._resumed_prompt, self._session_status_word())
+            prompt = self._session_display_name()
+            title = format_terminal_title(prompt, self._session_status_word())
         if title != self._last_terminal_title:
             self._last_terminal_title = title
             set_terminal_title(title)
+
+    def _session_display_name(self) -> str:
+        """display_name(tui_meta) активной задачи — единый источник имени для OSC.
+
+        best-effort: без стора/задачи или при ошибке чтения — фолбэк на
+        ``_resumed_prompt`` (старое поведение), чтобы OSC не гас к «Без названия»
+        в гонке записи. см. R5/R6 (in-session-rename).
+        """
+        if self._store is None or self._active_task_id is None:
+            return self._resumed_prompt or ""
+        try:
+            meta = self._store.get_task_meta(self._active_task_id) or {}
+            return display_name(meta.get("tui"))
+        except Exception:
+            return self._resumed_prompt or ""
+
+    def _rename_active_session(self) -> None:
+        """R2 (in-session-rename): открыть RenameScreen(current=display_name) активной сессии.
+
+        Гейт: ``_active_task_id`` и ``_store`` не None. Текущее имя =
+        ``_session_display_name()`` (title > last_actual > «Без названия»).
+        Результат → ``_on_rename_result`` (R3).
+        """
+        if self._active_task_id is None or self._store is None:
+            return
+        from tui.screens.rename import RenameScreen
+        current = self._session_display_name()
+        self.app.push_screen(RenameScreen(current=current), self._on_rename_result)
+
+    def _on_rename_result(self, value: Optional[str]) -> None:
+        """R3 (in-session-rename): применить результат RenameScreen.
+
+        ``None`` (Esc) → no-op. Иначе ``update_tui_meta(tid, {"title": value})``
+        (``""`` = сброс к авто-имени из last_actual), затем ``_update_terminal_title``
+        (OSC сразу видит новое имя). best-effort: без стора/задачи — no-op.
+        """
+        if value is None:
+            return
+        if self._active_task_id is None or self._store is None:
+            return
+        try:
+            self._store.update_tui_meta(self._active_task_id, {"title": value})
+        except Exception:
+            return
+        self._update_terminal_title()
 
     def _session_last_prompt(self) -> "Optional[str]":
         """Последний user-промпт активной сессии из стора (для заголовка при resume).
@@ -1687,6 +1813,21 @@ class TraceScreen(Screen):
         self._unmount_ask_human_banner()
 
     
+    def _diff_thread_identity(self) -> tuple[Optional[str], Optional[str], Optional[str]]:
+        """(threads_dir, system_id, thread_id) текущей сессии для DiffService."""
+        threads_dir = getattr(self.app, "_threads_dir", None)
+        system_id = getattr(self.app, "_system", None)
+        thread_id = self._active_task_id or getattr(
+            getattr(self.app, "tui_state", None), "active_task_id", None
+        )
+        if not isinstance(threads_dir, str) or not threads_dir.strip():
+            threads_dir = None
+        if not isinstance(system_id, str) or not system_id.strip():
+            system_id = None
+        if not isinstance(thread_id, str) or not thread_id.strip():
+            thread_id = None
+        return threads_dir, system_id, thread_id
+
     def _diff_service_for_preview(self):
         cfg = getattr(self.app, "_config", None) or {}
         launch_root = cfg.get("launch_root")
@@ -1694,7 +1835,14 @@ class TraceScreen(Screen):
             return None
         from tui.screens.diff import _service_from_config
 
-        return _service_from_config(str(launch_root), cfg)
+        threads_dir, system_id, thread_id = self._diff_thread_identity()
+        return _service_from_config(
+            str(launch_root),
+            cfg,
+            threads_dir=threads_dir,
+            system_id=system_id,
+            thread_id=thread_id,
+        )
 
     def _on_ask_human_event(self, ev, *, live: bool = False) -> None:
         from tui.widgets.ask_human_banner import AskHumanBanner
@@ -1996,6 +2144,22 @@ class TraceScreen(Screen):
             self._store.update_tui_meta(tid, {"pending_user_messages": new_list})
         self._pending_user_widgets.clear()
 
+    def _begin_auto_created_task(self) -> str:
+        """Автосоздание треда под первое сообщение: id, store, наследование
+        сессионных настроек режимов. Единая точка для всех входов
+        (свободный текст, inline /skill, /init)."""
+        tid = uuid.uuid4().hex
+        self.app.tui_state.active_task_id = tid
+        self._active_task_id = tid
+        # Открываем store сейчас, чтобы _track_pending мог писать meta.
+        self._store = FileTaskStore(
+            threads_dir=self.app._threads_dir or "",
+            system=self.app._system,
+        )
+        # /new и автосоздание: новый тред наследует то, с чем работаем сейчас.
+        self.app.persist_session_overrides()
+        return tid
+
     def _prepare_for_new_run(self) -> None:
         """Подготовить TUI к новому запуску runner.start:
         сбросить error-флаг, очистить last_runner_error,
@@ -2102,15 +2266,40 @@ class TraceScreen(Screen):
         else:
             self._reasoning_clock.stop("stream")
 
+    def _ui_frozen_for_select(self) -> bool:
+        """F1: заморожен ли UI из-за app-select. Сигнал — Screen._selecting."""
+        return bool(getattr(self, "_selecting", False))
+
     def _poll_active(self) -> None:
         # Потолок #trace = экран минус хром. Зависит только от стабильных высот
         # (header/indicator-bar[зарезервирован]/input/footer) → пересчёт синхронный и
         # без гонки (на гарде ставит max-height лишь при ресайзе / росте ввода).
         self._sync_trace_max_height()
+        # Freeze UI на время app-select (§3.2 F2–F5). Пока Screen._selecting —
+        # точечно глушим UI-мутации трейса (stick/scroll/stream paint/wipe),
+        # но НЕ весь poll: footer/OSC/title/runner-логика/orphan/tail-события
+        # без мутаций экрана продолжаются (F6 — runner жив, UI не тупеет целиком).
+        _frozen = self._ui_frozen_for_select()
+        if _frozen:
+            if self._select_freeze_since is None:
+                self._select_freeze_since = time.monotonic()
+            # F5: timeout ~5с → снять выделение принудительно (runner не стопаем).
+            if time.monotonic() - self._select_freeze_since > 5.0:
+                try:
+                    self.clear_selection()
+                except Exception:
+                    pass
+                self._select_freeze_since = None
+                self._selecting = False
+                _frozen = False
+        else:
+            self._select_freeze_since = None
         # Липкость к низу: детект ручного скролла + повторное прижатие.
-        self._update_stick_state()
-        if self._stick_bottom:
-            self._scroll_trace_end()
+        # F2: при freeze — не обновляем stick и не прижимаем (текст стоит на месте).
+        if not _frozen:
+            self._update_stick_state()
+            if self._stick_bottom:
+                self._scroll_trace_end()
         # Отложенное удаление осиротевших реплик (cancel-with-undo), когда idle.
         self._run_orphan_cleanups()
         # Индикатор загрузки MCP — на старте (до появления активной задачи) тоже.
@@ -2213,6 +2402,7 @@ class TraceScreen(Screen):
         self._drain_subagent_progress()
         summarizing = False
         finalizing = False
+        finish_gate_checking = False
         _tmeta: dict = {}
         if self._store is not None and self._active_task_id is not None:
             try:
@@ -2220,9 +2410,11 @@ class TraceScreen(Screen):
                 _rt = _tmeta.get("runtime") or {}
                 summarizing = bool(_rt.get("summarizing"))
                 finalizing = bool(_rt.get("finalizing"))
+                finish_gate_checking = bool(_rt.get("finish_gate_checking"))
             except Exception:
                 summarizing = False
                 finalizing = False
+                finish_gate_checking = False
                 _tmeta = {}
         # Завершение сжатия (summarizing True→False) → baseline =
         # снимок meta.runtime.live_msg_count (persist уже пересчитал live_* на compact).
@@ -2257,7 +2449,8 @@ class TraceScreen(Screen):
                     or not is_terminal_indicator_state(self._thinking._state)
                 ):
                     self._destroy_thinking_indicator()
-            self._clear_stream_block()
+            if not _frozen:
+                self._clear_stream_block()
             self._refresh_footer()
             self._update_terminal_title()
             return
@@ -2273,11 +2466,14 @@ class TraceScreen(Screen):
             # falling-edge/idle и не зависим от reaping воркера. _show создаёт
             # индикатор, если его нет.
             self._show_thinking_indicator(state="failed")
-            self._clear_stream_block()
+            if not _frozen:
+                self._clear_stream_block()
         elif _indicator_mode == "active":
             import time as _time
             since_last = _time.monotonic() - self._last_event_at
-            # summarizing → «сжимаю контекст…»; finalizing (принят финальный ответ:
+            # summarizing → «сжимаю контекст…»; finish_gate_checking (судья turn_finish
+            # реально сейчас вызывается) → «сверяюсь…» — ВЫШЕ защёлки _finalized, иначе
+            # судья работает невидимо под «завершаю…»; finalizing (принят финальный ответ:
             # submit_solution ИЛИ финальная проза — идёт запись/саммари/flush/cleanup)
             # → «✓ завершаю…»; скрытое событие ≥1.5с (finish-gate сверяет / bounce /
             # доделка) → «сверяюсь…»; иначе «думаю…». Sentinel «_finalized» и флаг
@@ -2285,6 +2481,7 @@ class TraceScreen(Screen):
             substate = select_active_substate(
                 summarizing=summarizing,
                 finalizing=finalizing,
+                finish_gate_checking=finish_gate_checking,
                 last_event_kind=self._last_event_kind,
                 since_last=since_last,
                 soft_hide_kinds=_SOFT_HIDE_KINDS,
@@ -2298,7 +2495,9 @@ class TraceScreen(Screen):
             # не показываем — иначе строка-мысль висит после финального ответа (баг B).
             _thinking_phase = (not summarizing) and (not finalizing) and (self._last_event_kind != "_finalized")
             sink = getattr(self.app, "_stream_sink", None)
-            if _thinking_phase and sink is not None and sink.has_content():
+            # F3: при freeze не монтируем/не красим стрим-виджеты (mount/switch/
+            # set_content дрожали бы экран под выделением). Контент догонит после MouseUp.
+            if _thinking_phase and sink is not None and sink.has_content() and not _frozen:
                 from tui.services.stream_sink import (
                     format_stream_block, format_reasoning_line, select_stream_render,
                 )
@@ -2331,7 +2530,7 @@ class TraceScreen(Screen):
                     self._refresh_stream_content()
                 else:
                     self._clear_stream_block(reset_sink=False)
-            elif not _thinking_phase:
+            elif not _thinking_phase and not _frozen:
                 self._clear_stream_block()
         elif _indicator_mode == "hide":
             # Агент заблокирован — ждёт ответа пользователя. Скрываем (не destroy),
@@ -2358,7 +2557,8 @@ class TraceScreen(Screen):
                 self._thinking.set_state(term_state)
             else:
                 self._destroy_thinking_indicator()
-            self._clear_stream_block()
+            if not _frozen:
+                self._clear_stream_block()
         # Footer-left зависит от is_running — обновляем каждый тик, чтобы
         # /stop появлялся/исчезал без отдельных вызовов из start/stop путей.
         self._refresh_footer()
@@ -2367,6 +2567,12 @@ class TraceScreen(Screen):
             self._flush_diff_pending_cta()
             return
         tail = self._store.tail_events(self._active_task_id, self._cursor)
+        # F3: при freeze НЕ перерисовываем трейс (wipe/clear_trace/render_records
+        # дрожали бы экраном под выделением). Курсор двигаем, чтобы не копить
+        # хвост — отрисовка догонит на следующем тике после MouseUp.
+        if _frozen:
+            self._cursor = tail.next_cursor
+            return
         if tail.stream_reset:
             self._clear_trace()
             self._reset_render_state()
@@ -2549,7 +2755,22 @@ class TraceScreen(Screen):
             self._palette, self._skill_picker, self._arg_picker, self._file_picker,
         ))
 
+    # R1: алиасы Ctrl+R для ручного переименования активной сессии.
+    # Локальный маппинг (образец — diff.py _KEY_ALIASES); diff-модуль не тащим.
+    # ctrl+к / ctrl+К — русская раскладка (клавиша «R» на той же физ. кнопке).
+    _RENAME_KEYS = frozenset({"ctrl+r", "ctrl+R", "ctrl+к", "ctrl+К"})
+
     def on_key(self, event: events.Key) -> None:
+        # R1: Ctrl+R (и алиасы раскладки) — переименование активной сессии.
+        # Гейт _active_task_id + _store; до confirm-banner/pickers (как в спеке).
+        if event.key in self._RENAME_KEYS \
+                and self._active_task_id is not None \
+                and self._store is not None:
+            self._rename_active_session()
+            event.stop()
+            event.prevent_default()
+            return
+
         # Confirm-баннер имеет наивысший приоритет: одиночный y/N перехватываем
         # до истории, Esc-лестницы и любых пикеров. TextArea скрыта, клавиши
         # не потребляются ею и доходят сюда.
@@ -2783,10 +3004,11 @@ class TraceScreen(Screen):
         elif event.key in ("left", "right"):
             cmd = self._palette.selected_command()
             if cmd is not None and cmd.is_toggle:
-                # Мгновенная модель (спека 2026-07-18 §1): ←/→ применяет значение
-                # СРАЗУ (запись config.yml + hot-reload), черновика нет.
-                current = toggle_state(self.app, cmd.name)
-                new_value = cycle_value(cmd.name, current, -1 if event.key == "left" else 1)
+                # Мгновенная модель (спека §1): ←/→ применяет в сессию сразу.
+                # custom не выбирается (ревизия 4) — /rigor крутит только
+                # low/medium/high, ровно как Settings.
+                d = -1 if event.key == "left" else 1
+                new_value = next_toggle_value(self.app, cmd.name, d)
                 try:
                     apply_toggle(self.app, cmd.name, new_value)
                 except (ValueError, OSError) as exc:
@@ -2967,6 +3189,8 @@ class TraceScreen(Screen):
         palette = CommandPalette(
             self._registry, initial_filter=prefix,
             toggle_state=lambda name: toggle_state(self.app, name),
+            toggle_extra=lambda name: preset_track_extra(self.app, name),
+            toggle_custom_hint=lambda name: preset_custom_hint(self.app, name),
         )
         self._palette = palette
         self._mount_input_overlay(palette)
@@ -3156,9 +3380,9 @@ class TraceScreen(Screen):
             if cmd is not None and cmd.is_toggle:
                 # Toggle-строка: Enter не сабмитит текст — циклит (+1) и
                 # применяет мгновенно, тот же путь, что ←/→ (спека 2026-07-18
-                # §1). Палитра остаётся открытой.
-                current = toggle_state(self.app, cmd.name)
-                new_value = cycle_value(cmd.name, current, 1)
+                # §1). custom не выбирается (ревизия 4) — тот же роутинг, что
+                # и ←/→ выше. Палитра остаётся открытой.
+                new_value = next_toggle_value(self.app, cmd.name, 1)
                 try:
                     apply_toggle(self.app, cmd.name, new_value)
                 except (ValueError, OSError) as exc:
@@ -3253,14 +3477,7 @@ class TraceScreen(Screen):
             # AUTO-CREATE: первый свободный текст → новая задача.
             # Применяем pre-stage: pending_skill_id встраиваем в первое
             # сообщение и фиксируем в meta.tui.
-            tid = uuid.uuid4().hex
-            self.app.tui_state.active_task_id = tid
-            self._active_task_id = tid
-            # Открываем store сейчас, чтобы _track_pending мог писать meta.
-            self._store = FileTaskStore(
-                threads_dir=self.app._threads_dir or "",
-                system=self.app._system,
-            )
+            tid = self._begin_auto_created_task()
             full_query, patch = self._consume_pending_prefix(text)
             display_query, skill_loaded = self._skill_display_args(text)
             technical = self._build_attachment_technical(text)
@@ -3371,8 +3588,9 @@ class TraceScreen(Screen):
 
     def _cmd_settings(self) -> None:
         from tui.screens.settings import SettingsScreen
+        self.app.reload_config_if_changed()   # свежесть глобала — только на пути Settings (дизайн 2026-07-21 §4)
         self.app.push_screen(SettingsScreen(
-            config=getattr(self.app, "_config", None) or {},
+            config=self.app.screen_config(),
             config_path=getattr(self.app, "_config_path", None),
             on_apply=self.app.reload_config,
         ))
@@ -3380,7 +3598,7 @@ class TraceScreen(Screen):
     def _cmd_config(self) -> None:
         from tui.screens.config import ConfigScreen
         self.app.push_screen(ConfigScreen(
-            config=getattr(self.app, "_config", None) or {},
+            config=self.app.screen_config(),
             config_path=getattr(self.app, "_config_path", None),
             project_local=getattr(self.app, "_config_project_local", None),
         ))
@@ -3390,7 +3608,7 @@ class TraceScreen(Screen):
         from tui.services.file_view import FileViewSettings
         from tui.screens.file_view import FileViewerScreen
 
-        cfg = getattr(self.app, "_config", None) or {}
+        cfg = self.app.screen_config()
         store = getattr(self.app, "view_positions", None)
         if store is None:
             from tui.services.file_view import ViewPositionStore
@@ -3406,13 +3624,13 @@ class TraceScreen(Screen):
     def _cmd_mcp(self) -> None:
         from tui.screens.mcp import McpScreen
         self.app.push_screen(McpScreen(
-            config=getattr(self.app, "_config", None) or {},
+            config=self.app.screen_config(),
             tools_snapshot=self._mcp_screen_snapshot(),
         ))
 
     def _cmd_diff(self) -> None:
         from tui.screens.diff import DiffScreen
-        cfg = getattr(self.app, "_config", None) or {}
+        cfg = self.app.screen_config()
         launch_root = cfg.get("launch_root")
         if not launch_root:
             self._mount_trace_row(
@@ -3421,12 +3639,16 @@ class TraceScreen(Screen):
                 kind_class="line-meta",
             )
             return
+        threads_dir, system_id, thread_id = self._diff_thread_identity()
         self.app.push_screen(
             DiffScreen(
                 launch_root=str(launch_root),
                 config=cfg,
                 on_undo_feedback=self._on_diff_undo_feedback,
                 on_ui_ack=self._on_diff_ui_ack,
+                threads_dir=threads_dir,
+                system_id=system_id,
+                thread_id=thread_id,
             )
         )
 
@@ -3926,14 +4148,7 @@ class TraceScreen(Screen):
 
         if self.app.tui_state.active_task_id is None:
             # AUTO-CREATE: зеркалим порядок auto-create в on_command_text_area_submitted.
-            tid = uuid.uuid4().hex
-            self.app.tui_state.active_task_id = tid
-            self._active_task_id = tid
-            # Открываем store сейчас, чтобы _track_pending мог писать meta.
-            self._store = FileTaskStore(
-                threads_dir=self.app._threads_dir or "",
-                system=self.app._system,
-            )
+            tid = self._begin_auto_created_task()
             runner = self.app.get_runner()
             self._prepare_for_new_run()
             self._reset_thinking_timer()
@@ -4239,7 +4454,7 @@ class TraceScreen(Screen):
             from tui.screens.skills import SkillsScreen
             self.app.push_screen(SkillsScreen(
                 skills=self._load_skills_safe(),
-                config=getattr(self.app, "_config", None) or {},
+                config=self.app.screen_config(),
             ))
             return
         if name == "config":
@@ -4250,6 +4465,9 @@ class TraceScreen(Screen):
             return
         if name == "mcp":
             self._cmd_mcp()
+            return
+        if name == "buffer":
+            self.app.action_buffer()
             return
         if name == "diff":
             self.app.action_diff()
@@ -4275,7 +4493,7 @@ class TraceScreen(Screen):
         if name == "compact":
             self._cmd_compact()
             return
-        if name in ("gate", "answers"):
+        if cmd.is_toggle:
             self._toggle_info_command(name)
             return
 
@@ -4567,12 +4785,7 @@ class TraceScreen(Screen):
         self._last_user_message_id = msg_id
 
         if self.app.tui_state.active_task_id is None:
-            tid = uuid.uuid4().hex
-            self.app.tui_state.active_task_id = tid
-            self._active_task_id = tid
-            self._store = FileTaskStore(
-                threads_dir=self.app._threads_dir or "", system=self.app._system,
-            )
+            tid = self._begin_auto_created_task()
             runner = self.app.get_runner()
             self._prepare_for_new_run()
             self._reset_thinking_timer()

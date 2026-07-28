@@ -1,6 +1,6 @@
 from run_context import RunContext, create_run_context
 
-from tools.backends.local import LocalFsBackend
+from backends.local import LocalFsBackend
 
 
 def test_runcontext_has_environment_and_os_backend_fields():

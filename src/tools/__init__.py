@@ -13,7 +13,9 @@ from tools.arguments_validation import (
 from tools.skills.registry import get_skills_registry
 from tools.skills.skills_tools import get_skills_tools_data
 from tools.registry import get_builtin_tools_data
-from tools.backends.factory import parse_os_backend_kind
+from backends.factory import parse_os_backend_kind
+from backends.protocol import FsBackend
+from tools.skills.registry import SkillsRegistry
 from tools.subagents.registry import is_subagent_tool
 from tools.inject_tool_fields import (
     apply_injected_fields_to_spec,
@@ -105,6 +107,9 @@ def _apply_openai_strict_tools_schema(spec: Dict[str, Any]) -> None:
 def build_tools_data(
     config_dict: Dict[str, Any],
     on_progress=None,
+    *,
+    os_backend: FsBackend | None = None,
+    skills_registry: SkillsRegistry | None = None,
 ) -> Tuple[Dict[str, Dict[str, Any]], list, list, dict]:
     """
     Собрать единый словарь tools_data и производные списки spec/description
@@ -116,8 +121,8 @@ def build_tools_data(
     for k, v in builtin_tools_data.items():
         tools_data[k] = v
 
-    skills_registry = get_skills_registry(config_dict)
-    skills_tools_data = get_skills_tools_data(skills_registry)
+    registry = skills_registry or get_skills_registry(config_dict, backend=os_backend)
+    skills_tools_data = get_skills_tools_data(registry)
     for k, v in skills_tools_data.items():
         tools_data[k] = v
 

@@ -1,3 +1,4 @@
+import hashlib
 import json
 import functools
 import difflib
@@ -8,8 +9,6 @@ from utils.tool_report_paths import tool_report_abspath
 from security.path_policy import enforce_write_guard
 from tools.schema_optional import coalesce_optional_string
 from utils.file_text import check_expected_file_sha256, is_valid_sha256_hex
-from diff_tui.tracking import snapshot_before_text_mutation
-
 
 class SearchAndReplace(AbstractSimpleTool):
     """
@@ -65,7 +64,7 @@ class SearchAndReplace(AbstractSimpleTool):
                     },
                     "search": {
                         "type": "string",
-                        "description": "The exact content to find and replace. Match is case-sensitive and literal (not regex). May be multiline. Cannot be empty."
+                        "description": "The exact content to find and replace. Match is case-sensitive and literal (not regex). May be multiline. Cannot be empty. Use a unique multi-line snippet to avoid accidental matches elsewhere in the file."
                     },
                     "replace": {
                         "type": "string",
@@ -79,16 +78,6 @@ class SearchAndReplace(AbstractSimpleTool):
                         "type": "integer",
                         "minimum": 0,
                         "description": "If provided, tool fails unless the total number of matches in file equals this value."
-                    },
-                    "start_line": {
-                        "type": "integer",
-                        "minimum": 1,
-                        "description": "Optional 1-based start line of the search/replace scope."
-                    },
-                    "end_line": {
-                        "type": "integer",
-                        "minimum": 1,
-                        "description": "Optional 1-based end line of the search/replace scope."
                     },
                     "occurrence": {
                         "description": "Which occurrence to replace: 'first' (default), 'last', 'all', or 1-based integer index.",
@@ -133,7 +122,7 @@ class SearchAndReplace(AbstractSimpleTool):
     def prompt_description(cls) -> str:
         description = '''Tool name: fs_search_and_replace  
 Tool description: Replaces exact text in a file using literal matching; supports dry-run, occurrence selection, expected match count, backup, and optional diff output.
-Input schema: {"type": "object", "properties": {"path": {"type": "string", "description": "The absolute path of the file to modify."}, "search": {"type": "string", "description": "The exact content to find and replace.  May be multiline."}, "replace": {"type": "string", "description": "The new content to replace the found content with.  May be multiline."}, "dry_run": {"type": "boolean"}, "expected_matches": {"type": "integer", "minimum": 0}, "start_line": {"type": "integer", "minimum": 1}, "end_line": {"type": "integer", "minimum": 1}, "occurrence": {"anyOf": [{"type": "string", "enum": ["first", "last", "all"]}, {"type": "integer", "minimum": 1}]}, "backup": {"type": "boolean"}, "return_diff": {"type": "boolean"}, "diff_context_lines": {"type": "integer", "minimum": 0}, "max_diff_chars": {"type": "integer", "minimum": 1}}, "required": ["path", "search", "replace"], "additionalProperties": false}
+Input schema: {"type": "object", "properties": {"path": {"type": "string", "description": "The absolute path of the file to modify."}, "search": {"type": "string", "description": "The exact content to find and replace.  May be multiline."}, "replace": {"type": "string", "description": "The new content to replace the found content with.  May be multiline."}, "dry_run": {"type": "boolean"}, "expected_matches": {"type": "integer", "minimum": 0}, "occurrence": {"anyOf": [{"type": "string", "enum": ["first", "last", "all"]}, {"type": "integer", "minimum": 1}]}, "backup": {"type": "boolean"}, "return_diff": {"type": "boolean"}, "diff_context_lines": {"type": "integer", "minimum": 0}, "max_diff_chars": {"type": "integer", "minimum": 1}}, "required": ["path", "search", "replace"], "additionalProperties": false}
 
 Usage:
 - Modifies a **single file** by replacing one occurrence of `search` with `replace`.
@@ -143,7 +132,11 @@ Usage:
 - Uses UTF-8 encoding with `errors='ignore'` for robustness.
 - Optional `dry_run=true` computes result without writing.
 - Optional `expected_matches` guards against unintended edits when total match count differs.
-- Optional `start_line`/`end_line` limit replacements to a specific line range.
+- Matching is done across the ENTIRE file — there are no start_line/end_line scope args.
+- For disambiguation use a wide enough unique snippet in search (with surrounding context),
+  or use occurrence/first/last/all and expected_matches.
+- Short search like "i += 1" may match unseen duplicates in file parts not in current read page;
+  prefer broader unique fragments and guard with expected_matches=1 when appropriate.
 - Optional `backup=true` creates `<path>.bak` before write.
 - Optional `return_diff=true` returns unified diff.
 - Optional `diff_context_lines` controls context lines in diff (default 3).
@@ -212,6 +205,7 @@ Update version string:
         error: Dict[str, Any] | None = None,
         suggestions: list[Dict[str, Any]] | None = None,
         suggestions_total: int = 0,
+        sha256: str | None = None,
     ) -> str:
         return json.dumps(
             {
@@ -229,6 +223,7 @@ Update version string:
                 "diff_truncated": diff_truncated,
                 "suggestions": suggestions or [],
                 "suggestions_total": suggestions_total,
+                "sha256": sha256,
                 "error": error,
                 "message": message,
             },
@@ -265,8 +260,6 @@ Update version string:
         replace: str,
         dry_run: bool = False,
         expected_matches: int | None = None,
-        start_line: int | None = None,
-        end_line: int | None = None,
         occurrence: str | int = "first",
         backup: bool = False,
         return_diff: bool = False,
@@ -340,34 +333,6 @@ Update version string:
                 suggestions=[],
                 suggestions_total=0,
                 error={"type": "invalid_argument", "field": "expected_matches"},
-            )
-        if start_line is not None and (
-            not isinstance(start_line, int) or start_line < 1
-        ):
-            return _result(
-                ok=False,
-                matched=False,
-                replaced=0,
-                match_count=0,
-                line_numbers=[],
-                message="Argument 'start_line' must be a positive integer.",
-                suggestions=[],
-                suggestions_total=0,
-                error={"type": "invalid_argument", "field": "start_line"},
-            )
-        if end_line is not None and (
-            not isinstance(end_line, int) or end_line < 1
-        ):
-            return _result(
-                ok=False,
-                matched=False,
-                replaced=0,
-                match_count=0,
-                line_numbers=[],
-                message="Argument 'end_line' must be a positive integer.",
-                suggestions=[],
-                suggestions_total=0,
-                error={"type": "invalid_argument", "field": "end_line"},
             )
         expected_total_matches = expected_matches
         if not (
@@ -573,23 +538,7 @@ Update version string:
                 error=stale_error,
             )
 
-        total_lines = content.count("\n") + 1
-        effective_start_line = start_line if start_line is not None else 1
-        effective_end_line = end_line if end_line is not None else total_lines
-        if effective_start_line > effective_end_line:
-            return _result(
-                ok=False,
-                matched=False,
-                replaced=0,
-                match_count=0,
-                line_numbers=[],
-                message="Argument 'start_line' must be <= 'end_line'.",
-                suggestions=[],
-                suggestions_total=0,
-                error={"type": "invalid_argument", "field": "start_line"},
-            )
-
-        # Build all in-scope match starts (non-overlapping, like str.replace behavior).
+        # Build all match starts (non-overlapping, like str.replace behavior).
         match_entries: list[tuple[int, int, int]] = []  # (start_idx, start_line, end_line)
         start = 0
         while True:
@@ -599,11 +548,7 @@ Update version string:
             matched_fragment = content[idx:idx + len(search)]
             match_start_line = content.count("\n", 0, idx) + 1
             match_end_line = match_start_line + matched_fragment.count("\n")
-            if (
-                match_start_line >= effective_start_line
-                and match_end_line <= effective_end_line
-            ):
-                match_entries.append((idx, match_start_line, match_end_line))
+            match_entries.append((idx, match_start_line, match_end_line))
             start = idx + len(search)
 
         match_count = len(match_entries)
@@ -613,11 +558,6 @@ Update version string:
                 content=content,
             )
             miss_message = "Search string not found in file. No changes made."
-            if start_line is not None or end_line is not None:
-                miss_message = (
-                    f"Search string not found in specified line range "
-                    f"{effective_start_line}-{effective_end_line}. No changes made."
-                )
             return _result(
                 ok=False,
                 matched=False,
@@ -751,7 +691,6 @@ Update version string:
                 )
 
         try:
-            snapshot_before_text_mutation(self, path)
             self._backend.write(path, new_content, encoding="utf-8")
         except Exception as e:
             return _result(
@@ -770,9 +709,13 @@ Update version string:
                 error={"type": "write_failed", "message": str(e)},
             )
 
+        content_sha256 = hashlib.sha256(
+            new_content.encode("utf-8", errors="replace")
+        ).hexdigest()
         return _result(
             ok=True,
             applied=True,
+            sha256=content_sha256,
             matched=True,
             replaced=replaced_count,
             match_count=match_count,

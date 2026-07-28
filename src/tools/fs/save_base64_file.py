@@ -1,7 +1,9 @@
 import base64
+import hashlib
 import json
 import os
 
+from security.path_policy import enforce_write_guard
 from tools.simple_tool_base import AbstractSimpleTool
 from utils.tool_report_paths import tool_report_abspath
 from utils.atomic_io import atomic_replace
@@ -58,18 +60,30 @@ class SaveBase64File(AbstractSimpleTool):
             "- On decode_failed, check for non-ASCII characters or incorrect padding.\n"
         )
 
-    def _result(self, *, ok: bool, path: str, bytes_written: int = 0, error=None) -> str:
+    def _result(self, *, ok: bool, path: str, bytes_written: int = 0, sha256=None, error=None) -> str:
         return json.dumps(
             {
                 "tool": SaveBase64File.registered_tool_name(),
                 "ok": ok,
                 "path": tool_report_abspath(path, workspace=self._workspace),
                 "bytes_written": bytes_written,
+                "sha256": sha256,
                 "error": error,
             },
             ensure_ascii=False,
         )
 
+    def _write_guard_blocked_result(
+        self,
+        error: dict,
+        path: str,
+        data: str,
+        *args,
+        **kwargs,
+    ) -> str:
+        return self._result(ok=False, path=path, error=error)
+
+    @enforce_write_guard(path_arg="path", operation="write")
     def __call__(self, path: str, data: str, **kwargs) -> str:
         if not isinstance(path, str) or not path.strip():
             return self._result(ok=False, path=str(path), error={"type": "invalid_argument", "field": "path"})
@@ -94,4 +108,9 @@ class SaveBase64File(AbstractSimpleTool):
         except Exception as e:
             return self._result(ok=False, path=path, error={"type": "write_failed", "message": str(e)})
 
-        return self._result(ok=True, path=path, bytes_written=len(raw))
+        return self._result(
+            ok=True,
+            path=path,
+            bytes_written=len(raw),
+            sha256=hashlib.sha256(raw).hexdigest(),
+        )

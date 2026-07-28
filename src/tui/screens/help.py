@@ -25,6 +25,7 @@ _QUICKSTART_HELP: tuple[tuple[str, str], ...] = (
     ("Ctrl+V", "Вставка: 1× — плашка «N строк / символов»; 2× тем же текстом — показать целиком"),
     ("Ctrl+C", "Стоп агента (если нет выделения)"),
     ("Ctrl+J", "Перенос строки в поле ввода"),
+    ("Ctrl+клик", "Просмотр аргументов и результата инструмента / вызова"),
     ("[asking]", "Агент задал вопрос — напишите ответ в поле и Enter"),
 )
 
@@ -43,6 +44,7 @@ _EXTRA_HOTKEYS: tuple[tuple[str, str], ...] = (
     ("@", "Упомянуть файл в сообщении"),
     (".", "Палитра команд (как /, без смены раскладки)"),
     ("F6", "Настройки"),
+    ("Ctrl+R", "Переименовать активную сессию (пустое → авто-имя)"),
 )
 
 # Буфер обмена — не slash-команда; короткая секция в /help.
@@ -50,6 +52,18 @@ _CLIPBOARD_HELP: tuple[tuple[str, str], ...] = (
     ("Linux", "Поставьте wl-clipboard или xclip, чтобы вставлять в другие программы"),
     ("Без утилит", "Вставьте в поле ввода текста (Ctrl+V), выделите с Shift+мышь, скопируйте хоткеем терминала (Ctrl+Shift+C)"),
     ("Вставка", "Вставить из внешнего буфера обмена на Linux - Ctrl+Shift+V"),
+)
+
+# Буфер сессии (B10) — /buffer попадает в «команды» из реестра, но без явной
+# секции пользователь не видит, что есть три буфера, что Esc сохраняет, а
+# Ctrl+C дописывает в буфер сессии. Синхрон с docs/tui.md.
+_BUFFER_SESSION_HELP: tuple[tuple[str, str], ...] = (
+    ("Три буфера", "TUI (copy-on-select) · сессии (накапливающий) · ОС (системный) — в каждой сессии свой"),
+    ("F7 / /buffer", "Открыть буфер сессии — большой текст собранных копий"),
+    ("Esc", "Сохранить и закрыть (пустой текст = очистили буфер; без изменений — на диск не пишем)"),
+    ("Ctrl+C", "Копирует выделение наружу и дописывает сверху в буфер сессии (без выделения — стоп агента)"),
+    ("Ctrl+V", "Вставка на экране буфера — сначала из ОС, пусто — из внутреннего TUI"),
+    ("лимит", "20 000 символов; старые куски выкидываются снизу целиком"),
 )
 
 # Shell (`!`) — не slash-команда; отдельная секция в /help.
@@ -85,6 +99,8 @@ class HelpScreen(Screen):
             self._mount_row(trace, row_i, cmd, desc)
             row_i += 1
 
+        from tui.toggles import owning_preset_name
+
         row_i = self._mount_section(trace, "команды", row_i)
         for cmd in reg.list_commands():
             label = f"/{cmd.name}"
@@ -92,6 +108,11 @@ class HelpScreen(Screen):
             if cmd.args:
                 parts.append(cmd.args.strip())
             parts.append(cmd.description)
+            # Дочерний тоггл пресета (/gate,/answers) — связь с родителем словом,
+            # а не цветом (серый в плоском каталоге читался бы как «выключено»).
+            owner = owning_preset_name(cmd.name)
+            if owner is not None:
+                parts.append(f"настройка /{owner}")
             if cmd.hotkey:
                 parts.append(cmd.hotkey)
             self._mount_row(trace, row_i, label, "  ·  ".join(parts))
@@ -105,6 +126,11 @@ class HelpScreen(Screen):
         row_i = self._mount_section(trace, "хоткеи", row_i)
         for key, desc in _EXTRA_HOTKEYS:
             self._mount_row(trace, row_i, key, desc)
+            row_i += 1
+
+        row_i = self._mount_section(trace, "буфер сессии", row_i)
+        for label, desc in _BUFFER_SESSION_HELP:
+            self._mount_row(trace, row_i, label, desc)
             row_i += 1
 
         row_i = self._mount_section(trace, "буфер обмена Linux", row_i)

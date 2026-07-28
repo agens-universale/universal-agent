@@ -1,5 +1,4 @@
 import os
-import shutil
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
@@ -7,10 +6,36 @@ from execution_workspace import build_execution_workspace, host_os_label
 from utils.directory_write_access import directory_allows_probe_write
 
 cut_first = 100
-cut_second = 30
+cut_second = 120  # D4: was 30, raised to cover ~50-53 children in typical src/
+
+_TRUNCATE_MARKER = "(truncated {shown}/{total})"  # D5
+_FINAL_HINT = "[projectDirListing truncated — read the needed directory separately]"  # D5
+
+
+def _sort_key(name: str, is_dir: bool) -> tuple[int, str]:
+    """
+    stable ordering — dirs first, then casefold alpha.
+    Returns (0, name.casefold()) for dirs, (1, name.casefold()) for files.
+    """
+    return (0 if is_dir else 1, name.casefold())
+
+
+def _slice_level(
+    entries: list[tuple[str, bool]],
+    limit: int,
+) -> tuple[list[tuple[str, bool]], bool, int, int]:
+    """
+    stable sort, slice by shown count, record truncation.
+
+    Returns (shown, was_truncated, shown_count, total_count).
+    """
+    total = len(entries)
+    sorted_entries = sorted(entries, key=lambda e: _sort_key(e[0], e[1]))
+    shown = sorted_entries[:limit]
+    return shown, len(shown) < total, len(shown), total
 
 stop_folders = {
-        '.git', '.hg', '.svn', '.osc',
+        '.git', '.hg', '.svn', '.osc', '.gc',
         '__pycache__', 'venv', '.venv', '.env',
         'node_modules', 'bower_components',
         'dist', 'build', 'out', 'target', 'bin', 'obj',
@@ -32,72 +57,83 @@ stop_folders = {
 
 
 def get_listing(dir_path: str) -> str:
-    files = os.listdir(dir_path)
-    res = []
-    for i,f in enumerate(files):
-        if f in stop_folders:
-            continue
-        if i >= cut_first:
-            res.append(('...', []))
-            break
+    def _listdir(p: str) -> list[tuple[str, bool]]:
+        return [(f, os.path.isdir(os.path.join(p, f))) for f in os.listdir(p)]
 
-        pt = os.path.join(dir_path, f)
-        if os.path.isdir(pt):
-            sub_files = os.listdir(pt)
-            sub_res = []
-            for j, ff in enumerate(sub_files):
-                if ff in stop_folders:
-                    continue
-                if j >= cut_second:
-                    sub_res.append('...')
-                    break
-                spt = os.path.join(pt, ff)
-                if os.path.isdir(spt):
-                    sub_res.append(ff + '/')
-                else:
-                    sub_res.append(ff)
-            res.append((f + '/', sub_res))
-        else:
-            res.append((f, []))
+    def _join(base: str, name: str) -> str:
+        return os.path.join(base, name)
 
-    tpl = ''
-    for f, sub_files in res:
-        tpl += '\n' + f
-        for sf in sub_files:
-            tpl += '\n    ' + sf
-
-    return tpl.strip()
+    return _build_listing(_listdir, _join, dir_path)
 
 
 def get_listing_from_backend(backend: Any, dir_path: str) -> str:
-    """Two-level listing of `dir_path` read through an FsBackend (same shape as get_listing)."""
-    entries = backend.listdir(dir_path)
+    def _listdir(p: str) -> list[tuple[str, bool]]:
+        return list(backend.listdir(p))
+
+    def _join(base: str, name: str) -> str:
+        return backend.join(base, name)
+
+    return _build_listing(_listdir, _join, dir_path)
+
+
+def _build_listing(
+    listdir_fn,
+    join_fn,
+    dir_path: str,
+) -> str:
+    """
+    shared two-level listing builder for both FS and backend.
+
+    - Stable sort: dirs-first, casefold alpha (D2).
+    - Limit counts shown names after stop_folders filter (D3).
+    - Level marker: ``...(truncated N/total)`` on any truncated level (D5).
+    - Final hint: one tool-agnostic line at end of listing,
+      present ONLY when at least one level was truncated (D5).
+    """
+    raw_entries = listdir_fn(dir_path)
+
+    filtered: list[tuple[str, bool]] = [
+        (n, d) for n, d in raw_entries if n not in stop_folders
+    ]
+
+    shown, root_trunc, root_shown, root_total = _slice_level(filtered, cut_first)
+    any_trunc = root_trunc
+
     res: List[tuple[str, List[str]]] = []
-    for i, (name, is_dir) in enumerate(entries):
-        if name in stop_folders:
-            continue
-        if i >= cut_first:
-            res.append(("...", []))
-            break
+    for name, is_dir in shown:
         if is_dir:
-            sub_path = backend.join(dir_path, name)
-            sub_res: List[str] = []
-            for j, (sub_name, sub_is_dir) in enumerate(backend.listdir(sub_path)):
-                if sub_name in stop_folders:
-                    continue
-                if j >= cut_second:
-                    sub_res.append("...")
-                    break
-                sub_res.append(sub_name + "/" if sub_is_dir else sub_name)
-            res.append((name + "/", sub_res))
+            sub_path = join_fn(dir_path, name)
+            raw_sub = listdir_fn(sub_path)
+            filtered_sub: list[tuple[str, bool]] = [
+                (n, d) for n, d in raw_sub if n not in stop_folders
+            ]
+            shown_sub, sub_trunc, sub_shown, sub_total = _slice_level(filtered_sub, cut_second)
+            if sub_trunc:
+                any_trunc = True
+            sub_items = [n + "/" if d else n for n, d in shown_sub]
+            if sub_trunc:
+                sub_items.append(
+                    "..." + _TRUNCATE_MARKER.format(shown=sub_shown, total=sub_total)
+                )
+            res.append((name + "/", sub_items))
         else:
             res.append((name, []))
 
+    if root_trunc:
+        res.append((
+            "..." + _TRUNCATE_MARKER.format(shown=root_shown, total=root_total),
+            [],
+        ))
+
     tpl = ""
-    for name, sub_files in res:
+    for name, sub_items in res:
         tpl += "\n" + name
-        for sub in sub_files:
+        for sub in sub_items:
             tpl += "\n    " + sub
+
+    if any_trunc:
+        tpl += "\n" + _FINAL_HINT
+
     return tpl.strip()
 
 
@@ -157,7 +193,7 @@ def _coerce_workspace(
     if backend is not None and getattr(backend, "is_sandbox", False):
         return build_execution_workspace(backend, workspace_config)
     # Lazy: avoids tools → security → project_data import cycle.
-    from tools.backends.local import LocalFsBackend
+    from backends.local import LocalFsBackend
 
     return build_execution_workspace(LocalFsBackend(), workspace_config)
 
@@ -240,154 +276,3 @@ def get_project_data(
         "isGitProject": is_git_project,
         "projectDirListing": project_dir_listing,
     }
-
-
-def run_tests():
-    # === Тест get_listing ===
-
-    # Создаём временную структуру каталогов
-    test_dir = "test_temp_dir"
-    if os.path.exists(test_dir):
-        shutil.rmtree(test_dir)
-    os.mkdir(test_dir)
-
-    # Создаём файлы и подкаталоги
-    open(os.path.join(test_dir, "file1.txt"), "w").close()
-    open(os.path.join(test_dir, "file2.py"), "w").close()
-    os.mkdir(os.path.join(test_dir, "subdir1"))
-    os.mkdir(os.path.join(test_dir, "subdir2"))
-
-    with open(os.path.join(test_dir, "subdir1", "script.py"), "w") as f:
-        f.write("print('hello')")
-    with open(os.path.join(test_dir, "subdir1", "data.txt"), "w") as f:
-        f.write("data")
-    with open(os.path.join(test_dir, "subdir2", "config.json"), "w") as f:
-        f.write("{}")
-
-    # Тест 1: обычное содержимое каталога
-    listing = get_listing(test_dir)
-    expected_lines = [
-        'file1.txt',
-        'file2.py',
-        'subdir1/',
-        '    script.py',
-        '    data.txt',
-        'subdir2/',
-        '    config.json'
-    ]
-    actual_lines = listing.strip().split('\n')
-    for l in expected_lines:
-        assert l in actual_lines, f"Тест 1 провален:\n{l}\nне в \n{actual_lines}"
-
-    for l in actual_lines:
-        assert l in expected_lines, f"Тест 1 провален:\n{l}\nне в \n{expected_lines}"
-
-    # Тест 2: проверка ограничения cut_first (ограничение на количество элементов верхнего уровня)
-    global cut_first, cut_second
-    old_cut_first = cut_first
-    cut_first = 2  # Ограничим до 2 элементов
-
-    listing_limited = get_listing(test_dir)
-    limited_lines = listing_limited.strip().split('\n')
-    assert '...' in limited_lines, f"Тест 2 (cut_first) провален: {limited_lines}"
-
-    cut_first = old_cut_first  # Восстанавливаем
-
-    # Тест 3: проверка cut_second (ограничение на поддиректории)
-    old_cut_second = cut_second
-    cut_second = 1
-    listing_sub_limited = get_listing(test_dir)
-    sub_lines = listing_sub_limited.strip().split('\n')
-    expected_sub_lines = [
-        'file1.txt',
-        'file2.py',
-        'subdir1/',
-        '    script.py',
-        '    ...',
-        'subdir2/',
-        '    config.json',
-    ]
-    assert '    ...' in sub_lines
-    assert  len(expected_sub_lines) == len(sub_lines)
-
-    cut_second = old_cut_second  # Восстанавливаем
-
-    # Тест 4: пустая директория
-    empty_dir = os.path.join(test_dir, "empty_subdir")
-    os.mkdir(empty_dir)
-    listing_empty = get_listing(empty_dir)
-    assert listing_empty == "", "Тест 4 (пустая директория) провален"
-
-    # Тест 5: отсутствующая директория
-    try:
-        get_listing("non_existent_path_12345")
-        assert False, "Тест 5 должен был вызвать исключение"
-    except FileNotFoundError:
-        pass  # OK
-    except Exception as e:
-        assert False, f"Тест 5: неправильное исключение: {e}"
-
-    # === Тест get_project_data ===
-
-    # Тест 6: структура данных
-    data = get_project_data()
-    required_keys = [
-        'OS',
-        'shell',
-        'projectDir',
-        'projectDirWritable',
-        'allowed_write_paths',
-        'currentDate',
-        'isGitProject',
-        'projectDirListing',
-    ]
-    for k in required_keys:
-        assert k in data, f"Ключ {k} отсутствует в данных проекта"
-
-    # Тест 7: проверка типа значений
-    assert isinstance(data['OS'], str), "OS должно быть строкой"
-    assert isinstance(data['shell'], str), "shell должно быть строкой"
-    assert isinstance(data['projectDir'], str), "projectDir должно быть строкой"
-    assert isinstance(data['currentDate'], str), "currentDate должно быть строкой"
-    assert data['isGitProject'] in ['true', 'false'], "isGitProject должно быть 'true' или 'false'"
-    assert isinstance(data['projectDirListing'], str), "projectDirListing должно быть строкой"
-
-    # Тест 8: проверка currentDate — формат YYYY-MM-DD
-    current_date = data['currentDate']
-    try:
-        datetime.strptime(current_date, '%Y-%m-%d')
-    except ValueError:
-        assert False, f"Неверный формат даты: {current_date}"
-
-    # Тест 9: projectDir — существующий путь
-    assert os.path.isdir(data['projectDir']), "projectDir должен указывать на существующую директорию"
-
-    # Тест 10: isGitProject — зависит от наличия .git
-    git_status = os.path.exists(os.path.join(data['projectDir'], ".git"))
-    expected_git = "true" if git_status else "false"
-    assert data['isGitProject'] == expected_git, f"isGitProject: ожидалось {expected_git}, получено {data['isGitProject']}"
-
-    # Тест 11: projectDirListing — корректная строка, соответствует текущей директории (частично)
-    listing_output = data['projectDirListing']
-    files_in_current = os.listdir(data['projectDir'])
-    listed_names = [line.strip().rstrip('/') for line in listing_output.split('\n') if line.strip() and not line.startswith('    ')]
-    # Проверяем, что хотя бы некоторые реальные файлы/папки есть в выводе (если их < cut_first)
-    if len(files_in_current) < cut_first:
-        for f in files_in_current:
-            base_name = f.rstrip('/')
-            if base_name in stop_folders:
-                continue
-            assert any(base_name in listed for listed in listed_names), f"Файл {f} не найден в projectDirListing"
-    else:
-        assert '...' in listing_output, "Если файлов больше cut_first, должен быть '...'"
-
-    # Удаляем временную директорию
-    shutil.rmtree(test_dir)
-    print("✅ Все тесты пройдены!")
-
-
-# Запуск тестов
-if __name__ == "__main__":
-    run_tests()
-    print(get_project_data())
-    print(get_project_data()['projectDirListing'])

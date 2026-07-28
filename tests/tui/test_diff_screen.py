@@ -33,11 +33,32 @@ def _cfg(launch_root: Path) -> dict:
     }
 
 
-def _seed_pending(launch_root: Path) -> None:
-    target = launch_root / "src" / "foo.py"
+def _seed_pending(
+    launch_root: Path,
+    threads_dir: str,
+    *,
+    system: str = "cli",
+    thread_id: str = "t1",
+    key: str = "src/foo.py",
+) -> None:
+    from diff_tui.touched import TouchedJournal
+
+    target = launch_root / key
+    target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text("base\n", encoding="utf-8")
     DiffStore(str(launch_root)).register_mutation(str(target))
     target.write_text("changed\n", encoding="utf-8")
+    TouchedJournal(threads_dir, system, thread_id).add(key)
+
+
+def _diff_kwargs(tmp_path, *, tid: str = "t1") -> dict:
+    threads = tmp_path / "threads"
+    threads.mkdir(exist_ok=True)
+    return {
+        "threads_dir": str(threads),
+        "system_id": "cli",
+        "thread_id": tid,
+    }
 
 
 @pytest.mark.asyncio
@@ -63,12 +84,12 @@ async def test_diff_screen_lists_pending_and_approve(tmp_path, launch_root):
     from tui.app import TuiApp
     from tui.screens.diff import DiffScreen
 
-    _seed_pending(launch_root)
+    _seed_pending(launch_root, str(tmp_path / "threads"))
     cfg = _cfg(launch_root)
     async with TuiApp(
         threads_dir=str(tmp_path / "threads"), system="cli", config=cfg
     ).run_test() as pilot:
-        scr = DiffScreen(launch_root=str(launch_root), config=cfg)
+        scr = DiffScreen(launch_root=str(launch_root), config=cfg, **_diff_kwargs(tmp_path))
         await pilot.app.push_screen(scr)
         await pilot.pause()
         assert any(e.key == "src/foo.py" for e in scr._entries)
@@ -140,12 +161,14 @@ async def test_diff_screen_hybrid_shows_i_marker(tmp_path, launch_root):
     target.write_text("v1\n", encoding="utf-8")
     DiffStore(str(launch_root)).register_mutation(str(target))
     target.write_text("v2\n", encoding="utf-8")
+    from diff_tui.touched import TouchedJournal
+    TouchedJournal(str(tmp_path / "threads"), "cli", "t1").add("src/local.md")
 
     cfg = _cfg(launch_root)
     async with TuiApp(
         threads_dir=str(tmp_path / "threads"), system="cli", config=cfg
     ).run_test() as pilot:
-        scr = DiffScreen(launch_root=str(launch_root), config=cfg)
+        scr = DiffScreen(launch_root=str(launch_root), config=cfg, **_diff_kwargs(tmp_path))
         await pilot.app.push_screen(scr)
         await pilot.pause()
         assert any(e.key == "src/local.md" and e.backend == "cache" for e in scr._entries)
@@ -159,13 +182,13 @@ async def test_diff_screen_undo_restores(tmp_path, launch_root):
     from tui.app import TuiApp
     from tui.screens.diff import DiffScreen
 
-    _seed_pending(launch_root)
+    _seed_pending(launch_root, str(tmp_path / "threads"))
     cfg = _cfg(launch_root)
     target = launch_root / "src" / "foo.py"
     async with TuiApp(
         threads_dir=str(tmp_path / "threads"), system="cli", config=cfg
     ).run_test() as pilot:
-        scr = DiffScreen(launch_root=str(launch_root), config=cfg)
+        scr = DiffScreen(launch_root=str(launch_root), config=cfg, **_diff_kwargs(tmp_path))
         await pilot.app.push_screen(scr)
         await pilot.pause()
         await pilot.press("r")
@@ -180,13 +203,13 @@ async def test_diff_screen_enter_opens_viewer(tmp_path, launch_root):
     from tui.screens.diff import DiffScreen, DiffViewerScreen
     from textual.widgets import Static
 
-    _seed_pending(launch_root)
+    _seed_pending(launch_root, str(tmp_path / "threads"))
     cfg = _cfg(launch_root)
     async with TuiApp(
         threads_dir=str(tmp_path / "threads"), system="cli", config=cfg
     ).run_test() as pilot:
         await pilot.app.push_screen(
-            DiffScreen(launch_root=str(launch_root), config=cfg)
+            DiffScreen(launch_root=str(launch_root), config=cfg, **_diff_kwargs(tmp_path))
         )
         await pilot.pause()
         await pilot.press("enter")
@@ -196,6 +219,8 @@ async def test_diff_screen_enter_opens_viewer(tmp_path, launch_root):
         assert "[a] принять" in footer
         assert "[r] откатить" in footer
         assert "[Ctrl+a] принять все" in footer
+        assert pilot.app.screen.clipboard_source_cite() == ("diff", "src/foo.py")
+
 
 
 @pytest.mark.asyncio
@@ -204,12 +229,12 @@ async def test_diff_viewer_approve_closes_and_clears(tmp_path, launch_root):
     from tui.app import TuiApp
     from tui.screens.diff import DiffScreen, DiffViewerScreen
 
-    _seed_pending(launch_root)
+    _seed_pending(launch_root, str(tmp_path / "threads"))
     cfg = _cfg(launch_root)
     async with TuiApp(
         threads_dir=str(tmp_path / "threads"), system="cli", config=cfg
     ).run_test() as pilot:
-        scr = DiffScreen(launch_root=str(launch_root), config=cfg)
+        scr = DiffScreen(launch_root=str(launch_root), config=cfg, **_diff_kwargs(tmp_path))
         await pilot.app.push_screen(scr)
         await pilot.pause()
         await pilot.press("enter")
@@ -228,14 +253,14 @@ async def test_diff_viewer_undo_restores(tmp_path, launch_root):
     from tui.app import TuiApp
     from tui.screens.diff import DiffScreen, DiffViewerScreen
 
-    _seed_pending(launch_root)
+    _seed_pending(launch_root, str(tmp_path / "threads"))
     cfg = _cfg(launch_root)
     target = launch_root / "src" / "foo.py"
     async with TuiApp(
         threads_dir=str(tmp_path / "threads"), system="cli", config=cfg
     ).run_test() as pilot:
         await pilot.app.push_screen(
-            DiffScreen(launch_root=str(launch_root), config=cfg)
+            DiffScreen(launch_root=str(launch_root), config=cfg, **_diff_kwargs(tmp_path))
         )
         await pilot.pause()
         await pilot.press("enter")
@@ -254,12 +279,12 @@ async def test_diff_screen_ru_layout_approve(tmp_path, launch_root):
     from tui.app import TuiApp
     from tui.screens.diff import DiffScreen
 
-    _seed_pending(launch_root)
+    _seed_pending(launch_root, str(tmp_path / "threads"))
     cfg = _cfg(launch_root)
     async with TuiApp(
         threads_dir=str(tmp_path / "threads"), system="cli", config=cfg
     ).run_test() as pilot:
-        scr = DiffScreen(launch_root=str(launch_root), config=cfg)
+        scr = DiffScreen(launch_root=str(launch_root), config=cfg, **_diff_kwargs(tmp_path))
         await pilot.app.push_screen(scr)
         await pilot.pause()
         await pilot.press("ф")
@@ -274,14 +299,14 @@ async def test_diff_viewer_ru_layout_undo(tmp_path, launch_root):
     from tui.app import TuiApp
     from tui.screens.diff import DiffScreen, DiffViewerScreen
 
-    _seed_pending(launch_root)
+    _seed_pending(launch_root, str(tmp_path / "threads"))
     cfg = _cfg(launch_root)
     target = launch_root / "src" / "foo.py"
     async with TuiApp(
         threads_dir=str(tmp_path / "threads"), system="cli", config=cfg
     ).run_test() as pilot:
         await pilot.app.push_screen(
-            DiffScreen(launch_root=str(launch_root), config=cfg)
+            DiffScreen(launch_root=str(launch_root), config=cfg, **_diff_kwargs(tmp_path))
         )
         await pilot.pause()
         await pilot.press("enter")
@@ -301,17 +326,19 @@ async def test_diff_viewer_caps_ф_approves_one_not_all(tmp_path, launch_root):
     from tui.screens.diff import DiffScreen, DiffViewerScreen
     from diff_tui.store import DiffStore
 
-    _seed_pending(launch_root)
+    _seed_pending(launch_root, str(tmp_path / "threads"))
     other = launch_root / "src" / "bar.py"
     other.write_text("base2\n", encoding="utf-8")
     DiffStore(str(launch_root)).register_mutation(str(other))
     other.write_text("changed2\n", encoding="utf-8")
+    from diff_tui.touched import TouchedJournal
+    TouchedJournal(str(tmp_path / "threads"), "cli", "t1").add("src/bar.py")
 
     cfg = _cfg(launch_root)
     async with TuiApp(
         threads_dir=str(tmp_path / "threads"), system="cli", config=cfg
     ).run_test() as pilot:
-        scr = DiffScreen(launch_root=str(launch_root), config=cfg)
+        scr = DiffScreen(launch_root=str(launch_root), config=cfg, **_diff_kwargs(tmp_path))
         await pilot.app.push_screen(scr)
         await pilot.pause()
         assert len(scr._entries) == 2
@@ -337,17 +364,19 @@ async def test_diff_screen_ctrl_a_approves_all(tmp_path, launch_root):
     from tui.screens.diff import DiffScreen
     from diff_tui.store import DiffStore
 
-    _seed_pending(launch_root)
+    _seed_pending(launch_root, str(tmp_path / "threads"))
     other = launch_root / "src" / "bar.py"
     other.write_text("base2\n", encoding="utf-8")
     DiffStore(str(launch_root)).register_mutation(str(other))
     other.write_text("changed2\n", encoding="utf-8")
+    from diff_tui.touched import TouchedJournal
+    TouchedJournal(str(tmp_path / "threads"), "cli", "t1").add("src/bar.py")
 
     cfg = _cfg(launch_root)
     async with TuiApp(
         threads_dir=str(tmp_path / "threads"), system="cli", config=cfg
     ).run_test() as pilot:
-        scr = DiffScreen(launch_root=str(launch_root), config=cfg)
+        scr = DiffScreen(launch_root=str(launch_root), config=cfg, **_diff_kwargs(tmp_path))
         await pilot.app.push_screen(scr)
         await pilot.pause()
         assert len(scr._entries) == 2
@@ -363,12 +392,12 @@ async def test_diff_screen_undo_shows_status(tmp_path, launch_root):
     from tui.screens.diff import DiffScreen
     from textual.widgets import Static
 
-    _seed_pending(launch_root)
+    _seed_pending(launch_root, str(tmp_path / "threads"))
     cfg = _cfg(launch_root)
     async with TuiApp(
         threads_dir=str(tmp_path / "threads"), system="cli", config=cfg
     ).run_test() as pilot:
-        scr = DiffScreen(launch_root=str(launch_root), config=cfg)
+        scr = DiffScreen(launch_root=str(launch_root), config=cfg, **_diff_kwargs(tmp_path))
         await pilot.app.push_screen(scr)
         await pilot.pause()
         await pilot.press("r")
@@ -385,7 +414,7 @@ async def test_diff_screen_approve_shows_status(tmp_path, launch_root):
     from tui.screens.diff import DiffScreen
     from tui.widgets.trace_row import TraceRow
 
-    _seed_pending(launch_root)
+    _seed_pending(launch_root, str(tmp_path / "threads"))
     cfg = _cfg(launch_root)
     async with TuiApp(
         threads_dir=str(tmp_path / "threads"), system="cli", config=cfg
@@ -394,6 +423,7 @@ async def test_diff_screen_approve_shows_status(tmp_path, launch_root):
             launch_root=str(launch_root),
             config=cfg,
             on_ui_ack=pilot.app.screen._on_diff_ui_ack,
+            **_diff_kwargs(tmp_path),
         )
         await pilot.app.push_screen(scr)
         await pilot.pause()
@@ -417,7 +447,7 @@ async def test_diff_screen_undo_shows_trace_ack(tmp_path, launch_root):
     from tui.screens.diff import DiffScreen
     from tui.widgets.trace_row import TraceRow
 
-    _seed_pending(launch_root)
+    _seed_pending(launch_root, str(tmp_path / "threads"))
     cfg = _cfg(launch_root)
     async with TuiApp(
         threads_dir=str(tmp_path / "threads"), system="cli", config=cfg
@@ -426,6 +456,7 @@ async def test_diff_screen_undo_shows_trace_ack(tmp_path, launch_root):
             launch_root=str(launch_root),
             config=cfg,
             on_ui_ack=pilot.app.screen._on_diff_ui_ack,
+            **_diff_kwargs(tmp_path),
         )
         await pilot.app.push_screen(scr)
         await pilot.pause()
@@ -448,13 +479,14 @@ async def test_trace_mounts_pending_cta(tmp_path, launch_root):
     from tui.screens.main import TraceScreen
     from tui.widgets.trace_row import TraceRow
 
-    _seed_pending(launch_root)
+    _seed_pending(launch_root, str(tmp_path / "threads"))
     cfg = _cfg(launch_root)
     cfg["launch_root"] = str(launch_root)
     async with TuiApp(
         threads_dir=str(tmp_path / "threads"), system="cli", config=cfg
     ).run_test() as pilot:
         assert isinstance(pilot.app.screen, TraceScreen)
+        pilot.app.screen.attach_active_task("t1")
         pilot.app.screen._maybe_mount_diff_pending_cta()
         await pilot.pause()
         found = any(
@@ -472,7 +504,7 @@ async def test_flush_cta_survives_after_clear_trace(tmp_path, launch_root):
     from tui.screens.main import TraceScreen
     from tui.widgets.trace_row import TraceRow
 
-    _seed_pending(launch_root)
+    _seed_pending(launch_root, str(tmp_path / "threads"))
     cfg = _cfg(launch_root)
     cfg["launch_root"] = str(launch_root)
     async with TuiApp(
@@ -480,6 +512,7 @@ async def test_flush_cta_survives_after_clear_trace(tmp_path, launch_root):
     ).run_test() as pilot:
         scr = pilot.app.screen
         assert isinstance(scr, TraceScreen)
+        scr.attach_active_task("t1")
         scr._diff_pending_cta_pending = True
         # имитация: смонтировали слишком рано, потом wipe
         scr._maybe_mount_diff_pending_cta()
@@ -506,7 +539,7 @@ async def test_cta_always_shows_when_pending(tmp_path, launch_root):
     from tui.screens.main import TraceScreen
     from tui.widgets.trace_row import TraceRow
 
-    _seed_pending(launch_root)
+    _seed_pending(launch_root, str(tmp_path / "threads"))
     cfg = _cfg(launch_root)
     cfg["launch_root"] = str(launch_root)
     async with TuiApp(
@@ -514,6 +547,7 @@ async def test_cta_always_shows_when_pending(tmp_path, launch_root):
     ).run_test() as pilot:
         scr = pilot.app.screen
         assert isinstance(scr, TraceScreen)
+        scr.attach_active_task("t1")
         scr._maybe_mount_diff_pending_cta()
         scr._maybe_mount_diff_pending_cta()
         await pilot.pause()
@@ -537,12 +571,14 @@ async def test_diff_viewer_created_shows_file_content(tmp_path, launch_root):
     created = launch_root / "diff-test.txt"
     DiffStore(str(launch_root)).register_mutation(str(created))
     created.write_text("hello created body\n", encoding="utf-8")
+    from diff_tui.touched import TouchedJournal
+    TouchedJournal(str(tmp_path / "threads"), "cli", "t1").add("diff-test.txt")
 
     cfg = _cfg(launch_root)
     async with TuiApp(
         threads_dir=str(tmp_path / "threads"), system="cli", config=cfg
     ).run_test() as pilot:
-        scr = DiffScreen(launch_root=str(launch_root), config=cfg)
+        scr = DiffScreen(launch_root=str(launch_root), config=cfg, **_diff_kwargs(tmp_path))
         await pilot.app.push_screen(scr)
         await pilot.pause()
         await pilot.press("enter")
@@ -564,12 +600,14 @@ async def test_diff_viewer_undo_created_deletes_file(tmp_path, launch_root):
     created = launch_root / "diff-test.txt"
     DiffStore(str(launch_root)).register_mutation(str(created))
     created.write_text("new\n", encoding="utf-8")
+    from diff_tui.touched import TouchedJournal
+    TouchedJournal(str(tmp_path / "threads"), "cli", "t1").add("diff-test.txt")
 
     cfg = _cfg(launch_root)
     async with TuiApp(
         threads_dir=str(tmp_path / "threads"), system="cli", config=cfg
     ).run_test() as pilot:
-        scr = DiffScreen(launch_root=str(launch_root), config=cfg)
+        scr = DiffScreen(launch_root=str(launch_root), config=cfg, **_diff_kwargs(tmp_path))
         await pilot.app.push_screen(scr)
         await pilot.pause()
         assert any(e.key == "diff-test.txt" for e in scr._entries)
@@ -593,11 +631,13 @@ async def test_trace_ctrl_a_selects_input_not_approve(tmp_path, launch_root):
     from tui.widgets.command_input import CommandTextArea
     from diff_tui.store import DiffStore
 
-    _seed_pending(launch_root)
+    _seed_pending(launch_root, str(tmp_path / "threads"))
     other = launch_root / "src" / "bar.py"
     other.write_text("base2\n", encoding="utf-8")
     DiffStore(str(launch_root)).register_mutation(str(other))
     other.write_text("changed2\n", encoding="utf-8")
+    from diff_tui.touched import TouchedJournal
+    TouchedJournal(str(tmp_path / "threads"), "cli", "t1").add("src/bar.py")
 
     cfg = _cfg(launch_root)
     cfg["launch_root"] = str(launch_root)
@@ -614,7 +654,8 @@ async def test_trace_ctrl_a_selects_input_not_approve(tmp_path, launch_root):
         assert inp.selected_text == "hello draft"
         from tui.screens.diff import _service_from_config
 
-        svc = _service_from_config(str(launch_root), cfg)
+        kw = _diff_kwargs(tmp_path)
+        svc = _service_from_config(str(launch_root), cfg, **kw)
         assert len(svc.list_entries(pending_only=True)) >= 2
 
 
@@ -625,7 +666,7 @@ async def test_f3_opens_diff(tmp_path, launch_root):
     from tui.screens.diff import DiffScreen
     from tui.screens.main import TraceScreen
 
-    _seed_pending(launch_root)
+    _seed_pending(launch_root, str(tmp_path / "threads"))
     cfg = _cfg(launch_root)
     cfg["launch_root"] = str(launch_root)
     async with TuiApp(
@@ -652,9 +693,235 @@ async def test_diff_screen_esc_returns(tmp_path, launch_root):
         threads_dir=str(tmp_path / "threads"), system="cli", config=cfg
     ).run_test() as pilot:
         await pilot.app.push_screen(
-            DiffScreen(launch_root=str(launch_root), config=cfg)
+            DiffScreen(launch_root=str(launch_root), config=cfg, **_diff_kwargs(tmp_path))
         )
         await pilot.pause()
         await pilot.press("escape")
         await pilot.pause()
         assert isinstance(pilot.app.screen, TraceScreen)
+
+
+# --- SPEC §5 шаг 4: `f` → push full-viewer, Esc=pop, footer [f] ----------
+
+@pytest.mark.asyncio
+async def test_diff_viewer_footer_has_f_hint(tmp_path, launch_root):
+    """На адаптивном viewer footer содержит подсказку [f]."""
+    pytest.importorskip("textual")
+    from tui.app import TuiApp
+    from tui.screens.diff import DiffScreen, DiffViewerScreen
+    from textual.widgets import Static
+
+    _seed_pending(launch_root, str(tmp_path / "threads"))
+    cfg = _cfg(launch_root)
+    async with TuiApp(
+        threads_dir=str(tmp_path / "threads"), system="cli", config=cfg
+    ).run_test() as pilot:
+        await pilot.app.push_screen(
+            DiffScreen(launch_root=str(launch_root), config=cfg, **_diff_kwargs(tmp_path))
+        )
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+        assert isinstance(pilot.app.screen, DiffViewerScreen)
+        footer = str(pilot.app.screen.query_one("#footer", Static).render())
+        assert "[f]" in footer
+
+
+@pytest.mark.asyncio
+async def test_f_pushes_full_viewer_and_not_again(tmp_path, launch_root):
+    """`f` на адаптивном → push full-viewer; повторный `f` на full не пушит (D3)."""
+    pytest.importorskip("textual")
+    from tui.app import TuiApp
+    from tui.screens.diff import DiffScreen, DiffViewerScreen
+
+    _seed_pending(launch_root, str(tmp_path / "threads"))
+    cfg = _cfg(launch_root)
+    async with TuiApp(
+        threads_dir=str(tmp_path / "threads"), system="cli", config=cfg
+    ).run_test() as pilot:
+        await pilot.app.push_screen(
+            DiffScreen(launch_root=str(launch_root), config=cfg, **_diff_kwargs(tmp_path))
+        )
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+        first = pilot.app.screen
+        assert isinstance(first, DiffViewerScreen)
+        assert first.mode == "adaptive"
+        await pilot.press("f")
+        await pilot.pause()
+        second = pilot.app.screen
+        assert isinstance(second, DiffViewerScreen)
+        assert second.mode == "full"
+        assert second is not first
+        # повторный `f` на full — не пушим ещё один слой
+        await pilot.press("f")
+        await pilot.pause()
+        assert pilot.app.screen is second
+
+
+@pytest.mark.asyncio
+async def test_esc_from_full_returns_to_adaptive(tmp_path, launch_root):
+    """Esc на full → pop на адаптивный; ещё Esc → список (стек pop, не toggle)."""
+    pytest.importorskip("textual")
+    from tui.app import TuiApp
+    from tui.screens.diff import DiffScreen, DiffViewerScreen
+
+    _seed_pending(launch_root, str(tmp_path / "threads"))
+    cfg = _cfg(launch_root)
+    async with TuiApp(
+        threads_dir=str(tmp_path / "threads"), system="cli", config=cfg
+    ).run_test() as pilot:
+        await pilot.app.push_screen(
+            DiffScreen(launch_root=str(launch_root), config=cfg, **_diff_kwargs(tmp_path))
+        )
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+        await pilot.press("f")
+        await pilot.pause()
+        assert pilot.app.screen.mode == "full"
+        await pilot.press("escape")
+        await pilot.pause()
+        assert isinstance(pilot.app.screen, DiffViewerScreen)
+        assert pilot.app.screen.mode == "adaptive"
+        await pilot.press("escape")
+        await pilot.pause()
+        assert isinstance(pilot.app.screen, DiffScreen)
+
+
+@pytest.mark.asyncio
+async def test_full_viewer_approve_closes_stack(tmp_path, launch_root):
+    """a/r на full → действие + закрытие viewer-стека до списка (D3)."""
+    pytest.importorskip("textual")
+    from tui.app import TuiApp
+    from tui.screens.diff import DiffScreen, DiffViewerScreen
+
+    _seed_pending(launch_root, str(tmp_path / "threads"))
+    cfg = _cfg(launch_root)
+    async with TuiApp(
+        threads_dir=str(tmp_path / "threads"), system="cli", config=cfg
+    ).run_test() as pilot:
+        scr = DiffScreen(launch_root=str(launch_root), config=cfg, **_diff_kwargs(tmp_path))
+        await pilot.app.push_screen(scr)
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+        await pilot.press("f")
+        await pilot.pause()
+        assert pilot.app.screen.mode == "full"
+        await pilot.press("a")
+        await pilot.pause()
+        # viewer-стек закрыт полностью → DiffScreen
+        assert isinstance(pilot.app.screen, DiffScreen)
+        assert scr._entries == []
+        assert (launch_root / "src" / "foo.py").read_text(encoding="utf-8") == "changed\n"
+
+
+@pytest.mark.asyncio
+async def test_full_viewer_undo_restores(tmp_path, launch_root):
+    pytest.importorskip("textual")
+    from tui.app import TuiApp
+    from tui.screens.diff import DiffScreen, DiffViewerScreen
+
+    _seed_pending(launch_root, str(tmp_path / "threads"))
+    cfg = _cfg(launch_root)
+    target = launch_root / "src" / "foo.py"
+    async with TuiApp(
+        threads_dir=str(tmp_path / "threads"), system="cli", config=cfg
+    ).run_test() as pilot:
+        await pilot.app.push_screen(
+            DiffScreen(launch_root=str(launch_root), config=cfg, **_diff_kwargs(tmp_path))
+        )
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+        await pilot.press("f")
+        await pilot.pause()
+        await pilot.press("r")
+        await pilot.pause()
+        assert isinstance(pilot.app.screen, DiffScreen)
+        assert target.read_text(encoding="utf-8") == "base\n"
+
+
+@pytest.mark.asyncio
+async def test_full_viewer_ctrl_a_approves_all(tmp_path, launch_root):
+    pytest.importorskip("textual")
+    from tui.app import TuiApp
+    from tui.screens.diff import DiffScreen, DiffViewerScreen
+    from diff_tui.store import DiffStore
+
+    _seed_pending(launch_root, str(tmp_path / "threads"))
+    other = launch_root / "src" / "bar.py"
+    other.write_text("base2\n", encoding="utf-8")
+    DiffStore(str(launch_root)).register_mutation(str(other))
+    other.write_text("changed2\n", encoding="utf-8")
+    from diff_tui.touched import TouchedJournal
+    TouchedJournal(str(tmp_path / "threads"), "cli", "t1").add("src/bar.py")
+
+    cfg = _cfg(launch_root)
+    async with TuiApp(
+        threads_dir=str(tmp_path / "threads"), system="cli", config=cfg
+    ).run_test() as pilot:
+        scr = DiffScreen(launch_root=str(launch_root), config=cfg, **_diff_kwargs(tmp_path))
+        await pilot.app.push_screen(scr)
+        await pilot.pause()
+        assert len(scr._entries) == 2
+        await pilot.press("enter")
+        await pilot.pause()
+        await pilot.press("f")
+        await pilot.pause()
+        await pilot.press("ctrl+a")
+        await pilot.pause()
+        assert isinstance(pilot.app.screen, DiffScreen)
+        assert scr._entries == []
+
+
+@pytest.mark.asyncio
+async def test_f_ru_layout_alias(tmp_path, launch_root):
+    """ЙЦУКЕН: «а» (физическая клавиша F) = `f` → push full-viewer."""
+    pytest.importorskip("textual")
+    from tui.app import TuiApp
+    from tui.screens.diff import DiffScreen, DiffViewerScreen
+
+    _seed_pending(launch_root, str(tmp_path / "threads"))
+    cfg = _cfg(launch_root)
+    async with TuiApp(
+        threads_dir=str(tmp_path / "threads"), system="cli", config=cfg
+    ).run_test() as pilot:
+        await pilot.app.push_screen(
+            DiffScreen(launch_root=str(launch_root), config=cfg, **_diff_kwargs(tmp_path))
+        )
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+        # «а» в ЙЦУКЕН на физической клавише F
+        await pilot.press("а")
+        await pilot.pause()
+        assert isinstance(pilot.app.screen, DiffViewerScreen)
+        assert pilot.app.screen.mode == "full"
+
+
+@pytest.mark.asyncio
+async def test_full_viewer_header_marks_full(tmp_path, launch_root):
+    """Header на full-viewer содержит «полный файл»."""
+    pytest.importorskip("textual")
+    from tui.app import TuiApp
+    from tui.screens.diff import DiffScreen, DiffViewerScreen
+    from textual.widgets import Static
+
+    _seed_pending(launch_root, str(tmp_path / "threads"))
+    cfg = _cfg(launch_root)
+    async with TuiApp(
+        threads_dir=str(tmp_path / "threads"), system="cli", config=cfg
+    ).run_test() as pilot:
+        await pilot.app.push_screen(
+            DiffScreen(launch_root=str(launch_root), config=cfg, **_diff_kwargs(tmp_path))
+        )
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+        await pilot.press("f")
+        await pilot.pause()
+        header = str(pilot.app.screen.query_one("#header-left", Static).render())
+        assert "полный файл" in header

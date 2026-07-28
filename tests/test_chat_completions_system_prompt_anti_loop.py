@@ -68,14 +68,15 @@ def test_orchestrator_anti_loop_single_bullet_own_changes_only():
 
 def test_subagent_anti_loop_single_bullet_memory_when_needed():
     text = _read_prompt(SUBAGENT_PROMPT_PATH)
-    assert "Do not repeat reads/searches" in text
-    assert "unless the resource changed" in text
+    assert "Do not repeat the same read/list/get/search call" in text
+    assert "if you already have its result" in text
+    assert "have not changed that resource" in text
     assert "Before opening files" not in text
-    assert "inspect memory only when" in text
+    assert "inspect memory only when" in text.lower()
     assert "Do not read memory for isolated subtasks" not in text
     assert "read_user_intent_log" not in text
     assert "working_memory" not in text
-    assert "project/long memory" in text.lower() or "project-scoped long memory" in text.lower()
+    assert "project memory" in text.lower()
     assert "thread/session memory" in text.lower()
 
 
@@ -125,4 +126,4 @@ def test_subagent_prompt_no_zero_sycophancy_block():
     text = _read_prompt(SUBAGENT_PROMPT_PATH)
     assert "ZERO SYCOPHANCY" not in text
     assert "evidence-driven" in text.lower()
-    assert "Accuracy and intellectual honesty" in text
+    assert "**Honesty:**" in text

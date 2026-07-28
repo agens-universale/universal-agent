@@ -97,7 +97,13 @@ class FinishGateGuard:
         if not isinstance(cfg, dict):
             return False
         strict = bool(cfg.get("strict_turn_finish_validation", True))
-        return strict and judge_available(cfg)
+        if not (strict and judge_available(cfg)):
+            return False
+        # smart (только TUI-проекция): без вызовов инструментов за ход судью не зовём.
+        # CLI/server ключа finish_gate_smart не ставят → ветка не срабатывает.
+        if cfg.get("finish_gate_smart"):
+            return int(getattr(self._state, "turn_tool_calls", 0) or 0) >= 1
+        return True
 
     def evaluate_turn_finish(
         self,
@@ -118,6 +124,8 @@ class FinishGateGuard:
                 reason = "strict_turn_finish_validation=false"
             elif backend != "chat_completions":
                 reason = f"backend_api_mode={backend}"
+            elif cfg.get("finish_gate_smart"):
+                reason = "finish_gate_smart_no_tool_calls"
             log_finish_gate_skipped(
                 self._logger,
                 reason=reason,

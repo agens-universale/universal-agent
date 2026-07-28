@@ -8,20 +8,27 @@ def test_cycle_value_wraps_around():
     """Чистая функция цикла: ±1 по кортежу values, по кругу, без записи."""
     from tui.toggles import cycle_value
 
-    assert cycle_value("gate", "on", 1) == "off"
-    assert cycle_value("gate", "off", 1) == "on"
-    assert cycle_value("answers", "judge", 1) == "allow"
-    assert cycle_value("answers", "allow", 1) == "deny"
-    assert cycle_value("answers", "deny", 1) == "judge"
-    assert cycle_value("answers", "deny", -1) == "allow"
+    assert cycle_value("gate", "on", 1) == "off"     # (idx2+1)%3 -> off
+    assert cycle_value("gate", "off", 1) == "smart"  # было "on" -> теперь "smart"
+    assert cycle_value("gate", "smart", 1) == "on"
+    assert cycle_value("answers", "judge", 1) == "deny"
+    assert cycle_value("answers", "allow", 1) == "judge"
+    assert cycle_value("answers", "deny", 1) == "allow"
+    assert cycle_value("answers", "deny", -1) == "judge"
 
 
-def test_palette_renders_toggle_state():
+def test_palette_renders_toggle_state(monkeypatch):
     """Строка toggle-команды рисует слайдер и значение справа: `● on`
     (рендер — rich.Text, спека 2026-07-18 §2-4; текст читаем через `.plain`)."""
     pytest.importorskip("textual")
+    from dataclasses import replace
+
     from tui.commands import Command, CommandRegistry
+    from tui.toggles import TOGGLES
     from tui.widgets.command_palette import CommandPalette
+
+    # Механика рендера, не видимость (Task 4 §4.1) — gate виден в пустом фильтре.
+    monkeypatch.setitem(TOGGLES, "gate", replace(TOGGLES["gate"], palette_default=True))
 
     reg = CommandRegistry()
     reg.register(Command("help", (), "", "справка"))
@@ -80,11 +87,11 @@ async def test_palette_footer_shows_docked_toggle_row(tmp_path):
 
     reg = CommandRegistry()
     reg.register(Command("help", (), "", "справка"))
-    reg.register(Command("gate", (), "", "финиш-гейт", is_toggle=True))
+    reg.register(Command("rigor", (), "", "строгость: пресет", is_toggle=True))
 
     app = TuiApp(threads_dir=str(tmp_path / "t"), config={"model": "M"})
     async with app.run_test(size=(80, 40)) as pilot:
-        pal = CommandPalette(reg, initial_filter="", toggle_state=lambda name: "on")
+        pal = CommandPalette(reg, initial_filter="", toggle_state=lambda name: "medium")
         await app.screen.mount(pal)
         await pilot.pause()
 
@@ -93,7 +100,7 @@ async def test_palette_footer_shows_docked_toggle_row(tmp_path):
         toggle_rows = list(pal.query(".palette-toggle-row"))
         assert len(toggle_rows) == 1
         row_text = toggle_rows[0].render().plain
-        assert "●" in row_text and row_text.rstrip().endswith("on")
+        assert "●" in row_text and row_text.rstrip().endswith("medium")
         # Верхняя зона (обычные команды) не задета toggle-подвалом.
         assert len(list(pal.query(".palette-row").exclude(".palette-toggle-row"))) == 1
 
@@ -110,11 +117,11 @@ async def test_palette_footer_vertical_order(tmp_path):
 
     reg = CommandRegistry()
     reg.register(Command("help", (), "", "справка"))
-    reg.register(Command("gate", (), "", "финиш-гейт", is_toggle=True))
+    reg.register(Command("rigor", (), "", "строгость: пресет", is_toggle=True))
 
     app = TuiApp(threads_dir=str(tmp_path / "t"), config={"model": "M"})
     async with app.run_test(size=(80, 40)) as pilot:
-        pal = CommandPalette(reg, initial_filter="", toggle_state=lambda name: "on")
+        pal = CommandPalette(reg, initial_filter="", toggle_state=lambda name: "medium")
         await app.screen.mount(pal)
         await pilot.pause()
 
@@ -192,11 +199,11 @@ async def test_palette_footer_not_hanging_below_border_with_full_list(tmp_path):
         assert hint.region.y + hint.region.height <= pal_region.y + pal_region.height
 
 
-def test_apply_toggle_writes_config_and_reloads(tmp_path):
-    """apply_toggle: пишет в РЕАЛЬНЫЙ config.yml ровно переданное value, reload_config
-    вызван (не пересчитывает направление сам — это чинит находку #2 ревью)."""
+def test_apply_toggle_writes_session_and_invalidates_runner(tmp_path):
+    """apply_toggle: НЕ пишет в config.yml — переопределяет текущую сессию,
+    сохраняет в метаданные треда и зовёт invalidate_runner (не reload_config;
+    спека 2026-07-20-session-scoped-settings §2)."""
     pytest.importorskip("textual")
-    import yaml
     from tui.app import TuiApp
     from tui.toggles import apply_toggle
 
@@ -205,32 +212,37 @@ def test_apply_toggle_writes_config_and_reloads(tmp_path):
     app = TuiApp(config={})
     app._config_path = str(cfg_file)
     app.reload_config()
+    app._threads_dir = str(tmp_path / "threads")   # изолируем метаданные от реального gc-state
+    app.tui_state.active_task_id = "t1"
 
     calls = {"n": 0}
-    orig_reload = app.reload_config
+    orig_invalidate = app.invalidate_runner
 
-    def counting_reload():
+    def counting_invalidate():
         calls["n"] += 1
-        orig_reload()
+        orig_invalidate()
 
-    app.reload_config = counting_reload
+    app.invalidate_runner = counting_invalidate
 
     new_value = apply_toggle(app, "gate", "off")
 
     assert new_value == "off"
     assert calls["n"] == 1
-    data = yaml.safe_load(cfg_file.read_text(encoding="utf-8"))
-    assert data["tui"]["finish_gate_mode"] == "off"
+    assert cfg_file.read_text(encoding="utf-8") == 'tui:\n  finish_gate_mode: "on"\n'
+
+    from tui.services.stores.file_store import FileTaskStore
+    store = FileTaskStore(threads_dir=app._threads_dir, system=app._system)
+    saved = (store.get_task_meta("t1").get("tui") or {}).get("session_settings")
+    assert saved == {"tui.finish_gate_mode": "off"}
 
 
 def test_apply_toggle_writes_explicit_value_not_recomputed_direction(tmp_path):
-    """Находка #2: приложение обязано писать значение, показанное в драфте, а не
+    """Находка #2: приложение обязано применить значение, показанное в драфте, а не
     cycle_value(current, +1) от текущего состояния. current='allow' + draft='deny'
-    (юзер крутил ←) — apply_toggle обязан записать 'deny', а не пересчитанный 'judge'."""
+    (юзер крутил ←) — apply_toggle обязан выставить 'deny', а не пересчитанный 'judge'."""
     pytest.importorskip("textual")
-    import yaml
     from tui.app import TuiApp
-    from tui.toggles import apply_toggle
+    from tui.toggles import apply_toggle, toggle_state
 
     cfg_file = tmp_path / "config.yml"
     cfg_file.write_text('tui:\n  text_answer_mode: "allow"\n', encoding="utf-8")
@@ -241,8 +253,8 @@ def test_apply_toggle_writes_explicit_value_not_recomputed_direction(tmp_path):
     got = apply_toggle(app, "answers", "deny")
 
     assert got == "deny"
-    data = yaml.safe_load(cfg_file.read_text(encoding="utf-8"))
-    assert data["tui"]["text_answer_mode"] == "deny"
+    assert toggle_state(app, "answers") == "deny"
+    assert cfg_file.read_text(encoding="utf-8") == 'tui:\n  text_answer_mode: "allow"\n'
 
 
 def test_apply_toggle_rejects_value_outside_spec(tmp_path):
@@ -264,11 +276,10 @@ def test_apply_toggle_rejects_value_outside_spec(tmp_path):
 
 
 def test_apply_toggle_answers_three_values(tmp_path):
-    """Каждое из трёх значений /answers реально применяется и оседает в файле."""
+    """Каждое из трёх значений /answers реально применяется — в сессии, файл не трогается."""
     pytest.importorskip("textual")
-    import yaml
     from tui.app import TuiApp
-    from tui.toggles import apply_toggle
+    from tui.toggles import apply_toggle, toggle_state
 
     cfg_file = tmp_path / "config.yml"
     cfg_file.write_text('tui:\n  text_answer_mode: "judge"\n', encoding="utf-8")
@@ -279,8 +290,8 @@ def test_apply_toggle_answers_three_values(tmp_path):
     for value in ("allow", "deny", "judge"):
         got = apply_toggle(app, "answers", value)
         assert got == value
-        data = yaml.safe_load(cfg_file.read_text(encoding="utf-8"))
-        assert data["tui"]["text_answer_mode"] == value
+        assert toggle_state(app, "answers") == value
+        assert cfg_file.read_text(encoding="utf-8") == 'tui:\n  text_answer_mode: "judge"\n'
 
 
 def test_gate_state_shows_effective_not_raw():
@@ -314,12 +325,12 @@ def _app_with_config(tmp_path, yaml_text):
 
 @pytest.mark.asyncio
 async def test_palette_arrow_applies_toggle_immediately_both_directions(tmp_path):
-    """(а) ←/→ на выделенной toggle-строке применяет значение СРАЗУ: пишет
-    config.yml обеими сторонами (←=-1, →=+1), рендер сразу показывает
-    применённое ●, палитра остаётся открытой."""
+    """(а) ←/→ на выделенной toggle-строке применяет значение СРАЗУ: переопределяет
+    сессию обеими сторонами (←=-1, →=+1), рендер сразу показывает применённое ●,
+    config.yml не трогается, палитра остаётся открытой."""
     pytest.importorskip("textual")
-    import yaml
     app, cfg_file = _app_with_config(tmp_path, 'tui:\n  finish_gate_mode: "on"\n')
+    original = cfg_file.read_text(encoding="utf-8")
 
     async with app.run_test() as pilot:
         inp = pilot.app.query_one("#cmdinput")
@@ -328,20 +339,18 @@ async def test_palette_arrow_applies_toggle_immediately_both_directions(tmp_path
         await pilot.press("left")
         await pilot.pause(0.05)
 
-        data = yaml.safe_load(cfg_file.read_text(encoding="utf-8"))
-        assert data["tui"]["finish_gate_mode"] == "off"
+        assert cfg_file.read_text(encoding="utf-8") == original
         palette = pilot.app.query_one(".palette")
         rows_text = "\n".join(
             r.render().plain for r in palette.query(".palette-toggle-row")
         )
-        assert "●" in rows_text and rows_text.rstrip().endswith("off")
+        assert "●" in rows_text and rows_text.rstrip().endswith("smart")   # было "off"
         assert pilot.app.query(".palette")  # осталась открыта
 
         await pilot.press("right")
         await pilot.pause(0.05)
 
-        data = yaml.safe_load(cfg_file.read_text(encoding="utf-8"))
-        assert data["tui"]["finish_gate_mode"] == "on"
+        assert cfg_file.read_text(encoding="utf-8") == original
         rows_text = "\n".join(
             r.render().plain for r in palette.query(".palette-toggle-row")
         )
@@ -351,11 +360,11 @@ async def test_palette_arrow_applies_toggle_immediately_both_directions(tmp_path
 @pytest.mark.asyncio
 async def test_palette_enter_cycles_and_applies_keeps_palette_open(tmp_path):
     """(б) Enter на toggle-строке циклит (+1) и применяет мгновенно — тот же
-    путь, что ←/→: файл изменился, reload сработал, палитра открыта, текст
-    поля НЕ сабмитится."""
+    путь, что ←/→: сессия изменилась, config.yml не тронут, палитра открыта,
+    текст поля НЕ сабмитится."""
     pytest.importorskip("textual")
-    import yaml
     app, cfg_file = _app_with_config(tmp_path, 'tui:\n  finish_gate_mode: "on"\n')
+    original = cfg_file.read_text(encoding="utf-8")
 
     async with app.run_test() as pilot:
         inp = pilot.app.query_one("#cmdinput")
@@ -365,8 +374,7 @@ async def test_palette_enter_cycles_and_applies_keeps_palette_open(tmp_path):
         await pilot.pause(0.05)
 
         assert pilot.app.query(".palette")  # палитра осталась открыта
-        data = yaml.safe_load(cfg_file.read_text(encoding="utf-8"))
-        assert data["tui"]["finish_gate_mode"] == "off"
+        assert cfg_file.read_text(encoding="utf-8") == original
         palette = pilot.app.query_one(".palette")
         rows_text = "\n".join(
             r.render().plain for r in palette.query(".palette-toggle-row")
@@ -460,6 +468,31 @@ async def test_typed_answers_command_shows_info_without_changing_value(tmp_path)
 
 
 @pytest.mark.asyncio
+async def test_typed_rigor_command_shows_info_without_changing_value(tmp_path):
+    """То же для `/rigor` — паритет с `/gate`/`/answers` (пресетный тоггл)."""
+    pytest.importorskip("textual")
+    app, cfg_file = _app_with_config(
+        tmp_path, 'tui:\n  finish_gate_mode: "on"\n  text_answer_mode: "deny"\n'
+    )
+    original = cfg_file.read_text(encoding="utf-8")
+
+    async with app.run_test() as pilot:
+        inp = pilot.app.query_one("#cmdinput")
+        inp.text = "/rigor "
+        await pilot.pause(0.1)
+        assert not pilot.app.query(".palette")
+
+        await pilot.press("enter")
+        await pilot.pause(0.05)
+
+        assert cfg_file.read_text(encoding="utf-8") == original
+        footer = pilot.app.query_one("#footer-left")
+        footer_text = str(footer.render())
+        assert "/rigor" in footer_text and "текущее значение: high" in footer_text
+        assert "←/→" in footer_text
+
+
+@pytest.mark.asyncio
 async def test_palette_filter_change_does_not_touch_config(tmp_path):
     """Смена фильтра сама по себе ничего не пишет и не применяет — значение
     тоггла меняется только явным ←/→/Enter на самой строке."""
@@ -504,12 +537,21 @@ async def test_palette_space_on_toggle_row_does_not_cycle(tmp_path):
 # --- Task 2: слайдер-рендер тоггл-строк (спека 2026-07-18 §2-4) -------------
 
 
-def _reg_with_gate_answers():
+def _reg_with_gate_answers(monkeypatch):
     """Реестр с /gate + /answers, описания — генерённые из TOGGLES (та же
-    формула, что и в build_default_registry — не дублируем формулировку своей)."""
+    формула, что и в build_default_registry — не дублируем формулировку своей).
+    Эти тесты проверяют механику рендера слайдера, а не видимость (Task 4
+    §4.1) — делаем оба тоггла видимыми в пустом фильтре монкипатчем
+    `palette_default`, иначе `_visible_toggle_rows()` пуст (gate/answers
+    default-скрыты) и `_toggle_columns()` падает на пустом max()."""
     pytest.importorskip("textual")
+    from dataclasses import replace
+
     from tui.commands import Command, CommandRegistry
     from tui.toggles import TOGGLES
+
+    monkeypatch.setitem(TOGGLES, "gate", replace(TOGGLES["gate"], palette_default=True))
+    monkeypatch.setitem(TOGGLES, "answers", replace(TOGGLES["answers"], palette_default=True))
 
     reg = CommandRegistry()
     reg.register(Command("gate", (), "", f"{TOGGLES['gate'].label}: {TOGGLES['gate'].summary}",
@@ -525,26 +567,32 @@ def _mk_palette(reg, state_map):
     return CommandPalette(reg, initial_filter="", toggle_state=lambda n: state_map[n])
 
 
-def test_slider_row_plain_text_gate_track():
+def test_slider_row_plain_text_gate_track(monkeypatch):
     """gate (2 значения) → трек `○ ●`/`● ○`, `.plain` заканчивается подписью
     значения; точек-разделителей (`·`) нет — пустые позиции рисуются `○`
     (спека §2-3)."""
-    reg = _reg_with_gate_answers()
+    reg = _reg_with_gate_answers(monkeypatch)
     pal = _mk_palette(reg, {"gate": "on", "answers": "judge"})
 
     txt = pal._format_toggle_row(reg.lookup("gate")).plain
 
-    assert txt.rstrip().endswith("○ ●  on")
+    assert txt.rstrip().endswith("○ ○ ●  on")   # было "○ ●  on"
     assert "·" not in txt
 
 
-def test_regular_and_toggle_rows_share_name_column():
+def test_regular_and_toggle_rows_share_name_column(monkeypatch):
     """Спека §4: имя-колонка общая для ОБЕИХ зон — длинное имя обычной команды
     сдвигает описание тоггл-строки на ту же общую колонку (находка ревью:
     /gate,/answers обязаны быть в той же колонке, что /help,/sessions)."""
     pytest.importorskip("textual")
+    from dataclasses import replace
+
     from tui.commands import Command, CommandRegistry
+    from tui.toggles import TOGGLES
     from tui.widgets.command_palette import CommandPalette
+
+    # Механика колонок, не видимость (Task 4 §4.1) — gate виден в пустом фильтре.
+    monkeypatch.setitem(TOGGLES, "gate", replace(TOGGLES["gate"], palette_default=True))
 
     reg = CommandRegistry()
     reg.register(Command("verylongcommand", (), "", "обычная команда"))
@@ -558,27 +606,199 @@ def test_regular_and_toggle_rows_share_name_column():
     assert plain_row.index("обычная") == toggle_row.index("самопроверка")
 
 
-def test_slider_indicator_and_track_columns_align():
+def test_slider_indicator_and_track_columns_align(monkeypatch):
     """Трек gate (3 ячейки) добит пробелами до общего поля (answers,
     5 ячеек), прижат вправо; трек answers не изменился; подписи значений
     начинаются в одной колонке в обеих строках."""
-    reg = _reg_with_gate_answers()
+    reg = _reg_with_gate_answers(monkeypatch)
     pal = _mk_palette(reg, {"gate": "on", "answers": "judge"})
 
     g = pal._format_toggle_row(reg.lookup("gate")).plain
     a = pal._format_toggle_row(reg.lookup("answers")).plain
 
-    assert g.rstrip().endswith("○ ●  on") and "·" not in g
+    assert g.rstrip().endswith("○ ○ ●  on") and "·" not in g   # было "○ ●  on"
     assert "○ ● ○" in a and a.rstrip().endswith("judge")
     assert g.rindex("on") == a.rindex("judge")          # общая колонка подписей
     assert len(g.split("on")[0]) == len(a.split("judge")[0])
 
 
-def test_slider_colors_semantic():
+def test_child_rows_always_dim_flat_and_track_aligned_with_parent():
+    """Ревизия 7 (спека §2, §6): дети видны ВСЕГДА под родителем, без условия
+    выделения (композиция статична — ничего не нужно выставлять на
+    `_selected`, в отличие от ревизии 5/6) — flat (никакого отступа), имя+
+    описание СТИЛЕМ DIM, подпись ЗНАЧЕНИЯ ребёнка тоже DIM. Выравнивание
+    трека — по ЛЕВОМУ краю общего поля: базовый трек ВСЕХ строк начинается в
+    ОДНОЙ колонке (`col`), custom-резерв — правее троек, паддинг у детей
+    достраивается СПРАВА."""
+    pytest.importorskip("textual")
+    from tui import palette as p
+    from tui.commands import build_default_registry
+    from tui.toggles import TOGGLES
+    from tui.widgets.command_palette import CommandPalette
+
+    reg = build_default_registry()
+    state = {"rigor": "high", "gate": "on", "answers": "deny"}
+
+    def _extra(name):
+        return False if TOGGLES[name].preset_keys else None
+
+    pal = CommandPalette(
+        reg, initial_filter="",
+        toggle_state=lambda n: state[n],
+        toggle_extra=_extra,
+    )
+
+    col, base_w, extra_w, label_w = pal._toggle_columns()
+    assert base_w == 5 and extra_w == 3   # тройки(5) + custom-резерв(3) — общие для всех строк
+
+    rigor_row = pal._format_toggle_row(reg.lookup("rigor"))
+    gate_row = pal._format_toggle_row(reg.lookup("gate"))
+    answers_row = pal._format_toggle_row(reg.lookup("answers"))
+    rigor_plain, gate_plain, answers_plain = rigor_row.plain, gate_row.plain, answers_row.plain
+
+    # Flat (ревизия 7) — никакого отступа ни у кого, включая детей (было +2
+    # пробела у ребёнка в ревизии 5/6).
+    assert gate_plain.startswith(" /gate") and not gate_plain.startswith("  /gate")
+    assert answers_plain.startswith(" /answers") and not answers_plain.startswith("  /answers")
+    assert rigor_plain.startswith(" /rigor") and not rigor_plain.startswith("  /rigor")
+
+    # Левый край: базовый трек всех трёх строк начинается РОВНО в колонке `col`.
+    assert rigor_plain[col] in ("●", "○")
+    assert gate_plain[col] in ("●", "○")
+    assert answers_plain[col] in ("●", "○")
+
+    # Общая колонка подписей значений — контракт не изменился, паддинг ушёл
+    # с левого края трека на правый (после троек/резерва).
+    assert rigor_plain.rindex("high") == gate_plain.rindex("on") == answers_plain.rindex("deny")
+
+    # Имя+описание ребёнка — стилем DIM (весь head, включая слеш).
+    dim_spans_gate = [s for s in gate_row.spans if p.DIM.lower() in str(s.style).lower()]
+    assert dim_spans_gate and dim_spans_gate[0].start == 0
+    assert dim_spans_gate[0].end >= len(" /gate")
+    dim_spans_answers = [s for s in answers_row.spans if p.DIM.lower() in str(s.style).lower()]
+    assert dim_spans_answers and dim_spans_answers[0].start == 0
+
+    # Подпись значения ребёнка (§4.1, новое) — тоже DIM, отдельным span'ом
+    # у хвоста строки (трек между head и подписью — семантические цвета,
+    # не задет).
+    gate_value_start = gate_plain.rindex("on")
+    assert any(
+        p.DIM.lower() in str(s.style).lower() and s.start <= gate_value_start < s.end
+        for s in gate_row.spans
+    )
+    answers_value_start = answers_plain.rindex("deny")
+    assert any(
+        p.DIM.lower() in str(s.style).lower() and s.start <= answers_value_start < s.end
+        for s in answers_row.spans
+    )
+
+    # Родитель /rigor НЕ дымится DIM-ом (обычный toggle-стиль строки).
+    assert not any(p.DIM.lower() in str(s.style).lower() for s in rigor_row.spans)
+
+
+def test_filtered_dedups_child_matching_filter(monkeypatch):
+    """Ревизия 7 (спека §2, дедуп — правило не изменилось, только без условия
+    выделения): непустой фильтр, совпадающий И с родителем, И с ребёнком
+    (реальных имён с общим префиксом нет — тогглы синтетические, generic-
+    механика не завязана на конкретные имена) — ребёнок обязан попасть в
+    подвал ОДИН раз, на позиции ребёнка сразу после родителя (оформлен как
+    ребёнок), а не дважды (один раз сам по фильтру, второй раз родительской
+    вставкой)."""
+    pytest.importorskip("textual")
+    from tui import palette as p
+    from tui import toggles as tg
+    from tui.commands import Command, CommandRegistry
+    from tui.widgets.command_palette import CommandPalette
+
+    child = tg.ToggleSpec(
+        dotted="tui.zz_child",
+        values=(tg.ToggleValue("a", "hint a", p.INK),
+                tg.ToggleValue("b", "hint b", p.ACCENT)),
+        state=lambda cfg: "a",
+        label="дочерний фиктивный тоггл",
+        summary="демо",
+        palette_default=False,
+    )
+    parent = tg.ToggleSpec(
+        values=(tg.ToggleValue("x", "hint x", p.INK),
+                tg.ToggleValue("y", "hint y", p.ACCENT)),
+        state=lambda cfg: "x",
+        label="родительский фиктивный тоггл",
+        summary="демо",
+        preset_keys=("tui.zz_child",),
+        palette_default=True,
+    )
+    monkeypatch.setitem(tg.TOGGLES, "zzchild", child)
+    monkeypatch.setitem(tg.TOGGLES, "zzparent", parent)
+
+    reg = CommandRegistry()
+    reg.register(Command("zzparent", (), "", "родитель", is_toggle=True))
+    reg.register(Command("zzchild", (), "", "ребёнок", is_toggle=True))
+    state = {"zzparent": "x", "zzchild": "a"}
+    pal = CommandPalette(reg, toggle_state=lambda n: state[n])
+
+    pal.set_filter("zz")   # startswith -> матчит ОБА: zzparent И zzchild
+
+    names = [c.name for c in pal._visible_toggle_rows()]
+    assert names == ["zzparent", "zzchild"]     # один экземпляр, не два
+    assert pal._owning_preset("zzchild") == "zzparent"   # оформлен как ребёнок группы
+    child_row = pal._format_toggle_row(reg.lookup("zzchild"))
+    assert child_row.plain.startswith(" /zzchild") and not child_row.plain.startswith("  /zzchild")
+
+
+def test_filtered_dedups_child_matching_filter_registered_before_parent(monkeypatch):
+    """Находка ревью Z1: дедуп был порядко-зависимым — `injected` помечался
+    только когда ребёнка вставлял родитель, а если Command ребёнка
+    зарегистрирован в реестре РАНЬШЕ родителя и оба матчат фильтр, ребёнок
+    сначала попадал в `result` напрямую из базы (ещё не помечен), а потом ещё
+    раз — родительской вставкой (дубликат: `['zzchild','zzparent','zzchild']`).
+    Недостижимо сегодня (`/rigor` регистрируется раньше `/gate`,`/answers`),
+    но ревизия 7 явно рассчитана на будущие независимые группы — состав
+    подвала обязан быть дедуплицирован НЕЗАВИСИМО от порядка регистрации."""
+    pytest.importorskip("textual")
+    from tui import palette as p
+    from tui import toggles as tg
+    from tui.commands import Command, CommandRegistry
+    from tui.widgets.command_palette import CommandPalette
+
+    child = tg.ToggleSpec(
+        dotted="tui.zz_child",
+        values=(tg.ToggleValue("a", "hint a", p.INK),
+                tg.ToggleValue("b", "hint b", p.ACCENT)),
+        state=lambda cfg: "a",
+        label="дочерний фиктивный тоггл",
+        summary="демо",
+        palette_default=False,
+    )
+    parent = tg.ToggleSpec(
+        values=(tg.ToggleValue("x", "hint x", p.INK),
+                tg.ToggleValue("y", "hint y", p.ACCENT)),
+        state=lambda cfg: "x",
+        label="родительский фиктивный тоггл",
+        summary="демо",
+        preset_keys=("tui.zz_child",),
+        palette_default=True,
+    )
+    monkeypatch.setitem(tg.TOGGLES, "zzchild", child)
+    monkeypatch.setitem(tg.TOGGLES, "zzparent", parent)
+
+    reg = CommandRegistry()
+    reg.register(Command("zzchild", (), "", "ребёнок", is_toggle=True))    # ребёнок ПЕРВЫМ
+    reg.register(Command("zzparent", (), "", "родитель", is_toggle=True))  # родитель ВТОРЫМ
+    state = {"zzparent": "x", "zzchild": "a"}
+    pal = CommandPalette(reg, toggle_state=lambda n: state[n])
+
+    pal.set_filter("zz")   # startswith -> матчит ОБА: zzchild И zzparent
+
+    names = [c.name for c in pal._visible_toggle_rows()]
+    assert names == ["zzparent", "zzchild"]     # один экземпляр, СРАЗУ после родителя
+
+
+def test_slider_colors_semantic(monkeypatch):
     """Цвет ползунка/индикатора = цвет значения (spans rich.Text), не позиция."""
     from tui import palette as p
 
-    reg = _reg_with_gate_answers()
+    reg = _reg_with_gate_answers(monkeypatch)
     pal = _mk_palette(reg, {"gate": "off", "answers": "judge"})
 
     text = pal._format_toggle_row(reg.lookup("answers"))
@@ -595,7 +815,7 @@ def test_slider_colors_semantic():
 
 
 @pytest.mark.asyncio
-async def test_slider_narrow_terminal_truncation_keeps_common_column(tmp_path):
+async def test_slider_narrow_terminal_truncation_keeps_common_column(tmp_path, monkeypatch):
     """Находка ревью Task 2: `label_w` раньше брался из `spec.names` ТЕКУЩЕЙ
     команды (gate max "off"=3, answers "judge"=5) → head_w/col получались
     per-row, и при усечении узкого терминала треки/подписи разных строк
@@ -605,7 +825,7 @@ async def test_slider_narrow_terminal_truncation_keeps_common_column(tmp_path):
     pytest.importorskip("textual")
     from tui.app import TuiApp
 
-    reg = _reg_with_gate_answers()
+    reg = _reg_with_gate_answers(monkeypatch)
     app = TuiApp(threads_dir=str(tmp_path / "t"), config={"model": "M"})
     async with app.run_test(size=(64, 24)) as pilot:
         pal = _mk_palette(reg, {"gate": "on", "answers": "judge"})
@@ -622,18 +842,18 @@ async def test_slider_narrow_terminal_truncation_keeps_common_column(tmp_path):
         # (2) описание усечено многоточием (ветка сужения реально сработала).
         assert "…" in gate_row and "…" in answers_row
         # (3) слайдер+подпись присутствуют целиком, не усечены.
-        assert gate_row.rstrip().endswith("○ ●  on")
+        assert gate_row.rstrip().endswith("○ ○ ●  on")   # было "○ ●  on"
         assert "○ ● ○" in answers_row and answers_row.rstrip().endswith("judge")
 
 
 # --- Task 3: hint-строка со значением тоггла + приоритетное усечение (§6) ---
 
 
-def test_toggle_hint_shows_value_meaning():
+def test_toggle_hint_shows_value_meaning(monkeypatch):
     """Выделенная toggle-строка — hint = <значение> — <подсказка из TOGGLES>  ·
     ←/→/Enter — переключить (значение/подсказка всегда от применённого —
     черновика не существует; про Esc в toggle-hint не пишем — спека §6)."""
-    reg = _reg_with_gate_answers()
+    reg = _reg_with_gate_answers(monkeypatch)
     pal = _mk_palette(reg, {"gate": "on", "answers": "judge"})
     pal._selected = len(pal._visible_rows())              # первая тоггл-строка (gate)
 
@@ -643,10 +863,10 @@ def test_toggle_hint_shows_value_meaning():
     assert "←/→/Enter — переключить" in hint
 
 
-def test_toggle_hint_updates_after_state_changes():
+def test_toggle_hint_updates_after_state_changes(monkeypatch):
     """hint строится от ПРИМЕНЁННОГО значения и меняется вслед за
     toggle_state-провайдером — переключение отражается сразу, без черновика."""
-    reg = _reg_with_gate_answers()
+    reg = _reg_with_gate_answers(monkeypatch)
     state = {"gate": "on", "answers": "judge"}
     pal = _mk_palette(reg, state)
 
@@ -658,28 +878,91 @@ def test_toggle_hint_updates_after_state_changes():
     assert hint_off.startswith("off — самопроверка выключена")
 
 
+def test_toggle_hint_carries_scope_inline(monkeypatch):
+    """§6.1 модели уровней настроек (2026-07-21): область действия ВЕРНУЛАСЬ —
+    внутрь клавишной части подсказки, не отдельным сегментом (отвергнутые
+    подходы — отдельный сегмент-хвост / строка-легенда — см. дизайн §6.1).
+    Несмонтированная палитра → width=0 → `_fit_hint` не усекает вовсе
+    (см. первый guard), поэтому hint содержит область целиком."""
+    reg = _reg_with_gate_answers(monkeypatch)
+    pal = _mk_palette(reg, {"gate": "on", "answers": "judge"})
+    pal._selected = len(pal._visible_rows())              # первая тоггл-строка (gate)
+
+    hint = pal._toggle_hint(reg.lookup("gate"))
+
+    assert hint.startswith("on — самопроверка не даст закончить")
+    assert "←/→/Enter — переключить в текущей сессии" in hint
+
+
 def test_fit_hint_priority_truncation():
-    """Порядок жертв §6: 1) хвост подсказки после последнего ' · '; 2) клавиши
-    сжимаются до ←/→/Enter; 3) многоточие. Механика видима всегда."""
+    """Порядок жертв §6.1 (4 ступени): 1) хвост подсказки после последнего
+    ' · '; 2) клавиши теряют область — «переключить в текущей сессии» →
+    «переключить», область уходит ЦЕЛЫМ куском, не обрывком; 3) клавиши
+    сжимаются до ←/→/Enter; 4) многоточие на смысле. Механика видима всегда."""
     from tui.widgets.command_palette import _HINT_KEYS_TOGGLE, _fit_hint
-    from tui.toggles import _HINT_KEYS_TOGGLE_SHORT
+    from tui.toggles import _HINT_KEYS_TOGGLE_MEDIUM, _HINT_KEYS_TOGGLE_SHORT
 
     value, keys = "on", _HINT_KEYS_TOGGLE
     hint = ("самопроверка не даст закончить, пока запрос не закрыт · "
             "для сложных задач, где важна полнота")
 
     full = _fit_hint(value, hint, keys, width=200)
-    assert "для сложных задач" in full and "переключить" in full
+    assert "для сложных задач" in full
+    assert "в текущей сессии" in full                      # область на месте
+
+    w120 = _fit_hint(value, hint, keys, width=120)
+    assert "для сложных задач" not in w120                 # 1) хвост ушёл первым
+    assert "самопроверка" in w120
+    assert "в текущей сессии" in w120                       # область ещё цела в клавишах
+
+    w90 = _fit_hint(value, hint, keys, width=90)
+    assert "в текущей сессии" not in w90                    # 2) область ушла ЦЕЛЫМ куском
+    assert "в теку" not in w90                              # не обрывок
+    assert _HINT_KEYS_TOGGLE_MEDIUM in w90
+    assert "самопроверка" in w90
 
     w80 = _fit_hint(value, hint, keys, width=80)
-    assert "для сложных задач" not in w80                  # хвост ушёл первым
-    assert "самопроверка" in w80
-
-    w60 = _fit_hint(value, hint, keys, width=60)
-    assert _HINT_KEYS_TOGGLE_SHORT in w60                   # клавиши сжались
+    assert _HINT_KEYS_TOGGLE_MEDIUM not in w80              # 3) клавиши сжались дальше
+    assert _HINT_KEYS_TOGGLE_SHORT in w80
 
     w30 = _fit_hint(value, hint, keys, width=30)
-    assert w30.endswith("…") or len(w30) <= 30             # механика с многоточием
+    assert "…" in w30 and len(w30) <= 30                    # 4) многоточие на смысле
+
+
+@pytest.mark.asyncio
+async def test_toggle_hint_scope_visible_wide_and_gracefully_truncated_narrow(tmp_path):
+    """ГЛАВНЫЙ живой прогон §6.1: реальный pilot-mount палитры (не width=0
+    несмонтированного виджета), тоггл выделен через обычный ввод `/gate`
+    (как в e2e-тестах роутинга выше). Значение `off` — короткий смысл, чтобы
+    область была видна целиком на широком терминале.
+
+    Широкий терминал (140 колонок) — hint содержит «в текущей сессии»
+    целиком. Узкий (70 колонок) — область усечена ЦЕЛЫМ куском (клавиши
+    падают на `_HINT_KEYS_TOGGLE_MEDIUM`): «в текущей сессии» отсутствует
+    полностью, обрывка «в теку…» нет."""
+    pytest.importorskip("textual")
+
+    app_wide, _ = _app_with_config(tmp_path, 'tui:\n  finish_gate_mode: "off"\n')
+    async with app_wide.run_test(size=(140, 24)) as pilot:
+        inp = pilot.app.query_one("#cmdinput")
+        inp.text = "/gate"
+        await pilot.pause(0.1)
+        palette = pilot.app.query_one(".palette")
+        hint_wide = palette.query_one(".palette-hint").render().plain
+
+        assert "переключить в текущей сессии" in hint_wide
+
+    app_narrow, _ = _app_with_config(tmp_path, 'tui:\n  finish_gate_mode: "off"\n')
+    async with app_narrow.run_test(size=(70, 24)) as pilot:
+        inp = pilot.app.query_one("#cmdinput")
+        inp.text = "/gate"
+        await pilot.pause(0.1)
+        palette = pilot.app.query_one(".palette")
+        hint_narrow = palette.query_one(".palette-hint").render().plain
+
+        assert "в текущей сессии" not in hint_narrow             # ушла ЦЕЛЫМ куском
+        assert "в теку" not in hint_narrow                       # не обрывок
+        assert "переключить" in hint_narrow                      # клавиши-механика жива
 
 
 def test_non_toggle_hint_unchanged():
@@ -781,6 +1064,110 @@ async def test_palette_toggle_apply_failure_shows_flash_keeps_palette_and_value(
         assert "не сохранено" in footer_text
         assert pilot.app.query(".palette")
         assert cfg_file.read_text(encoding="utf-8") == 'tui:\n  finish_gate_mode: "on"\n'
+
+
+@pytest.mark.asyncio
+async def test_palette_navigation_does_not_change_footer_row_count(tmp_path):
+    """Ревизия 7 (спека §2, §4.1): дети /gate,/answers видны ВСЕГДА под
+    /rigor, независимо от выделения (видимость-по-выделению ревизии 5/6
+    снесена — вся машинерия развёртывания группы по выделению удалена).
+    Навигация ↑/↓ не меняет число toggle-строк подвала ни на одном шаге
+    (сравниваем len до/после каждого press) — заменяет прежний тест «дети
+    появляются/прячутся по группе» (ревизия 5). Реальные `pilot.press` —
+    так двигается пользователь."""
+    pytest.importorskip("textual")
+    from tui.app import TuiApp
+
+    app = TuiApp(threads_dir=str(tmp_path / "t"), config={"model": "M"})
+    async with app.run_test(size=(80, 40)) as pilot:
+        inp = pilot.app.query_one("#cmdinput")
+        inp.text = "/"
+        await pilot.pause(0.1)
+        palette = pilot.app.query_one(".palette")
+
+        def _names():
+            return [c.name for c in palette._visible_toggle_rows()]
+
+        assert palette.selected_command().name == "help"
+        assert _names() == ["rigor", "gate", "answers"]   # дети видны сразу, без навигации
+        expected = len(_names())
+
+        regular_count = len(palette._visible_rows())
+        total_rows = regular_count + expected
+        for _ in range(total_rows + 1):   # больше одного полного оборота
+            await pilot.press("down")
+            await pilot.pause(0.02)
+            assert len(_names()) == expected
+
+        for _ in range(total_rows + 1):
+            await pilot.press("up")
+            await pilot.pause(0.02)
+            assert len(_names()) == expected
+
+
+@pytest.mark.asyncio
+async def test_group_separator_between_two_preset_groups(tmp_path, monkeypatch):
+    """Ревизия 7 (спека §4.1, генерик по `preset_keys`): между ДВУМЯ группами
+    (тогглы-пресеты) — ровно один `.palette-group-sep`; до первой группы
+    разделителя нет (граница «команды/подвал» уже несёт `.palette-separator`).
+    Синтетический реестр с двумя preset-тогглами — сегодня в TOGGLES ровно
+    одна preset-группа (`/rigor`), механизм рассчитан на будущее."""
+    pytest.importorskip("textual")
+    from tui import palette as p
+    from tui import toggles as tg
+    from tui.app import TuiApp
+    from tui.commands import Command, CommandRegistry
+    from tui.widgets.command_palette import CommandPalette
+
+    group_a = tg.ToggleSpec(
+        values=(tg.ToggleValue("x", "hint x", p.INK), tg.ToggleValue("y", "hint y", p.ACCENT)),
+        state=lambda cfg: "x", label="группа A", summary="демо",
+        preset_keys=("tui.zz_a_child",), palette_default=True,
+    )
+    group_b = tg.ToggleSpec(
+        values=(tg.ToggleValue("p", "hint p", p.INK), tg.ToggleValue("q", "hint q", p.ACCENT)),
+        state=lambda cfg: "p", label="группа B", summary="демо",
+        preset_keys=("tui.zz_b_child",), palette_default=True,
+    )
+    monkeypatch.setitem(tg.TOGGLES, "zzgroupa", group_a)
+    monkeypatch.setitem(tg.TOGGLES, "zzgroupb", group_b)
+
+    reg = CommandRegistry()
+    reg.register(Command("help", (), "", "справка"))
+    reg.register(Command("zzgroupa", (), "", "группа A", is_toggle=True))
+    reg.register(Command("zzgroupb", (), "", "группа B", is_toggle=True))
+    state = {"zzgroupa": "x", "zzgroupb": "p"}
+
+    app = TuiApp(threads_dir=str(tmp_path / "t"), config={"model": "M"})
+    async with app.run_test(size=(80, 40)) as pilot:
+        pal = CommandPalette(reg, initial_filter="", toggle_state=lambda n: state[n])
+        await app.screen.mount(pal)
+        await pilot.pause()
+
+        seps = list(pal.query(".palette-group-sep"))
+        assert len(seps) == 1                          # ровно один — между группами
+
+        toggle_rows = list(pal.query(".palette-toggle-row"))
+        assert [r.render().plain.split()[0] for r in toggle_rows] == ["/zzgroupa", "/zzgroupb"]
+        # Разделитель группы строго между zzgroupa и zzgroupb.
+        assert toggle_rows[0].region.y < seps[0].region.y < toggle_rows[1].region.y
+
+
+@pytest.mark.asyncio
+async def test_palette_filter_reveals_hidden_gate(tmp_path):
+    """Набор «ga» → появляется /gate (существующий фильтр по startswith)."""
+    pytest.importorskip("textual")
+    from tui.app import TuiApp
+    from tui.commands import build_default_registry
+    from tui.widgets.command_palette import CommandPalette
+
+    reg = build_default_registry()
+    app = TuiApp(threads_dir=str(tmp_path / "t"), config={"model": "M"})
+    async with app.run_test(size=(80, 40)) as pilot:
+        pal = CommandPalette(reg, initial_filter="ga", toggle_state=lambda n: "on")
+        await app.screen.mount(pal)
+        await pilot.pause()
+        assert [c.name for c in pal._visible_toggle_rows()] == ["gate"]
 
 
 @pytest.mark.asyncio

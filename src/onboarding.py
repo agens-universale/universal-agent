@@ -133,6 +133,7 @@ FIELD_ANCHOR_PATHS: Dict[str, str] = {
     "completions_url": "backend.completions_url",
     "Authorization": "backend.chat_completion_headers.Authorization",
     "model": "agent.model",
+    "proxy": "backend.proxy",
 }
 
 

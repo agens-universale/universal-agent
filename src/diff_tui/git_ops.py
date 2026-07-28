@@ -115,13 +115,18 @@ def git_restore_worktree(launch_root: PathLike, path: str) -> GitRunResult:
     return _run_git(launch_root, ["restore", "--worktree", "--", path])
 
 
-def git_restore_worktree_all(launch_root: PathLike) -> GitRunResult:
-    return _run_git(launch_root, ["restore", "--worktree", "--", "."])
-
-
 def git_diff_worktree(launch_root: PathLike, path: str) -> GitRunResult:
     """Unstaged / pending diff vs index для одного файла."""
     return _run_git(launch_root, ["diff", "--", path])
+
+
+def git_show_index(launch_root: PathLike, path: str) -> GitRunResult:
+    """``git show :<path>`` — содержимое файла из index (baseline для viewer).
+
+    Для untracked / staged-delete — ``ok=False`` (нет в index).
+    Используется visual-diff builder'ом вместо сырого ``git diff`` (D1).
+    """
+    return _run_git(launch_root, ["show", f":{path}"])
 
 
 def check_ignore(launch_root: PathLike, path: str) -> Optional[bool]:

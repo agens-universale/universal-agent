@@ -10,7 +10,8 @@ from config_modules.diff_tui import DiffTuiConfig
 def test_diff_tui_defaults():
     cfg = DiffTuiConfig()
     assert cfg.cache_max_orig == 500
-    assert cfg.preview_context_lines == 3
+    assert cfg.preview_context_lines == 50
+    assert cfg.full_file_max_lines == 300
     assert cfg.max_diff_chars == 100_000
 
 
@@ -24,7 +25,8 @@ def test_app_config_includes_diff_tui():
 
     app = AppConfig()
     assert app.diff_tui.cache_max_orig == 500
-    assert app.diff_tui.preview_context_lines == 3
+    assert app.diff_tui.preview_context_lines == 50
+    assert app.diff_tui.full_file_max_lines == 300
     assert app.diff_tui.max_diff_chars == 100_000
 
 
@@ -41,6 +43,7 @@ def test_flatten_exposes_diff_tui(tmp_path, monkeypatch):
         "diff_tui:\n"
         "  cache_max_orig: 42\n"
         "  preview_context_lines: 7\n"
+        "  full_file_max_lines: 120\n"
         "  max_diff_chars: 100\n",
         encoding="utf-8",
     )
@@ -48,5 +51,6 @@ def test_flatten_exposes_diff_tui(tmp_path, monkeypatch):
     assert cfg["diff_tui"] == {
         "cache_max_orig": 42,
         "preview_context_lines": 7,
+        "full_file_max_lines": 120,
         "max_diff_chars": 100,
     }

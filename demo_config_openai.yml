@@ -72,7 +72,7 @@ working_memory:
 
 tool_usage_notice:
   - tool_name: session_memory
-    step_messages_count: 10
+    step_messages_count: 16
     notice_message: "You have not used session memory for some steps. Review/update thread memory if needed."
 project_memory:
   enable_project_memory_notice: true

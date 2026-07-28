@@ -13,8 +13,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from tests.harbor.fakes import FakeBackend, bind_os_backend
-from tools.backends.local import LocalFsBackend
+from tests.harbor_support.fakes import FakeBackend, bind_os_backend
+from backends.local import LocalFsBackend
 from tools.fs.search_files import SearchFiles
 
 # ---------------------------------------------------------------------------
@@ -266,26 +266,26 @@ def test_invalid_regex_empty_tree(tmp_path):
     _assert_invalid_regex_envelope(base_env, pattern)
 
 
-def test_not_a_directory(tmp_path):
-    """Passing a file path as 'path' returns ok=False with error.type=not_a_directory."""
-    # Create a file, pass it as path
+def test_search_single_file_path(tmp_path):
+    """Passing a file path searches that file (local + harbor shim)."""
     f = tmp_path / "file.txt"
-    f.write_text("content")
+    f.write_text("hello content\nother\n", encoding="utf-8")
 
     base = _base_tool()
-    base_raw = base(path=str(f), regex="content")
-    base_env = json.loads(base_raw)
+    base_env = json.loads(base(path=str(f), regex="content"))
 
-    # Shim: /work/file.txt is a file, not a dir — FakeBackend.is_dir will return False
-    fake = FakeBackend({"/work/file.txt": "content"})
+    fake = FakeBackend({"/work/file.txt": "hello content\nother\n"})
     shim = bind_os_backend(SearchFiles.__new__(SearchFiles), fake)
-    shim_raw = shim(path="/work/file.txt", regex="content")
-    shim_env = json.loads(shim_raw)
+    shim_env = json.loads(shim(path="/work/file.txt", regex="content"))
 
-    assert base_env["ok"] is False
-    assert shim_env["ok"] is False
-    assert (base_env.get("error") or {}).get("type") == "not_a_directory"
-    assert (shim_env.get("error") or {}).get("type") == "not_a_directory"
+    assert base_env["ok"] is True
+    assert shim_env["ok"] is True
+    assert base_env["total_matches"] == 1
+    assert shim_env["total_matches"] == 1
+    assert base_env["matches"][0]["line"] == 1
+    assert shim_env["matches"][0]["line"] == 1
+    assert "content" in base_env["matches"][0]["line_content"]
+    assert "content" in shim_env["matches"][0]["line_content"]
 
 
 # ---------------------------------------------------------------------------

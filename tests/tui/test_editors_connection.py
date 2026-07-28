@@ -36,7 +36,7 @@ async def test_submit_empty_url_returns_error():
     async with app.run_test() as pilot:
         await pilot.pause()
         ed.query_one("#conn-url", Input).value = ""
-        url, header, error = ed.submit()
+        url, header, error, _proxy = ed.submit()
         assert url is None and error == "введите адрес"
 
 
@@ -47,7 +47,7 @@ async def test_submit_malformed_url_returns_error():
     async with app.run_test() as pilot:
         await pilot.pause()
         ed.query_one("#conn-url", Input).value = "notaurl"
-        url, header, error = ed.submit()
+        url, header, error, _proxy = ed.submit()
         assert url is None and error == "нужны http(s):// и хост"
 
 
@@ -62,7 +62,7 @@ async def test_submit_valid_pair():
         ed.move(1)                                  # курсор → Bearer, поле токена показано
         await pilot.pause()
         ed.query_one("#conn-token", Input).value = "sk-NEW"
-        url, header, error = ed.submit()
+        url, header, error, _proxy = ed.submit()
         assert url == "https://new/v1/chat/completions"
         assert header == "Bearer sk-NEW"
         assert error is None
@@ -77,7 +77,7 @@ async def test_bearer_selected_without_token_asks_for_token():
     async with app.run_test() as pilot:
         await pilot.pause()
         ed.move(1)                                   # курсор → Bearer, токен пуст
-        url, header, error = ed.submit()
+        url, header, error, _proxy = ed.submit()
         assert error == "введите токен"
         assert url is None and header is None
         assert ed.is_dirty() is True                 # незавершённый выбор — секция «изменена»
@@ -92,7 +92,7 @@ async def test_bearer_active_empty_field_is_noop():
     async with app.run_test() as pilot:
         await pilot.pause()
         ed.move(1)                                   # курсор → Bearer, поле пусто
-        url, header, error = ed.submit()
+        url, header, error, _proxy = ed.submit()
         assert (url, header, error) == (None, None, None)
         assert ed.is_dirty() is False
 
@@ -122,7 +122,7 @@ async def test_move_does_not_move_active_mark_before_enter():
         opt1 = str(ed.query_one("#conn-opt-1", Static).render())   # без авторизации
         assert "▸" in opt0                          # курсор переехал на Bearer
         assert "●" in opt1 and "○" in opt0          # но метка ● осталась на действующем варианте
-        _url, auth_idx, _tok = ed.peek()
+        _url, auth_idx, _tok, _proxy = ed.peek()
         assert auth_idx == 0                        # Enter зафиксирует то, что под курсором (Bearer)
 
 

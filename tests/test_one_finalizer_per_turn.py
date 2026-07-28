@@ -88,6 +88,7 @@ def test_flush_non_blocking_outputs_before_ask_human(monkeypatch):
         def __init__(self):
             self.session_compact_applied = False
             self.tool_calls = 0
+            self.turn_tool_calls = 0
 
     messages = [
         {"type": "function_call", "name": "session_memory", "call_id": "c1", "arguments": "{}"},
@@ -128,6 +129,7 @@ def test_flush_skipped_outputs_before_ask_human(monkeypatch):
         def __init__(self):
             self.session_compact_applied = False
             self.tool_calls = 0
+            self.turn_tool_calls = 0
 
     messages = [
         {"type": "function_call", "name": "turn_ask_human", "call_id": "c1", "arguments": "{}"},

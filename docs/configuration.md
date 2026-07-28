@@ -212,6 +212,9 @@ mcp:
 - `agent.exec_timeout_sec` — дефолтный таймаут `execute_command` / `run_python_code`
   (секунды), если модель не передала `timeout_seconds`. По умолчанию `120`. Для длинных
   контейнерных сборок (Harbor) обычно поднимают до `600`.
+- `agent.exec_output_capture_max_chars` — потолок RAM-буфера stdout/stderr на поток
+  (decoded UTF-8 chars) для exec. По умолчанию `60000`. После cap вывод сливается и
+  отбрасывается без kill процесса; page полного captured — через stream refs в ответе тулы.
 
 ## Слои инструкций (AGENTS.md)
 

@@ -3,8 +3,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from tests.harbor.fakes import FakeBackend, bind_os_backend, strip_path_fields
-from tools.backends.local import LocalFsBackend
+from tests.harbor_support.fakes import FakeBackend, bind_os_backend, strip_path_fields
+from backends.local import LocalFsBackend
 from tools.fs.read_file import ReadFile
 
 CONTENT = "line1\nline2\nline3\nline4\n"

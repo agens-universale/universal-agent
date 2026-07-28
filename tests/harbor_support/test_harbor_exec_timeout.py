@@ -8,8 +8,8 @@ import threading
 
 import pytest
 
-from tests.harbor.fakes import bind_os_backend
-from tools.backends.harbor import HarborBackend
+from tests.harbor_support.fakes import bind_os_backend
+from backends.harbor import HarborBackend
 from tools.exec.execute_command import ExecuteCommand
 
 

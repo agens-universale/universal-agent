@@ -1,3 +1,4 @@
+import hashlib
 import json
 import os
 
@@ -5,8 +6,6 @@ from tools.simple_tool_base import AbstractSimpleTool
 from utils.tool_report_paths import tool_report_abspath
 from utils.atomic_io import atomic_replace
 from security.path_policy import enforce_write_guard
-from diff_tui.tracking import snapshot_before_text_mutation
-
 class WriteToFile(AbstractSimpleTool):
 
     @classmethod
@@ -90,6 +89,7 @@ Usage:
         created: bool = False,
         bytes_written: int = 0,
         backup_path: str | None = None,
+        sha256: str | None = None,
         error: dict | None = None,
     ) -> str:
         return json.dumps(
@@ -100,6 +100,7 @@ Usage:
                 "mode": mode,
                 "created": created,
                 "bytes_written": bytes_written,
+                "sha256": sha256,
                 "backup_path": tool_report_abspath(backup_path, workspace=self._workspace),
                 "error": error,
             },
@@ -243,7 +244,6 @@ Usage:
                 )
 
         try:
-            snapshot_before_text_mutation(self, path)
             self._backend.write(path, normalized, encoding=encoding)
         except Exception as e:
             return self._result(
@@ -258,12 +258,18 @@ Usage:
         except Exception:
             bytes_written = 0
 
+        # Hash the exact bytes written (same encoding/errors as backend.write).
+        content_sha256 = hashlib.sha256(
+            normalized.encode(encoding, errors="replace")
+        ).hexdigest()
+
         return self._result(
             ok=True,
             path=path,
             mode=mode,
             created=not exists,
             bytes_written=bytes_written,
+            sha256=content_sha256,
             backup_path=backup_path,
             error=None,
         )

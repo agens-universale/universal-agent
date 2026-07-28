@@ -51,8 +51,6 @@ def build_skill_delivery(skill_id: str, registry: Any) -> str:
             "Load auxiliary files by the exact names above "
             "(skills_read_reference / skills_read_asset)."
         )
-    lock.append("Do not read skill files via read_file.")
-
     parts.append("")
     parts.append(" ".join(lock))
     return "\n".join(parts)

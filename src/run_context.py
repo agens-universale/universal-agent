@@ -13,9 +13,10 @@ from utils.prod_auth import AuthConnector
 from utils.logging_module import create_run_logger
 from utils.logging_module import generate_run_id
 from tools import build_tools_data
+from tools.skills.registry import SkillsRegistry, get_skills_registry
 from execution_workspace import ExecutionWorkspace, build_execution_workspace
-from tools.backends.factory import resolve_os_backend
-from tools.backends.protocol import FsBackend
+from backends.factory import resolve_os_backend
+from backends.protocol import FsBackend
 from config_modules.env_vars import project_gc_dir as _resolve_project_gc_dir
 from trace_id import trace_id_from_config, trace_header_name
 
@@ -50,6 +51,7 @@ class RunContext:
     tools_spec: List[Dict[str, Any]]
     tools_description: List[str]
     os_backend: FsBackend
+    skills_registry: SkillsRegistry
     workspace: ExecutionWorkspace
     # Внешний trace_id этого рана; "" = отсутствует. Производное чтение
     # config_dict["trace_id"] — источник правды один, вычисление в одном месте
@@ -59,6 +61,8 @@ class RunContext:
     project_gc_dir: Path = field(default_factory=lambda: Path("."))
     environment: Optional[Any] = None
     on_stream_delta: Optional[Callable[[str, str], None]] = None
+    # Optional: messages dropped by context compaction (not retained in State).
+    on_messages_evicted: Optional[Callable[[List[Dict[str, Any]]], None]] = None
 
 
 def create_run_context(
@@ -71,6 +75,8 @@ def create_run_context(
     loop: Optional[Any] = None,
     os_backend: Optional[FsBackend] = None,
     on_stream_delta=None,
+    on_messages_evicted: Optional[Callable[[List[Dict[str, Any]]], None]] = None,
+    is_tui: bool = False,
 ) -> RunContext:
     """
     Создать RunContext для одного запуска агента.
@@ -81,9 +87,22 @@ def create_run_context(
     - Логгер создаётся заново для каждого запуска (своё имя файла логов).
     - ``os_backend`` собирается фабрикой из ``config_dict['os_backend']`` (default: local).
       Для ``harbor`` нужны ``environment`` и ``loop``; тесты могут передать ``os_backend=``.
+    - ``is_tui=True`` + LocalFsBackend → ``TrackingFsBackend`` (Diff journal/snapshot).
     """
     effective_run_id = run_id or generate_run_id()
-    tools_data, tools_spec, tools_description, mcp_status = build_tools_data(config_dict, on_progress=on_progress)
+    backend = resolve_os_backend(
+        config_dict,
+        environment=environment,
+        loop=loop,
+        override=os_backend,
+    )
+    skills_registry = get_skills_registry(config_dict, backend=backend)
+    tools_data, tools_spec, tools_description, mcp_status = build_tools_data(
+        config_dict,
+        on_progress=on_progress,
+        os_backend=backend,
+        skills_registry=skills_registry,
+    )
 
     run_logger, logging_path, summary_trace_path = create_run_logger(
         config_dict, run_id=effective_run_id, agent_kind="main"
@@ -127,12 +146,6 @@ def create_run_context(
         )
 
     chat_completions_llm = chat_completions_llm_from_config_dict(config_dict)
-    backend = resolve_os_backend(
-        config_dict,
-        environment=environment,
-        loop=loop,
-        override=os_backend,
-    )
     workspace = build_execution_workspace(backend, config_dict)
 
     ctx = RunContext(
@@ -152,16 +165,27 @@ def create_run_context(
         project_gc_dir=_resolve_project_gc_dir(),
         environment=environment,
         os_backend=backend,
+        skills_registry=skills_registry,
         workspace=workspace,
         on_stream_delta=on_stream_delta,
+        on_messages_evicted=on_messages_evicted,
     )
+    ctx.is_tui = bool(is_tui)
+
+    if is_tui and os_backend is None:
+        from diff_tui.tracking import wrap_local_for_tui
+
+        wrapped = wrap_local_for_tui(backend, ctx)
+        if wrapped is not backend:
+            ctx.os_backend = wrapped
+            ctx.workspace = build_execution_workspace(wrapped, config_dict)
 
     run_logger.debug(
         "Created RunContext (run_id=%s, logging_path=%s, os_backend=%s, workspace_root=%s)",
         effective_run_id,
         logging_path,
-        type(backend).__name__,
-        workspace.root,
+        type(ctx.os_backend).__name__,
+        ctx.workspace.root,
     )
 
     return ctx

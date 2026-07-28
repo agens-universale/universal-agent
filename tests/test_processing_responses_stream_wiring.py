@@ -27,6 +27,7 @@ def _patch_policy(monkeypatch):
         runtime_notices_enabled=False,
         notice_url=None,
         timeout=None,
+        config_proxy=None,
     ):
         seen["on_delta"] = on_delta
         return (

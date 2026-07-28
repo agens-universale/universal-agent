@@ -1,6 +1,7 @@
 """TuiApp — Textual application."""
 from __future__ import annotations
 
+import os
 import uuid
 from pathlib import Path
 from typing import List, Optional
@@ -12,12 +13,13 @@ from textual.screen import Screen
 from runtime_notices import (
     collect_runtime_notices,
     collect_unread_runtime_notices,
+    push_runtime_notice,
     register_runtime_notices_listener,
 )
 from startup_notices import Notice, collect_startup_notices
 from tui import branding, palette
 from tui.screens.main import TraceScreen
-from tui.services.clipboard_ops import copy_out
+from tui.services.clipboard_ops import copy_out, with_source_cite
 from tui.services.stream_sink import StreamSink
 from tools.registry import all_builtin_tool_names
 
@@ -101,6 +103,7 @@ class TuiApp(App):
         Binding("f4", "notices", "/notices"),
         Binding("f5", "config", "/config"),
         Binding("f6", "settings", "/settings", priority=True),  # у TextArea свой f6=select_line — без priority хоткей мёртв при фокусе в инпуте
+        Binding("f7", "buffer", "Буфер сессии", priority=True),  # TextArea f7=select_all — без priority F7 в инпуте не откроет буфер
         Binding("ctrl+slash", "help", "Help"),
         Binding("ctrl+s", "sessions", "/sessions"),
         # priority: TextArea перехватывает Ctrl+D как delete-right.
@@ -127,6 +130,10 @@ class TuiApp(App):
         self._threads_dir = threads_dir
         self._system = system
         self._config = config or {}
+        # Сессионные переопределения конфига (спека 2026-07-20-session-scoped-settings):
+        # база — self._config (файл), это — то, что переключено в текущем треде.
+        # Хранятся по dotted-именам; накладываются в effective_config().
+        self._session_overrides: dict = {}
         self._executor_factory = None  # callable returning an executor; for tests
         self._stream_sink = StreamSink()
         self._subagent_progress_sink = None  # QueueSubagentProgressSink; set in executor build
@@ -141,6 +148,7 @@ class TuiApp(App):
         self.last_stop_requested: bool = False   # юзер /stop по живому прогону → терминал «stopped»
         self._onboarding_mode = None          # None | "auto" | "review"; ставит tui/__init__.py
         self._config_path = None              # путь к конфигу на диске; задаётся снаружи после __init__
+        self._config_mtime = None             # снимок mtime config.yml на момент последнего чтения базы
         self._onboarding_config_path = None   # куда писать конфиг (user_config_path)
         self._upgrade_info = None             # upgrade_gate.UpgradeInfo | None; ставит tui/__init__.py
         self._update_available = False        # async авто-чек нашёл новую версию (brand-строка + /notices)
@@ -267,6 +275,19 @@ class TuiApp(App):
             config_path=self._config_path,
         ))
 
+    def set_config_path(self, path: Optional[str]) -> None:
+        """Единая точка присвоения `_config_path`: путь + снимок его mtime одним
+        движением. Вызывать ровно тогда, когда self._config уже фактически
+        соответствует файлу по этому пути (main() — конфиг только что загружен
+        из него; финал онбординга — следом сразу идёт reload_config()).
+
+        Без немедленного снимка первая же проверка reload_config_if_changed()
+        в новом окне видит файл как «изменившийся» (снимка ещё нет) и зря
+        перечитывает конфиг и инвалидирует раннер — хотя окно только что само
+        прочитало этот же файл."""
+        self._config_path = path
+        self._config_mtime = self._config_file_mtime()
+
     def reload_config(self) -> None:
         """Hot-apply (спека B, B3): перечитать конфиг с диска и применить к app.
 
@@ -285,19 +306,167 @@ class TuiApp(App):
         carry_over_runtime_fields(self._config or {}, cfg)
         self._config = cfg
         self._threads_dir = resolve_threads_dir(cfg)
-        runner = self.active_runner
-        if runner is None:
+        # Снимок обновлён ЗДЕСЬ же: собственное сохранение (reload_config уже
+        # перечитал файл) не должно выглядеть «изменившимся» для следующей
+        # проверки reload_config_if_changed и триггерить повторное чтение.
+        self._config_mtime = self._config_file_mtime()
+        self.invalidate_runner()
+
+    def _config_file_mtime(self) -> Optional[float]:
+        """mtime текущего файла конфига или None (путь не задан / файл недоступен)."""
+        path = self._config_path
+        if not path:
+            return None
+        try:
+            return os.path.getmtime(path)
+        except OSError:
+            return None
+
+    def reload_config_if_changed(self) -> None:
+        """Гейт свежести окна: перечитать базу (reload_config), только если сам
+        файл `self._config_path` реально изменился с последнего известного снимка
+        mtime — другое окно могло сохранить своё умолчание, пока это окно живёт
+        на конфиге, прочитанном при старте.
+
+        Зовётся ЯВНО и только на пути открытия Settings (main._cmd_settings при
+        открытии экрана, settings._sync_config_from_app при входе в секцию) —
+        там, где редактируется глобальный дефолт; больше ниоткуда
+        (дизайн 2026-07-21 §4). Поток вызова — только UI, поэтому замок не нужен.
+
+        Граница: следим ровно за одним файлом. Оверлеи, которые подмешивает
+        load_config (managed `~/.gc/config.local.yml`, project-local
+        `.gc/config.yml`), не отслеживаются — их правку другим окном гейт не
+        заметит.
+
+        Файл не менялся — не делаем НИЧЕГО: ни чтения, ни invalidate_runner.
+
+        Битый/пропавший файл (юзер сохранил config.yml в промежуточном
+        состоянии) не должен ронять окно — остаёмся на прежней базе, а причину
+        кладём в runtime-уведомления (/notices)."""
+        mtime = self._config_file_mtime()
+        if mtime is None or mtime == self._config_mtime:
             return
-        if runner.is_running():
+        try:
+            self.reload_config()
+        except Exception as exc:
+            push_runtime_notice(Notice(
+                "warning", "config_reload_failed",
+                f"config.yml не перечитан, окно осталось на прежней базе: {exc}",
+                ("config.yml",),
+            ))
+
+    def screen_config(self) -> dict:
+        """Единая точка доступа к базе для ОТКРЫТИЯ экранов (/config, /mcp, /diff,
+        /skills, /settings — и вход в секцию /settings): отдаёт актуальную базу
+        БЕЗ автоперечитки. Свежесть config.yml нужна только там, где он
+        редактируется (Settings), и вызывается ЯВНО на пути его открытия
+        (main._cmd_settings, settings._sync_config_from_app) — иначе два окна
+        правили бы файл вслепую (дизайн 2026-07-21 §4).
+
+        НЕ для рендера — effective_config() (база + сессионные переопределения)
+        зовётся на каждый кадр; здесь — только выдача базы при открытии экрана."""
+        return self._config or {}
+
+    def effective_config(self) -> dict:
+        """Конфиг, который видят и UI, и агент: база + сессионные переопределения.
+
+        Единая точка чтения: витрины (палитра, секция настроек) и сборка
+        executor обязаны брать конфиг отсюда, а не из `self._config` — иначе
+        переключённое в сессии значение не доедет."""
+        from tui.session_settings import apply_overrides
+        cfg = dict(self._config or {})
+        apply_overrides(cfg, self._session_overrides)
+        return cfg
+
+    def set_session_override(self, dotted: str, value) -> None:
+        """Переопределить ключ в текущей сессии (в файл конфига НЕ пишет)."""
+        self._session_overrides[dotted] = value
+
+    def apply_session_override(self, dotted: str, value) -> None:
+        """Переопределить ключ и сохранить набор в метаданные треда — атомарно.
+
+        Не записалось (каталог тредов недоступен, диск полон, отвалившийся сетевой
+        путь) — откатываем: вызывающий показывает «✗ не сохранено» и оставляет на
+        экране прежнее значение, поэтому effective_config() обязан отдавать ровно
+        его, иначе следующий ход агента пойдёт в необъявленном пользователю режиме."""
+        prev = dict(self._session_overrides)
+        self.set_session_override(dotted, value)
+        try:
+            self.persist_session_overrides()
+        except OSError:
+            self._session_overrides = prev
+            raise
+
+    def apply_session_overrides(self, overrides: dict) -> None:
+        """Переопределить НЕСКОЛЬКО ключей разом и сохранить в метаданные треда —
+        атомарно (для пары /rigor). Не записалось — откатываем ВЕСЬ набор к
+        прежнему, как одиночный apply_session_override: объявленное пользователю и
+        то, с чем пойдёт следующий ход, обязаны совпасть."""
+        prev = dict(self._session_overrides)
+        self._session_overrides.update(overrides or {})
+        try:
+            self.persist_session_overrides()
+        except OSError:
+            self._session_overrides = prev
+            raise
+
+    def clear_session_overrides(self, keys) -> None:
+        """Снять НЕСКОЛЬКО ключей сессии разом — generic primitive для отката
+        целой группы оверрайдов (парой и больше) к глобальному дефолту.
+        Нечего снимать — тихий no-op без persist. Ошибка записи — откат, как в
+        apply_session_overrides."""
+        prev = dict(self._session_overrides)
+        for k in keys:
+            self._session_overrides.pop(k, None)
+        if self._session_overrides == prev:
+            return
+        try:
+            self.persist_session_overrides()
+        except OSError:
+            self._session_overrides = prev
+            raise
+
+    def load_session_overrides(self, overrides: dict) -> bool:
+        """Заменить набор переопределений целиком — при открытии треда.
+        Пустой набор возвращает сессию к умолчаниям конфига.
+
+        Возвращает True, если набор реально изменился: пересборка executor стоит
+        MCP-дискавери в worker-потоке (пользователь ждёт её до начала хода), и
+        платить за неё, когда у треда те же значения, незачем."""
+        new = dict(overrides or {})
+        changed = new != self._session_overrides
+        self._session_overrides = new
+        return changed
+
+    def persist_session_overrides(self) -> None:
+        """Сохранить переопределения в метаданные текущего треда (meta.tui).
+
+        Тред может быть ещё не создан (пустая сессия) — тогда тихо выходим:
+        значения живут в памяти и запишутся при следующем персисте, когда тред
+        появится. Ошибки записи не гасим — вызывающий показывает флеш."""
+        task_id = getattr(self.tui_state, "active_task_id", None)
+        if not task_id or not self._threads_dir:
+            return
+        from tui.services.stores.file_store import FileTaskStore
+        from tui.session_settings import to_meta_patch
+        store = FileTaskStore(threads_dir=self._threads_dir, system=self._system)
+        store.update_tui_meta(task_id, to_meta_patch(self._session_overrides))
+
+    def invalidate_runner(self) -> None:
+        """Конфиг сессии изменился — следующий run должен собраться заново.
+        Живой run не трогаем: помечаем stale, пересборка после завершения.
+        Единая точка сброса раннера: сюда же делегирует reload_config."""
+        runner = self.active_runner
+        if runner is not None and runner.is_running():
             self._runner_stale = True
-        else:
-            self.active_runner = None
-            self._runner_stale = False
+            return
+        self.active_runner = None
+        self._runner_stale = False
 
     def _finish_onboarding(self) -> None:
         """Финал онбординга (auto и review одинаково): reload_config + переход
         на главный экран — «завершил настройку → стартует агент»."""
-        self._config_path = self._onboarding_config_path
+        self.set_config_path(self._onboarding_config_path)
         self.reload_config()
         self._onboarding_mode = None
         # OnboardingScreen — базовый экран (get_default_screen), у него нет result-callback,
@@ -330,16 +499,29 @@ class TuiApp(App):
         from tui.services.agent_runner import AgentRunner
         factory = self._executor_factory or self._build_real_executor
 
+        # runner_ref заполняется сразу после конструктора: callback должен
+        # игнорировать ошибки чужого/заменённого runner (см. AgentRunner._emit_error).
+        runner_ref: list = []
+
         def _on_runner_error(exc: BaseException) -> None:
+            runner = runner_ref[0] if runner_ref else None
+            if runner is None or runner is not self.active_runner:
+                return
+            if getattr(runner, "_marked_stopped", False):
+                return
             self.last_runner_error = str(exc) or exc.__class__.__name__
 
         def _on_runner_complete(outcome: Optional[str]) -> None:
+            runner = runner_ref[0] if runner_ref else None
+            if runner is None or runner is not self.active_runner:
+                return
             self.last_terminal_outcome = outcome
 
         self.active_runner = AgentRunner(
             executor_factory=factory, on_error=_on_runner_error,
             on_complete=_on_runner_complete,
         )
+        runner_ref.append(self.active_runner)
         self._runner_stale = False
         return self.active_runner
 
@@ -349,7 +531,7 @@ class TuiApp(App):
         from config import build_auth_connector
         from run_context import create_run_context
         from tui.services.mcp_progress import McpProgress
-        cfg = dict(self._config) if self._config else {}
+        cfg = self.effective_config()
         cfg["console_trace"] = False
         from tui.services.prompt_assets import tui_special_instructions_path
         cfg["chat_completions_special_instructions_path"] = tui_special_instructions_path()
@@ -371,6 +553,7 @@ class TuiApp(App):
         ctx = create_run_context(
             cfg, auth_connector=auth, on_progress=progress.update,
             on_stream_delta=self._stream_pump.on_delta,
+            is_tui=True,
         )
         self._session_log_path = ctx.logging_path
         # Live nested progress субагентов: очередь на app, копия на ctx → child.
@@ -385,7 +568,6 @@ class TuiApp(App):
         # Проводка confirm-канала: TUI-раннер умеет показывать баннер; CLI/server — нет.
         runner = self.active_runner
         if runner is not None and hasattr(runner, "make_tui_confirm"):
-            ctx.is_tui = True
             ctx.tui_confirm = runner.make_tui_confirm(self._present_confirm)
         register_runtime_notices_listener(self._on_runtime_notice)
         return AgentExecutor(ctx)
@@ -545,6 +727,25 @@ class TuiApp(App):
             return
         main._cmd_settings()
 
+    def action_buffer(self) -> None:
+        """B5: открыть буфер сессии (F7 / /buffer). No-op если уже открыт.
+
+        Нет активной сессии — короткое сообщение, экран не открываем.
+        """
+        from tui.screens.copy_buffer import CopyBufferScreen
+
+        if isinstance(self.screen, CopyBufferScreen):
+            return  # повторный F7 на открытом буфере — no-op
+        main = self._main_screen()
+        if main is None:
+            return
+        store = getattr(main, "_store", None)
+        task_id = getattr(main, "_active_task_id", None)
+        if store is None or not task_id:
+            self.notify("Нет активной сессии — буфер недоступен")
+            return
+        self.push_screen(CopyBufferScreen(store=store, task_id=task_id))
+
     def action_notices(self) -> None:
         from tui.screens.notices import NoticesScreen
         if isinstance(self.screen, NoticesScreen):
@@ -596,26 +797,73 @@ class TuiApp(App):
         except Exception:
             return ""
 
+    def _clipboard_payload(self) -> str:
+        """Выделение + опциональный суффикс источника с view/diff экранов."""
+        sel = self._current_selection()
+        if not sel:
+            return ""
+        cite = getattr(self.screen, "clipboard_source_cite", None)
+        if not callable(cite):
+            return sel
+        try:
+            info = cite()
+        except Exception:
+            return sel
+        if not info:
+            return sel
+        kind, path = info
+        return with_source_cite(sel, kind=kind, path=path)
+
     def action_copy_selection(self) -> None:
         """Ctrl+Shift+C / Super+C: copy selection; пусто → no-op (не stop)."""
-        sel = self._current_selection()
-        if sel:
-            copy_out(self, sel, toast=True)
+        payload = self._clipboard_payload()
+        if payload:
+            copy_out(self, payload, toast=True)
 
     def on_text_selected(self, event) -> None:
         """Copy-on-select: drag без Shift → внешний буфер (тихий успех).
 
         TextSelected не шлётся из Input/TextArea — дубля с focused.selected_text нет.
         """
-        sel = self._current_selection()
-        if sel:
-            copy_out(self, sel, toast=False)
+        payload = self._clipboard_payload()
+        if payload:
+            copy_out(self, payload, toast=False)
+
+    def _push_session_copy_buffer(self, payload: str) -> None:
+        """B2: дописать payload сверху в буфер сессии (tui.copy_buffer) через meta.
+
+        Тот же payload, что ушёл наружу (включая cite, если он был). Не вызываем
+        на экране буфера (B8 — иначе буфер дописывал бы сам в себя). Best-effort:
+        без store/active task — no-op. Только из UI-потока Textual.
+        """
+        # B8: на экране буфера не self-push (иначе буфер дописывал бы сам в себя)
+        if getattr(self.screen, "_is_copy_buffer_screen", False):
+            return
+        # Store/task_id — из базового TraceScreen (как action_buffer): у diff/view
+        # экранов своих _store/_active_task_id нет, без этого фикс push молча no-op.
+        main = self._main_screen()
+        if main is None:
+            return
+        store = getattr(main, "_store", None)
+        task_id = getattr(main, "_active_task_id", None)
+        if store is None or not task_id:
+            return
+        try:
+            from tui.services.copy_buffer import push_copy_buffer
+
+            meta = store.get_task_meta(task_id) or {}
+            existing = (meta.get("tui") or {}).get("copy_buffer") or ""
+            new_buf = push_copy_buffer(existing, payload)
+            store.update_tui_meta(task_id, {"copy_buffer": new_buf})
+        except Exception:
+            pass  # best-effort: буфер сессии не должен ронять copy-жест
 
     def action_interrupt(self) -> None:
-        """Ctrl+C: выделение → копировать; активный run → стоп; вхолостую → exit-модалка (как Esc)."""
-        sel = self._current_selection()
-        if sel:
-            copy_out(self, sel, toast=True)
+        """Ctrl+C: выделение → копировать (+ буфер сессии); активный run → стоп; вхолостую → exit-модалка (как Esc)."""
+        payload = self._clipboard_payload()
+        if payload:
+            copy_out(self, payload, toast=True)
+            self._push_session_copy_buffer(payload)  # B2: тем же payload сверху
             return
         scr = self.screen
         runner = getattr(self, "active_runner", None)

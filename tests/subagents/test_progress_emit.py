@@ -15,6 +15,7 @@ def _state(*, steps=3, max_steps=50):
         max_steps=max_steps,
         session_compact_applied=False,
         tool_calls=0,
+        turn_tool_calls=0,
     )
 
 

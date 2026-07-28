@@ -50,6 +50,7 @@ def _stub_tools_modules() -> None:
     tools_pkg.apply_tool = _apply_tool
     tools_pkg.build_tools_data = _build_tools_data
     tools_pkg.WrongFunctionArgumentsException = _WrongFunctionArgumentsException
+    tools_pkg.is_unknown_tool_output = lambda *_a, **_kw: False
     root = Path(__file__).resolve().parents[1]
     tools_dir = root / "src" / "tools"
     tools_pkg.__path__ = [str(tools_dir)]
@@ -63,7 +64,8 @@ def _stub_tools_modules() -> None:
 
     registry_mod = types.ModuleType("tools.skills.registry")
 
-    registry_mod.get_skills_registry = lambda _config_dict: _SkillsRegistryStub()
+    registry_mod.get_skills_registry = lambda _config_dict, **_kw: _SkillsRegistryStub()
+    registry_mod.SkillsRegistry = _SkillsRegistryStub
 
     sys.modules["tools.skills.registry"] = registry_mod
 
@@ -88,7 +90,7 @@ class BackendModeSwitchTest(unittest.TestCase):
         completions_calls = []
 
         def _mock_responses_backend(
-            data, headers, url, verify=True, cert=None, use_retry=True, logger=None, timeout=None,
+            data, headers, url, verify=True, cert=None, use_retry=True, logger=None, timeout=None, config_proxy=None,
         ):
             responses_calls.append(
                 {
@@ -120,7 +122,7 @@ class BackendModeSwitchTest(unittest.TestCase):
             )
 
         def _mock_completions_backend(
-            data, headers, url, verify=True, cert=None, use_retry=True, logger=None, timeout=None,
+            data, headers, url, verify=True, cert=None, use_retry=True, logger=None, timeout=None, config_proxy=None,
         ):
             completions_calls.append(
                 {
@@ -184,6 +186,7 @@ class BackendModeSwitchTest(unittest.TestCase):
                     tools_spec=[],
                     tools_description=[],
                     project_gc_dir=Path(tmp_dir) / ".gc",
+                    skills_registry=_SkillsRegistryStub(),
                 )
 
                 def _mock_chat_completions_policy(**kwargs):
@@ -205,10 +208,6 @@ class BackendModeSwitchTest(unittest.TestCase):
                     ), payload
 
                 with patch.object(
-                    agent_executor_module,
-                    "get_skills_registry",
-                    return_value=_SkillsRegistryStub(),
-                ), patch.object(
                     processing_module, "request_backend", side_effect=_mock_responses_backend
                 ), patch.object(
                     processing_module,

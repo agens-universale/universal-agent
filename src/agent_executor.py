@@ -20,6 +20,7 @@ from run_summary_coordinator import (
     RunSummaryCoordinator,
     reset_stale_summarizing_flag,
     set_tui_finalizing,
+    set_tui_finish_gate_checking,
 )
 from summarize.config import (
     parse_summary_trigger_chars,
@@ -44,10 +45,10 @@ from tools.subagents.active_scope import try_enqueue_user_message
 from tools.subagents.sidecar import bind_thread_identity, clear_thread_identity
 from tools.connect_mcp.persistent_stdio import PersistentStdioRegistry
 from tools.connect_mcp.stream_client import _SESSION_MANAGER as _STREAM_SESSION_MANAGER
-from tools.skills.registry import get_skills_registry
 from message_policy.tool_usage_notice.state import persist_tool_usage_notice_state
 from utils.generate_message_id import generate_msg_id_sha256 as generate_message_id_func
 from utils.logging_module import human_console_enabled
+from config_modules.agent import merge_special_instructions_with_model_steering
 from utils.local_render_system_prompt import render_system_prompt
 from security.permission_store import PermissionStore
 
@@ -176,7 +177,7 @@ class AgentExecutor:
         effective_verbose = (
             verbose if verbose is not None else config_dict.get("verbose", False)
         )
-        skills_list = get_skills_registry(config_dict).list_skills()
+        skills_list = self._ctx.skills_registry.list_skills()
 
         thread_session: ThreadSession | None = None
         thread_shared: SharedStateData | None = None
@@ -216,6 +217,8 @@ class AgentExecutor:
         reset_stale_summarizing_flag(thread_session)
         # Снять протухший флаг финализации от прерванного прошлого run'а.
         set_tui_finalizing(thread_session, False)
+        # Снять протухший флаг «судья работает» от прерванного прошлого run'а.
+        set_tui_finish_gate_checking(thread_session, False)
 
         # Снимок MCP «сервер→тулы» для TUI-экрана /mcp (необязателен — не валим run).
         if thread_id is not None and config_dict.get("mcp-servers"):
@@ -262,6 +265,10 @@ class AgentExecutor:
                         special_instructions = fd.read().strip() or None
                 except OSError:
                     special_instructions = None
+            special_instructions = merge_special_instructions_with_model_steering(
+                special_instructions,
+                config_dict=config_dict,
+            )
 
         state_data = {
             "limit_project_metadata": config_dict.get("limit_project_metadata", False),
@@ -291,6 +298,7 @@ class AgentExecutor:
             get_stored_tool_outputs_max_entries(config_dict)
         )
         state.backend_api_mode = backend_api_mode
+        state.on_messages_evicted = getattr(self._ctx, "on_messages_evicted", None)
         state.dialog_steps_offset = 0
         if thread_session is not None:
             meta = getattr(thread_session, "meta", None) or {}
@@ -512,6 +520,9 @@ class AgentExecutor:
                 ),
                 mark_finalizing=(
                     lambda active: set_tui_finalizing(thread_session, active)
+                ),
+                mark_finish_gate_checking=(
+                    lambda active: set_tui_finish_gate_checking(thread_session, active)
                 ),
             )
             self.last_terminal_outcome = getattr(state, "terminal_outcome", None)

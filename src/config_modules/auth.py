@@ -29,4 +29,5 @@ def build_auth_connector(config_dict: Dict[str, Any]) -> Optional[AuthConnector]
         device_code_hex=device_code_hex,
         login=login,
         verify=verify,
+        config_proxy=config_dict.get("proxy"),
     )

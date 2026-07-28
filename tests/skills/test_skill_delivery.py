@@ -24,7 +24,7 @@ def test_injects_instructions_refs_and_lock():
     assert "quality_criteria, report_templates" in out
     assert "skills_read_reference" in out
     assert "do not call skills_load again" in out
-    assert "Do not read skill files via read_file." in out
+    assert "Do not read skill files via read_file." not in out
 
 
 def test_fallback_on_unknown_skill():
@@ -37,7 +37,8 @@ def test_no_reference_clause_when_no_refs_or_assets():
     reg = _FakeReg({"instructions": "X", "references": [], "assets": []})
     out = build_skill_delivery("s", reg)
     assert "skills_read_reference" not in out      # нет вспом. файлов → нет клаузы их загрузки
-    assert "Do not read skill files via read_file." in out             # но базовый замок есть
+    assert "do not call skills_load again" in out  # базовый замок без запрета read_file
+    assert "Do not read skill files via read_file." not in out
     assert "ВАЛИД" not in out                       # sanity: чужой текст не просочился
 
 
@@ -53,7 +54,7 @@ def test_none_detail_returns_directive_with_empty_instructions():
     out = build_skill_delivery("s", reg)
     assert out.startswith("Use skill `s`.")
     assert "skills_read_reference" not in out
-    assert "Do not read skill files via read_file." in out
+    assert "Do not read skill files via read_file." not in out
 
 
 def test_skill_is_available_true_when_detail_loads():

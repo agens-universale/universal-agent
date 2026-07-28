@@ -64,10 +64,6 @@ def test_nested_markers_are_stripped_too(specs):
     assert item["required"] == [
         "search",
         "replace",
-        "expected_matches",
-        "occurrence",
-        "start_line",
-        "end_line",
     ], "the standard part of the schema must survive untouched"
 
 

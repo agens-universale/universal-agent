@@ -16,7 +16,7 @@ def _restore_real_tools_package() -> None:
     # common case: tests/tools/ and tests/security/ conftests always
     # round-trip back to the real modules after each file they wrap).
     # Popping+reimporting unconditionally would also discard already-real
-    # submodules (e.g. lazily-imported `tools.backends.local`) that other
+    # submodules (e.g. lazily-imported `backends.local`) that other
     # already-collected test modules hold direct references to, creating a
     # second, distinct module/class object under the same dotted name and
     # breaking isinstance()/identity checks against the earlier reference.

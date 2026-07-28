@@ -1,9 +1,15 @@
 """Выбор режима строки-индикатора в _poll_active.
 
-Краш раннера (err) должен иметь приоритет → терминальный ✗ Ошибка сразу,
-не дожидаясь reaping воркера / falling-edge (иначе при быстром «продолжай»
-статус теряется, а индикатор уничтожается в idle-ветке)."""
+Human-wait (ask/confirm) скрывает индикатор даже при err — иначе stale
+last_runner_error от заменённого runner рисует ✗ Ошибка поверх баннера.
+Краш текущего раннера (err) приоритетнее running → терминальный ✗ Ошибка сразу,
+не дожидаясь reaping воркера / falling-edge."""
 from tui.screens.main import select_indicator_mode as M
+
+
+def test_human_wait_hides_even_with_err():
+    assert M(err="boom", is_running=True, ask_human=True, confirm=False) == "hide"
+    assert M(err="boom", is_running=False, ask_human=False, confirm=True) == "hide"
 
 
 def test_err_takes_precedence_over_running():

@@ -5,8 +5,6 @@ from tools.schema_optional import X_PRESERVE_EMPTY_STRING
 from tools.simple_tool_base import AbstractSimpleTool
 from utils.tool_report_paths import tool_report_abspath
 from security.path_policy import enforce_write_guard
-from diff_tui.tracking import snapshot_before_text_mutation
-
 class AppendToFile(AbstractSimpleTool):
 
     @classmethod
@@ -37,9 +35,8 @@ class AppendToFile(AbstractSimpleTool):
                         "type": "string",
                         X_PRESERVE_EMPTY_STRING: True,
                         "description": (
-                            "String inserted before appended content. Always pass this field. "
-                            "Use \"\\n\\n\" for a blank line between old and new content. "
-                            "Pass empty string \"\" for no separator (append flush to file end)."
+                            "Text put between the current file end and the new content. "
+                            "Prefer two newlines unless another separator is needed; empty string means no separation."
                         ),
                     },
                     "create_if_missing": {
@@ -66,12 +63,11 @@ class AppendToFile(AbstractSimpleTool):
     def prompt_description(cls):
         description = '''Tool name: fs_append_file
 Tool description: Appends content to an existing file (e.g., for notes, logs, analysis results).
-Input schema: {"type": "object", "properties": {"path": {"type": "string", "description": "Absolute path to an existing file."}, "content": {"type": "string", "description": "Content to append."}, "separator": {"type": "string", "description": "Inserted before content; always pass. Use \\n\\n for a blank line, or \"\" for flush append."}}, "required": ["path", "content", "separator"], "additionalProperties": false}
+Input schema: {"type": "object", "properties": {"path": {"type": "string", "description": "Absolute path to an existing file."}, "content": {"type": "string", "description": "Content to append."}, "separator": {"type": "string", "description": "Text put between the current file end and the new content. Prefer two newlines unless another separator is needed; empty string means no separation."}}, "required": ["path", "content", "separator"], "additionalProperties": false}
 
 Usage:
 - The target file MUST exist. If the file does not exist, write the file first (use a short initial write for new long files).
 - **Chunking:** for large bodies, append in multiple steps; each `content` should be modest. Do not send an entire article or huge blob in one call.
-- Always pass `separator`: `"\\n\\n"` (blank line) or `""` (flush, no separator).
 - Ideal for accumulating analysis notes, debugging logs, or review comments without overwriting previous data.
 - Do not use for modifying source code logic.
 '''
@@ -84,6 +80,7 @@ Usage:
         separator: str,
         created: bool = False,
         bytes_appended: int = 0,
+        sha256: str | None = None,
         error: dict | None = None,
     ) -> str:
         return json.dumps(
@@ -93,6 +90,7 @@ Usage:
                 "path": tool_report_abspath(path, workspace=self._workspace),
                 "created": created,
                 "bytes_appended": bytes_appended,
+                "sha256": sha256,
                 "separator": separator,
                 "error": error,
             },
@@ -210,7 +208,6 @@ Usage:
 
         try:
             before = self._backend.getsize(path) if self._backend.exists(path) else 0
-            snapshot_before_text_mutation(self, path)
             self._backend.append(path, separator + content, encoding=encoding)
             after = self._backend.getsize(path)
             appended = max(0, after - before)
@@ -222,11 +219,18 @@ Usage:
                 error={"type": "append_failed", "message": str(e)},
             )
 
+        # Only the delta is in memory, so hash the file via the backend.
+        try:
+            content_sha256 = self._backend.sha256_bytes(path)
+        except Exception:
+            content_sha256 = None
+
         return self._result(
             ok=True,
             path=path,
             separator=separator,
             created=not exists,
             bytes_appended=appended,
+            sha256=content_sha256,
             error=None,
         )

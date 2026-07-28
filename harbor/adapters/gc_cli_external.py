@@ -17,13 +17,8 @@ Usage:
 """
 import asyncio
 import os
-import re
-import shlex
 from pathlib import Path
 from typing import Any
-from xml.etree.ElementTree import Element, SubElement, indent, tostring
-
-import yaml
 
 from harbor.agents.base import BaseAgent
 from harbor.environments.base import BaseEnvironment
@@ -219,61 +214,25 @@ class GcCliExternal(BaseAgent):
         )
 
     @staticmethod
-    def _parse_skill_frontmatter(content: str) -> dict[str, str] | None:
-        """Parse a SKILL.md YAML frontmatter block for name/description."""
-        match = re.match(r"^---\n(.*?)\n---", content, re.DOTALL)
-        if not match:
-            return None
-        try:
-            fm = yaml.safe_load(match.group(1))
-        except yaml.YAMLError:
-            return None
-        if not isinstance(fm, dict) or "name" not in fm or "description" not in fm:
-            return None
-        return {"name": fm["name"], "description": fm["description"]}
+    def _apply_injected_skills(config_dict: dict, skills_path: str | None) -> None:
+        """Configure a single backend-visible skills root.
 
-    async def _build_skills_section(self, environment: BaseEnvironment) -> str | None:
-        """Advertise harbor-injected task skills as an <available_skills> block.
-
-        Harbor uploads the task's skills into the container at ``self.skills_dir``;
-        we surface them so the agent can read each SKILL.md and run its scripts via its normal in-container
-        tools. Distinct from ``_SKILLS_DIR`` (our bundled repo skills); both coexist.
+        Harbor must never retain the adapter's bundled host path: the backend
+        can only see container paths. A nonexistent container sentinel produces
+        an intentionally empty single-source registry.
         """
-        skills_dir = getattr(self, "skills_dir", None)
-        if not skills_dir or not await environment.is_dir(skills_dir):
-            return None
+        config_dict["skills_data_path"] = skills_path or "/harbor/.gc_no_skills"
 
-        listing = await environment.exec(
-            f"find {shlex.quote(skills_dir)} -mindepth 2 -maxdepth 2"
-            " -name SKILL.md -type f | sort",
-            timeout_sec=10,
+    @staticmethod
+    def _nudge_instruction(instruction: str, skills_path: str | None) -> str:
+        """Append a one-line, model-agnostic hint to discover skills natively."""
+        if not skills_path:
+            return instruction
+        return (
+            f"{instruction}\n\n"
+            "Task-specific skills are available — use `skills_list` to see them and "
+            "`skills_load` to load the relevant one before solving."
         )
-        if listing.return_code != 0 or not (listing.stdout or "").strip():
-            return None
-
-        entries: list[tuple[str, str, str]] = []  # (name, description, location)
-        for skill_md_path in listing.stdout.strip().splitlines():
-            cat = await environment.exec(
-                f"cat {shlex.quote(skill_md_path)}", timeout_sec=10
-            )
-            if cat.return_code != 0 or not cat.stdout:
-                continue
-            fm = self._parse_skill_frontmatter(cat.stdout)
-            if fm is None:
-                continue
-            entries.append((fm["name"], fm["description"], skill_md_path))
-
-        if not entries:
-            return None
-
-        root = Element("available_skills")
-        for name, description, location in entries:
-            skill = SubElement(root, "skill")
-            SubElement(skill, "name").text = name
-            SubElement(skill, "description").text = description
-            SubElement(skill, "location").text = location
-        indent(root, space="  ")
-        return tostring(root, encoding="unicode")
 
     def _write_trajectory(self, state: Any) -> int:
         """Dump the gc-cli run as ATIF `trajectory.json`, mirroring Terminus2.
@@ -283,7 +242,10 @@ class GcCliExternal(BaseAgent):
         Returns the number of steps written (0 if nothing was dumped).
         """
         try:
-            messages = list(getattr(state, "messages", None) or []) if state is not None else []
+            archived = list(getattr(self, "_evicted_messages", None) or [])
+            current = list(getattr(state, "messages", None) or []) if state is not None else []
+            # Full trajectory: compaction-evicted steps (via callback) + compacted tail.
+            messages = archived + current
             steps = _messages_to_steps(messages)
             if not steps:
                 return 0
@@ -314,23 +276,28 @@ class GcCliExternal(BaseAgent):
 
         loop = asyncio.get_running_loop()
         config_dict = self._build_config()
-
-        # Append harbor-injected task skills to the instruction (see _build_skills_section).
-        skills_section = await self._build_skills_section(environment)
-        if skills_section:
-            instruction = (
-                f"{instruction}\n\n"
-                "The following Agent Skills are available in this environment. To use "
-                "one, read its SKILL.md at the given location, then follow it (its "
-                "scripts are runnable via the shell):\n"
-                f"{skills_section}"
-            )
+        skills_dir = getattr(self, "skills_dir", None)
+        container_skills = (
+            skills_dir if skills_dir and await environment.is_dir(skills_dir) else None
+        )
+        self._apply_injected_skills(config_dict, container_skills)
+        instruction = self._nudge_instruction(instruction, container_skills)
 
         executor = None
+        self._evicted_messages: list = []
+
+        def _on_messages_evicted(dropped: list) -> None:
+            # Host-side archive for ATIF dump; core State does not retain these.
+            self._evicted_messages.extend(dropped)
 
         def _run_loop():
             nonlocal executor
-            ctx = create_run_context(config_dict, environment=environment, loop=loop)
+            ctx = create_run_context(
+                config_dict,
+                environment=environment,
+                loop=loop,
+                on_messages_evicted=_on_messages_evicted,
+            )
             executor = AgentExecutor(ctx)
             executor.run([instruction])
             return executor.get_state()

@@ -37,12 +37,31 @@ class AgentRunner:
         self._stdin_queue: "queue.Queue[str]" = queue.Queue()
         self._prebuild_messages: list[dict] = []
         self._stop_requested = False
+        # TUI _stop_and_replace_runner: runner снят с active_runner, но поток ещё
+        # может досидеть HTTP/ретраи. Его on_error не должен залипать ✗ Ошибка
+        # поверх уже живого следующего прогона.
+        self._marked_stopped = False
         # Вид последней работы воркера: "run" | "compact" | "". Falling-edge
         # стампа терминального статуса (main._poll_active) пропускает "compact",
         # чтобы ручной /compact не перетирал прежний терминал-статус на completed.
         self._thread_kind: str = ""
         self._confirm_event = threading.Event()
         self._confirm_choice: str = "deny"
+
+    def _emit_error(self, exc: BaseException) -> None:
+        """Сообщить об ошибке в TUI, если runner ещё «актуальный».
+
+        После stop/replace поток может упасть на ConnectionError в хвосте ретраев —
+        это не ошибка текущего UI-прогона, и last_runner_error ставить нельзя.
+        """
+        if self._marked_stopped or self._stop_requested:
+            return
+        if self._on_error is None:
+            return
+        try:
+            self._on_error(exc)
+        except Exception:
+            pass
 
     def _ensure_executor(self) -> Any:
         with self._build_lock:
@@ -67,11 +86,7 @@ class AgentRunner:
             try:
                 self._ensure_executor()
             except Exception as exc:
-                if self._on_error is not None:
-                    try:
-                        self._on_error(exc)
-                    except Exception:
-                        pass
+                self._emit_error(exc)
 
         threading.Thread(target=_target, name="gc-ua-warm", daemon=True).start()
 
@@ -100,11 +115,7 @@ class AgentRunner:
                     executor = self._ensure_executor()
                     executor.compact_thread(thread_id, system=system)
                 except Exception as exc:
-                    if self._on_error is not None:
-                        try:
-                            self._on_error(exc)
-                        except Exception:
-                            pass
+                    self._emit_error(exc)
 
             t = threading.Thread(target=_target, name="gc-ua-compact", daemon=True)
             self._thread = t
@@ -186,11 +197,7 @@ class AgentRunner:
                             except Exception:
                                 pass
                     except Exception as exc:
-                        if self._on_error is not None:
-                            try:
-                                self._on_error(exc)
-                            except Exception:
-                                pass
+                        self._emit_error(exc)
 
             t = threading.Thread(target=_target, name="gc-ua-agent", daemon=True)
             self._thread = t

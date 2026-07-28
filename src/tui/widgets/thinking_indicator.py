@@ -201,6 +201,12 @@ class ThinkingIndicator(Static):
         self.set_interval(0.1, self._tick)
 
     def _tick(self) -> None:
+        # F4: freeze UI на время app-select — не дёргаем анимацию (Screen._selecting).
+        try:
+            if getattr(self.screen, "_selecting", False):
+                return
+        except Exception:
+            pass
         self._frame = (self._frame + 1) % _ANIM_PERIOD
         # render() читает _frame динамически — достаточно запросить refresh.
         # Guard `is_mounted` — в юнит-тестах _tick дёргается без app-контекста.

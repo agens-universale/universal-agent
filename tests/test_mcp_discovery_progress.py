@@ -54,6 +54,6 @@ def test_create_run_context_accepts_on_progress(monkeypatch):
     import run_context as rc
     captured = []
     monkeypatch.setattr(rc, "build_tools_data",
-                        lambda cfg, on_progress=None: (captured.append(on_progress) or ({}, [], [], {})))
+                        lambda cfg, on_progress=None, **_kwargs: (captured.append(on_progress) or ({}, [], [], {})))
     rc.create_run_context({"model": "M"}, on_progress=lambda s, st: None)
     assert captured and callable(captured[0])

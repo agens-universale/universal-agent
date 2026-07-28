@@ -89,6 +89,9 @@ class State:
         self.instruction_warnings: list[str] = []
         self.call_metadata = self.set_call_metadata()
         self.messages = []
+        # Optional sink for messages dropped by context compaction.
+        # Core does not retain them; harbor/other hosts may archive for trajectory.
+        self.on_messages_evicted: Optional[Any] = None
         self.backend_api_mode = "responses"
         self.previous_response_id = None
         self.last_backend_response_id = None
@@ -103,7 +106,8 @@ class State:
         self.current_user_intent: list[IntentRecord] = []
         self.user_turn_seq: int = 0
         self.finish_gate_rejection_count: int = 0
-        self.terminal_outcome: Optional[str] = None  # None | "step_limit" | "tool_errors" | "token_limit" | "tool_call_limit"
+        self.turn_tool_calls: int = 0   # вызовов инструментов за текущий ход (smart-гейт, спека §3)
+        self.terminal_outcome: Optional[str] = None  # None | "step_limit" | "tool_errors"
         self.last_unknown_tool_name: Optional[str] = None
         self.unknown_tool_repeat_count: int = 0
         self.last_batch_unknown_tool_count: int = 0
@@ -219,10 +223,15 @@ class State:
         self.tool_usage_notice_cnt = {}
 
     def flush_current_user_intent(self) -> None:
-        """Flush open turn records into closed log and increment ``user_turn_seq``."""
+        """Flush open turn records into closed log and increment ``user_turn_seq``.
+
+        Граница хода: сбрасываем ``turn_tool_calls`` — следующий ход считает вызовы
+        заново (smart-гейт судьи, спека §3). Компакция границей хода не является и
+        сюда не заходит, поэтому счётчик её переживает."""
         self.current_user_intent, self.user_intent_log, self.user_turn_seq = flush(
             self.current_user_intent,
             self.user_intent_log,
             self.user_turn_seq,
         )
+        self.turn_tool_calls = 0
 

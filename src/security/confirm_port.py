@@ -6,7 +6,6 @@ from typing import Any
 
 from constants.tool_names import ASK_HUMAN_TOOL_NAME
 from security.path_policy import prompt_user_confirmation_choice
-from tools.subagents.progress import emit_progress
 
 CONFIRM_ONCE = "once"
 CONFIRM_SESSION = "session"
@@ -37,6 +36,9 @@ def _via_name(ctx: Any) -> str | None:
 def _ask_choice(ctx: Any, *, title: str, question: str, fields: list) -> str:
     if not confirm_available(ctx):
         return CONFIRM_DENY
+
+    # Lazy: security → tools на module load ломает import graph (paths/diff_tui).
+    from tools.subagents.progress import emit_progress
 
     via = _via_name(ctx)
     # confirm-порт не знает steps child — для progress достаточно нулей

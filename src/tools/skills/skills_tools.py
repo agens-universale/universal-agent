@@ -8,8 +8,11 @@ from __future__ import annotations
 
 import json
 import logging
+import shlex
+import sys
 from typing import Any, Dict, Optional
 
+from config_modules.agent import exec_timeout_from_config_dict
 from tools.schema_optional import coalesce_optional_string
 from tools.skills.registry import AmbiguousSkillId, SkillsRegistry
 from utils.arg_decorators import parse_json_object_argument
@@ -122,6 +125,8 @@ class LoadSkillTool:
 class RunSkillScriptTool:
     def __init__(self, registry: SkillsRegistry, *args: Any, **kwargs: Any) -> None:
         self._registry = registry
+        self._ctx = kwargs.get("ctx")
+        self._config_dict = kwargs.get("config_dict") or {}
 
     @parse_json_object_argument(
         source_arg="args",
@@ -132,23 +137,44 @@ class RunSkillScriptTool:
         self,
         skill_id: str,
         script_name: str | None = None,
+        argv: str | None = None,
         args: str | None = None,
         args_data: Dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> Dict[str, Any]:
         try:
-            result = self._registry.run_script(
-                skill_id=skill_id,
-                script_name=script_name,
-                args=args_data,
+            resolved = self._registry.resolve_script(
+                skill_id=skill_id, script_name=script_name or ""
             )
-            script_ok = result.get("exit_code", 1) == 0
+            if self._ctx is None or not hasattr(self._ctx, "os_backend"):
+                raise RuntimeError("skills_run_script requires a run context with os_backend")
+            backend = self._ctx.os_backend
+            python = "python3" if backend.is_sandbox else sys.executable
+            run_argv = [python, resolved["path"]]
+            stdin: str | None = None
+            if argv is not None:
+                run_argv += shlex.split(argv)
+            elif args_data is not None:
+                stdin = json.dumps(args_data, ensure_ascii=False)
+            exec_result = backend.exec_argv(
+                run_argv,
+                stdin=stdin,
+                timeout=exec_timeout_from_config_dict(self._config_dict),
+            )
+            result = {
+                "stdout": exec_result.stdout,
+                "stderr": exec_result.stderr,
+                "exit_code": exec_result.return_code,
+                "timed_out": exec_result.timed_out,
+            }
+            script_ok = not exec_result.timed_out and exec_result.return_code == 0
             return _wrap(
                 tool="skills_run_script",
                 ok=True,
                 script_ok=script_ok,
                 skill_id=skill_id,
-                script_name=script_name,
+                script_name=resolved["script_name"],
+                argv=argv,
                 args=args_data,
                 result=result,
             )
@@ -158,6 +184,7 @@ class RunSkillScriptTool:
                 ok=False,
                 skill_id=skill_id,
                 script_name=script_name,
+                argv=argv,
                 args=args_data,
                 result=None,
                 error={
@@ -172,6 +199,7 @@ class RunSkillScriptTool:
                 ok=False,
                 skill_id=skill_id,
                 script_name=script_name,
+                argv=argv,
                 args=args_data,
                 result=None,
                 error={"code": "SCRIPT_NOT_FOUND", "message": str(exc)},
@@ -183,6 +211,7 @@ class RunSkillScriptTool:
                 ok=False,
                 skill_id=skill_id,
                 script_name=script_name,
+                argv=argv,
                 args=args_data,
                 result=None,
                 error={
@@ -197,6 +226,7 @@ class RunSkillScriptTool:
             ok=False,
             skill_id=call_kwargs.get("skill_id"),
             script_name=call_kwargs.get("script_name"),
+            argv=call_kwargs.get("argv"),
             args=call_kwargs.get("args"),
             result=None,
             error={"code": "INVALID_ARGUMENT", "field": exc.field, "message": exc.message},
@@ -304,8 +334,8 @@ def get_skills_tools_data(skills_registry: SkillsRegistry) -> Dict[str, Dict[str
     Собрать словарь инструментов работы со скиллами в формате tools_data.
     """
     def _make_fabric(tool_cls: type):
-        def fabric(**_kwargs: Any):
-            return tool_cls(skills_registry)
+        def fabric(**kwargs: Any):
+            return tool_cls(skills_registry, **kwargs)
 
         return fabric
 
@@ -394,10 +424,10 @@ def get_skills_tools_data(skills_registry: SkillsRegistry) -> Dict[str, Dict[str
                 "name": "skills_run_script",
                 "description": (
                     "Run a Python script that belongs to a specific skill. "
-                    "Arguments are passed as JSON via stdin; the script must read and parse stdin "
-                    "(argparse CLI positional/options are not auto-converted from args). "
-                    "If script_name is omitted, scripts/main.py is used. "
-                    "Returns a JSON string envelope: {tool, ok, script_ok, skill_id, script_name, args, error, result}. "
+                    "script_name is required and must be one of the skill's listed scripts. "
+                    "Use argv for CLI positional arguments and flags (for example, '--input report.pdf'). "
+                    "args is a legacy JSON object string, supplied to stdin only when argv is absent. "
+                    "Returns a JSON string envelope: {tool, ok, script_ok, skill_id, script_name, argv, args, error, result}. "
                     "ok=true means the wrapper launched the script; script_ok=false when result.exit_code != 0. "
                     "On success, the script output is inside result."
                 ),
@@ -411,8 +441,15 @@ def get_skills_tools_data(skills_registry: SkillsRegistry) -> Dict[str, Dict[str
                         "script_name": {
                             "type": "string",
                             "description": (
-                                "Optional script file name inside the skill's scripts/ directory. "
-                                "Defaults to 'main.py' if not provided."
+                                "Required script file name inside the skill's scripts/ directory. "
+                                "Use an exact name returned by skills_load; the scripts/ prefix is accepted."
+                            ),
+                        },
+                        "argv": {
+                            "type": "string",
+                            "description": (
+                                "CLI arguments passed after the script path, as entered in a terminal. "
+                                "Example: '--input report.pdf --format json'. When set, args is ignored."
                             ),
                         },
                         "args": {
@@ -427,25 +464,26 @@ def get_skills_tools_data(skills_registry: SkillsRegistry) -> Dict[str, Dict[str
                             ),
                         },
                     },
-                    "required": ["skill_id"],
+                    "required": ["skill_id", "script_name"],
                     "additionalProperties": False,
                 },
                 "strict": True,
             },
             "description": (
                 "Tool name: skills_run_script\n"
-                "Tool description: Runs a Python script of a specific skill.\n"
+                "Tool description: Runs an explicitly selected Python script of a specific skill.\n"
                 "Input schema: {\"type\": \"object\", \"properties\": {\"skill_id\": {\"type\": \"string\"}, "
-                "\"script_name\": {\"type\": \"string\"}, \"args\": {\"type\": \"string\"}}, "
-                "\"required\": [\"skill_id\"], \"additionalProperties\": false}\n"
+                "\"script_name\": {\"type\": \"string\"}, \"argv\": {\"type\": \"string\"}, "
+                "\"args\": {\"type\": \"string\"}}, \"required\": [\"skill_id\", \"script_name\"], "
+                "\"additionalProperties\": false}\n"
                 "\n"
                 "Usage:\n"
                 "- Use this tool when a skill defines executable logic in its scripts/ directory.\n"
-                "- If you don't know the script name, omit it to run scripts/main.py by default.\n"
-                "- Provide script arguments in args only when the skill expects them.\n"
+                "- Obtain the exact required script_name from skills_load; there is no default script.\n"
+                "- Prefer argv for argparse-style flags and positional arguments.\n"
                 "- args must decode to a JSON object; pass it as a string, not a nested object "
                 "(e.g. '{\"input\":\"hello\"}').\n"
-                "- Scripts must read stdin JSON themselves; args are not mapped to argparse CLI.\n"
+                "- args is legacy stdin JSON and is used only when argv is absent.\n"
                 "- The result includes stdout, stderr, exit_code, and script_ok (false when exit_code != 0)."
             ),
         },

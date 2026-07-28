@@ -14,8 +14,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from tests.harbor.fakes import FakeBackend, bind_os_backend, strip_path_fields
-from tools.backends.local import LocalFsBackend
+from tests.harbor_support.fakes import FakeBackend, bind_os_backend, strip_path_fields
+from backends.local import LocalFsBackend
 from tools.fs.apply_file_edits import ApplyFileEdits
 
 CONTENT = "alpha\nbeta\nalpha\ngamma\n"
@@ -26,7 +26,6 @@ def _edit(search, replace, **over):
     e = {
         "search": search, "replace": replace,
         "expected_matches": None, "occurrence": None,
-        "start_line": None, "end_line": None,
     }
     e.update(over)
     return e
@@ -78,7 +77,6 @@ _CASES = [
     ("occurrence_all", CONTENT, [_edit("alpha", "Z", occurrence="all")], {}),
     ("occurrence_int_2", CONTENT, [_edit("alpha", "Z", occurrence=2)], {}),
     ("occurrence_out_of_range", CONTENT, [_edit("alpha", "Z", occurrence=9)], {}),
-    ("scope_start_line", CONTENT, [_edit("alpha", "Z", start_line=2)], {}),
     ("expected_matches_ok", CONTENT, [_edit("alpha", "Z", occurrence="all", expected_matches=2)], {}),
     ("expected_matches_mismatch", CONTENT, [_edit("alpha", "Z", expected_matches=1)], {}),
     ("no_match", CONTENT, [_edit("NOPE", "X")], {}),

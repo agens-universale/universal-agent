@@ -4,6 +4,7 @@ import pytest
 pytest.importorskip("textual")
 
 from textual.widgets import Static
+from tests.tui.conftest import open_settings_section, settings_section_index
 
 
 def _cfg():
@@ -26,10 +27,11 @@ def _probe_ok(models_ids=("test-model",)):
     return ProbeResult("ok", 200, [ModelInfo(id=i) for i in models_ids], 118, "доступен")
 
 
-def _mk_screen(config=None, config_path="C:/tmp/config.yml"):
+def _mk_screen(config=None, config_path="C:/tmp/config.yml", on_apply=None):
     from tui.screens.settings import SettingsScreen
     return SettingsScreen(config=config or _cfg(), config_path=config_path,
-                          on_apply=lambda: None, probe_fn=_fake_probe(_probe_ok()))
+                          on_apply=on_apply or (lambda: None),
+                          probe_fn=_fake_probe(_probe_ok()))
 
 
 def _write_cfg(tmp_path, *, url='"http://host/v1/chat/completions"',
@@ -181,6 +183,92 @@ async def test_plain_arrows_do_not_switch_sections():
         assert scr._view == 0                         # остаётся в секции 0
         await pilot.press("left")                     # обычная стрелка влево
         assert scr._view == 0                         # остаётся в секции 0
+
+
+async def test_open_section_picks_up_default_changed_by_other_window(tmp_path):
+    """Дыра 2: пока /settings уже открыт, другое окно сохраняет новое умолчание в
+    config.yml — вход в секцию обязан увидеть свежее значение БЕЗ выхода из
+    экрана и повторного /settings."""
+    import os
+    import time
+    import tui.app as app_mod
+    cfg_file = _write_cfg(tmp_path, model='"old-model"')
+    app = app_mod.TuiApp(config={"model": "placeholder"})
+    app._config_path = str(cfg_file)
+    app.reload_config()                              # база + снимок mtime — как в проде
+    async with app.run_test() as pilot:
+        app.push_screen(_mk_screen(config=app._config, config_path=str(cfg_file)))
+        await pilot.pause()
+        scr = app.screen
+
+        _write_cfg(tmp_path, model='"new-model"')     # «другое окно» сохранило умолчание
+        t = time.time() + 5.0
+        os.utime(cfg_file, (t, t))
+
+        open_settings_section(scr, "Модель")
+        await pilot.pause()
+
+        assert scr._raw_value("model") == "new-model"
+
+
+async def test_open_section_noop_when_file_unchanged(tmp_path, monkeypatch):
+    """Файл не менялся — вход в секцию не перечитывает конфиг и не инвалидирует
+    раннер (дефект, который на этой ветке уже ловили дважды: лишняя пересборка
+    executor тянет MCP-дискавери и держит пользователя на старте хода)."""
+    import tui.app as app_mod
+    cfg_file = _write_cfg(tmp_path)
+    app = app_mod.TuiApp(config={"model": "placeholder"})
+    app._config_path = str(cfg_file)
+    app.reload_config()
+
+    calls = {"load": 0, "invalidate": 0}
+    monkeypatch.setattr("config.load_config", lambda *_a, **_k: (
+        calls.__setitem__("load", calls["load"] + 1) or {}
+    ))
+    orig_invalidate = app.invalidate_runner
+
+    def counting_invalidate():
+        calls["invalidate"] += 1
+        orig_invalidate()
+
+    app.invalidate_runner = counting_invalidate
+
+    async with app.run_test() as pilot:
+        app.push_screen(_mk_screen(config=app._config, config_path=str(cfg_file)))
+        await pilot.pause()
+        scr = app.screen
+
+        open_settings_section(scr, "Модель")
+        await pilot.pause()
+
+        assert calls == {"load": 0, "invalidate": 0}
+
+
+async def test_open_section_noop_when_config_is_empty():
+    """Пустая (falsy) база — отдельный случай от «файл не менялся» выше:
+    screen_config() (`self._config or {}`) и __init__ этого экрана (`config or {}`)
+    на falsy-ветке аллоцируют новый {} при каждом обращении, так что голое `is`
+    между двумя пустыми базами лгало бы «изменилось». Без config_path _read_raw/
+    _read_origins дёшевы ({} за счёт раннего return), поэтому лишний вызов не
+    упал бы сам — считаем вызовы явно."""
+    import tui.app as app_mod
+    from tui.screens.settings import SettingsScreen
+    app = app_mod.TuiApp(config={})   # falsy _config; без config_path — reload не триггерится вовсе
+    async with app.run_test() as pilot:
+        scr = SettingsScreen(config=app.screen_config(), config_path=None,
+                              on_apply=lambda: None, probe_fn=_fake_probe(_probe_ok()))
+        app.push_screen(scr)
+        await pilot.pause()
+
+        calls = {"raw": 0, "origins": 0}
+        orig_raw, orig_origins = scr._read_raw, scr._read_origins
+        scr._read_raw = lambda: (calls.__setitem__("raw", calls["raw"] + 1) or orig_raw())
+        scr._read_origins = lambda: (calls.__setitem__("origins", calls["origins"] + 1) or orig_origins())
+
+        open_settings_section(scr, "Модель")
+        await pilot.pause()
+
+        assert calls == {"raw": 0, "origins": 0}
 
 
 async def test_settings_apply_endpoint_writes_and_reloads(tmp_path):
@@ -418,8 +506,7 @@ async def test_settings_auth_no_auth_writes_empty_header(tmp_path):
         await pilot.pause()
         scr = app.screen
         # открыть секцию «Подключение» (idx=0 в меню)
-        scr._menu_idx = 0
-        scr._open_section(0)
+        open_settings_section(scr, "Подключение")
         await pilot.pause()
         assert not scr.query(".set-current")          # v2: строка «Текущая» удалена
         from tui.editors.connection import ConnectionEditor
@@ -664,8 +751,7 @@ async def test_apply_model_writes_and_returns_to_hub(tmp_path, monkeypatch):
                                        probe_fn=_fake_probe(_probe_ok())))
         await pilot.pause()
         scr = app.screen
-        scr._menu_idx = 1
-        scr._open_section(1)
+        open_settings_section(scr, "Модель")
         await pilot.pause()
         assert not scr.query(".set-current")          # v2: строка «Текущая» удалена
         from textual.widgets import Input
@@ -848,7 +934,7 @@ async def test_config_probe_survives_entering_section_while_flying():
         await pilot.pause()
         scr._probe_in_flight = True                      # эмуляция «config-probe летит»
         gen = scr._config_gen
-        scr._open_section(0)                              # draft-reset бампает draft_gen, не config_gen
+        open_settings_section(scr, "Подключение")            # draft-reset бампает draft_gen, не config_gen
         result = _probe_ok()
         scr._on_config_probe(result, gen=gen)
         assert scr._probe_in_flight is False
@@ -899,7 +985,7 @@ async def test_rejected_token_saves_without_force(tmp_path, monkeypatch):
                              on_apply=lambda: None, probe_fn=probe)
         app.push_screen(scr)
         await pilot.pause()
-        scr._open_section(0)
+        open_settings_section(scr, "Подключение")
         await pilot.pause()
         from tui.editors.connection import ConnectionEditor
         from textual.widgets import Input
@@ -1015,8 +1101,7 @@ async def test_draft_probe_no_auth_choice_probes_without_old_token(tmp_path):
                              on_apply=lambda: None, probe_fn=probe_fn)
         app.push_screen(scr)
         await pilot.pause()
-        scr._menu_idx = 0
-        scr._open_section(0)
+        open_settings_section(scr, "Подключение")
         await pilot.pause()
         scr.query_one(ConnectionEditor).move(2)          # выбор «без авторизации»
         scr._start_draft_probe(0)
@@ -1086,8 +1171,7 @@ async def test_dirty_marker_model_section_toggles_on_move(tmp_path, monkeypatch)
                                        probe_fn=_fake_probe(_probe_ok())))
         await pilot.pause()
         scr = app.screen
-        scr._menu_idx = 1
-        scr._open_section(1)
+        open_settings_section(scr, "Модель")
         await pilot.pause()
         title = scr.query_one("#set-title", Static)
         assert "изменено" not in str(title.render())    # исходный выбор == модель конфига
@@ -1147,8 +1231,7 @@ async def test_dirty_marker_model_section_no_false_negative_when_active_not_firs
                                        probe_fn=_fake_probe(_probe_ok())))
         await pilot.pause()
         scr = app.screen
-        scr._menu_idx = 1
-        scr._open_section(1)
+        open_settings_section(scr, "Модель")
         await pilot.pause()                                # worker fetch отработал
         title = scr.query_one("#set-title", Static)
         assert "изменено" not in str(title.render())        # курсор сразу на active — не dirty
@@ -1181,8 +1264,7 @@ async def test_dirty_marker_model_section_manual_entry_reacts_to_typing(tmp_path
                                        probe_fn=_fake_probe(_probe_ok())))
         await pilot.pause()
         scr = app.screen
-        scr._menu_idx = 1
-        scr._open_section(1)
+        open_settings_section(scr, "Модель")
         await pilot.pause()                                # worker fetch=[] отработал
         title = scr.query_one("#set-title", Static)
         assert "изменено" not in str(title.render())
@@ -1215,8 +1297,7 @@ async def test_draft_probe_no_auth_401_shows_requires_auth_hint(tmp_path):
                              probe_fn=_fake_probe(_probe_rejected()))
         app.push_screen(scr)
         await pilot.pause()
-        scr._menu_idx = 0
-        scr._open_section(0)
+        open_settings_section(scr, "Подключение")
         await pilot.pause()
         scr.query_one(ConnectionEditor).move(2)          # выбор «без авторизации»
         scr._start_draft_probe(0)
@@ -1255,8 +1336,7 @@ async def test_auth_draft_probe_server_ignores_token(tmp_path):
                              on_apply=lambda: None, probe_fn=probe_fn)
         app.push_screen(scr)
         await pilot.pause()
-        scr._menu_idx = 0
-        scr._open_section(0)                              # секция «Подключение» (токен в поле)
+        open_settings_section(scr, "Подключение")            # токен в поле
         await pilot.pause()
         captured.clear()                                  # отбросить config-probe маунта
         scr._start_draft_probe(0)                         # Tab
@@ -1336,8 +1416,7 @@ async def test_auth_section_saved_token_is_not_dirty(tmp_path):
                                        probe_fn=_fake_probe(_probe_ok())))
         await pilot.pause()
         scr = app.screen
-        scr._menu_idx = 0
-        scr._open_section(0)                              # секция «Подключение»
+        open_settings_section(scr, "Подключение")
         await pilot.pause()
         title = scr.query_one("#set-title", Static)
         assert "изменено" not in str(title.render())     # токен в поле == исходный
@@ -1364,8 +1443,7 @@ async def test_auth_section_repeated_enter_no_change_does_not_crash(tmp_path):
                                        probe_fn=_fake_probe(_probe_ok())))
         await pilot.pause()
         scr = app.screen
-        scr._menu_idx = 0
-        scr._open_section(0)                              # секция «Подключение»
+        open_settings_section(scr, "Подключение")
         await pilot.pause()
         for _ in range(3):
             await pilot.press("enter")                    # ничего не введено/не менялось
@@ -1512,8 +1590,7 @@ async def test_env_ref_token_survives_save_without_changes(tmp_path, monkeypatch
     app = app_mod.TuiApp(config=cfg)
     async with app.run_test() as pilot:
         scr = await _open_settings(app, pilot, cfg_file, cfg)
-        scr._menu_idx = 0
-        scr._open_section(0)                                  # «Подключение»
+        open_settings_section(scr, "Подключение")
         await pilot.pause()
         assert scr._is_dirty(0) is False                      # ничего не трогали
         await pilot.press("enter")
@@ -1539,8 +1616,7 @@ async def test_env_ref_missing_var_not_shown_as_token_set(tmp_path, monkeypatch)
         assert "${ENV:GC_API_KEY}" in row                     # показана ссылка…
         assert "переменной нет" in row                        # …и её честный статус
         assert "***" not in row                               # не «токен задан»
-        scr._menu_idx = 0
-        scr._open_section(0)
+        open_settings_section(scr, "Подключение")
         await pilot.pause()
         await pilot.press("enter")
         await pilot.pause(); await pilot.pause()
@@ -1576,8 +1652,7 @@ async def test_literal_over_env_ref_needs_confirm_then_writes(tmp_path, monkeypa
     app = app_mod.TuiApp(config=cfg)
     async with app.run_test() as pilot:
         scr = await _open_settings(app, pilot, cfg_file, cfg)
-        scr._menu_idx = 0
-        scr._open_section(0)
+        open_settings_section(scr, "Подключение")
         await pilot.pause()
         await pilot.press("down")                             # курсор → Bearer: поле токена показано
         await pilot.pause()
@@ -1587,7 +1662,7 @@ async def test_literal_over_env_ref_needs_confirm_then_writes(tmp_path, monkeypa
         banner = " ".join(str(w.render()) for w in scr.query(".set-confirm"))
         assert "GC_API_KEY" in banner                         # баннер назвал переменную
         assert "sk-typed-by-hand" not in cfg_file.read_text(encoding="utf-8")   # ещё не записано
-        assert scr._view == 0                                 # остались в секции
+        assert scr._view == settings_section_index("Подключение")   # остались в секции
         await pilot.press("enter")                            # подтверждение
         await pilot.pause(); await pilot.pause()
         content = cfg_file.read_text(encoding="utf-8")
@@ -1604,8 +1679,7 @@ async def test_literal_token_edit_saves_without_confirm(tmp_path):
     app = app_mod.TuiApp(config=cfg)
     async with app.run_test() as pilot:
         scr = await _open_settings(app, pilot, cfg_file, cfg)
-        scr._menu_idx = 0
-        scr._open_section(0)
+        open_settings_section(scr, "Подключение")
         await pilot.pause()
         await pilot.press("down")                             # курсор → Bearer: поле токена показано
         await pilot.pause()
@@ -1629,8 +1703,7 @@ async def test_bearer_without_token_hints_instead_of_nothing_changed(tmp_path):
     app = app_mod.TuiApp(config=cfg)
     async with app.run_test() as pilot:
         scr = await _open_settings(app, pilot, cfg_file, cfg)
-        scr._menu_idx = 0
-        scr._open_section(0)
+        open_settings_section(scr, "Подключение")
         await pilot.pause()
         await pilot.press("down")                         # курсор → Bearer, токен НЕ введён
         await pilot.pause()
@@ -1727,8 +1800,7 @@ async def _open_model_section(app, pilot, cfg_file, cfg):
     from tests.tui.conftest import wait_until
     from tui.editors.model import ModelEditor
     scr = await _open_settings(app, pilot, cfg_file, cfg)
-    scr._menu_idx = 1
-    scr._open_section(1)                                  # секция «Модель»
+    open_settings_section(scr, "Модель")
     await pilot.pause()
     await wait_until(pilot, lambda: scr.query_one(ModelEditor).models_loaded, "models loaded")
     return scr
@@ -1808,8 +1880,7 @@ async def test_auth_override_shows_masked_effective_value(tmp_path, monkeypatch,
     app = app_mod.TuiApp(config=cfg)
     async with app.run_test() as pilot:
         scr = await _open_settings(app, pilot, cfg_file, cfg)
-        scr._menu_idx = 0
-        scr._open_section(0)
+        open_settings_section(scr, "Подключение")
         await pilot.pause()
         text = _screen_text(scr)
         assert "перекрыто" in text
@@ -1912,8 +1983,7 @@ async def test_non_string_auth_in_overlay_does_not_crash_section(tmp_path, monke
     app = app_mod.TuiApp(config=cfg)
     async with app.run_test() as pilot:
         scr = await _open_settings(app, pilot, cfg_file, cfg)
-        scr._menu_idx = 0
-        scr._open_section(0)
+        open_settings_section(scr, "Подключение")
         await pilot.pause()
         text = _screen_text(scr)
         assert "перекрыто" in text
@@ -2001,7 +2071,7 @@ async def test_modes_section_preview_shows_toggle_pairs():
         await pilot.pause()
         rows = _menu_lines(app.screen)
         modes_row = next(r for r in rows if "Режимы работы" in r)
-        assert "самопроверка выполнения задачи: on" in modes_row
+        assert "самопроверка выполнения задачи: smart" in modes_row
         assert ("формат ответа: judge" in modes_row) or ("· …" in modes_row)
 
 
@@ -2025,139 +2095,241 @@ async def test_modes_preview_truncated_on_first_frame_of_narrow_menu(tmp_path):
         assert "…" in modes_row
 
 
-async def test_modes_subscreen_rows_and_instant_apply(tmp_path):
-    """Подэкран «Режимы работы»: строка на тоггл (label + трек + значение, общие
-    колонки), ←/→/Enter применяют значение МГНОВЕННО (реальный config.yml, без моков),
-    Esc возвращает в меню с обновлённым превью."""
-    import yaml
-    import tui.app as app_mod
-    cfg_file = tmp_path / "config.yml"
-    cfg_file.write_text('tui:\n  finish_gate_mode: "on"\n  text_answer_mode: "judge"\n',
-                        encoding="utf-8")
-    app = app_mod.TuiApp(config={})
-    app._config_path = str(cfg_file)
-    app.reload_config()
+async def test_modes_subscreen_writes_global(tmp_path):
+    """Подэкран «Режимы работы»: строка-пресет первая (head «rigor · строгость
+    завершения хода», без слеша). Ревизия 7 (flat-группы, спека шапка/§4.2):
+    дети рисуются БЕЗ ведущего маркера «· » и БЕЗ отступа — «gate ·
+    самопроверка выполнения задачи», «answers · формат ответа» — одним левым
+    краем с родителем (иерархия только цветом, см. стилевой тест в
+    test_rigor_acceptance.py). Крутка пресета пишет ПАРУ; крутка детальной —
+    один ключ (глобал)."""
+    app, cfg_file = _app_with_config(
+        tmp_path, 'tui:\n  finish_gate_mode: "on"\n  text_answer_mode: "deny"\n')
     async with app.run_test() as pilot:
-        scr = await _open_settings(app, pilot, cfg_file, app._config)
-        scr._menu_idx = 3
-        scr._open_section(3)                     # «Режимы работы»
-        await pilot.pause()
-        assert scr._view == 3
+        scr = await _open_modes_section(pilot)
+        assert not scr.query(".set-modes-save")
 
-        # 1) строки: курсор + label + трек + значение, подписи в общей колонке (label_w общий)
-        rows_w = list(scr.query(".set-row"))
-        rows = [str(w.render()) for w in rows_w]
-        assert any("самопроверка выполнения задачи" in r and "on" in r for r in rows)
-        assert any("формат ответа" in r and "judge" in r for r in rows)
-        label_w, _ = scr._modes_columns()
-        assert label_w == max(len("самопроверка выполнения задачи"), len("формат ответа")) + 3 + 2
-
-        # выделенная строка (gate, курсор 0) начинается с «▸ », остальные — с двух пробелов
-        assert rows[0].startswith("▸ ")
-        assert all(r.startswith("  ") for r in rows[1:])
-        # воздух между тоггл-строками — тот же класс/паттерн, что и в «Обновлении»
-        assert all(w.has_class("set-spaced") for w in rows_w)
-
-        # 2) → на выделенной строке gate: config.yml меняется СРАЗУ, трек перерисован
-        await pilot.press("right")
-        await pilot.pause()
-        data = yaml.safe_load(cfg_file.read_text(encoding="utf-8"))
-        assert data["tui"]["finish_gate_mode"] == "off"
+        # курсор 0 = пресет rigor (high: on+deny). → пишет ПАРУ следующего пресета.
         rows = [str(w.render()) for w in scr.query(".set-row")]
-        assert any("самопроверка выполнения задачи" in r and "off" in r for r in rows)
+        assert any("rigor · строгость завершения хода" in r for r in rows)
+        assert not any("/rigor" in r for r in rows)
+        assert not any("├" in r or "└" in r for r in rows)
+        assert not any(r[2:].startswith("· ") for r in rows)   # ревизия 7: маркер убран у всех строк
+        assert any(r[2:].startswith("gate · самопроверка выполнения задачи") for r in rows)
+        assert any(r[2:].startswith("answers · формат ответа") for r in rows)
 
-        # 3) Enter на строке answers: значение циклится (judge -> allow) и записано
+        await pilot.press("right")       # high -> low (cycle_value по low/medium/high)
+        await pilot.pause(0.1)
+        text = cfg_file.read_text(encoding="utf-8")
+        # пара low: off + allow — обе записаны
+        assert 'finish_gate_mode: "off"' in text and 'text_answer_mode: "allow"' in text
+
+        # спуск на детальную gate, крутка пишет ОДИН ключ
         await pilot.press("down")
-        await pilot.pause()
-        # курсор перешёл на строку answers (индекс 1) — перерисовка после ↑/↓ его сохраняет
-        rows = [str(w.render()) for w in scr.query(".set-row")]
-        assert rows[1].startswith("▸ ")
-        assert rows[0].startswith("  ")
-        await pilot.press("enter")
-        await pilot.pause()
-        data = yaml.safe_load(cfg_file.read_text(encoding="utf-8"))
-        assert data["tui"]["text_answer_mode"] == "allow"
-
-        # 4) Esc: возврат в меню, превью строки обновилось новыми значениями
-        await pilot.press("escape")
-        await pilot.pause()
-        assert scr._view == "menu"
-        modes_row = next(r for r in _menu_lines(scr) if "Режимы работы" in r)
-        assert "самопроверка выполнения задачи: off" in modes_row
+        await pilot.pause(0.1)
+        await pilot.press("right")       # off -> smart
+        await pilot.pause(0.1)
+        assert 'finish_gate_mode: "smart"' in cfg_file.read_text(encoding="utf-8")
 
 
-async def test_modes_subscreen_error_flash_keeps_screen(tmp_path, monkeypatch):
-    """apply_toggle падает (OSError) → флеш «✗ не сохранено: …», подэкран не закрывается,
-    config.yml не меняется."""
-    import tui.app as app_mod
-    cfg_file = tmp_path / "config.yml"
-    cfg_file.write_text('tui:\n  finish_gate_mode: "on"\n  text_answer_mode: "judge"\n',
-                        encoding="utf-8")
-    app = app_mod.TuiApp(config={})
-    app._config_path = str(cfg_file)
-    app.reload_config()
+async def test_modes_apply_error_flash_keeps_screen(tmp_path, monkeypatch):
+    """Писатель падает (OSError) → флеш «✗ не сохранено: …», подэкран не
+    закрывается, config.yml не меняется."""
+    app, cfg_file = _app_with_config(tmp_path, 'tui:\n  finish_gate_mode: "on"\n')
     original = cfg_file.read_text(encoding="utf-8")
 
-    def boom(app_, name, value):
+    def boom(path, values, **kw):
         raise OSError("disk full")
-    monkeypatch.setattr("tui.toggles.apply_toggle", boom)
+    monkeypatch.setattr("onboarding_config_writer.write_values", boom)
 
     async with app.run_test() as pilot:
-        scr = await _open_settings(app, pilot, cfg_file, app._config)
-        scr._menu_idx = 3
-        scr._open_section(3)
-        await pilot.pause()
+        scr = await _open_modes_section(pilot)
         await pilot.press("right")
-        await pilot.pause()
-        assert scr._view == 3
+        await pilot.pause(0.1)
+        assert scr._view == settings_section_index("Режимы работы")
         assert cfg_file.read_text(encoding="utf-8") == original
         notice = " ".join(str(w.render()) for w in scr.query(Static))
         assert "не сохранено" in notice
 
 
 async def test_modes_footer_shows_value_hint(tmp_path):
-    """Подэкран «Режимы работы» (ревизия 2026-07-19 по смоуку юзера, дизайн §3):
-    hint выделенного тоггла («<значение> — <подсказка>», БЕЗ клавишной части) —
-    ВНУТРИ рамки секции (класс set-hint/set-modes-hint, конвенция «Обновления»),
-    меняется при смене выделения и после переключения значения; футер ВНЕ рамки —
-    статичный клавишный, как у других секций (_FOOTERS)."""
-    import tui.app as app_mod
-    cfg_file = tmp_path / "config.yml"
-    cfg_file.write_text('tui:\n  finish_gate_mode: "on"\n  text_answer_mode: "judge"\n',
-                        encoding="utf-8")
-    app = app_mod.TuiApp(config={})
-    app._config_path = str(cfg_file)
-    app.reload_config()
+    """Hint выделенного (внутри рамки, без клавиш) меняется при смене выделения.
+    Курсор 0 = /rigor; спускаемся на детальные gate/answers."""
+    app, cfg_file = _app_with_config(
+        tmp_path, 'tui:\n  finish_gate_mode: "on"\n  text_answer_mode: "deny"\n')  # high -> пресет-строка
     async with app.run_test() as pilot:
-        scr = await _open_settings(app, pilot, cfg_file, app._config)
-        scr._menu_idx = 3
-        scr._open_section(3)
-        await pilot.pause()
-
-        # футер — статичный клавишный, тот же для любой выделенной строки
+        scr = await _open_modes_section(pilot)
         footer = str(scr.query_one("#set-footer", Static).render())
         assert footer == ("↑/↓ — выбор · ←/→/Enter — переключить · "
                            "PgUp/PgDn — секции · Esc — меню")
+        hint0 = str(scr.query_one(".set-modes-hint", Static).render())
+        assert hint0.startswith("high —")          # строка пресета, значение high
+        assert "Enter" not in hint0
 
-        # hint — внутри рамки, у выделенного тоггла gate ("on")
-        hint = str(scr.query_one(".set-modes-hint", Static).render())
-        assert hint.startswith("on —")
-        assert "Enter" not in hint            # клавиши — только в футере
+        await pilot.press("down")                    # -> gate (самопроверка), значение on
+        await pilot.pause(0.1)
+        hint1 = str(scr.query_one(".set-modes-hint", Static).render())
+        assert hint1.startswith("on —")
+        assert hint1 != hint0
 
-        await pilot.press("down")
-        await pilot.pause()
-        footer2 = str(scr.query_one("#set-footer", Static).render())
-        assert footer2 == footer              # футер не зависит от выделения
+        await pilot.press("down")                    # -> answers (формат), значение deny
+        await pilot.pause(0.1)
         hint2 = str(scr.query_one(".set-modes-hint", Static).render())
-        assert hint2.startswith("judge —")
-        assert hint2 != hint
+        assert hint2.startswith("deny —")
+        assert hint2 != hint1
 
-        # переключение значения (Enter) — hint выделенной строки обновляется
-        await pilot.press("enter")
-        await pilot.pause()
-        hint3 = str(scr.query_one(".set-modes-hint", Static).render())
-        assert hint3.startswith("allow —")
-        assert hint3 != hint2
+
+async def test_modes_preset_row_shows_custom_when_global_nonstandard(tmp_path):
+    """Глобал нестандартный (on+allow) → строка-пресет резолвится в custom, трек
+    отращивает 4-ю позицию (спека §2, §4.2)."""
+    app, cfg_file = _app_with_config(
+        tmp_path, 'tui:\n  finish_gate_mode: "on"\n  text_answer_mode: "allow"\n')
+    async with app.run_test() as pilot:
+        scr = await _open_modes_section(pilot)
+        rows = [str(w.render()) for w in scr.query(".set-row")]
+        rigor_row = next(r for r in rows if "rigor ·" in r)
+        assert rigor_row.rstrip().endswith("custom")
+        assert "  ●" in rigor_row or "  ○" in rigor_row  # 4-я вне-шкальная позиция
+
+
+async def test_modes_preset_row_shows_session_override_tail(tmp_path):
+    """Хвост «· в текущей сессии: X» на строке пресета (§6.2): X = резолв сессионной
+    пары. Глобал medium, сессия -> high."""
+    app, cfg_file = _app_with_config(
+        tmp_path, 'tui:\n  finish_gate_mode: "smart"\n  text_answer_mode: "judge"\n')
+    app.tui_state.active_task_id = "t1"
+    app._threads_dir = str(tmp_path / "threads")
+    app.apply_session_overrides({"tui.finish_gate_mode": "on", "tui.text_answer_mode": "deny"})
+    async with app.run_test(size=(200, 24)) as pilot:
+        scr = await _open_modes_section(pilot)
+        rows = [str(w.render()) for w in scr.query(".set-row")]
+        rigor_row = next(r for r in rows if "rigor ·" in r)
+        assert "в текущей сессии: high" in rigor_row
+
+
+async def test_modes_preset_track_width_reserved_regardless_of_global(tmp_path):
+    """Ревизия 4 (спека §4.2): 4-я позиция трека пресета зарезервирована ВСЕГДА
+    (`extra_lit=False` -> `render_track` сам добавляет +3 пустых символа) —
+    колонка значения строки-пресета не сдвигается между стандартным глобалом
+    (medium) и custom (on+allow). Без фикса `_modes_columns`/`_mode_row_text`
+    считают `extra=None` для не-custom -> трек короче на 3 символа -> значение
+    "medium" стоит на 3 позиции левее, чем "custom"."""
+    custom_dir = tmp_path / "custom"
+    custom_dir.mkdir()
+    app_std, _ = _app_with_config(
+        tmp_path, 'tui:\n  finish_gate_mode: "smart"\n  text_answer_mode: "judge"\n')
+    app_custom, _ = _app_with_config(
+        custom_dir, 'tui:\n  finish_gate_mode: "on"\n  text_answer_mode: "allow"\n')
+    async with app_std.run_test() as pilot_std:
+        scr_std = await _open_modes_section(pilot_std)
+        rows_std = [str(w.render()) for w in scr_std.query(".set-row")]
+        row_std = next(r for r in rows_std if "rigor ·" in r)
+    async with app_custom.run_test() as pilot_custom:
+        scr_custom = await _open_modes_section(pilot_custom)
+        rows_custom = [str(w.render()) for w in scr_custom.query(".set-row")]
+        row_custom = next(r for r in rows_custom if "rigor ·" in r)
+    assert row_std.index("medium") == row_custom.index("custom")
+
+
+async def test_modes_rows_track_base_left_aligned(tmp_path):
+    """Ревизия 5 (спека §4.2/§6, тот же контракт, что и в палитре): базовый
+    трек ВСЕХ строк секции (rigor и дети) начинается в ОДНОЙ колонке — первый
+    глиф ●/○ на одной позиции. Раньше равенство было только по ШИРИНАМ
+    (право-прижатый трек внутри общего поля) — короткий базовый трек детей
+    (5 ячеек, без 4-й позиции) сдвигался вправо, чтобы упереться в тот же
+    правый край, что и трек пресета (5+3 ячейки с зарезервированной custom-
+    позицией) — первый глиф у детей и у пресета не совпадал. custom-резерв
+    рисуется правее троек и не двигает ни тройки, ни подписи между стандартным
+    глобалом (medium) и custom (on+allow)."""
+    custom_dir = tmp_path / "custom"
+    custom_dir.mkdir()
+    app_std, _ = _app_with_config(
+        tmp_path, 'tui:\n  finish_gate_mode: "smart"\n  text_answer_mode: "judge"\n')
+    app_custom, _ = _app_with_config(
+        custom_dir, 'tui:\n  finish_gate_mode: "on"\n  text_answer_mode: "allow"\n')
+
+    async with app_std.run_test() as pilot_std:
+        scr_std = await _open_modes_section(pilot_std)
+        label_w, base_w, extra_w, value_w = scr_std._modes_columns()
+        rows_std = [str(w.render()) for w in scr_std.query(".set-row")]
+        rigor_std = next(r for r in rows_std if "rigor ·" in r)
+        gate_std = next(r for r in rows_std if "самопроверка" in r)
+        answers_std = next(r for r in rows_std if "формат ответа" in r)
+
+    async with app_custom.run_test() as pilot_custom:
+        scr_custom = await _open_modes_section(pilot_custom)
+        rows_custom = [str(w.render()) for w in scr_custom.query(".set-row")]
+        rigor_custom = next(r for r in rows_custom if "rigor ·" in r)
+        gate_custom = next(r for r in rows_custom if "самопроверка" in r)
+        answers_custom = next(r for r in rows_custom if "формат ответа" in r)
+
+    assert base_w == 5 and extra_w == 3   # тройки(5) + custom-резерв(3) — общие для всех строк
+
+    def first_glyph_col(row: str) -> int:
+        for i, ch in enumerate(row):
+            if ch in ("●", "○"):
+                return i
+        raise AssertionError(f"no track glyph in row: {row!r}")
+
+    col_rigor = first_glyph_col(rigor_std)
+    assert first_glyph_col(gate_std) == col_rigor
+    assert first_glyph_col(answers_std) == col_rigor
+
+    # Позиция базы (первый глиф) и подписей значений не сдвигается между
+    # стандартным глобалом и custom — ни у пресета, ни у детей.
+    assert first_glyph_col(rigor_custom) == col_rigor
+    assert first_glyph_col(gate_custom) == first_glyph_col(gate_std)
+    assert first_glyph_col(answers_custom) == first_glyph_col(answers_std)
+    assert rigor_std.index("medium") == rigor_custom.index("custom")
+    assert gate_std.rindex("smart") == gate_custom.rindex("on")
+    assert answers_std.rindex("judge") == answers_custom.rindex("allow")
+
+
+async def test_modes_value_column_fixed_width_aligns_session_tail(tmp_path):
+    """Ревизия 6, п.3 (спека шапка): колонка подписи значения — фиксированной
+    ширины (`value_w`, max по ВСЕМ именам значений секции + custom, докстрин
+    `_modes_columns`) — хвост «· в текущей сессии: X» стартует в ОДНОЙ колонке
+    у всех строк секции, даже когда глобальные значения разной длины (custom=6,
+    judge=5, off=3) и сессионные X — тоже разной длины (high=4, deny=4, on=2)."""
+    app, cfg_file = _app_with_config(
+        tmp_path, 'tui:\n  finish_gate_mode: "off"\n  text_answer_mode: "judge"\n')
+    app.tui_state.active_task_id = "t1"
+    app._threads_dir = str(tmp_path / "threads")
+    # глобал (off, judge) — не пресет -> rigor резолвится в custom (6 симв.);
+    # сессия (on, deny) — ровно пара "high" (4 симв.), отличная от custom.
+    app.apply_session_overrides({"tui.finish_gate_mode": "on", "tui.text_answer_mode": "deny"})
+    async with app.run_test(size=(200, 24)) as pilot:
+        scr = await _open_modes_section(pilot)
+        rows = [str(w.render()) for w in scr.query(".set-row")]
+        rigor_row = next(r for r in rows if "rigor ·" in r)
+        gate_row = next(r for r in rows if "самопроверка" in r)
+        answers_row = next(r for r in rows if "формат ответа" in r)
+
+        assert "в текущей сессии: high" in rigor_row
+        assert "в текущей сессии: on" in gate_row
+        assert "в текущей сессии: deny" in answers_row
+
+        tail = "· в текущей сессии:"
+        assert rigor_row.index(tail) == gate_row.index(tail) == answers_row.index(tail)
+
+
+async def test_modes_hint_global_framing_even_with_session_override(tmp_path):
+    """Ревьюный follow-up V1 (`_modes_hint_text` -> `preset_custom_hint`): строка
+    пресета в Settings правит ГЛОБАЛ (спека §4.2), поэтому custom-хинт обязан
+    описывать глобальную пару текстом «ваш дефолт: …», даже когда сессия ТОЖЕ
+    переопределяет пару — иначе хинт называет сессионные значения и рамку «своя
+    пара этой сессии», хотя строка над ним показывает глобал. Глобал custom
+    (on+allow), сессия расходится с ним (off+deny)."""
+    app, cfg_file = _app_with_config(
+        tmp_path, 'tui:\n  finish_gate_mode: "on"\n  text_answer_mode: "allow"\n')
+    app.tui_state.active_task_id = "t1"
+    app._threads_dir = str(tmp_path / "threads")
+    app.apply_session_overrides({"tui.finish_gate_mode": "off", "tui.text_answer_mode": "deny"})
+    async with app.run_test(size=(200, 24)) as pilot:
+        scr = await _open_modes_section(pilot)
+        hint = str(scr.query_one(".set-modes-hint", Static).render())
+        assert "ваш дефолт: самопроверка on, формат allow" in hint
+        assert "своя пара этой сессии" not in hint
 
 
 async def test_modes_generic_toggle_appears_and_cycles_without_code_changes(tmp_path, monkeypatch):
@@ -2188,10 +2360,12 @@ async def test_modes_generic_toggle_appears_and_cycles_without_code_changes(tmp_
     )
     monkeypatch.setitem(tg.TOGGLES, "fake", fake)
 
-    def _fake_apply(app_, name, value):
-        state_holder["value"] = value
-        return value
-    monkeypatch.setattr(tg, "apply_toggle", _fake_apply)
+    def _fake_write(path, values, **kw):
+        # _modes_apply пишет ровно один ключ {"tui.fake_mode": "<value>"}; реальная
+        # схема config.yml (extra=forbid) фиктивный ключ не знает — перехватываем
+        # запись и обновляем holder, из которого читает state-провайдер тоггла.
+        state_holder["value"] = values["tui.fake_mode"]
+    monkeypatch.setattr("onboarding_config_writer.write_values", _fake_write)
 
     cfg_file = tmp_path / "config.yml"
     cfg_file.write_text('tui:\n  finish_gate_mode: "on"\n  text_answer_mode: "judge"\n',
@@ -2208,10 +2382,9 @@ async def test_modes_generic_toggle_appears_and_cycles_without_code_changes(tmp_
         assert "фиктивный режим: f0" in modes_row
 
         # 2) подэкран: строка фиктивного тоггла смонтирована
-        scr._menu_idx = 3
-        scr._open_section(3)
+        open_settings_section(scr, "Режимы работы")
         await pilot.pause()
-        assert scr._view == 3
+        assert scr._view == settings_section_index("Режимы работы")
         names = list(tg.TOGGLES.keys())
         fake_idx = names.index("fake")
         row_texts = [str(w.render()) for w in scr.query(".set-row")]
@@ -2227,6 +2400,232 @@ async def test_modes_generic_toggle_appears_and_cycles_without_code_changes(tmp_
         assert any("фиктивный режим" in r and "f0" in r for r in row_texts)
 
 
+def _app_with_config(tmp_path, yaml_text):
+    """TuiApp с реальным config.yml на диске (тот же паттерн, что apply_toggle-тесты)."""
+    import tui.app as app_mod
+
+    cfg_file = tmp_path / "config.yml"
+    cfg_file.write_text(yaml_text, encoding="utf-8")
+    app = app_mod.TuiApp(config={})
+    app._config_path = str(cfg_file)
+    app.reload_config()
+    return app, cfg_file
+
+
+async def _open_modes_section(pilot):
+    """Настройки → «Режимы работы»: открыть экран настроек в этой секции."""
+    app = pilot.app
+    # on_apply — как в проде (_cmd_settings): экран применяет запись через него,
+    # а не зовёт app.reload_config мимо инъекции.
+    scr = _mk_screen(config=app._config, config_path=app._config_path,
+                     on_apply=app.reload_config)
+    app.push_screen(scr)
+    await pilot.pause()
+    open_settings_section(scr, "Режимы работы")
+    await pilot.pause(0.1)
+    return scr
+
+
+async def test_modes_section_group_separator_between_two_preset_groups(tmp_path, monkeypatch):
+    """Ревизия 7 (спека §4.2: разделитель групп — родовой по `preset_keys`,
+    ОБЩИЙ для палитры и Settings; мирроринг
+    test_palette_toggles.py::test_group_separator_between_two_preset_groups).
+    Секция «Режимы работы» монтирует строки НАПРЯМУЮ из `TOGGLES` (нет своего
+    реестра/фильтра, как у палитры) — честный 2-group тест подменяет сам
+    `TOGGLES` ЦЕЛИКОМ (`monkeypatch.setattr`, не точечный `setitem`), иначе
+    к синтетическим группам примешалась бы настоящая `rigor` (сегодня в
+    проде группа одна). `_mount_modes_section` в остальном не тронута —
+    это её РЕАЛЬНЫЙ путь монтирования на подменных данных, не фейковый стенд."""
+    pytest.importorskip("textual")
+    from tui import palette as p
+    from tui import toggles as tg
+
+    group_a = tg.ToggleSpec(
+        values=(tg.ToggleValue("x", "hint x", p.INK), tg.ToggleValue("y", "hint y", p.ACCENT)),
+        state=lambda cfg: "x", label="группа A", summary="демо",
+        preset_keys=("tui.zz_a_child",),
+    )
+    group_b = tg.ToggleSpec(
+        values=(tg.ToggleValue("p", "hint p", p.INK), tg.ToggleValue("q", "hint q", p.ACCENT)),
+        state=lambda cfg: "p", label="группа B", summary="демо",
+        preset_keys=("tui.zz_b_child",),
+    )
+    monkeypatch.setattr(tg, "TOGGLES", {"zzgroupa": group_a, "zzgroupb": group_b})
+
+    app, _ = _app_with_config(tmp_path, 'tui:\n  finish_gate_mode: "smart"\n  text_answer_mode: "judge"\n')
+    async with app.run_test() as pilot:
+        scr = await _open_modes_section(pilot)
+
+        seps = list(scr.query(".set-group-sep"))
+        assert len(seps) == 1                          # ровно один — между двумя группами
+
+        rows = list(scr.query(".set-row"))
+        assert len(rows) == 2
+        assert rows[0].region.y < seps[0].region.y < rows[1].region.y
+
+
+async def test_modes_apply_blocked_when_not_writable(tmp_path, monkeypatch):
+    """При `_writable() is False` (пакетный шаблон) запись глобала НЕ проходит,
+    config.yml не меняется, уведомление объясняет причину."""
+    import config as config_mod
+    app, cfg_file = _app_with_config(tmp_path, 'tui:\n  finish_gate_mode: "on"\n')
+    original = cfg_file.read_text(encoding="utf-8")
+    monkeypatch.setattr(config_mod, "_default_config_path", lambda: str(cfg_file))
+
+    async with app.run_test() as pilot:
+        scr = await _open_modes_section(pilot)
+        assert not scr._writable()
+
+        await pilot.press("right")
+        await pilot.pause(0.1)
+
+        assert cfg_file.read_text(encoding="utf-8") == original
+        notice = " ".join(str(w.render()) for w in scr.query(Static))
+        assert "недоступен для записи" in notice
+
+
+async def test_modes_apply_preserves_unrelated_keys(tmp_path):
+    """Запись глобала трогает только dotted-ключ переключённого тоггла —
+    посторонний ключ config.yml (agent.model) остаётся с прежним значением.
+    Курсор 0 = /rigor (пресет) — спускаемся на детальную gate."""
+    app, cfg_file = _app_with_config(
+        tmp_path,
+        'tui:\n  finish_gate_mode: "on"\n'
+        'agent:\n  model: "custom-model-xyz"\n')
+    async with app.run_test() as pilot:
+        scr = await _open_modes_section(pilot)
+        await pilot.press("down")            # /rigor -> gate
+        await pilot.pause(0.1)
+        await pilot.press("right")          # gate on -> off глобально
+        await pilot.pause(0.1)
+
+        text = cfg_file.read_text(encoding="utf-8")
+        assert 'finish_gate_mode: "off"' in text
+        assert 'model: "custom-model-xyz"' in text
+
+
+async def test_modes_apply_does_not_reset_live_session_override(tmp_path):
+    """Центральная гарантия модели «место = scope» (Settings пишет глобал,
+    сессию не трогает) — прямым тестом, не композицией существующих. Оверрайд
+    "on" совпадает с исходным глобалом ДО переключения — это осознанный выбор:
+    после единственного нажатия глобал уходит в "off" (цикл идёт от глобала),
+    и только тогда пара расходится ("on" оверрайда против "off" нового
+    глобала) — иначе ассерты не различили бы, откуда взялось эффективное
+    значение. Если `_modes_apply` начнёт сбрасывать/перезаписывать сессионные
+    переопределения при записи глобала — первым упадёт п.3 (эффективное
+    значение перестанет быть оверрайдом). Курсор 0 = /rigor (пресет) —
+    спускаемся на детальную gate; терминал шире (200 колонок) — хвост оверрайда
+    в строке не зависит от ширины, здесь важен сам факт его наличия."""
+    from tui.toggles import toggle_state
+    app, cfg_file = _app_with_config(tmp_path, 'tui:\n  finish_gate_mode: "on"\n')
+    async with app.run_test(size=(200, 24)) as pilot:
+        scr = await _open_modes_section(pilot)
+        app.set_session_override("tui.finish_gate_mode", "on")
+
+        await pilot.press("down")            # /rigor -> gate
+        await pilot.pause(0.1)
+        await pilot.press("right")          # глобал on -> off; оверрайд не трогаем
+        await pilot.pause(0.1)
+
+        text = cfg_file.read_text(encoding="utf-8")
+        assert 'finish_gate_mode: "off"' in text                    # (1) новый глобал в файле
+
+        assert app._session_overrides == {"tui.finish_gate_mode": "on"}  # (2) оверрайд выжил
+
+        assert toggle_state(app, "gate") == "on"                    # (3) эффективное = оверрайд, не новый глобал
+
+        rows = [str(w.render()) for w in scr.query(".set-row")]
+        gate_row = next(r for r in rows if "самопроверка" in r)
+        assert "· в текущей сессии: on" in gate_row                    # (4) пометка отражает пару слоёв
+
+
+async def test_modes_row_shows_session_override_note(tmp_path):
+    """§6.2 (ревизия 2026-07-21 вечер): когда сессия перекрывает глобальный дефолт
+    режима, хвостом В СТРОКЕ тоггла (сразу после значения) появляется «· в текущей
+    сессии: Y» — привязка к параметру однозначна, отдельной строки больше нет;
+    без оверрайда хвоста нет ни у одной строки; слова «глобально» нигде нет
+    (значение в строке — это и есть глобал); трек/значение строки по-прежнему
+    показывают ГЛОБАЛ (секция правит его), не эффективное. Терминал шире (200
+    колонок) — общие колонки секции выросли (глиф дерева + возможная 4-я позиция
+    трека /rigor), хвост оверрайда проверяется независимо от ширины."""
+    from tui.toggles import TOGGLES
+    app, cfg_file = _app_with_config(tmp_path, 'tui:\n  finish_gate_mode: "on"\n')
+    async with app.run_test(size=(200, 24)) as pilot:
+        scr = await _open_modes_section(pilot)
+        rows = [str(w.render()) for w in scr.query(".set-row")]
+        assert not any("в текущей сессии" in r for r in rows)   # оверрайда нет — хвоста нет нигде
+
+        app.set_session_override("tui.finish_gate_mode", "off")
+        scr._render_view()
+        await pilot.pause(0.1)
+
+        rows = [str(w.render()) for w in scr.query(".set-row")]
+        assert len(rows) == len(TOGGLES)                     # пометка не добавляет строк
+
+        gate_row = next(r for r in rows if "самопроверка" in r)
+        answers_row = next(r for r in rows if "формат ответа" in r)
+        assert "· в текущей сессии: off" in gate_row
+        assert "глобально" not in gate_row
+        assert "в текущей сессии" not in answers_row             # неразошедшийся — без хвоста
+        # значение в строке — глобал, не сессия (сплит по самому хвосту: head ребёнка
+        # тоже несёт маркер «· » ревизии 3, поэтому голый split("·") больше не годится)
+        assert gate_row.split("· в текущей сессии:")[0].rstrip().endswith("on")
+
+
+async def test_modes_no_override_note_from_legacy_key_alone(tmp_path):
+    """Инвариант §6.2: расхождение глобал≠эффективное возможно ТОЛЬКО от
+    сессионного оверрайда — не от того, ЧЕМ посчитан сам глобал. Легаси-ключ
+    `agent.strict_turn_finish_validation: false` (без tui.finish_gate_mode) уже
+    заставляет правило коллизии эффективного /gate отдать "off", но без сессии
+    toggle_state_base и toggle_state гоняют то же правило по одному и тому же
+    конфигу — расхождения нет. Гвоздь против будущей правки effective_config,
+    которая начнёт менять БАЗОВЫЕ ключи не из session overrides."""
+    from tui.toggles import toggle_state, toggle_state_base
+    app, cfg_file = _app_with_config(
+        tmp_path, 'agent:\n  strict_turn_finish_validation: false\n')
+    async with app.run_test() as pilot:
+        scr = await _open_modes_section(pilot)
+        rows = [str(w.render()) for w in scr.query(".set-row")]
+        assert not any("в текущей сессии" in r for r in rows)
+        assert toggle_state_base(app, "gate") == toggle_state(app, "gate") == "off"
+
+
+async def test_modes_row_hides_session_override_note_when_narrow(tmp_path):
+    """Important-1 (ревью): ветка «хвост не влез» `_mode_row_text` (§6.2, all-or-
+    nothing по `_modes_row_width`) не была исполнена ни одним из существующих
+    тестов — все на широком терминале, где хвост всегда помещается. На узком
+    терминале (60 колонок → `_modes_row_width()` == 50) ядро строки gate (курсор +
+    label + трек + значение, 44 символа) ещё влезает, а ядро + хвост
+    "   · в текущей сессии: off" (44 + 23 = 67 символов) — уже нет: хвост уходит
+    ЦЕЛИКОМ (не обрезком/многоточием — в отличие от hint-строки у него нет
+    механики усечения), ядро остаётся видимым полностью. На широком терминале
+    (100 колонок → row_width == 90) тот же оверрайд даёт хвост целиком."""
+    app, cfg_file = _app_with_config(tmp_path, 'tui:\n  finish_gate_mode: "on"\n')
+    async with app.run_test(size=(60, 24)) as pilot:
+        scr = await _open_modes_section(pilot)
+        app.set_session_override("tui.finish_gate_mode", "off")
+        scr._render_view()
+        await pilot.pause(0.1)          # carry-fix _refresh_modes_rows после layout
+
+        rows = [str(w.render()) for w in scr.query(".set-row")]
+        gate_row = next(r for r in rows if "самопроверка" in r)
+        assert "в текущей сессии" not in gate_row     # хвост ушёл целиком
+        assert "· в тек" not in gate_row            # не обрезком/многоточием
+        assert "самопроверка выполнения задачи" in gate_row   # ядро: label цел
+        assert gate_row.rstrip().endswith("on")               # ядро: значение (глобал) цело
+
+    app2, _cfg_file2 = _app_with_config(tmp_path, 'tui:\n  finish_gate_mode: "on"\n')
+    async with app2.run_test(size=(100, 24)) as pilot2:
+        scr2 = await _open_modes_section(pilot2)
+        app2.set_session_override("tui.finish_gate_mode", "off")
+        scr2._render_view()
+        await pilot2.pause(0.1)
+
+        rows2 = [str(w.render()) for w in scr2.query(".set-row")]
+        gate_row2 = next(r for r in rows2 if "самопроверка" in r)
+        assert "· в текущей сессии: off" in gate_row2   # на широком — хвост есть
+
+
 async def test_connection_section_mounts_connection_editor(tmp_path):
     from tui.screens.settings import SettingsScreen
     from tui.editors.connection import ConnectionEditor
@@ -2240,7 +2639,7 @@ async def test_connection_section_mounts_connection_editor(tmp_path):
                              on_apply=lambda: None, probe_fn=_fake_probe(_probe_ok()))
         app.push_screen(scr)
         await pilot.pause()
-        scr._open_section(0)                 # секция «Подключение»
+        open_settings_section(scr, "Подключение")
         await pilot.pause()
         assert scr.query(ConnectionEditor)
 
@@ -2266,8 +2665,7 @@ async def test_settings_model_filter_and_save(tmp_path, monkeypatch):
     app = app_mod.TuiApp(config=cfg)
     async with app.run_test() as pilot:
         scr = await _open_settings(app, pilot, cfg_file, cfg)
-        scr._menu_idx = 1
-        scr._open_section(1)                               # секция Модель
+        open_settings_section(scr, "Модель")
         await pilot.pause(); await pilot.pause()           # fetch-воркер
         scr.query_one("#model-filter", Input).value = "gpt"
         await pilot.pause()
