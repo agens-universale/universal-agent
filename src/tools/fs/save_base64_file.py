@@ -1,12 +1,12 @@
 import base64
-import hashlib
 import json
 import os
 
 from security.path_policy import enforce_write_guard
 from tools.simple_tool_base import AbstractSimpleTool
-from utils.tool_report_paths import tool_report_abspath
 from utils.atomic_io import atomic_replace
+from utils.file_text import sha256_hex_of_bytes
+from utils.tool_report_paths import tool_report_abspath
 
 
 class SaveBase64File(AbstractSimpleTool):
@@ -112,5 +112,5 @@ class SaveBase64File(AbstractSimpleTool):
             ok=True,
             path=path,
             bytes_written=len(raw),
-            sha256=hashlib.sha256(raw).hexdigest(),
+            sha256=sha256_hex_of_bytes(raw),
         )

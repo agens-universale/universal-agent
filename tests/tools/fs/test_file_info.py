@@ -107,8 +107,7 @@ def test_file_info_cp1251_not_binary(tmp_path):
     assert res["sha256"] == sha256_hex_of_bytes(data)
     assert res["encoding_guess"] == "cp1251"
     assert res["encoding_confidence"] >= 0.5
-    # Line count needs a successful utf-8 decode; deferred until encoding=.
-    assert res["line_count"] is None
+    assert res["line_count"] == 3
 
 
 def test_file_info_broken_symlink_reports_symlink(tmp_path):

@@ -7,6 +7,7 @@ from utils.file_text import (
     BINARY_SAMPLE_BYTES,
     classify_content_from_sample,
     count_lines_in_text,
+    decode_text_bytes,
     guess_encoding,
 )
 from security.read_guard import enforce_read_guard
@@ -220,9 +221,12 @@ class FileInfo(AbstractSimpleTool):
 
             if include_line_count and not is_binary:
                 try:
-                    line_count = count_lines_in_text(self._backend.read(stat_path))
-                except UnicodeDecodeError:
-                    line_count = None
+                    raw = self._backend.read_bytes(stat_path)
+                    decoded = decode_text_bytes(raw, encoding=encoding_guess)
+                    if decoded.ok and decoded.text is not None:
+                        line_count = count_lines_in_text(decoded.text)
+                    else:
+                        line_count = None
                 except OSError as e:
                     return self._error(
                         path=path,

@@ -67,10 +67,22 @@ def guess_encoding(data: bytes) -> tuple[str | None, float | None]:
 
 
 def read_text_for_edit(path: str) -> str:
-    """Strict UTF-8 decode of raw file bytes (preserves CRLF; no errors=ignore)."""
+    """Decode local file via file_text canon (BOM / utf-8 / chardet allowlist).
+
+    Preserves CRLF. No ``errors=ignore|replace``. Undecodable/binary → ``UnicodeDecodeError``.
+    """
     with open(path, "rb") as f:
         data = f.read()
-    return data.decode(EDIT_TEXT_ENCODING)
+    text = decode_text_best_effort(data)
+    if text is not None:
+        return text
+    raise UnicodeDecodeError(
+        EDIT_TEXT_ENCODING,
+        data,
+        0,
+        1,
+        "undecodable or binary file",
+    )
 
 
 def sha256_hex_of_bytes(data: bytes) -> str:
@@ -331,10 +343,36 @@ def try_encode_text_bytes(
         return None, encode_failed_error(canonical)
 
 
+def encode_text_for_write(content: str, encoding: str = EDIT_TEXT_ENCODING) -> bytes:
+    """Strict allowlist encode for backend ``write``/``append``. Raises ``ValueError`` on fail."""
+    data, err = try_encode_text_bytes(content, encoding)
+    if err is not None:
+        raise ValueError(err.get("message") or f"encode failed: {encoding}")
+    assert data is not None
+    return data
+
+
 def count_lines_in_text(text: str) -> int:
     if not text:
         return 0
     return text.count("\n") + (0 if text.endswith("\n") else 1)
+
+
+def decode_text_best_effort(data: bytes) -> str | None:
+    """Best-effort decode for metadata/display (not for write). Never raises on codec fail.
+
+    Confident Unicode first; else chardet allowlist guess. Binary / undecodable → ``None``.
+    """
+    result = decode_text_bytes(data)
+    if result.ok:
+        return result.text
+    if (result.error or {}).get("type") == "is_binary":
+        return None
+    guess, _ = guess_encoding(data)
+    if guess is None:
+        return None
+    guessed = decode_text_bytes(data, encoding=guess)
+    return guessed.text if guessed.ok else None
 
 
 def _strip_incomplete_utf8_tail(chunk: bytes) -> bytes:

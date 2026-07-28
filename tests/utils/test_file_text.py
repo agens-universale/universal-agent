@@ -129,6 +129,16 @@ def test_read_text_for_edit_preserves_crlf_and_is_strict(tmp_path):
         read_text_for_edit(str(bad))
 
 
+def test_read_text_for_edit_cp1251_via_canon(tmp_path):
+    legacy = (
+        "Уважаемые коллеги! Настоящим сообщаем, что заседание рабочей группы "
+        "по внедрению системы состоится 15 марта 2024 года в переговорной.\n"
+    ) * 3
+    path = tmp_path / "legacy.txt"
+    path.write_bytes(legacy.encode("cp1251"))
+    assert read_text_for_edit(str(path)) == legacy
+
+
 def test_decode_text_bytes_utf8_and_bom_round_trip():
     utf8 = decode_text_bytes("hi\n".encode("utf-8"))
     assert utf8.ok and utf8.encoding_used == "utf-8" and utf8.text == "hi\n"
@@ -155,6 +165,18 @@ def test_decode_text_bytes_nul_and_legacy():
     assert err["encoding_confidence"] >= 0.5
     assert "Уважаемые" in err["preview"]
     assert err["preview_encoding"] == "cp1251"
+
+
+def test_decode_text_best_effort_utf8_and_cp1251():
+    from utils.file_text import decode_text_best_effort
+
+    assert decode_text_best_effort("hi\n".encode("utf-8")) == "hi\n"
+    legacy = (
+        "Уважаемые коллеги! Настоящим сообщаем, что заседание рабочей группы "
+        "по внедрению системы состоится 15 марта 2024 года в переговорной.\n"
+    ) * 3
+    assert decode_text_best_effort(legacy.encode("cp1251")) == legacy
+    assert decode_text_best_effort(b"a\x00b") is None
 
 
 def test_decode_explicit_cp1251_and_unsupported():

@@ -67,6 +67,29 @@ def test_write_group_atomic_and_append(be, tmp_path):
     assert os.path.isdir(nd)
 
 
+def test_read_write_cp1251_round_trip(be, tmp_path):
+    p = str(tmp_path / "legacy.txt")
+    text = (
+        "Уважаемые коллеги! Настоящим сообщаем, что заседание рабочей группы "
+        "по внедрению системы состоится 15 марта 2024 года в переговорной.\n"
+    ) * 3
+    be.write(p, text, encoding="cp1251")
+    assert open(p, "rb").read() == text.encode("cp1251")
+    assert be.read(p) == text
+
+
+def test_write_unsupported_encoding_raises(be, tmp_path):
+    p = str(tmp_path / "x.txt")
+    with pytest.raises(ValueError, match="Unsupported encoding"):
+        be.write(p, "hi", encoding="ibm866")
+
+
+def test_write_encode_failed_raises(be, tmp_path):
+    p = str(tmp_path / "x.txt")
+    with pytest.raises(ValueError, match="Cannot encode"):
+        be.write(p, "Привет", encoding="latin-1")
+
+
 def test_traverse_and_paths(be, tmp_path):
     (tmp_path / "sub").mkdir()
     (tmp_path / "sub" / "f.txt").write_text("x", encoding="utf-8")

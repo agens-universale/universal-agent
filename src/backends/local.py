@@ -14,7 +14,7 @@ from backends.protocol import (
     ExecResult,
     FsBackend,
 )
-from utils.file_text import read_text_for_edit
+from utils.file_text import encode_text_for_write, read_text_for_edit
 
 
 class LocalFsBackend(FsBackend):
@@ -88,7 +88,7 @@ class LocalFsBackend(FsBackend):
             return f.read()
 
     def iter_lines(self, path: str) -> Iterable[str]:
-        # Preserve raw line endings; strict UTF-8 (same as read_text_for_edit).
+        # Preserve raw line endings; same codec as read_text_for_edit.
         text = self.read(path)
         yield from text.splitlines(keepends=True)
 
@@ -105,8 +105,8 @@ class LocalFsBackend(FsBackend):
 
     # --- write ---
     def write(self, path: str, content: str, encoding: str = "utf-8") -> None:
-        # Strict encode → atomic bytes write (no errors=replace).
-        self.write_bytes(path, content.encode(encoding))
+        # Allowlist + strict encode → atomic bytes write (no errors=replace).
+        self.write_bytes(path, encode_text_for_write(content, encoding))
 
     def write_bytes(self, path: str, data: bytes) -> None:
         tmp_path = f"{path}.tmp"
@@ -124,7 +124,7 @@ class LocalFsBackend(FsBackend):
 
     def append(self, path: str, content: str, encoding: str = "utf-8") -> None:
         with open(path, "ab") as fd:
-            fd.write(content.encode(encoding))
+            fd.write(encode_text_for_write(content, encoding))
 
     def copy(self, src: str, dst: str) -> None:
         with open(src, "rb") as s, open(dst, "wb") as d:

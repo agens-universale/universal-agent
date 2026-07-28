@@ -7,6 +7,7 @@ File ops mirror deepagents' HarborSandbox: write/edit use native upload/download
 read/list use shell through exec.
 """
 import asyncio
+import base64
 import shlex
 import tempfile
 from pathlib import Path
@@ -19,6 +20,7 @@ from backends.protocol import (
     bound_exec_result,
 )
 from backends.walk_util import iter_files_from_flat, iter_walk_from_flat
+from utils.file_text import decode_text_best_effort, encode_text_for_write
 
 
 class HarborBackend(FsBackend):
@@ -92,12 +94,21 @@ class HarborBackend(FsBackend):
         command = f"python3 - <<'GC_HARBOR_PY_EOF'\n{code}\nGC_HARBOR_PY_EOF"
         return self.exec(command, cwd=cwd, timeout=timeout, env=env)
 
-    # --- file read (shell) ---
+    # --- file read (shell / download) ---
     def read(self, path: str) -> str:
-        res = self._await(self._env.exec(f"cat {shlex.quote(path)}"))
-        if res.return_code != 0:
+        # Raw bytes via download, then same codec as local ``read_text_for_edit``.
+        if not self.exists(path):
             raise FileNotFoundError(path)
-        return res.stdout or ""
+        text = decode_text_best_effort(self.read_bytes(path))
+        if text is not None:
+            return text
+        raise UnicodeDecodeError(
+            "utf-8",
+            b"",
+            0,
+            1,
+            f"undecodable or binary file: {path}",
+        )
 
     def read_bytes(self, path: str) -> bytes:
         with tempfile.NamedTemporaryFile("wb", delete=False) as tmp:
@@ -112,10 +123,18 @@ class HarborBackend(FsBackend):
         return iter(self.read(path).splitlines(keepends=True))
 
     def read_head_bytes(self, path: str, n: int) -> bytes:
-        res = self.exec(f"head -c {int(n)} {shlex.quote(path)}")
+        """Raw file prefix. ``exec`` stdout is text — pipe via base64 to avoid mangling."""
+        n = max(0, int(n))
+        if n == 0:
+            return b""
+        # GNU coreutils in harbor images (same assumption as ``stat -c`` / ``find -printf``).
+        res = self.exec(f"head -c {n} {shlex.quote(path)} | base64 -w 0")
         if res.return_code != 0:
             raise OSError(res.stderr.strip() or f"head failed: {path}")
-        return (res.stdout or "").encode("utf-8", errors="surrogateescape")[:n]
+        try:
+            return base64.b64decode(res.stdout or "", validate=False)
+        except Exception as exc:
+            raise OSError(f"base64 decode failed for head of {path}") from exc
 
     def sha256_bytes(self, path: str) -> str:
         return self.sha256(path)
@@ -244,8 +263,8 @@ class HarborBackend(FsBackend):
 
     # --- file write/edit (native transfer) ---
     def write(self, path: str, content: str, encoding: str = "utf-8") -> None:
-        # Strict encode on host → bytes upload (same path as write_bytes).
-        self.write_bytes(path, content.encode(encoding))
+        # Allowlist + strict encode on host → bytes upload (same path as write_bytes).
+        self.write_bytes(path, encode_text_for_write(content, encoding))
 
     def write_bytes(self, path: str, data: bytes) -> None:
         with tempfile.NamedTemporaryFile("wb", delete=False) as tmp:
@@ -259,7 +278,7 @@ class HarborBackend(FsBackend):
 
     def append(self, path: str, content: str, encoding: str = "utf-8") -> None:
         current = self.read_bytes(path) if self.exists(path) else b""
-        self.write_bytes(path, current + content.encode(encoding))
+        self.write_bytes(path, current + encode_text_for_write(content, encoding))
 
     def copy(self, src: str, dst: str) -> None:
         res = self.exec(f"cp {shlex.quote(src)} {shlex.quote(dst)}")

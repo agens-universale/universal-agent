@@ -41,6 +41,9 @@ class DiffStore:
 
     Пишет только обвязка Diff-TUI (не agent tools). Путь:
     ``<launch_root>/.gc/diffs/``.
+
+    ``.orig`` хранит **сырые байты** диска (не utf-8-only text), чтобы
+    undo/approve сохраняли legacy-кодировки (cp1251 и т.п.).
     """
 
     def __init__(
@@ -102,11 +105,11 @@ class DiffStore:
         )
         atomic_replace(tmp, self.index_path)
 
-    def _write_orig(self, key: str, content: str) -> None:
+    def _write_orig(self, key: str, data: bytes) -> None:
         self._ensure_dir()
         dest = self._orig_path(key)
         tmp = dest.with_suffix(".orig.tmp")
-        tmp.write_text(content, encoding="utf-8")
+        tmp.write_bytes(data)
         atomic_replace(tmp, dest)
 
     # --- register / snapshot ---
@@ -139,7 +142,7 @@ class DiffStore:
         if disk.is_file():
             wrote_orig = False
             if not orig.is_file():
-                self._write_orig(key, disk.read_text(encoding="utf-8"))
+                self._write_orig(key, disk.read_bytes())
                 wrote_orig = True
             index[key] = {
                 "status": STATUS_MODIFIED,
@@ -183,9 +186,9 @@ class DiffStore:
         if classify_file_content(str(disk)).is_binary:
             return False
 
-        content = disk.read_text(encoding="utf-8")
+        data = disk.read_bytes()
         # 1) .orig first
-        self._write_orig(key, content)
+        self._write_orig(key, data)
         # 2) then index
         index = self.load_index()
         index[key] = {
@@ -219,11 +222,11 @@ class DiffStore:
         if not orig.is_file():
             return UndoResult(ok=False, reason="no_orig")
 
-        content = orig.read_text(encoding="utf-8")
+        data = orig.read_bytes()
         disk = self._disk_path(key)
         disk.parent.mkdir(parents=True, exist_ok=True)
         tmp = disk.with_suffix(disk.suffix + ".tmp")
-        tmp.write_text(content, encoding="utf-8")
+        tmp.write_bytes(data)
         atomic_replace(tmp, disk)
         return UndoResult(ok=True, reason="restored")
 
@@ -326,9 +329,7 @@ class DiffStore:
                 return orig
             disk = self._disk_path(key)
             try:
-                if disk.is_file() and disk.read_text(encoding="utf-8") == orig.read_text(
-                    encoding="utf-8"
-                ):
+                if disk.is_file() and disk.read_bytes() == orig.read_bytes():
                     return orig
             except OSError:
                 continue
