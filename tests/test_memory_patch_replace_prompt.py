@@ -32,3 +32,5 @@ def test_patch_replace_prompt_injects_summary_tags_and_wm_registers():
     for name in REGISTER_ORDER:
         assert f"<{name}>..." in loaded
     assert "user_intent" not in loaded.lower()
+    assert "never basename-only" in loaded
+    assert "absolute" in loaded.lower()

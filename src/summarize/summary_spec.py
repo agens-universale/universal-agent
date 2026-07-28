@@ -65,6 +65,7 @@ SUMMARY_SECTIONS: tuple[SummarySection, ...] = (
         memory_patch_hint="batch deltas → merge into `<knowledge>`",
         description=(
             "- **This batch only:** new or changed verified outcomes (command → verdict, or path → what was proven).\n"
+            "- File/module refs: full absolute paths as in tool results (`.../src/backends/local.py:84`), never basename-only (`local.py`).\n"
             "- Do **not** repeat sha256/checksum catalogs, path lists, or facts already in `<persistent_state>` unless corrected this batch.\n"
             "- Prefer `n/a` if nothing new was verified in this batch.\n"
             "- Do not invent paths, numbers, or outcomes; trace every item to dialogue or tool output."
@@ -85,6 +86,7 @@ SUMMARY_SECTIONS: tuple[SummarySection, ...] = (
         memory_patch_hint="path → purpose index (no sha256) → merge into `<knowledge>`",
         description=(
             "- Recent paths, URLs, modules, symbols, drafts, or outputs as `path -> purpose` (index only, not file contents).\n"
+            "- Paths must be full absolute paths as in tool results (`.../src/tools/fs/file_info.py`), never basename-only.\n"
             "- No checksum/sha256 lines here (session memory `knowledge` is canonical for those).\n"
             "- Do not duplicate last_verified_facts; artifacts answer *where*, facts answer *what was proven*.\n"
             "- Use `n/a` if unchanged since persistent_state; every entry traceable to dialogue, tool output, or user message."

@@ -202,7 +202,7 @@ Registers:
 - goal: user intent, desired outcome, success criteria, definition of done
 - constraints: hard requirements, preferences, prohibitions, format/technical/safety limits
 - state: current plan, progress, completed steps, open TODOs, blockers, next actions, active hypotheses
-- knowledge: stable verified facts, architecture decisions, implementation notes, artifact references, evidence
+- knowledge: stable verified facts, architecture decisions, implementation notes, artifact references, evidence (file refs: full absolute paths as in tools, e.g. `/home/.../src/backends/local.py` — never basename-only)
 
 Actions:
 - list: show register sizes

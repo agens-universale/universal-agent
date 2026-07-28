@@ -58,7 +58,8 @@ SESSION_MEMORY_REGISTERS: tuple[SessionMemoryRegister, ...] = (
     SessionMemoryRegister(
         name=REGISTER_KNOWLEDGE,
         replace_rule=(
-            "stable verified facts and evidence; canonical paths, checksums, command verdicts "
+            "stable verified facts and evidence; full absolute paths as in tool results "
+            "(e.g. `/home/.../src/backends/local.py:84`, never basename-only), checksums, command verdicts "
             "(one line each; dedupe persistent_state; cap superseded noise)"
         ),
     ),
