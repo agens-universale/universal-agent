@@ -36,9 +36,10 @@ class SearchFiles(AbstractSimpleTool):
             "type": "function",
             "name": "fs_search_files",
             "description": (
-                "Searches for a regex pattern in file contents (full-file regex: "
-                "matches may span newlines; '.' matches newline; '^'/'$' match line "
-                "boundaries — Python re DOTALL+MULTILINE). "
+                "Searches for a regex pattern in file contents (not for listing files by name). "
+                "`regex` is required — this tool does not list files by glob/name alone. "
+                "Full-file regex: matches may span newlines; '.' matches newline; '^'/'$' match "
+                "line boundaries — Python re DOTALL+MULTILINE. "
                 "`path` may be a directory (recursive search, optional file_pattern filter) "
                 "or a single file. Returns paginated hits: metadata includes total_matches, "
                 "offset, limit, truncated, next_offset, then matches (slice for this page). "
@@ -64,20 +65,22 @@ class SearchFiles(AbstractSimpleTool):
                     "regex": {
                         "type": "string",
                         "description": (
-                            "Regex matched against the whole file (DOTALL+MULTILINE: "
+                            "Required. Regex matched against file contents (DOTALL+MULTILINE: "
                             "patterns may span newlines; '.' matches newline; "
                             "'^'/'$' match line boundaries). "
                             "Keep patterns bounded — avoid unbounded .* across huge files. "
                             "Avoid unsupported features like backreferences or "
                             "variable-length lookarounds. "
-                            "Use double backslashes (e.g., \\d, \\s)."
+                            "Use double backslashes (e.g., \\d, \\s). "
+                            "Cannot be omitted: this tool always searches contents."
                         ),
                     },
                     "file_pattern": {
                         "type": "string",
                         "description": (
-                            "Glob pattern to filter files when path is a directory "
-                            "(e.g., '*.py', 'src/**/*.rs'). Ignored when path is a file. "
+                            "Optional glob to narrow which files are content-searched when path "
+                            "is a directory (e.g., '*.py', 'src/**/*.rs'). Not a standalone file "
+                            "finder — always pair with regex. Ignored when path is a file. "
                             "When unset, all files under the directory are searched."
                         ),
                     },
@@ -107,23 +110,24 @@ class SearchFiles(AbstractSimpleTool):
     @classmethod
     def prompt_description(cls):
         description = '''Tool name: fs_search_files  
-Tool description: Searches for a regex pattern in file contents under a directory (recursive) or in a single file; directories may be filtered by a glob pattern.
-Input schema: {"type": "object", "properties": {"path": {"type": "string", "description": "Directory to search recursively, or a single file."}, "regex": {"type": "string", "description": "Regex matched against the whole file (DOTALL+MULTILINE: patterns may span newlines; '.' matches newline; '^'/'$' are line boundaries). Keep patterns bounded."}, "file_pattern": {"type": "string", "description": "Glob pattern to filter files when path is a directory (e.g., \'*.py\'). Ignored when path is a file."}, "offset": {"type": "integer", "description": "1-based index of the first match to return."}, "limit": {"type": "integer", "description": "Max matches returned for this page."}}, "required": ["path", "regex"], "additionalProperties": false}
+Tool description: Searches for a regex pattern in file contents (not for listing files by name). regex is required; does not list files by glob/name alone.
+Input schema: {"type": "object", "properties": {"path": {"type": "string", "description": "Directory to search recursively, or a single file."}, "regex": {"type": "string", "description": "Required. Regex matched against the whole file (DOTALL+MULTILINE: patterns may span newlines; '.' matches newline; '^'/'$' are line boundaries). Keep patterns bounded."}, "file_pattern": {"type": "string", "description": "Optional glob to narrow which files are content-searched (e.g., \'*.py\'). Always pair with regex — not a standalone name listing."}, "offset": {"type": "integer", "description": "1-based index of the first match to return."}, "limit": {"type": "integer", "description": "Max matches returned for this page."}}, "required": ["path", "regex"], "additionalProperties": false}
 
 Usage:
 - `path` may be a **directory** (search all files recursively) or a **single file**.
-- When `path` is a directory, filters files using a **glob pattern** (e.g., `"*.py"`, `"src/**/*.rs"`). `file_pattern` is ignored for a file path.
+- When `path` is a directory, optionally narrow files with **file_pattern** (glob). `file_pattern` alone is not enough — `regex` is always required. This tool does not list files by name/glob alone.
 - Matches using a **regex** over the **whole file** (DOTALL+MULTILINE: patterns may span newlines; `.` matches newline; `^`/`$` match line boundaries). Keep patterns bounded.
 - Returns a **paginated** list of matches with file paths, **`line`** (start), **`end_line`**, `line_content`, and ±5 lines of `context`.
 - **`count`** = matches in **this response** (page size). **`total_matches`** = all hits in the scan.
 - If **`truncated`** is true, call again with **`offset` = `next_offset`** (and same or new `limit`) to get more.
-- Omitting **`offset`** and **`limit`** is equivalent to the first page: offset 1 and default **`limit`** (same default window idea as **fs_read_file** preview).
+- Omitting **`offset`** and **`limit`** is equivalent to the first page: offset 1 and default **`limit`**.
 - Returns an empty **`matches`** list if none found.
 - Files skipped (too large / binary / unreadable) appear in **`skipped`** with a reason (`file_too_large`, `is_binary`, `read_failed`, …); **`skipped_total`** is the full count (list may be capped, see **`skipped_truncated`**). A skip is not the same as "no match".
-- Prefer **`fs_read_file`** when you need the full file; use this tool to locate matches.
+- Prefer a dedicated file-read tool when you need the full file; use this tool to locate matches.
 
 Important Usage Rules
-- **ALWAYS** use `fs_search_files` for searching text or code.
+- **ALWAYS** use `fs_search_files` for searching text or code inside files.
+- This tool does **not** list/find files by name or glob alone — `regex` is always required.
 - **NEVER** use external tools like `grep`, `rg`, or shell commands — this tool is optimized and permission-safe.
 - Always provide a **full absolute path** for the `path` parameter.
 - The `regex` must be a valid Rust-compatible pattern. Avoid unsafe features:
