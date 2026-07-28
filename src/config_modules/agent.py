@@ -24,6 +24,11 @@ class AgentConfig(BaseModel):
     # x_trace_id для бэкенда модели, trace_id для MCP. Сам trace_id схемным
     # ключом НЕ является: это свойство вызова, а не конфигурации.
     trace_id_header_name: str | None = None
+    # Отправлять ли внешний trace_id в заголовке к бэкенду модели. False
+    # (дефолт) — не отправлять: рассылка трейса наружу строго opt-in, как и для
+    # MCP-серверов. Гейтит только заголовок; имя лог-файла, записи логов и
+    # meta.runtime.trace_ids работают независимо от него.
+    trace_header_enabled: bool = False
     verbose: bool = True
     stop_tools: list[str] = Field(default_factory=list)
     # Список canonical id скиллов / паков, которые исключаются из SkillsRegistry

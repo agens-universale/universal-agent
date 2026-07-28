@@ -526,7 +526,7 @@ mcp:
       # Разрешить отправку внешнего trace_id этому серверу (заголовок для
       # http-подобных транспортов, env TRACE_ID для stdio). Дефолт — false:
       # без этой строки внутренний корреляционный id наружу не уходит.
-      # trace_header: true
+      # trace_header_enabled: true
     duckduckgo_search:
       transport: stdio
       command: ddgs-mcp

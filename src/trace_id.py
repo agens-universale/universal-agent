@@ -24,7 +24,7 @@ def normalize_trace_id(value: Any) -> Optional[str]:
 
     ``None`` и пустая (после strip) строка — отсутствие, а не ошибка: незаданный
     ``${ENV:VAR}`` резолвится в "" с варнингом, и это штатный путь.
-    Управляющие символы и превышение длины — ``ValueError``.
+    Управляющие символы, превышение длины и символы вне latin-1 — ``ValueError``.
     """
     if value is None:
         return None
@@ -42,6 +42,17 @@ def normalize_trace_id(value: Any) -> Optional[str]:
                 "trace_id не должен содержать управляющие символы "
                 "(включая CR, LF и tab)"
             )
+    # HTTP-заголовки кодируются latin-1 (RFC 7230), поэтому кириллица, эмодзи и
+    # прочее вне 0-255 роняют КАЖДЫЙ запрос к модели с UnicodeEncodeError. Хуже
+    # того, ошибка ретраебельна: 5 попыток со снами 10/20/40/80s на каждый вызов,
+    # и только потом падение. Ловим на старте — ровно ради этого валидация и есть.
+    try:
+        text.encode("latin-1")
+    except UnicodeEncodeError as exc:
+        raise ValueError(
+            "trace_id должен кодироваться в latin-1 (ограничение HTTP-заголовков): "
+            f"недопустимый символ {text[exc.start:exc.end]!r} в позиции {exc.start}"
+        ) from exc
     return text
 
 
@@ -80,3 +91,14 @@ def trace_header_name(config_dict: Optional[Dict[str, Any]], default: str) -> st
     raw = (config_dict or {}).get("trace_id_header_name")
     name = str(raw).strip() if raw is not None else ""
     return name or default
+
+
+def model_trace_header_enabled(config_dict: Optional[Dict[str, Any]]) -> bool:
+    """Разрешена ли отправка trace_id в заголовке к бэкенду модели.
+
+    ``agent.trace_header_enabled``, по умолчанию False: рассылка трейса наружу —
+    строго opt-in, как и для MCP-серверов (``mcp.servers.<name>.
+    trace_header_enabled``). Флаг гейтит ТОЛЬКО исходящий заголовок; имя
+    лог-файла, записи логов и ``meta.runtime.trace_ids`` от него не зависят.
+    """
+    return bool((config_dict or {}).get("trace_header_enabled", False))

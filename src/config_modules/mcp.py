@@ -57,7 +57,7 @@ class McpServerConfig(BaseModel):
     # его не разрешили явно (в mcp-servers могут быть сторонние эндпойнты).
     # True — header для http/sse/stream_http/stream_sse и env TRACE_ID для
     # stdio/stream_stdio.
-    trace_header: bool = False
+    trace_header_enabled: bool = False
     # mTLS / TLS для http-транспортов: значения читает рантайм utils/ssl_config.py
     # (get_verify_ssl / get_client_cert) через config_dict["mcp-servers"].
     # Унифицировано с backend: на входе принимаются use-ssl / use_ssl / verify-ssl,

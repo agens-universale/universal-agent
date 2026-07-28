@@ -284,6 +284,7 @@ def flatten_app_config(app_cfg: AppConfig) -> Dict[str, Any]:
         "client_name": app_cfg.agent.client_name,
         "x_cl_id": app_cfg.agent.x_cl_id,
         "trace_id_header_name": app_cfg.agent.trace_id_header_name,
+        "trace_header_enabled": app_cfg.agent.trace_header_enabled,
         "verbose": app_cfg.agent.verbose,
         "stop_tools": app_cfg.agent.stop_tools,
         "disable_skills": app_cfg.agent.disable_skills,

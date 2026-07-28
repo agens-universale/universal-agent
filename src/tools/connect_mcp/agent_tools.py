@@ -376,7 +376,7 @@ def _servers_cfg_with_trace(
     Отсутствие trace → исходный объект возвращается по identity, то есть
     «ничего не изменилось» буквально.
 
-    Рассылка — строго opt-in: дефолт ``trace_header`` False совпадает со
+    Рассылка — строго opt-in: дефолт ``trace_header_enabled`` False совпадает со
     схемным (``config_modules/mcp.py``), иначе руками собранный конфиг вёл бы
     себя не так, как прошедший валидацию.
     """
@@ -386,7 +386,7 @@ def _servers_cfg_with_trace(
     header_name = trace_header_name(config_dict, "trace_id")
     out: Dict[str, Any] = {}
     for name, srv in servers_cfg.items():
-        if not isinstance(srv, dict) or not srv.get("trace_header", False):
+        if not isinstance(srv, dict) or not srv.get("trace_header_enabled", False):
             out[name] = srv
             continue
         transport = str(srv.get("transport") or "").strip()

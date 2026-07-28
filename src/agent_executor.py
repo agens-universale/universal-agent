@@ -105,40 +105,6 @@ def _append_trace_id_to_meta(
         return
 
 
-def _emit_run_finished(
-    logger: Any,
-    *,
-    terminal_outcome: Any,
-    steps: Any,
-    tool_calls: Any,
-    thread_id: Any,
-    system: Any,
-) -> None:
-    """Машиночитаемый исход рана одной записью.
-
-    Закрывает реальную дыру: ``state.terminal_outcome`` выставляется в цикле, но
-    читает его только TUI, а ``gc-cli main()`` всегда возвращает 0 — значит
-    headless-оркестратор не может отличить «агент закончил работу» от «упёрся в
-    step_limit / token_limit». trace_id приезжает сам, через фильтр логгера.
-    """
-    if logger is None:
-        return
-    try:
-        logger.info(
-            "run_finished",
-            extra={
-                "event": "run_finished",
-                "terminal_outcome": terminal_outcome,
-                "steps": steps,
-                "tool_calls": tool_calls,
-                "thread_id": thread_id,
-                "system": system,
-            },
-        )
-    except Exception:
-        return
-
-
 class AgentExecutor:
     """
     Потокобезопасный запуск агента с возможностью добавлять сообщения во время run
@@ -594,16 +560,6 @@ class AgentExecutor:
                 "log_path",
                 extra={"event": "log_path", "path": getattr(self._ctx, "logging_path", None)},
             )
-        # Машиночитаемый исход рана — вне try/except отчёта по usage выше:
-        # падение там не должно глушить это событие. Помощник сам гасит исключения.
-        _emit_run_finished(
-            logger,
-            terminal_outcome=self.last_terminal_outcome,
-            steps=getattr(state, "steps", None),
-            tool_calls=getattr(state, "tool_calls", None),
-            thread_id=getattr(state, "thread_id", None),
-            system=system_id,
-        )
         return response
 
     def add_message(self, message: dict) -> None:

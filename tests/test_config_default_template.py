@@ -81,6 +81,9 @@ EXPERT_ONLY_KEYS: set = {
     # Имя HTTP-заголовка для внешнего trace_id; None по умолчанию, нужен только
     # при внешней трассировке (напр. интеграция с оркестратором заказчика).
     "agent.trace_id_header_name",
+    # Разрешение слать trace_id в заголовке к модели; False по умолчанию —
+    # рассылка трейса наружу opt-in, нужна только при внешней трассировке.
+    "agent.trace_header_enabled",
     # Model steering → special_instructions; строка специфичных инструкций для модели.
     "agent.model_steering",
 

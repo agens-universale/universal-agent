@@ -9,7 +9,13 @@ class _StateStub:
 
 
 def _ctx(**cfg):
-    base = {"x_cl_id": "12345", "backend_api_mode": "chat_completions"}
+    # trace_header_enabled=True: отправка трейса в модель — opt-in, без флага
+    # заголовка не будет вовсе (для этого есть отдельный класс тестов ниже).
+    base = {
+        "x_cl_id": "12345",
+        "backend_api_mode": "chat_completions",
+        "trace_header_enabled": True,
+    }
     base.update(cfg)
     return SimpleNamespace(config_dict=base, auth_connector=None)
 
@@ -59,3 +65,30 @@ class TestTraceHeader:
     def test_raw_value_is_sent_verbatim(self):
         headers = create_call_headers(_StateStub(), _ctx(trace_id="wf/123"))
         assert headers["x_trace_id"] == "wf/123"
+
+
+class TestModelHeaderGate:
+    """Отправка трейса в модель — opt-in через agent.trace_header_enabled."""
+
+    def test_no_header_without_the_flag(self):
+        ctx = SimpleNamespace(
+            config_dict={
+                "x_cl_id": "12345",
+                "backend_api_mode": "chat_completions",
+                "trace_id": "wf-42",
+            },
+            auth_connector=None,
+        )
+        headers = create_call_headers(_StateStub(), ctx)
+        assert "x_trace_id" not in headers
+        assert not [k for k in headers if "trace" in k.lower()]
+
+    def test_flag_false_is_explicit_no(self):
+        headers = create_call_headers(
+            _StateStub(), _ctx(trace_id="wf-42", trace_header_enabled=False)
+        )
+        assert "x_trace_id" not in headers
+
+    def test_flag_alone_without_trace_adds_nothing(self):
+        headers = create_call_headers(_StateStub(), _ctx(trace_header_enabled=True))
+        assert "x_trace_id" not in headers

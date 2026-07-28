@@ -529,6 +529,17 @@ async def swarm_run(request: Request):
 
     # Нормализуем system и task_id по тем же правилам, что и в вебхуке.
     task_id = ensure_task_id(payload)
+    # trace_id — поле контекста задачи, а не часть запроса к модели. Снимаем его
+    # ДО того, как payload уедет в песочницу целиком: он доставляется ребёнку
+    # аргументом `-q`, то есть оставленный в теле трейс попал бы в промпт модели
+    # как текст задачи. Симметрично вебхуку.
+    try:
+        trace_id = normalize_trace_id(payload.pop("trace_id", None))
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={"status": "error", "payload": f"invalid trace_id: {exc}"},
+        )
     source_value = payload.get("system")
     defaults = SERVER_CONFIG.get("defaults") or {}
     default_system = str(defaults.get("system", "generic"))
@@ -607,7 +618,11 @@ async def swarm_run(request: Request):
 
         try:
             swarm_id, _pid = swarm_runner.start_swarm_process(
-                SWARM_CONFIG, system=system, task_id=task_id, payload=payload
+                SWARM_CONFIG,
+                system=system,
+                task_id=task_id,
+                payload=payload,
+                trace_id=trace_id,
             )
         except Exception as e:  # noqa: BLE001
             raise HTTPException(

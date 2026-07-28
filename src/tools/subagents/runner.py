@@ -74,6 +74,10 @@ class SubagentRunner:
         self._parent_call_id: str = ""
         # Уже влитый в parent снимок child.usage — для incremental delta (без double-count).
         self._usage_pushed = UsageAccount()
+        # То же для счётчика вызовов тулов ребёнка: сколько его вызовов уже
+        # влито в parent.tool_calls. Симметрия с usage — бюджет max_tool_calls
+        # считается по всему дереву, а не только по вызовам самого родителя.
+        self._tool_calls_pushed = 0
 
     def run(
         self,
@@ -217,6 +221,7 @@ class SubagentRunner:
             pre_backend_compaction_hook = summary.pre_backend_compaction_hook
 
         self._usage_pushed = UsageAccount()
+        self._tool_calls_pushed = 0
         try:
             with activate_child_input(parent_call_id=self._parent_call_id) as scope:
 
@@ -281,6 +286,7 @@ class SubagentRunner:
             # Только residual delta с последнего live-tick — не полный merge
             # (иначе double-count уже запушенных токенов).
             self._push_usage_delta(child_state, child_ctx)
+            self._push_tool_calls_delta(child_state)
 
         if result is None:
             self._log_lifecycle(
@@ -403,6 +409,29 @@ class SubagentRunner:
                 usage_delta=delta.to_meta(),
             )
 
+    def _push_tool_calls_delta(self, child_state: State) -> None:
+        """Влить в parent прирост child.tool_calls с последнего tick.
+
+        Бюджет ``agent.max_tool_calls`` — по всему дереву: вызовы ребёнка тратят
+        бюджет родителя так же, как это уже сделано для токенов
+        (``_push_usage_delta``). Инкрементально, по тому же принципу снимка, —
+        метод зовётся и на live-tick'ах, и в finally, а double-count бюджет
+        обнулил бы досрочно.
+
+        Сам вызов ``subagent_*`` уже посчитан родителем как 1 в
+        ``processing_responses`` — итого родитель тратит 1 + вызовы ребёнка.
+        """
+        child_calls = getattr(child_state, "tool_calls", None)
+        if not isinstance(child_calls, int):
+            return
+        delta = child_calls - self._tool_calls_pushed
+        if delta <= 0:
+            return
+        parent = self._orchestrator_state
+        if isinstance(getattr(parent, "tool_calls", None), int):
+            parent.tool_calls += delta
+        self._tool_calls_pushed = child_calls
+
     def _persist_runtime_step(
         self,
         child_state: State,
@@ -418,6 +447,7 @@ class SubagentRunner:
         persist_tool_usage_notice_state(child_state, child_meta)
         # Live spend → касса родителя (футер TUI читает parent state.usage).
         self._push_usage_delta(child_state, child_ctx)
+        self._push_tool_calls_delta(child_state)
 
     def _build_child_state(self, agent_role: str) -> State:
         """Создать дочерний State, наследуя общие данные от оркестратора."""

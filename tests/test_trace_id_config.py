@@ -37,7 +37,7 @@ class TestMcpTraceHeaderFlag:
         """Рассылка trace — opt-in: без явного разрешения сервер его не получает."""
         raw = {"mcp": {"servers": {"srv": {"transport": "http", "url": "http://x/mcp"}}}}
         cfg = flatten_app_config(_app(raw))
-        assert cfg["mcp-servers"]["srv"]["trace_header"] is False
+        assert cfg["mcp-servers"]["srv"]["trace_header_enabled"] is False
 
     def test_can_be_enabled(self):
         raw = {
@@ -46,10 +46,10 @@ class TestMcpTraceHeaderFlag:
                     "srv": {
                         "transport": "http",
                         "url": "http://x/mcp",
-                        "trace_header": True,
+                        "trace_header_enabled": True,
                     }
                 }
             }
         }
         cfg = flatten_app_config(_app(raw))
-        assert cfg["mcp-servers"]["srv"]["trace_header"] is True
+        assert cfg["mcp-servers"]["srv"]["trace_header_enabled"] is True

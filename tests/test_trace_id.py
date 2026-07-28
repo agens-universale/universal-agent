@@ -77,3 +77,29 @@ class TestTraceHeaderName:
         cfg = {"trace_id_header_name": "X-Trace-Id"}
         assert trace_header_name(cfg, "x_trace_id") == "X-Trace-Id"
         assert trace_header_name(cfg, "trace_id") == "X-Trace-Id"
+
+
+class TestLatin1Constraint:
+    """HTTP-заголовки кодируются latin-1 — иначе UnicodeEncodeError на каждом
+    запросе к модели, причём ретраебельный (5 попыток по 10/20/40/80s)."""
+
+    def test_rejects_cyrillic(self):
+        with pytest.raises(ValueError, match="latin-1"):
+            normalize_trace_id("wf-42-проверка")
+
+    def test_rejects_emoji(self):
+        with pytest.raises(ValueError, match="latin-1"):
+            normalize_trace_id("wf-🚀")
+
+    def test_error_names_the_offending_fragment_and_position(self):
+        # UnicodeEncodeError отдаёт весь непереводимый диапазон — так понятнее,
+        # чем один символ: видно и что именно, и где.
+        with pytest.raises(ValueError, match="'проверка'.*позиции 3"):
+            normalize_trace_id("wf-проверка")
+
+    def test_accepts_latin1_accents(self):
+        # café кодируется в latin-1 и заголовок не ломает — отвергать нельзя.
+        assert normalize_trace_id("wf-café") == "wf-café"
+
+    def test_accepts_plain_ascii(self):
+        assert normalize_trace_id("wf-42") == "wf-42"

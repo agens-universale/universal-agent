@@ -42,3 +42,24 @@ def test_init_config_and_query_mutually_exclusive(monkeypatch):
     monkeypatch.setattr(sys, "argv", ["gc-cli", "--init-config", "-q", "hi"])
     with pytest.raises(SystemExit):
         importlib.reload(importlib.import_module("arg_parser"))
+
+
+def test_trace_id_both_spellings_are_the_same_flag(monkeypatch):
+    """--trace-id и --trace_id — один параметр, оба идут в dest trace_id."""
+    dash = _parse(["gc-cli", "-q", "x", "--trace-id", "wf-42"], monkeypatch)
+    assert dash.trace_id == "wf-42"
+    underscore = _parse(["gc-cli", "-q", "x", "--trace_id", "wf-42"], monkeypatch)
+    assert underscore.trace_id == "wf-42"
+
+
+def test_trace_id_underscore_is_not_a_generic_override(monkeypatch):
+    """Подчёркнутая форма объявлена, поэтому НЕ попадает в generic-оверрайды.
+
+    Иначе значение прошло бы через yaml.safe_load: `00123` → 83, `on` → True.
+    """
+    monkeypatch.setattr(sys, "argv", ["gc-cli", "-q", "x", "--trace_id", "00123"])
+    import importlib
+    import arg_parser as ap_mod
+    importlib.reload(ap_mod)
+    assert ap_mod.run_args.trace_id == "00123"     # строка, не 83
+    assert "trace_id" not in ap_mod.extra_config_overrides
