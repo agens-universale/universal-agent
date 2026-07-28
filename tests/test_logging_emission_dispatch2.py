@@ -204,6 +204,10 @@ def test_run_finished_event_emitted_at_end_of_run(tmp_path):
         return "ok"
 
     with tempfile.TemporaryDirectory() as thread_dir:
+        class _SkillsRegistryStub:
+            def list_skills(self):
+                return []
+
         ctx = SimpleNamespace(
             config_dict={
                 "verbose": False,
@@ -228,15 +232,10 @@ def test_run_finished_event_emitted_at_end_of_run(tmp_path):
             logging_path=logging_path,
             tools_spec=[],
             tools_description=[],
+            skills_registry=_SkillsRegistryStub(),
         )
 
-        class _SkillsRegistryStub:
-            def list_skills(self):
-                return []
-
-        with patch.object(
-            agent_executor_module, "get_skills_registry", return_value=_SkillsRegistryStub()
-        ), patch.object(agent_executor_module, "run_agent", side_effect=_fake_run_agent):
+        with patch.object(agent_executor_module, "run_agent", side_effect=_fake_run_agent):
             executor = agent_executor_module.AgentExecutor(ctx)
             result = executor.run(["hello"], thread_id="thr2", system="cli", verbose=False)
             assert result == "ok"

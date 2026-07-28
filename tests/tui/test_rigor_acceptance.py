@@ -279,6 +279,9 @@ def test_process_tool_calls_increments_counter_even_on_tool_failure(monkeypatch)
         def __init__(self):
             self.session_compact_applied = False
             self.turn_tool_calls = 0
+            # Per-run счётчик для agent.max_tool_calls — контрактное поле State
+            # (не getattr-фоллбэк), поэтому дабл обязан его инициализировать.
+            self.tool_calls = 0
 
     state = _State()
     ctx = SimpleNamespace(config_dict={}, logger=None)

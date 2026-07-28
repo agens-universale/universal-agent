@@ -523,9 +523,10 @@ mcp:
       #   Authorization: "Bearer ${ENV:SCIENCE_MCP_TOKEN}"
       #   X-API-Key: "${ENV:SCIENCE_MCP_X_API_KEY}"
       #
-      # Не отправлять этому серверу внешний trace_id (для сторонних публичных
-      # эндпойнтов, которым внутренний корреляционный id знать не нужно).
-      # trace_header: false
+      # Разрешить отправку внешнего trace_id этому серверу (заголовок для
+      # http-подобных транспортов, env TRACE_ID для stdio). Дефолт — false:
+      # без этой строки внутренний корреляционный id наружу не уходит.
+      # trace_header: true
     duckduckgo_search:
       transport: stdio
       command: ddgs-mcp

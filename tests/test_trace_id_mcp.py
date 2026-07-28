@@ -2,14 +2,22 @@ from tools.connect_mcp.agent_tools import _servers_cfg_with_trace
 
 
 def _servers():
+    """Рассылка trace — opt-in: без `trace_header: true` сервер не получает ничего."""
     return {
-        "http_srv": {"transport": "http", "url": "http://a/mcp"},
-        "sse_srv": {"transport": "sse", "url": "http://b/mcp", "headers": {"X-Keep": "1"}},
-        "shttp_srv": {"transport": "stream_http", "url": "http://c/mcp"},
-        "ssse_srv": {"transport": "stream_sse", "url": "http://d/mcp"},
-        "stdio_srv": {"transport": "stdio", "command": "srv", "env": {"KEEP": "1"}},
-        "sstdio_srv": {"transport": "stream_stdio", "command": "srv"},
+        "http_srv": {"transport": "http", "url": "http://a/mcp", "trace_header": True},
+        "sse_srv": {
+            "transport": "sse", "url": "http://b/mcp",
+            "headers": {"X-Keep": "1"}, "trace_header": True,
+        },
+        "shttp_srv": {"transport": "stream_http", "url": "http://c/mcp", "trace_header": True},
+        "ssse_srv": {"transport": "stream_sse", "url": "http://d/mcp", "trace_header": True},
+        "stdio_srv": {
+            "transport": "stdio", "command": "srv",
+            "env": {"KEEP": "1"}, "trace_header": True,
+        },
+        "sstdio_srv": {"transport": "stream_stdio", "command": "srv", "trace_header": True},
         "opted_out": {"transport": "http", "url": "http://e/mcp", "trace_header": False},
+        "no_flag": {"transport": "http", "url": "http://f/mcp"},
     }
 
 
@@ -40,10 +48,12 @@ class TestPresentTrace:
             assert "trace_id" not in (out[name].get("headers") or {}), name
         assert out["stdio_srv"]["env"]["KEEP"] == "1"
 
-    def test_opted_out_server_gets_nothing(self):
+    def test_server_gets_nothing_without_explicit_opt_in(self):
+        """Дефолт — не отправлять: и явный `trace_header: false`, и отсутствие ключа."""
         out = _servers_cfg_with_trace(_servers(), {"trace_id": "wf-42"})
-        assert "trace_id" not in (out["opted_out"].get("headers") or {})
-        assert "TRACE_ID" not in (out["opted_out"].get("env") or {})
+        for name in ("opted_out", "no_flag"):
+            assert "trace_id" not in (out[name].get("headers") or {}), name
+            assert "TRACE_ID" not in (out[name].get("env") or {}), name
 
     def test_custom_header_name_is_used(self):
         out = _servers_cfg_with_trace(

@@ -200,10 +200,17 @@ class TestExecuteCommandPreview:
         """Timeout: partial stdout still gets preview (not discarded)."""
         state = _make_state()
         tool = _make_tool(ExecuteCommand, state=state)
-        # Print before sleeping
+        # Print before sleeping. flush=True обязателен: при выводе в пайп python
+        # буферизует stdout блоками, а таймаут снимает процесс через SIGKILL —
+        # неслитый буфер живёт в памяти ребёнка и теряется вместе с ним, этого не
+        # спасёт никакая реализация родителя. Тест проверяет своё намерение —
+        # что РЕАЛЬНО дошедший до пайпа частичный вывод не выбрасывается.
         r = json.loads(
             tool(
-                command=f'"{sys.executable}" -c "print(\'partial_out\'); import time; time.sleep(2)"',
+                command=(
+                    f'"{sys.executable}" -c '
+                    f'"print(\'partial_out\', flush=True); import time; time.sleep(2)"'
+                ),
                 timeout_seconds=1,
                 max_output_chars=4000,
             )
