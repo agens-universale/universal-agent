@@ -3,7 +3,13 @@
 Три вердикта (балансная модель): ok — сервер подтвердил; rejected — сервер ОТВЕТИЛ
 отказом (достоверно: 401 токен, 404 путь/модель); unknown — не достучались либо
 не-вердиктный ответ (5xx и пр.) — данные НЕ виноваты, возможно VPN/туннель.
-Двухступенчато: models-цепочка → при 404-подобном фолбэк POST в сам endpoint.
+Двухступенчато: models-цепочка → при любом не-сетевом отказе (включая 401 —
+у /config|/models может быть своя авторизация/их может не быть) фолбэк POST в сам
+endpoint; вердикт о токене — по реальному маршруту. Без модели POST шлётся с
+инертной заглушкой и судит ТОЛЬКО токен: не-401 (400/422/5xx/404-с-JSON) значит
+«сервер пропустил авторизацию до валидации тела» → токен принят. 404 различаем
+по телу: JSON — ответило приложение (модель/тело), не-JSON (HTML «Cannot POST»
+Express/гейтвея) — путь не найден, токен не виним.
 Сервис чистый: сеть только через инъецируемые model_picker.probe_fetch/probe_post."""
 from __future__ import annotations
 
@@ -11,6 +17,10 @@ from dataclasses import dataclass
 from typing import Optional
 
 import model_picker
+
+# Заглушка для POST-проверки без заданной модели: инертное имя, которое сервер
+# гарантированно не знает — ответ (401 vs 400/404/5xx) судит только токен.
+_DUMMY_MODEL = "gc-connection-probe"
 
 
 @dataclass(frozen=True)
@@ -46,30 +56,41 @@ def probe(endpoint: str, auth: Optional[str], verify: bool, model: str, *,
         out = fetch_ex(endpoint, auth, verify=verify)
     if out.models:
         return ProbeResult("ok", out.status, out.models, out.latency_ms, "доступен")
-    if out.status == 401:
-        return ProbeResult("rejected", 401, None, out.latency_ms, "токен отклонён (401)")
     if out.status is None:
         return ProbeResult("unknown", None, None, out.latency_ms,
                            f"нет соединения ({out.network_error})")
-    # Сервер жив, но models-цепочка не про него (404/403/5xx на /config|/models) → ступень 2.
-    if not model:
-        return ProbeResult("unknown", out.status, None, out.latency_ms,
-                           "путь не проверен — задайте модель")
+    # Сервер жив, но models-цепочка не про него → ступень 2 (вердикт по реальному
+    # маршруту). 401 цепочки — НЕ приговор токену: у gigacode /config собственная
+    # plugin-авторизация (x-authorization-url, код 14011) → 401 при валидном Bearer,
+    # а /models может отсутствовать (404); судим по самому chat/completions.
+    # Без модели (первичная настройка: адрес+токен раньше шага модели) POST идёт
+    # с инертной заглушкой и судит только токен.
+    dummy = not model
+    probe_model = model or _DUMMY_MODEL
     if post_ex is None:
-        status, net_err, lat = model_picker.probe_post(
-            endpoint, auth, model, verify=verify, config_proxy=config_proxy,
+        status, net_err, lat, json_body = model_picker.probe_post(
+            endpoint, auth, probe_model, verify=verify, config_proxy=config_proxy,
         )
     else:
-        status, net_err, lat = post_ex(endpoint, auth, model, verify=verify)
-    if status is not None and 200 <= status < 300:
+        status, net_err, lat, json_body = post_ex(endpoint, auth, probe_model, verify=verify)
+    if status is None:
+        return ProbeResult("unknown", None, None, lat, f"нет соединения ({net_err})")
+    if 200 <= status < 300:
         return ProbeResult("ok", status, None, lat, "доступен")
     if status == 401:
         return ProbeResult("rejected", 401, None, lat, "токен отклонён (401)")
     if status == 404:
+        if not json_body:   # HTML/текст «Cannot POST …» — маршрута нет, токен ни при чём
+            return ProbeResult("rejected", 404, None, lat,
+                               "путь не найден (404) — проверьте адрес")
+        if dummy:           # JSON-ошибка на заглушку — приложение ответило, auth пройден
+            return ProbeResult("ok", status, None, lat, "доступен")
         return ProbeResult("rejected", 404, None, lat,
-                           "отклонено сервером (404): проверьте путь и имя модели")
-    if status is None:
-        return ProbeResult("unknown", None, None, lat, f"нет соединения ({net_err})")
+                           "отклонено сервером (404): проверьте имя модели")
+    if dummy:
+        # 400/422/5xx на заглушку: до «плохая модель/тело» нельзя дойти,
+        # не пройдя авторизацию → сервер жив, токен принят.
+        return ProbeResult("ok", status, None, lat, "доступен")
     return ProbeResult("unknown", status, None, lat, f"сервер ответил {status}")
 
 

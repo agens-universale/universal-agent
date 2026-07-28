@@ -13,9 +13,9 @@ def _fetch(models=None, status=None, net="", latency=7):
     return fetch_ex
 
 
-def _post(status=None, net=""):
+def _post(status=None, net="", json_body=True):
     def post_ex(endpoint, auth, model, *, verify=True, http_post_ex=None):
-        return status, net, 11
+        return status, net, 11, json_body
     return post_ex
 
 
@@ -26,11 +26,68 @@ def test_ok_from_stage1_models():
     assert r.reachable and r.auth_ok
 
 
-def test_rejected_401_from_stage1():
+def test_stage1_401_with_working_post_is_ok():
+    """gigacode ST: /config со своей plugin-авторизацией даёт 401 при валидном
+    Bearer, /models отсутствует (404) → цепочка схлопывается в 401. Вердикт о
+    токене — по реальному маршруту: POST в chat/completions прошёл → ok."""
+    r = probe("http://x/v1/chat/completions", "Bearer good", True, "m1",
+              fetch_ex=_fetch(status=401), post_ex=_post(status=200))
+    assert r.verdict == "ok" and r.auth_ok
+
+
+def test_stage1_401_and_post_401_is_rejected():
+    """401 и на models-цепочке, и на самом chat/completions → токен отклонён."""
     r = probe("http://x/v1/chat/completions", "Bearer bad", True, "m1",
-              fetch_ex=_fetch(status=401))
+              fetch_ex=_fetch(status=401), post_ex=_post(status=401))
     assert r.verdict == "rejected" and r.http_status == 401
     assert "401" in r.detail and not r.auth_ok
+
+
+def test_no_model_dummy_post_non401_token_accepted():
+    """Первичная настройка (адрес+токен, модели ещё нет): 401 цепочки + POST
+    с заглушкой ответил 500 «незнакомая модель» → авторизация пройдена → ok.
+    Строка «Подключение» судит только сервер+токен, модель не её забота."""
+    r = probe("http://x/v1/chat/completions", "Bearer good", True, "",
+              fetch_ex=_fetch(status=401), post_ex=_post(status=500))
+    assert r.verdict == "ok" and r.auth_ok
+
+
+def test_no_model_dummy_post_401_is_rejected():
+    """Без модели: POST-заглушка тоже 401 → токен отклонён."""
+    r = probe("http://x/v1/chat/completions", "Bearer bad", True, "",
+              fetch_ex=_fetch(status=401), post_ex=_post(status=401))
+    assert r.verdict == "rejected" and r.http_status == 401
+
+
+def test_no_model_dummy_post_404_json_is_ok():
+    """404 с JSON-телом = ответило приложение («model not found» на заглушку) —
+    до валидации тела нельзя дойти, не пройдя авторизацию → токен принят."""
+    r = probe("http://x/v1/chat/completions", "Bearer good", True, "",
+              fetch_ex=_fetch(status=401), post_ex=_post(status=404, json_body=True))
+    assert r.verdict == "ok" and r.auth_ok
+
+
+def test_no_model_dummy_post_404_html_is_path_error():
+    """404 без JSON (HTML «Cannot POST» от Express/гейтвея) → путь не найден;
+    токен не виним — до авторизации дело не дошло."""
+    r = probe("http://x/v1/chat/completions", "Bearer good", True, "",
+              fetch_ex=_fetch(status=401), post_ex=_post(status=404, json_body=False))
+    assert r.verdict == "rejected" and r.http_status == 404
+    assert "адрес" in r.detail and r.auth_ok
+
+
+def test_no_model_sends_dummy_probe_model():
+    """Без модели ступень 2 шлёт инертную заглушку, а не пустую строку."""
+    seen = {}
+
+    def post_ex(endpoint, auth, model, *, verify=True, http_post_ex=None):
+        seen["model"] = model
+        return 500, "", 11, True
+
+    r = probe("http://x/v1/chat/completions", "Bearer good", True, "",
+              fetch_ex=_fetch(status=401), post_ex=post_ex)
+    assert r.verdict == "ok"
+    assert seen["model"] and "probe" in seen["model"]
 
 
 def test_network_stage1_is_unknown():
@@ -46,11 +103,20 @@ def test_404_on_models_falls_to_stage2_ok():
     assert r.verdict == "ok" and r.models is None   # сервер жив, списка нет
 
 
-def test_404_on_models_and_stage2_404_is_rejected():
+def test_404_on_models_and_stage2_404_json_blames_model():
+    """Реальная модель, 404 с JSON-телом → приложение не знает модель."""
     r = probe("http://x/v1/chat/completions", None, True, "m1",
               fetch_ex=_fetch(status=404), post_ex=_post(status=404))
     assert r.verdict == "rejected" and r.http_status == 404
-    assert "404" in r.detail
+    assert "404" in r.detail and "модел" in r.detail
+
+
+def test_404_on_models_and_stage2_404_html_blames_path():
+    """Реальная модель, 404 без JSON (HTML «Cannot POST») → путь не найден."""
+    r = probe("http://x/v1/chat/completions", None, True, "m1",
+              fetch_ex=_fetch(status=404), post_ex=_post(status=404, json_body=False))
+    assert r.verdict == "rejected" and r.http_status == 404
+    assert "адрес" in r.detail
 
 
 def test_stage2_401_is_rejected():
@@ -71,11 +137,12 @@ def test_stage2_5xx_is_unknown_not_rejected():
     assert r.verdict == "unknown"                   # 500 — не вердикт о данных
 
 
-def test_no_model_for_stage2_is_unknown():
+def test_no_model_stage1_404_dummy_post_ok():
+    """Без модели ступень 2 работает и после 404-цепочки (заглушка вместо
+    «задайте модель»): POST прошёл → сервер жив, auth ок."""
     r = probe("http://x/v1/chat/completions", None, True, "",
-              fetch_ex=_fetch(status=404))
-    assert r.verdict == "unknown"
-    assert "модел" in r.detail                      # «задайте модель»
+              fetch_ex=_fetch(status=404), post_ex=_post(status=200))
+    assert r.verdict == "ok"
 
 
 # --- interpret_auth: differential-probe авторизации ---

@@ -428,7 +428,7 @@ class SettingsScreen(Screen):
 
     # --- probe-инфраструктура (спека B2.1: слоты + generation) ---
     def _probe_args_from_config(self):
-        from onboarding import TOKEN_SENTINEL, URL_SENTINEL
+        from onboarding import MODEL_SENTINEL, TOKEN_SENTINEL, URL_SENTINEL
         c = self._config
         url = c.get("completions_url") or ""
         endpoint = url if url and url != URL_SENTINEL else ""
@@ -436,7 +436,10 @@ class SettingsScreen(Screen):
         if auth in (TOKEN_SENTINEL, ""):
             auth = None
         proxy = c.get("proxy") or None
-        return endpoint, auth, bool(c.get("use_ssl", True)), c.get("model") or "", proxy
+        model = c.get("model") or ""
+        if model == MODEL_SENTINEL:   # плейсхолдер шаблона — не слать его как имя модели
+            model = ""
+        return endpoint, auth, bool(c.get("use_ssl", True)), model, proxy
 
     def _start_config_probe(self) -> None:
         endpoint, auth, verify, model, proxy = self._probe_args_from_config()
