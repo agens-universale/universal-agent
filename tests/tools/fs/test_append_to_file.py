@@ -170,3 +170,42 @@ def test_append_rejects_nul_binary(tmp_path):
     assert res["ok"] is False
     assert res["error"]["type"] == "is_binary"
     assert p.read_bytes() == original
+
+
+def test_append_large_file_without_full_read(tmp_path):
+    """Append must not require loading the whole file (head-check + end write)."""
+    from utils.file_text import APPEND_HEAD_SAMPLE_BYTES
+
+    p = tmp_path / "big.log"
+    # Larger than former mutate cap and larger than head sample.
+    body = ("line\n" * 30_000).encode("utf-8")
+    assert len(body) > APPEND_HEAD_SAMPLE_BYTES
+    p.write_bytes(body)
+    res = json.loads(
+        with_local_ctx(AppendToFile)(
+            path=str(p), content="TAIL", separator="\n", encoding="utf-8"
+        )
+    )
+    assert res["ok"] is True
+    assert p.read_bytes().endswith(b"\nTAIL")
+    assert p.read_bytes().startswith(body[:64])
+    assert res["sha256"]
+
+
+def test_append_head_truncated_utf8_still_ok(tmp_path):
+    """Multi-byte char spanning the head cut must not false-fail encoding check."""
+    from utils.file_text import APPEND_HEAD_SAMPLE_BYTES
+
+    # Fill so that a 2-byte Cyrillic char sits across the sample boundary.
+    prefix = b"a" * (APPEND_HEAD_SAMPLE_BYTES - 1)
+    # "я" is D1 8F in utf-8 — first byte at last head slot, second beyond sample.
+    rest = "я".encode("utf-8") + b" more text\n"
+    p = tmp_path / "cut.txt"
+    p.write_bytes(prefix + rest)
+    res = json.loads(
+        with_local_ctx(AppendToFile)(
+            path=str(p), content="ok", separator="", encoding="utf-8"
+        )
+    )
+    assert res["ok"] is True
+    assert p.read_bytes().endswith(b"ok")

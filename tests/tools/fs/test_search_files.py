@@ -90,8 +90,8 @@ def test_search_alternation_literal_prefilter(tmp_path):
     for regex in ("ALPHA|beta", "beta|ALPHA"):
         data = json.loads(tool(path=str(tmp_path), regex=regex))
         assert data["ok"] is True
-        assert data["total_matches"] == 3, (regex, data["total_matches"], data["matches"])
-        assert [m["line"] for m in data["matches"]] == [1, 2, 3]
+        assert data["total_matches"] == 4, (regex, data["total_matches"], data["matches"])
+        assert [m["line"] for m in data["matches"]] == [1, 2, 3, 3]
 
 
 def test_search_alternation_cyrillic(tmp_path):
@@ -103,8 +103,8 @@ def test_search_alternation_cyrillic(tmp_path):
     )
     data = json.loads(with_local_ctx(SearchFiles)(path=str(tmp_path), regex="Аудит|План проверки"))
     assert data["ok"] is True
-    assert data["total_matches"] == 3
-    assert [m["line"] for m in data["matches"]] == [1, 2, 3]
+    assert data["total_matches"] == 4
+    assert [m["line"] for m in data["matches"]] == [1, 2, 3, 3]
 
 
 def test_search_validation_and_file_path(tmp_path):
@@ -195,4 +195,125 @@ def test_search_context_edges_and_nearby_matches(tmp_path):
         "G\n",
         "H\n",
     ]
+
+
+def test_search_skips_file_over_size_cap(tmp_path):
+    small = tmp_path / "small.txt"
+    big = tmp_path / "big.txt"
+    small.write_text("FINDME in small\n", encoding="utf-8")
+    big.write_text("FINDME in big file content\n", encoding="utf-8")
+    tool = with_local_ctx(
+        SearchFiles,
+        config_dict={"fs_tools": {"max_read_bytes": len(small.read_bytes())}},
+    )
+    data = json.loads(tool(path=str(tmp_path), regex="FINDME"))
+    assert data["ok"] is True
+    assert data["total_matches"] == 1
+    assert data["matches"][0]["file"].endswith("small.txt")
+    skipped = data.get("skipped") or []
+    assert data["skipped_total"] == 1
+    assert data["skipped_truncated"] is False
+    assert any(
+        s.get("reason") == "file_too_large" and s["path"].endswith("big.txt")
+        for s in skipped
+    )
+
+
+def test_search_skipped_list_capped(tmp_path, monkeypatch):
+    monkeypatch.setattr(SearchFiles, "default_skipped_limit", 2)
+    for i in range(5):
+        (tmp_path / f"big{i}.txt").write_text("FINDME xxxxxxxx\n", encoding="utf-8")
+    (tmp_path / "small.txt").write_text("FINDME\n", encoding="utf-8")
+    tool = with_local_ctx(
+        SearchFiles,
+        config_dict={"fs_tools": {"max_read_bytes": len(b"FINDME\n")}},
+    )
+    data = json.loads(tool(path=str(tmp_path), regex="FINDME"))
+    assert data["ok"] is True
+    assert data["skipped_total"] == 5
+    assert data["skipped_truncated"] is True
+    assert len(data["skipped"]) == 2
+    assert all(s["reason"] == "file_too_large" for s in data["skipped"])
+
+
+def test_search_spans_lines_by_default(tmp_path):
+    p = tmp_path / "block.txt"
+    p.write_text("alpha\nSTART\nmiddle\nEND\nomega\n", encoding="utf-8")
+    tool = with_local_ctx(SearchFiles)
+    data = json.loads(tool(path=str(p), regex=r"START.*?END"))
+    assert data["ok"] is True
+    assert "multiline" not in data
+    assert data["total_matches"] == 1
+    hit = data["matches"][0]
+    assert hit["line"] == 2
+    assert hit["end_line"] == 4
+    assert "START" in hit["line_content"] and "END" in hit["line_content"]
+    assert "middle" in hit["context"]
+
+    literal = json.loads(tool(path=str(p), regex=r"START\nmiddle\nEND"))
+    assert literal["ok"] is True
+    assert literal["total_matches"] == 1
+    assert literal["matches"][0]["line"] == 2
+    assert literal["matches"][0]["end_line"] == 4
+
+
+def test_search_clips_large_match_content_and_context(tmp_path):
+    # Greedy span: many lines between START and END; match text also exceeds clip.
+    body = "\n".join([f"pad{i}-{'x' * 80}" for i in range(40)])
+    p = tmp_path / "wide.txt"
+    p.write_text(f"before\nSTART\n{body}\nEND\nafter\n", encoding="utf-8")
+    tool = with_local_ctx(SearchFiles)
+    data = json.loads(tool(path=str(p), regex=r"START.*END"))
+    assert data["ok"] is True and data["total_matches"] == 1
+    hit = data["matches"][0]
+    assert hit["line"] == 2
+    assert hit["end_line"] == 43  # START + 40 pads + END
+    assert "match_truncated" in hit["line_content"]
+    assert hit["line_content"].startswith("START")
+    assert "context_truncated" in hit["context"]
+    assert "START" in hit["context"] and "END" in hit["context"]
+    assert "pad0-" in hit["context"]  # near start window
+    assert "pad39-" in hit["context"]  # near end window
+    assert "pad20-" not in hit["context"]  # middle omitted
+
+
+def test_search_single_file_too_large(tmp_path):
+    p = tmp_path / "only.txt"
+    p.write_text("needle\n", encoding="utf-8")
+    tool = with_local_ctx(
+        SearchFiles,
+        config_dict={"fs_tools": {"max_read_bytes": 1}},
+    )
+    data = json.loads(tool(path=str(p), regex="needle"))
+    assert data["ok"] is False
+    assert data["error"]["type"] == "file_too_large"
+    assert data["error"]["max_bytes"] == 1
+    assert data["matches"] == []
+
+
+def test_search_skips_binary_in_directory(tmp_path):
+    text = tmp_path / "ok.txt"
+    binary = tmp_path / "blob.bin"
+    text.write_text("FINDME here\n", encoding="utf-8")
+    binary.write_bytes(b"FINDME\x00binary\xff")
+    tool = with_local_ctx(SearchFiles)
+    data = json.loads(tool(path=str(tmp_path), regex="FINDME"))
+    assert data["ok"] is True
+    assert data["total_matches"] == 1
+    assert data["matches"][0]["file"].endswith("ok.txt")
+    skipped = data.get("skipped") or []
+    assert data["skipped_total"] == 1
+    assert any(
+        s.get("reason") == "is_binary" and s["path"].endswith("blob.bin")
+        for s in skipped
+    )
+
+
+def test_search_single_file_binary_errors(tmp_path):
+    p = tmp_path / "blob.bin"
+    p.write_bytes(b"abc\x00def")
+    data = json.loads(with_local_ctx(SearchFiles)(path=str(p), regex="abc"))
+    assert data["ok"] is False
+    assert data["error"]["type"] == "is_binary"
+    assert data["matches"] == []
 

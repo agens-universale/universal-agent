@@ -196,3 +196,21 @@ def test_try_encode_failed_and_round_trip():
     assert err is None and data == "Привет".encode("cp1251")
     data2, err2 = try_encode_text_bytes("Привет", "latin-1")
     assert data2 is None and err2["type"] == "encode_failed"
+
+
+def test_check_encoding_on_file_head_truncation():
+    from utils.file_text import check_encoding_on_file_head
+
+    # Incomplete trailing UTF-8 sequence at cut — should still pass when truncated.
+    sample = b"hello " + b"\xd0"  # start of a 2-byte Cyrillic char
+    assert (
+        check_encoding_on_file_head(
+            sample, "utf-8", sample_is_complete_file=False
+        )
+        is None
+    )
+    # Same bytes as a complete file would be invalid UTF-8.
+    err = check_encoding_on_file_head(
+        sample, "utf-8", sample_is_complete_file=True
+    )
+    assert err is not None and err["type"] == "undecodable_text"

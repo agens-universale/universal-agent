@@ -432,9 +432,12 @@ def test_search_and_replace_encode_failed_keeps_file(tmp_path):
 def test_reject_large_file(tmp_path):
     p = tmp_path / "big.txt"
     p.write_text("small", encoding="utf-8")
-    tool = with_local_ctx(SearchAndReplace)
-    tool.max_file_size_bytes = 1
+    tool = with_local_ctx(
+        SearchAndReplace,
+        config_dict={"fs_tools": {"max_mutate_bytes": 1}},
+    )
     res = json.loads(tool(path=str(p), search="x y", replace="z"))
     assert res["ok"] is False and res["matched"] is False
     assert res["error"]["type"] == "file_too_large"
     assert res["error"]["actual_bytes"] > res["error"]["max_bytes"]
+    assert res["error"]["max_bytes"] == 1

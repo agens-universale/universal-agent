@@ -295,6 +295,12 @@ summary:
   last_dialog_step_message_max_chars: 5000
   intent_log_preview_chars: 10000
 
+# Лимиты FS-тулов, которые поднимают файл целиком в память.
+# read — fs_read_file / fs_search_files; mutate — apply/replace (не append).
+fs_tools:
+  max_read_bytes: 8388608       # 8 MiB
+  max_mutate_bytes: 104857600   # 100 MiB
+
 security:
   # =========================================================================
   # 4 независимых слоя на одном уровне.

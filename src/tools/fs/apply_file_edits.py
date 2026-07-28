@@ -11,6 +11,7 @@ from utils.file_text import (
     sha256_hex_of_bytes,
     try_encode_text_bytes,
 )
+from utils.fs_size_limits import check_file_size, fs_mutate_max_bytes
 from tools.fs.edit_suggestions import build_edit_miss_suggestions
 from tools.schema_optional import coalesce_optional_string
 from tools.simple_tool_base import AbstractSimpleTool
@@ -18,7 +19,6 @@ from utils.tool_report_paths import tool_report_abspath
 from utils.atomic_io import atomic_replace
 
 class ApplyFileEdits(AbstractSimpleTool):
-    max_file_size_bytes = 100 * 1024 * 1024
     default_diff_context_lines = 3
     default_max_diff_chars = 12000
 
@@ -342,8 +342,13 @@ class ApplyFileEdits(AbstractSimpleTool):
             file_size = self._backend.getsize(path)
         except Exception as e:
             return _result(ok=False, applied=False, edits_would_apply=0, total_would_replace=0, edits_applied=0, total_replaced=0, edit_results=[], message="Failed to get file size.", error={"type": "stat_failed", "message": str(e)})
-        if file_size > self.max_file_size_bytes:
-            return _result(ok=False, applied=False, edits_would_apply=0, total_would_replace=0, edits_applied=0, total_replaced=0, edit_results=[], message=f"File is too large for apply_file_edits: {file_size} bytes (max {self.max_file_size_bytes} bytes).", error={"type": "file_too_large", "actual_bytes": file_size, "max_bytes": self.max_file_size_bytes})
+        size_err = check_file_size(
+            file_size,
+            fs_mutate_max_bytes(self._config_dict),
+            operation="apply_file_edits",
+        )
+        if size_err is not None:
+            return _result(ok=False, applied=False, edits_would_apply=0, total_would_replace=0, edits_applied=0, total_replaced=0, edit_results=[], message=size_err["message"], error=size_err)
 
         try:
             raw = self._backend.read_bytes(path)

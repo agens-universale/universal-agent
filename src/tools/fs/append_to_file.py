@@ -4,9 +4,9 @@ import os
 from tools.schema_optional import X_PRESERVE_EMPTY_STRING
 from tools.simple_tool_base import AbstractSimpleTool
 from utils.file_text import (
-    decode_text_bytes,
+    APPEND_HEAD_SAMPLE_BYTES,
+    check_encoding_on_file_head,
     resolve_encoding_arg,
-    sha256_hex_of_bytes,
     try_encode_text_bytes,
 )
 from utils.tool_report_paths import tool_report_abspath
@@ -22,6 +22,8 @@ class AppendToFile(AbstractSimpleTool):
             "name": "fs_append_file",
             "description": (
                 "Append text to the end of an existing file (optional create). "
+                "Checks encoding on a file head sample, then appends without loading "
+                "the whole file into memory. "
                 "Build large files with several moderate `content` chunks — not one huge append."
             ),
             "parameters": {
@@ -60,7 +62,7 @@ class AppendToFile(AbstractSimpleTool):
                             "Text encoding for the appended bytes: utf-8, utf-8-sig, cp1251, "
                             "koi8-r, latin-1, utf-16, utf-16-le, utf-16-be "
                             "(also windows-1251, iso-8859-1). Default utf-8. "
-                            "Must match the existing file; if the file cannot be decoded "
+                            "Must match the existing file head; if the head cannot be decoded "
                             "as this encoding, append fails and the file is unchanged."
                         ),
                     }
@@ -197,7 +199,6 @@ Usage:
                 },
             )
 
-        # Проверка существования файла
         exists = self._backend.exists(path)
         if not exists:
             if not create_if_missing:
@@ -227,9 +228,8 @@ Usage:
                         error={"type": "parent_not_found"},
                     )
 
-        out_bytes, encode_err = try_encode_text_bytes(
-            separator + content, encoding_used
-        )
+        chunk = separator + content
+        out_bytes, encode_err = try_encode_text_bytes(chunk, encoding_used)
         if encode_err is not None:
             return self._result(
                 ok=False, path=path, separator=separator, error=encode_err
@@ -238,19 +238,32 @@ Usage:
 
         try:
             if exists:
-                existing = self._backend.read_bytes(path)
-                decoded = decode_text_bytes(existing, encoding=encoding_used)
-                if not decoded.ok:
+                try:
+                    size = self._backend.getsize(path)
+                    head = self._backend.read_head_bytes(path, APPEND_HEAD_SAMPLE_BYTES)
+                except OSError as e:
                     return self._result(
                         ok=False,
                         path=path,
                         separator=separator,
-                        error=decoded.error,
+                        error={"type": "stat_failed", "message": str(e)},
                     )
-                final = existing + out_bytes
+                head_err = check_encoding_on_file_head(
+                    head,
+                    encoding_used,
+                    sample_is_complete_file=size <= len(head),
+                )
+                if head_err is not None:
+                    return self._result(
+                        ok=False,
+                        path=path,
+                        separator=separator,
+                        error=head_err,
+                    )
+                self._backend.append(path, chunk, encoding=encoding_used)
             else:
-                final = out_bytes
-            self._backend.write_bytes(path, final)
+                self._backend.write_bytes(path, out_bytes)
+            content_sha256 = self._backend.sha256_bytes(path)
         except Exception as e:
             return self._result(
                 ok=False,
@@ -265,7 +278,7 @@ Usage:
             separator=separator,
             created=not exists,
             bytes_appended=len(out_bytes),
-            sha256=sha256_hex_of_bytes(final),
+            sha256=content_sha256,
             encoding_used=encoding_used,
             error=None,
         )

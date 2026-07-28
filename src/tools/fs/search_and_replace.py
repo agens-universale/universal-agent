@@ -14,6 +14,7 @@ from utils.file_text import (
     sha256_hex_of_bytes,
     try_encode_text_bytes,
 )
+from utils.fs_size_limits import check_file_size, fs_mutate_max_bytes
 
 class SearchAndReplace(AbstractSimpleTool):
     """
@@ -21,7 +22,6 @@ class SearchAndReplace(AbstractSimpleTool):
     Performs a single search and replace operation in a file.
     Only the first occurrence is replaced.
     """
-    max_file_size_bytes = 100 * 1024 * 1024
     default_diff_context_lines = 3
     default_max_diff_chars = 12000
 
@@ -493,24 +493,22 @@ Update version string:
                 suggestions_total=0,
                 error={"type": "stat_failed", "message": str(e)},
             )
-        if file_size > self.max_file_size_bytes:
+        size_err = check_file_size(
+            file_size,
+            fs_mutate_max_bytes(self._config_dict),
+            operation="search_and_replace",
+        )
+        if size_err is not None:
             return _result(
                 ok=False,
                 matched=False,
                 replaced=0,
                 match_count=0,
                 line_numbers=[],
-                message=(
-                    f"File is too large for search_and_replace: {file_size} bytes "
-                    f"(max {self.max_file_size_bytes} bytes)."
-                ),
+                message=size_err["message"],
                 suggestions=[],
                 suggestions_total=0,
-                error={
-                    "type": "file_too_large",
-                    "actual_bytes": file_size,
-                    "max_bytes": self.max_file_size_bytes,
-                },
+                error=size_err,
             )
 
         if search == '':

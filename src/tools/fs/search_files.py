@@ -1,4 +1,5 @@
 import json
+import bisect
 import functools
 import os
 import re
@@ -7,6 +8,8 @@ from tools.schema_optional import coalesce_optional_string
 from tools.simple_tool_base import AbstractSimpleTool
 from utils.glob_to_regex import compile_glob
 from utils.tool_report_paths import tool_report_abspath
+from utils.fs_size_limits import check_file_size, fs_read_max_bytes
+from utils.file_text import decode_text_best_effort, decode_text_bytes
 from tools.fs.agent_hidden import is_agent_hidden
 from security.read_guard import (
     enforce_read_guard,
@@ -22,6 +25,9 @@ class SearchFiles(AbstractSimpleTool):
     """Paginated grep-style search; default first page mirrors fs_read_file preview (500 items)."""
 
     default_limit = 500
+    # Cap skipped entries in the tool envelope so huge trees don't flood the model.
+    default_skipped_limit = 20
+    max_match_content_chars = 2000
     _literal_word_re = re.compile(r"[a-zA-Z_а-яА-Я][a-zA-Z0-9_а-яА-Я]+")
 
     @classmethod
@@ -30,12 +36,20 @@ class SearchFiles(AbstractSimpleTool):
             "type": "function",
             "name": "fs_search_files",
             "description": (
-                "Searches for a regex pattern in file contents. "
+                "Searches for a regex pattern in file contents (full-file regex: "
+                "matches may span newlines; '.' matches newline; '^'/'$' match line "
+                "boundaries — Python re DOTALL+MULTILINE). "
                 "`path` may be a directory (recursive search, optional file_pattern filter) "
                 "or a single file. Returns paginated hits: metadata includes total_matches, "
                 "offset, limit, truncated, next_offset, then matches (slice for this page). "
+                "Each hit has line (start), end_line, line_content, context. "
                 "Field count is the number of matches in this response (same as len(matches)); "
-                "total_matches is the full hit count for the search scope."
+                "total_matches is the full hit count for the search scope. "
+                "Files too large for fs_tools.max_read_bytes, binary, or unreadable are listed in "
+                "`skipped` with a reason (`file_too_large` / `is_binary` / `read_failed` / …) — "
+                "they are not searched; do not treat missing hits "
+                "there as 'no match'. `skipped_total` is the full skip count; the list may be "
+                f"capped (default {cls.default_skipped_limit}) with `skipped_truncated`."
             ),
             "parameters": {
                 "type": "object",
@@ -49,7 +63,15 @@ class SearchFiles(AbstractSimpleTool):
                     },
                     "regex": {
                         "type": "string",
-                        "description": "The Rust-style regular expression pattern to search for. Must be a valid pattern without unsupported features like backreferences or variable-length lookarounds. Use double backslashes (e.g., \\d, \\s)."
+                        "description": (
+                            "Regex matched against the whole file (DOTALL+MULTILINE: "
+                            "patterns may span newlines; '.' matches newline; "
+                            "'^'/'$' match line boundaries). "
+                            "Keep patterns bounded — avoid unbounded .* across huge files. "
+                            "Avoid unsupported features like backreferences or "
+                            "variable-length lookarounds. "
+                            "Use double backslashes (e.g., \\d, \\s)."
+                        ),
                     },
                     "file_pattern": {
                         "type": "string",
@@ -86,17 +108,18 @@ class SearchFiles(AbstractSimpleTool):
     def prompt_description(cls):
         description = '''Tool name: fs_search_files  
 Tool description: Searches for a regex pattern in file contents under a directory (recursive) or in a single file; directories may be filtered by a glob pattern.
-Input schema: {"type": "object", "properties": {"path": {"type": "string", "description": "Directory to search recursively, or a single file."}, "regex": {"type": "string", "description": "The Rust-style regex pattern to search for."}, "file_pattern": {"type": "string", "description": "Glob pattern to filter files when path is a directory (e.g., \'*.py\'). Ignored when path is a file."}, "offset": {"type": "integer", "description": "1-based index of the first match to return."}, "limit": {"type": "integer", "description": "Max matches returned for this page."}}, "required": ["path", "regex"], "additionalProperties": false}
+Input schema: {"type": "object", "properties": {"path": {"type": "string", "description": "Directory to search recursively, or a single file."}, "regex": {"type": "string", "description": "Regex matched against the whole file (DOTALL+MULTILINE: patterns may span newlines; '.' matches newline; '^'/'$' are line boundaries). Keep patterns bounded."}, "file_pattern": {"type": "string", "description": "Glob pattern to filter files when path is a directory (e.g., \'*.py\'). Ignored when path is a file."}, "offset": {"type": "integer", "description": "1-based index of the first match to return."}, "limit": {"type": "integer", "description": "Max matches returned for this page."}}, "required": ["path", "regex"], "additionalProperties": false}
 
 Usage:
 - `path` may be a **directory** (search all files recursively) or a **single file**.
 - When `path` is a directory, filters files using a **glob pattern** (e.g., `"*.py"`, `"src/**/*.rs"`). `file_pattern` is ignored for a file path.
-- Matches lines using a **Rust-style regular expression**.
-- Returns a **paginated** list of matches with file paths, line contents, and ±5 lines of `context`.
+- Matches using a **regex** over the **whole file** (DOTALL+MULTILINE: patterns may span newlines; `.` matches newline; `^`/`$` match line boundaries). Keep patterns bounded.
+- Returns a **paginated** list of matches with file paths, **`line`** (start), **`end_line`**, `line_content`, and ±5 lines of `context`.
 - **`count`** = matches in **this response** (page size). **`total_matches`** = all hits in the scan.
 - If **`truncated`** is true, call again with **`offset` = `next_offset`** (and same or new `limit`) to get more.
 - Omitting **`offset`** and **`limit`** is equivalent to the first page: offset 1 and default **`limit`** (same default window idea as **fs_read_file** preview).
 - Returns an empty **`matches`** list if none found.
+- Files skipped (too large / binary / unreadable) appear in **`skipped`** with a reason (`file_too_large`, `is_binary`, `read_failed`, …); **`skipped_total`** is the full count (list may be capped, see **`skipped_truncated`**). A skip is not the same as "no match".
 - Prefer **`fs_read_file`** when you need the full file; use this tool to locate matches.
 
 Important Usage Rules
@@ -107,7 +130,7 @@ Important Usage Rules
   - No backreferences (e.g., `\1`, `\2`)
   - No variable-length lookarounds (e.g., `(?<=a.*)b`)
   - No recursive or deeply nested patterns
-- **No multiline matching**: patterns must match within a **single line**.
+- Prefer tight patterns; unbounded `.*` can span huge regions of a file.
 - Use **simple, efficient regex patterns** to avoid performance issues or excessive results.
 - Always escape special sequences with **double backslashes**: use `\\d`, `\\s`, `\\w`, `\\.` instead of `\\d`, `\\s`, etc.
 - Use `file_pattern` to narrow scope (e.g., `"*.ts"`, `"tests/**/*"`) when searching a directory.
@@ -153,92 +176,104 @@ Search for error logs in Rust source files:
                 literals.append(word)
         return tuple(literals)
 
-    def _search_lines(self, file_path: str, lines, regex: str, context_num=5) -> List[Dict[str, Any]]:
+    @staticmethod
+    def _line_start_offsets(lines: List[str]) -> List[int]:
+        """Byte/char offsets of the start of each line (aligned with ``splitlines``)."""
+        starts: List[int] = []
+        pos = 0
+        for line in lines:
+            starts.append(pos)
+            pos += len(line)
+        return starts
+
+    @staticmethod
+    def _offset_to_line(line_starts: List[int], offset: int, text_len: int) -> int:
+        """1-based line number of the character at ``offset`` (clamped)."""
+        if not line_starts:
+            return 1
+        if offset <= 0:
+            return 1
+        if offset >= text_len:
+            return len(line_starts)
+        return bisect.bisect_right(line_starts, offset)
+
+    def _clip_match_content(self, content: str) -> str:
+        max_chars = self.max_match_content_chars
+        if len(content) <= max_chars:
+            return content
+        return (
+            content[:max_chars]
+            + f"...[match_truncated: showing first {max_chars} of "
+            f"{len(content)} chars]"
+        )
+
+    def _build_match_context(
+        self,
+        lines: List[str],
+        start_line: int,
+        end_line: int,
+        context_num: int = 5,
+    ) -> str:
+        """±context_num around the match; large spans → head + cut marker + tail."""
+        n = len(lines)
+        # Keep a contiguous window when the match itself is small.
+        if end_line - start_line <= 2 * context_num:
+            ctx_lo = max(0, start_line - 1 - context_num)
+            ctx_hi = min(n, end_line + context_num)
+            return "".join(lines[ctx_lo:ctx_hi])
+
+        head_lo = max(0, start_line - 1 - context_num)
+        head_hi = min(n, start_line + context_num)
+        tail_lo = max(0, end_line - 1 - context_num)
+        tail_hi = min(n, end_line + context_num)
+        if tail_lo <= head_hi:
+            return "".join(lines[head_lo:tail_hi])
+
+        omitted = tail_lo - head_hi
+        marker = (
+            f"...[context_truncated: match spans lines {start_line}-{end_line}; "
+            f"omitted {omitted} lines between context windows]...\n"
+        )
+        return "".join(lines[head_lo:head_hi]) + marker + "".join(lines[tail_lo:tail_hi])
+
+    def _search_text(
+        self, file_path: str, text: str, regex: str, context_num: int = 5
+    ) -> List[Dict[str, Any]]:
         try:
-            compiled_regex = re.compile(regex)
+            compiled_regex = re.compile(regex, re.DOTALL | re.MULTILINE)
         except re.error as e:
             raise ValueError(f"Invalid regex pattern '{regex}': {str(e)}")
 
         literal_hints = self._extract_literals(regex)
+        if literal_hints and not any(hint in text for hint in literal_hints):
+            return []
 
+        lines = text.splitlines(keepends=True)
+        line_starts = self._line_start_offsets(lines)
+        text_len = len(text)
         results: List[Dict[str, Any]] = []
-        before: List[str] = []
-        # Matches waiting for up to context_num lines after the hit.
-        pending: List[Dict[str, Any]] = []
-        max_line_length = 1000
-        line_context_window = 500
+        report_path = tool_report_abspath(file_path, workspace=self._workspace)
 
-        def _cut_line(line: str) -> str:
-            if len(line) > max_line_length:
-                return (
-                    line[:max_line_length]
-                    + f"...[line_cutted. Show first {max_line_length}, "
-                    f"cut last {len(line) - max_line_length}]\n"
-                )
-            return line
-
-        def _emit_pending(item: Dict[str, Any]) -> None:
-            item["data"]["context"] = "".join(
-                item["before"] + [item["match_line"]] + item["after"]
+        for match in compiled_regex.finditer(text):
+            start = match.start()
+            end = match.end()
+            start_line = self._offset_to_line(line_starts, start, text_len)
+            end_line = (
+                start_line
+                if end <= start
+                else self._offset_to_line(line_starts, end - 1, text_len)
             )
-            results.append(item["data"])
-
-        try:
-            for line_num, line in enumerate(lines, start=1):
-                line_cutted = _cut_line(line)
-
-                still_pending: List[Dict[str, Any]] = []
-                for item in pending:
-                    item["after"].append(line_cutted)
-                    if len(item["after"]) >= context_num:
-                        _emit_pending(item)
-                    else:
-                        still_pending.append(item)
-                pending = still_pending
-
-                run_regex = True
-                if literal_hints and not any(hint in line for hint in literal_hints):
-                    run_regex = False
-
-                if run_regex:
-                    res = compiled_regex.search(line)
-                    if res:
-                        span = res.span()
-                        left = max(0, span[0] - line_context_window)
-                        right = min(len(line), span[1] + line_context_window)
-                        found_content = line[left:right]
-                        if left > 0:
-                            found_content = f"[...cutted first {left}]" + found_content
-                        if right < len(line):
-                            found_content += f"[cutted last {len(line) - right}...]"
-                        if left > 0 or right < len(line):
-                            found_content += f"(shown from {left} to {right} symbols)"
-                        else:
-                            found_content = found_content.strip()
-                        pending.append(
-                            {
-                                "data": {
-                                    "file": tool_report_abspath(
-                                        file_path, workspace=self._workspace
-                                    ),
-                                    "line": line_num,
-                                    "line_content": found_content,
-                                },
-                                "before": list(before),
-                                "match_line": line_cutted,
-                                "after": [],
-                            }
-                        )
-
-                before.append(line_cutted)
-                if len(before) > context_num:
-                    before = before[-context_num:]
-
-            for item in pending:
-                _emit_pending(item)
-        except Exception:
-            pass
-
+            results.append(
+                {
+                    "file": report_path,
+                    "line": start_line,
+                    "end_line": end_line,
+                    "line_content": self._clip_match_content(match.group(0)),
+                    "context": self._build_match_context(
+                        lines, start_line, end_line, context_num
+                    ),
+                }
+            )
         return results
 
     def _result(self, 
@@ -254,6 +289,9 @@ Search for error logs in Rust source files:
         limit: Optional[int] = None,
         truncated: Optional[bool] = None,
         next_offset: Optional[int] = None,
+        skipped: Optional[List[Dict[str, Any]]] = None,
+        skipped_total: Optional[int] = None,
+        skipped_truncated: Optional[bool] = None,
     ) -> str:
         payload: Dict[str, Any] = {
             "tool": SearchFiles.registered_tool_name(),
@@ -264,6 +302,10 @@ Search for error logs in Rust source files:
             "error": error,
             "matches": matches if matches is not None else [],
         }
+        if skipped is not None:
+            payload["skipped"] = skipped
+            payload["skipped_total"] = skipped_total if skipped_total is not None else len(skipped)
+            payload["skipped_truncated"] = bool(skipped_truncated)
         if ok and total_matches is not None:
             payload["total_matches"] = total_matches
             payload["count"] = len(matches) if matches is not None else 0
@@ -321,11 +363,14 @@ Search for error logs in Rust source files:
         **kwargs,
     ) -> str:
         file_pattern = coalesce_optional_string(file_pattern)
+
         _result = functools.partial(
-            self._result, path=path, regex=regex, file_pattern=file_pattern
+            self._result,
+            path=path if isinstance(path, str) else str(path),
+            regex=regex if isinstance(regex, str) else "",
+            file_pattern=file_pattern,
         )
 
-        # Input validation
         if not isinstance(path, str):
             return _result(ok=False, error={"type": "invalid_argument", "field": "path"})
         if not isinstance(regex, str):
@@ -338,7 +383,7 @@ Search for error logs in Rust source files:
             return _result(ok=False, error={"type": "invalid_argument", "field": "limit"})
 
         try:
-            re.compile(regex)
+            re.compile(regex, re.DOTALL | re.MULTILINE)
         except re.error as e:
             return _result(
                 ok=False,
@@ -382,14 +427,95 @@ Search for error logs in Rust source files:
             return True
 
         results: List[Dict[str, Any]] = []
+        skipped: List[Dict[str, Any]] = []
+        max_bytes = fs_read_max_bytes(self._config_dict)
+
+        def _skip(abs_path: str, reason: str, **extra: Any) -> None:
+            entry: Dict[str, Any] = {
+                "path": tool_report_abspath(abs_path, workspace=self._workspace),
+                "reason": reason,
+            }
+            entry.update(extra)
+            skipped.append(entry)
+
+        def _load_search_text(abs_path: str) -> Tuple[Optional[str], Optional[Dict[str, Any]]]:
+            """Return (text, None) or (None, error dict with type/message for skip or tool error)."""
+            try:
+                raw = self._backend.read_bytes(abs_path)
+            except OSError as e:
+                return None, {"type": "read_failed", "message": str(e)}
+
+            decoded = decode_text_bytes(raw)
+            if decoded.ok:
+                return decoded.text or "", None
+
+            err = decoded.error or {
+                "type": "read_failed",
+                "message": "Failed to decode file.",
+            }
+            err_type = err.get("type") or "read_failed"
+            if err_type == "is_binary":
+                return None, {
+                    "type": "is_binary",
+                    "message": err.get("message")
+                    or "File looks binary; not searchable as text.",
+                }
+
+            # Non-UTF8 text: best-effort decode for discovery (same idea as backend.read).
+            text = decode_text_best_effort(raw)
+            if text is not None:
+                return text, None
+            return None, {
+                "type": err_type,
+                "message": err.get("message") or "Failed to decode file.",
+            }
+
+        def _search_file_contents(abs_path: str) -> Tuple[Optional[List[Dict[str, Any]]], Optional[Dict[str, Any]]]:
+            text, err = _load_search_text(abs_path)
+            if err is not None:
+                return None, err
+            assert text is not None
+            return self._search_text(abs_path, text, regex), None
+
+        def _search_one(abs_path: str) -> Optional[List[Dict[str, Any]]]:
+            try:
+                size = self._backend.getsize(abs_path)
+            except OSError as e:
+                _skip(abs_path, "stat_failed", message=str(e))
+                return None
+            size_err = check_file_size(size, max_bytes, operation="search_files")
+            if size_err is not None:
+                _skip(
+                    abs_path,
+                    "file_too_large",
+                    actual_bytes=size,
+                    max_bytes=max_bytes,
+                )
+                return None
+            hits, err = _search_file_contents(abs_path)
+            if err is not None:
+                _skip(
+                    abs_path,
+                    err.get("type") or "read_failed",
+                    message=err.get("message"),
+                )
+                return None
+            return hits
 
         if self._backend.is_file(path):
             # Single-file search (models often pass a file like `rg pattern file.py`).
             # file_pattern does not apply — the path already names the file.
             try:
-                results = self._search_lines(path, self._backend.iter_lines(path), regex)
-            except (OSError, FileNotFoundError):
+                size = self._backend.getsize(path)
+            except OSError:
                 return _result(ok=False, error={"type": "not_found"})
+            size_err = check_file_size(size, max_bytes, operation="search_files")
+            if size_err is not None:
+                return _result(ok=False, error=size_err)
+            hits, err = _search_file_contents(path)
+            if err is not None:
+                return _result(ok=False, error=err)
+            results = hits or []
         elif self._backend.is_dir(path):
             file_matcher = self._create_file_matcher(file_pattern, base_path=path)
             try:
@@ -403,12 +529,7 @@ Search for error logs in Rust source files:
                     continue
                 if not _rg_pass(abs_path):
                     continue
-                try:
-                    file_result = self._search_lines(
-                        abs_path, self._backend.iter_lines(abs_path), regex
-                    )
-                except (OSError, FileNotFoundError):
-                    continue
+                file_result = _search_one(abs_path)
                 if file_result:
                     results += file_result
         else:
@@ -435,6 +556,11 @@ Search for error logs in Rust source files:
             limit=lim_eff,
             truncated=truncated,
             next_offset=next_offset,
+            skipped=skipped[: self.default_skipped_limit] if skipped else None,
+            skipped_total=len(skipped) if skipped else None,
+            skipped_truncated=(
+                len(skipped) > self.default_skipped_limit if skipped else None
+            ),
         )
 
     def _create_file_matcher(self, file_pattern: Optional[str], base_path: str):

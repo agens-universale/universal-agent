@@ -10,6 +10,8 @@ import chardet
 
 EDIT_TEXT_ENCODING: Final[str] = "utf-8"
 BINARY_SAMPLE_BYTES: Final[int] = 8192
+# Head sample for append encoding check (do not load the whole file).
+APPEND_HEAD_SAMPLE_BYTES: Final[int] = 100 * 1024
 ENCODING_PREVIEW_CHARS: Final[int] = 500
 ENCODING_GUESS_MIN_CONFIDENCE: Final[float] = 0.5
 HEX_PREVIEW_BYTES: Final[int] = 64
@@ -397,6 +399,42 @@ def _strip_incomplete_utf8_tail(chunk: bytes) -> bytes:
     if len(chunk) - index < need:
         return chunk[:index]
     return chunk
+
+
+def _trim_head_sample_for_decode(sample: bytes, encoding: str) -> bytes:
+    """Drop a possibly incomplete trailing code unit so head decode can be strict."""
+    if encoding in ("utf-8", "utf-8-sig"):
+        return _strip_incomplete_utf8_tail(sample)
+    if encoding in ("utf-16-le", "utf-16-be", "utf-16"):
+        # Avoid cutting mid code unit (2 bytes). Surrogate pairs may still split —
+        # rare at a 100 KiB boundary; fail closed via decode error if so.
+        return sample if len(sample) % 2 == 0 else sample[:-1]
+    return sample
+
+
+def check_encoding_on_file_head(
+    sample: bytes,
+    encoding: str,
+    *,
+    sample_is_complete_file: bool,
+) -> dict[str, Any] | None:
+    """Validate that a file head matches ``encoding`` without loading the whole file.
+
+    Returns an error dict (``is_binary`` / ``undecodable_text`` / …) or ``None`` if OK.
+    When ``sample_is_complete_file`` is false, trims an incomplete trailing UTF-8/16
+    sequence at the cut point before decoding.
+    """
+    canonical, enc_err = resolve_encoding_arg(encoding)
+    if enc_err is not None:
+        return enc_err
+    assert canonical is not None
+    data = sample
+    if not sample_is_complete_file:
+        data = _trim_head_sample_for_decode(sample, canonical)
+    decoded = decode_text_bytes(data, encoding=canonical)
+    if not decoded.ok:
+        return decoded.error
+    return None
 
 
 def _try_decode_utf8_strict(data: bytes) -> bool:

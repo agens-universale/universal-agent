@@ -301,6 +301,7 @@ def flatten_app_config(app_cfg: AppConfig) -> Dict[str, Any]:
         "pricing": app_cfg.pricing.model_dump(),
         "agent_auth": app_cfg.agent_auth.model_dump() if app_cfg.agent_auth else {},
         "diff_tui": app_cfg.diff_tui.model_dump(),
+        "fs_tools": app_cfg.fs_tools.model_dump(),
         "strip_tags_projection": app_cfg.strip_tags_projection.model_dump(),
     }
 

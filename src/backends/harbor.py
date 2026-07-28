@@ -10,6 +10,7 @@ import asyncio
 import base64
 import shlex
 import tempfile
+import uuid
 from pathlib import Path
 from typing import Any, Callable, Iterable, Optional
 
@@ -277,8 +278,28 @@ class HarborBackend(FsBackend):
             tmp_path.unlink(missing_ok=True)
 
     def append(self, path: str, content: str, encoding: str = "utf-8") -> None:
-        current = self.read_bytes(path) if self.exists(path) else b""
-        self.write_bytes(path, current + encode_text_for_write(content, encoding))
+        # Upload only the new chunk, then shell-append (no full-file download).
+        data = encode_text_for_write(content, encoding)
+        with tempfile.NamedTemporaryFile("wb", delete=False) as tmp:
+            tmp.write(data)
+            local_tmp = Path(tmp.name)
+        remote_tmp = f"{path}.gc-append-tmp.{uuid.uuid4().hex}"
+        try:
+            self._await(self._env.exec(f"mkdir -p $(dirname {shlex.quote(path)})"))
+            self._await(self._env.upload_file(local_tmp, remote_tmp))
+            res = self.exec(
+                f"cat {shlex.quote(remote_tmp)} >> {shlex.quote(path)}; "
+                f"rm -f {shlex.quote(remote_tmp)}"
+            )
+            if res.return_code != 0:
+                raise OSError(res.stderr.strip() or f"append failed: {path}")
+        finally:
+            local_tmp.unlink(missing_ok=True)
+            # Best-effort: upload/exec may leave remote_tmp if the cat+rm line never ran.
+            try:
+                self.exec(f"rm -f {shlex.quote(remote_tmp)}")
+            except Exception:
+                pass
 
     def copy(self, src: str, dst: str) -> None:
         res = self.exec(f"cp {shlex.quote(src)} {shlex.quote(dst)}")

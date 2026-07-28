@@ -122,6 +122,12 @@ intent_scope:
   # <= порога — как есть (raw); > порога — LLM-саммари (кап max_summary_chars).
   max_final_answer_raw_chars: 2000
 
+# Лимиты FS-тулов, которые поднимают файл целиком в память.
+# read — fs_read_file / fs_search_files; mutate — apply/replace (не append).
+fs_tools:
+  max_read_bytes: 8388608       # 8 MiB
+  max_mutate_bytes: 104857600   # 100 MiB
+
 security:
   command_moderation:
     enabled: true
