@@ -169,10 +169,15 @@ def bind_os_backend(tool, backend, *, config_dict=None):
     )
     # Mirror AbstractSimpleTool.__init__ defaults for attributes accessed by
     # tool methods (e.g. exec tools read self._state / self._call_id).
+    # `self._config_dict` is read directly by fs tools (fs_size_limits) and
+    # by read_file's char-limit lookup; AbstractSimpleTool.__init__ sets it
+    # from kwargs, but tests here build the tool via __new__ (skipping
+    # __init__), so expose it explicitly to avoid AttributeError.
     if not hasattr(tool, "_state"):
         tool._state = None
     if not hasattr(tool, "_call_id"):
         tool._call_id = None
+    tool._config_dict = cfg
     return tool
 
 
