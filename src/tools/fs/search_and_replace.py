@@ -1,4 +1,3 @@
-import hashlib
 import json
 import functools
 import difflib
@@ -8,7 +7,13 @@ from tools.fs.edit_suggestions import build_edit_miss_suggestions
 from utils.tool_report_paths import tool_report_abspath
 from security.path_policy import enforce_write_guard
 from tools.schema_optional import coalesce_optional_string
-from utils.file_text import check_expected_file_sha256, is_valid_sha256_hex
+from utils.file_text import (
+    check_expected_file_sha256,
+    decode_text_bytes,
+    is_valid_sha256_hex,
+    sha256_hex_of_bytes,
+    try_encode_text_bytes,
+)
 
 class SearchAndReplace(AbstractSimpleTool):
     """
@@ -111,6 +116,15 @@ class SearchAndReplace(AbstractSimpleTool):
                             "Edit aborts with stale_file if file content changed."
                         ),
                     },
+                    "encoding": {
+                        "type": "string",
+                        "description": (
+                            "Optional text encoding. Omit for UTF-8 (default; also UTF-16 with BOM). "
+                            "Otherwise: utf-8, utf-8-sig, cp1251, koi8-r, latin-1, utf-16, "
+                            "utf-16-le, utf-16-be (also windows-1251, iso-8859-1). "
+                            "Successful edits are written back in the same encoding."
+                        ),
+                    },
                 },
                 "required": ["path", "search", "replace"],
                 "additionalProperties": False
@@ -129,7 +143,6 @@ Usage:
 - The `search` string must match **exactly** (case-sensitive).
 - By default, only the **first match** is replaced. You can choose `occurrence="last"`, `occurrence="all"`, or a 1-based occurrence number.
 - File is rewritten safely (write + replace) to prevent data loss.
-- Uses UTF-8 encoding with `errors='ignore'` for robustness.
 - Optional `dry_run=true` computes result without writing.
 - Optional `expected_matches` guards against unintended edits when total match count differs.
 - Matching is done across the ENTIRE file — there are no start_line/end_line scope args.
@@ -206,6 +219,7 @@ Update version string:
         suggestions: list[Dict[str, Any]] | None = None,
         suggestions_total: int = 0,
         sha256: str | None = None,
+        encoding_used: str | None = None,
     ) -> str:
         return json.dumps(
             {
@@ -224,6 +238,7 @@ Update version string:
                 "suggestions": suggestions or [],
                 "suggestions_total": suggestions_total,
                 "sha256": sha256,
+                "encoding_used": encoding_used,
                 "error": error,
                 "message": message,
             },
@@ -266,9 +281,11 @@ Update version string:
         diff_context_lines: int = default_diff_context_lines,
         max_diff_chars: int = default_max_diff_chars,
         expected_file_sha256: str | None = None,
+        encoding: str | None = None,
         **kwargs,
     ) -> str:
         expected_file_sha256 = coalesce_optional_string(expected_file_sha256)
+        encoding = coalesce_optional_string(encoding)
         _result = functools.partial(self._result, path=path, applied=False)
 
         # Input validation
@@ -510,7 +527,7 @@ Update version string:
             )
 
         try:
-            content = self._backend.read(path)
+            raw = self._backend.read_bytes(path)
         except Exception as e:
             return _result(
                 ok=False,
@@ -523,8 +540,24 @@ Update version string:
                 suggestions_total=0,
                 error={"type": "read_failed", "message": str(e)},
             )
-
-        stale_error = check_expected_file_sha256(content, expected_file_sha256)
+        decoded = decode_text_bytes(raw, encoding=encoding)
+        if not decoded.ok:
+            err = decoded.error or {"type": "read_failed", "message": "Failed to decode file."}
+            return _result(
+                ok=False,
+                matched=False,
+                replaced=0,
+                match_count=0,
+                line_numbers=[],
+                message=err.get("message", "Failed to decode file."),
+                suggestions=[],
+                suggestions_total=0,
+                error=err,
+            )
+        content = decoded.text or ""
+        encoding_used = decoded.encoding_used
+        actual_sha256 = sha256_hex_of_bytes(raw)
+        stale_error = check_expected_file_sha256(actual_sha256, expected_file_sha256)
         if stale_error is not None:
             return _result(
                 ok=False,
@@ -691,7 +724,25 @@ Update version string:
                 )
 
         try:
-            self._backend.write(path, new_content, encoding="utf-8")
+            out_bytes, encode_err = try_encode_text_bytes(new_content, encoding_used or "utf-8")
+            if encode_err is not None:
+                return _result(
+                    ok=False,
+                    matched=True,
+                    replaced=0,
+                    match_count=match_count,
+                    line_numbers=line_numbers,
+                    match_ranges=match_ranges,
+                    message=encode_err.get("message", "Failed to encode file."),
+                    backup_path=backup_path,
+                    diff=diff_text,
+                    diff_truncated=diff_truncated,
+                    suggestions=[],
+                    suggestions_total=0,
+                    error=encode_err,
+                )
+            assert out_bytes is not None
+            self._backend.write_bytes(path, out_bytes)
         except Exception as e:
             return _result(
                 ok=False,
@@ -709,13 +760,12 @@ Update version string:
                 error={"type": "write_failed", "message": str(e)},
             )
 
-        content_sha256 = hashlib.sha256(
-            new_content.encode("utf-8", errors="replace")
-        ).hexdigest()
+        content_sha256 = sha256_hex_of_bytes(out_bytes)
         return _result(
             ok=True,
             applied=True,
             sha256=content_sha256,
+            encoding_used=encoding_used,
             matched=True,
             replaced=replaced_count,
             match_count=match_count,

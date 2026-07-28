@@ -13,6 +13,7 @@ from diff_tui.mode import resolve_mode
 from diff_tui.paths import canonical_path_key
 from diff_tui.store import DiffStore
 from diff_tui.touched import TouchedJournal
+from utils.file_text import BINARY_SAMPLE_BYTES, classify_content_from_sample
 
 _logger = logging.getLogger(__name__)
 
@@ -194,6 +195,8 @@ class TrackingFsBackend:
         self._inner.write(path, content, encoding=encoding)
 
     def write_bytes(self, path: str, data: bytes) -> None:
+        if not classify_content_from_sample(path, data[:BINARY_SAMPLE_BYTES]).is_binary:
+            self._track_text_mutation(path)
         self._inner.write_bytes(path, data)
 
     def append(self, path: str, content: str, encoding: str = "utf-8") -> None:
@@ -268,6 +271,9 @@ class TrackingFsBackend:
 
     def read(self, path: str) -> str:
         return self._inner.read(path)
+
+    def read_bytes(self, path: str) -> bytes:
+        return self._inner.read_bytes(path)
 
     def iter_lines(self, path: str) -> Iterable[str]:
         return self._inner.iter_lines(path)

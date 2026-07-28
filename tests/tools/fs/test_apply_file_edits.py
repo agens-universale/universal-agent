@@ -1,7 +1,7 @@
 import json
 
 from tools.fs.apply_file_edits import ApplyFileEdits
-from utils.file_text import sha256_hex_of_text
+from utils.file_text import sha256_hex_of_bytes
 
 
 from tests.helpers.tool_ctx import with_local_ctx
@@ -76,13 +76,67 @@ def test_apply_batch_stale_file_guard(tmp_path):
         with_local_ctx(ApplyFileEdits)(
             path=str(p),
             edits=[{"search": "live", "replace": "dead"}],
-            expected_file_sha256=sha256_hex_of_text("old content"),
+            expected_file_sha256=sha256_hex_of_bytes(b"old content"),
         )
     )
     assert res["ok"] is False and res["applied"] is False
     assert res["edits_applied"] == 0
     assert res["error"]["type"] == "stale_file"
     assert p.read_text(encoding="utf-8") == "live content"
+
+
+def test_apply_crlf_file_info_hash_allows_edit_without_false_stale(tmp_path):
+    from tools.fs.file_info import FileInfo
+
+    data = b"version one\r\n"
+    p = tmp_path / "crlf.txt"
+    p.write_bytes(data)
+    info = json.loads(with_local_ctx(FileInfo)(path=str(p), include_hash=True))
+    res = json.loads(
+        with_local_ctx(ApplyFileEdits)(
+            path=str(p),
+            edits=[{"search": "one", "replace": "two"}],
+            expected_file_sha256=info["sha256"],
+        )
+    )
+    assert res["ok"] is True and res["applied"] is True
+    assert p.read_bytes() == b"version two\r\n"
+    assert res["sha256"] == sha256_hex_of_bytes(b"version two\r\n")
+
+
+def test_apply_batch_rejects_nul_binary(tmp_path):
+    p = tmp_path / "blob.bin"
+    original = b"live\x00content"
+    p.write_bytes(original)
+    res = json.loads(
+        with_local_ctx(ApplyFileEdits)(
+            path=str(p),
+            edits=[{"search": "live", "replace": "dead"}],
+        )
+    )
+    assert res["ok"] is False and res["applied"] is False
+    assert res["error"]["type"] == "is_binary"
+    assert p.read_bytes() == original
+
+
+def test_apply_batch_encoding_required_does_not_write(tmp_path):
+    text = (
+        "Уважаемые коллеги! Настоящим сообщаем, что заседание рабочей группы "
+        "по внедрению системы состоится 15 марта 2024 года в переговорной.\n"
+    ) * 3
+    original = text.encode("cp1251")
+    p = tmp_path / "legacy.txt"
+    p.write_bytes(original)
+    res = json.loads(
+        with_local_ctx(ApplyFileEdits)(
+            path=str(p),
+            edits=[{"search": "коллеги", "replace": "друзья"}],
+        )
+    )
+    assert res["ok"] is False and res["applied"] is False
+    assert res["error"]["type"] == "encoding_required"
+    assert res["error"]["encoding_guess"] == "cp1251"
+    assert p.read_bytes() == original
 
 
 def test_apply_batch_backup_once(tmp_path):

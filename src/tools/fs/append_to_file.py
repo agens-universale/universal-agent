@@ -3,8 +3,16 @@ import os
 
 from tools.schema_optional import X_PRESERVE_EMPTY_STRING
 from tools.simple_tool_base import AbstractSimpleTool
+from utils.file_text import (
+    decode_text_bytes,
+    resolve_encoding_arg,
+    sha256_hex_of_bytes,
+    try_encode_text_bytes,
+)
 from utils.tool_report_paths import tool_report_abspath
 from security.path_policy import enforce_write_guard
+
+
 class AppendToFile(AbstractSimpleTool):
 
     @classmethod
@@ -14,8 +22,7 @@ class AppendToFile(AbstractSimpleTool):
             "name": "fs_append_file",
             "description": (
                 "Append text to the end of an existing file (optional create). "
-                "Build large files with several moderate `content` chunks — not one huge append. "
-                "Use after an initial write stub, or to add sections incrementally; read back to verify when needed."
+                "Build large files with several moderate `content` chunks — not one huge append."
             ),
             "parameters": {
                 "type": "object",
@@ -49,7 +56,13 @@ class AppendToFile(AbstractSimpleTool):
                     },
                     "encoding": {
                         "type": "string",
-                        "description": "Text encoding to use. Default 'utf-8'."
+                        "description": (
+                            "Text encoding for the appended bytes: utf-8, utf-8-sig, cp1251, "
+                            "koi8-r, latin-1, utf-16, utf-16-le, utf-16-be "
+                            "(also windows-1251, iso-8859-1). Default utf-8. "
+                            "Must match the existing file; if the file cannot be decoded "
+                            "as this encoding, append fails and the file is unchanged."
+                        ),
                     }
                 },
                 "required": ["path", "content", "separator"],
@@ -81,6 +94,7 @@ Usage:
         created: bool = False,
         bytes_appended: int = 0,
         sha256: str | None = None,
+        encoding_used: str | None = None,
         error: dict | None = None,
     ) -> str:
         return json.dumps(
@@ -91,6 +105,7 @@ Usage:
                 "created": created,
                 "bytes_appended": bytes_appended,
                 "sha256": sha256,
+                "encoding_used": encoding_used,
                 "separator": separator,
                 "error": error,
             },
@@ -163,6 +178,12 @@ Usage:
                 separator=separator,
                 error={"type": "invalid_argument", "field": "encoding"},
             )
+        encoding_used, enc_err = resolve_encoding_arg(encoding)
+        if enc_err is not None:
+            return self._result(
+                ok=False, path=path, separator=separator, error=enc_err
+            )
+        assert encoding_used is not None
 
         if not os.path.isabs(path):
             return self._result(
@@ -206,11 +227,30 @@ Usage:
                         error={"type": "parent_not_found"},
                     )
 
+        out_bytes, encode_err = try_encode_text_bytes(
+            separator + content, encoding_used
+        )
+        if encode_err is not None:
+            return self._result(
+                ok=False, path=path, separator=separator, error=encode_err
+            )
+        assert out_bytes is not None
+
         try:
-            before = self._backend.getsize(path) if self._backend.exists(path) else 0
-            self._backend.append(path, separator + content, encoding=encoding)
-            after = self._backend.getsize(path)
-            appended = max(0, after - before)
+            if exists:
+                existing = self._backend.read_bytes(path)
+                decoded = decode_text_bytes(existing, encoding=encoding_used)
+                if not decoded.ok:
+                    return self._result(
+                        ok=False,
+                        path=path,
+                        separator=separator,
+                        error=decoded.error,
+                    )
+                final = existing + out_bytes
+            else:
+                final = out_bytes
+            self._backend.write_bytes(path, final)
         except Exception as e:
             return self._result(
                 ok=False,
@@ -219,18 +259,13 @@ Usage:
                 error={"type": "append_failed", "message": str(e)},
             )
 
-        # Only the delta is in memory, so hash the file via the backend.
-        try:
-            content_sha256 = self._backend.sha256_bytes(path)
-        except Exception:
-            content_sha256 = None
-
         return self._result(
             ok=True,
             path=path,
             separator=separator,
             created=not exists,
-            bytes_appended=appended,
-            sha256=content_sha256,
+            bytes_appended=len(out_bytes),
+            sha256=sha256_hex_of_bytes(final),
+            encoding_used=encoding_used,
             error=None,
         )

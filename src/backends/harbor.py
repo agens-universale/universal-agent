@@ -99,6 +99,15 @@ class HarborBackend(FsBackend):
             raise FileNotFoundError(path)
         return res.stdout or ""
 
+    def read_bytes(self, path: str) -> bytes:
+        with tempfile.NamedTemporaryFile("wb", delete=False) as tmp:
+            tmp_path = Path(tmp.name)
+        try:
+            self._await(self._env.download_file(path, tmp_path))
+            return tmp_path.read_bytes()
+        finally:
+            tmp_path.unlink(missing_ok=True)
+
     def iter_lines(self, path: str) -> Iterable[str]:
         return iter(self.read(path).splitlines(keepends=True))
 
@@ -235,15 +244,8 @@ class HarborBackend(FsBackend):
 
     # --- file write/edit (native transfer) ---
     def write(self, path: str, content: str, encoding: str = "utf-8") -> None:
-        # encoding accepted for protocol compat; container writes are always utf-8
-        with tempfile.NamedTemporaryFile("w", delete=False, encoding="utf-8") as tmp:
-            tmp.write(content)
-            tmp_path = Path(tmp.name)
-        try:
-            self._await(self._env.exec(f"mkdir -p $(dirname {shlex.quote(path)})"))
-            self._await(self._env.upload_file(tmp_path, path))
-        finally:
-            tmp_path.unlink(missing_ok=True)
+        # Strict encode on host → bytes upload (same path as write_bytes).
+        self.write_bytes(path, content.encode(encoding))
 
     def write_bytes(self, path: str, data: bytes) -> None:
         with tempfile.NamedTemporaryFile("wb", delete=False) as tmp:
@@ -256,9 +258,8 @@ class HarborBackend(FsBackend):
             tmp_path.unlink(missing_ok=True)
 
     def append(self, path: str, content: str, encoding: str = "utf-8") -> None:
-        # encoding accepted for protocol compat; container writes are always utf-8
-        current = self.read(path) if self.exists(path) else ""
-        self.write(path, current + content)
+        current = self.read_bytes(path) if self.exists(path) else b""
+        self.write_bytes(path, current + content.encode(encoding))
 
     def copy(self, src: str, dst: str) -> None:
         res = self.exec(f"cp {shlex.quote(src)} {shlex.quote(dst)}")

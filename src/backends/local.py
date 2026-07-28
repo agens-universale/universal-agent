@@ -83,10 +83,14 @@ class LocalFsBackend(FsBackend):
     def read(self, path: str) -> str:
         return read_text_for_edit(path)
 
+    def read_bytes(self, path: str) -> bytes:
+        with open(path, "rb") as f:
+            return f.read()
+
     def iter_lines(self, path: str) -> Iterable[str]:
-        with open(path, "r", encoding="utf-8", errors="ignore") as f:
-            for line in f:
-                yield line
+        # Preserve raw line endings; strict UTF-8 (same as read_text_for_edit).
+        text = self.read(path)
+        yield from text.splitlines(keepends=True)
 
     def read_head_bytes(self, path: str, n: int) -> bytes:
         with open(path, "rb") as f:
@@ -101,19 +105,8 @@ class LocalFsBackend(FsBackend):
 
     # --- write ---
     def write(self, path: str, content: str, encoding: str = "utf-8") -> None:
-        # Atomic: tmp + os.replace.
-        tmp_path = f"{path}.tmp"
-        try:
-            with open(tmp_path, "w", encoding=encoding, errors="replace") as fd:
-                fd.write(content)
-            os.replace(tmp_path, path)
-        except Exception:
-            try:
-                if os.path.exists(tmp_path):
-                    os.remove(tmp_path)
-            except Exception:
-                pass
-            raise
+        # Strict encode → atomic bytes write (no errors=replace).
+        self.write_bytes(path, content.encode(encoding))
 
     def write_bytes(self, path: str, data: bytes) -> None:
         tmp_path = f"{path}.tmp"
@@ -130,8 +123,8 @@ class LocalFsBackend(FsBackend):
             raise
 
     def append(self, path: str, content: str, encoding: str = "utf-8") -> None:
-        with open(path, "a", encoding=encoding, errors="replace") as fd:
-            fd.write(content)
+        with open(path, "ab") as fd:
+            fd.write(content.encode(encoding))
 
     def copy(self, src: str, dst: str) -> None:
         with open(src, "rb") as s, open(dst, "wb") as d:

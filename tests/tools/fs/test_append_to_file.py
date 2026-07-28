@@ -99,3 +99,74 @@ def test_append_errors(tmp_path):
     assert miss["ok"] is False and miss["error"]["type"] == "not_found"
     bad_sep = json.loads(tool(path=str(tmp_path / "x.txt"), content="x", separator=123))
     assert bad_sep["ok"] is False and bad_sep["error"]["field"] == "separator"
+
+
+def test_append_cp1251_round_trip(tmp_path):
+    p = tmp_path / "ru.txt"
+    p.write_bytes("Привет".encode("cp1251"))
+    res = json.loads(
+        with_local_ctx(AppendToFile)(
+            path=str(p),
+            content=" мир",
+            separator="",
+            encoding="cp1251",
+        )
+    )
+    assert res["ok"] is True
+    assert res["encoding_used"] == "cp1251"
+    assert p.read_bytes() == "Привет мир".encode("cp1251")
+
+
+def test_append_unsupported_encoding(tmp_path):
+    p = tmp_path / "a.txt"
+    p.write_text("x", encoding="utf-8")
+    res = json.loads(
+        with_local_ctx(AppendToFile)(
+            path=str(p), content="y", separator="", encoding="shift_jis"
+        )
+    )
+    assert res["ok"] is False
+    assert res["error"]["type"] == "unsupported_encoding"
+    assert p.read_text(encoding="utf-8") == "x"
+
+
+def test_append_encode_failed_keeps_file(tmp_path):
+    p = tmp_path / "a.txt"
+    original = "Hi".encode("latin-1")
+    p.write_bytes(original)
+    res = json.loads(
+        with_local_ctx(AppendToFile)(
+            path=str(p), content="Привет", separator="", encoding="latin-1"
+        )
+    )
+    assert res["ok"] is False
+    assert res["error"]["type"] == "encode_failed"
+    assert p.read_bytes() == original
+
+
+def test_append_wrong_encoding_keeps_file(tmp_path):
+    p = tmp_path / "ru.txt"
+    original = "Привет".encode("cp1251")
+    p.write_bytes(original)
+    res = json.loads(
+        with_local_ctx(AppendToFile)(
+            path=str(p), content=" x", separator="", encoding="utf-8"
+        )
+    )
+    assert res["ok"] is False
+    assert res["error"]["type"] == "undecodable_text"
+    assert p.read_bytes() == original
+
+
+def test_append_rejects_nul_binary(tmp_path):
+    p = tmp_path / "blob.bin"
+    original = b"aaa\x00bbb"
+    p.write_bytes(original)
+    res = json.loads(
+        with_local_ctx(AppendToFile)(
+            path=str(p), content="x", separator="", encoding="utf-8"
+        )
+    )
+    assert res["ok"] is False
+    assert res["error"]["type"] == "is_binary"
+    assert p.read_bytes() == original

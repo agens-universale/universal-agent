@@ -7,7 +7,7 @@ from utils.file_text import (
     BINARY_SAMPLE_BYTES,
     classify_content_from_sample,
     count_lines_in_text,
-    sha256_hex_of_text,
+    guess_encoding,
 )
 from security.read_guard import enforce_read_guard
 from tools.simple_tool_base import AbstractSimpleTool
@@ -155,6 +155,7 @@ class FileInfo(AbstractSimpleTool):
                 writable=False,
                 line_count=None,
                 encoding_guess=None,
+                encoding_confidence=None,
                 is_binary=None,
                 binary_detection_reason=None,
                 sha256=None,
@@ -196,6 +197,7 @@ class FileInfo(AbstractSimpleTool):
 
         line_count: Optional[int] = None
         encoding_guess: Optional[str] = None
+        encoding_confidence: Optional[float] = None
         is_binary: Optional[bool] = None
         binary_detection_reason: Optional[str] = None
         sha256: Optional[str] = None
@@ -206,12 +208,21 @@ class FileInfo(AbstractSimpleTool):
             sample = self._backend.read_head_bytes(stat_path, BINARY_SAMPLE_BYTES)
             classification = classify_content_from_sample(stat_path, sample)
             is_binary = classification.is_binary
-            encoding_guess = classification.encoding_guess
             binary_detection_reason = classification.binary_detection_reason
+            if is_binary:
+                encoding_guess = None
+                encoding_confidence = None
+            elif classification.encoding_guess is not None:
+                encoding_guess = classification.encoding_guess
+                encoding_confidence = 1.0
+            else:
+                encoding_guess, encoding_confidence = guess_encoding(sample)
 
             if include_line_count and not is_binary:
                 try:
                     line_count = count_lines_in_text(self._backend.read(stat_path))
+                except UnicodeDecodeError:
+                    line_count = None
                 except OSError as e:
                     return self._error(
                         path=path,
@@ -224,14 +235,8 @@ class FileInfo(AbstractSimpleTool):
                     hash_skipped_reason = "file_too_large"
                 else:
                     try:
-                        if is_binary:
-                            sha256 = self._backend.sha256_bytes(stat_path)
-                            hash_mode = "bytes"
-                        else:
-                            content = self._backend.read(stat_path)
-                            normalized = content.replace("\r\n", "\n").replace("\r", "\n")
-                            sha256 = sha256_hex_of_text(normalized)
-                            hash_mode = "text"
+                        sha256 = self._backend.sha256_bytes(stat_path)
+                        hash_mode = "bytes"
                     except OSError as e:
                         return self._error(
                             path=path,
@@ -254,6 +259,7 @@ class FileInfo(AbstractSimpleTool):
             writable=writable,
             line_count=line_count,
             encoding_guess=encoding_guess,
+            encoding_confidence=encoding_confidence,
             is_binary=is_binary,
             binary_detection_reason=binary_detection_reason,
             sha256=sha256,

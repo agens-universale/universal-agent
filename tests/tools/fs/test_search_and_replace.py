@@ -1,6 +1,6 @@
 import json
 
-from utils.file_text import sha256_hex_of_text
+from utils.file_text import sha256_hex_of_bytes
 from tools.fs.search_and_replace import SearchAndReplace
 
 
@@ -322,7 +322,7 @@ def test_not_found_unrelated_search_has_no_suggestions(tmp_path):
 def test_stale_file_sha256_guard(tmp_path):
     p = tmp_path / "stale.txt"
     p.write_text("version one", encoding="utf-8")
-    stale_hash = sha256_hex_of_text("version zero")
+    stale_hash = sha256_hex_of_bytes(b"version zero")
     res = json.loads(
         with_local_ctx(SearchAndReplace)(
             path=str(p),
@@ -345,11 +345,88 @@ def test_expected_file_sha256_allows_match(tmp_path):
             path=str(p),
             search="keep",
             replace="changed",
-            expected_file_sha256=sha256_hex_of_text(text),
+            expected_file_sha256=sha256_hex_of_bytes(text.encode("utf-8")),
         )
     )
     assert res["ok"] is True and res["applied"] is True
     assert p.read_text(encoding="utf-8") == "changed me"
+
+
+def test_crlf_file_info_hash_allows_edit_without_false_stale(tmp_path):
+    from tools.fs.file_info import FileInfo
+
+    data = b"version one\r\n"
+    p = tmp_path / "crlf.txt"
+    p.write_bytes(data)
+    info = json.loads(with_local_ctx(FileInfo)(path=str(p), include_hash=True))
+    res = json.loads(
+        with_local_ctx(SearchAndReplace)(
+            path=str(p),
+            search="one",
+            replace="two",
+            expected_file_sha256=info["sha256"],
+        )
+    )
+    assert res["ok"] is True and res["applied"] is True
+    assert p.read_bytes() == b"version two\r\n"
+    assert res["sha256"] == sha256_hex_of_bytes(b"version two\r\n")
+
+
+def test_search_and_replace_rejects_nul_binary(tmp_path):
+    p = tmp_path / "blob.bin"
+    original = b"aaa\x00bbb"
+    p.write_bytes(original)
+    res = json.loads(
+        with_local_ctx(SearchAndReplace)(path=str(p), search="aaa", replace="XXX")
+    )
+    assert res["ok"] is False and res["applied"] is False
+    assert res["error"]["type"] == "is_binary"
+    assert p.read_bytes() == original
+
+
+def test_search_and_replace_utf16_le_round_trip(tmp_path):
+    p = tmp_path / "utf16.txt"
+    p.write_bytes(b"\xff\xfeH\x00i\x00\n\x00")
+    res = json.loads(
+        with_local_ctx(SearchAndReplace)(path=str(p), search="Hi", replace="Yo")
+    )
+    assert res["ok"] is True and res["applied"] is True
+    assert res["encoding_used"] == "utf-16-le"
+    assert p.read_bytes() == b"\xff\xfeY\x00o\x00\n\x00"
+
+
+def test_search_and_replace_cp1251_round_trip(tmp_path):
+    text = "Привет, мир\n"
+    p = tmp_path / "legacy.txt"
+    p.write_bytes(text.encode("cp1251"))
+    res = json.loads(
+        with_local_ctx(SearchAndReplace)(
+            path=str(p),
+            search="мир",
+            replace="код",
+            encoding="cp1251",
+        )
+    )
+    assert res["ok"] is True and res["applied"] is True
+    assert res["encoding_used"] == "cp1251"
+    assert p.read_bytes() == "Привет, код\n".encode("cp1251")
+
+
+def test_search_and_replace_encode_failed_keeps_file(tmp_path):
+    p = tmp_path / "a.txt"
+    p.write_bytes(b"Hi\n")
+    original = p.read_bytes()
+    res = json.loads(
+        with_local_ctx(SearchAndReplace)(
+            path=str(p),
+            search="Hi",
+            replace="Привет",
+            encoding="latin-1",
+        )
+    )
+    assert res["ok"] is False and res["applied"] is False
+    assert res["error"]["type"] == "encode_failed"
+    assert p.read_bytes() == original
 
 
 def test_reject_large_file(tmp_path):

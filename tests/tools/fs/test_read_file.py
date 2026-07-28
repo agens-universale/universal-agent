@@ -6,7 +6,7 @@ from tools.fs.read_file import (
     DEFAULT_READ_FILE_CHAR_LIMIT,
     DEFAULT_READ_FILE_MAX_BYTES,
 )
-from utils.file_text import sha256_hex_of_text
+from utils.file_text import sha256_hex_of_bytes
 
 
 from tests.helpers.tool_ctx import with_local_ctx
@@ -16,9 +16,86 @@ def test_read_returns_sha256_for_full_file(tmp_path):
     p = tmp_path / "h.txt"
     p.write_text(text, encoding="utf-8")
     res = json.loads(with_local_ctx(ReadFile)(path=str(p), offset=1, limit=1))
-    assert res["sha256"] == sha256_hex_of_text(text)
+    assert res["sha256"] == sha256_hex_of_bytes(text.encode("utf-8"))
     info = json.loads(with_local_ctx(FileInfo)(path=str(p), include_hash=True))
     assert res["sha256"] == info["sha256"]
+
+
+def test_read_rejects_nul_binary_without_content(tmp_path):
+    p = tmp_path / "blob.bin"
+    p.write_bytes(b"hello\x00world")
+    res = json.loads(with_local_ctx(ReadFile)(path=str(p)))
+    assert res["ok"] is False
+    assert res["error"]["type"] == "is_binary"
+    assert res["content"] in ("", None)
+    assert "\x00" not in (res.get("content") or "")
+
+
+def test_read_utf16_le_bom_returns_text_and_encoding_used(tmp_path):
+    p = tmp_path / "utf16.txt"
+    p.write_bytes(b"\xff\xfeH\x00i\x00\n\x00")
+    res = json.loads(with_local_ctx(ReadFile)(path=str(p)))
+    assert res["ok"] is True
+    assert res["encoding_used"] == "utf-16-le"
+    assert res["content"] == "Hi\n"
+
+
+def test_read_utf8_returns_encoding_used(tmp_path):
+    p = tmp_path / "a.txt"
+    p.write_text("hello\n", encoding="utf-8")
+    res = json.loads(with_local_ctx(ReadFile)(path=str(p)))
+    assert res["ok"] is True
+    assert res["encoding_used"] == "utf-8"
+    assert res["content"] == "hello\n"
+
+
+def test_read_cp1251_requires_encoding(tmp_path):
+    text = (
+        "Уважаемые коллеги! Настоящим сообщаем, что заседание рабочей группы "
+        "по внедрению системы состоится 15 марта 2024 года в переговорной.\n"
+    ) * 3
+    p = tmp_path / "legacy.txt"
+    p.write_bytes(text.encode("cp1251"))
+    res = json.loads(with_local_ctx(ReadFile)(path=str(p)))
+    assert res["ok"] is False
+    assert res["error"]["type"] == "encoding_required"
+    assert res["content"] == ""
+    assert res["encoding_guess"] == "cp1251"
+    assert res["encoding_confidence"] >= 0.5
+    assert "Уважаемые" in res["preview"]
+    assert res["preview_encoding"] == "cp1251"
+    assert res["preview_truncated"] is False
+
+
+def test_read_cp1251_with_explicit_encoding_and_alias(tmp_path):
+    text = "Привет, мир\n"
+    p = tmp_path / "legacy.txt"
+    p.write_bytes(text.encode("cp1251"))
+    res = json.loads(with_local_ctx(ReadFile)(path=str(p), encoding="cp1251"))
+    assert res["ok"] is True
+    assert res["encoding_used"] == "cp1251"
+    assert res["content"] == text
+
+    aliased = json.loads(with_local_ctx(ReadFile)(path=str(p), encoding="windows-1251"))
+    assert aliased["ok"] is True
+    assert aliased["encoding_used"] == "cp1251"
+    assert aliased["content"] == text
+
+
+def test_read_unsupported_encoding(tmp_path):
+    p = tmp_path / "a.txt"
+    p.write_text("hi\n", encoding="utf-8")
+    res = json.loads(with_local_ctx(ReadFile)(path=str(p), encoding="ibm866"))
+    assert res["ok"] is False
+    assert res["error"]["type"] == "unsupported_encoding"
+
+
+def test_read_undecodable_text(tmp_path):
+    p = tmp_path / "legacy.txt"
+    p.write_bytes("Привет".encode("cp1251"))
+    res = json.loads(with_local_ctx(ReadFile)(path=str(p), encoding="utf-8"))
+    assert res["ok"] is False
+    assert res["error"]["type"] == "undecodable_text"
 
 
 def test_read_default_selects_whole_file(tmp_path):

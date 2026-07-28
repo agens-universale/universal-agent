@@ -15,6 +15,7 @@ class FakeEnv:
     def __init__(self):
         self.calls = []
         self.uploaded = []
+        self.uploaded_bytes = []
         self.downloaded = []
 
     async def exec(self, command, **kw):
@@ -22,7 +23,10 @@ class FakeEnv:
         return FakeExecResult(stdout=f"ran:{command}", return_code=0)
 
     async def upload_file(self, src, dst):
+        from pathlib import Path
+        data = Path(src).read_bytes()
         self.uploaded.append((str(src), dst))
+        self.uploaded_bytes.append(data)
 
     async def download_file(self, src, dst):
         from pathlib import Path
@@ -156,9 +160,12 @@ def test_append_concatenates_existing_content(loop_in_thread):
         env.calls.append(command)
         if command.startswith("test -e"):
             return FakeExecResult(stdout="", return_code=0)
-        if command.startswith("cat "):
-            return FakeExecResult(stdout="existing-", return_code=0)
         return FakeExecResult(stdout=f"ran:{command}", return_code=0)
+
+    async def fake_download_file(src, dst):
+        from pathlib import Path
+        Path(dst).write_bytes(b"existing-")
+        env.downloaded.append((src, str(dst)))
 
     async def fake_upload_file(src, dst):
         from pathlib import Path
@@ -166,6 +173,7 @@ def test_append_concatenates_existing_content(loop_in_thread):
         env.uploaded.append((str(src), dst))
 
     env.exec = fake_exec
+    env.download_file = fake_download_file
     env.upload_file = fake_upload_file
     backend = HarborBackend(env, loop_in_thread)
     backend.append("/work/f.txt", "more")
@@ -216,6 +224,16 @@ def test_write_and_append_accept_encoding_kwarg(loop_in_thread):
     backend.write("/work/a.txt", "data", encoding="utf-8")
     backend.append("/work/a.txt", "more", encoding="utf-8")
     assert env.uploaded and env.uploaded[0][1] == "/work/a.txt"
+
+
+def test_harbor_write_bytes_preserves_cp1251(loop_in_thread):
+    """Harbor text-write must encode on host and upload raw bytes (not force utf-8)."""
+    env = FakeEnv()
+    backend = HarborBackend(env, loop_in_thread)
+    text = "Привет"
+    backend.write("/work/ru.txt", text, encoding="cp1251")
+    assert env.uploaded_bytes[-1] == text.encode("cp1251")
+    assert env.uploaded_bytes[-1] != text.encode("utf-8")
 
 
 def _make_exec_returning(env, stdout, return_code=0):

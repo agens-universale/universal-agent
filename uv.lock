@@ -814,9 +814,10 @@ wheels = [
 
 [[package]]
 name = "gc-ua"
-version = "0.0.1"
+version = "0.2.2"
 source = { editable = "." }
 dependencies = [
+    { name = "chardet" },
     { name = "httpx", extra = ["socks"] },
     { name = "httpx-sse" },
     { name = "jsonschema" },
@@ -854,6 +855,7 @@ test = [
 
 [package.metadata]
 requires-dist = [
+    { name = "chardet", specifier = ">=7.4.3" },
     { name = "httpx", extras = ["socks"], specifier = ">=0.27.0" },
     { name = "httpx-sse", specifier = ">=0.4.0" },
     { name = "jsonschema", specifier = ">=4.0.0" },

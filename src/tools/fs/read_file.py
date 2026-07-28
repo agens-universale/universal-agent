@@ -3,9 +3,10 @@ from typing import Any, Dict, Optional
 import os
 import json
 
-from utils.file_text import sha256_hex_of_text
 from utils.tool_report_paths import tool_report_abspath
 from security.read_guard import enforce_read_guard
+from tools.schema_optional import coalesce_optional_string
+from utils.file_text import decode_text_bytes, sha256_hex_of_bytes
 
 # Safety cap for one char-page of the selected line range. Normal sources/configs fit;
 # oversized blobs page via char_offset. Model-facing preview still goes through stored_tool_output.
@@ -50,6 +51,7 @@ class ReadFile(AbstractSimpleTool):
         file_size_bytes: Optional[int],
         sha256: str,
         hint: Optional[str] = None,
+        encoding_used: Optional[str] = None,
     ) -> str:
         returned_chars = len(content)
         payload: Dict[str, Any] = {
@@ -57,6 +59,7 @@ class ReadFile(AbstractSimpleTool):
             "ok": True,
             "path": tool_report_abspath(path, workspace=self._workspace),
             "sha256": sha256,
+            "encoding_used": encoding_used,
             "file_size_bytes": file_size_bytes,
             "start_line": start_line,
             "end_line": end_line,
@@ -84,6 +87,7 @@ class ReadFile(AbstractSimpleTool):
         message: Optional[str] = None,
         error_details: Optional[Dict[str, Any]] = None,
         file_size_bytes: Optional[int] = None,
+        extra_fields: Optional[Dict[str, Any]] = None,
     ) -> str:
         error_obj: Dict[str, Any] = {"type": error_type}
         if field is not None:
@@ -92,29 +96,30 @@ class ReadFile(AbstractSimpleTool):
             error_obj["message"] = message
         if error_details:
             error_obj.update(error_details)
-        return json.dumps(
-            {
-                "tool": ReadFile.registered_tool_name(),
-                "ok": False,
-                "path": tool_report_abspath(path, workspace=self._workspace),
-                "sha256": None,
-                "file_size_bytes": file_size_bytes,
-                "start_line": 0,
-                "end_line": 0,
-                "total_lines": 0,
-                "truncated": False,
-                "next_offset": None,
-                "char_offset": 0,
-                "char_limit": 0,
-                "total_chars": 0,
-                "returned_chars": 0,
-                "content_truncated": False,
-                "next_char_offset": None,
-                "error": error_obj,
-                "content": "",
-            },
-            ensure_ascii=False,
-        )
+        payload: Dict[str, Any] = {
+            "tool": ReadFile.registered_tool_name(),
+            "ok": False,
+            "path": tool_report_abspath(path, workspace=self._workspace),
+            "sha256": None,
+            "encoding_used": None,
+            "file_size_bytes": file_size_bytes,
+            "start_line": 0,
+            "end_line": 0,
+            "total_lines": 0,
+            "truncated": False,
+            "next_offset": None,
+            "char_offset": 0,
+            "char_limit": 0,
+            "total_chars": 0,
+            "returned_chars": 0,
+            "content_truncated": False,
+            "next_char_offset": None,
+            "error": error_obj,
+            "content": "",
+        }
+        if extra_fields:
+            payload.update(extra_fields)
+        return json.dumps(payload, ensure_ascii=False)
 
     def _resolve_char_limit(self, char_limit: Optional[int]) -> int:
         if char_limit is None:
@@ -172,6 +177,14 @@ class ReadFile(AbstractSimpleTool):
                         "description": (
                             f"Max characters to return from char_offset. "
                             f"Default {DEFAULT_READ_FILE_CHAR_LIMIT}."
+                        ),
+                    },
+                    "encoding": {
+                        "type": "string",
+                        "description": (
+                            "Optional text encoding. Omit for UTF-8 (default; also UTF-16 with BOM). "
+                            "Otherwise: utf-8, utf-8-sig, cp1251, koi8-r, latin-1, utf-16, "
+                            "utf-16-le, utf-16-be (also windows-1251, iso-8859-1)."
                         ),
                     },
                 },
@@ -247,8 +260,10 @@ Usage:
         limit: Optional[int] = None,
         char_offset: Optional[int] = None,
         char_limit: Optional[int] = None,
+        encoding: Optional[str] = None,
         **kwargs,
     ) -> str:
+        encoding = coalesce_optional_string(encoding)
         if not isinstance(path, str):
             return self._error_result(
                 path=str(path),
@@ -362,7 +377,7 @@ Usage:
         resolved_char_offset = 0 if char_offset is None else char_offset
 
         try:
-            full_text = self._backend.read(path)
+            raw = self._backend.read_bytes(path)
         except OSError as e:
             return self._error_result(
                 path=path,
@@ -370,8 +385,38 @@ Usage:
                 message=f"Failed to read file: {e}",
                 file_size_bytes=file_size_bytes,
             )
-
-        file_sha256 = sha256_hex_of_text(full_text)
+        decoded = decode_text_bytes(raw, encoding=encoding, include_preview=True)
+        if not decoded.ok:
+            err = decoded.error or {"type": "read_failed", "message": "Failed to decode file."}
+            extra = None
+            if err.get("type") == "encoding_required":
+                extra = {
+                    "encoding_guess": err.get("encoding_guess"),
+                    "encoding_confidence": err.get("encoding_confidence"),
+                    "preview": err.get("preview"),
+                    "preview_encoding": err.get("preview_encoding"),
+                    "preview_truncated": err.get("preview_truncated"),
+                }
+                # Keep error compact: type + message (+ guess fields for agents).
+                err = {
+                    "type": "encoding_required",
+                    "message": err.get("message"),
+                    "encoding_guess": err.get("encoding_guess"),
+                    "encoding_confidence": err.get("encoding_confidence"),
+                }
+            return self._error_result(
+                path=path,
+                error_type=err["type"],
+                message=err.get("message"),
+                error_details={
+                    k: v for k, v in err.items() if k not in ("type", "message")
+                } or None,
+                file_size_bytes=file_size_bytes,
+                extra_fields=extra,
+            )
+        full_text = decoded.text or ""
+        file_sha256 = sha256_hex_of_bytes(raw)
+        encoding_used = decoded.encoding_used
         lines = full_text.splitlines(keepends=True)
         total_lines = len(lines)
 
@@ -435,5 +480,6 @@ Usage:
             next_char_offset=next_char_offset,
             file_size_bytes=file_size_bytes,
             sha256=file_sha256,
+            encoding_used=encoding_used,
             hint=hint,
         )

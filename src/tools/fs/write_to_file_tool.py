@@ -1,11 +1,16 @@
-import hashlib
 import json
 import os
 
 from tools.simple_tool_base import AbstractSimpleTool
+from utils.file_text import (
+    resolve_encoding_arg,
+    sha256_hex_of_bytes,
+    try_encode_text_bytes,
+)
 from utils.tool_report_paths import tool_report_abspath
-from utils.atomic_io import atomic_replace
 from security.path_policy import enforce_write_guard
+
+
 class WriteToFile(AbstractSimpleTool):
 
     @classmethod
@@ -17,7 +22,8 @@ class WriteToFile(AbstractSimpleTool):
                 "Create or overwrite a text file (optional parent dirs). Keep each call small — stub or first section only. "
                 "For long documents: minimal write here, then chain append calls with moderate chunks. "
                 "Huge single `content` often breaks tool-call JSON. "
-                "Prefer this when you need a new file or full replace; use append to grow an existing file."
+                "Prefer this when you need a new file or full replace; use append to grow an existing file. "
+                "Pass encoding= to write non-UTF-8 (e.g. cp1251)."
             ),
             "parameters": {
                 "type": "object",
@@ -45,7 +51,11 @@ class WriteToFile(AbstractSimpleTool):
                     },
                     "encoding": {
                         "type": "string",
-                        "description": "Text encoding to use. Default 'utf-8'."
+                        "description": (
+                            "Text encoding to write: utf-8, utf-8-sig, cp1251, koi8-r, "
+                            "latin-1, utf-16, utf-16-le, utf-16-be "
+                            "(also windows-1251, iso-8859-1). Default utf-8."
+                        ),
                     },
                     "newline": {
                         "type": "string",
@@ -90,6 +100,7 @@ Usage:
         bytes_written: int = 0,
         backup_path: str | None = None,
         sha256: str | None = None,
+        encoding_used: str | None = None,
         error: dict | None = None,
     ) -> str:
         return json.dumps(
@@ -101,6 +112,7 @@ Usage:
                 "created": created,
                 "bytes_written": bytes_written,
                 "sha256": sha256,
+                "encoding_used": encoding_used,
                 "backup_path": tool_report_abspath(backup_path, workspace=self._workspace),
                 "error": error,
             },
@@ -167,6 +179,10 @@ Usage:
                 mode=mode,
                 error={"type": "invalid_argument", "field": "encoding"},
             )
+        encoding_used, enc_err = resolve_encoding_arg(encoding)
+        if enc_err is not None:
+            return self._result(ok=False, path=path, mode=mode, error=enc_err)
+        assert encoding_used is not None
         if not isinstance(newline, str) or newline not in ("preserve", "lf", "crlf"):
             return self._result(
                 ok=False,
@@ -244,32 +260,34 @@ Usage:
                 )
 
         try:
-            self._backend.write(path, normalized, encoding=encoding)
+            out_bytes, encode_err = try_encode_text_bytes(normalized, encoding_used)
+            if encode_err is not None:
+                return self._result(
+                    ok=False,
+                    path=path,
+                    mode=mode,
+                    backup_path=backup_path,
+                    error=encode_err,
+                )
+            assert out_bytes is not None
+            self._backend.write_bytes(path, out_bytes)
         except Exception as e:
             return self._result(
                 ok=False,
                 path=path,
                 mode=mode,
+                backup_path=backup_path,
                 error={"type": "write_failed", "message": str(e)},
             )
-
-        try:
-            bytes_written = self._backend.getsize(path)
-        except Exception:
-            bytes_written = 0
-
-        # Hash the exact bytes written (same encoding/errors as backend.write).
-        content_sha256 = hashlib.sha256(
-            normalized.encode(encoding, errors="replace")
-        ).hexdigest()
 
         return self._result(
             ok=True,
             path=path,
             mode=mode,
             created=not exists,
-            bytes_written=bytes_written,
-            sha256=content_sha256,
+            bytes_written=len(out_bytes),
+            sha256=sha256_hex_of_bytes(out_bytes),
+            encoding_used=encoding_used,
             backup_path=backup_path,
             error=None,
         )

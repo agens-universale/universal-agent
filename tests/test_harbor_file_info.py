@@ -147,9 +147,9 @@ def test_permissions_are_symbolic_not_octal():
     )
 
 
-def test_hash_mode_is_text_for_text_file():
-    """hash_mode must be 'text' for a text file (not 'bytes')."""
+def test_hash_mode_is_bytes_for_text_file():
+    """hash_mode is always 'bytes' (raw on-disk digest), including text files."""
     content = "text content\n"
     base, harbor = _compare(content, include_hash=True)
-    assert base["hash_mode"] == "text"
-    assert harbor["hash_mode"] == "text"
+    assert base["hash_mode"] == "bytes"
+    assert harbor["hash_mode"] == "bytes"

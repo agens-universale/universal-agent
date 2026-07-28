@@ -58,6 +58,9 @@ class RecordingSandboxBackend(FsBackend):
     def read(self, path):
         return self.files[path]
 
+    def read_bytes(self, path):
+        return self.files[path].encode("utf-8")
+
     def iter_lines(self, path):
         return iter(self.read(path).splitlines(keepends=True))
 
