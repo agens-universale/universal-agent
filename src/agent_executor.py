@@ -157,6 +157,26 @@ class AgentExecutor:
             thread_session = ThreadSession.from_config(
                 config_dict=config_dict, system_id=system_id, thread_id=thread_id
             )
+            if logger is not None:
+                # Единственная связка «этот лог-файл ↔ этот тред»: на момент
+                # создания логгера тред ещё не разрешён, поэтому в agent_start
+                # его нет, а RunContextFilter ставит только run_id. Без этой
+                # записи тред виден в логе лишь косвенно — через сообщения
+                # суммаризации, и только если она вообще срабатывала.
+                #
+                # Значения продублированы в тексте сообщения намеренно: поля из
+                # extra= рендерит только JsonlFormatter, а при logging.format:
+                # text (дефолт) в строке осталось бы голое имя события.
+                logger.info(
+                    "thread_bound thread_id=%s system_id=%s",
+                    thread_session.thread_id,
+                    thread_session.system_id,
+                    extra={
+                        "event": "thread_bound",
+                        "thread_id": thread_session.thread_id,
+                        "system_id": thread_session.system_id,
+                    },
+                )
             if backend_api_mode == "chat_completions":
                 thread_session.history_messages = repair_tool_call_pairing(
                     thread_session.history_messages,
