@@ -941,6 +941,34 @@ async def test_config_probe_survives_entering_section_while_flying():
         assert scr._probe_config is result
 
 
+async def test_open_connection_autoruns_differential_probe(tmp_path):
+    """Вход в «Подключение» сам запускает differential-проверку (как Tab):
+    контроль без токена, затем повтор с токеном — полный вердикт сразу,
+    без ручного Tab. Проверяем сам факт вызовов probe_fn."""
+    import tui.app as app_mod
+    from tui.screens.settings import SettingsScreen
+    from tui.services.settings_probe import ProbeResult
+    from tests.tui.conftest import wait_until
+
+    calls = []
+
+    def probe(endpoint, auth, verify, model, **kw):
+        calls.append(auth)
+        return ProbeResult("rejected", 401, None, 10, "токен отклонён (401)")
+
+    app = app_mod.TuiApp(config=_cfg())
+    async with app.run_test() as pilot:
+        scr = SettingsScreen(config=_cfg(), config_path="C:/tmp/config.yml",
+                             on_apply=lambda: None, probe_fn=probe)
+        app.push_screen(scr)
+        await pilot.pause(); await pilot.pause()
+        calls.clear()                          # отсечь config-probe с монтирования
+        open_settings_section(scr, "Подключение")
+        await wait_until(pilot, lambda: len(calls) >= 2, "auto differential probe ran")
+        assert calls[0] is None                # контроль БЕЗ токена ушёл сам
+        assert calls[1]                        # затем повтор С токеном
+
+
 def _probe_rejected():
     from tui.services.settings_probe import ProbeResult
     return ProbeResult("rejected", 401, None, 90, "токен отклонён (401)")
@@ -1337,8 +1365,11 @@ async def test_auth_draft_probe_server_ignores_token(tmp_path):
         app.push_screen(scr)
         await pilot.pause()
         open_settings_section(scr, "Подключение")            # токен в поле
-        await pilot.pause()
-        captured.clear()                                  # отбросить config-probe маунта
+        from tests.tui.conftest import wait_until
+        # авто-differential входа шлёт контроль auth=None (config-probe маунта — с токеном);
+        # его появление заодно гарантирует, что поля редактора смонтированы для ручного Tab
+        await wait_until(pilot, lambda: None in captured, "auto-probe on entry")
+        captured.clear()             # отбросить config-probe маунта и авто-probe входа
         scr._start_draft_probe(0)                         # Tab
         await pilot.pause(); await pilot.pause()
         assert captured == [None]                          # только контроль без токена (control ok → без 2-го)

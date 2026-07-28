@@ -1431,6 +1431,26 @@ class SettingsScreen(Screen):
         # На dev-установке _check_updates_now — no-op (источника обновления нет).
         if i == _UPDATE and self._update_check_result is None and not self._update_checking:
             self._check_updates_now()
+        # Авто-проверка при входе в «Подключение»: сразу полный differential-вердикт
+        # «сервер+токен» (как Tab), а не нейтральный config-probe. Таймер, НЕ
+        # call_after_refresh: рекурсивный refresh-callback голодом морит message pump
+        # (дети редактора не успевают смонтироваться → вечный цикл). Гонок нет:
+        # draft_gen бампнут выше, уход из секции/экрана стухает и ретраи, и результат.
+        if i == _CONNECTION:
+            self.set_timer(0.05, self._autorun_connection_probe)
+
+    def _autorun_connection_probe(self) -> None:
+        if self._view != _CONNECTION or not self.is_mounted:
+            return
+        from tui.editors.connection import ConnectionEditor
+        editors = self.query(ConnectionEditor)
+        if not editors:
+            return                  # read-only конфиг — редактор не смонтирован, probe не нужен
+        if not editors.first().query("#conn-url"):
+            # дети редактора ещё компонуются — peek() упал бы NoMatches; повторим чуть позже
+            self.set_timer(0.05, self._autorun_connection_probe)
+            return
+        self._start_draft_probe(_CONNECTION)
 
     def _switch_section(self, delta: int) -> None:
         if self._view == "menu":
