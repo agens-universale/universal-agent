@@ -118,6 +118,34 @@ def test_local_exec_argv_is_shell_less_and_preserves_hostile_tokens(tmp_path):
     assert lines[1] == "42"
 
 
+def test_tracking_fs_backend_exec_argv_is_shell_less_and_delegates(tmp_path):
+    """TrackingFsBackend (TUI wrapper) must expose exec_argv and delegate
+    to the inner LocalFsBackend without a POSIX shell string.
+
+    Regression for skills_run_script under TUI: the Tracking decorator
+    previously had no exec_argv method, so ``backend.exec_argv(...)``
+    raised AttributeError. argv must pass through verbatim (shell-less).
+    """
+    from diff_tui.tracking import TrackingFsBackend
+
+    script = tmp_path / "echo_argv.py"
+    script.write_text(
+        "import sys\nprint('|'.join(sys.argv[1:]))\nprint(sys.stdin.read())\n",
+        encoding="utf-8",
+    )
+    hostile = [r"C:\temp\it's report.pdf", '{"a": "b c"}', "--flag='x'"]
+    inner = LocalFsBackend()
+    ctx = local_ctx()
+    wrapped = TrackingFsBackend(inner, ctx)
+    res = wrapped.exec_argv(
+        [sys.executable, str(script), *hostile], stdin="42"
+    )
+    assert res.return_code == 0
+    lines = res.stdout.splitlines()
+    assert lines[0] == "|".join(hostile)
+    assert lines[1] == "42"
+
+
 def test_default_exec_argv_builds_posix_pipe_for_sandbox_backends():
     """Sandbox backends (harbor) keep the POSIX shell-string contract."""
     class _Recorder:
