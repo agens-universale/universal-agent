@@ -3487,6 +3487,14 @@ class TraceScreen(Screen):
             branch = current_branch(self._current_cwd())
             if branch:
                 self._store.update_tui_meta(tid, {"branch": branch})
+            # Абсолютный путь проекта на момент создания сессии (исторический,
+            # не живой cwd). Безусловно — путь есть даже в не-git папке.
+            try:
+                ppath = str(Path(self._current_cwd()).resolve())
+            except Exception:
+                ppath = ""
+            if ppath:
+                self._store.update_tui_meta(tid, {"project_path": ppath})
             # _track_pending — после attach_active_task (которое чистит
             # _pending_user_widgets через _reset_render_state) и после
             # потенциальной первой записи meta исполнителем.
