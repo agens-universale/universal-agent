@@ -45,7 +45,8 @@ class AppendToFile(AbstractSimpleTool):
                         X_PRESERVE_EMPTY_STRING: True,
                         "description": (
                             "Text put between the current file end and the new content. "
-                            "Prefer two newlines unless another separator is needed; empty string means no separation."
+                            "Prefer two newlines unless another separator is needed; empty string means no separation. "
+                            "Use a real newline character (embedded in the JSON string as \n), not a literal backslash-n. Do not double-escape."
                         ),
                     },
                     "create_if_missing": {
