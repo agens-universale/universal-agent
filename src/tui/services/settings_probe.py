@@ -80,9 +80,14 @@ def probe(endpoint: str, auth: Optional[str], verify: bool, model: str, *,
     if status == 401:
         return ProbeResult("rejected", 401, None, lat, "токен отклонён (401)")
     if status == 404:
-        if not json_body:   # HTML/текст «Cannot POST …» — маршрута нет, токен ни при чём
+        if not json_body:
+            # 404 без JSON неоднозначен: HTML «Cannot POST» пути ИЛИ роутер, не знающий
+            # модель (gigacode ST на несуществующую модель отвечает так же) — не гадаем.
+            if dummy:       # модель-заглушка наша — совсем не вердикт о данных юзера
+                return ProbeResult("unknown", 404, None, lat,
+                                   "не удалось проверить (404: путь или модель)")
             return ProbeResult("rejected", 404, None, lat,
-                               "путь не найден (404) — проверьте адрес")
+                               "отклонено сервером (404): проверьте адрес и имя модели")
         if dummy:           # JSON-ошибка на заглушку — приложение ответило, auth пройден
             return ProbeResult("ok", status, None, lat, "доступен")
         return ProbeResult("rejected", 404, None, lat,
@@ -118,6 +123,14 @@ def interpret_auth(control: ProbeResult, with_token: Optional[ProbeResult],
         if with_token is None:
             return control
         if with_token.verdict == "ok":
+            return ProbeResult("ok", with_token.http_status, with_token.models,
+                               with_token.latency_ms, "токен принят",
+                               auth_state="accepted")
+        if with_token.http_status not in (None, 401):
+            # Отказ «переехал» дальше авторизации (401 без токена → 404/5xx с токеном
+            # на ТОМ ЖЕ маршруте) → путь существует, токен принят; остаток отказа —
+            # про модель/сервер, это забота других секций (живой кейс gigacode ST:
+            # несуществующая модель даёт 404-не-JSON, неотличимый от кривого пути).
             return ProbeResult("ok", with_token.http_status, with_token.models,
                                with_token.latency_ms, "токен принят",
                                auth_state="accepted")

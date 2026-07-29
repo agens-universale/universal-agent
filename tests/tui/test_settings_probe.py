@@ -67,13 +67,15 @@ def test_no_model_dummy_post_404_json_is_ok():
     assert r.verdict == "ok" and r.auth_ok
 
 
-def test_no_model_dummy_post_404_html_is_path_error():
-    """404 без JSON (HTML «Cannot POST» от Express/гейтвея) → путь не найден;
-    токен не виним — до авторизации дело не дошло."""
+def test_no_model_dummy_post_404_html_is_unknown():
+    """404 без JSON на заглушку — неоднозначно: gigacode ST так отвечает и на
+    НЕЗНАКОМУЮ МОДЕЛЬ (роутер, не Express-404 пути) → не заявляем «путь не
+    найден» и не виним токен; честное «не удалось проверить». Differential
+    спасает случай через 401→404 (см. interpret_auth-тесты)."""
     r = probe("http://x/v1/chat/completions", "Bearer good", True, "",
               fetch_ex=_fetch(status=401), post_ex=_post(status=404, json_body=False))
-    assert r.verdict == "rejected" and r.http_status == 404
-    assert "адрес" in r.detail and r.auth_ok
+    assert r.verdict == "unknown" and r.http_status == 404
+    assert r.auth_ok
 
 
 def test_no_model_sends_dummy_probe_model():
@@ -111,12 +113,14 @@ def test_404_on_models_and_stage2_404_json_blames_model():
     assert "404" in r.detail and "модел" in r.detail
 
 
-def test_404_on_models_and_stage2_404_html_blames_path():
-    """Реальная модель, 404 без JSON (HTML «Cannot POST») → путь не найден."""
+def test_404_on_models_and_stage2_404_html_names_both():
+    """Реальная модель, 404 без JSON: не различить «кривой путь» от «роутер не
+    знает модель» (gigacode ST на несуществующую модель отвечает 404-не-JSON,
+    как и на кривой путь) → честное объединённое «адрес и имя модели»."""
     r = probe("http://x/v1/chat/completions", None, True, "m1",
               fetch_ex=_fetch(status=404), post_ex=_post(status=404, json_body=False))
     assert r.verdict == "rejected" and r.http_status == 404
-    assert "адрес" in r.detail
+    assert "адрес" in r.detail and "модел" in r.detail
 
 
 def test_stage2_401_is_rejected():
@@ -184,6 +188,31 @@ def test_auth_token_rejected():
     """Сервер требует авторизацию, с токеном тоже 401 → токен отклонён."""
     r = interpret_auth(_r401(), _r401(), has_token=True)
     assert r.verdict == "rejected" and "отклонён" in r.detail
+
+
+def test_auth_accepted_when_401_moves_to_404():
+    """Живой кейс ST (несуществующая модель): контроль без токена → 401, с
+    токеном → 404. Отказ «переехал» дальше авторизации → путь существует,
+    ТОКЕН ПРИНЯТ; 404 — про модель, это забота секции «Модель»."""
+    wt = ProbeResult("rejected", 404, None, 25,
+                     "отклонено сервером (404): проверьте адрес и имя модели")
+    r = interpret_auth(_r401(), wt, has_token=True)
+    assert r.verdict == "ok" and r.auth_state == "accepted"
+    assert r.detail == "токен принят"
+
+
+def test_auth_accepted_when_401_moves_to_5xx():
+    """Тот же принцип для 5xx: с токеном сервер упал дальше авторизации."""
+    wt = ProbeResult("unknown", 500, None, 25, "сервер ответил 500")
+    r = interpret_auth(_r401(), wt, has_token=True)
+    assert r.verdict == "ok" and r.auth_state == "accepted"
+
+
+def test_auth_not_claimed_when_with_token_network_fails():
+    """С токеном сеть упала (status None) → про токен ничего не утверждаем."""
+    wt = ProbeResult("unknown", None, None, 5000, "нет соединения (timeout)")
+    r = interpret_auth(_r401(), wt, has_token=True)
+    assert r.auth_state != "accepted" and r.verdict == "unknown"
 
 
 def test_auth_unknown_control_passes_through():
