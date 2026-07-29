@@ -225,8 +225,10 @@ def probe_fetch(completions_url: str, auth_header: Optional[str], *,
 
 def probe_post(completions_url: str, auth_header: Optional[str], model: str, *,
                verify: bool = True, config_proxy: Optional[str] = None,
-               http_post_ex: Optional[Callable] = None) -> tuple[Optional[int], str, int]:
-    """Минимальный POST в сам chat/completions (ступень 2 probe). → (status, net_err, latency_ms)."""
+               http_post_ex: Optional[Callable] = None) -> tuple[Optional[int], str, int, bool]:
+    """Минимальный POST в сам chat/completions (ступень 2 probe).
+    → (status, net_err, latency_ms, json_body); json_body — тело ответа было JSON
+    (ответило приложение), а не HTML/текст 404-страницы гейтвея/Express."""
     import time
     if http_post_ex is None:
         def post_ex(url, headers, body, verify):
@@ -240,7 +242,8 @@ def probe_post(completions_url: str, auth_header: Optional[str], model: str, *,
             "max_tokens": 1, "stream": False}
     t0 = time.monotonic()
     reply = post_ex(completions_url, headers, body, verify)
-    return reply.status, reply.network_error, int((time.monotonic() - t0) * 1000)
+    return (reply.status, reply.network_error, int((time.monotonic() - t0) * 1000),
+            reply.payload is not None)
 
 
 def _urllib_get(url: str, headers: dict, verify: bool) -> dict:
