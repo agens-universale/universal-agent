@@ -275,6 +275,13 @@ Usage:
                         separator=separator,
                         error=head_err,
                     )
+                # Preserve the existing newline style: if the file head uses
+                # CRLF (\r\n), normalize lone \n in the appended chunk to \r\n
+                # so we don't mix line endings. LF files are written as-is.
+                if b"\r\n" in head:
+                    chunk = (
+                        chunk.replace("\r\n", "\n").replace("\r", "\n").replace("\n", "\r\n")
+                    )
                 self._backend.append(path, chunk, encoding=encoding_used)
             else:
                 self._backend.write_bytes(path, payload_bytes)

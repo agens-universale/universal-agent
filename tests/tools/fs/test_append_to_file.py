@@ -372,3 +372,63 @@ def test_append_to_empty_existing_file_writes_bom(tmp_path, encoding):
         assert raw[:3] == b"\xef\xbb\xbf", f"{encoding}: BOM missing: {raw[:3]!r}"
     decoded = decode_text_bytes(raw, encoding=encoding)
     assert decoded.ok and decoded.text == "Hello"
+
+
+# --- CRLF preservation (fix #2) ---
+
+def test_append_to_crlf_file_preserves_crlf(tmp_path):
+    """Appending \\n-delimited text to a CRLF file must not mix line endings.
+
+    Regression for FS_UTF8_PROBLEMS.md case #2: ``fs_append_file`` wrote the chunk
+    bytes as-is, so appending LF text to a CRLF file produced mixed endings
+    (some \\r\\n, some lone \\n). Now the head is scanned for \\r\\n and the chunk
+    is normalized to CRLF when the existing file uses CRLF.
+    """
+    p = tmp_path / "crlf.txt"
+    p.write_bytes(b"line1\r\nline2\r\n")
+    res = json.loads(
+        with_local_ctx(AppendToFile)(
+            path=str(p), content="added line3\nmore text", separator="\n\n",
+        )
+    )
+    assert res["ok"], res
+    raw = p.read_bytes()
+    crlf = raw.count(b"\r\n")
+    lone_lf = raw.count(b"\n") - crlf
+    assert lone_lf == 0, f"mixed endings: lone LF={lone_lf}, raw={raw!r}"
+    assert crlf == 5, f"unexpected CRLF count: {crlf}, raw={raw!r}"
+    assert raw == b"line1\r\nline2\r\n\r\n\r\nadded line3\r\nmore text"
+
+
+def test_append_to_lf_file_keeps_lf(tmp_path):
+    """Appending to an LF file must NOT introduce CRLF endings."""
+    p = tmp_path / "lf.txt"
+    p.write_bytes(b"line1\nline2\n")
+    res = json.loads(
+        with_local_ctx(AppendToFile)(
+            path=str(p), content="added line3\nmore text", separator="\n\n",
+        )
+    )
+    assert res["ok"], res
+    raw = p.read_bytes()
+    crlf = raw.count(b"\r\n")
+    lone_lf = raw.count(b"\n") - crlf
+    assert crlf == 0, f"CRLF introduced into LF file: {crlf}, raw={raw!r}"
+    assert lone_lf == 5
+    assert raw == b"line1\nline2\n\n\nadded line3\nmore text"
+
+
+def test_append_crlf_empty_separator(tmp_path):
+    """CRLF preservation works with an empty separator too."""
+    p = tmp_path / "crlf3.txt"
+    p.write_bytes(b"a\r\nb\r\n")
+    res = json.loads(
+        with_local_ctx(AppendToFile)(
+            path=str(p), content="c\nd", separator="",
+        )
+    )
+    assert res["ok"], res
+    raw = p.read_bytes()
+    lone_lf = raw.count(b"\n") - raw.count(b"\r\n")
+    assert lone_lf == 0, f"mixed endings: {raw!r}"
+    assert raw == b"a\r\nb\r\nc\r\nd"
