@@ -1,6 +1,5 @@
 import json
 import os
-import re
 import time
 from typing import Any, Dict, Optional
 from urllib.parse import urljoin
@@ -146,8 +145,8 @@ class DownloadFile(AbstractSimpleTool):
             return {"type": "invalid_filename", "message": "filename must be a non-empty basename."}
         if os.path.basename(name) != name or "/" in name or "\\" in name:
             return {"type": "invalid_filename", "message": "filename must be a basename without path separators."}
-        if not re.fullmatch(r"[A-Za-z0-9._-]+", name):
-            return {"type": "invalid_filename", "message": "filename contains unsupported characters."}
+        if "\x00" in name or "\r" in name or "\n" in name:
+            return {"type": "invalid_filename", "message": "filename contains unsupported characters (null byte or newline)."}
         if len(name) > 255:
             return {"type": "invalid_filename", "message": "filename is too long."}
         ext = os.path.splitext(name)[1].lower()
