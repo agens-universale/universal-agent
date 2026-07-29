@@ -346,8 +346,54 @@ def try_encode_text_bytes(
 
 
 def encode_text_for_write(content: str, encoding: str = EDIT_TEXT_ENCODING) -> bytes:
-    """Strict allowlist encode for backend ``write``/``append``. Raises ``ValueError`` on fail."""
+    """Strict allowlist encode for backend ``write``. Raises ``ValueError`` on fail."""
     data, err = try_encode_text_bytes(content, encoding)
+    if err is not None:
+        raise ValueError(err.get("message") or f"encode failed: {encoding}")
+    assert data is not None
+    return data
+
+
+def try_encode_text_bytes_for_append(
+    text: str,
+    encoding: str,
+) -> tuple[bytes | None, dict[str, Any] | None]:
+    """Like :func:`try_encode_text_bytes` but WITHOUT a leading BOM for utf-16.
+
+    Used by ``append``: the existing file already carries a BOM at offset 0, so the
+    appended chunk must be pure payload. A second BOM in the middle of the file would
+    decode as ``U+FEFF`` (ZERO WIDTH NO-BREAK SPACE) between the existing tail and the
+    new content. Applies to both utf-16 family and utf-8-sig (EF BB BF).
+    """
+    canonical, err = resolve_encoding_arg(encoding)
+    if err is not None:
+        return None, err
+    assert canonical is not None
+    try:
+        if canonical == "utf-16-le":
+            return text.encode("utf-16-le"), None
+        if canonical == "utf-16-be":
+            return text.encode("utf-16-be"), None
+        if canonical == "utf-16":
+            # utf-16 canonical == little-endian with BOM (see encode_text_bytes);
+            # existing file already has the BOM, so append LE payload without it.
+            return text.encode("utf-16-le"), None
+        if canonical == "utf-8-sig":
+            # utf-8-sig file already carries an EF BB BF BOM at offset 0;
+            # append plain utf-8 payload without re-emitting the BOM.
+            return text.encode("utf-8"), None
+        return encode_text_bytes(text, canonical), None
+    except UnicodeEncodeError:
+        return None, encode_failed_error(canonical)
+
+
+def encode_text_for_append(content: str, encoding: str = EDIT_TEXT_ENCODING) -> bytes:
+    """Strict allowlist encode for backend ``append``. Raises ``ValueError`` on fail.
+
+    Unlike :func:`encode_text_for_write`, this never emits a leading BOM for utf-16
+    or utf-8-sig encodings — appending a BOM in the middle of an existing file corrupts it.
+    """
+    data, err = try_encode_text_bytes_for_append(content, encoding)
     if err is not None:
         raise ValueError(err.get("message") or f"encode failed: {encoding}")
     assert data is not None

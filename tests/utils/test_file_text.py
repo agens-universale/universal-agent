@@ -8,9 +8,11 @@ from utils.file_text import (
     classify_file_content,
     decode_text_bytes,
     encode_text_bytes,
+    encode_text_for_append,
     read_text_for_edit,
     sha256_hex_of_bytes,
     sha256_hex_of_file_bytes,
+    try_encode_text_bytes_for_append,
 )
 
 
@@ -214,3 +216,63 @@ def test_check_encoding_on_file_head_truncation():
         sample, "utf-8", sample_is_complete_file=True
     )
     assert err is not None and err["type"] == "undecodable_text"
+
+
+# --- append encode (no mid-file BOM) -------------------------------------------
+
+@pytest.mark.parametrize(
+    "encoding,expected_payload",
+    [
+        # utf-16 family: payload WITHOUT BOM (BOM lives at file offset 0).
+        ("utf-16", "Ab".encode("utf-16-le")),
+        ("utf-16-le", "Ab".encode("utf-16-le")),
+        ("utf-16-be", "Ab".encode("utf-16-be")),
+        # utf-8-sig: payload WITHOUT BOM (EF BB BF lives at file offset 0).
+        ("utf-8-sig", b"Ab"),
+        # plain utf-8 / single-byte: no BOM either way.
+        ("utf-8", b"Ab"),
+        ("cp1251", "\u0410b".encode("cp1251")),
+    ],
+)
+def test_try_encode_text_bytes_for_append_no_bom(encoding, expected_payload):
+    data, err = try_encode_text_bytes_for_append("Ab" if encoding != "cp1251" else "\u0410b", encoding)
+    assert err is None, err
+    assert data == expected_payload
+    # Crucially: no BOM anywhere in the appended payload.
+    assert not data.startswith(b"\xef\xbb\xbf")  # utf-8-sig BOM
+    assert not data.startswith(b"\xff\xfe")  # utf-16-le BOM
+    assert not data.startswith(b"\xfe\xff")  # utf-16-be BOM
+
+
+def test_try_encode_text_bytes_for_append_empty_string():
+    # Empty content → empty payload for every BOM-bearing encoding (no spurious BOM).
+    for enc in ("utf-16", "utf-16-le", "utf-16-be", "utf-8-sig", "utf-8"):
+        data, err = try_encode_text_bytes_for_append("", enc)
+        assert err is None, (enc, err)
+        assert data == b"", (enc, data)
+
+
+def test_try_encode_text_bytes_for_append_unsupported():
+    data, err = try_encode_text_bytes_for_append("x", "ibm866")
+    assert data is None and err["type"] == "unsupported_encoding"
+
+
+def test_try_encode_text_bytes_for_append_encode_fail():
+    # cp1251 cannot encode the surrogate/non-cp1251 char here is tricky; use a char
+    # outside latin-1 to force an encode failure on latin-1.
+    data, err = try_encode_text_bytes_for_append("\u0410", "latin-1")
+    assert data is None and err["type"] == "encode_failed"
+
+
+def test_encode_text_for_append_raises_and_returns():
+    assert encode_text_for_append("Ab", "utf-8-sig") == b"Ab"
+    assert encode_text_for_append("", "utf-16") == b""
+    with pytest.raises(ValueError):
+        encode_text_for_append("\u0410", "latin-1")
+
+
+def test_encode_text_for_append_utf8_sig_no_mid_bom_regression():
+    # The exact bug: append-payload for utf-8-sig must NOT start with EF BB BF.
+    data = encode_text_for_append("hello", "utf-8-sig")
+    assert data == b"hello"
+    assert data[:3] != b"\xef\xbb\xbf"

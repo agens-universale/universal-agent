@@ -21,7 +21,11 @@ from backends.protocol import (
     bound_exec_result,
 )
 from backends.walk_util import iter_files_from_flat, iter_walk_from_flat
-from utils.file_text import decode_text_best_effort, encode_text_for_write
+from utils.file_text import (
+    decode_text_best_effort,
+    encode_text_for_append,
+    encode_text_for_write,
+)
 
 
 class HarborBackend(FsBackend):
@@ -279,7 +283,9 @@ class HarborBackend(FsBackend):
 
     def append(self, path: str, content: str, encoding: str = "utf-8") -> None:
         # Upload only the new chunk, then shell-append (no full-file download).
-        data = encode_text_for_write(content, encoding)
+        # Append payload WITHOUT a leading BOM: a second BOM in the middle of an
+        # existing utf-16 file decodes as U+FEFF (ZERO WIDTH NO-BREAK SPACE).
+        data = encode_text_for_append(content, encoding)
         with tempfile.NamedTemporaryFile("wb", delete=False) as tmp:
             tmp.write(data)
             local_tmp = Path(tmp.name)

@@ -209,3 +209,166 @@ def test_append_head_truncated_utf8_still_ok(tmp_path):
     )
     assert res["ok"] is True
     assert p.read_bytes().endswith(b"ok")
+
+
+@pytest.mark.parametrize("encoding", ["utf-16", "utf-16-le", "utf-16-be"])
+def test_append_utf16_no_mid_bom(tmp_path, encoding):
+    """Appending to a utf-16 file must NOT insert a BOM (U+FEFF) between lines.
+
+    Regression for FS_ENCODING_PROBLEMS.md case #1: ``fs_append_file`` inserted a
+    BOM in the middle of an existing utf-16 file, corrupting it with
+    ZERO WIDTH NO-BREAK SPACE (U+FEFF) between the existing tail and the new chunk.
+    """
+    from utils.file_text import decode_text_bytes
+    from tools.fs.write_to_file_tool import WriteToFile
+
+    p = tmp_path / "u16.txt"
+    wres = json.loads(
+        with_local_ctx(WriteToFile)(
+            path=str(p),
+            content="Строка первая\nСтрока вторая",
+            mode="overwrite",
+            encoding=encoding,
+        )
+    )
+    assert wres["ok"], wres
+
+    res = json.loads(
+        with_local_ctx(AppendToFile)(
+            path=str(p),
+            content="Строка третья",
+            separator="",
+            encoding=encoding,
+        )
+    )
+    assert res["ok"], res
+
+    raw = p.read_bytes()
+    # The leading BOM (written by fs_write_file) must still be present at offset 0.
+    expected_bom = b"\xff\xfe" if encoding in ("utf-16", "utf-16-le") else b"\xfe\xff"
+    assert raw[:2] == expected_bom, f"{encoding}: start BOM lost: {raw[:2]!r}"
+
+    # Decoded text must NOT contain U+FEFF anywhere — decode_text_bytes strips the
+    # leading BOM, so any remaining U+FEFF is a spurious mid-file BOM (the bug).
+    decoded = decode_text_bytes(raw, encoding=encoding)
+    assert decoded.ok, f"{encoding}: decode failed: {decoded.error}"
+    assert "\ufeff" not in decoded.text, (
+        f"{encoding}: spurious mid-file BOM (U+FEFF): {decoded.text!r}"
+    )
+    assert decoded.text == "Строка первая\nСтрока втораяСтрока третья"
+
+    # bytes_appended must count the payload without the BOM (26 bytes = 13 chars * 2).
+    assert res["bytes_appended"] == 26, res["bytes_appended"]
+
+
+@pytest.mark.parametrize("encoding", ["utf-16", "utf-16-le", "utf-16-be"])
+def test_append_utf16_create_missing_has_bom(tmp_path, encoding):
+    """create_if_missing path must still write a BOM for a brand-new utf-16 file."""
+    from utils.file_text import decode_text_bytes
+
+    p = tmp_path / "created.txt"
+    res = json.loads(
+        with_local_ctx(AppendToFile)(
+            path=str(p),
+            content="Hello",
+            separator="",
+            encoding=encoding,
+            create_if_missing=True,
+            make_dirs=True,
+        )
+    )
+    assert res["ok"] and res["created"], res
+    raw = p.read_bytes()
+    expected_bom = b"\xff\xfe" if encoding in ("utf-16", "utf-16-le") else b"\xfe\xff"
+    assert raw[:2] == expected_bom, f"{encoding}: start BOM missing: {raw[:2]!r}"
+    decoded = decode_text_bytes(raw, encoding=encoding)
+    assert decoded.ok and decoded.text == "Hello"
+
+
+def test_append_utf8_sig_no_mid_bom(tmp_path):
+    """Appending to a utf-8-sig file must NOT re-emit EF BB BF in the middle.
+
+    Regression for the same mid-file BOM bug extended to utf-8-sig:
+    ``text.encode(\"utf-8-sig\")`` always prepends EF BB BF, so the append path must
+    encode as plain utf-8 (BOM lives only at file offset 0).
+    """
+    from utils.file_text import decode_text_bytes
+    from tools.fs.write_to_file_tool import WriteToFile
+
+    p = tmp_path / "sig.txt"
+    wres = json.loads(
+        with_local_ctx(WriteToFile)(
+            path=str(p), content="first line\nsecond line",
+            mode="overwrite", encoding="utf-8-sig",
+        )
+    )
+    assert wres["ok"], wres
+
+    res = json.loads(
+        with_local_ctx(AppendToFile)(
+            path=str(p), content="third line", separator="", encoding="utf-8-sig",
+        )
+    )
+    assert res["ok"], res
+
+    raw = p.read_bytes()
+    # Start BOM preserved by fs_write_file.
+    assert raw[:3] == b"\xef\xbb\xbf", f"start BOM lost: {raw[:3]!r}"
+    # No second BOM in the middle of the byte stream.
+    assert b"\xef\xbb\xbf" not in raw[3:], f"spurious mid-file utf-8-sig BOM: {raw!r}"
+    decoded = decode_text_bytes(raw, encoding="utf-8-sig")
+    assert decoded.ok and "\ufeff" not in decoded.text
+    assert decoded.text == "first line\nsecond linethird line"
+    # bytes_appended = len("third line") = 10 (plain utf-8, no BOM).
+    assert res["bytes_appended"] == 10, res["bytes_appended"]
+
+
+def test_append_utf8_sig_create_missing_has_bom(tmp_path):
+    """create_if_missing for utf-8-sig must write the EF BB BF BOM at offset 0."""
+    from utils.file_text import decode_text_bytes
+
+    p = tmp_path / "created_sig.txt"
+    res = json.loads(
+        with_local_ctx(AppendToFile)(
+            path=str(p), content="Hello", separator="",
+            encoding="utf-8-sig", create_if_missing=True, make_dirs=True,
+        )
+    )
+    assert res["ok"] and res["created"], res
+    raw = p.read_bytes()
+    assert raw[:3] == b"\xef\xbb\xbf", f"start BOM missing: {raw[:3]!r}"
+    decoded = decode_text_bytes(raw, encoding="utf-8-sig")
+    assert decoded.ok and decoded.text == "Hello"
+
+
+@pytest.mark.parametrize("encoding", ["utf-16", "utf-16-le", "utf-16-be", "utf-8-sig"])
+def test_append_to_empty_existing_file_writes_bom(tmp_path, encoding):
+    """An existing but empty (size==0) file must be treated like create: BOM emitted.
+
+    Without this, appending utf-16/utf-8-sig to a zero-byte file would produce a
+    BOM-less file that later decodes incorrectly. size==0 → create-path (write_bytes
+    with BOM) rather than append-path (no BOM).
+    """
+    from utils.file_text import decode_text_bytes
+
+    p = tmp_path / "empty.dat"
+    p.write_bytes(b"")  # exists but size == 0
+    assert p.exists() and p.stat().st_size == 0
+
+    res = json.loads(
+        with_local_ctx(AppendToFile)(
+            path=str(p), content="Hello", separator="", encoding=encoding,
+        )
+    )
+    assert res["ok"], res
+    # created flag set because size==0 is treated as create.
+    assert res["created"] is True, res
+    raw = p.read_bytes()
+    if encoding in ("utf-16", "utf-16-le"):
+        assert raw[:2] == b"\xff\xfe", f"{encoding}: BOM missing: {raw[:2]!r}"
+    elif encoding == "utf-16-be":
+        assert raw[:2] == b"\xfe\xff", f"{encoding}: BOM missing: {raw[:2]!r}"
+    else:  # utf-8-sig
+        assert raw[:3] == b"\xef\xbb\xbf", f"{encoding}: BOM missing: {raw[:3]!r}"
+    decoded = decode_text_bytes(raw, encoding=encoding)
+    assert decoded.ok and decoded.text == "Hello"

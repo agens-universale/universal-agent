@@ -14,7 +14,7 @@ from backends.protocol import (
     ExecResult,
     FsBackend,
 )
-from utils.file_text import encode_text_for_write, read_text_for_edit
+from utils.file_text import encode_text_for_append, encode_text_for_write, read_text_for_edit
 
 
 class LocalFsBackend(FsBackend):
@@ -123,8 +123,10 @@ class LocalFsBackend(FsBackend):
             raise
 
     def append(self, path: str, content: str, encoding: str = "utf-8") -> None:
+        # Append payload WITHOUT a leading BOM: a second BOM in the middle of an
+        # existing utf-16 file decodes as U+FEFF (ZERO WIDTH NO-BREAK SPACE).
         with open(path, "ab") as fd:
-            fd.write(encode_text_for_write(content, encoding))
+            fd.write(encode_text_for_append(content, encoding))
 
     def copy(self, src: str, dst: str) -> None:
         with open(src, "rb") as s, open(dst, "wb") as d:
