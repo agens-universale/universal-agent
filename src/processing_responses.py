@@ -350,6 +350,9 @@ def _request_backend_canonical_once(
         _ch0 = _choices_raw[0]
         if isinstance(_ch0, dict):
             _finish = _ch0.get("finish_reason")
+    # Сохраняем finish_reason на state — catch-блок WrongFunctionArgumentsException
+    # использует его, чтобы отличить усечённый JSON (length) от обычной невалидности.
+    state.last_finish_reason = _finish
     _run_log.info(
         "chat/completions response meta: max_tokens_requested=%s finish_reason=%s usage=%s",
         call_data.get("max_tokens"),
@@ -1128,6 +1131,15 @@ def run_agent(
             except WrongFunctionArgumentsException as e:
                 run_logger.error(e, exc_info=True)
                 tool_error_cnt += 1
+                # Если finish_reason=="length" — JSON был усечён потолком
+                # max_tokens. Объясняем модели причину и советуем компактный
+                # вариант/разбиение на вызовы; иначе — feedback как есть.
+                if getattr(state, "last_finish_reason", None) == "length":
+                    e.extra_hint = (
+                        "⚠ Output was truncated: output token limit reached "
+                        "(finish_reason == \"length\"). Shorten the response "
+                        "or split it into multiple calls with smaller payloads."
+                    )
                 messages = [
                     _make_technical_feedback_user_message(
                         e.to_llm_feedback(),
