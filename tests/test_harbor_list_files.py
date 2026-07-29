@@ -246,6 +246,75 @@ def test_glob_filter(tmp_path):
     _compare_results(base_raw, harbor_raw, "glob_filter")
 
 
+def test_glob_with_slash_no_max_depth_returns_empty(tmp_path):
+    """Glob containing '/' and no max_depth: flat listing (depth 0), 0 matches.
+
+    There is NO auto-raise of max_depth. Any glob with '/' (including '**')
+    matches files in subdirectories, which are invisible at depth 0 — so the
+    result is empty. The caller must set max_depth explicitly. This is the
+    documented, predictable behaviour (variant A: no magic).
+    """
+    _make_real_tree(tmp_path)
+    base_raw = _base()(path=str(tmp_path), glob="**/*.py")
+    harbor_raw = _harbor()(path=_FAKE_ROOT, glob="**/*.py")
+    _compare_results(base_raw, harbor_raw, "glob_slash_no_depth")
+
+    b = json.loads(base_raw)
+    assert b["max_depth"] == 0, f"no auto-raise: depth must stay 0, got {b['max_depth']}"
+    assert "max_depth_auto" not in b, "auto-raise was removed; field must be absent"
+    # '**/*.py' at depth 0 matches only root-level .py files (a.py); it cannot
+    # reach sub/c.py. Confirm that sub/c.py is NOT in the flat result.
+    root_py = {e["path"] for e in b["entries"]}
+    assert any(p.endswith("a.py") for p in root_py), "root a.py should match '**/*.py' at depth 0"
+    assert not any("c.py" in p for p in root_py), "sub/c.py must NOT be found at depth 0"
+
+
+def test_glob_with_slash_and_explicit_max_depth_returns_matches(tmp_path):
+    """Glob containing '/' WITH explicit max_depth: subdirs traversed, matches found."""
+    _make_real_tree(tmp_path)
+    base_raw = _base()(path=str(tmp_path), glob="**/*.py", max_depth=10)
+    harbor_raw = _harbor()(path=_FAKE_ROOT, glob="**/*.py", max_depth=10)
+    _compare_results(base_raw, harbor_raw, "glob_slash_explicit_depth")
+
+    b = json.loads(base_raw)
+    assert b["max_depth"] == 10
+    assert "max_depth_auto" not in b
+    assert b["count"] > 0, "with max_depth=10, '**/*.py' must find sub/*.py"
+
+
+def test_multi_segment_glob_no_max_depth_returns_empty(tmp_path):
+    """Glob 'sub/*.py' (multi-segment, no '**') and no max_depth: 0 matches.
+
+    Confirms the footgun is documented, not silently fixed: any glob with '/'
+    needs explicit max_depth. The description tells the caller to raise depth.
+    """
+    _make_real_tree(tmp_path)
+    base_raw = _base()(path=str(tmp_path), glob="sub/*.py")
+    harbor_raw = _harbor()(path=_FAKE_ROOT, glob="sub/*.py")
+    _compare_results(base_raw, harbor_raw, "multi_segment_no_depth")
+
+    b = json.loads(base_raw)
+    assert b["max_depth"] == 0
+    assert "max_depth_auto" not in b
+    assert b["count"] == 0, "flat listing cannot match 'sub/*.py'"
+
+
+def test_simple_glob_no_slash_works_flat(tmp_path):
+    """Glob '*.py' (no '/') and no max_depth: flat listing, matches found.
+
+    Globs without '/' work at depth 0 as expected — no auto-raise needed.
+    """
+    _make_real_tree(tmp_path)
+    base_raw = _base()(path=str(tmp_path), glob="*.py")
+    harbor_raw = _harbor()(path=_FAKE_ROOT, glob="*.py")
+    _compare_results(base_raw, harbor_raw, "simple_glob_flat")
+
+    b = json.loads(base_raw)
+    assert b["max_depth"] == 0
+    assert "max_depth_auto" not in b
+    assert b["count"] > 0, "'*.py' must match top-level a.py"
+
+
 def test_max_entries_truncation(tmp_path):
     """max_entries=3 with full traversal triggers truncation."""
     _make_real_tree(tmp_path)
