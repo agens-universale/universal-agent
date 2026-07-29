@@ -100,6 +100,16 @@ class SearchFiles(AbstractSimpleTool):
                             "If both offset and limit are omitted, defaults to offset=1 and the same limit."
                         ),
                     },
+                    "encoding": {
+                        "type": "string",
+                        "description": (
+                            "Optional text encoding. Omit for UTF-8 (default; also UTF-16 with BOM). "
+                            "Pass encoding= to search files in cp1251, koi8-r, latin-1, "
+                            "utf-8-sig, utf-16, utf-16-le, utf-16-be "
+                            "(also windows-1251, iso-8859-1). When set, all searched files are "
+                            "decoded with this encoding; files that fail to decode are skipped."
+                        ),
+                    },
                 },
                 "required": ["path", "regex"],
                 "additionalProperties": False
@@ -111,7 +121,7 @@ class SearchFiles(AbstractSimpleTool):
     def prompt_description(cls):
         description = '''Tool name: fs_search_files  
 Tool description: Searches for a regex pattern in file contents (not for listing files by name). regex is required; does not list files by glob/name alone.
-Input schema: {"type": "object", "properties": {"path": {"type": "string", "description": "Directory to search recursively, or a single file."}, "regex": {"type": "string", "description": "Required. Regex matched against the whole file (DOTALL+MULTILINE: patterns may span newlines; '.' matches newline; '^'/'$' are line boundaries). Keep patterns bounded."}, "file_pattern": {"type": "string", "description": "Optional glob to narrow which files are content-searched (e.g., \'*.py\'). Always pair with regex — not a standalone name listing."}, "offset": {"type": "integer", "description": "1-based index of the first match to return."}, "limit": {"type": "integer", "description": "Max matches returned for this page."}}, "required": ["path", "regex"], "additionalProperties": false}
+Input schema: {"type": "object", "properties": {"path": {"type": "string", "description": "Directory to search recursively, or a single file."}, "regex": {"type": "string", "description": "Required. Regex matched against the whole file (DOTALL+MULTILINE: patterns may span newlines; '.' matches newline; '^'/'$' are line boundaries). Keep patterns bounded."}, "file_pattern": {"type": "string", "description": "Optional glob to narrow which files are content-searched (e.g., \'*.py\'). Always pair with regex — not a standalone name listing."}, "offset": {"type": "integer", "description": "1-based index of the first match to return."}, \"limit\": {\"type\": \"integer\", \"description\": \"Max matches returned for this page.\"}, \"encoding\": {\"type\": \"string\", \"description\": \"Optional text encoding (e.g. cp1251, koi8-r, utf-16-le). Omit for UTF-8 default.\"}}, \"required\": [\"path\", \"regex\"], \"additionalProperties\": false}
 
 Usage:
 - `path` may be a **directory** (search all files recursively) or a **single file**.
@@ -364,9 +374,12 @@ Search for error logs in Rust source files:
         file_pattern: Optional[str] = None,
         offset: Optional[int] = None,
         limit: Optional[int] = None,
+        encoding: Optional[str] = None,
         **kwargs,
     ) -> str:
         file_pattern = coalesce_optional_string(file_pattern)
+
+        encoding = coalesce_optional_string(encoding)
 
         _result = functools.partial(
             self._result,
@@ -385,6 +398,8 @@ Search for error logs in Rust source files:
             return _result(ok=False, error={"type": "invalid_argument", "field": "offset"})
         if limit is not None and not isinstance(limit, int):
             return _result(ok=False, error={"type": "invalid_argument", "field": "limit"})
+        if encoding is not None and not isinstance(encoding, str):
+            return _result(ok=False, error={"type": "invalid_argument", "field": "encoding"})
 
         try:
             re.compile(regex, re.DOTALL | re.MULTILINE)
@@ -449,7 +464,7 @@ Search for error logs in Rust source files:
             except OSError as e:
                 return None, {"type": "read_failed", "message": str(e)}
 
-            decoded = decode_text_bytes(raw)
+            decoded = decode_text_bytes(raw, encoding=encoding)
             if decoded.ok:
                 return decoded.text or "", None
 
@@ -466,9 +481,12 @@ Search for error logs in Rust source files:
                 }
 
             # Non-UTF8 text: best-effort decode for discovery (same idea as backend.read).
-            text = decode_text_best_effort(raw)
-            if text is not None:
-                return text, None
+            # Only when no explicit encoding was requested — with an explicit encoding,
+            # a decode failure means the file is genuinely not in that encoding.
+            if encoding is None:
+                text = decode_text_best_effort(raw)
+                if text is not None:
+                    return text, None
             return None, {
                 "type": err_type,
                 "message": err.get("message") or "Failed to decode file.",

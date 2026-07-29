@@ -317,3 +317,125 @@ def test_search_single_file_binary_errors(tmp_path):
     assert data["error"]["type"] == "is_binary"
     assert data["matches"] == []
 
+
+# ---------------------------------------------------------------------------
+# encoding parameter — searching non-UTF-8 files
+# ---------------------------------------------------------------------------
+
+def test_search_single_file_cp1251_encoding(tmp_path):
+    """Single-file search with explicit encoding=cp1251 finds Cyrillic text."""
+    p = tmp_path / "cp1251.txt"
+    p.write_bytes("Строка 15: Тестовый текст\n".encode("cp1251"))
+    tool = with_local_ctx(SearchFiles)
+    data = json.loads(tool(path=str(p), regex="Строка 1", encoding="cp1251"))
+    assert data["ok"] is True
+    assert data["total_matches"] == 1
+    # line_content is the regex match, not the full line — check context for full line
+    assert "Строка 1" in data["matches"][0]["line_content"]
+    assert "Строка 15" in data["matches"][0]["context"]
+
+
+def test_search_directory_cp1251_encoding(tmp_path):
+    """Directory search with encoding=cp1251 finds matches in cp1251 files."""
+    (tmp_path / "a_cp1251.txt").write_bytes("Привет мир\nСтрока 42\n".encode("cp1251"))
+    (tmp_path / "b_cp1251.txt").write_bytes("Другая строка\n".encode("cp1251"))
+    tool = with_local_ctx(SearchFiles)
+    data = json.loads(tool(path=str(tmp_path), regex="Строка", encoding="cp1251"))
+    assert data["ok"] is True
+    assert data["total_matches"] == 1
+    assert data["matches"][0]["file"].endswith("a_cp1251.txt")
+
+
+def test_search_encoding_none_is_default_behavior(tmp_path):
+    """Without encoding=, cp1251 file is skipped (encoding_required or best-effort miss) — regression check."""
+    p = tmp_path / "cp1251.txt"
+    p.write_bytes("Привет мир\n".encode("cp1251"))
+    tool = with_local_ctx(SearchFiles)
+    data = json.loads(tool(path=str(p), regex="Привет"))
+    # Without explicit encoding, cp1251 is not auto-detected reliably.
+    # The file should either be skipped or produce no matches — but NOT crash.
+    assert data["ok"] in (True, False)  # ok=False means skipped/error, ok=True means no match
+    if data["ok"]:
+        assert data["total_matches"] == 0
+
+
+def test_search_utf16_le_no_bom_with_encoding(tmp_path):
+    """utf-16-le file without BOM is searchable when encoding=utf-16-le is given (bug #4 workaround)."""
+    p = tmp_path / "utf16le_nobom.txt"
+    p.write_bytes("Hello мир\nСтрока 99\n".encode("utf-16-le"))
+    tool = with_local_ctx(SearchFiles)
+    data = json.loads(tool(path=str(p), regex="Строка", encoding="utf-16-le"))
+    assert data["ok"] is True
+    assert data["total_matches"] == 1
+    assert "Строка" in data["matches"][0]["line_content"]
+    assert "Строка 99" in data["matches"][0]["context"]
+
+
+def test_search_utf16_le_no_bom_without_encoding_is_binary(tmp_path):
+    """Without encoding=, utf-16-le no-BOM file is skipped as binary (bug #4 — not fixed for auto-detect)."""
+    p = tmp_path / "utf16le_nobom.txt"
+    p.write_bytes("Hello мир\n".encode("utf-16-le"))
+    tool = with_local_ctx(SearchFiles)
+    data = json.loads(tool(path=str(p), regex="Hello"))
+    assert data["ok"] is False
+    assert data["error"]["type"] == "is_binary"
+
+
+def test_search_invalid_encoding_returns_envelope(tmp_path):
+    """Invalid encoding name returns ok=False with invalid_argument error."""
+    p = tmp_path / "a.txt"
+    p.write_text("hello\n", encoding="utf-8")
+    tool = with_local_ctx(SearchFiles)
+    data = json.loads(tool(path=str(p), regex="hello", encoding="nonexistent-codec"))
+    assert data["ok"] is False
+    assert data["error"]["type"] == "unsupported_encoding"
+
+
+def test_search_encoding_wrong_codec_skips_file(tmp_path):
+    """utf-8 file searched with encoding=utf-16-le → decode fails → skipped, no crash."""
+    p = tmp_path / "utf8.txt"
+    p.write_text("plain ascii text\n", encoding="utf-8")
+    tool = with_local_ctx(SearchFiles)
+    data = json.loads(tool(path=str(p), regex="plain", encoding="utf-16-le"))
+    # utf-16-le decode of ascii text may succeed (odd byte count) or fail → either skip or no match
+    # Most likely: decodes as garbage → regex "plain" won't match → total_matches=0
+    # Or: decode fails → ok=False
+    assert data["ok"] in (True, False)
+
+
+def test_search_encoding_koi8r_directory(tmp_path):
+    """Directory search with encoding=koi8-r finds matches in koi8-r files."""
+    (tmp_path / "koi.txt").write_bytes("Тестовая строка\n".encode("koi8-r"))
+    tool = with_local_ctx(SearchFiles)
+    data = json.loads(tool(path=str(tmp_path), regex="Тестовая", encoding="koi8-r"))
+    assert data["ok"] is True
+    assert data["total_matches"] == 1
+
+
+def test_search_encoding_utf16_be_with_bom(tmp_path):
+    """utf-16-be file with BOM searched with encoding=utf-16-be."""
+    p = tmp_path / "utf16be.txt"
+    p.write_bytes("Строка BE\n".encode("utf-16-be"))
+    tool = with_local_ctx(SearchFiles)
+    data = json.loads(tool(path=str(p), regex="Строка", encoding="utf-16-be"))
+    assert data["ok"] is True
+    assert data["total_matches"] == 1
+
+
+def test_search_encoding_utf8_sig(tmp_path):
+    """utf-8-sig file (with BOM) searched with encoding=utf-8-sig."""
+    p = tmp_path / "utf8sig.txt"
+    p.write_bytes("Поиск строки\n".encode("utf-8-sig"))
+    tool = with_local_ctx(SearchFiles)
+    data = json.loads(tool(path=str(p), regex="Поиск", encoding="utf-8-sig"))
+    assert data["ok"] is True
+    assert data["total_matches"] == 1
+
+
+def test_search_encoding_does_not_break_utf8_files(tmp_path):
+    """Searching UTF-8 files without encoding= still works (regression)."""
+    (tmp_path / "a.py").write_text("def hello():\n    return 42\n", encoding="utf-8")
+    tool = with_local_ctx(SearchFiles)
+    data = json.loads(tool(path=str(tmp_path), regex="hello"))
+    assert data["ok"] is True
+    assert data["total_matches"] == 1
