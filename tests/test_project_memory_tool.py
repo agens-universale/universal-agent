@@ -35,6 +35,33 @@ def test_tool_description_has_three_actions_only():
     assert "compact" not in enum
 
 
+def test_tool_description_requires_action_and_content():
+    required = ProjectMemory.tool_description()["parameters"]["required"]
+    assert required == ["action", "content"]
+    content_desc = ProjectMemory.tool_description()["parameters"]["properties"]["content"][
+        "description"
+    ].lower()
+    assert "required for every action" in content_desc
+    assert "ignored for read" in content_desc
+
+
+def test_parse_and_validate_rejects_append_without_content():
+    from tools.arguments_validation import (
+        WrongFunctionArgumentsException,
+        parse_and_validate_tool_arguments,
+    )
+
+    spec = ProjectMemory.tool_description()
+    with pytest.raises(WrongFunctionArgumentsException):
+        parse_and_validate_tool_arguments(
+            tool_name="project_memory",
+            arguments=json.dumps({"action": "append"}),
+            tool_spec=spec,
+            allow_empty_for_empty_schema=False,
+            tool_fabric=ProjectMemory,
+        )
+
+
 def test_tool_description_does_not_leak_path_or_compaction():
     desc = ProjectMemory.tool_description()
     description_text = desc["description"]
@@ -62,6 +89,16 @@ def test_tool_read_missing_file_returns_ok_with_empty_content(tmp_path):
     assert res["fill_percent"] == 0
     assert res["max_append_chars"] == 3_000
     assert "hint" in res
+
+
+def test_tool_read_with_empty_content_arg_ok(tmp_path):
+    """Schema requires content; read ignores it — empty string is fine."""
+    (tmp_path / ".gc").mkdir()
+    (tmp_path / ".gc" / "project_memory.md").write_text("kept", encoding="utf-8")
+    tool = _make_tool(tmp_path)
+    res = json.loads(tool(action="read", content=""))
+    assert res["ok"] is True
+    assert res["content"] == "kept"
 
 
 def test_tool_read_existing_file_returns_full_content(tmp_path):
