@@ -3,7 +3,8 @@ import functools
 import json
 import re
 import time
-from typing import Optional, Dict, Any
+from collections import OrderedDict
+from typing import Optional, Dict, Any, Tuple
 
 import requests
 import trafilatura
@@ -16,6 +17,10 @@ from security.url_policy import enforce_url_policy
 class FetchUrl(AbstractSimpleTool):
     timeout_seconds = 20
     max_content_chars = 20_000
+    # LRU-лимит кэша извлечённого текста страниц (на тред/сессию).
+    # Кэш хранится в SharedStateData (per-thread, персистится в meta),
+    # поэтому лимит ограничивает и RAM, и размер JSON-meta треда.
+    fetch_url_cache_max_size = 10
     max_retries = 2
     retry_backoff_seconds = 1.0
     default_user_agent = (
@@ -255,15 +260,50 @@ Usage:
         payload["preview"] = preview
         return json.dumps(payload, ensure_ascii=False)
 
-    def _get_cache(self) -> Optional[Dict[str, Any]]:
+    def _get_cache(self) -> Optional["OrderedDict[str, Any]"]:
         shared = getattr(self._state, "shared", None)
         if shared is None:
             return None
         cache = getattr(shared, "fetch_url_cache", None)
-        if not isinstance(cache, dict):
-            cache = {}
+        # Нормализация: из meta кэш восстанавливается как обычный dict,
+        # а для LRU нужен OrderedDict. Если тип не совпадает — пересобираем.
+        if not isinstance(cache, OrderedDict):
+            cache = OrderedDict(cache if isinstance(cache, dict) else {})
             setattr(shared, "fetch_url_cache", cache)
         return cache
+
+    def _get_from_cache(
+        self, url: str
+    ) -> Optional[Tuple[str, Dict[str, Optional[str]]]]:
+        """Возвращает (content, meta) для закэшированного URL или None.
+
+        При cache-hit обновляет LRU-порядок: только что читанный URL становится
+        самым свежим и не вытесняется следующими записями.
+        """
+        cache = self._get_cache()
+        if cache is None or url not in cache:
+            return None
+        cached = cache[url]
+        if isinstance(cached, dict):
+            content = cached.get("content", "")
+            meta = self._normalize_meta(cached.get("meta"))
+        else:
+            content = cached if isinstance(cached, str) else ""
+            meta = self._normalize_meta(None)
+        cache.move_to_end(url)
+        return content, meta
+
+    def _put_to_cache(
+        self, url: str, content: str, meta: Dict[str, Optional[str]]
+    ) -> None:
+        """Записывает страницу в кэш и эвиктирует самые старые при превышении лимита."""
+        cache = self._get_cache()
+        if cache is None:
+            return
+        cache[url] = {"content": content, "meta": meta}
+        cache.move_to_end(url, last=True)
+        while len(cache) > self.fetch_url_cache_max_size:
+            cache.popitem(last=False)
 
     @staticmethod
     def _normalize_meta(meta: Optional[Dict[str, Any]]) -> Dict[str, Optional[str]]:
@@ -404,15 +444,9 @@ Usage:
                 error={"type": "invalid_argument", "field": "timeout_seconds", "message": "timeout_seconds must be greater than 0."},
             )
 
-        cache = self._get_cache()
-        if cache is not None and normalized_url in cache:
-            cached = cache[normalized_url]
-            if isinstance(cached, dict):
-                cached_content = cached.get("content", "")
-                cached_meta = self._normalize_meta(cached.get("meta"))
-            else:
-                cached_content = cached if isinstance(cached, str) else ""
-                cached_meta = self._normalize_meta(None)
+        cached = self._get_from_cache(normalized_url)
+        if cached is not None:
+            cached_content, cached_meta = cached
             sliced = self._slice_content(cached_content, offset, limit)
             return _result(
                 ok=True,
@@ -562,8 +596,7 @@ Usage:
         if extracted_text and extracted_text.strip():
             c = extracted_text.strip()
             if not self._looks_like_garbled_text(c):
-                if cache is not None:
-                    cache[normalized_url] = {"content": c, "meta": page_meta}
+                self._put_to_cache(normalized_url, c, page_meta)
                 sliced = self._slice_content(c, offset, limit)
                 return _result(
                     ok=True,
@@ -600,8 +633,7 @@ Usage:
             if fallback_text and fallback_text.strip():
                 c = fallback_text.strip()
                 if not self._looks_like_garbled_text(c):
-                    if cache is not None:
-                        cache[normalized_url] = {"content": c, "meta": page_meta}
+                    self._put_to_cache(normalized_url, c, page_meta)
                     sliced = self._slice_content(c, offset, limit)
                     return _result(
                         ok=True,
@@ -627,8 +659,7 @@ Usage:
             cleaned_summary = self._strip_html_tags(summary_html)
             if cleaned_summary and not self._looks_like_garbled_text(cleaned_summary):
                 c = cleaned_summary
-                if cache is not None:
-                    cache[normalized_url] = {"content": c, "meta": page_meta}
+                self._put_to_cache(normalized_url, c, page_meta)
                 sliced = self._slice_content(c, offset, limit)
                 return _result(
                     ok=True,

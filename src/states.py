@@ -20,7 +20,7 @@ class SharedStateData:
     # ``<persistent_state>``. Intentionally not renamed in JSON/yaml (thread compat).
     working_memory: Dict[str, str] = field(default_factory=dict)
     notes_md: str = ""
-    fetch_url_cache: Dict[str, str] = field(default_factory=dict)
+    fetch_url_cache: Dict[str, Any] = field(default_factory=dict)
     confirm_rules: Dict[str, bool] = field(default_factory=dict)
 
 
