@@ -1,7 +1,7 @@
 """Реестр как функция от конфига: встроенные + кастомные из папки."""
 import pytest
 
-from tools.subagents.file_definitions import SubagentDefinitionError
+from tools.subagents.custom.file_definitions import SubagentDefinitionError
 from tools.subagents.registry import (
     SUBAGENT_CLASSES,
     builtin_subagent_names,

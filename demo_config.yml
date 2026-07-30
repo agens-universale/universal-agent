@@ -150,6 +150,21 @@ agent:
   use_server_subagents: false
   use_local_subagents: true
   subagent_max_steps: 50
+  # Кастомные сабагенты из файлов: папка с .md (YAML-frontmatter + тело-роль).
+  # Не задана — доступны только семь встроенных. Подробнее: docs/subagents.md.
+  #   subagents_dir: ./agents
+  #   subagents_max_count: 20       # предел числа подхватываемых определений
+  # Файл выглядит так:
+  #   ---
+  #   name: subagent_db_migrator    # обязателен префикс subagent_
+  #   description: Пишет и проверяет миграции БД. Вызывать, когда нужна схема.
+  #   tools:                        # опционально: allowlist конечных имён
+  #     - fs_read_file
+  #     - turn_finish                        # обязателен, вынуть нельзя
+  #     - session_read_stored_tool_output    # обязателен, вынуть нельзя
+  #   stop_tools: [exec_python]     # опционально; дополняет глобальный stop_tools
+  #   ---
+  #   Ты — инженер по миграциям базы данных.
   client_name: mini_cli_pub_agent_1
   x_cl_id: "12345"
   verbose: true

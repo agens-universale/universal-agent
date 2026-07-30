@@ -38,6 +38,10 @@ agent:
   use_server_subagents: false
   use_local_subagents: true
   subagent_max_steps: 100
+  # Кастомные сабагенты из файлов (.md с YAML-frontmatter): см. docs/subagents.md.
+  # Не задана — только встроенные семь.
+  #   subagents_dir: ./agents
+  #   subagents_max_count: 20
   client_name: mini_cli_pub_agent_1
   x_cl_id: "12345"
   verbose: true

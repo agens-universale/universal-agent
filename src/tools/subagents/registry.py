@@ -8,11 +8,11 @@ from tools.subagents.planner import Planner
 from tools.subagents.critic import Critic
 from tools.subagents.code_reviewer import CodeReviewer
 from tools.subagents.special_agent import SpecialAgent
-from tools.subagents.file_definitions import (
+from tools.subagents.custom.file_definitions import (
     SubagentDefinition,
     discover_subagent_definitions,
 )
-from tools.subagents.file_subagent import (
+from tools.subagents.custom.file_subagent import (
     FileDefinedSubagent,
     build_tool_specification,
     validate_required_tools,

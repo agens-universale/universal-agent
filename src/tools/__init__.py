@@ -131,7 +131,7 @@ def apply_subagent_tools_filter(
     if allow is None and not stop:
         return tools_data
 
-    from tools.subagents.file_subagent import REQUIRED_TOOL_NAMES
+    from tools.subagents.custom.file_subagent import REQUIRED_TOOL_NAMES
 
     known = set(tools_data)
     unknown = sorted(((allow or set()) | stop) - known)

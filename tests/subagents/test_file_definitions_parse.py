@@ -5,7 +5,7 @@
 """
 import pytest
 
-from tools.subagents.file_definitions import (
+from tools.subagents.custom.file_definitions import (
     SubagentDefinitionError,
     parse_subagent_file,
 )

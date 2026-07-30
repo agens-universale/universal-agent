@@ -11,7 +11,7 @@ from typing import Any, Dict
 
 from constants.tool_names import FINISH_TOOL_NAME, READ_STORED_TOOL_OUTPUT_NAME
 from tools.subagents.abstract_subagent import AbstractSubagent
-from tools.subagents.file_definitions import SubagentDefinition, SubagentDefinitionError
+from tools.subagents.custom.file_definitions import SubagentDefinition, SubagentDefinitionError
 
 # Тулы, без которых сабагент ломается не сразу, а позже и незаметно:
 # - turn_finish: контракт сдачи требует вернуть отчёт через него, результат ребёнка

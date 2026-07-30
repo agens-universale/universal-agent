@@ -3,8 +3,8 @@ import asyncio
 
 import pytest
 
-from tools.subagents.file_definitions import SubagentDefinition, SubagentDefinitionError
-from tools.subagents.file_subagent import (
+from tools.subagents.custom.file_definitions import SubagentDefinition, SubagentDefinitionError
+from tools.subagents.custom.file_subagent import (
     REQUIRED_TOOL_NAMES,
     FileDefinedSubagent,
     build_tool_specification,
