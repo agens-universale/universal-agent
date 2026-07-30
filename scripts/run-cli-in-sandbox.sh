@@ -173,6 +173,14 @@ CLI_CMD=(
   -q "${SWARM_PAYLOAD_JSON:-}"
 )
 
+# Внешний trace_id (SWARM_TRACE_ID). Флаг добавляем ТОЛЬКО при непустом
+# значении: пустой --trace-id "" ничего бы не дал, а лишний аргумент в командной
+# строке — это уже отличие от нетрассируемого рана. Через конфиг трейс передать
+# нельзя: ребёнку материализуется сырой YAML с extra="forbid".
+if [[ -n "${SWARM_TRACE_ID:-}" ]]; then
+  CLI_CMD+=(--trace-id "${SWARM_TRACE_ID}")
+fi
+
 # --- Таймаут через GNU timeout (если есть) ---
 
 if command -v timeout >/dev/null 2>&1; then

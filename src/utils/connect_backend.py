@@ -19,6 +19,11 @@ from utils.retry import retry_with_backoff
 from usage.context import record_usage
 from utils.chat_completions_stream import iter_sse_data_lines, assemble_streamed_completion, OnDelta, BackendStreamError
 from utils.backend_errors import is_empty_completion
+from trace_id import (
+    trace_id_from_config,
+    trace_header_name,
+    model_trace_header_enabled,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -382,7 +387,6 @@ def create_call_headers(state, ctx) -> Dict[str, str]:
 
     call_headers: Dict[str, str] = {
         "x_cl_id": str(config_dict.get("x_cl_id")),
-        "x_trace_id": str(state.state_id),
         "x_rq_id": str(uuid4()),
         "x-session-id": str(state.state_id),
     }
@@ -410,6 +414,18 @@ def create_call_headers(state, ctx) -> Dict[str, str]:
                 if not v:
                     continue
                 call_headers[k] = v
+
+    # Внешний trace_id — строго opt-in через agent.trace_header_enabled: без
+    # флага заголовок не уходит, даже если трейс у рана есть (в лог-файл и в
+    # записи логов он при этом попадает как обычно).
+    # Инъекция ПОСЛЕ оверлея chat_completion_headers — осознанный приоритет:
+    # per-run значение выигрывает у статического YAML с тем же именем. И вне
+    # ветки backend_mode: заголовок нужен в обоих режимах API. Дисциплина пустых
+    # значений — как у оверлея выше, а не как у x_cl_id, где отсутствие ключа
+    # отправляет литерал "None".
+    trace_id = trace_id_from_config(config_dict)
+    if trace_id and model_trace_header_enabled(config_dict):
+        call_headers[trace_header_name(config_dict, "x_trace_id")] = trace_id
     return call_headers
 
 

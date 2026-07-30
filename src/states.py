@@ -103,6 +103,7 @@ class State:
         self.call_id = call_id
         self.max_steps = max_steps
         self.steps = 0
+        self.tool_calls = 0
         self.stop_requested = False
         self.discard_writes_after_stop = False  # TUI ставит True; пропускает persist
         self.user_intent_log: list[IntentRecord] = []

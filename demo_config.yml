@@ -54,6 +54,7 @@ backend:
   # подставляется из окружения перед валидацией. Удобно, чтобы не держать секрет
   # в файле. Отсутствующая переменная → пустая строка + warning (без значения).
   #   Authorization: "Bearer ${ENV:GC_API_KEY}"     # затем: export GC_API_KEY=sk-...
+  #   Или из файла (chmod 600): Authorization: "Bearer ${FILE:~/.secrets/gc_api_key}"
   #
   # use_ssl: bool ИЛИ строка-путь к CA-bundle (self-signed / корп-CA):
   #   true | false | "/path/ca-bundle.pem"
@@ -162,6 +163,9 @@ agent:
   disable_skills: []
   server_tool_prefix: system
   max_steps: 200
+  # Per-run лимиты надёжности (закомментировано = выключено):
+  # session_token_limit: 200000   # бюджет input+output токенов на один ран
+  # max_tool_calls: 100           # макс. вызовов инструментов на один ран
   no_tool_call_max_count: 3
   strict_turn_finish_validation: true
   # Finish gate (quality gate): макс. reject turn_finish за user turn / subagent run
@@ -177,6 +181,12 @@ agent:
   exec_output_capture_max_chars: 60000
   inject_tool_fields:
     reason: "Brief rationale (1–2 sentences): goal, why now, expected outcome."
+  # Имя HTTP-заголовка для внешнего trace_id (флаг gc-cli --trace-id или поле
+  # trace_id в теле вебхука). Не задано — заголовок к модели называется
+  # x_trace_id, заголовок к MCP-серверам — trace_id.
+  # Задайте X-Trace-Id, если между агентом и бэкендом стоит nginx: он по
+  # умолчанию выбрасывает заголовки с подчёркиванием (underscores_in_headers off).
+  # trace_id_header_name: X-Trace-Id
 
 logging:
   full_log_backend: false
@@ -497,6 +507,10 @@ mcp:
       args: ["--transport", "stdio", "--allow-any"]
       server-name: office
       description: Read office documents (pdf, docx, xls, xlsx, pptx, csv, html, msg) as markdown
+      # Whitelist тулов сервера (нет блока / enabled: false → все тулы):
+      # whitelist:
+      #   enabled: true
+      #   tools: [read_document, list_sheets]   # базовые имена из tools/list; [] = ноль тулов
     science:
       transport: stream_http
       url: http://127.0.0.1:8765/mcp
@@ -514,6 +528,11 @@ mcp:
       # headers:
       #   Authorization: "Bearer ${ENV:SCIENCE_MCP_TOKEN}"
       #   X-API-Key: "${ENV:SCIENCE_MCP_X_API_KEY}"
+      #
+      # Разрешить отправку внешнего trace_id этому серверу (заголовок для
+      # http-подобных транспортов, env TRACE_ID для stdio). Дефолт — false:
+      # без этой строки внутренний корреляционный id наружу не уходит.
+      # trace_header_enabled: true
     duckduckgo_search:
       transport: stdio
       command: ddgs-mcp

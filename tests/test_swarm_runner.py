@@ -613,3 +613,41 @@ def test_materialize_agent_overrides_empty_noop(tmp_path):
         runner._materialize_runtime_config(str(host_cfg), str(sb), swarm_cfg)
         written = _yaml.safe_load((sb / ".gc" / "config.yml").read_text())
         assert written["agent"]["max_steps"] == 77
+
+
+# --- Внешний trace_id в песочнице ---------------------------------------------
+
+
+def test_start_swarm_env_trace_id_empty_when_absent(base_swarm_cfg, mock_popen):
+    """Трейс не задан → переменная пустая, обёртка не добавит --trace-id."""
+    runner.start_swarm_process(
+        base_swarm_cfg, system="ci", task_id="t1", payload={"q": "go"},
+    )
+    _args, kwargs = mock_popen.call_args
+    assert kwargs["env"]["SWARM_TRACE_ID"] == ""
+
+
+def test_start_swarm_env_carries_trace_id(base_swarm_cfg, mock_popen):
+    runner.start_swarm_process(
+        base_swarm_cfg, system="ci", task_id="t1", payload={"q": "go"},
+        trace_id="wf-42",
+    )
+    _args, kwargs = mock_popen.call_args
+    assert kwargs["env"]["SWARM_TRACE_ID"] == "wf-42"
+
+
+def test_start_swarm_trace_id_not_in_payload_json(base_swarm_cfg, mock_popen):
+    """Трейс уезжает отдельной переменной, а НЕ в payload.
+
+    payload доставляется ребёнку аргументом `-q`, т.е. становится текстом задачи:
+    трейс внутри него попал бы в промпт модели.
+    """
+    runner.start_swarm_process(
+        base_swarm_cfg, system="ci", task_id="t1", payload={"q": "go"},
+        trace_id="wf-42",
+    )
+    _args, kwargs = mock_popen.call_args
+    payload_json = kwargs["env"]["SWARM_PAYLOAD_JSON"]
+    assert "wf-42" not in payload_json
+    # `system` в payload дописывает хендлер /swarm/run, не runner.
+    assert json.loads(payload_json) == {"q": "go"}

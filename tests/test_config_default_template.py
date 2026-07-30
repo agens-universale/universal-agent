@@ -70,11 +70,20 @@ EXPERT_ONLY_KEYS: set = {
     "agent.exec_timeout_sec",                # таймаут execute_command / run_python_code
     "agent.exec_output_capture_max_chars",   # RAM-cap stdout/stderr на поток для exec
     "agent.limit_project_metadata",           # скрыть проектные метаданные из системного промпта
+    # Per-run лимиты надёжности (по умолчанию выключены); см. docs/configuration.md.
+    "agent.session_token_limit",
+    "agent.max_tool_calls",
     # Списки по умолчанию пусты; наполнение — проектный оверлей (.gc/config.yml)
     "agent.disable_skills",
     # Синтетические поля tool schema — инжект description к параметру «reason»;
     # задаётся под конкретную модель / промпт.
     "agent.inject_tool_fields",
+    # Имя HTTP-заголовка для внешнего trace_id; None по умолчанию, нужен только
+    # при внешней трассировке (напр. интеграция с оркестратором заказчика).
+    "agent.trace_id_header_name",
+    # Разрешение слать trace_id в заголовке к модели; False по умолчанию —
+    # рассылка трейса наружу opt-in, нужна только при внешней трассировке.
+    "agent.trace_header_enabled",
     # Model steering → special_instructions; строка специфичных инструкций для модели.
     "agent.model_steering",
 

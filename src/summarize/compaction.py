@@ -54,8 +54,13 @@ def _emit_messages_evicted(state: Any, dropped: List[dict]) -> None:
     """Best-effort notify host about messages leaving the model context.
 
     State does not retain ``dropped``; optional ``state.on_messages_evicted``
-    may archive them (harbor trajectory journal, tests, etc.). Callback errors
+    may archive them (harbor trajectory store, tests, etc.). Callback errors
     never fail compaction.
+
+    NB: merge-инвариант в ``tests/test_memory_cutover_invariants.py`` запрещает
+    в ``src/summarize/`` упоминание legacy-термина memory-шага (того самого,
+    что был вытеснен этим callback'ом) — даже в комментариях. Для архива
+    на стороне хоста используем нейтральные слова: store, архив, trajectory.
     """
     if not dropped:
         return

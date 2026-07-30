@@ -268,9 +268,9 @@ def stub_runner(monkeypatch):
     """Мокает swarm_runner.start_swarm_process — возвращает (sid, pid) без реального Popen."""
     calls = []
 
-    def fake_start(swarm_cfg, *, system, task_id, payload):
+    def fake_start(swarm_cfg, *, system, task_id, payload, trace_id=None):
         sid = _swarm_sid(system, task_id)
-        calls.append((sid, payload))
+        calls.append((sid, payload, trace_id))
         # Симулируем, что start_swarm_process пишет meta (как реальный runner).
         import swarm.storage as storage
         storage.save_swarm_meta(
@@ -325,6 +325,50 @@ def test_run_starts_new_sworm_returns_started(make_server, stub_runner):
     assert body["task_id"] == "build-42"
     assert len(stub_runner) == 1
     assert stub_runner[0][0] == _swarm_sid("generic", "build-42")
+
+
+def test_run_forwards_trace_id_and_strips_it_from_payload(make_server, stub_runner):
+    """trace_id уезжает отдельным аргументом, а НЕ в payload.
+
+    payload доставляется агенту в песочнице через `-q`, т.е. становится текстом
+    задачи: оставленный в теле трейс попал бы в промпт модели.
+    """
+    server_mod, _threads, _ = make_server(enabled=True)
+    from starlette.testclient import TestClient
+    client = TestClient(server_mod.app)
+
+    resp = client.post(
+        "/swarm/run", json={"task_id": "t-tr", "trace_id": " wf-42 ", "q": "go"}
+    )
+    assert resp.status_code == 200
+    _sid, payload, trace_id = stub_runner[0]
+    assert trace_id == "wf-42"           # нормализован (strip)
+    assert "trace_id" not in payload
+    assert payload["q"] == "go"
+
+
+def test_run_without_trace_id_passes_none(make_server, stub_runner):
+    server_mod, _threads, _ = make_server(enabled=True)
+    from starlette.testclient import TestClient
+    client = TestClient(server_mod.app)
+
+    resp = client.post("/swarm/run", json={"task_id": "t-no-tr"})
+    assert resp.status_code == 200
+    assert stub_runner[0][2] is None
+
+
+def test_run_400_on_invalid_trace_id(make_server, stub_runner):
+    """Управляющие символы в трейсе — отказ до старта песочницы, как в вебхуке."""
+    server_mod, _threads, _ = make_server(enabled=True)
+    from starlette.testclient import TestClient
+    client = TestClient(server_mod.app)
+
+    resp = client.post(
+        "/swarm/run", json={"task_id": "t-bad", "trace_id": "wf\n42"}
+    )
+    assert resp.status_code == 400
+    assert "invalid trace_id" in resp.json()["detail"]["payload"]
+    assert stub_runner == []            # процесс не стартовал
 
 
 def test_run_409_when_swarm_id_active(make_server, stub_runner):

@@ -125,6 +125,8 @@ _STATE_CANCELLED = "cancelled"
 _STATE_FAILED = "failed"
 _STATE_STOPPED_STEPS = "stopped_steps"
 _STATE_STOPPED_ERRORS = "stopped_errors"
+_STATE_STOPPED_TOKENS = "stopped_tokens"
+_STATE_STOPPED_TOOL_CALLS = "stopped_tool_calls"
 
 # Исходы, которые персистентны как строка-итог (done / cancelled / …) до
 # следующего user-send. Единый список для poll, resume и meta.last_indicator.
@@ -134,6 +136,8 @@ TERMINAL_INDICATOR_STATES = frozenset({
     _STATE_FAILED,
     _STATE_STOPPED_STEPS,
     _STATE_STOPPED_ERRORS,
+    _STATE_STOPPED_TOKENS,
+    _STATE_STOPPED_TOOL_CALLS,
 })
 
 
@@ -180,7 +184,8 @@ class ThinkingIndicator(Static):
         """Переключить визуал без размонтирования. Идемпотентен."""
         if state not in (_STATE_THINKING, _STATE_VALIDATING, _STATE_COMPRESSING,
                          _STATE_PROCESSING, _STATE_DONE, _STATE_CANCELLED, _STATE_FAILED,
-                         _STATE_STOPPED_STEPS, _STATE_STOPPED_ERRORS):
+                         _STATE_STOPPED_STEPS, _STATE_STOPPED_ERRORS,
+                         _STATE_STOPPED_TOKENS, _STATE_STOPPED_TOOL_CALLS):
             return
         if self._state == state:
             return
@@ -258,6 +263,16 @@ class ThinkingIndicator(Static):
             text.append("⏹", style=_DIM)
             text.append(" ")
             text.append("Остановлено: превышен лимит ошибок", style=_DIM)
+            return text
+        if self._state == _STATE_STOPPED_TOKENS:
+            text.append("⏹", style=_DIM)
+            text.append(" ")
+            text.append("Остановлено: превышен лимит токенов", style=_DIM)
+            return text
+        if self._state == _STATE_STOPPED_TOOL_CALLS:
+            text.append("⏹", style=_DIM)
+            text.append(" ")
+            text.append("Остановлено: превышен лимит вызовов инструментов", style=_DIM)
             return text
         if self._state == _STATE_VALIDATING:
             text.append("✦", style=self._validating_shade())

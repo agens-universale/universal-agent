@@ -9,6 +9,7 @@ from typing import Any, Dict
 from tools.connect_mcp.api import call_mcp_tool
 from tools.connect_mcp.registry import ToolsCache
 from tools.schema_optional import apply_openai_strict_object
+from trace_id import trace_id_from_config, trace_header_name
 
 logger = logging.getLogger(__name__)
 
@@ -350,6 +351,60 @@ def normalize_tool_spec_for_agent(
 
 
 
+# Транспорты, у которых есть канал HTTP-заголовков.
+_TRACE_HEADER_TRANSPORTS = {"http", "sse", "stream_http", "stream_sse"}
+# Транспорты без заголовков вообще: _request_stdio принимает аргумент headers и
+# никогда его не использует, у SDK-пути stdio параметра headers нет. Единственный
+# канал — переменные окружения дочернего процесса на спавне.
+_TRACE_ENV_TRANSPORTS = {"stdio", "stream_stdio"}
+# Имя переменной окружения для stdio-серверов.
+_TRACE_ENV_VAR = "TRACE_ID"
+
+
+def _servers_cfg_with_trace(
+    servers_cfg: Dict[str, Any],
+    config_dict: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Копия конфига MCP-серверов с внешним trace_id.
+
+    ПЕРЕСБОРКА, не мутация, и это требование корректности, а не стиль: в
+    серверном режиме config_dict — shallow copy процесс-глобального конфига, то
+    есть ``config_dict["mcp-servers"]`` — тот же объект. Мутация пометила бы все
+    последующие раны процесса, включая раны без trace, а раны идут в
+    конкурентных потоках и писали бы друг другу чужие id.
+
+    Отсутствие trace → исходный объект возвращается по identity, то есть
+    «ничего не изменилось» буквально.
+
+    Рассылка — строго opt-in: дефолт ``trace_header_enabled`` False совпадает со
+    схемным (``config_modules/mcp.py``), иначе руками собранный конфиг вёл бы
+    себя не так, как прошедший валидацию.
+    """
+    trace_id = trace_id_from_config(config_dict)
+    if not trace_id:
+        return servers_cfg
+    header_name = trace_header_name(config_dict, "trace_id")
+    out: Dict[str, Any] = {}
+    for name, srv in servers_cfg.items():
+        if not isinstance(srv, dict) or not srv.get("trace_header_enabled", False):
+            out[name] = srv
+            continue
+        transport = str(srv.get("transport") or "").strip()
+        if transport in _TRACE_HEADER_TRANSPORTS:
+            out[name] = {
+                **srv,
+                "headers": {**(srv.get("headers") or {}), header_name: trace_id},
+            }
+        elif transport in _TRACE_ENV_TRANSPORTS:
+            out[name] = {
+                **srv,
+                "env": {**(srv.get("env") or {}), _TRACE_ENV_VAR: trace_id},
+            }
+        else:
+            out[name] = srv
+    return out
+
+
 def get_mcp_tools_data_for_config(
     config_dict: Dict[str, Any],
     on_progress=None,
@@ -363,6 +418,10 @@ def get_mcp_tools_data_for_config(
     servers_cfg = config_dict.get("mcp-servers") or {}
     if not servers_cfg:
         return {}, {}
+    # Единственная точка: этот же объект уходит и в ToolsCache (весь discovery),
+    # и в замыкание каждого MCPToolWrapper (все вызовы тулов), и повторно сюда же
+    # для сабагентов через build_tools_data(child_config).
+    servers_cfg = _servers_cfg_with_trace(servers_cfg, config_dict)
 
     cfg: Dict[str, Any] = {
         "mcp-servers": servers_cfg,

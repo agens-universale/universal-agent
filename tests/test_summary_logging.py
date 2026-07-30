@@ -122,3 +122,36 @@ def test_append_summary_trace_record_writes_jsonl(tmp_path):
     assert parsed["trigger_reason"] == "turn_end"
     assert parsed["summary_trace"] == {"step": 1}
     assert parsed["newly_summarized_message_id"] == "m_sum"
+
+
+def test_append_summary_trace_record_absent_trace_adds_no_key(tmp_path):
+    trace_file = tmp_path / "summary_trace_main_abc.jsonl"
+    ctx = SimpleNamespace(summary_trace_path=str(trace_file), config_dict={})
+
+    append_summary_trace_record(
+        ctx,
+        trigger_reason="chars",
+        trace_data={"a": 1},
+        newly_summarized_message_id="m1",
+    )
+
+    record = json.loads(trace_file.read_text(encoding="utf-8").splitlines()[0])
+    assert "trace_id" not in record
+
+
+def test_append_summary_trace_record_writes_trace_id(tmp_path):
+    trace_file = tmp_path / "summary_trace_main_abc.jsonl"
+    ctx = SimpleNamespace(
+        summary_trace_path=str(trace_file),
+        config_dict={"trace_id": "wf-42"},
+    )
+
+    append_summary_trace_record(
+        ctx,
+        trigger_reason="chars",
+        trace_data={"a": 1},
+        newly_summarized_message_id="m1",
+    )
+
+    record = json.loads(trace_file.read_text(encoding="utf-8").splitlines()[0])
+    assert record["trace_id"] == "wf-42"

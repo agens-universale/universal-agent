@@ -232,9 +232,16 @@ def start_swarm_process(
     system: str,
     task_id: str,
     payload: Dict[str, Any],
+    trace_id: Optional[str] = None,
 ) -> Tuple[str, int]:
     """
-    Запустить обёрточный скрипт для сворм-режима.
+    Запустить обёрточный скрипт для сворм-процесса.
+
+    ``trace_id`` — внешний трейс (уже нормализованный вызывающей стороной).
+    Уезжает в песочницу как ``SWARM_TRACE_ID``: обёртка добавляет
+    ``--trace-id`` в командную строку CLI, только если значение непустое.
+    Через конфиг его передать нельзя — ребёнку материализуется сырой YAML, а
+    неизвестный верхнеуровневый ключ отвергнет ``extra="forbid"``.
 
     Возвращает (swarm_id, pid).
     """
@@ -313,6 +320,9 @@ def start_swarm_process(
             "SWARM_LIMIT_TIMEOUT_SECONDS": str(limits.get("timeout_seconds", "")),
             # Полный payload запроса можем передать в окружение как JSON-строку.
             "SWARM_PAYLOAD_JSON": json.dumps(payload, ensure_ascii=False),
+            # Внешний трейс. Пусто = не задан: обёртка тогда не добавляет флаг,
+            # и ран в песочнице ведёт себя как раньше (ничего не меняется).
+            "SWARM_TRACE_ID": str(trace_id or ""),
             # Пути до swarm-специфичных инструкций и директории со скиллами.
             "SWARM_AGENTMD_PATH": agentmd_path,
             "SWARM_SKILLS_DIR": skills_dir,

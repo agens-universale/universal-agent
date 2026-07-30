@@ -294,6 +294,7 @@ def main() -> int:
         no_read_guard=getattr(arg_parser.run_args, "no_read_guard", False),
         read_guard_mode=getattr(arg_parser.run_args, "read_guard_mode", None),
         agentsmd_override=getattr(arg_parser.run_args, "agentsmd_override", False),
+        trace_id=getattr(arg_parser.run_args, "trace_id", None),
     )
     import upgrade_gate
     _upgrade_info = upgrade_gate.detect_upgrade()

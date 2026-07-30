@@ -4,6 +4,7 @@ from typing import Any, Dict
 import yaml
 
 from config import load_config, sync_logging_flat_and_params  # type: ignore
+from config_modules.env_interpolation import resolve_env_placeholders
 from bundled_assets import bundled_root
 
 
@@ -45,6 +46,11 @@ def load_server_config() -> Dict[str, Any]:
 
     with open(cfg_path, "r", encoding="utf-8") as f:
         raw = yaml.safe_load(f) or {}
+
+    # ${ENV:VAR} / ${FILE:path} — как в основном config.yml, чтобы серверные
+    # секреты (server.auth_token и пр.) не приходилось держать в файле открытым
+    # текстом. Отсутствующий источник → пустая строка + warning, как везде.
+    raw = resolve_env_placeholders(raw)
 
     # Гарантируем наличие ключевых секций.
     server_cfg = raw.get("server") or {}

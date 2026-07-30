@@ -20,6 +20,15 @@ class AgentConfig(BaseModel):
     subagent_max_steps: int = 100
     client_name: str = "mini_cli_pub_agent_1"
     x_cl_id: str = "12345"
+    # Имя HTTP-заголовка для внешнего trace_id. None → дефолты по назначению:
+    # x_trace_id для бэкенда модели, trace_id для MCP. Сам trace_id схемным
+    # ключом НЕ является: это свойство вызова, а не конфигурации.
+    trace_id_header_name: str | None = None
+    # Отправлять ли внешний trace_id в заголовке к бэкенду модели. False
+    # (дефолт) — не отправлять: рассылка трейса наружу строго opt-in, как и для
+    # MCP-серверов. Гейтит только заголовок; имя лог-файла, записи логов и
+    # meta.runtime.trace_ids работают независимо от него.
+    trace_header_enabled: bool = False
     verbose: bool = True
     stop_tools: list[str] = Field(default_factory=list)
     # Список canonical id скиллов / паков, которые исключаются из SkillsRegistry
@@ -29,6 +38,10 @@ class AgentConfig(BaseModel):
     disable_skills: list[str] = Field(default_factory=list)
     server_tool_prefix: str = "system"
     max_steps: int = 1000
+    # Per-run лимиты надёжности (None = выключено). Область — один ран,
+    # как max_steps; сабагент наследует те же значения на свой ран.
+    session_token_limit: int | None = None
+    max_tool_calls: int | None = None
     no_tool_call_max_count: int = 5
     max_unknown_tool_repeats: int = 5
     strict_turn_finish_validation: bool = True
@@ -47,6 +60,30 @@ class AgentConfig(BaseModel):
     # Steering-текст: при рендере system prompt дописывается в <special_instructions>
     # для любой активной модели (пока непустой). Пусто / omit — без инжекта.
     model_steering: str = ""
+
+    @field_validator("session_token_limit", "max_tool_calls")
+    @classmethod
+    def validate_optional_positive(cls, value: int | None) -> int | None:
+        if value is not None and value < 1:
+            raise ValueError("лимит должен быть None или целым >= 1")
+        return value
+
+    @field_validator("trace_id_header_name", mode="before")
+    @classmethod
+    def normalize_trace_id_header_name(cls, value: Any) -> str | None:
+        if value is None:
+            return None
+        text = str(value).strip()
+        if not text:
+            return None
+        for ch in text:
+            code = ord(ch)
+            if ch.isspace() or code < 0x20 or code == 0x7F or ch == ":":
+                raise ValueError(
+                    "agent.trace_id_header_name: имя заголовка без пробелов, "
+                    "управляющих символов и ':'"
+                )
+        return text
 
     @field_validator("exec_timeout_sec", mode="before")
     @classmethod

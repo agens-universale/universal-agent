@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 from bundled_assets import bundled_root
+from trace_id import trace_id_from_config
 from config_modules.stored_outputs import get_stored_tool_outputs_max_entries
 from config_modules.chat_completions import chat_completions_llm_from_config_dict
 from config_modules.intent_scope import intent_scope_from_config_dict
@@ -73,6 +74,10 @@ class SubagentRunner:
         self._parent_call_id: str = ""
         # Уже влитый в parent снимок child.usage — для incremental delta (без double-count).
         self._usage_pushed = UsageAccount()
+        # То же для счётчика вызовов тулов ребёнка: сколько его вызовов уже
+        # влито в parent.tool_calls. Симметрия с usage — бюджет max_tool_calls
+        # считается по всему дереву, а не только по вызовам самого родителя.
+        self._tool_calls_pushed = 0
 
     def run(
         self,
@@ -216,6 +221,7 @@ class SubagentRunner:
             pre_backend_compaction_hook = summary.pre_backend_compaction_hook
 
         self._usage_pushed = UsageAccount()
+        self._tool_calls_pushed = 0
         try:
             with activate_child_input(parent_call_id=self._parent_call_id) as scope:
 
@@ -280,6 +286,7 @@ class SubagentRunner:
             # Только residual delta с последнего live-tick — не полный merge
             # (иначе double-count уже запушенных токенов).
             self._push_usage_delta(child_state, child_ctx)
+            self._push_tool_calls_delta(child_state)
 
         if result is None:
             self._log_lifecycle(
@@ -308,29 +315,31 @@ class SubagentRunner:
                 child_run_id=str(getattr(child_ctx, "run_id", "") or ""),
             )
 
-        if getattr(child_state, "terminal_outcome", None) == "step_limit":
+        _limit_outcome = getattr(child_state, "terminal_outcome", None)
+        if _limit_outcome in ("step_limit", "token_limit", "tool_call_limit"):
             self._log_lifecycle(
                 event="subagent_end",
                 tool_name=tool_name,
                 child_state=child_state,
                 child_ctx=child_ctx,
-                extra={"steps": child_state.steps, "finish_reason": "step_limit"},
+                extra={"steps": child_state.steps, "finish_reason": _limit_outcome},
             )
             emit_progress(
                 child_ctx,
                 child_state,
                 "error",
                 ok=False,
-                error_brief="step limit",
+                error_brief=_limit_outcome.replace("_", " "),
             )
             self._persist_finished(
                 child_ctx,
                 child_state,
                 ok=False,
-                finish_reason="step_limit",
+                finish_reason=_limit_outcome,
             )
-            return self._step_limit_response(
+            return self._limit_response(
                 tool_name=tool_name,
+                finish_reason=_limit_outcome,
                 steps=child_state.steps,
                 child_run_id=str(getattr(child_ctx, "run_id", "") or ""),
                 detail=result if isinstance(result, str) else None,
@@ -400,6 +409,29 @@ class SubagentRunner:
                 usage_delta=delta.to_meta(),
             )
 
+    def _push_tool_calls_delta(self, child_state: State) -> None:
+        """Влить в parent прирост child.tool_calls с последнего tick.
+
+        Бюджет ``agent.max_tool_calls`` — по всему дереву: вызовы ребёнка тратят
+        бюджет родителя так же, как это уже сделано для токенов
+        (``_push_usage_delta``). Инкрементально, по тому же принципу снимка, —
+        метод зовётся и на live-tick'ах, и в finally, а double-count бюджет
+        обнулил бы досрочно.
+
+        Сам вызов ``subagent_*`` уже посчитан родителем как 1 в
+        ``processing_responses`` — итого родитель тратит 1 + вызовы ребёнка.
+        """
+        child_calls = getattr(child_state, "tool_calls", None)
+        if not isinstance(child_calls, int):
+            return
+        delta = child_calls - self._tool_calls_pushed
+        if delta <= 0:
+            return
+        parent = self._orchestrator_state
+        if isinstance(getattr(parent, "tool_calls", None), int):
+            parent.tool_calls += delta
+        self._tool_calls_pushed = child_calls
+
     def _persist_runtime_step(
         self,
         child_state: State,
@@ -415,6 +447,7 @@ class SubagentRunner:
         persist_tool_usage_notice_state(child_state, child_meta)
         # Live spend → касса родителя (футер TUI читает parent state.usage).
         self._push_usage_delta(child_state, child_ctx)
+        self._push_tool_calls_delta(child_state)
 
     def _build_child_state(self, agent_role: str) -> State:
         """Создать дочерний State, наследуя общие данные от оркестратора."""
@@ -542,6 +575,10 @@ class SubagentRunner:
         child_ctx = RunContext(
             config_dict=child_config,
             run_id=child_run_id,
+            # config_dict наследуется дословно через child_config, но поле ctx
+            # собирается руками и НЕ наследуется автоматически — без этой строки
+            # ctx.trace_id ребёнка разъедется с его же config_dict.
+            trace_id=trace_id_from_config(child_config),
             auth_connector=getattr(self._ctx, "auth_connector", None),
             logger=child_logger,
             logging_path=child_log_path,
@@ -631,31 +668,37 @@ class SubagentRunner:
             meta["child_run_id"] = child_run_id
         return cancelled_by_user_output(tool_name, meta=meta)
 
-    def _step_limit_response(
+    def _limit_response(
         self,
         tool_name: str,
+        *,
+        finish_reason: str,
         steps: int,
         child_run_id: str = "",
         detail: Optional[str] = None,
     ) -> str:
-        """Step-limit: ok=false, finish_reason=step_limit (не маскировать под completed)."""
-        message = (detail or "").strip() or (
-            f"Subagent {tool_name} stopped: step limit reached ({steps})."
-        )
+        """Run limit (step/token/tool-call): ok=false, finish_reason=<limit> (не маскировать под completed)."""
+        if finish_reason == "step_limit":
+            default_message = f"Subagent {tool_name} stopped: step limit reached ({steps})."
+        else:
+            default_message = (
+                f"Subagent {tool_name} stopped: {finish_reason.replace('_', ' ')} reached."
+            )
+        message = (detail or "").strip() or default_message
         meta: Dict[str, Any] = {
             "tool_name": tool_name,
             "steps": steps,
-            "finish_reason": "step_limit",
+            "finish_reason": finish_reason,
         }
         if child_run_id:
             meta["child_run_id"] = child_run_id
         payload = {
             "tool": tool_name,
             "ok": False,
-            "status": "step_limit",
+            "status": finish_reason,
             "message": message,
             "error": {
-                "code": "step_limit",
+                "code": finish_reason,
                 "message": message,
                 "retryable": True,
             },

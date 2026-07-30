@@ -484,6 +484,10 @@ def _summarize_output(output: Any, *, error: bool) -> str:
         return "не запущено (стоп)"
     if status == "step_limit":
         return "лимит шагов"
+    if status == "token_limit":
+        return "лимит токенов"
+    if status == "tool_call_limit":
+        return "лимит вызовов"
 
     if error:
         err = data.get("error") or data.get("message") or ""

@@ -5,6 +5,7 @@ import pytest
 
 from security.path_policy import (
     WriteGuardViolation,
+    audit_policy_decision,
     check_write_path_allowed,
     enforce_write_guard,
     is_within_root,
@@ -172,3 +173,35 @@ def test_enforce_write_guard_prefers_explicit_logger_over_context_logger(tmp_pat
     assert result["ok"] is False
     assert '"decision": "blocked"' in explicit_logger.messages[-1]
     assert context_logger.messages == []
+
+
+def test_audit_policy_decision_absent_trace_adds_no_key():
+    logger = _Logger()
+    context = SimpleNamespace(logger=logger, ctx=SimpleNamespace(config_dict={}))
+
+    audit_policy_decision(
+        context,
+        tool_name="exec_command",
+        decision="allow",
+        reason_code="ok",
+    )
+
+    assert '"trace_id"' not in logger.messages[-1]
+
+
+def test_audit_policy_decision_trace_is_inside_the_payload():
+    logger = _Logger()
+    context = SimpleNamespace(
+        logger=logger,
+        ctx=SimpleNamespace(config_dict={"trace_id": "wf-42"}),
+    )
+
+    audit_policy_decision(
+        context,
+        tool_name="exec_command",
+        decision="deny",
+        reason_code="blocked",
+    )
+
+    assert '"trace_id": "wf-42"' in logger.messages[-1]
+    assert '"decision": "deny"' in logger.messages[-1]

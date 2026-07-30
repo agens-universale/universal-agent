@@ -32,6 +32,17 @@ def test_cli_override_resolves_env(monkeypatch):
     assert cd["completions_url"] == "http://h/v1/chat"
 
 
+def test_cli_override_file_placeholder(tmp_path):
+    f = tmp_path / "tok"
+    f.write_text("cli-secret\n")
+    config_dict: dict = {}
+    apply_cli_overrides(
+        config_dict,
+        extra_overrides={"chat_completion_headers": {"Authorization": f"Bearer ${{FILE:{f}}}"}},
+    )
+    assert config_dict["chat_completion_headers"]["Authorization"] == "Bearer cli-secret"
+
+
 def test_validate_config_text_resolves_env_like_load_config(monkeypatch):
     """Writer валидирует конфиг тем же конвейером, что и загрузчик: compat → ${ENV:} → схема.
 

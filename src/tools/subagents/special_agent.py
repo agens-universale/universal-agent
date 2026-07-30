@@ -3,6 +3,11 @@ from typing import Any, Dict
 from config_modules.backend import parse_chat_completions_max_tokens
 from request_backend_policy import request_chat_completions_with_policy
 from tools.subagents.abstract_subagent import AbstractSubagent
+from trace_id import (
+    trace_id_from_config,
+    trace_header_name,
+    model_trace_header_enabled,
+)
 from utils.ssl_config import get_backend_client_cert
 
 _ROLE_GENERATION_MAX_TOKENS = 4096
@@ -217,6 +222,13 @@ class SpecialAgent(AbstractSubagent):
                 if not v:
                     continue
                 headers[k] = v
+
+        # Второй, независимый от create_call_headers сборщик заголовков. Без этой
+        # строки утверждение «trace_id уходит на каждом запросе к модели» ложно:
+        # генерация роли сабагента делает реальный chat/completions-запрос.
+        _trace_id = trace_id_from_config(self.config_dict)
+        if _trace_id and model_trace_header_enabled(self.config_dict):
+            headers[trace_header_name(self.config_dict, "x_trace_id")] = _trace_id
 
         protected = {"model", "messages", "max_tokens", "max_completion_tokens"}
         extra = self.config_dict.get("chat_completion_kwargs")
