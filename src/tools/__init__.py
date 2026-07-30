@@ -104,6 +104,66 @@ def _apply_openai_strict_tools_schema(spec: Dict[str, Any]) -> None:
         apply_openai_strict_parameters(params)
 
 
+SUBAGENT_TOOLS_ALLOW_KEY = "subagent_tools_allow"
+SUBAGENT_TOOLS_STOP_KEY = "subagent_tools_stop"
+
+
+def apply_subagent_tools_filter(
+    tools_data: Dict[str, Dict[str, Any]],
+    config_dict: Dict[str, Any],
+) -> Dict[str, Dict[str, Any]]:
+    """Сузить набор тулов дочернего рана по allow/stop из определения сабагента.
+
+    Точка применения — здесь, а не в раннере: детские тулы собираются в двух
+    местах (``_build_child_state`` и ``_build_child_ctx``), оба зовут
+    ``build_tools_data``. Фильтр в раннере пришлось бы дублировать, и два
+    call-site'а обязаны были бы оставаться синхронными.
+
+    Применяется ПОСЛЕ подмешивания скиллов и MCP (иначе ``mcp_*`` было бы не
+    отфильтровать, как это происходит с глобальным ``stop_tools``) и ДО сборки
+    ``tools_spec`` — иначе модель увидела бы в схеме тул, который не сможет
+    вызвать.
+    """
+    allow_raw = config_dict.get(SUBAGENT_TOOLS_ALLOW_KEY)
+    stop_raw = config_dict.get(SUBAGENT_TOOLS_STOP_KEY)
+    allow = set(allow_raw) if allow_raw is not None else None
+    stop = set(stop_raw or ())
+    if allow is None and not stop:
+        return tools_data
+
+    from tools.subagents.file_subagent import REQUIRED_TOOL_NAMES
+
+    known = set(tools_data)
+    unknown = sorted(((allow or set()) | stop) - known)
+    if unknown:
+        # Опечатка в имени тула не должна ронять ран: определение уже прошло
+        # проверку обязательных тулов, а остальное — предпочтения оператора.
+        subagent_names = [name for name in unknown if name.startswith("subagent_")]
+        rest = [name for name in unknown if not name.startswith("subagent_")]
+        if subagent_names:
+            # Глубина всегда 1: ребёнку сабагенты не выдаются в принципе.
+            _fallback_logger.warning(
+                "subagent_tools_filter_nested_ignored names=%s", ", ".join(subagent_names)
+            )
+        if rest:
+            _fallback_logger.warning(
+                "subagent_tools_filter_unknown names=%s", ", ".join(rest)
+            )
+
+    filtered = {
+        name: entry
+        for name, entry in tools_data.items()
+        if (allow is None or name in allow) and name not in stop
+    }
+    # Ядро возвращается безусловно: определение не могло его отрезать (валидатор
+    # падает на старте), но глобальный stop_tools или harbor могли, и тогда его
+    # здесь просто нет — восстанавливать несуществующее нечего.
+    for name in REQUIRED_TOOL_NAMES:
+        if name in tools_data:
+            filtered[name] = tools_data[name]
+    return filtered
+
+
 def build_tools_data(
     config_dict: Dict[str, Any],
     on_progress=None,
@@ -134,13 +194,15 @@ def build_tools_data(
     backend_mode = str(config_dict.get("backend_api_mode", "responses")).strip().lower()
     if use_local_subagents and backend_mode == "chat_completions":
         from tools.subagents.registry import get_subagents_tools_data
-        subagent_tools = get_subagents_tools_data()
+        subagent_tools = get_subagents_tools_data(config_dict)
         for k, v in subagent_tools.items():
             tools_data[k] = v
 
     if parse_os_backend_kind(config_dict) == "harbor":
         # Host-only: writes to local disk; not available in harbor/sandbox mode.
         tools_data.pop("download_file", None)
+
+    tools_data = apply_subagent_tools_filter(tools_data, config_dict)
 
     # Логирование оставляем модульным, так как build_tools_data вызывается
     # при создании RunContext, когда logger ещё не привязан к контексту.
@@ -210,7 +272,7 @@ def apply_tool(
         return f"{tool_name} call"
 
     use_local_subagents = config_dict.get("use_local_subagents", False)
-    if use_local_subagents and is_subagent_tool(tool_name):
+    if use_local_subagents and is_subagent_tool(tool_name, config_dict):
         from tools.subagents.runner import SubagentRunner  # lazy: runner imports from tools
         orchestrator_state = kwargs.get("state")
         run_agent_func = kwargs.get("run_agent_func")

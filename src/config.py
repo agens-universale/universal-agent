@@ -281,6 +281,8 @@ def flatten_app_config(app_cfg: AppConfig) -> Dict[str, Any]:
         "use_server_subagents": app_cfg.agent.use_server_subagents,
         "use_local_subagents": app_cfg.agent.use_local_subagents,
         "subagent_max_steps": app_cfg.agent.subagent_max_steps,
+        "subagents_dir": app_cfg.agent.subagents_dir,
+        "subagents_max_count": app_cfg.agent.subagents_max_count,
         "client_name": app_cfg.agent.client_name,
         "x_cl_id": app_cfg.agent.x_cl_id,
         "trace_id_header_name": app_cfg.agent.trace_id_header_name,

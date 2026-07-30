@@ -56,6 +56,10 @@ agent:
   # Задайте X-Trace-Id, если между агентом и бэкендом стоит nginx: он по
   # умолчанию выбрасывает заголовки с подчёркиванием (underscores_in_headers off).
   # trace_id_header_name: X-Trace-Id
+  # Папка с файлами-определениями кастомных сабагентов (.md с YAML-frontmatter).
+  # Не задана — доступны только встроенные. См. docs/subagents.md.
+  # subagents_dir: ./agents
+  # subagents_max_count: 20
 
 # TUI: что рендерить во время стриминга (действует только при backend.stream: true;
 # на счётчик токенов и индикатор не влияет — только контент).

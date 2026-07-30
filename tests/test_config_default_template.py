@@ -84,6 +84,10 @@ EXPERT_ONLY_KEYS: set = {
     # Разрешение слать trace_id в заголовке к модели; False по умолчанию —
     # рассылка трейса наружу opt-in, нужна только при внешней трассировке.
     "agent.trace_header_enabled",
+    # Кастомные сабагенты из папки: None по умолчанию (только встроенные классы),
+    # лимит имеет смысл только вместе с папкой. См. docs/subagents.md.
+    "agent.subagents_dir",
+    "agent.subagents_max_count",
     # Model steering → special_instructions; строка специфичных инструкций для модели.
     "agent.model_steering",
 
