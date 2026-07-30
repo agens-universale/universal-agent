@@ -1,7 +1,6 @@
 """C3: run_agent при WrongFunctionArgumentsException добавляет truncation-hint,
 если finish_reason последнего backend-ответа == "length", и не добавляет иначе."""
 import processing_responses as pr
-from tools import WrongFunctionArgumentsException
 
 
 def _state():
@@ -46,7 +45,7 @@ def _run_with_finish_reason(monkeypatch, finish_reason):
         }], "resp_2"
 
     def _fake_process_tool_calls(messages, state, ctx, **_kwargs):
-        raise WrongFunctionArgumentsException(
+        raise pr.WrongFunctionArgumentsException(
             message="некорректный JSON: Expecting property name enclosed in double quotes",
             received_args='{"path": "/tmp/x.md", "content": "hello"}',
             expected_schema={"parameters": {"properties": {}, "required": []}},
