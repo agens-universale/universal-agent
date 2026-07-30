@@ -46,8 +46,6 @@ def test_finally_merge_folds_child_usage_into_parent(monkeypatch):
     monkeypatch.setattr(runner, "_log_lifecycle", lambda **k: None)
 
     import tools.subagents.runner as runner_mod
-
-    monkeypatch.setattr(runner_mod, "save_state", lambda s: None)
     monkeypatch.setattr(runner_mod, "init_subagent_open_turn", lambda *a, **k: None)
     monkeypatch.setattr(
         runner_mod, "get_thread_memory_registers_from_shared", lambda shared: {}

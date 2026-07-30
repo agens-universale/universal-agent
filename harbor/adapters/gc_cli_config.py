@@ -63,7 +63,6 @@ def bench_defaults(prompts_dir: Path, skills_dir: Path) -> Dict[str, Any]:
         "no_tool_call_max_count": 3,
         "max_steps": 200,
         "save_logs": False,
-        "dump_storage": False,
         "console_trace": False,
         # Guards pinned OFF for benches regardless of release defaults: host-path guards
         # resolve against the RUNNER's fs tree (container paths always "out of perimeter"),

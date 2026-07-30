@@ -6,7 +6,6 @@ import json
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-from persistence.state_storage import save_state
 from states import SharedStateData, State
 from tools import apply_tool
 from tools.subagents.progress import (
@@ -121,7 +120,6 @@ def _make_state():
         shared=SharedStateData(),
     )
     state.backend_api_mode = "chat_completions"
-    save_state(state)
     return state
 
 

@@ -9,7 +9,6 @@ import intent_guard.guard as intent_guard_guard
 from intent_guard.guard import FinishGateGuard
 from intent_guard.validation_result import ValidationResult
 from intent_log.user_turn import init_subagent_open_turn
-from persistence.state_storage import save_state
 from states import SharedStateData, State
 from tools.subagents.runner import SubagentRunner
 
@@ -30,7 +29,6 @@ def _make_orchestrator_state():
     state.backend_api_mode = "chat_completions"
     state.current_user_intent = ["создай приложение для бухгалтерии"]
     state.user_intent_log = []
-    save_state(state)
     return state
 
 

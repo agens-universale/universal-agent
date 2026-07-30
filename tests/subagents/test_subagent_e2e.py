@@ -5,7 +5,6 @@ import json
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch, AsyncMock
 
-from persistence.state_storage import save_state, state_storage
 from states import State, SharedStateData
 from tools.subagents import runner as runner_module
 from tools.subagents.runner import SubagentRunner
@@ -25,7 +24,6 @@ def _make_orchestrator_state(system_prompt="System\n<specific_role>x</specific_r
         shared=SharedStateData(working_memory={"state": "initial"}),
     )
     state.backend_api_mode = "chat_completions"
-    save_state(state)
     return state
 
 
@@ -156,10 +154,8 @@ class TestSubagentRunnerRun:
 
         assert captured_child["state"].parent_state_id == orch.state_id
 
-    def test_child_state_saved_to_storage(self):
-        """Child state should be saved via save_state before run_agent_func is called."""
-        from persistence.state_storage import state_storage
-
+    def test_child_state_passed_to_run_agent(self):
+        """Child state is created and passed to run_agent_func before execution."""
         orch = _make_orchestrator_state()
         cfg = _make_config()
         ctx = _make_ctx(cfg)
@@ -175,7 +171,8 @@ class TestSubagentRunnerRun:
             runner.run("subagent_worker", {"task": "test"}, fake_run_agent)
 
         child = captured_child["state"]
-        assert state_storage.get_state_by_id(child.state_id) is child
+        assert isinstance(child, State)
+        assert child.parent_state_id == orch.state_id
 
     def test_unknown_subagent_returns_error(self):
         """run() with unknown tool_name returns error string."""

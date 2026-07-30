@@ -6,7 +6,6 @@ import json
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from persistence.state_storage import save_state
 from states import SharedStateData, State
 from thread_store import read_subagent_trace
 from tools.subagents.sidecar import persist_subagent_trace
@@ -70,7 +69,6 @@ def _orch_state():
         shared=SharedStateData(),
     )
     state.backend_api_mode = "chat_completions"
-    save_state(state)
     return state
 
 

@@ -7,7 +7,6 @@ State создаётся заново при каждом run(). Возвращ�
 """
 
 import gc
-import os
 import threading
 from copy import copy as _shallow_copy_msg
 from typing import Any, Optional
@@ -27,7 +26,6 @@ from summarize.config import (
     parse_summary_trigger_chars,
     parse_summary_turn_end_trigger_chars,
 )
-from persistence.state_storage import dump_storage, save_state
 from persistence.thread_meta_mapper import ThreadMetaMapper
 from intent_log.user_turn import append_user_ask_deduped, append_user_asks_from_messages
 from message_policy.user_message_policy import extract_real_user_message_text
@@ -318,8 +316,6 @@ class AgentExecutor:
                     "id": generate_message_id_func("m_sys"),
                 }
             ]
-        save_state(state)
-
         with self._lock:
             self._state = state
             self._state.discard_writes_after_stop = bool(discard_writes_after_stop)
@@ -541,12 +537,8 @@ class AgentExecutor:
                 pass
             # C2: после закрытия MCP/stdio — подбираем циклический мусор
             # (pipes, ClientSession, loop buffers). State здесь не трогаем:
-            # ниже ещё dump_storage и usage-отчёт по state.
+            # ниже usage-отчёт по state.
             gc.collect()
-
-        if config_dict.get("dump_storage"):
-            cur_dir = config_dict.get("logs_dump_dir") or os.getcwd()
-            dump_storage(cur_dir, indent=2, logger=logger, console=human_console_enabled(config_dict))
 
         # Отчёт по токенам/стоимости за этот прогон (дельта от снимка до старта).
         try:

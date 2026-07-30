@@ -42,8 +42,6 @@ def _wire(monkeypatch, runner, child, *, run_id="run-abc"):
     monkeypatch.setattr(runner, "_log_lifecycle", lambda **k: None)
 
     import tools.subagents.runner as runner_mod
-
-    monkeypatch.setattr(runner_mod, "save_state", lambda s: None)
     monkeypatch.setattr(runner_mod, "init_subagent_open_turn", lambda *a, **k: None)
     monkeypatch.setattr(
         runner_mod, "get_thread_memory_registers_from_shared", lambda shared: {}

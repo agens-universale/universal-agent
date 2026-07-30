@@ -191,7 +191,6 @@ agent:
 logging:
   full_log_backend: false
   console_trace: true
-  dump_storage: true
   save_logs: true
   # Формат per-run логов:
   #   text  — человекочитаемо (дефолт, историческое поведение);

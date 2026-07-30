@@ -3,7 +3,6 @@
 from types import SimpleNamespace
 
 from intent_log.user_turn import init_subagent_open_turn
-from persistence.state_storage import save_state
 from states import State, SharedStateData
 from tools.subagents.runner import SubagentRunner
 
@@ -22,7 +21,6 @@ def _make_orchestrator_state(system_prompt=None):
         shared=SharedStateData(),
     )
     state.backend_api_mode = "chat_completions"
-    save_state(state)
     return state
 
 

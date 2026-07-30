@@ -9,7 +9,6 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from message_policy.user_message_policy import wrap_technical_user_content
-from persistence.state_storage import save_state
 from states import SharedStateData, State
 from tools.subagents.active_scope import (
     activate_child_input,
@@ -44,7 +43,6 @@ def _make_orchestrator_state():
         shared=SharedStateData(),
     )
     state.backend_api_mode = "chat_completions"
-    save_state(state)
     return state
 
 

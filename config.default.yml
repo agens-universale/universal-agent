@@ -104,7 +104,6 @@ update:
 logging:
   full_log_backend: false
   console_trace: true
-  dump_storage: false
   save_logs: true
   format: text                 # text — человекочитаемо; jsonl — структурный поток событий
   log_level: info              # debug | info | warning | error

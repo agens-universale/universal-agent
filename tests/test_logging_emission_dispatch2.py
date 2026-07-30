@@ -148,7 +148,6 @@ def test_log_path_event_emitted_at_end_of_run(tmp_path):
                 "agent_md_path": None,
                 "limit_project_metadata": True,
                 "console_trace": False,
-                "dump_storage": False,
                 "threads_data_path": thread_dir,
                 "agent_url": "http://backend.local/v1/responses",
                 "backend_api_mode": "responses",

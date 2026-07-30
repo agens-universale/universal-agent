@@ -7,7 +7,6 @@ from unittest.mock import patch, MagicMock
 
 import pytest
 
-from persistence.state_storage import save_state
 from states import State, SharedStateData
 from tools.subagents import special_agent as special_agent_module
 from tools.subagents.special_agent import SpecialAgent
@@ -29,7 +28,6 @@ def _make_orchestrator_state():
         shared=SharedStateData(),
     )
     state.backend_api_mode = "chat_completions"
-    save_state(state)
     return state
 
 

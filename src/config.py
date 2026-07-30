@@ -35,7 +35,6 @@ _DEFAULT_LAST_DIALOG_STEP_MESSAGE_MAX_CHARS = (
 _LOGGING_SYNC_KEYS = (
     "full_log_backend",
     "console_trace",
-    "dump_storage",
     "save_logs",
     "logging_format",
     "log_level",
@@ -299,7 +298,6 @@ def flatten_app_config(app_cfg: AppConfig) -> Dict[str, Any]:
         "subagent_finish_gate_max_iterations": app_cfg.agent.subagent_finish_gate_max_iterations,
         "finish_gate_use_rule_hints": app_cfg.agent.finish_gate_use_rule_hints,
         "console_trace": app_cfg.logging.console_trace,
-        "dump_storage": app_cfg.logging.dump_storage,
         "save_logs": app_cfg.logging.save_logs,
         "logging_format": app_cfg.logging.format,
         "log_level": app_cfg.logging.log_level,

@@ -23,7 +23,6 @@ def _child_ctx(sink, *, tool_name="subagent_worker"):
 class TestChildCtxCopiesTuiConfirm:
     def test_build_child_ctx_copies_tui_confirm_and_tool_name(self, tmp_path):
         from states import SharedStateData, State
-        from persistence.state_storage import save_state
         from tools.subagents.runner import SubagentRunner
 
         state = State(
@@ -39,7 +38,6 @@ class TestChildCtxCopiesTuiConfirm:
             shared=SharedStateData(),
         )
         state.backend_api_mode = "chat_completions"
-        save_state(state)
 
         cfg = {
             "save_logs": True,

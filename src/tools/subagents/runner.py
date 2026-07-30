@@ -20,7 +20,6 @@ from message_policy.tool_usage_notice.policy import (
     wrap_thread_memory_technical_user_message,
 )
 from message_policy.tool_usage_notice.state import persist_tool_usage_notice_state
-from persistence.state_storage import save_state
 from intent_log.user_turn import append_user_asks_from_messages, init_subagent_open_turn
 from run_context import RunContext
 from tools.skills.registry import get_skills_registry
@@ -147,8 +146,6 @@ class SubagentRunner:
                 message=f"Subagent {tool_name} child state build failed: {exc}",
                 retryable=False,
             )
-        save_state(child_state)
-
         user_message = {
             "role": "user",
             "content": initial_message,

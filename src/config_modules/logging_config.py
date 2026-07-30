@@ -18,7 +18,6 @@ class LoggingConfig(BaseModel):
 
     full_log_backend: bool = False
     console_trace: bool = True
-    dump_storage: bool = False
     save_logs: bool = True
     # Формат per-run логов: text (дефолт = историческое поведение) | jsonl.
     format: str = "text"

@@ -3,7 +3,6 @@ import logging
 
 from states import SharedStateData
 from states import State
-from persistence.state_storage import save_state
 from tests.helpers.tool_ctx import local_ctx
 from tools.subagents.runner import SubagentRunner
 
@@ -22,7 +21,6 @@ def _make_orchestrator_state():
         shared=SharedStateData(),
     )
     state.backend_api_mode = "chat_completions"
-    save_state(state)
     return state
 
 
