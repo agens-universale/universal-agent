@@ -140,7 +140,10 @@ class WorkingMemory(AbstractSimpleTool):
                     "register": {
                         "type": "string",
                         "enum": list(REGISTER_ORDER),
-                        "description": "Target memory register.",
+                        "description": (
+                            "Target memory register. Required for every action "
+                            "(ignored for list)."
+                        ),
                     },
                     "reason": {
                         "type": "string",
@@ -159,7 +162,7 @@ class WorkingMemory(AbstractSimpleTool):
                         ),
                     },
                 },
-                "required": ["action"],
+                "required": ["action", "register"],
                 "additionalProperties": False,
             },
             "strict": True,
@@ -231,9 +234,10 @@ If unsure:
 Do NOT store chain-of-thought, verbose reasoning, raw logs, large blobs, full file contents, repetitive history, or transient chatter.
 Keep memory compact, structured, and durable.
 
+`register` is required for every action (ignored for list).
 `reason` is optional; `content` is required for append/write.
 
-Input schema: {"type":"object","properties":{"action":{"type":"string","enum":["list","read","append","write"]},"register":{"type":"string","enum":["goal","constraints","state","knowledge"]},"reason":{"type":"string"},"content":{"type":"string"}},"required":["action"],"additionalProperties":false}
+Input schema: {"type":"object","properties":{"action":{"type":"string","enum":["list","read","append","write"]},"register":{"type":"string","enum":["goal","constraints","state","knowledge"]},"reason":{"type":"string"},"content":{"type":"string"}},"required":["action","register"],"additionalProperties":false}
 """
 
     def _get_registers(self) -> Dict[str, str]:
@@ -325,6 +329,15 @@ Input schema: {"type":"object","properties":{"action":{"type":"string","enum":["
         return handler(register=register, reason=reason, content=content)
 
     def _validate_register(self, register: str, action: str) -> Optional[str]:
+        if not isinstance(register, str) or not register.strip():
+            return self._error(
+                action=action,
+                error_type="missing_register",
+                message=(
+                    f"register is required for {action}; "
+                    "one of: goal, constraints, state, knowledge."
+                ),
+            )
         if register not in REGISTER_SET:
             return self._error(
                 action=action,
