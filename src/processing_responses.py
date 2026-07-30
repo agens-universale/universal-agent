@@ -567,7 +567,7 @@ def process_tool_calls(
         # Live-прогресс субагента: «тул пошёл». На обычном parent-прогоне — no-op.
         # Sidecar persist параллельно (нужен thread identity; sink не требуется).
         # ask_human: только banner (ask_human/ask_human_done); nested tool-row
-        # без sidecar/cache → Ctrl+click молча no-op — не монтируем.
+        # без sidecar → Ctrl+click молча no-op — не монтируем.
         persist_tool_trace = (
             not is_intermediate and tool_name != ASK_HUMAN_TOOL_NAME
         )

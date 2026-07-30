@@ -20,17 +20,14 @@ from tools.subagents.active_scope import (
 )
 from tools.subagents.progress import QueueSubagentProgressSink
 from tools.subagents.runner import SubagentRunner
-from tools.subagents.sidecar import clear_detail_cache
 from thread_store import read_subagent_trace
 
 
 @pytest.fixture(autouse=True)
 def _clean_scope():
     reset_active_scope_for_tests()
-    clear_detail_cache()
     yield
     reset_active_scope_for_tests()
-    clear_detail_cache()
 
 
 def _make_orchestrator_state():

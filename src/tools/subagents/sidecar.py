@@ -1,22 +1,20 @@
-"""Sidecar nested-trace: gate, append writer, mid-session detail cache.
+"""Sidecar nested-trace: gate and append writer.
 
 Persist is independent of the live progress sink (CLI / no-op sink still writes
-when thread identity is present).
+when thread identity is present). Nested tool detail for TUI Ctrl+click comes
+from data_subagents_*.jsonl on disk — no in-memory detail cache.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, Optional, Sequence
+from typing import Any, Dict, Optional
 
 from thread_store import (
     append_subagent_trace_record,
     sanitize_system_id,
     validate_thread_id,
 )
-
-# call_id → {"call": function_call wire, "result": function_call_output wire}
-_DETAIL_CACHE: Dict[str, Dict[str, Any]] = {}
 
 
 @dataclass(frozen=True)
@@ -79,51 +77,14 @@ def resolve_sidecar_identity(ctx: Any) -> Optional[SidecarIdentity]:
     )
 
 
-def clear_detail_cache() -> None:
-    _DETAIL_CACHE.clear()
-
-
-def lookup_tool_detail(call_id: str) -> Optional[Dict[str, Any]]:
-    """In-memory detail для Ctrl+click mid-session; None если нет."""
-    if not call_id:
-        return None
-    entry = _DETAIL_CACHE.get(str(call_id))
-    if not entry:
-        return None
-    return dict(entry)
-
-
-def _update_detail_cache(kind: str, payload: Dict[str, Any]) -> None:
-    call_id = payload.get("call_id")
-    if not isinstance(call_id, str) or not call_id:
-        return
-    entry = _DETAIL_CACHE.setdefault(call_id, {})
-    if kind == "call":
-        entry["call"] = payload
-    elif kind in ("result", "error"):
-        entry["result"] = payload
-        entry["result_kind"] = kind
-
-
-def warm_detail_cache_from_records(records: Sequence[Dict[str, Any]]) -> None:
-    """Прогреть in-memory detail cache из sidecar (reopen / Ctrl+click)."""
-    for rec in records:
-        if not isinstance(rec, dict):
-            continue
-        kind = rec.get("kind")
-        payload = rec.get("payload")
-        if kind in ("call", "result", "error") and isinstance(payload, dict):
-            _update_detail_cache(str(kind), payload)
-
-
 def persist_subagent_trace(
     ctx: Any, *, kind: str, payload: Dict[str, Any]
 ) -> Optional[Dict[str, Any]]:
-    """Append sidecar record when gate passes; update detail cache. Else no-op."""
+    """Append sidecar record when gate passes. Else no-op."""
     ident = resolve_sidecar_identity(ctx)
     if ident is None:
         return None
-    record = append_subagent_trace_record(
+    return append_subagent_trace_record(
         ident.threads_dir,
         ident.system_id,
         ident.thread_id,
@@ -132,17 +93,12 @@ def persist_subagent_trace(
         kind=kind,
         payload=payload,
     )
-    _update_detail_cache(kind, payload)
-    return record
 
 
 __all__ = [
     "SidecarIdentity",
     "bind_thread_identity",
-    "clear_detail_cache",
     "clear_thread_identity",
-    "lookup_tool_detail",
     "persist_subagent_trace",
     "resolve_sidecar_identity",
-    "warm_detail_cache_from_records",
 ]

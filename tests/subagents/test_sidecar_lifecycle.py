@@ -9,7 +9,7 @@ from unittest.mock import patch
 from persistence.state_storage import save_state
 from states import SharedStateData, State
 from thread_store import read_subagent_trace
-from tools.subagents.sidecar import clear_detail_cache, persist_subagent_trace
+from tools.subagents.sidecar import persist_subagent_trace
 
 
 def _state():
@@ -96,9 +96,6 @@ def _runner_cfg(tmp_path, *, trigger=0):
 
 
 class TestSidecarIntermediateReply:
-    def setup_method(self):
-        clear_detail_cache()
-
     def test_persists_intermediate_reply_without_sink(self, tmp_path, monkeypatch):
         answer = "Сейчас проверю структуру"
         pr = _patch_process(
@@ -126,9 +123,6 @@ class TestSidecarIntermediateReply:
 
 
 class TestSidecarFinished:
-    def setup_method(self):
-        clear_detail_cache()
-
     def test_finished_on_success(self, tmp_path):
         from tests.helpers.tool_ctx import local_ctx
         from tools.subagents.runner import SubagentRunner
@@ -214,9 +208,6 @@ class TestSidecarFinished:
 
 
 class TestSidecarChildSummary:
-    def setup_method(self):
-        clear_detail_cache()
-
     def test_child_summary_on_compaction_applied(self, tmp_path):
         from tests.helpers.tool_ctx import local_ctx
         from tools.subagents.runner import SubagentRunner
