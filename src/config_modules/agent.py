@@ -16,7 +16,10 @@ class AgentConfig(BaseModel):
     model: str = "MiniMax-M2.7"
     system_prompt_id: str = "v1"
     use_server_subagents: bool = False
-    use_local_subagents: bool = False
+    # bool или список имён. Список = «включено + только эти» и работает одинаково
+    # для встроенных и кастомных сабагентов. Пустой список = ни одного (не «все»):
+    # иначе опечатка в YAML молча включала бы полный состав.
+    use_local_subagents: bool | list[str] = False
     subagent_max_steps: int = 100
     # Папка с файлами-определениями кастомных сабагентов. None/пусто → папка не
     # читается вовсе и доступны только встроенные классы.

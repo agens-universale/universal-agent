@@ -3,12 +3,12 @@ import asyncio
 
 import pytest
 
-from tools.subagents.custom.file_definitions import SubagentDefinition, SubagentDefinitionError
+from tools.subagents.custom.file_definitions import SubagentDefinition
 from tools.subagents.custom.file_subagent import (
     REQUIRED_TOOL_NAMES,
     FileDefinedSubagent,
     build_tool_specification,
-    validate_required_tools,
+    required_tools_banned_in_definition,
 )
 
 REQUIRED = ("turn_finish", "session_read_stored_tool_output")
@@ -26,39 +26,39 @@ def _definition(tools=None, stop_tools=(), role="Ты — писатель."):
 
 
 class TestRequiredTools:
-    def test_absent_allowlist_is_fine(self):
-        validate_required_tools(_definition())
+    """Служебное ядро выдаётся всегда: перечислять не нужно, stop_tools не отбирает.
 
-    def test_allowlist_with_required_is_fine(self):
-        validate_required_tools(_definition(tools=("fs_read_file", *REQUIRED)))
+    Гарантия, а не запрет — поэтому определение с любым набором tools/stop_tools
+    остаётся валидным, а фактическую выдачу обеспечивает фильтр в build_tools_data
+    (см. test_subagent_tools_filter).
+    """
 
-    @pytest.mark.parametrize("missing", REQUIRED)
-    def test_allowlist_without_required_fails(self, missing):
-        present = tuple(t for t in REQUIRED if t != missing)
-        with pytest.raises(SubagentDefinitionError) as exc:
-            validate_required_tools(_definition(tools=("fs_read_file", *present)))
-        # Оператору нужны оба факта: какой файл и какой инструмент.
-        assert "/a/doc.md" in str(exc.value)
-        assert missing in str(exc.value)
+    def test_absent_allowlist_reports_nothing(self):
+        assert required_tools_banned_in_definition(_definition()) == []
+
+    def test_allowlist_without_required_is_not_a_problem(self):
+        # Главное изменение: ядро не нужно упоминать в tools.
+        assert required_tools_banned_in_definition(_definition(tools=("fs_read_file",))) == []
+
+    def test_empty_allowlist_is_not_a_problem(self):
+        assert required_tools_banned_in_definition(_definition(tools=())) == []
 
     @pytest.mark.parametrize("banned", REQUIRED)
-    def test_required_in_stop_tools_fails(self, banned):
-        with pytest.raises(SubagentDefinitionError) as exc:
-            validate_required_tools(_definition(stop_tools=(banned,)))
-        assert banned in str(exc.value)
-        assert "stop_tools" in str(exc.value)
+    def test_stop_tools_ban_is_reported(self, banned):
+        # Запрет не исполняется, но оператор должен узнать, что он проигнорирован.
+        assert required_tools_banned_in_definition(
+            _definition(stop_tools=(banned,))
+        ) == [banned]
 
-    def test_all_problems_are_reported_at_once(self):
-        # Оператор должен починить файл за один заход, а не по тулу за прогон.
-        d = _definition(tools=("fs_read_file",), stop_tools=("turn_finish",))
-        message = str(pytest.raises(SubagentDefinitionError, validate_required_tools, d).value)
-        assert "turn_finish" in message
-        assert "session_read_stored_tool_output" in message
+    def test_all_bans_reported_at_once(self):
+        assert required_tools_banned_in_definition(
+            _definition(stop_tools=REQUIRED)
+        ) == sorted(REQUIRED)
 
-    def test_empty_allowlist_fails(self):
-        # tools: [] валиден для парсера, но обязан упереться сюда.
-        with pytest.raises(SubagentDefinitionError):
-            validate_required_tools(_definition(tools=()))
+    def test_unrelated_stop_tools_are_ignored(self):
+        assert required_tools_banned_in_definition(
+            _definition(stop_tools=("exec_python",))
+        ) == []
 
     def test_required_set_is_exactly_two(self):
         assert REQUIRED_TOOL_NAMES == set(REQUIRED)

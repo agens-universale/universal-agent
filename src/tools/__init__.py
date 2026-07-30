@@ -17,6 +17,11 @@ from backends.factory import parse_os_backend_kind
 from backends.protocol import FsBackend
 from tools.skills.registry import SkillsRegistry
 from tools.subagents.registry import is_subagent_tool
+from tools.subagents.selection import (
+    filter_subagents_by_allowlist,
+    subagents_allowlist,
+    subagents_enabled,
+)
 from tools.inject_tool_fields import (
     apply_injected_fields_to_spec,
     resolve_inject_tool_fields,
@@ -111,6 +116,8 @@ SUBAGENT_TOOLS_STOP_KEY = "subagent_tools_stop"
 def apply_subagent_tools_filter(
     tools_data: Dict[str, Dict[str, Any]],
     config_dict: Dict[str, Any],
+    *,
+    logger: Any = None,
 ) -> Dict[str, Dict[str, Any]]:
     """Сузить набор тулов дочернего рана по allow/stop из определения сабагента.
 
@@ -140,14 +147,22 @@ def apply_subagent_tools_filter(
         # проверку обязательных тулов, а остальное — предпочтения оператора.
         subagent_names = [name for name in unknown if name.startswith("subagent_")]
         rest = [name for name in unknown if not name.startswith("subagent_")]
+        log = logger or _fallback_logger
         if subagent_names:
             # Глубина всегда 1: ребёнку сабагенты не выдаются в принципе.
-            _fallback_logger.warning(
-                "subagent_tools_filter_nested_ignored names=%s", ", ".join(subagent_names)
+            log.warning(
+                "subagent_tools_filter_nested_ignored names=%s",
+                ", ".join(subagent_names),
+                extra={
+                    "event": "subagent_tools_filter_nested_ignored",
+                    "names": subagent_names,
+                },
             )
         if rest:
-            _fallback_logger.warning(
-                "subagent_tools_filter_unknown names=%s", ", ".join(rest)
+            log.warning(
+                "subagent_tools_filter_unknown names=%s",
+                ", ".join(rest),
+                extra={"event": "subagent_tools_filter_unknown", "names": rest},
             )
 
     filtered = {
@@ -155,9 +170,10 @@ def apply_subagent_tools_filter(
         for name, entry in tools_data.items()
         if (allow is None or name in allow) and name not in stop
     }
-    # Ядро возвращается безусловно: определение не могло его отрезать (валидатор
-    # падает на старте), но глобальный stop_tools или harbor могли, и тогда его
-    # здесь просто нет — восстанавливать несуществующее нечего.
+    # Служебное ядро возвращается безусловно: перечислять его в `tools` не нужно,
+    # и `stop_tools` его не отбирает (попытка запрета логируется в реестре). Если
+    # ядра нет в исходном наборе — его убрал глобальный stop_tools или harbor, и
+    # восстанавливать несуществующее нечего.
     for name in REQUIRED_TOOL_NAMES:
         if name in tools_data:
             filtered[name] = tools_data[name]
@@ -170,6 +186,7 @@ def build_tools_data(
     *,
     os_backend: FsBackend | None = None,
     skills_registry: SkillsRegistry | None = None,
+    logger: Any = None,
 ) -> Tuple[Dict[str, Dict[str, Any]], list, list, dict]:
     """
     Собрать единый словарь tools_data и производные списки spec/description
@@ -190,19 +207,25 @@ def build_tools_data(
     for k, v in mcp_tools_data.items():
         tools_data[k] = v
 
-    use_local_subagents = config_dict.get("use_local_subagents", False)
+    local_subagents_cfg = config_dict.get("use_local_subagents", False)
     backend_mode = str(config_dict.get("backend_api_mode", "responses")).strip().lower()
-    if use_local_subagents and backend_mode == "chat_completions":
+    if subagents_enabled(local_subagents_cfg) and backend_mode == "chat_completions":
         from tools.subagents.registry import get_subagents_tools_data
-        subagent_tools = get_subagents_tools_data(config_dict)
+        subagent_tools = get_subagents_tools_data(config_dict, logger=logger)
+        # Список в use_local_subagents сужает состав: оркестратор увидит только
+        # перечисленные имена, встроенные и кастомные на равных.
+        allowed = filter_subagents_by_allowlist(
+            subagent_tools.keys(), local_subagents_cfg, logger=logger
+        )
         for k, v in subagent_tools.items():
-            tools_data[k] = v
+            if k in allowed:
+                tools_data[k] = v
 
     if parse_os_backend_kind(config_dict) == "harbor":
         # Host-only: writes to local disk; not available in harbor/sandbox mode.
         tools_data.pop("download_file", None)
 
-    tools_data = apply_subagent_tools_filter(tools_data, config_dict)
+    tools_data = apply_subagent_tools_filter(tools_data, config_dict, logger=logger)
 
     # Логирование оставляем модульным, так как build_tools_data вызывается
     # при создании RunContext, когда logger ещё не привязан к контексту.
@@ -271,8 +294,16 @@ def apply_tool(
     ):
         return f"{tool_name} call"
 
-    use_local_subagents = config_dict.get("use_local_subagents", False)
-    if use_local_subagents and is_subagent_tool(tool_name, config_dict):
+    local_subagents_cfg = config_dict.get("use_local_subagents", False)
+    # Диспетчер сверяется со списком отдельно от сборки тулов: отфильтрованного
+    # сабагента нет в tools_spec, но is_subagent_tool знает о нём из реестра, и
+    # без этой проверки прямой вызов исполнился бы в обход конфига.
+    _allowed_local = subagents_allowlist(local_subagents_cfg)
+    if (
+        subagents_enabled(local_subagents_cfg)
+        and (_allowed_local is None or tool_name in _allowed_local)
+        and is_subagent_tool(tool_name, config_dict)
+    ):
         from tools.subagents.runner import SubagentRunner  # lazy: runner imports from tools
         orchestrator_state = kwargs.get("state")
         run_agent_func = kwargs.get("run_agent_func")

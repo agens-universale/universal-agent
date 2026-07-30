@@ -1,7 +1,6 @@
 """Реестр как функция от конфига: встроенные + кастомные из папки."""
-import pytest
+import logging
 
-from tools.subagents.custom.file_definitions import SubagentDefinitionError
 from tools.subagents.registry import (
     SUBAGENT_CLASSES,
     builtin_subagent_names,
@@ -69,15 +68,17 @@ class TestWithCustom:
         assert len(resolve_subagent_definitions({"subagents_dir": str(tmp_path)})) == 2
 
 
-class TestRequiredToolsFailFast:
-    def test_missing_required_tool_raises(self, tmp_path):
+class TestRequiredToolsAlwaysGranted:
+    def test_allowlist_without_required_loads_fine(self, tmp_path):
+        # Раньше это была ошибка старта; теперь ядро доливается само.
         _write(tmp_path, "a.md", "subagent_alpha", extra="tools: [fs_read_file]\n")
-        with pytest.raises(SubagentDefinitionError, match="turn_finish"):
-            get_subagents_tools_data({"subagents_dir": str(tmp_path)})
+        data = get_subagents_tools_data({"subagents_dir": str(tmp_path)})
+        assert "subagent_alpha" in data
 
-    def test_error_is_not_swallowed_as_invalid_file(self, tmp_path):
-        # Битый файл деградирует до варнинга, а вынутый обязательный тул — нет:
-        # он даёт агента, который молча не работает.
+    def test_stop_tools_ban_warns_and_still_loads(self, tmp_path, caplog):
         _write(tmp_path, "a.md", "subagent_alpha", extra="stop_tools: [turn_finish]\n")
-        with pytest.raises(SubagentDefinitionError):
-            resolve_subagent_definitions({"subagents_dir": str(tmp_path)})
+        with caplog.at_level(logging.WARNING):
+            defs = resolve_subagent_definitions({"subagents_dir": str(tmp_path)})
+        assert "subagent_alpha" in defs
+        msgs = [r.getMessage() for r in caplog.records]
+        assert any("subagent_required_tools_kept" in m and "turn_finish" in m for m in msgs)

@@ -1,3 +1,4 @@
+import logging
 from typing import Any, Dict, List, Optional, Type
 
 from tools.subagents.abstract_subagent import AbstractSubagent
@@ -15,7 +16,7 @@ from tools.subagents.custom.file_definitions import (
 from tools.subagents.custom.file_subagent import (
     FileDefinedSubagent,
     build_tool_specification,
-    validate_required_tools,
+    required_tools_banned_in_definition,
 )
 
 SUBAGENT_CLASSES: List[Type[AbstractSubagent]] = [
@@ -37,6 +38,8 @@ _SUBAGENT_MAP: Dict[str, Type[AbstractSubagent]] = {
 # расточительно. Кэш в config_dict, а не глобальный: в серверном режиме раны идут
 # в разных потоках со своими конфигами, и общий кэш отдавал бы чужие определения.
 _DEFS_CACHE_KEY = "_subagent_definitions_cache"
+
+_log = logging.getLogger(__name__)
 
 
 def builtin_subagent_names() -> set:
@@ -72,10 +75,6 @@ def resolve_subagent_definitions(
 
     ``config_dict is None`` → кастомных нет вовсе: так вызывают тесты и любой
     код, которому нужен только встроенный состав.
-
-    Проверка обязательных тулов делается ЗДЕСЬ и намеренно не перехватывается:
-    битый файл лишает оператора одного агента (варнинг), а вынутый ``turn_finish``
-    даёт агента, который молча не работает, — это ошибка старта.
     """
     if config_dict is None:
         return {}
@@ -88,7 +87,20 @@ def resolve_subagent_definitions(
         config_dict, builtin_names=builtin_subagent_names(), logger=logger
     )
     for definition in definitions:
-        validate_required_tools(definition)
+        banned = required_tools_banned_in_definition(definition)
+        if banned:
+            # Запрет не исполняется — служебное ядро выдаётся всегда. Но указание
+            # оператора явное, поэтому о его игнорировании сообщаем.
+            (logger or _log).warning(
+                "subagent_required_tools_kept path=%s names=%s "
+                "(служебные инструменты выдаются всегда, stop_tools их не отбирает)",
+                definition.source_path, ", ".join(banned),
+                extra={
+                    "event": "subagent_required_tools_kept",
+                    "path": definition.source_path,
+                    "names": banned,
+                },
+            )
 
     resolved = {definition.name: definition for definition in definitions}
     config_dict[_DEFS_CACHE_KEY] = resolved

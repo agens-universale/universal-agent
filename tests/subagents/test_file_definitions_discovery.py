@@ -116,3 +116,46 @@ class TestMaxCount:
             _write(tmp_path, f"a{i}.md", f"subagent_n{i}")
         found = _discover({"subagents_dir": str(tmp_path), "subagents_max_count": 1})
         assert len(found) == 1
+
+
+class TestWarningsAreLoggable:
+    """Ключи extra= не должны конфликтовать с атрибутами LogRecord.
+
+    logging.makeRecord падает `KeyError: Attempt to overwrite 'name'` на
+    зарезервированных именах (name, module, filename, lineno, …), и падает это в
+    рантайме, на пути, который иначе только предупреждает.
+    """
+
+    def _emit_all_warning_paths(self, tmp_path, logger):
+        # битый файл
+        (tmp_path / "bad.md").write_text("нет frontmatter", encoding="utf-8")
+        # коллизия со встроенным
+        _write(tmp_path, "collide.md", "subagent_worker")
+        # коллизия между кастомными
+        _write(tmp_path, "a_dup.md", "subagent_dup")
+        _write(tmp_path, "z_dup.md", "subagent_dup")
+        # превышение лимита
+        for i in range(3):
+            _write(tmp_path, f"n{i}.md", f"subagent_n{i}")
+        discover_subagent_definitions(
+            {"subagents_dir": str(tmp_path), "subagents_max_count": 1},
+            builtin_names=BUILTIN, logger=logger,
+        )
+
+    def test_every_warning_path_survives_real_logging(self, tmp_path, caplog):
+        logger = logging.getLogger("test_extra_keys")
+        with caplog.at_level(logging.WARNING, logger="test_extra_keys"):
+            self._emit_all_warning_paths(tmp_path, logger)
+        events = {getattr(r, "event", None) for r in caplog.records}
+        assert "subagent_definition_invalid" in events
+        assert "subagent_name_collision" in events
+        assert "subagents_max_count_exceeded" in events
+
+    def test_missing_dir_warning_survives(self, tmp_path, caplog):
+        logger = logging.getLogger("test_extra_keys")
+        with caplog.at_level(logging.WARNING, logger="test_extra_keys"):
+            discover_subagent_definitions(
+                {"subagents_dir": str(tmp_path / "нет")},
+                builtin_names=BUILTIN, logger=logger,
+            )
+        assert any(getattr(r, "event", None) == "subagents_dir_missing" for r in caplog.records)

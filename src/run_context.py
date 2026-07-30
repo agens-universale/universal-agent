@@ -97,15 +97,19 @@ def create_run_context(
         override=os_backend,
     )
     skills_registry = get_skills_registry(config_dict, backend=backend)
+    # Логгер создаётся ДО сборки тулов: она предупреждает о пропущенных файлах
+    # сабагентов и нераспознанных именах тулов, и эти варнинги обязаны попасть в
+    # лог-файл рана, а не только в stderr модульного логгера. Создание логгера
+    # зависит лишь от config_dict и run_id, поэтому порядок безопасен.
+    run_logger, logging_path, summary_trace_path = create_run_logger(
+        config_dict, run_id=effective_run_id, agent_kind="main"
+    )
     tools_data, tools_spec, tools_description, mcp_status = build_tools_data(
         config_dict,
         on_progress=on_progress,
         os_backend=backend,
         skills_registry=skills_registry,
-    )
-
-    run_logger, logging_path, summary_trace_path = create_run_logger(
-        config_dict, run_id=effective_run_id, agent_kind="main"
+        logger=run_logger,
     )
 
     run_logger.info(

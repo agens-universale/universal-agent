@@ -42,6 +42,7 @@ from thread_store import (
 )
 from trace_id import trace_id_from_config
 from tools.subagents.active_scope import try_enqueue_user_message
+from tools.subagents.selection import subagents_enabled
 from tools.subagents.sidecar import bind_thread_identity, clear_thread_identity
 from tools.connect_mcp.persistent_stdio import PersistentStdioRegistry
 from tools.connect_mcp.stream_client import _SESSION_MANAGER as _STREAM_SESSION_MANAGER
@@ -277,7 +278,7 @@ class AgentExecutor:
             "logger": logger,
             "workspace": getattr(self._ctx, "workspace", None),
         }
-        if config_dict.get("use_local_subagents", False):
+        if subagents_enabled(config_dict.get("use_local_subagents", False)):
             state_data["specific_role"] = ORCHESTRATOR_SPECIFIC_ROLE
         state = State(**state_data)
         state.tool_call_outputs_store.set_max_entries(

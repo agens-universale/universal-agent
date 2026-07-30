@@ -11,44 +11,31 @@ from typing import Any, Dict
 
 from constants.tool_names import FINISH_TOOL_NAME, READ_STORED_TOOL_OUTPUT_NAME
 from tools.subagents.abstract_subagent import AbstractSubagent
-from tools.subagents.custom.file_definitions import SubagentDefinition, SubagentDefinitionError
+from tools.subagents.custom.file_definitions import SubagentDefinition
 
-# Тулы, без которых сабагент ломается не сразу, а позже и незаметно:
+# Служебное ядро: выдаётся сабагенту ВСЕГДА, перечислять в `tools` не нужно, и
+# `stop_tools` его не отбирает. Причина в том, что без него сабагент ломается не
+# сразу, а позже и незаметно:
 # - turn_finish: контракт сдачи требует вернуть отчёт через него, результат ребёнка
 #   извлекается из его вызова, и ядро синтезирует его при cycle_stop. Без него
 #   сабагент докручивает до subagent_max_steps и не сдаёт ничего;
 # - session_read_stored_tool_output: оборачивание больших выводов безусловно, и в
 #   подсказке прямым текстом «Continue with session_read_stored_tool_output».
 #   Без тула ребёнку велят вызвать то, чего у него нет.
-# Оба отказа выглядят как «модель тупит», поэтому проверяем на старте.
+# Оба отказа выглядят как «модель тупит», поэтому ядро не отдаётся на усмотрение
+# файла вовсе — это не запрет, а гарантия.
 REQUIRED_TOOL_NAMES = frozenset({FINISH_TOOL_NAME, READ_STORED_TOOL_OUTPUT_NAME})
 
 
-def validate_required_tools(definition: SubagentDefinition) -> None:
-    """Убедиться, что определение не отрезает обязательные тулы.
+def required_tools_banned_in_definition(definition: SubagentDefinition) -> list[str]:
+    """Служебные тулы, которые файл пытается запретить через ``stop_tools``.
 
-    Единственное место фичи, где мы падаем, а не варним: битый файл лишает
-    оператора одного агента, а вынутый ``turn_finish`` даёт агента, который молча
-    не работает.
+    Запрет не исполняется (ядро выдаётся всегда), но и молчать нельзя: оператор
+    написал явное указание, и он должен узнать, что оно проигнорировано.
+    Отсутствие ядра в ``tools`` сюда НЕ попадает — перечислять его не требуется,
+    это штатный путь, а не ошибка.
     """
-    stop = set(definition.stop_tools)
-    allow = set(definition.tools) if definition.tools is not None else None
-
-    # Обе причины собираются целиком и в одно сообщение: иначе оператор чинит
-    # файл по одному тулу за прогон, каждый раз перезапуская агента.
-    banned = sorted(REQUIRED_TOOL_NAMES & stop)
-    missing = sorted(REQUIRED_TOOL_NAMES - allow) if allow is not None else []
-
-    problems = []
-    if banned:
-        problems.append("нельзя помещать в stop_tools: " + ", ".join(banned))
-    if missing:
-        problems.append("отсутствуют в списке tools: " + ", ".join(missing))
-    if problems:
-        raise SubagentDefinitionError(
-            definition.source_path,
-            "обязательные инструменты — " + "; ".join(problems),
-        )
+    return sorted(REQUIRED_TOOL_NAMES & set(definition.stop_tools))
 
 
 def build_tool_specification(definition: SubagentDefinition) -> Dict[str, Any]:
@@ -139,5 +126,5 @@ __all__ = [
     "REQUIRED_TOOL_NAMES",
     "FileDefinedSubagent",
     "build_tool_specification",
-    "validate_required_tools",
+    "required_tools_banned_in_definition",
 ]

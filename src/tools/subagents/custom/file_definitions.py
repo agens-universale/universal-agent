@@ -21,6 +21,19 @@ import yaml
 # для имени лог-файла.
 NAME_RE = re.compile(r"^subagent_[a-z0-9_]+$")
 
+# Предел длины имени. Два независимых основания, оба жёсткие:
+# - OpenAI-совместимые бэкенды ограничивают имя функции 64 символами, то есть
+#   более длинное имя отверг бы сам API;
+# - имя без префикса становится `kind` в имени лог-файла
+#   (`agent_<kind>_<run_id>.jsonl`), а basename ограничен 255 байтами. Без лимита
+#   длинное имя даёт `OSError: File name too long` не на старте, а в момент вызова
+#   сабагента — то есть в самый неудобный момент.
+MAX_NAME_LEN = 64
+# Предел длины описания. Оно уходит в схему тулов на КАЖДОМ запросе к модели,
+# поэтому неограниченный текст — это постоянный расход контекста. Порог с большим
+# запасом: у встроенных сабагентов описания 220-280 символов.
+MAX_DESCRIPTION_LEN = 1024
+
 _ALLOWED_KEYS = frozenset({"name", "description", "tools", "stop_tools"})
 _LIST_KEYS = ("tools", "stop_tools")
 
@@ -123,10 +136,22 @@ def parse_subagent_file(path: str, text: str) -> SubagentDefinition:
             path,
             f"'name' должен матчить {NAME_RE.pattern} (нижний регистр, префикс subagent_): {name!r}",
         )
+    if len(name) > MAX_NAME_LEN:
+        raise SubagentDefinitionError(
+            path,
+            f"'name' длиннее {MAX_NAME_LEN} символов ({len(name)}): лимит имени функции "
+            "у OpenAI-совместимых бэкендов и защита имени лог-файла",
+        )
 
     description = str(meta.get("description") or "").strip()
     if not description:
         raise SubagentDefinitionError(path, "обязательное поле 'description' отсутствует или пусто")
+    if len(description) > MAX_DESCRIPTION_LEN:
+        raise SubagentDefinitionError(
+            path,
+            f"'description' длиннее {MAX_DESCRIPTION_LEN} символов ({len(description)}): "
+            "описание уходит в схему тулов на каждом запросе к модели",
+        )
 
     role = body.strip()
     if not role:
@@ -155,8 +180,22 @@ def parse_subagent_file(path: str, text: str) -> SubagentDefinition:
     )
 
 
-def _warn(logger: Optional[logging.Logger], msg: str, *args: Any) -> None:
-    (logger or _log).warning(msg, *args)
+def _warn(
+    logger: Optional[logging.Logger],
+    msg: str,
+    *args: Any,
+    event: str = "",
+    **fields: Any,
+) -> None:
+    """Варнинг в логгер рана с машиночитаемым ``event``.
+
+    Значения дублируются и в тексте сообщения, и в ``extra``: поля из ``extra``
+    рендерит только ``JsonlFormatter``, а при ``logging.format: text`` (дефолт) в
+    строке осталось бы голое имя события.
+    """
+    extra = {"event": event or "subagent_definition_warning"}
+    extra.update(fields)
+    (logger or _log).warning(msg, *args, extra=extra)
 
 
 def discover_subagent_definitions(
@@ -182,13 +221,15 @@ def discover_subagent_definitions(
         return []
 
     if not os.path.isdir(base_dir):
-        _warn(logger, "subagents_dir_missing dir=%s (кастомные сабагенты не загружены)", base_dir)
+        _warn(logger, "subagents_dir_missing dir=%s (кастомные сабагенты не загружены)",
+              base_dir, event="subagents_dir_missing", dir=base_dir)
         return []
 
     try:
         entries = sorted(os.listdir(base_dir))
     except OSError as exc:
-        _warn(logger, "subagents_dir_unreadable dir=%s error=%s", base_dir, exc)
+        _warn(logger, "subagents_dir_unreadable dir=%s error=%s", base_dir, exc,
+              event="subagents_dir_unreadable", dir=base_dir)
         return []
 
     max_count = _resolve_max_count(config_dict)
@@ -207,7 +248,8 @@ def discover_subagent_definitions(
                 text = fd.read()
             definition = parse_subagent_file(path, text)
         except (OSError, SubagentDefinitionError) as exc:
-            _warn(logger, "subagent_definition_invalid error=%s", exc)
+            _warn(logger, "subagent_definition_invalid error=%s", exc,
+                  event="subagent_definition_invalid", path=path, reason=str(exc))
             continue
 
         if definition.name in builtin:
@@ -215,6 +257,8 @@ def discover_subagent_definitions(
                 logger,
                 "subagent_name_collision name=%s path=%s (совпадает со встроенным, файл пропущен)",
                 definition.name, path,
+                event="subagent_name_collision", subagent_name=definition.name,
+                path=path, winner="builtin",
             )
             continue
         if definition.name in taken:
@@ -222,6 +266,8 @@ def discover_subagent_definitions(
                 logger,
                 "subagent_name_collision name=%s path=%s winner=%s (побеждает прочитанный первым)",
                 definition.name, path, taken[definition.name].source_path,
+                event="subagent_name_collision", subagent_name=definition.name,
+                path=path, winner=taken[definition.name].source_path,
             )
             continue
 
@@ -236,6 +282,7 @@ def discover_subagent_definitions(
             logger,
             "subagents_max_count_exceeded limit=%s dropped=%s",
             max_count, ", ".join(overflow),
+            event="subagents_max_count_exceeded", limit=max_count, dropped=overflow,
         )
 
     return list(taken.values())
@@ -252,6 +299,8 @@ def _resolve_max_count(config_dict: Dict[str, Any]) -> int:
 
 __all__ = [
     "DEFAULT_MAX_COUNT",
+    "MAX_DESCRIPTION_LEN",
+    "MAX_NAME_LEN",
     "NAME_RE",
     "SubagentDefinition",
     "SubagentDefinitionError",

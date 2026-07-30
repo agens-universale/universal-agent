@@ -70,13 +70,18 @@ class TestStopList:
 
 
 class TestCore:
-    def test_core_survives_even_if_filter_would_drop_it(self):
-        # Определение не могло отрезать ядро (валидатор падает на старте), но
-        # фильтр обязан быть безопасным сам по себе.
-        cfg = {SUBAGENT_TOOLS_ALLOW_KEY: ("fs_read_file",)}
+    def test_stop_list_cannot_take_core_away(self):
+        # Ядро — гарантия, а не предпочтение: stop_tools его не отбирает.
+        cfg = {SUBAGENT_TOOLS_STOP_KEY: REQUIRED}
         out = apply_subagent_tools_filter(dict(BASE), cfg)
         for name in REQUIRED:
             assert name in out
+
+    def test_core_arrives_without_being_listed(self):
+        # Перечислять ядро в tools не требуется — оно доливается само.
+        cfg = {SUBAGENT_TOOLS_ALLOW_KEY: ("fs_read_file",)}
+        out = apply_subagent_tools_filter(dict(BASE), cfg)
+        assert set(out) == {"fs_read_file", *REQUIRED}
 
     def test_absent_core_is_not_invented(self):
         # Если ядра нет в исходном наборе (глобальный stop_tools, harbor) —

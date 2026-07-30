@@ -485,7 +485,9 @@ class SubagentRunner:
         child_config = self._build_child_config()
         parent_backend = getattr(self._ctx, "os_backend", None)
         child_tools_data, child_tools_spec, child_tools_descr, _mcp_status = build_tools_data(
-            child_config, os_backend=parent_backend
+            child_config,
+            os_backend=parent_backend,
+            logger=getattr(self._ctx, "logger", None),
         )
         child_system_prompt = self._resolve_subagent_system_prompt()
 
@@ -601,6 +603,7 @@ class SubagentRunner:
             child_config,
             os_backend=parent_backend,
             skills_registry=child_skills_registry,
+            logger=child_logger,
         )
 
         child_ctx = RunContext(

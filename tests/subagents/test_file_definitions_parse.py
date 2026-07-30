@@ -6,6 +6,8 @@
 import pytest
 
 from tools.subagents.custom.file_definitions import (
+    MAX_DESCRIPTION_LEN,
+    MAX_NAME_LEN,
     SubagentDefinitionError,
     parse_subagent_file,
 )
@@ -149,3 +151,42 @@ class TestListNormalization:
         text = MINIMAL.replace("---\nname:", "---\ntools: fs_read_file\nname:")
         with pytest.raises(SubagentDefinitionError, match="tools"):
             parse_subagent_file("/a/x.md", text)
+
+
+class TestLengthLimits:
+    """Имя и описание ограничены по длине — оба лимита с внешним основанием."""
+
+    def test_accepts_name_at_limit(self):
+        name = "subagent_" + "x" * (MAX_NAME_LEN - len("subagent_"))
+        text = MINIMAL.replace("subagent_doc_writer", name)
+        assert parse_subagent_file("/a/x.md", text).name == name
+
+    def test_rejects_too_long_name(self):
+        # Без лимита это падало бы OSError: File name too long при создании
+        # детского лога — то есть в момент вызова сабагента, а не на старте.
+        name = "subagent_" + "x" * MAX_NAME_LEN
+        text = MINIMAL.replace("subagent_doc_writer", name)
+        with pytest.raises(SubagentDefinitionError, match="'name' длиннее"):
+            parse_subagent_file("/a/x.md", text)
+
+    def test_accepts_description_at_limit(self):
+        desc = "д" * MAX_DESCRIPTION_LEN
+        text = MINIMAL.replace("Пишет документацию.", desc)
+        assert parse_subagent_file("/a/x.md", text).description == desc
+
+    def test_rejects_too_long_description(self):
+        text = MINIMAL.replace("Пишет документацию.", "д" * (MAX_DESCRIPTION_LEN + 1))
+        with pytest.raises(SubagentDefinitionError, match="'description' длиннее"):
+            parse_subagent_file("/a/x.md", text)
+
+    def test_limit_applies_after_strip(self):
+        # Пробелы по краям не должны съедать бюджет.
+        desc = "  " + "д" * MAX_DESCRIPTION_LEN + "  "
+        text = MINIMAL.replace("Пишет документацию.", f"'{desc}'")
+        assert len(parse_subagent_file("/a/x.md", text).description) == MAX_DESCRIPTION_LEN
+
+    def test_role_body_is_not_limited(self):
+        # Роль уходит в системный промпт ОДИН раз за ран ребёнка, а не в схему
+        # тулов на каждом запросе — ограничивать её нет основания.
+        text = MINIMAL.replace("Ты — технический писатель.", "р" * 50_000)
+        assert len(parse_subagent_file("/a/x.md", text).role) == 50_000
