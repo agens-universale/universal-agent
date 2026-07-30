@@ -6,6 +6,7 @@ State создаётся заново при каждом run(). Возвращ�
 нельзя мутировать снаружи; изменения — только через add_message() или под get_lock().
 """
 
+import gc
 import os
 import threading
 from copy import copy as _shallow_copy_msg
@@ -538,6 +539,10 @@ class AgentExecutor:
                 _STREAM_SESSION_MANAGER.close_all()
             except Exception:
                 pass
+            # C2: после закрытия MCP/stdio — подбираем циклический мусор
+            # (pipes, ClientSession, loop buffers). State здесь не трогаем:
+            # ниже ещё dump_storage и usage-отчёт по state.
+            gc.collect()
 
         if config_dict.get("dump_storage"):
             cur_dir = config_dict.get("logs_dump_dir") or os.getcwd()

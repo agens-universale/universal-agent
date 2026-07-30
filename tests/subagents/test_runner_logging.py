@@ -47,7 +47,7 @@ def _make_config(tmp_path):
     }
 
 
-def _parent_ctx(tmp_path, *, is_tui: bool = False):
+def _parent_ctx(tmp_path, *, is_tui: bool = False, is_cli_mode: bool = False):
     cfg = _make_config(tmp_path)
     ctx = local_ctx(cfg)
     ctx.run_id = "parent_run_1"
@@ -59,6 +59,7 @@ def _parent_ctx(tmp_path, *, is_tui: bool = False):
     ctx.tools_spec = []
     ctx.tools_description = []
     ctx.is_tui = is_tui
+    ctx.is_cli_mode = is_cli_mode
     return ctx, cfg
 
 
@@ -82,6 +83,29 @@ def test_build_child_ctx_inherits_is_tui_from_parent(tmp_path):
     child_ctx = runner._build_child_ctx(tool_name="subagent_worker")
 
     assert child_ctx.is_tui is True
+
+
+def test_build_child_ctx_inherits_is_cli_mode_from_parent(tmp_path):
+    orch = _make_orchestrator_state()
+    parent_ctx, cfg = _parent_ctx(tmp_path, is_cli_mode=True)
+    runner = SubagentRunner(parent_ctx, orch, cfg)
+
+    child_ctx = runner._build_child_ctx(tool_name="subagent_worker")
+
+    assert child_ctx.is_cli_mode is True
+    assert child_ctx.is_tui is False
+
+
+def test_build_child_ctx_cli_mode_defaults_false_when_parent_unset(tmp_path):
+    orch = _make_orchestrator_state()
+    parent_ctx, cfg = _parent_ctx(tmp_path)
+    if hasattr(parent_ctx, "is_cli_mode"):
+        delattr(parent_ctx, "is_cli_mode")
+    runner = SubagentRunner(parent_ctx, orch, cfg)
+
+    child_ctx = runner._build_child_ctx(tool_name="subagent_worker")
+
+    assert child_ctx.is_cli_mode is False
 
 
 def test_lifecycle_payload_contains_parent_and_child_run_ids(tmp_path):

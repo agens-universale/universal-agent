@@ -594,7 +594,10 @@ class SubagentRunner:
             environment=getattr(self._ctx, "environment", None),
             project_gc_dir=getattr(self._ctx, "project_gc_dir", Path(".")),
         )
+        # Режим родителя (C3 gc.force_collect default on CLI/TUI) — наследуем,
+        # иначе child process_tool_calls видит оба флага False и collect выключается.
         child_ctx.is_tui = bool(getattr(self._ctx, "is_tui", False))
+        child_ctx.is_cli_mode = bool(getattr(self._ctx, "is_cli_mode", False))
         # Progress bridge: same sink as parent (TUI queue or None/no-op); call_id of
         # the parent subagent_* function_call for correlating nested UI rows.
         child_ctx.subagent_progress_sink = getattr(

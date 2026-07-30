@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import contextlib
+import gc
 from copy import copy as shallow_copy
 from typing import TYPE_CHECKING, Any
 
@@ -326,6 +327,9 @@ class RunSummaryCoordinator:
                         on_summary_applied=self.on_summary_applied,
                         trigger_threshold_chars=self._summary_trigger_chars,
                     )
+            # C1: старая история отцеплена компакцией — собираем циклический мусор.
+            if rounds > 0:
+                gc.collect()
         except Exception as summarize_exc:
             log_compaction_failed(
                 logger,
@@ -353,6 +357,8 @@ class RunSummaryCoordinator:
                 on_summary_applied=self.on_summary_applied,
                 trigger_threshold_chars=self._summary_trigger_chars,
             )
+        # C1: старая история отцеплена компакцией — собираем циклический мусор.
+        gc.collect()
 
     def pre_backend_compaction_hook(
         self,
@@ -412,6 +418,8 @@ class RunSummaryCoordinator:
 
         # После суммаризации + extend следующий шаг обрабатывает только preserved_batch.
         current_messages[:] = preserved_batch
+        # C1: старый хвост current_messages отцеплен — собираем циклический мусор.
+        gc.collect()
 
     def turn_end_compact_if_needed(self) -> None:
         """Compaction после accept ``turn_finish`` (turn-end trigger)."""
@@ -437,6 +445,8 @@ class RunSummaryCoordinator:
                     on_summary_applied=self.on_summary_applied,
                     trigger_threshold_chars=self._turn_end_trigger_chars,
                 )
+            # C1: старая история отцеплена компакцией — собираем циклический мусор.
+            gc.collect()
         except Exception as summarize_exc:
             log_compaction_failed(
                 logger,

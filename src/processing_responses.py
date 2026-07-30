@@ -1,8 +1,10 @@
+import gc
 import json
 import time
 from types import SimpleNamespace
 
 from config import parse_chat_completions_max_tokens, resolve_tui_stream_enabled
+from config_modules.gc import gc_force_collect_enabled
 from intent_guard.feedback import (
     build_finish_gate_feedback,
     build_finish_gate_reject_technical_user_content,
@@ -753,6 +755,16 @@ def process_tool_calls(
             technical_type=TECHNICAL_TYPE_TECHNICAL,
         )
         tools_outputs = [*preserved, resume]
+
+    # C3: один collect на границе «батч тулов → LLM-шаг» — подбираем циклический
+    # мусор между шагами. Default on для CLI/TUI, off для server; явный
+    # gc.force_collect в конфиге перекрывает default.
+    if gc_force_collect_enabled(
+        getattr(ctx, "config_dict", {}) or {},
+        is_tui=bool(getattr(ctx, "is_tui", False)),
+        is_cli_mode=bool(getattr(ctx, "is_cli_mode", False)),
+    ):
+        gc.collect()
 
     return tools_outputs
 

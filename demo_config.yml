@@ -573,3 +573,11 @@ pricing:
   #     per_tokens: 1000         # override единицы (тариф за 1K)
   #     input: 0.05
   #     output: 0.15
+
+# Сборка мусора (gc.collect) — точки C1/C2/C3.
+# C1 (после компакции истории) и C2 (после close_all в finally) — всегда вкл.
+# C3 (один collect после батча тулов, перед LLM-шагом) — управляется этим флагом.
+# Default: on для CLI/TUI, off для server (gc.collect глобален для процесса).
+# Явное значение перекрывает режимный default. Раскомментируйте, чтобы выключить C3.
+# gc:
+#   force_collect: false
