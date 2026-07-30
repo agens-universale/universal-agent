@@ -2,6 +2,7 @@ import glob
 import json
 import os
 import re
+import threading
 from datetime import datetime, timezone
 from typing import Dict, List, Tuple, Any, Set, Optional
 
@@ -25,6 +26,11 @@ from utils.atomic_io import atomic_replace
 _THREAD_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]+$")
 _SYSTEM_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]+$")
 _META_SCHEMA_VERSION = 2
+
+# Process-local счётчик последнего выданного seq sidecar (SPEC 2026-07-30-sidecar-append-o1-seq).
+# Ключ — нормализованный путь jsonl. Cold init на первый append для path; далее O(1).
+_sidecar_last_seq: Dict[str, int] = {}
+_sidecar_seq_lock = threading.Lock()
 
 
 def _utc_now_iso() -> str:
@@ -169,7 +175,8 @@ def reset_thread_files(threads_dir: str, system_id: str, thread_id: str) -> List
     paths = []
     paths.extend(_thread_paths(threads_dir, sys_norm, normalized_thread_id))
     paths.extend(_thread_paths_legacy(threads_dir, normalized_thread_id))
-    paths.append(subagent_trace_path(threads_dir, sys_norm, normalized_thread_id))
+    sidecar = subagent_trace_path(threads_dir, sys_norm, normalized_thread_id)
+    paths.append(sidecar)
     paths.append(touched_journal_path(threads_dir, sys_norm, normalized_thread_id))
     paths.append(_lock_path(threads_dir, sys_norm, normalized_thread_id))
 
@@ -178,6 +185,9 @@ def reset_thread_files(threads_dir: str, system_id: str, thread_id: str) -> List
         if os.path.exists(path):
             os.remove(path)
             deleted.append(path)
+    # Сброс process-local счётчика sidecar seq, иначе recreate получит «дырявый» seq (S5).
+    with _sidecar_seq_lock:
+        _sidecar_last_seq.pop(sidecar, None)
     return deleted
 
 
@@ -210,7 +220,8 @@ def delete_thread(threads_dir: str, system_id: str, thread_id: str) -> List[str]
     paths.extend(_thread_paths(threads_dir, system_id, thread_id))
     paths.extend(_thread_paths_legacy(threads_dir, thread_id))
     paths.extend(_thread_archive_paths(threads_dir, system_id, thread_id))
-    paths.append(subagent_trace_path(threads_dir, system_id, thread_id))
+    sidecar = subagent_trace_path(threads_dir, system_id, thread_id)
+    paths.append(sidecar)
     paths.append(touched_journal_path(threads_dir, system_id, thread_id))
     paths.append(_lock_path(threads_dir, system_id, thread_id))
 
@@ -219,6 +230,9 @@ def delete_thread(threads_dir: str, system_id: str, thread_id: str) -> List[str]
         if os.path.exists(path):
             os.remove(path)
             deleted.append(path)
+    # Сброс process-local счётчика sidecar seq, иначе recreate получит «дырявый» seq (S5).
+    with _sidecar_seq_lock:
+        _sidecar_last_seq.pop(sidecar, None)
     return deleted
 
 
@@ -254,19 +268,30 @@ def append_subagent_trace_record(
     kind: str,
     payload: Dict[str, Any],
 ) -> Dict[str, Any]:
-    """Append-only запись в sidecar nested-трейса (flat envelope, seq = max+1)."""
+    """Append-only запись в sidecar nested-трейса (flat envelope, монотонный seq).
+
+    Hot path O(1): cold init (один скан max seq) только на первый append для path
+    в жизни процесса, далее seq = last_seq + 1 без чтения файла. Сериализация writers
+    одним модулем lock-ом, чтобы параллельные child-субагенты не получили дубль seq.
+    (SPEC 2026-07-30-sidecar-append-o1-seq, S2-S4).
+    """
     ensure_threads_dir(threads_dir)
     path = subagent_trace_path(threads_dir, system_id, thread_id)
-    record = {
-        "ts": _utc_now_iso(),
-        "seq": _max_subagent_trace_seq(path) + 1,
-        "parent_call_id": parent_call_id,
-        "child_run_id": child_run_id,
-        "kind": kind,
-        "payload": payload,
-    }
-    with open(path, "a", encoding="utf-8") as f:
-        f.write(json.dumps(record, ensure_ascii=False) + "\n")
+    with _sidecar_seq_lock:
+        if path not in _sidecar_last_seq:
+            _sidecar_last_seq[path] = _max_subagent_trace_seq(path)  # cold init: 0 если файла нет
+        seq = _sidecar_last_seq[path] + 1
+        _sidecar_last_seq[path] = seq  # bump ДО write: упавший write даёт дырку, не дубль seq
+        record = {
+            "ts": _utc_now_iso(),
+            "seq": seq,
+            "parent_call_id": parent_call_id,
+            "child_run_id": child_run_id,
+            "kind": kind,
+            "payload": payload,
+        }
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(record, ensure_ascii=False) + "\n")
     return record
 
 
