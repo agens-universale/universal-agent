@@ -12,6 +12,7 @@ from collections import OrderedDict
 from states import SharedStateData
 from persistence.thread_meta_mapper import ThreadMetaMapper
 from tools.exec.fetch_url import FetchUrl
+from tools.exec.simple_fetch_url import SimpleFetchUrl
 
 
 # ── Стаб shared/state для _get_cache ──────────────────────────────────────────
@@ -28,6 +29,10 @@ class _State:
 
 def _make_fetch() -> FetchUrl:
     return FetchUrl(state=_State())
+
+
+def _make_simple_fetch() -> SimpleFetchUrl:
+    return SimpleFetchUrl(state=_State())
 
 
 # ── Нормализация dict→OrderedDict ─────────────────────────────────────────────
@@ -202,3 +207,74 @@ def test_get_from_cache_updates_lru_order():
     f._get_from_cache("https://example.com/3")
     cache = f._get_cache()
     assert list(cache.keys())[-1] == "https://example.com/3"
+
+
+# ── SimpleFetchUrl: тот же LRU API (общий shared.fetch_url_cache) ─────────────
+
+def test_simple_fetch_max_size_matches_fetch_url():
+    assert SimpleFetchUrl.fetch_url_cache_max_size == FetchUrl.fetch_url_cache_max_size == 10
+
+
+def test_simple_fetch_get_cache_normalizes_plain_dict_to_ordereddict():
+    f = _make_simple_fetch()
+    f._state.shared.fetch_url_cache = {"https://a": {"content": "A"}}
+    cache = f._get_cache()
+    assert isinstance(cache, OrderedDict)
+    assert isinstance(f._state.shared.fetch_url_cache, OrderedDict)
+
+
+def test_simple_fetch_cache_evicts_oldest_when_limit_exceeded():
+    f = _make_simple_fetch()
+    for i in range(15):
+        f._put_to_cache(
+            f"https://example.com/{i}",
+            f"page-{i}",
+            {"title": None, "description": None, "lang": None},
+        )
+    cache = f._get_cache()
+    assert len(cache) == 10
+    assert list(cache.keys())[0] == "https://example.com/5"
+    assert list(cache.keys())[-1] == "https://example.com/14"
+
+
+def test_simple_fetch_cache_hit_moves_to_end():
+    f = _make_simple_fetch()
+    for i in range(10):
+        f._put_to_cache(
+            f"https://example.com/{i}",
+            f"page-{i}",
+            {"title": None, "description": None, "lang": None},
+        )
+    result = f._get_from_cache("https://example.com/5")
+    assert result is not None
+    assert list(f._get_cache().keys())[-1] == "https://example.com/5"
+
+
+def test_simple_and_full_fetch_share_lru_cache():
+    """Оба тула пишут в один shared.fetch_url_cache с общей эвикцией."""
+    shared = _Shared()
+    state = _State()
+    state.shared = shared
+    full = FetchUrl(state=state)
+    simple = SimpleFetchUrl(state=state)
+    for i in range(8):
+        full._put_to_cache(
+            f"https://example.com/{i}",
+            f"page-{i}",
+            {"title": None, "description": None, "lang": None},
+        )
+    for i in range(8, 12):
+        simple._put_to_cache(
+            f"https://example.com/{i}",
+            f"page-{i}",
+            {"title": None, "description": None, "lang": None},
+        )
+    cache = simple._get_cache()
+    assert len(cache) == 10
+    assert "https://example.com/0" not in cache
+    assert "https://example.com/1" not in cache
+    assert "https://example.com/11" in cache
+    # Cache-hit через SimpleFetchUrl обновляет LRU для общей записи.
+    hit = simple._get_from_cache("https://example.com/2")
+    assert hit is not None
+    assert list(cache.keys())[-1] == "https://example.com/2"
