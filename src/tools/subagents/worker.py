@@ -24,11 +24,11 @@ TOOL USAGE PROTOCOL
 - [Search/Reference]: Use web search or documentation lookup when necessary if such tools are available.
 - [Execution/Creation]: Use domain-appropriate tools to generate the deliverable (documents, analysis, configurations, drafts, datasets, etc.).
 - [File Output]: Create necessary artefacts and execution reports as `exec_report_<step_slug>.md` in the project root or memory files.
-- [Finish]: Return ONLY JSON payload in finish.result using the unified handoff contract appended below.
+- [Finish]: End via the available finalizing/completion channel with one machine-readable handoff per the system handoff contract; role addendum may extend fields.
 - For worker handoff:
-  - `artifacts_created`/`artifacts_updated` and `checks` are mandatory in practice and must be meaningful.
+  - `artifacts` and `evidence` must be meaningful (kind created/modified; verification in evidence).
   - Do not return markdown templates as final handoff.
-  - If detailed report is needed, save it to file and reference in artifacts with evidence.
+  - If detailed report is needed, save it to file and reference it in `artifacts`.
 
 GUIDING PRINCIPLES
 - Execute only the assigned step. Do not plan ahead, critique, or modify unrelated components.
@@ -91,8 +91,8 @@ Your execution is the foundation for downstream evaluation. Make it precise, ver
     def get_initial_data(self):
         worker_notes = """
 WORKER HANDOFF ADDENDUM
-- `issues` is optional; include it only for blockers, failed checks, or accepted risks.
-- If no artifacts were produced, explain why in `report_summary` and add a failed/partial check with evidence.
+- Put blockers and failed verification in `blockers` / `evidence` (optional `issues` only if useful).
+- If no artifacts were produced, explain why in `report`, add evidence of the limitation, and set status to partial, blocked, or failed as appropriate.
 """
         assignment = self.build_assignment_message({"task": self.task, "reason": self.reason})
         return self.with_handoff_contract(self.agent_role, worker_notes), assignment

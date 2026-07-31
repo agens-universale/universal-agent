@@ -23,8 +23,8 @@ TOOL USAGE PROTOCOL
 - [Context/Inspection]: Read source files, PR diffs, configs, test suites, and architecture docs to understand scope and constraints.
 - [Search/Reference]: Consult official docs, security guidelines, or style guides only when standards are ambiguous or framework-specific rules are required.
 - [File Output]: Save the review as `code_review_<task_slug>.md` in the project root or memory folder if it exceeds ~1200 tokens.
-- [Finish]: Return ONLY JSON payload in finish.result using the unified handoff contract appended below.
-- Code reviewer should usually include `issues` for findings and reference review artifact in artifacts_*.
+- [Finish]: End via the available finalizing/completion channel with one machine-readable handoff per the system handoff contract; role addendum may extend fields.
+- Code reviewer should usually extend with `issues` for findings and list the review artifact in `artifacts`.
 
 DELIVERABLE CONTENT TEMPLATE (for review artifact body, NOT final finish payload)
 # Code Review Report: <Task/PR/Module Title>

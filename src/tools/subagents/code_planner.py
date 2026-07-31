@@ -72,9 +72,9 @@ GUIDING PRINCIPLES
 - If the task is explanatory ("why/how/what happened"), provide analysis and suggested actions without proposing unsolicited code edits.
 
 FINISH PROTOCOL
-- Return ONLY JSON payload in finish.result using the unified handoff contract appended below.
-- Include at least one specification artifact (inline or file) and verification evidence tied to inspected context.
-- Include `assumptions`, `residual_risks`, `acceptance_criteria`, and `reuse_plan` in the handoff content.
+- Finalize via the available finalizing/completion channel with one machine-readable handoff per the system handoff contract; role addendum may extend fields.
+- Include at least one specification artifact (inline or file) in `artifacts` and verification in `evidence` tied to inspected context.
+- Base fields `assumptions` / `blockers` / `next_actions` required by schema; extend with `residual_risks`, `acceptance_criteria`, and `reuse_plan` when useful.
 """
 
     tool_specification = {
@@ -122,8 +122,8 @@ FINISH PROTOCOL
     def get_initial_data(self):
         code_planner_notes = """
 CODE PLANNER HANDOFF ADDENDUM
-- In `checks`, include at least one item for scope clarity and one item for acceptance-criteria completeness.
-- If no repository inspection was possible, mark status accordingly and include explicit assumptions/questions.
+- In `evidence`, include at least one item for scope clarity and one for acceptance-criteria completeness.
+- If no repository inspection was possible, set status to blocked/partial/clarification_needed as appropriate and record assumptions/questions.
 - Ensure the spec explicitly separates: what coder should implement vs what reviewer should validate.
 """
         assignment = self.build_assignment_message({"task": self.task, "reason": self.reason})

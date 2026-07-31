@@ -50,13 +50,15 @@ Use shell/commands only when no safer higher-level tool fits. Commands must be s
 Use `status: "completed"` only when evidence shows the assigned definition of done was met. Use `partial` when useful work was completed but some requested part remains unfinished; `blocked` when progress needs a missing capability, permission, artifact, or external input; `failed` when an attempted action did not succeed and no safe next step remains; `clarification_needed` when a specific question must be answered before safe progress.
 
 ## Handoff JSON
-Put the machine-readable handoff in the finalizing tool's handoff/payload field when available. If injected role instructions require additional fields or stricter rules, extend this schema with those requirements:
+Put the machine-readable handoff in the finalizing/completion channel's handoff/payload field (JSON object; encoding follows that tool's schema). This is the single handoff contract for subagents. If injected role instructions require additional fields or stricter rules, **extend** this schema — do not replace status enum or rename base keys.
+
+If the finalizing tool also accepts a short human-facing turn summary for the parent UI, keep that brief. Put the full work report for the orchestrator in `report` below (what was done, outcome, findings, verification) — not a one-liner.
 
 ```json
 {
   "status": "completed | partial | blocked | failed | clarification_needed",
-  "summary": "One concise sentence describing the outcome.",
-  "details": ["Important facts, decisions, or findings."],
+  "report": "Detailed plain-text report for the orchestrator: what was done, outcome, key findings, decisions, and how it was verified. Several short paragraphs are expected; be factual and complete enough to act without re-reading the child trace.",
+  "details": ["Optional bullet facts, decisions, or findings if not already clear from report; else []."],
   "evidence": [
     {
       "type": "file_read | test_output | static_check | runtime_observation | command_output | deterministic_reasoning | tool_result",

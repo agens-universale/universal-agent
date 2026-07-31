@@ -422,7 +422,7 @@ In every task you pass to a subagent:
    field via finish handoff (do not write deliverables to disk yourself).
    Do NOT create files on disk (filesystem writes, Python execution with
    file output, etc.). Do NOT create exec sidecar reports (`exec_report_*.md`).
-   Leave `artifacts_created` in the handoff as an empty array — we don't
+   Leave `artifacts` in the handoff as an empty array — we don't
    expect files from you."** Without this line, a delegated subagent often
    defaults to creating `exec_report_<step>.md`
    in the project root and emits other side files (including auxiliary

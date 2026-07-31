@@ -20,35 +20,13 @@ WORKFLOW CONTEXT
 
     HANDOFF_CONTRACT_GUIDANCE = """
 
-UNIFIED HANDOFF CONTRACT
-- Final answer MUST be returned via finish tool as JSON string in finish.result.
-- Required keys:
-  {
-    "result_schema_version": "1.0",
-    "status": "pass" | "partial" | "failed",
-    "report_summary": "short plain-text summary (2-5 sentences)",
-    "artifacts_created": [artifact, ...],
-    "artifacts_updated": [artifact, ...],
-    "checks": [check, ...]
-  }
-- Optional keys (use when applicable): issues, metrics, recommendations, blockers.
-- Artifact object shape:
-  {
-    "path": "absolute filesystem path OR memory://<artifact_id>",
-    "kind": "doc" | "code" | "config" | "report",
-    "format": "md" | "py" | "json" | "...",
-    "operation": "created" | "updated",
-    "evidence": "what proves success for this artifact"
-  }
-- If filesystem write is unavailable, store outputs in memory files and use `memory://...` path references.
-- If no artifact storage is possible at all, keep artifacts arrays empty and explain limitation in report_summary plus failed/partial check evidence.
-- Check object shape:
-  {
-    "name": "string",
-    "status": "pass" | "partial" | "failed",
-    "evidence": "string"
-  }
-- Keep handoff concise and machine-readable. Do not return prose-only final handoff.
+HANDOFF CONTRACT
+- End the run exactly once through the available finalizing/completion channel from `<tools>`.
+- Put one machine-readable handoff in that channel's handoff/payload slot (shape and encoding follow the tool schema and the system handoff contract).
+- Treat the system prompt's handoff contract as the single source of truth for keys and status values; do not invent a parallel schema.
+- Role addendum may require extra fields; extend the system contract — do not rename or replace its base keys/enums.
+- The handoff work report for the orchestrator must be detailed enough to act without the child trace; any separate short human-facing turn blurb on the finalizing tool stays brief.
+- Keep handoff machine-readable. Do not return prose-only final handoff.
 """
 
     @classmethod

@@ -70,11 +70,11 @@ Always ask yourself:
 - Would it pass a rigorous code review?
 
 FINISH PROTOCOL
-- Return ONLY JSON payload in finish.result using the unified handoff contract appended below.
-- Always include changed/created code artifacts and checks that prove correctness (tests, static checks, or reasoning evidence).
-- Include `verification_evidence`, `residual_risks`, `assumptions`, and `breaking_changes` (use "none" if absent).
-- Include `git_scope_check` and `convention_alignment` as concise statements.
-- If checks were not run, provide the exact reason and minimal command to run them.
+- Finalize via the available finalizing/completion channel with one machine-readable handoff per the system handoff contract; role addendum may extend fields.
+- Always include changed/created code in `artifacts` and proving items in `evidence` (tests, static checks, or reasoning).
+- Extend with `residual_risks`, `breaking_changes`, `git_scope_check`, and `convention_alignment` when relevant (use "none" if absent).
+- `assumptions` belongs in the base handoff contract — fill it (or `[]`).
+- If checks were not run, state the reason and minimal command in `evidence` / `blockers`.
 
 Your output becomes part of the codebase — write it as if you’ll maintain it for years."""
 
@@ -116,8 +116,8 @@ Your output becomes part of the codebase — write it as if you’ll maintain it
     def get_initial_data(self):
         coder_notes = """
 CODE GENERATOR HANDOFF ADDENDUM
-- Include at least one check for functional correctness and one for integration compatibility when context allows.
-- If tests were not run, state the reason in evidence.
+- In `evidence`, include at least one item for functional correctness and one for integration compatibility when context allows.
+- If tests were not run, state the reason in `evidence` / `blockers`.
 """
         assignment = self.build_assignment_message({"task": self.task, "reason": self.reason})
         return self.with_handoff_contract(self.agent_role, coder_notes), assignment

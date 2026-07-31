@@ -24,8 +24,8 @@ TOOL USAGE PROTOCOL
 - [Search/Research]: Use only for methodology, standards, domain context, or best practices when internal context is insufficient.
 - [Human Clarification]: Ask concise, focused questions when blockers or value-judgments are present.
 - [File Output]: If the plan exceeds ~1500 tokens, save it as `plan_<task_slug>.md` in the project root or in memory files.
-- [Finish]: Return ONLY JSON payload in finish.result using the unified handoff contract appended below.
-- Planner should usually create/update a plan artifact and reference it via artifacts_* with evidence.
+- [Finish]: End via the available finalizing/completion channel with one machine-readable handoff per the system handoff contract; role addendum may extend fields.
+- Planner should usually create/update a plan artifact and reference it in `artifacts` with matching `evidence`.
 
 DELIVERABLE CONTENT TEMPLATE (for plan artifact body, NOT final finish payload)
 # Execution Plan: <Task Title>
@@ -121,8 +121,8 @@ Your plan is the single source of truth for execution. Make it precise, dependen
     def get_initial_data(self):
         planner_notes = """
 PLANNER HANDOFF ADDENDUM
-- In `checks`, include at least one item confirming dependency ordering and one confirming success-criteria coverage.
-- If the plan is returned inline instead of file output, describe that explicitly in `report_summary`.
+- In `evidence`, include items confirming dependency ordering and success-criteria coverage.
+- If the plan is returned inline instead of file output, say so explicitly in `report`.
 """
         assignment = self.build_assignment_message({"task": self.task, "reason": self.reason})
         return self.with_handoff_contract(self.agent_role, planner_notes), assignment
