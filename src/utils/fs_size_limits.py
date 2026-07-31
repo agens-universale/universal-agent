@@ -8,7 +8,7 @@ Two knobs (not one):
 
 Config (``fs_tools`` block, also flattened into ``config_dict``):
 - ``max_read_bytes`` (default 8 MiB)
-- ``max_mutate_bytes`` (default 100 MiB)
+- ``max_mutate_bytes`` (default 16 MiB)
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ from __future__ import annotations
 from typing import Any, Mapping, Optional
 
 DEFAULT_FS_READ_MAX_BYTES = 8 * 1024 * 1024
-DEFAULT_FS_MUTATE_MAX_BYTES = 100 * 1024 * 1024
+DEFAULT_FS_MUTATE_MAX_BYTES = 16 * 1024 * 1024
 
 
 def _positive_int(raw: Any, default: int) -> int:

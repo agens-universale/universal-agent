@@ -308,7 +308,7 @@ summary:
 # read — fs_read_file / fs_search_files; mutate — apply/replace (не append).
 fs_tools:
   max_read_bytes: 8388608       # 8 MiB
-  max_mutate_bytes: 104857600   # 100 MiB
+  max_mutate_bytes: 16777216    # 16 MiB (peak RAM ≈ ×2–3; raise via config if needed)
 
 security:
   # =========================================================================

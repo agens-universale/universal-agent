@@ -9,6 +9,8 @@ from utils.fs_size_limits import (
 
 
 def test_defaults_and_config_keys():
+    assert DEFAULT_FS_READ_MAX_BYTES == 8 * 1024 * 1024
+    assert DEFAULT_FS_MUTATE_MAX_BYTES == 16 * 1024 * 1024
     assert fs_read_max_bytes(None) == DEFAULT_FS_READ_MAX_BYTES
     assert fs_mutate_max_bytes(None) == DEFAULT_FS_MUTATE_MAX_BYTES
     assert fs_read_max_bytes({"fs_tools": {"max_read_bytes": 100}}) == 100
