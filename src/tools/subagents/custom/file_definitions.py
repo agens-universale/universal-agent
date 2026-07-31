@@ -185,6 +185,7 @@ def _warn(
     msg: str,
     *args: Any,
     event: str = "",
+    diagnostics: Optional[List[Dict[str, Any]]] = None,
     **fields: Any,
 ) -> None:
     """Варнинг в логгер рана с машиночитаемым ``event``.
@@ -192,10 +193,16 @@ def _warn(
     Значения дублируются и в тексте сообщения, и в ``extra``: поля из ``extra``
     рендерит только ``JsonlFormatter``, а при ``logging.format: text`` (дефолт) в
     строке осталось бы голое имя события.
+
+    ``diagnostics`` (опц.) — тот же факт в структурном виде для стартовых
+    уведомлений TUI: лог читают не все, а «файл молча пропущен» оператор обязан
+    увидеть на экране.
     """
     extra = {"event": event or "subagent_definition_warning"}
     extra.update(fields)
     (logger or _log).warning(msg, *args, extra=extra)
+    if diagnostics is not None:
+        diagnostics.append({"code": extra["event"], **fields})
 
 
 def discover_subagent_definitions(
@@ -203,16 +210,19 @@ def discover_subagent_definitions(
     *,
     builtin_names: Sequence[str] | set[str],
     logger: Optional[logging.Logger] = None,
+    diagnostics: Optional[List[Dict[str, Any]]] = None,
 ) -> List[SubagentDefinition]:
     """Прочитать папку ``agent.subagents_dir`` и вернуть валидные определения.
 
-    Порядок чтения — по имени файла: он обязан быть детерминированным, иначе
-    правило «при коллизии побеждает прочитанный первым» зависело бы от порядка
-    выдачи файловой системы. Встроенные сабагенты считаются прочитанными раньше
-    любых кастомных, поэтому кастомный с их именем проигрывает.
+    Возвращает ВСЕ валидные определения в порядке имён файлов. Порядок обязан
+    быть детерминированным, иначе правило «при коллизии побеждает прочитанный
+    первым» зависело бы от выдачи файловой системы. Встроенные считаются
+    прочитанными раньше любых кастомных, поэтому кастомный с их именем проигрывает.
 
-    Единственный отказ, роняющий старт, — обязательные тулы (см. ``file_subagent``).
-    Здесь всё деградирует до варнинга: один битый файл не должен лишать оператора
+    ``subagents_max_count`` здесь НЕ применяется: лимит и порядок зависят от
+    allowlist'а, а он известен уровнем выше (см. ``registry``).
+
+    Всё деградирует до варнинга: один битый файл не должен лишать оператора
     остальных.
     """
     raw_dir = (config_dict or {}).get("subagents_dir")
@@ -222,20 +232,18 @@ def discover_subagent_definitions(
 
     if not os.path.isdir(base_dir):
         _warn(logger, "subagents_dir_missing dir=%s (кастомные сабагенты не загружены)",
-              base_dir, event="subagents_dir_missing", dir=base_dir)
+              base_dir, event="subagents_dir_missing", diagnostics=diagnostics, dir=base_dir)
         return []
 
     try:
         entries = sorted(os.listdir(base_dir))
     except OSError as exc:
         _warn(logger, "subagents_dir_unreadable dir=%s error=%s", base_dir, exc,
-              event="subagents_dir_unreadable", dir=base_dir)
+              event="subagents_dir_unreadable", diagnostics=diagnostics, dir=base_dir)
         return []
 
-    max_count = _resolve_max_count(config_dict)
     taken: Dict[str, SubagentDefinition] = {}
     builtin = set(builtin_names)
-    overflow: List[str] = []
 
     for entry in entries:
         if not entry.endswith(".md"):
@@ -249,7 +257,8 @@ def discover_subagent_definitions(
             definition = parse_subagent_file(path, text)
         except (OSError, SubagentDefinitionError) as exc:
             _warn(logger, "subagent_definition_invalid error=%s", exc,
-                  event="subagent_definition_invalid", path=path, reason=str(exc))
+                  event="subagent_definition_invalid", diagnostics=diagnostics,
+                  path=path, reason=getattr(exc, "reason", str(exc)))
             continue
 
         if definition.name in builtin:
@@ -257,8 +266,8 @@ def discover_subagent_definitions(
                 logger,
                 "subagent_name_collision name=%s path=%s (совпадает со встроенным, файл пропущен)",
                 definition.name, path,
-                event="subagent_name_collision", subagent_name=definition.name,
-                path=path, winner="builtin",
+                event="subagent_name_collision", diagnostics=diagnostics,
+                subagent_name=definition.name, path=path, winner="builtin",
             )
             continue
         if definition.name in taken:
@@ -266,29 +275,18 @@ def discover_subagent_definitions(
                 logger,
                 "subagent_name_collision name=%s path=%s winner=%s (побеждает прочитанный первым)",
                 definition.name, path, taken[definition.name].source_path,
-                event="subagent_name_collision", subagent_name=definition.name,
-                path=path, winner=taken[definition.name].source_path,
+                event="subagent_name_collision", diagnostics=diagnostics,
+                subagent_name=definition.name, path=path,
+                winner=taken[definition.name].source_path,
             )
             continue
 
-        if len(taken) >= max_count:
-            overflow.append(definition.name)
-            continue
         taken[definition.name] = definition
-
-    if overflow:
-        # Молчаливое усечение читалось бы как «все агенты подхватились».
-        _warn(
-            logger,
-            "subagents_max_count_exceeded limit=%s dropped=%s",
-            max_count, ", ".join(overflow),
-            event="subagents_max_count_exceeded", limit=max_count, dropped=overflow,
-        )
 
     return list(taken.values())
 
 
-def _resolve_max_count(config_dict: Dict[str, Any]) -> int:
+def resolve_max_count(config_dict: Dict[str, Any]) -> int:
     raw = (config_dict or {}).get("subagents_max_count", DEFAULT_MAX_COUNT)
     try:
         value = int(raw)
@@ -305,5 +303,6 @@ __all__ = [
     "SubagentDefinition",
     "SubagentDefinitionError",
     "discover_subagent_definitions",
+    "resolve_max_count",
     "parse_subagent_file",
 ]

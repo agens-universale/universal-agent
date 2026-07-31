@@ -1,10 +1,11 @@
 """Толкование ``use_local_subagents``: bool или список имён.
 
-Список в ``use_local_subagents`` — это тот же «включено» плюс выбор конкретных имён:
-оркестратор увидит только их, и это работает одинаково для встроенных и кастомных
-сабагентов. ``use_server_subagents`` остаётся строго булевым: состав server-сабагентов
-определяет бэкенд (ему уходит только ``metadata.useServerSubagents``), выбирать имена
-на нашей стороне там нечем.
+Список в ``use_local_subagents`` выбирает КАСТОМНЫХ сабагентов: встроенные семь
+доступны всегда, пока значение не ``false``. Поэтому пустой список означает «только
+встроенные», а имя встроенного в списке безвредно — он и так включён.
+``use_server_subagents`` остаётся строго булевым: состав server-сабагентов определяет
+бэкенд (ему уходит только ``metadata.useServerSubagents``), выбирать имена на нашей
+стороне там нечем.
 
 Модуль без зависимостей от остального проекта: его читают и сборка тулов, и
 диспетчер, и ``agent_executor``, и ``manual_compaction``.
@@ -12,7 +13,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Iterable, Optional, Set
+from typing import Any, Iterable, List, Optional, Set
 
 _log = logging.getLogger(__name__)
 
@@ -35,13 +36,12 @@ def _normalize_name(raw: Any) -> str:
 def subagents_enabled(value: Any) -> bool:
     """Включены ли сабагенты вообще.
 
-    ``True`` → да; непустой список → да (и с сужением состава); ``False``,
-    ``None`` и **пустой список** → нет. Пустой список читается как «ни одного»
-    осознанно: иначе он означал бы «все», и опечатка в YAML молча включала бы
-    полный состав.
+    Выключает только ``False``/``None``. Любой список — включено: он сужает
+    состав КАСТОМНЫХ сабагентов, а встроенные доступны всегда. Пустой список
+    поэтому означает «только встроенные», а не «никого».
     """
     if isinstance(value, (list, tuple, set)):
-        return any(_normalize_name(item) for item in value)
+        return True
     return bool(value)
 
 
@@ -56,6 +56,23 @@ def subagents_allowlist(value: Any) -> Optional[Set[str]]:
     names = {_normalize_name(item) for item in value}
     names.discard("")
     return names or set()
+
+
+def subagents_allowlist_ordered(value: Any) -> Optional[List[str]]:
+    """Разрешённые имена в порядке из конфига; ``None`` — сужения нет.
+
+    Порядок важен: при превышении ``subagents_max_count`` кастомные берутся по
+    позиции в списке, а не по имени файла — оператор перечислил их в порядке
+    приоритета, и урезать надо с хвоста этого порядка.
+    """
+    if not isinstance(value, (list, tuple)):
+        return None
+    out: List[str] = []
+    for item in value:
+        name = _normalize_name(item)
+        if name and name not in out:
+            out.append(name)
+    return out
 
 
 def filter_subagents_by_allowlist(
@@ -92,6 +109,7 @@ def filter_subagents_by_allowlist(
 
 __all__ = [
     "filter_subagents_by_allowlist",
+    "subagents_allowlist_ordered",
     "subagents_allowlist",
     "subagents_enabled",
 ]

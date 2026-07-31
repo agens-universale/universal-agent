@@ -148,9 +148,9 @@ agent:
   #   Prefer the next concrete action over a broad survey; targeted reads that unlock that action are fine.
   system_prompt_id: v1
   use_server_subagents: false
-  # true/false либо список имён — тогда агент видит только их (встроенные и
-  # кастомные на равных, префикс subagent_ можно не писать):
-  #   use_local_subagents: [worker, db_migrator]
+  # true/false либо список имён. Список выбирает КАСТОМНЫХ сабагентов; встроенные
+  # семь доступны всегда, пока значение не false (префикс subagent_ необязателен):
+  #   use_local_subagents: [db_migrator]
   use_local_subagents: true
   subagent_max_steps: 50
   # Кастомные сабагенты из файлов: папка с .md (YAML-frontmatter + тело-роль).

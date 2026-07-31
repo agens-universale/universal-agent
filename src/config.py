@@ -271,6 +271,7 @@ def flatten_app_config(app_cfg: AppConfig) -> Dict[str, Any]:
         "agent_md_path": app_cfg.paths.agent_md_path,
         "chat_completions_system_prompt_path": app_cfg.paths.chat_completions_system_prompt_path,
         "chat_completions_intent_guard_prompt_path": app_cfg.paths.chat_completions_intent_guard_prompt_path,
+        "chat_completions_custom_subagent_system_prompt_path": app_cfg.paths.chat_completions_custom_subagent_system_prompt_path,
         "chat_completions_special_instructions_path": app_cfg.paths.chat_completions_special_instructions_path,
         "threads_data_path": app_cfg.paths.threads_data_path,
         "skills_data_path": app_cfg.paths.skills_data_path,

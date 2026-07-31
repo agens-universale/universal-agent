@@ -94,28 +94,21 @@ class TestCollisions:
         assert any("subagent_name_collision" in r.getMessage() for r in caplog.records)
 
 
-class TestMaxCount:
-    def test_default_limit_is_20(self, tmp_path, caplog):
+class TestNoLimitHere:
+    """Лимит применяется в registry, после allowlist'а: он зависит от порядка
+    имён в use_local_subagents, а дискавери о нём не знает."""
+
+    def test_all_valid_definitions_returned(self, tmp_path):
         for i in range(25):
             _write(tmp_path, f"a{i:02d}.md", f"subagent_n{i:02d}")
-        with caplog.at_level(logging.WARNING, logger="test_discovery"):
-            found = _discover({"subagents_dir": str(tmp_path)})
-        assert len(found) == 20
+        found = _discover({"subagents_dir": str(tmp_path), "subagents_max_count": 2})
+        assert len(found) == 25
 
-    def test_overflow_names_are_listed_not_silent(self, tmp_path, caplog):
-        for i in range(3):
-            _write(tmp_path, f"a{i}.md", f"subagent_n{i}")
-        with caplog.at_level(logging.WARNING, logger="test_discovery"):
-            found = _discover({"subagents_dir": str(tmp_path), "subagents_max_count": 2})
-        assert [d.name for d in found] == ["subagent_n0", "subagent_n1"]
-        msgs = [r.getMessage() for r in caplog.records]
-        assert any("subagents_max_count_exceeded" in m and "subagent_n2" in m for m in msgs)
-
-    def test_config_value_overrides_default(self, tmp_path):
-        for i in range(5):
-            _write(tmp_path, f"a{i}.md", f"subagent_n{i}")
-        found = _discover({"subagents_dir": str(tmp_path), "subagents_max_count": 1})
-        assert len(found) == 1
+    def test_order_is_by_filename(self, tmp_path):
+        _write(tmp_path, "z.md", "subagent_zebra")
+        _write(tmp_path, "a.md", "subagent_alpha")
+        names = [d.name for d in _discover({"subagents_dir": str(tmp_path)})]
+        assert names == ["subagent_alpha", "subagent_zebra"]
 
 
 class TestWarningsAreLoggable:
@@ -134,11 +127,8 @@ class TestWarningsAreLoggable:
         # коллизия между кастомными
         _write(tmp_path, "a_dup.md", "subagent_dup")
         _write(tmp_path, "z_dup.md", "subagent_dup")
-        # превышение лимита
-        for i in range(3):
-            _write(tmp_path, f"n{i}.md", f"subagent_n{i}")
         discover_subagent_definitions(
-            {"subagents_dir": str(tmp_path), "subagents_max_count": 1},
+            {"subagents_dir": str(tmp_path)},
             builtin_names=BUILTIN, logger=logger,
         )
 
@@ -149,7 +139,6 @@ class TestWarningsAreLoggable:
         events = {getattr(r, "event", None) for r in caplog.records}
         assert "subagent_definition_invalid" in events
         assert "subagent_name_collision" in events
-        assert "subagents_max_count_exceeded" in events
 
     def test_missing_dir_warning_survives(self, tmp_path, caplog):
         logger = logging.getLogger("test_extra_keys")

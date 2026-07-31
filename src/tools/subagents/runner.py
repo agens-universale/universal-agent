@@ -517,17 +517,30 @@ class SubagentRunner:
         child_state.discard_writes_after_stop = parent.discard_writes_after_stop
         return child_state
 
+    def _is_custom_subagent(self) -> bool:
+        """Задан ли текущий сабагент файлом, а не классом."""
+        return self._active_tool_name in resolve_subagent_definitions(self._config)
+
     def _resolve_subagent_system_prompt(self) -> Optional[str]:
-        """Вернуть системный промпт для субагента с fallback на промпт родителя."""
-        prompt_path_raw = self._config.get("chat_completions_subagent_system_prompt_path")
+        """Вернуть системный промпт для субагента с fallback на промпт родителя.
+
+        У кастомных (файловых) сабагентов промпт свой: он предупреждает модель,
+        что роль написана оператором в локальном файле, прав не выдаёт и может
+        расходиться с фактическим набором инструментов.
+        """
+        if self._is_custom_subagent():
+            config_key = "chat_completions_custom_subagent_system_prompt_path"
+            default_name = "chat_completions_custom_subagent_system_prompt.md"
+        else:
+            config_key = "chat_completions_subagent_system_prompt_path"
+            default_name = "chat_completions_subagent_system_prompt.md"
+
+        prompt_path_raw = self._config.get(config_key)
         candidate_paths: List[str] = []
         if isinstance(prompt_path_raw, str) and prompt_path_raw.strip():
             candidate_paths.append(os.path.abspath(prompt_path_raw.strip()))
         # bundled_root() — единый резолвер ассетов (editable → repo, wheel → site-packages).
-        default_prompt_path = str(
-            bundled_root() / "prompts" / "chat_completions_subagent_system_prompt.md"
-        )
-        candidate_paths.append(default_prompt_path)
+        candidate_paths.append(str(bundled_root() / "prompts" / default_name))
 
         for prompt_path in candidate_paths:
             if not prompt_path:

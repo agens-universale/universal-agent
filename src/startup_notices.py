@@ -116,6 +116,91 @@ def _upgrade(upgrade_info) -> List[Notice]:
                    highlights=(new,))]
 
 
+def _subagent_definitions(config_dict: Dict[str, Any]) -> List[Notice]:
+    """Пропущенные файлы кастомных сабагентов и отброшенные имена.
+
+    Дискавери зовём здесь намеренно: он читает несколько локальных .md и потому
+    дёшев (в отличие от MCP-дискавери, который ленив). Благодаря мемоизации в
+    config_dict повторного чтения не будет, а уведомления доступны сразу на
+    старте TUI, до первого запроса — иначе оператор узнал бы о пропущенном файле
+    только после того, как сабагент не нашёлся.
+
+    Молча пропущенный файл — ровно та же беда, что `stop_tools` с опечаткой:
+    оператор что-то написал, оно не сработало, и в логе он это не увидит.
+    """
+    if not str(config_dict.get("subagents_dir") or "").strip():
+        return []
+    try:
+        from tools.subagents.registry import (
+            SUBAGENT_DIAGNOSTICS_KEY,
+            resolve_subagent_definitions,
+        )
+
+        resolve_subagent_definitions(config_dict)
+        records = config_dict.get(SUBAGENT_DIAGNOSTICS_KEY) or []
+    except Exception:  # noqa: BLE001 — уведомления не должны ронять старт
+        return []
+
+    out: List[Notice] = []
+    for rec in records:
+        code = str(rec.get("code") or "")
+        if code == "subagent_definition_invalid":
+            name = _basename(rec.get("path"))
+            out.append(Notice(
+                "warning", code,
+                f"Файл сабагента пропущен: {name} — {rec.get('reason')}",
+                highlights=(name,),
+            ))
+        elif code == "subagent_name_collision":
+            name = _basename(rec.get("path"))
+            taken = str(rec.get("subagent_name") or "")
+            winner = rec.get("winner")
+            by = "встроенным" if winner == "builtin" else f"файлом {_basename(winner)}"
+            out.append(Notice(
+                "warning", code,
+                f"Имя {taken} уже занято {by} — файл {name} пропущен.",
+                highlights=(taken, name),
+            ))
+        elif code == "use_local_subagents_unknown":
+            names = [str(x) for x in (rec.get("names") or [])]
+            out.append(Notice(
+                "warning", code,
+                "use_local_subagents: имена не найдены ни среди встроенных, ни в папке "
+                f"и проигнорированы: {', '.join(names)}.",
+                highlights=("use_local_subagents", *names),
+            ))
+        elif code == "subagents_max_count_exceeded":
+            dropped = [str(x) for x in (rec.get("dropped") or [])]
+            out.append(Notice(
+                "warning", code,
+                f"Превышен subagents_max_count={rec.get('limit')} — не загружены: "
+                f"{', '.join(dropped)}.",
+                highlights=("subagents_max_count", *dropped),
+            ))
+        elif code == "subagent_required_tools_kept":
+            name = _basename(rec.get("path"))
+            names = [str(x) for x in (rec.get("names") or [])]
+            out.append(Notice(
+                "warning", code,
+                f"{name}: служебные инструменты выдаются всегда, stop_tools их не "
+                f"отбирает — запрет проигнорирован: {', '.join(names)}.",
+                highlights=(name, *names),
+            ))
+        elif code in ("subagents_dir_missing", "subagents_dir_unreadable"):
+            out.append(Notice(
+                "warning", code,
+                f"Папка кастомных сабагентов недоступна: {rec.get('dir')} — "
+                "загружены только встроенные.",
+                highlights=("subagents_dir",),
+            ))
+    return out
+
+
+def _basename(path: Any) -> str:
+    text = str(path or "")
+    return text.rsplit("/", 1)[-1] or text
+
+
 def collect_startup_notices(
     config_dict: Dict[str, Any],
     builtin_tool_names: Set[str],
@@ -131,6 +216,7 @@ def collect_startup_notices(
     infos: List[Notice] = []
     for n in (
         _stop_tools_unknown(config_dict, builtin_tool_names)
+        + _subagent_definitions(config_dict)
         + _mcp_failed(mcp_status)
         + _agentsmd(config_dict, is_tui=is_tui)
         + _compat(compat_notices)

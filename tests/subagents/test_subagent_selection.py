@@ -1,13 +1,24 @@
-"""use_local_subagents: bool или список имён (use_server_subagents не трогаем)."""
+"""use_local_subagents: bool или список имён (use_server_subagents не трогаем).
+
+Правило: список выбирает КАСТОМНЫХ сабагентов. Встроенные семь доступны всегда,
+пока значение не false, — поэтому пустой список означает «только встроенные», а
+имя встроенного в списке безвредно.
+"""
 import logging
 
 import pytest
 
 from tools.subagents.selection import (
-    filter_subagents_by_allowlist,
     subagents_allowlist,
+    subagents_allowlist_ordered,
     subagents_enabled,
 )
+
+BUILTIN = {
+    "subagent_worker", "subagent_code_generator", "subagent_code_planner",
+    "subagent_planner", "subagent_critic", "subagent_code_reviewer",
+    "subagent_special_agent",
+}
 
 
 class TestEnabled:
@@ -17,8 +28,8 @@ class TestEnabled:
         (None, False),
         (["subagent_worker"], True),
         (["worker"], True),
-        ([], False),          # пустой список = ни одного, не «все»
-        (["", "  "], False),  # список из мусора тоже пуст
+        ([], True),          # пустой список = только встроенные, а не «никого»
+        (["", "  "], True),  # мусорный список тоже включает встроенных
     ])
     def test_truthiness(self, value, expected):
         assert subagents_enabled(value) is expected
@@ -36,101 +47,159 @@ class TestAllowlist:
         assert subagents_allowlist(["worker"]) == {"subagent_worker"}
         assert subagents_allowlist(["subagent_worker"]) == {"subagent_worker"}
 
-    def test_mixed_forms_collapse(self):
-        assert subagents_allowlist(["worker", "subagent_worker"]) == {"subagent_worker"}
-
     def test_empty_list_is_empty_set_not_none(self):
-        # Отличие от None принципиально: None = «все», set() = «ни одного».
         assert subagents_allowlist([]) == set()
 
     def test_junk_entries_dropped(self):
         assert subagents_allowlist(["", "  ", "coder"]) == {"subagent_coder"}
 
 
-class TestFilter:
-    AVAILABLE = ("subagent_worker", "subagent_coder", "subagent_db_migrator")
+class TestOrderedAllowlist:
+    """Порядок нужен для урезания по subagents_max_count: оператор перечислил
+    кастомных в порядке приоритета, и отбрасывать надо хвост этого порядка."""
 
-    def test_bool_keeps_everything(self):
-        assert filter_subagents_by_allowlist(self.AVAILABLE, True) == set(self.AVAILABLE)
+    def test_bool_gives_none(self):
+        assert subagents_allowlist_ordered(True) is None
+        assert subagents_allowlist_ordered(False) is None
 
-    def test_list_narrows(self):
-        got = filter_subagents_by_allowlist(self.AVAILABLE, ["worker", "db_migrator"])
-        assert got == {"subagent_worker", "subagent_db_migrator"}
+    def test_keeps_config_order(self):
+        assert subagents_allowlist_ordered(["gamma", "alpha", "beta"]) == [
+            "subagent_gamma", "subagent_alpha", "subagent_beta",
+        ]
 
-    def test_custom_and_builtin_are_equal_citizens(self):
-        # Кастомного можно оставить, встроенных выкинуть — и наоборот.
-        assert filter_subagents_by_allowlist(self.AVAILABLE, ["db_migrator"]) == {
-            "subagent_db_migrator"
-        }
+    def test_dedup_keeps_first_position(self):
+        assert subagents_allowlist_ordered(["a", "b", "subagent_a"]) == [
+            "subagent_a", "subagent_b",
+        ]
 
-    def test_empty_list_yields_nothing(self):
-        assert filter_subagents_by_allowlist(self.AVAILABLE, []) == set()
-
-    def test_unknown_name_warns_and_is_skipped(self, caplog):
-        with caplog.at_level(logging.WARNING):
-            got = filter_subagents_by_allowlist(self.AVAILABLE, ["worker", "typo_name"])
-        assert got == {"subagent_worker"}
-        msgs = [r.getMessage() for r in caplog.records]
-        assert any("use_local_subagents_unknown" in m and "subagent_typo_name" in m for m in msgs)
+    def test_empty_list_is_empty_list(self):
+        assert subagents_allowlist_ordered([]) == []
 
 
 class TestIntegration:
-    def _cfg(self, tmp_path, agents_dir, value):
-        return {
+    def _cfg(self, tmp_path, agents_dir, value, **extra):
+        cfg = {
             "launch_root": str(tmp_path),
             "backend_api_mode": "chat_completions",
             "use_local_subagents": value,
             "subagents_dir": agents_dir,
         }
+        cfg.update(extra)
+        return cfg
 
-    def _agents(self, tmp_path):
+    def _agents(self, tmp_path, names=("alpha",)):
         d = tmp_path / "agents"
-        d.mkdir()
-        (d / "alpha.md").write_text(
-            "---\nname: subagent_alpha\ndescription: Альфа.\n---\nРоль.\n", encoding="utf-8"
-        )
+        d.mkdir(exist_ok=True)
+        for n in names:
+            (d / f"{n}.md").write_text(
+                f"---\nname: subagent_{n}\ndescription: {n}.\n---\nРоль.\n",
+                encoding="utf-8",
+            )
         return str(d)
 
-    def _subagent_names(self, cfg):
+    def _split(self, cfg):
         from tools import build_tools_data
 
         data, _spec, _descr, _mcp = build_tools_data(cfg)
-        return {n for n in data if n.startswith("subagent_")}
+        names = {n for n in data if n.startswith("subagent_")}
+        return names & BUILTIN, sorted(names - BUILTIN)
 
     def test_true_gives_all(self, tmp_path):
-        names = self._subagent_names(self._cfg(tmp_path, self._agents(tmp_path), True))
-        assert "subagent_alpha" in names
-        assert "subagent_worker" in names
+        builtin, custom = self._split(self._cfg(tmp_path, self._agents(tmp_path), True))
+        assert builtin == BUILTIN
+        assert custom == ["subagent_alpha"]
 
-    def test_list_narrows_across_both_sources(self, tmp_path):
-        cfg = self._cfg(tmp_path, self._agents(tmp_path), ["alpha", "worker"])
-        assert self._subagent_names(cfg) == {"subagent_alpha", "subagent_worker"}
+    def test_false_gives_none(self, tmp_path):
+        builtin, custom = self._split(self._cfg(tmp_path, self._agents(tmp_path), False))
+        assert builtin == set()
+        assert custom == []
 
-    def test_list_can_pick_only_custom(self, tmp_path):
-        cfg = self._cfg(tmp_path, self._agents(tmp_path), ["alpha"])
-        assert self._subagent_names(cfg) == {"subagent_alpha"}
+    def test_empty_list_keeps_builtins_only(self, tmp_path):
+        # Ключевое отличие от false: встроенные остаются.
+        builtin, custom = self._split(self._cfg(tmp_path, self._agents(tmp_path), []))
+        assert builtin == BUILTIN
+        assert custom == []
 
-    def test_false_and_empty_list_give_none(self, tmp_path):
+    def test_list_narrows_only_custom(self, tmp_path):
+        agents = self._agents(tmp_path, ("alpha", "beta"))
+        builtin, custom = self._split(self._cfg(tmp_path, agents, ["alpha"]))
+        assert builtin == BUILTIN
+        assert custom == ["subagent_alpha"]
+
+    def test_builtin_name_in_list_is_harmless(self, tmp_path):
+        agents = self._agents(tmp_path, ("alpha", "beta"))
+        builtin, custom = self._split(self._cfg(tmp_path, agents, ["alpha", "worker"]))
+        assert builtin == BUILTIN
+        assert custom == ["subagent_alpha"]
+
+    def test_unknown_name_warns(self, tmp_path, caplog):
         agents = self._agents(tmp_path)
-        assert self._subagent_names(self._cfg(tmp_path, agents, False)) == set()
-        assert self._subagent_names(self._cfg(tmp_path, agents, [])) == set()
+        with caplog.at_level(logging.WARNING):
+            self._split(self._cfg(tmp_path, agents, ["typo_name"]))
+        msgs = [r.getMessage() for r in caplog.records]
+        assert any("use_local_subagents_unknown" in m and "subagent_typo_name" in m for m in msgs)
 
-    def test_filtered_out_subagent_cannot_be_dispatched(self, tmp_path):
-        """Отфильтрованного нет в tools_spec, но реестр о нём знает.
+    def test_builtin_name_in_list_is_not_warned(self, tmp_path, caplog):
+        agents = self._agents(tmp_path)
+        with caplog.at_level(logging.WARNING):
+            self._split(self._cfg(tmp_path, agents, ["worker"]))
+        msgs = [r.getMessage() for r in caplog.records]
+        assert not any("use_local_subagents_unknown" in m for m in msgs)
 
-        Без проверки в диспетчере прямой вызов исполнился бы в обход конфига.
-        """
-        from tools import apply_tool
 
-        cfg = self._cfg(tmp_path, self._agents(tmp_path), ["alpha"])
-        out = apply_tool(
-            tool_name="subagent_worker",
-            arguments="{}",
-            config_dict=cfg,
-            tools_data_={},
-        )
-        assert "subagent_worker" in out
-        # Не запустился: вернулся отказ «нет такого тула», а не результат сабагента.
-        from tools import is_unknown_tool_output
+class TestLimitFollowsListOrder:
+    """subagents_max_count относится только к кастомным и урезает хвост списка."""
 
-        assert is_unknown_tool_output(out)
+    def _agents(self, tmp_path, names):
+        d = tmp_path / "agents"
+        d.mkdir(exist_ok=True)
+        for n in names:
+            (d / f"{n}.md").write_text(
+                f"---\nname: subagent_{n}\ndescription: {n}.\n---\nРоль.\n",
+                encoding="utf-8",
+            )
+        return str(d)
+
+    def _custom(self, tmp_path, value, limit):
+        from tools import build_tools_data
+
+        agents = self._agents(tmp_path, ("alpha", "beta", "gamma"))
+        data, _s, _d, _m = build_tools_data({
+            "launch_root": str(tmp_path),
+            "backend_api_mode": "chat_completions",
+            "use_local_subagents": value,
+            "subagents_dir": agents,
+            "subagents_max_count": limit,
+        })
+        names = {n for n in data if n.startswith("subagent_")}
+        return sorted(names - BUILTIN)
+
+    def test_list_order_wins_over_filename_order(self, tmp_path):
+        # По имени файла первыми были бы alpha и beta; список говорит иначе.
+        assert self._custom(tmp_path, ["gamma", "alpha", "beta"], 2) == [
+            "subagent_alpha", "subagent_gamma",
+        ]
+
+    def test_without_list_falls_back_to_filename_order(self, tmp_path):
+        assert self._custom(tmp_path, True, 2) == ["subagent_alpha", "subagent_beta"]
+
+    def test_builtins_are_not_counted_against_limit(self, tmp_path):
+        from tools import build_tools_data
+
+        agents = self._agents(tmp_path, ("alpha",))
+        data, _s, _d, _m = build_tools_data({
+            "launch_root": str(tmp_path),
+            "backend_api_mode": "chat_completions",
+            "use_local_subagents": True,
+            "subagents_dir": agents,
+            "subagents_max_count": 1,
+        })
+        names = {n for n in data if n.startswith("subagent_")}
+        assert names & BUILTIN == BUILTIN
+        assert sorted(names - BUILTIN) == ["subagent_alpha"]
+
+    def test_dropped_names_are_logged(self, tmp_path, caplog):
+        with caplog.at_level(logging.WARNING):
+            self._custom(tmp_path, ["gamma", "alpha", "beta"], 2)
+        msgs = [r.getMessage() for r in caplog.records]
+        assert any("subagents_max_count_exceeded" in m and "subagent_beta" in m for m in msgs)

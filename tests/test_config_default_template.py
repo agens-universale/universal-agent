@@ -80,6 +80,9 @@ EXPERT_ONLY_KEYS: set = {
     "agent.inject_tool_fields",
     # Имя HTTP-заголовка для внешнего trace_id; None по умолчанию, нужен только
     # при внешней трассировке (напр. интеграция с оркестратором заказчика).
+    # Промпт для кастомных сабагентов: дефолт резолвится из bundled prompts/,
+    # переопределяется только при своей редакции промпта. См. docs/subagents.md.
+    "paths.chat_completions_custom_subagent_system_prompt_path",
     "agent.trace_id_header_name",
     # Разрешение слать trace_id в заголовке к модели; False по умолчанию —
     # рассылка трейса наружу opt-in, нужна только при внешней трассировке.

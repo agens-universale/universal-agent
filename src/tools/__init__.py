@@ -17,11 +17,7 @@ from backends.factory import parse_os_backend_kind
 from backends.protocol import FsBackend
 from tools.skills.registry import SkillsRegistry
 from tools.subagents.registry import is_subagent_tool
-from tools.subagents.selection import (
-    filter_subagents_by_allowlist,
-    subagents_allowlist,
-    subagents_enabled,
-)
+from tools.subagents.selection import subagents_enabled
 from tools.inject_tool_fields import (
     apply_injected_fields_to_spec,
     resolve_inject_tool_fields,
@@ -211,15 +207,11 @@ def build_tools_data(
     backend_mode = str(config_dict.get("backend_api_mode", "responses")).strip().lower()
     if subagents_enabled(local_subagents_cfg) and backend_mode == "chat_completions":
         from tools.subagents.registry import get_subagents_tools_data
+        # Реестр уже применил список из use_local_subagents к кастомным;
+        # встроенные семь доступны всегда, пока фича включена.
         subagent_tools = get_subagents_tools_data(config_dict, logger=logger)
-        # Список в use_local_subagents сужает состав: оркестратор увидит только
-        # перечисленные имена, встроенные и кастомные на равных.
-        allowed = filter_subagents_by_allowlist(
-            subagent_tools.keys(), local_subagents_cfg, logger=logger
-        )
         for k, v in subagent_tools.items():
-            if k in allowed:
-                tools_data[k] = v
+            tools_data[k] = v
 
     if parse_os_backend_kind(config_dict) == "harbor":
         # Host-only: writes to local disk; not available in harbor/sandbox mode.
@@ -295,14 +287,10 @@ def apply_tool(
         return f"{tool_name} call"
 
     local_subagents_cfg = config_dict.get("use_local_subagents", False)
-    # Диспетчер сверяется со списком отдельно от сборки тулов: отфильтрованного
-    # сабагента нет в tools_spec, но is_subagent_tool знает о нём из реестра, и
-    # без этой проверки прямой вызов исполнился бы в обход конфига.
-    _allowed_local = subagents_allowlist(local_subagents_cfg)
-    if (
-        subagents_enabled(local_subagents_cfg)
-        and (_allowed_local is None or tool_name in _allowed_local)
-        and is_subagent_tool(tool_name, config_dict)
+    # Отдельная сверка со списком не нужна: реестр уже отдаёт только разрешённых
+    # кастомных, поэтому is_subagent_tool на отфильтрованном вернёт False.
+    if subagents_enabled(local_subagents_cfg) and is_subagent_tool(
+        tool_name, config_dict
     ):
         from tools.subagents.runner import SubagentRunner  # lazy: runner imports from tools
         orchestrator_state = kwargs.get("state")
