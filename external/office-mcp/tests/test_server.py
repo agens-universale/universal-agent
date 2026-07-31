@@ -47,6 +47,24 @@ async def test_build_server_registers_tools_with_correct_names(tmp_path):
     }
 
 
+async def test_aggregate_and_pivot_required_params_in_schema(tmp_path):
+    cfg = ServerConfig(
+        allowed_dirs=[str(tmp_path)],
+        allow_any=False,
+        max_file_size=10**7,
+        max_output_chars=10**6,
+        timeout_s=60,
+    )
+    server = build_server(cfg)
+    tools = {t.name: t for t in await server.list_tools()}
+
+    agg_required = set(tools["aggregate_xlsx"].inputSchema.get("required") or [])
+    assert {"path", "agg"} <= agg_required
+
+    pivot_required = set(tools["pivot_xlsx"].inputSchema.get("required") or [])
+    assert {"path", "index", "columns", "values"} <= pivot_required
+
+
 def test_health_endpoint_returns_ok(tmp_path):
     cfg = ServerConfig([str(tmp_path)], False, 10**7, 10**6, 60)
     app = build_asgi_app(cfg)

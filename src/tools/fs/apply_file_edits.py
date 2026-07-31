@@ -71,7 +71,6 @@ class ApplyFileEdits(AbstractSimpleTool):
                             "additionalProperties": False,
                         },
                     },
-                    "atomic": {"type": "boolean"},
                     "dry_run": {"type": "boolean"},
                     "backup": {"type": "boolean"},
                     "return_diff": {"type": "boolean"},

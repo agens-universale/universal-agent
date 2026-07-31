@@ -89,7 +89,7 @@ Usage:
 - Use this tool to run shell commands such as listing directories (`ls`, `dir`), checking versions (`python --version`), or running scripts.
 - Always quote arguments properly to avoid shell injection risks (the tool uses safe execution via subprocess).
 - The command is executed in the current working directory.
-- On success, the tool returns stdout; on failure, it returns stderr and exit code.
+- Always returns both stdout and stderr; check ok / exit_code for success or failure.
 - Be cautious with destructive commands (e.g., `rm`, `del`, `rmdir`).
 - Don't remove or create any files or folders outside of project directory!
 - Avoid interactive commands (e.g., `vim`, `python` without args) — they will time out or fail.
@@ -364,9 +364,7 @@ Important Usage Rules:
                         },
                     )
                 env_from_pairs[name.strip()] = value
-            # Ensure string keys and values for the backend's exec()
-            for k, v in env_from_pairs.items():
-                env_sanitized[str(k)] = "" if v is None else str(v)
+            env_sanitized = env_from_pairs
 
         try:
             res = self._backend.exec(

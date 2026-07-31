@@ -475,11 +475,11 @@ def build_server(cfg: ServerConfig) -> FastMCP:
     @mcp.tool(name="pivot_xlsx")
     def pivot_xlsx_tool(
         path: str,
+        index: str | list[str],
+        columns: str | list[str],
+        values: str,
         sheet: str | None = None,
         filter: list[FilterNode] | None = None,
-        index: str | list[str] | None = None,
-        columns: str | list[str] | None = None,
-        values: str | None = None,
         aggfunc: str = "sum",
         fill_value: int | float | str | bool | None = None,
         sort: list[SortSpec] | None = None,
@@ -493,11 +493,6 @@ def build_server(cfg: ServerConfig) -> FastMCP:
         (e.g. pivot of "id" by status -> id_open, id_closed).
         aggfunc: any AggFunc (default sum).
         Other params same as query_xlsx."""
-        if index is None or columns is None or values is None:
-            raise OfficeReaderError(
-                ErrorCategory.INVALID_INPUT,
-                reason="index, columns, and values are required",
-            )
         args = {
             "path": path, "sheet": sheet,
             "index": index, "columns": columns, "values": values, "aggfunc": aggfunc,
@@ -534,10 +529,10 @@ def build_server(cfg: ServerConfig) -> FastMCP:
     @mcp.tool(name="aggregate_xlsx")
     def aggregate_xlsx_tool(
         path: str,
+        agg: list[AggColumnSpec],
         sheet: str | None = None,
         filter: list[FilterNode] | None = None,
         groupby: list[str] | None = None,
-        agg: list[AggColumnSpec] | None = None,
         having: list[FilterNode] | None = None,
         sort: list[SortSpec] | None = None,
         limit: int | None = None,
@@ -552,8 +547,6 @@ def build_server(cfg: ServerConfig) -> FastMCP:
         having: filter applied AFTER aggregation; result-column names are
         <col>_<func> (e.g. hours_sum).
         Other params same as query_xlsx."""
-        if agg is None:
-            raise OfficeReaderError(ErrorCategory.INVALID_INPUT, reason="agg is required")
         agg_map = agg_columns_to_dict(agg)
         args = {
             "path": path, "sheet": sheet,
