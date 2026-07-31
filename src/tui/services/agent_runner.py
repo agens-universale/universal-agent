@@ -6,11 +6,19 @@
 """
 from __future__ import annotations
 
+import logging
 import queue
 import threading
+import time
 from typing import Any, Callable, Optional
 
 from tui.services.stdin_bridge import redirect_stdin
+
+# O11: без timeout агент-поток может висеть вечно, если UI не ответил на confirm.
+# 10 мин — достаточно человеку; дальше fail-closed deny.
+CONFIRM_WAIT_TIMEOUT_SEC = 600.0
+
+_log = logging.getLogger(__name__)
 
 
 class AgentRunner:
@@ -234,6 +242,8 @@ class AgentRunner:
     def make_tui_confirm(
         self,
         present: Callable[..., bool | None],
+        *,
+        timeout_sec: Optional[float] = None,
     ) -> Callable[..., str]:
         """Вернуть замыкание tui_confirm для передачи в ctx.
 
@@ -242,7 +252,13 @@ class AgentRunner:
         False — сразу deny без wait() (I2). None — legacy present без ack;
         поддерживается опциональный ``via`` для метки child HITL.
         Возвращает ConfirmChoice: 'once'|'session'|'deny'.
+
+        ``timeout_sec`` — макс. ожидание ответа (default ``CONFIRM_WAIT_TIMEOUT_SEC``).
+        По таймауту / stop → fail-closed ``deny`` (O11).
         """
+        wait_timeout = (
+            CONFIRM_WAIT_TIMEOUT_SEC if timeout_sec is None else float(timeout_sec)
+        )
 
         def _tui_confirm(
             *,
@@ -265,8 +281,29 @@ class AgentRunner:
             # False = explicit fail; None/True — mounted (None = legacy present без ack).
             if mounted is False:
                 return "deny"
-            self._confirm_event.wait()
-            return self._confirm_choice
+            if self._stop_requested or self._marked_stopped:
+                return "deny"
+            started = time.monotonic()
+            # Короткие wait-слойсы: реагируем на stop/cancel без полного timeout.
+            deadline = started + max(0.0, wait_timeout)
+            while True:
+                if self._stop_requested or self._marked_stopped:
+                    self._confirm_choice = "deny"
+                    return "deny"
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    elapsed = time.monotonic() - started
+                    _log.warning(
+                        "tui_confirm_timeout title=%r elapsed_sec=%.1f "
+                        "timeout_sec=%.1f → deny",
+                        title,
+                        elapsed,
+                        wait_timeout,
+                    )
+                    self._confirm_choice = "deny"
+                    return "deny"
+                if self._confirm_event.wait(timeout=min(remaining, 1.0)):
+                    return self._confirm_choice
 
         return _tui_confirm
 
