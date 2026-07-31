@@ -209,6 +209,28 @@ def test_exec_default_capture_cap_is_60k(be):
     assert be.exec_output_capture_max_chars == 60_000
 
 
+def test_exec_reader_threads_are_daemon(be, monkeypatch):
+    """A12: stdout/stderr readers must be daemon so mid-drain exit is not blocked."""
+    import threading
+
+    from backends import local as local_mod
+
+    created = []
+    RealThread = threading.Thread
+
+    def TrackingThread(*args, **kwargs):
+        t = RealThread(*args, **kwargs)
+        created.append(t)
+        return t
+
+    monkeypatch.setattr(local_mod.threading, "Thread", TrackingThread)
+    res = be.exec("echo hi", timeout=10)
+    assert res.return_code == 0
+    readers = [t for t in created if t.name in ("exec-stdout-reader", "exec-stderr-reader")]
+    assert len(readers) == 2
+    assert all(t.daemon for t in readers)
+
+
 def test_exec_bounded_stdout_not_killed(be):
     """Output exceeding cap is bounded; process is NOT killed (drain & discard)."""
     be.exec_output_capture_max_chars = 200

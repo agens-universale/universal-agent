@@ -272,7 +272,7 @@ _READ_CHUNK = 8192
 _CAPTURED_READY_TIMEOUT_SEC = 30
 # Discard после cap — fire-and-forget: данные уже в sink. Короткий join, чтобы
 # не копить зомби-треды на типичном хвосте; если discard долгий — уходим с
-# captured, reader дочитает в фоне (non-daemon).
+# captured, reader дочитает в фоне как daemon (не блокирует process exit).
 _DRAIN_JOIN_TIMEOUT_SEC = 2
 
 
@@ -391,10 +391,16 @@ def _run_bounded_process(
             ready.set()
 
     t_out = threading.Thread(
-        target=_reader, args=(proc.stdout, stdout_buf, stdout_hit, stdout_ready)
+        target=_reader,
+        args=(proc.stdout, stdout_buf, stdout_hit, stdout_ready),
+        daemon=True,
+        name="exec-stdout-reader",
     )
     t_err = threading.Thread(
-        target=_reader, args=(proc.stderr, stderr_buf, stderr_hit, stderr_ready)
+        target=_reader,
+        args=(proc.stderr, stderr_buf, stderr_hit, stderr_ready),
+        daemon=True,
+        name="exec-stderr-reader",
     )
     t_out.start()
     t_err.start()
