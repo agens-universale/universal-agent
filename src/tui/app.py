@@ -161,6 +161,11 @@ class TuiApp(App):
         # Один id на процесс TUI — для exclusive session lock (session-lock SPEC).
         self.tui_id = uuid.uuid4().hex
         self._clipboard_warn_shown = False  # native-fail hint раз за сессию (clipboard_ops)
+        self._select_copy_timer = None  # O9: debounce copy-on-select
+        self._pending_select_copy: Optional[str] = None
+
+    # Debounce copy-on-select: не дергать subprocess на каждый MouseUp.
+    _COPY_ON_SELECT_DEBOUNCE_S = 0.15
 
     def get_css_variables(self) -> dict:
         """Питаем TCSS палитрой из tui.palette — единый источник цветов для CSS и
@@ -818,16 +823,36 @@ class TuiApp(App):
         """Ctrl+Shift+C / Super+C: copy selection; пусто → no-op (не stop)."""
         payload = self._clipboard_payload()
         if payload:
-            copy_out(self, payload, toast=True)
+            copy_out(self, payload, toast=True, blocking=False)
 
     def on_text_selected(self, event) -> None:
         """Copy-on-select: drag без Shift → внешний буфер (тихий успех).
 
         TextSelected не шлётся из Input/TextArea — дубля с focused.selected_text нет.
+        Debounce: последний payload за окно; native write — в worker (O9).
         """
         payload = self._clipboard_payload()
-        if payload:
-            copy_out(self, payload, toast=False)
+        if not payload:
+            return
+        self._pending_select_copy = payload
+        timer = getattr(self, "_select_copy_timer", None)
+        if timer is not None:
+            try:
+                timer.stop()
+            except Exception:
+                pass
+        self._select_copy_timer = self.set_timer(
+            self._COPY_ON_SELECT_DEBOUNCE_S,
+            self._flush_select_copy,
+        )
+
+    def _flush_select_copy(self) -> None:
+        """Сработал debounce copy-on-select — копируем последний payload."""
+        self._select_copy_timer = None
+        text = self._pending_select_copy
+        self._pending_select_copy = None
+        if text:
+            copy_out(self, text, toast=False, blocking=False)
 
     def _push_session_copy_buffer(self, payload: str) -> None:
         """B2: дописать payload сверху в буфер сессии (tui.copy_buffer) через meta.
@@ -862,7 +887,7 @@ class TuiApp(App):
         """Ctrl+C: выделение → копировать (+ буфер сессии); активный run → стоп; вхолостую → exit-модалка (как Esc)."""
         payload = self._clipboard_payload()
         if payload:
-            copy_out(self, payload, toast=True)
+            copy_out(self, payload, toast=True, blocking=False)
             self._push_session_copy_buffer(payload)  # B2: тем же payload сверху
             return
         scr = self.screen

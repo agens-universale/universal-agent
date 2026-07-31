@@ -1,7 +1,8 @@
 """Единый write-path копирования во внешний буфер ОС.
 
-OSC 52 + внутренний app.clipboard всегда; native через os_ops.write_clipboard.
-Возврат bool = успех только native (OSC «вызван» ≠ успех).
+OSC 52 + внутренний app.clipboard всегда (на UI-потоке); native через
+os_ops.write_clipboard — синхронно (тесты) или в worker (TUI, O9).
+Возврат bool = успех native при blocking; при async — True если задача поставлена.
 """
 from __future__ import annotations
 
@@ -38,20 +39,40 @@ def with_source_cite(text: str, *, kind: str, path: str) -> str:
     return f"{text.rstrip()}\n[{kind}: {path}]"
 
 
-def copy_out(app: Any, text: str, *, toast: bool = False) -> bool:
-    """Скопировать text: OSC+internal, затем native. return = native ok.
+def copy_out(
+    app: Any,
+    text: str,
+    *,
+    toast: bool = False,
+    blocking: bool = True,
+) -> bool:
+    """Скопировать text: OSC+internal сразу, native sync или в worker.
 
     toast=True — хоткей: при native ok показать «Скопировано».
     toast=False — copy-on-select: тихий успех.
+    blocking=True — ждать write_clipboard (тесты / простой API).
+    blocking=False — native в ``run_worker``; UI не ждёт subprocess (O9).
     При native fail — warning раз за сессию (текст зависит от среды).
     Пустой text — no-op, False.
     """
     if not text:
         return False
     app.copy_to_clipboard(text)
-    ok = write_clipboard(text)
-    _feedback(app, ok, toast=toast)
-    return ok
+    if blocking or not callable(getattr(app, "run_worker", None)):
+        ok = write_clipboard(text)
+        _feedback(app, ok, toast=toast)
+        return ok
+
+    def _work() -> None:
+        ok = write_clipboard(text)
+        try:
+            app.call_from_thread(_feedback, app, ok, toast=toast)
+        except RuntimeError:
+            # App уже останавливается — feedback не нужен.
+            pass
+
+    app.run_worker(_work, thread=True, name="clipboard-write")
+    return True
 
 
 def _feedback(app: Any, ok: bool, *, toast: bool) -> None:

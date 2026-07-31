@@ -65,7 +65,7 @@ def test_write_clipboard_graceful_on_missing_tool(monkeypatch):
 def test_win_clipboard_roundtrip_cyrillic_and_glyphs():
     saved = os_ops.read_clipboard()
     try:
-        s = "привет ● ✓ ⠇ мир"  # кириллица + спец-глифы (проверка CF_UNICODETEXT/UTF-16)
+        s = "привет ● ✓ ⠇ мир"  # кириллица + текстовые глифы (проверка CF_UNICODETEXT/UTF-16)
         assert os_ops.write_clipboard(s) is True
         assert os_ops.read_clipboard() == s
     finally:

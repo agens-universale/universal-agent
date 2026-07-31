@@ -63,8 +63,8 @@ async def test_text_selected_calls_copy_out(tmp_path, monkeypatch):
 
     seen: list = []
 
-    def fake_copy_out(app, text, *, toast=False):
-        seen.append((text, toast))
+    def fake_copy_out(app, text, *, toast=False, blocking=True):
+        seen.append((text, toast, blocking))
         return True
 
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
@@ -77,8 +77,38 @@ async def test_text_selected_calls_copy_out(tmp_path, monkeypatch):
         )
         monkeypatch.setattr(pilot.app, "_current_selection", lambda: "выделено")
         pilot.app.post_message(events.TextSelected())
-        await pilot.pause(0.1)
-        assert seen == [("выделено", False)]  # toast=False — тихий select
+        # debounce 150ms — ждём flush
+        await pilot.pause(0.25)
+        assert seen == [("выделено", False, False)]  # toast=False, blocking=False
+
+
+@pytest.mark.asyncio
+async def test_text_selected_debounce_keeps_last(tmp_path, monkeypatch):
+    from textual import events
+    from tui.app import TuiApp
+
+    seen: list = []
+
+    def fake_copy_out(app, text, *, toast=False, blocking=True):
+        seen.append(text)
+        return True
+
+    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    async with app.run_test() as pilot:
+        monkeypatch.setattr("tui.app.copy_out", fake_copy_out)
+        seq = {"n": 0}
+        texts = ["один", "два"]
+
+        def _sel():
+            i = min(seq["n"], len(texts) - 1)
+            return texts[i]
+
+        monkeypatch.setattr(pilot.app, "_current_selection", _sel)
+        pilot.app.post_message(events.TextSelected())
+        seq["n"] = 1
+        pilot.app.post_message(events.TextSelected())
+        await pilot.pause(0.25)
+        assert seen == ["два"]
 
 
 @pytest.mark.asyncio
@@ -88,7 +118,7 @@ async def test_text_selected_empty_noop(tmp_path, monkeypatch):
 
     seen: list = []
 
-    def fake_copy_out(app, text, *, toast=False):
+    def fake_copy_out(app, text, *, toast=False, blocking=True):
         seen.append(text)
         return True
 
@@ -97,7 +127,7 @@ async def test_text_selected_empty_noop(tmp_path, monkeypatch):
         monkeypatch.setattr("tui.app.copy_out", fake_copy_out)
         monkeypatch.setattr(pilot.app, "_current_selection", lambda: "")
         pilot.app.post_message(events.TextSelected())
-        await pilot.pause(0.1)
+        await pilot.pause(0.25)
         assert seen == []
 
 
