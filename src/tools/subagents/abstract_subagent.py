@@ -25,7 +25,7 @@ HANDOFF CONTRACT
 - Put one machine-readable handoff in that channel's handoff/payload slot (shape and encoding follow the tool schema and the system handoff contract).
 - Treat the system prompt's handoff contract as the single source of truth for keys and status values; do not invent a parallel schema.
 - Role addendum may require extra fields; extend the system contract — do not rename or replace its base keys/enums.
-- The handoff work report for the orchestrator must be detailed enough to act without the child trace; any separate short human-facing turn blurb on the finalizing tool stays brief.
+- Keep handoff concise (brief self-contained summary + structured fields). Put the full narrative in the finalizing tool's dedicated human-facing report/summary field — do not duplicate a long write-up in handoff.
 - Keep handoff machine-readable. Do not return prose-only final handoff.
 """
 

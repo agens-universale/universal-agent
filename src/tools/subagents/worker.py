@@ -92,7 +92,7 @@ Your execution is the foundation for downstream evaluation. Make it precise, ver
         worker_notes = """
 WORKER HANDOFF ADDENDUM
 - Put blockers and failed verification in `blockers` / `evidence` (optional `issues` only if useful).
-- If no artifacts were produced, explain why in `report`, add evidence of the limitation, and set status to partial, blocked, or failed as appropriate.
+- If no artifacts were produced, explain why in `summary`/`details`, add evidence of the limitation, and set status to partial, blocked, or failed as appropriate.
 """
         assignment = self.build_assignment_message({"task": self.task, "reason": self.reason})
         return self.with_handoff_contract(self.agent_role, worker_notes), assignment

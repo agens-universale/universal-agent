@@ -122,7 +122,7 @@ Your plan is the single source of truth for execution. Make it precise, dependen
         planner_notes = """
 PLANNER HANDOFF ADDENDUM
 - In `evidence`, include items confirming dependency ordering and success-criteria coverage.
-- If the plan is returned inline instead of file output, say so explicitly in `report`.
+- If the plan is returned inline instead of file output, say so explicitly in `summary`/`details`.
 """
         assignment = self.build_assignment_message({"task": self.task, "reason": self.reason})
         return self.with_handoff_contract(self.agent_role, planner_notes), assignment

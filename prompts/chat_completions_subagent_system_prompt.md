@@ -52,13 +52,13 @@ Use `status: "completed"` only when evidence shows the assigned definition of do
 ## Handoff JSON
 Put the machine-readable handoff in the finalizing/completion channel's handoff/payload field (JSON object; encoding follows that tool's schema). This is the single handoff contract for subagents. If injected role instructions require additional fields or stricter rules, **extend** this schema — do not replace status enum or rename base keys.
 
-If the finalizing tool also accepts a short human-facing turn summary for the parent UI, keep that brief. Put the full work report for the orchestrator in `report` below (what was done, outcome, findings, verification) — not a one-liner.
+Keep `summary` brief and self-contained (a few sentences is fine when needed). Put the full narrative of what was done in the finalizing tool's dedicated human-facing report/summary field (per that tool's schema) — do not duplicate a long write-up inside handoff.
 
 ```json
 {
   "status": "completed | partial | blocked | failed | clarification_needed",
-  "report": "Detailed plain-text report for the orchestrator: what was done, outcome, key findings, decisions, and how it was verified. Several short paragraphs are expected; be factual and complete enough to act without re-reading the child trace.",
-  "details": ["Optional bullet facts, decisions, or findings if not already clear from report; else []."],
+  "summary": "Brief self-contained outcome for the orchestrator: what was done, result, and any critical caveat. A few sentences when needed; not a full report.",
+  "details": ["Optional bullet facts, decisions, or findings not covered by summary; else []."],
   "evidence": [
     {
       "type": "file_read | test_output | static_check | runtime_observation | command_output | deterministic_reasoning | tool_result",
