@@ -13,6 +13,7 @@ from message_policy.project_memory_notice.policy import (
     wrap_project_memory_hint_user_message,
 )
 from message_policy.notice_policy_log import log_notice_policy_step
+from message_policy.todo_reminder import apply_todo_reminder
 from message_policy.tool_usage_notice.policy import (
     batch_used_tool,
     collect_tool_usage_notices,
@@ -112,6 +113,8 @@ def apply_tool_usage_notice_before_llm(
 
     for notice_text in collect_tool_usage_notices(state, notice_rules, registers=registers):
         out.append(wrap_tool_usage_notice_user_message(notice_text))
+
+    out = apply_todo_reminder(out, state, cfg, step_messages=step_messages)
 
     counters_final = dict(getattr(state, "tool_usage_notice_cnt", None) or {})
     emitted_tools = {
