@@ -279,15 +279,17 @@ def run_summary_compaction(
             final_out["summary_message_content"] = summary_message_content
     log_summary_message_body(logger, log_ctx, summary_message_content)
 
+    # nested: cycle with persistence → states → tools → summarize
+    from persistence.schema import serialize_shared_block
+
     _shared = getattr(state, "shared", None)
     summary_payload = {
         "summary_message_content": summary_message_content,
-        "shared": {
-            "working_memory": dict(getattr(_shared, "working_memory", None) or {})
-            if _shared
-            else {},
-            "notes_md": str(getattr(_shared, "notes_md", "") or "") if _shared else "",
-        },
+        # Весь shared-блок целиком, а не выборка полей: thread_store этим объектом
+        # ПОЛНОСТЬЮ заменяет meta["shared"], поэтому ручной список терял остальные
+        # поля (confirm_rules, fetch_url_cache, …) — детерминированно при ручном
+        # /compact (там нет post-run heal) и при обрыве рана.
+        "shared": serialize_shared_block(_shared),
         "user_intent_log": serialize_for_meta(
             list(getattr(state, "user_intent_log", []) or [])
         ),
