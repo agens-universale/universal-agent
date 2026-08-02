@@ -171,8 +171,8 @@ def select_active_substate(
 # (/skills, /export доступны через палитру — в футере лишние. /mcp не дублируем —
 # подсказка «/mcp» уже в бренд-карточке.)
 # Diff: F3 в базовом хроме футера; CTA в трейсе — пути pending + [F3]/diff.
-_FOOTER_LEFT = "[F1]/help  [F2]/sessions  [F3]/diff  [F5]/config  [F6]/settings"
-_FOOTER_RUNNING_LEFT = "[F1]/help  [F2]/sessions  [F3]/diff  [Ctrl+C]/stop"
+_FOOTER_LEFT = "F1/help  F2/sessions  F3/diff  F5/config  F6/settings  F7/buffer"
+_FOOTER_RUNNING_LEFT = "F1/help  F2/sessions  F3/diff  F7/buffer  [Ctrl+C]/stop"
 _PLACEHOLDER_READY = "опишите задачу или /команда"
 _HINT_TEXT = {
     "clear": "Esc ещё раз, чтобы очистить",
@@ -2652,7 +2652,7 @@ class TraceScreen(Screen):
 
             ⚠ MCP: 3/5 подключены · /mcp             (только если заданы MCP-серверы)
 
-            ⚠ 2 · ℹ 1 · [F4]/notices                (только если есть уведомления)
+            ⚠ 2 · ℹ 1 · F4/notices                (только если есть уведомления)
 
             ↑ доступна новая версия · /settings → Обновление  (teal, если авто-чек нашёл)
 

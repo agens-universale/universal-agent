@@ -35,6 +35,8 @@ class AgentReplyLine(ClickModelMixin, Static):
         # Не-None → get_selection отдаёт весь markdown/fenced, игнорируя координаты
         # (rich.Table/rich.Syntax = RichVisual, координаты не мапятся на markdown).
         self._copy_text = copy_text
+        # Renderable для in-place подсветки (Syntax.bg); None если copy_text нет.
+        self._select_renderable = content if copy_text is not None else None
 
     def get_selection(self, selection) -> "tuple[str, str] | None":
         if self._copy_text is not None:
@@ -42,13 +44,33 @@ class AgentReplyLine(ClickModelMixin, Static):
         return super().get_selection(selection)
 
     def selection_updated(self, selection) -> None:
-        # Whole-widget highlight: RichVisual не красит selection сам (в отличие
-        # от Text/Content). Класс только при copy_text — иначе Text-ветка уже
-        # имеет нативный посимвольный span. Screen._watch_selections уже зовёт
-        # selection_updated на enter/leave selection.
+        # Whole-widget highlight: RichVisual не красит selection сам.
+        # 1) CSS-класс — background виджета (table padding / пустые зоны).
+        # 2) Syntax — свой bgcolor в каждой ячейке; CSS его не перекрывает,
+        #    поэтому меняем background_color in-place (BAND_BG ↔ FOCUS_BG).
+        # Outline не используем: margin-left у .code-indent клипает левый край.
         if self._copy_text is not None:
-            self.set_class(selection is not None, "-copy-selected")
+            selected = selection is not None
+            self.set_class(selected, "-copy-selected")
+            self._apply_syntax_select_bg(selected)
         super().selection_updated(selection)
+
+    def _apply_syntax_select_bg(self, selected: bool) -> None:
+        from rich.style import Style
+        from rich.syntax import Syntax
+
+        from tui.palette import BAND_BG, FOCUS_BG
+
+        renderable = self._select_renderable
+        if not isinstance(renderable, Syntax):
+            return
+        bg = FOCUS_BG if selected else BAND_BG
+        if renderable.background_color == bg:
+            return
+        renderable.background_color = bg
+        renderable.background_style = Style(bgcolor=bg)
+        # Пересобрать visual без reflow (размер тот же).
+        self.update(renderable, layout=False)
 
     def _open_request(self) -> Optional[Message]:
         if not self._event_no:

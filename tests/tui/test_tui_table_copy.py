@@ -189,6 +189,43 @@ async def test_selection_updated_no_class_without_copy_text():
         assert not w.has_class("-copy-selected")
 
 
+@pytest.mark.asyncio
+async def test_selection_updated_swaps_syntax_background():
+    """Syntax-ветка: selection → background_color=FOCUS_BG; clear → BAND_BG.
+
+    CSS background не перекрывает ячейки rich.Syntax — подсветка идёт
+    in-place через background_color (спека 2026-08-02).
+    """
+    from textual.app import App, ComposeResult
+    from rich.syntax import Syntax
+    from tui.palette import BAND_BG, FOCUS_BG
+    from tui.widgets.agent_reply_line import AgentReplyLine
+
+    syntax = Syntax(
+        "print(1)", lexer="python", theme="monokai",
+        background_color=BAND_BG, word_wrap=False,
+    )
+
+    class _App(App):
+        def compose(self) -> ComposeResult:
+            yield AgentReplyLine(syntax, event_no=1, copy_text="```python\nprint(1)\n```")
+
+    async with _App().run_test() as pilot:
+        w = pilot.app.query_one(AgentReplyLine)
+        assert isinstance(w._select_renderable, Syntax)
+        assert w._select_renderable.background_color == BAND_BG
+
+        w.selection_updated(selection=object())
+        await pilot.pause()
+        assert w.has_class("-copy-selected")
+        assert w._select_renderable.background_color == FOCUS_BG
+
+        w.selection_updated(selection=None)
+        await pilot.pause()
+        assert not w.has_class("-copy-selected")
+        assert w._select_renderable.background_color == BAND_BG
+
+
 # ---- render_code_block / build_block_widgets: copy_text передаётся ----
 
 def test_render_code_block_with_lang_has_copy_text():
