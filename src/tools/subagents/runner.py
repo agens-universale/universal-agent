@@ -334,13 +334,10 @@ class SubagentRunner:
                 ok=False,
                 finish_reason=_limit_outcome,
             )
-            return self._limit_response(
-                tool_name=tool_name,
-                finish_reason=_limit_outcome,
-                steps=child_state.steps,
-                child_run_id=str(getattr(child_ctx, "run_id", "") or ""),
-                detail=result if isinstance(result, str) else None,
-            )
+            # Pass-through: child run_agent already built the limit envelope
+            # (ok=false, status, message, raw_trace_summary). Do NOT rebuild
+            # our own JSON or call LLM here — spec §6.2.
+            return result
 
         result_payload: Any = result or "Subagent finished without explicit result."
         self._log_lifecycle(
@@ -667,44 +664,6 @@ class SubagentRunner:
         if child_run_id:
             meta["child_run_id"] = child_run_id
         return cancelled_by_user_output(tool_name, meta=meta)
-
-    def _limit_response(
-        self,
-        tool_name: str,
-        *,
-        finish_reason: str,
-        steps: int,
-        child_run_id: str = "",
-        detail: Optional[str] = None,
-    ) -> str:
-        """Run limit (step/token/tool-call): ok=false, finish_reason=<limit> (не маскировать под completed)."""
-        if finish_reason == "step_limit":
-            default_message = f"Subagent {tool_name} stopped: step limit reached ({steps})."
-        else:
-            default_message = (
-                f"Subagent {tool_name} stopped: {finish_reason.replace('_', ' ')} reached."
-            )
-        message = (detail or "").strip() or default_message
-        meta: Dict[str, Any] = {
-            "tool_name": tool_name,
-            "steps": steps,
-            "finish_reason": finish_reason,
-        }
-        if child_run_id:
-            meta["child_run_id"] = child_run_id
-        payload = {
-            "tool": tool_name,
-            "ok": False,
-            "status": finish_reason,
-            "message": message,
-            "error": {
-                "code": finish_reason,
-                "message": message,
-                "retryable": True,
-            },
-            "meta": meta,
-        }
-        return json.dumps(payload, ensure_ascii=False)
 
     def _error_response(
         self,

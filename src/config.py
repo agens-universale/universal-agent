@@ -309,6 +309,7 @@ def flatten_app_config(app_cfg: AppConfig) -> Dict[str, Any]:
         "exec_output_capture_max_chars": app_cfg.agent.exec_output_capture_max_chars,
         "inject_tool_fields": dict(app_cfg.agent.inject_tool_fields),
         "model_steering": app_cfg.agent.model_steering,
+        "limit_trace_summary": app_cfg.agent.limit_trace_summary,
         "mcp-servers": {
             name: server.model_dump(by_alias=True) for name, server in app_cfg.mcp.servers.items()
         },

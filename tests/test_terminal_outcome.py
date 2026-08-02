@@ -95,6 +95,8 @@ def _make_ctx(**overrides):
         "console_trace": False,
         "no_tool_call_max_count": 5,
         "strict_turn_finish_validation": False,
+        # Без live LLM в unit-тестах: envelope возвращается с пустым summary.
+        "limit_trace_summary": False,
     }
     cfg.update(overrides)
     return SimpleNamespace(
@@ -126,7 +128,11 @@ def test_step_limit_sets_terminal_outcome(monkeypatch):
         _make_ctx(),
     )
 
-    assert "step" in result.lower() or "limit" in result.lower()
+    _env = json.loads(result)
+    assert _env["ok"] is False
+    assert _env["status"] == "step_limit"
+    assert "step" in _env["message"].lower() or "limit" in _env["message"].lower()
+    assert "raw_trace_summary" in _env
     assert state.terminal_outcome == "step_limit"
 
 
@@ -158,9 +164,13 @@ def test_tool_call_limit_sets_terminal_outcome(monkeypatch):
         state,
         _make_ctx(max_tool_calls=2),
     )
+    _env = json.loads(result)
+    assert _env["ok"] is False
+    assert _env["status"] == "tool_call_limit"
+    assert "2" in _env["message"]
+    assert "raw_trace_summary" in _env
     assert state.terminal_outcome == "tool_call_limit"
     assert state.tool_calls >= 2
-    assert "tool calls of 2 limit" in result
 
 
 def test_tool_calls_counter_counts_batch_none_limit(monkeypatch):
@@ -202,8 +212,12 @@ def test_token_limit_sets_terminal_outcome_aux_category(monkeypatch):
         state,
         _make_ctx(session_token_limit=10),
     )
+    _env = json.loads(result)
+    assert _env["ok"] is False
+    assert _env["status"] == "token_limit"
+    assert "token" in _env["message"].lower()
+    assert "raw_trace_summary" in _env
     assert state.terminal_outcome == "token_limit"
-    assert "session token limit" in result
 
 
 def test_token_limit_ignores_thread_cumulative(monkeypatch):
@@ -222,5 +236,6 @@ def test_token_limit_ignores_thread_cumulative(monkeypatch):
         _make_ctx(session_token_limit=500),
     )
     # ран ничего не потратил → до token_limit не дошли, упёрлись в шаги
-    assert state.terminal_outcome == "step_limit"
-    assert "token" not in result
+    _env = json.loads(result)
+    assert _env["status"] == "step_limit"
+    assert "token" not in _env["message"].lower()

@@ -73,19 +73,24 @@ def test_step_limit_returns_ok_false_not_completed(monkeypatch):
     def _fake_run_agent(messages, child_state, child_ctx, **kwargs):
         child_state.terminal_outcome = "step_limit"
         child_state.steps = 5
-        return "Agent executed 5 steps and doesn't finish his work because of step limits."
+        # Child run_agent returns a limit envelope (build_limit_envelope).
+        return json.dumps({
+            "ok": False,
+            "status": "step_limit",
+            "message": "Agent stopped: step limit (5/5).",
+            "raw_trace_summary": "## Intent\n\nDid work.",
+        })
 
     out = runner._run_internal(
         "subagent_worker", subagent_cls, {"task": "t"}, _fake_run_agent
     )
+    # Runner pass-through: child envelope returned as-is (spec §6.2).
     payload = json.loads(out)
     assert payload["ok"] is False
     assert payload["status"] == "step_limit"
-    assert payload["error"]["code"] == "step_limit"
-    assert payload["meta"]["finish_reason"] == "step_limit"
-    assert payload["meta"]["steps"] == 5
-    assert payload["meta"]["child_run_id"] == "cr-step"
-    assert "result" not in payload or payload.get("ok") is False
+    assert "step" in payload["message"].lower()
+    assert payload["raw_trace_summary"] == "## Intent\n\nDid work."
+    assert "error" not in payload  # no _limit_response rebuild
 
 
 def test_normal_complete_still_ok_true(monkeypatch):

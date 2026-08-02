@@ -28,6 +28,7 @@ from intent_scope.final_answer import maybe_record_final_answer_intent
 from message_policy.cycle_stop import append_cycle_stop_tool_outputs_for_batch
 from message_policy.stop_persist import is_persist_discarded
 from message_policy.user_stop import not_started_due_to_user_stop_output
+from summarize.limit_trace_summary import build_limit_envelope
 from request_backend_policy import request_chat_completions_with_policy
 from tools import apply_tool, WrongFunctionArgumentsException, is_unknown_tool_output
 from tools.session.stored_outputs.wrapping import maybe_store_and_wrap_tool_output
@@ -887,14 +888,11 @@ def run_agent(
 
             if state.steps > state.max_steps:
                 state.terminal_outcome = "step_limit"
-                return f'Agent executed {state.max_steps} steps and doesn\'t finish his work because of step limits.'
+                return build_limit_envelope(state, "step_limit", ctx)
 
             if max_tool_calls_limit is not None and state.tool_calls >= max_tool_calls_limit:
                 state.terminal_outcome = "tool_call_limit"
-                return (
-                    f"Agent executed {state.tool_calls} tool calls of "
-                    f"{max_tool_calls_limit} limit and doesn't finish his work."
-                )
+                return build_limit_envelope(state, "tool_call_limit", ctx)
 
             if session_token_limit is not None:
                 _baseline = UsageAccount.from_meta(
@@ -903,10 +901,7 @@ def run_agent(
                 _spent = state.usage.delta_from(_baseline).totals()["total"]
                 if _spent >= session_token_limit:
                     state.terminal_outcome = "token_limit"
-                    return (
-                        f"Agent spent {_spent} tokens of {session_token_limit} "
-                        f"session token limit and doesn't finish his work."
-                    )
+                    return build_limit_envelope(state, "token_limit", ctx)
 
             if tool_error_cnt > max_tool_errors:
                 state.terminal_outcome = "tool_errors"
