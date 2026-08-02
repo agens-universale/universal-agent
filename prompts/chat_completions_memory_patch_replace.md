@@ -18,6 +18,8 @@ Prefer hint tags (`last_verified_facts`, `active_constraints`, `recent_artifacts
 
 When naming files/modules in any register, keep full absolute paths as in the dialog/tool results (e.g. `/home/.../src/backends/local.py:84`); never basename-only (`local.py`).
 
+{{MEMORY_PATCH_SUBAGENT_GUIDANCE}}
+
 ## Output
 
 {{MEMORY_PATCH_WM_REGISTERS}}
