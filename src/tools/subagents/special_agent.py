@@ -275,7 +275,8 @@ class SpecialAgent(AbstractSubagent):
         role_prompt = self.agent_role or ""
         special_notes = """
 SPECIAL AGENT HANDOFF ADDENDUM
-- Adapt optional fields (issues, metrics, recommendations, blockers) to the assigned domain.
+- Follow the system handoff contract; extend with domain fields (issues, metrics, recommendations) only when useful.
+- `blockers` / `assumptions` / `next_actions` are base schema fields — fill them (or `[]`).
 - Keep the final payload machine-readable and avoid prose-only final handoff.
 """
         assignment = self.build_assignment_message({"task": self.task, "reason": self.reason})

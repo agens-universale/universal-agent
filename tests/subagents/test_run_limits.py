@@ -17,16 +17,21 @@ def test_run_limit_returns_ok_false_not_completed(monkeypatch, finish_reason):
     def _fake_run_agent(messages, child_state, child_ctx, **kwargs):
         child_state.terminal_outcome = finish_reason
         child_state.steps = 5
-        return f"Agent stopped because of {finish_reason}."
+        # Child run_agent returns a limit envelope (build_limit_envelope).
+        return json.dumps({
+            "ok": False,
+            "status": finish_reason,
+            "message": f"Agent stopped: {finish_reason}.",
+            "raw_trace_summary": "",
+        })
 
     out = runner._run_internal(
         "subagent_worker", subagent_cls, {"task": "t"}, _fake_run_agent
     )
+    # Runner pass-through: child envelope returned as-is (spec §6.2).
     payload = json.loads(out)
     assert payload["ok"] is False
     assert payload["status"] == finish_reason
-    assert payload["error"]["code"] == finish_reason
-    assert payload["meta"]["finish_reason"] == finish_reason
-    assert payload["meta"]["steps"] == 5
-    assert payload["meta"]["child_run_id"] == "cr-step"
-    assert "result" not in payload or payload.get("ok") is False
+    assert finish_reason in payload["message"]
+    assert "raw_trace_summary" in payload
+    assert "error" not in payload  # no _limit_response rebuild

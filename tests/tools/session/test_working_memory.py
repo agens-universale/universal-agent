@@ -129,6 +129,13 @@ def test_prompt_description_reason_optional():
     assert "content" in prompt
 
 
+def test_schema_requires_action_and_register():
+    required = WorkingMemory.tool_description()["parameters"]["required"]
+    assert required == ["action", "register"]
+    prompt = WorkingMemory.prompt_description()
+    assert '"required":["action","register"]' in prompt.replace(" ", "")
+
+
 def test_invalid_register_rejected():
     res = _call(
         _make_state(),
@@ -137,6 +144,28 @@ def test_invalid_register_rejected():
     )
     assert res["ok"] is False
     assert res["error"]["type"] == "invalid_register"
+
+
+def test_write_without_register_missing_register():
+    res = _call(
+        _make_state(),
+        action="write",
+        content="should not land without register",
+    )
+    assert res["ok"] is False
+    assert res["error"]["type"] == "missing_register"
+    assert "register is required" in res["error"]["message"]
+
+
+def test_empty_register_missing_register():
+    res = _call(
+        _make_state(),
+        action="append",
+        register="  ",
+        content="- delta",
+    )
+    assert res["ok"] is False
+    assert res["error"]["type"] == "missing_register"
 
 
 def test_register_limit_exceeded():

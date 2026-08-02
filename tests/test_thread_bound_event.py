@@ -27,7 +27,6 @@ def _config(tmp_path, log_format):
         "max_steps": 0,
         "system_prompt_id": "v1",
         "chat_completions_system_prompt_path": str(_prompt_file(tmp_path)),
-        "dump_storage": False,
         "no_tool_call_max_count": 5,
         "verbose": False,
     }

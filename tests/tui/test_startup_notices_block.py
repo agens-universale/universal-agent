@@ -22,7 +22,7 @@ async def test_startup_block_collapsed_shows_max_three(tmp_path):
 
 @pytest.mark.asyncio
 async def test_notices_summary_in_card_not_trace(tmp_path):
-    """При уведомлениях в КАРТОЧКЕ строка «⚠ N · [F4]/notices» (формат B); в трейсе
+    """При уведомлениях в КАРТОЧКЕ строка «⚠ N · F4/notices» (формат B); в трейсе
     НЕТ блока-заголовка «Уведомления» — детали только на экране /notices."""
     pytest.importorskip("textual")
     from textual.widgets import Static
@@ -33,7 +33,7 @@ async def test_notices_summary_in_card_not_trace(tmp_path):
         scr = pilot.app.screen
         await pilot.pause()
         card = str(scr._mcp_status_row.render())
-        assert "⚠" in card and "[F4]/notices" in card, (
+        assert "⚠" in card and "F4/notices" in card, (
             f"Строка уведомлений не найдена в карточке: {card!r}"
         )
         # Блок-заголовок «Уведомления · N» в трейсе не монтируется.
@@ -56,7 +56,7 @@ async def test_notices_line_format_b_glyph_and_breakdown(tmp_path):
         await pilot.pause()
         card = str(scr._mcp_status_row.render())
         assert "уведомления:" not in card                       # слово убрано
-        assert "⚠ 2 · [F4]/notices" in card                    # 2 warning'а, формат B
+        assert "⚠ 2 · F4/notices" in card                    # 2 warning'а, формат B
         # строка уведомлений — базовым цветом карточки, без амбер-подсветки глифа
         from tui.palette import WARN
         t = scr._compose_card_lines(None)

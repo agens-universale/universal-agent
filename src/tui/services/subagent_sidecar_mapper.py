@@ -10,7 +10,6 @@ from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Literal, Optional, Sequence, Tuple
 
 from tools.subagents.progress import brief_args_summary, parse_tool_result_status
-from tools.subagents.sidecar import lookup_tool_detail
 from tui.models import TraceEvent
 
 CHILD_SUMMARY_LABEL = "контекст субагента сжат"
@@ -222,13 +221,10 @@ def detail_from_sidecar_records(
 def resolve_nested_tool_detail(
     call_id: str, *, sidecar_records: Sequence[Dict[str, Any]] | None = None
 ) -> Optional[Dict[str, Any]]:
-    """cache (mid-session) → sidecar records (reopen)."""
-    cached = lookup_tool_detail(call_id)
-    if cached and isinstance(cached.get("call"), dict):
-        return cached
-    if sidecar_records is not None:
-        return detail_from_sidecar_records(sidecar_records, call_id)
-    return None
+    """Detail из sidecar records на диске (mid-session и reopen)."""
+    if not call_id or sidecar_records is None:
+        return None
+    return detail_from_sidecar_records(sidecar_records, call_id)
 
 
 def trace_events_from_nested_detail(

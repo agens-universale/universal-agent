@@ -56,7 +56,6 @@ agent:
 logging:
   full_log_backend: false
   console_trace: true
-  dump_storage: false
   save_logs: true
 
 paths:
@@ -97,6 +96,12 @@ summary:
 # Доп. strip-теги для for_model / aux LLM. <think> всегда on; extras — сюда.
 strip_tags_projection:
   tags: []
+
+# Лимиты FS-тулов, которые поднимают файл целиком в память.
+# read — fs_read_file / fs_search_files; mutate — apply/replace (не append).
+fs_tools:
+  max_read_bytes: 8388608       # 8 MiB
+  max_mutate_bytes: 16777216    # 16 MiB (peak RAM ≈ ×2–3; raise via config if needed)
 
 security:
   command_moderation:

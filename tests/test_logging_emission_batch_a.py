@@ -1,7 +1,6 @@
 """TDD tests for the jsonl `event` instrumentation added to:
 - tools/turn/ask_human.py
 - tools/turn/intermediate_reply.py
-- persistence/state_storage.py
 - run_context.py
 
 Each test drives the real code path with a jsonl-mode per-run logger and
@@ -13,7 +12,6 @@ import json
 import pytest
 
 import run_context as rc
-from persistence.state_storage import dump_storage
 from tools.turn.ask_human import AskHuman
 from tools.turn.intermediate_reply import IntermediateReply
 from utils.logging_module import create_run_logger
@@ -114,27 +112,6 @@ def test_intermediate_reply_event(tmp_path):
     assert events
     assert events[0]["answer"] == "status update"
     assert events[0]["artifact_path"] == "report.md"
-
-
-# ---------------------------------------------------------------------------
-# persistence/state_storage.py
-# ---------------------------------------------------------------------------
-
-def test_dump_storage_logs_event(tmp_path):
-    logger, path, _ = create_run_logger(_jsonl_cfg(tmp_path), run_id="ds1", agent_kind="main")
-
-    dump_storage(str(tmp_path), logger=logger)
-
-    for h in logger.handlers:
-        h.flush()
-    events = [e for e in _read_events(path) if e["event"] == "storage_dumped"]
-    assert events
-    assert events[0]["path"].startswith(str(tmp_path))
-
-
-def test_dump_storage_without_logger_does_not_raise(tmp_path):
-    # Additive: no logger passed -> no event, but no crash and human print stays.
-    dump_storage(str(tmp_path))
 
 
 # ---------------------------------------------------------------------------

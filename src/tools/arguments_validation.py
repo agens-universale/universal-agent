@@ -222,6 +222,24 @@ def _coerce_numeric_strings(
         if not isinstance(subschema, dict):
             continue
         expected = subschema.get("type")
+        # anyOf/oneOf without a top-level type (e.g. `occurrence` in
+        # fs_search_and_replace / fs_apply_file_edits): locate a numeric branch
+        # so numeric strings are coerced like plain integer/number fields.
+        if expected is None:
+            composite = subschema.get("anyOf") or subschema.get("oneOf")
+            if not isinstance(composite, list):
+                continue
+            numeric_branch: Dict[str, Any] | None = None
+            for branch in composite:
+                if isinstance(branch, dict) and branch.get("type") in ("integer", "number"):
+                    numeric_branch = branch
+                    break
+            if numeric_branch is None:
+                continue
+            expected = numeric_branch["type"]
+            validate_schema = numeric_branch
+        else:
+            validate_schema = subschema
         if expected not in ("integer", "number"):
             continue
         try:
@@ -234,7 +252,7 @@ def _coerce_numeric_strings(
             if not float(num).is_integer():
                 continue
             num = int(num)
-        if Draft7Validator(subschema).is_valid(num):
+        if Draft7Validator(validate_schema).is_valid(num):
             coerced[field] = num
             changed = True
     return coerced, changed

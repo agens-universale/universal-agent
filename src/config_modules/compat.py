@@ -19,6 +19,7 @@ RENAME_CONVERTERS: Dict[str, Callable[[Any], Any]] = {}
 # {"dotted.путь": "почему удалён"}
 REMOVED: Dict[str, str] = {
     "update.check_interval_days": "проверка идёт при каждом запуске; выключить — update.check: off",
+    "logging.dump_storage": "debug-дамп storage удалён; обновите config.yml: gc-cli --sync-config",
 }
 
 _SYNC_HINT = "обновите config.yml: gc-cli --sync-config"

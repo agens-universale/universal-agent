@@ -20,7 +20,6 @@ from message_policy.tool_usage_notice.policy import (
     wrap_thread_memory_technical_user_message,
 )
 from message_policy.tool_usage_notice.state import persist_tool_usage_notice_state
-from persistence.state_storage import save_state
 from intent_log.user_turn import append_user_asks_from_messages, init_subagent_open_turn
 from run_context import RunContext
 from tools.skills.registry import get_skills_registry
@@ -155,8 +154,6 @@ class SubagentRunner:
                 message=f"Subagent {tool_name} child state build failed: {exc}",
                 retryable=False,
             )
-        save_state(child_state)
-
         user_message = {
             "role": "user",
             "content": initial_message,
@@ -345,13 +342,10 @@ class SubagentRunner:
                 ok=False,
                 finish_reason=_limit_outcome,
             )
-            return self._limit_response(
-                tool_name=tool_name,
-                finish_reason=_limit_outcome,
-                steps=child_state.steps,
-                child_run_id=str(getattr(child_ctx, "run_id", "") or ""),
-                detail=result if isinstance(result, str) else None,
-            )
+            # Pass-through: child run_agent already built the limit envelope
+            # (ok=false, status, message, raw_trace_summary). Do NOT rebuild
+            # our own JSON or call LLM here — spec §6.2.
+            return result
 
         result_payload: Any = result or "Subagent finished without explicit result."
         self._log_lifecycle(
@@ -641,7 +635,10 @@ class SubagentRunner:
             environment=getattr(self._ctx, "environment", None),
             project_gc_dir=getattr(self._ctx, "project_gc_dir", Path(".")),
         )
+        # Режим родителя (C3 gc.force_collect default on CLI/TUI) — наследуем,
+        # иначе child process_tool_calls видит оба флага False и collect выключается.
         child_ctx.is_tui = bool(getattr(self._ctx, "is_tui", False))
+        child_ctx.is_cli_mode = bool(getattr(self._ctx, "is_cli_mode", False))
         # Progress bridge: same sink as parent (TUI queue or None/no-op); call_id of
         # the parent subagent_* function_call for correlating nested UI rows.
         child_ctx.subagent_progress_sink = getattr(
@@ -714,44 +711,6 @@ class SubagentRunner:
         if child_run_id:
             meta["child_run_id"] = child_run_id
         return cancelled_by_user_output(tool_name, meta=meta)
-
-    def _limit_response(
-        self,
-        tool_name: str,
-        *,
-        finish_reason: str,
-        steps: int,
-        child_run_id: str = "",
-        detail: Optional[str] = None,
-    ) -> str:
-        """Run limit (step/token/tool-call): ok=false, finish_reason=<limit> (не маскировать под completed)."""
-        if finish_reason == "step_limit":
-            default_message = f"Subagent {tool_name} stopped: step limit reached ({steps})."
-        else:
-            default_message = (
-                f"Subagent {tool_name} stopped: {finish_reason.replace('_', ' ')} reached."
-            )
-        message = (detail or "").strip() or default_message
-        meta: Dict[str, Any] = {
-            "tool_name": tool_name,
-            "steps": steps,
-            "finish_reason": finish_reason,
-        }
-        if child_run_id:
-            meta["child_run_id"] = child_run_id
-        payload = {
-            "tool": tool_name,
-            "ok": False,
-            "status": finish_reason,
-            "message": message,
-            "error": {
-                "code": finish_reason,
-                "message": message,
-                "retryable": True,
-            },
-            "meta": meta,
-        }
-        return json.dumps(payload, ensure_ascii=False)
 
     def _error_response(
         self,

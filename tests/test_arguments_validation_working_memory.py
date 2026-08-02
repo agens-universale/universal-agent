@@ -47,6 +47,18 @@ def test_parse_and_validate_attaches_tool_hint_on_schema_error():
     assert exc_info.value.extra_hint is not None
 
 
+def test_parse_and_validate_rejects_write_without_register():
+    spec = WorkingMemory.tool_description()
+    with pytest.raises(WrongFunctionArgumentsException):
+        parse_and_validate_tool_arguments(
+            tool_name="session_memory",
+            arguments=json.dumps({"action": "write", "content": "x"}),
+            tool_spec=spec,
+            allow_empty_for_empty_schema=False,
+            tool_fabric=WorkingMemory,
+        )
+
+
 def test_exception_extra_hint_in_feedback():
     exc = WrongFunctionArgumentsException(
         message="unknown field",

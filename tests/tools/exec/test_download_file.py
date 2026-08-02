@@ -183,6 +183,52 @@ def test_download_file_invalid_filename_path_traversal(tmp_path):
     assert result["error"]["type"] == "invalid_filename"
 
 
+@pytest.mark.parametrize(
+    ("filename", "body"),
+    [
+        ("my report (final).pdf", PDF_BYTES),
+        ("отчёт за июль.pdf", PDF_BYTES),
+        ("Q1 (2026) — summary.xlsx", DOCX_BYTES),
+        ("file with spaces.txt", b"hello plain text\n"),
+    ],
+)
+def test_download_file_accepts_spaces_parens_unicode(tmp_path, monkeypatch, filename, body):
+    launch_root = tmp_path / "project"
+    launch_root.mkdir()
+    monkeypatch.setattr(
+        requests,
+        "Session",
+        lambda: _SessionStub(_Resp(content=body, url=f"https://example.com/{filename}")),
+    )
+
+    result = json.loads(
+        with_local_ctx(DownloadFile, config_dict=_config(launch_root))(
+            url="https://example.com/x.pdf",
+            filename=filename,
+        )
+    )
+
+    assert result["ok"] is True
+    assert result["filename"] == filename
+    assert (launch_root / "downloads" / filename).read_bytes() == body
+
+
+@pytest.mark.parametrize("bad_char", ["\x00", "\r", "\n"])
+def test_download_file_rejects_null_and_newlines(tmp_path, bad_char):
+    launch_root = tmp_path / "project"
+    launch_root.mkdir()
+
+    result = json.loads(
+        with_local_ctx(DownloadFile, config_dict=_config(launch_root))(
+            url="https://example.com/x.pdf",
+            filename=f"bad{bad_char}name.pdf",
+        )
+    )
+
+    assert result["ok"] is False
+    assert result["error"]["type"] == "invalid_filename"
+
+
 def test_download_file_format_blocked_extension(tmp_path):
     launch_root = tmp_path / "project"
     launch_root.mkdir()

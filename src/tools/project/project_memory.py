@@ -99,13 +99,14 @@ class ProjectMemory(AbstractSimpleTool):
                         "type": "string",
                         "description": (
                             "Markdown text for append/write. "
+                            "Required for every action; ignored for read. "
                             "For append: ONLY the new delta. "
                             "For write: the FULL updated markdown (full overwrite). "
-                            "Parameter is ignored for read action."
+                            "For read: pass empty string \"\"."
                         ),
                     },
                 },
-                "required": ["action"],
+                "required": ["action", "content"],
                 "additionalProperties": False,
             },
             "strict": True,

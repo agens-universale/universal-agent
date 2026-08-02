@@ -71,6 +71,11 @@ def _request_patch(
     )
 
 
+def _is_subagent_state(state: Any) -> bool:
+    """Child agent State has parent_state_id; main orchestrator does not."""
+    return getattr(state, "parent_state_id", None) is not None
+
+
 def request_patch_replace(
     *,
     ctx: Any,
@@ -85,7 +90,10 @@ def request_patch_replace(
         "chat_completions_memory_patch_replace_prompt_path",
         DEFAULT_MEMORY_PATCH_REPLACE_PROMPT_PATH,
     )
-    system = load_memory_patch_replace_prompt(prompt_path)
+    # Soft-only: subagent addendum lives in system prompt only (no user duplicate).
+    system = load_memory_patch_replace_prompt(
+        prompt_path, subagent=_is_subagent_state(state)
+    )
     user_prompt = (
         "<dialog_history>\n"
         f"{history_text}\n"

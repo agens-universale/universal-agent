@@ -183,6 +183,23 @@ def test_t7_binary_not_tracked(proj):
     assert list(store.diffs_dir.glob("*.orig")) == []
 
 
+def test_cp1251_snapshot_undo_round_trip(proj):
+    """F: legacy text is snapshotted as raw bytes; undo restores encoding."""
+    target = proj / "src" / "legacy.txt"
+    original = "Привет, мир!\n".encode("cp1251")
+    target.write_bytes(original)
+    store = _store(proj)
+
+    key = store.register_mutation(str(target))
+    assert key == "src/legacy.txt"
+    assert _orig_path(store, key).read_bytes() == original
+
+    target.write_bytes("Пока!\n".encode("cp1251"))
+    result = store.undo(str(target))
+    assert result.ok is True
+    assert target.read_bytes() == original
+
+
 # --- T8: атомарность approve — при сбое index не «approved» без .orig ---
 
 

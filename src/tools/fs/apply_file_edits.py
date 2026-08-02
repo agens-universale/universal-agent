@@ -1,14 +1,17 @@
 import difflib
 import functools
-import hashlib
 import json
 from typing import Any, Dict, List, Tuple
 
 from security.path_policy import enforce_write_guard
 from utils.file_text import (
     check_expected_file_sha256,
+    decode_text_bytes,
     is_valid_sha256_hex,
+    sha256_hex_of_bytes,
+    try_encode_text_bytes,
 )
+from utils.fs_size_limits import check_file_size, fs_mutate_max_bytes
 from tools.fs.edit_suggestions import build_edit_miss_suggestions
 from tools.schema_optional import coalesce_optional_string
 from tools.simple_tool_base import AbstractSimpleTool
@@ -16,7 +19,6 @@ from utils.tool_report_paths import tool_report_abspath
 from utils.atomic_io import atomic_replace
 
 class ApplyFileEdits(AbstractSimpleTool):
-    max_file_size_bytes = 100 * 1024 * 1024
     default_diff_context_lines = 3
     default_max_diff_chars = 12000
 
@@ -69,7 +71,6 @@ class ApplyFileEdits(AbstractSimpleTool):
                             "additionalProperties": False,
                         },
                     },
-                    "atomic": {"type": "boolean"},
                     "dry_run": {"type": "boolean"},
                     "backup": {"type": "boolean"},
                     "return_diff": {"type": "boolean"},
@@ -80,6 +81,15 @@ class ApplyFileEdits(AbstractSimpleTool):
                         "description": (
                             "SHA-256 hex digest from file_info(include_hash=true). "
                             "Batch aborts with stale_file if file content changed."
+                        ),
+                    },
+                    "encoding": {
+                        "type": "string",
+                        "description": (
+                            "Optional text encoding. Omit for UTF-8 (default; also UTF-16 with BOM). "
+                            "Otherwise: utf-8, utf-8-sig, cp1251, koi8-r, latin-1, utf-16, "
+                            "utf-16-le, utf-16-be (also windows-1251, iso-8859-1). "
+                            "Successful edits are written back in the same encoding."
                         ),
                     },
                 },
@@ -122,6 +132,7 @@ class ApplyFileEdits(AbstractSimpleTool):
         diff_truncated: bool = False,
         error: Dict[str, Any] | None = None,
         sha256: str | None = None,
+        encoding_used: str | None = None,
     ) -> str:
         return json.dumps(
             {
@@ -140,6 +151,7 @@ class ApplyFileEdits(AbstractSimpleTool):
                 "diff_truncated": diff_truncated,
                 "message": message,
                 "sha256": sha256,
+                "encoding_used": encoding_used,
                 "error": error,
             },
             ensure_ascii=False,
@@ -295,9 +307,11 @@ class ApplyFileEdits(AbstractSimpleTool):
         diff_context_lines: int = default_diff_context_lines,
         max_diff_chars: int = default_max_diff_chars,
         expected_file_sha256: str | None = None,
+        encoding: str | None = None,
         **kwargs,
     ) -> str:
         expected_file_sha256 = coalesce_optional_string(expected_file_sha256)
+        encoding = coalesce_optional_string(encoding)
         _result = functools.partial(self._result, path=path)
         if not isinstance(path, str):
             return _result(ok=False, applied=False, edits_would_apply=0, total_would_replace=0, edits_applied=0, total_replaced=0, edit_results=[], message="Argument 'path' must be a string.", error={"type": "invalid_argument", "field": "path"})
@@ -327,15 +341,26 @@ class ApplyFileEdits(AbstractSimpleTool):
             file_size = self._backend.getsize(path)
         except Exception as e:
             return _result(ok=False, applied=False, edits_would_apply=0, total_would_replace=0, edits_applied=0, total_replaced=0, edit_results=[], message="Failed to get file size.", error={"type": "stat_failed", "message": str(e)})
-        if file_size > self.max_file_size_bytes:
-            return _result(ok=False, applied=False, edits_would_apply=0, total_would_replace=0, edits_applied=0, total_replaced=0, edit_results=[], message=f"File is too large for apply_file_edits: {file_size} bytes (max {self.max_file_size_bytes} bytes).", error={"type": "file_too_large", "actual_bytes": file_size, "max_bytes": self.max_file_size_bytes})
+        size_err = check_file_size(
+            file_size,
+            fs_mutate_max_bytes(self._config_dict),
+            operation="apply_file_edits",
+        )
+        if size_err is not None:
+            return _result(ok=False, applied=False, edits_would_apply=0, total_would_replace=0, edits_applied=0, total_replaced=0, edit_results=[], message=size_err["message"], error=size_err)
 
         try:
-            original = self._backend.read(path)
+            raw = self._backend.read_bytes(path)
         except Exception as e:
             return _result(ok=False, applied=False, edits_would_apply=0, total_would_replace=0, edits_applied=0, total_replaced=0, edit_results=[], message="Failed to read file.", error={"type": "read_failed", "message": str(e)})
-
-        stale_error = check_expected_file_sha256(original, expected_file_sha256)
+        decoded = decode_text_bytes(raw, encoding=encoding)
+        if not decoded.ok:
+            err = decoded.error or {"type": "read_failed", "message": "Failed to decode file."}
+            return _result(ok=False, applied=False, edits_would_apply=0, total_would_replace=0, edits_applied=0, total_replaced=0, edit_results=[], message=err.get("message", "Failed to decode file."), error=err)
+        original = decoded.text or ""
+        encoding_used = decoded.encoding_used
+        actual_sha256 = sha256_hex_of_bytes(raw)
+        stale_error = check_expected_file_sha256(actual_sha256, expected_file_sha256)
         if stale_error is not None:
             return _result(
                 ok=False,
@@ -459,7 +484,24 @@ class ApplyFileEdits(AbstractSimpleTool):
                 )
 
         try:
-            self._backend.write(path, current, encoding="utf-8")
+            out_bytes, encode_err = try_encode_text_bytes(current, encoding_used or "utf-8")
+            if encode_err is not None:
+                return _result(
+                    ok=False,
+                    applied=False,
+                    edits_would_apply=edits_would_apply,
+                    total_would_replace=total_would_replace,
+                    edits_applied=0,
+                    total_replaced=0,
+                    edit_results=edit_results,
+                    message=encode_err.get("message", "Failed to encode file."),
+                    backup_path=backup_path,
+                    diff=diff_text,
+                    diff_truncated=diff_truncated,
+                    error=encode_err,
+                )
+            assert out_bytes is not None
+            self._backend.write_bytes(path, out_bytes)
         except Exception as e:
             return _result(
                 ok=False,
@@ -476,13 +518,12 @@ class ApplyFileEdits(AbstractSimpleTool):
                 error={"type": "write_failed", "message": str(e)},
             )
 
-        content_sha256 = hashlib.sha256(
-            current.encode("utf-8", errors="replace")
-        ).hexdigest()
+        content_sha256 = sha256_hex_of_bytes(out_bytes)
         return _result(
             ok=True,
             applied=True,
             sha256=content_sha256,
+            encoding_used=encoding_used,
             edits_would_apply=edits_would_apply,
             total_would_replace=total_would_replace,
             edits_applied=edits_would_apply,

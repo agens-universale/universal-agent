@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import threading
+import time
 import types
 
 import pytest
@@ -80,6 +81,48 @@ def test_tui_confirm_waits_only_after_mounted_ack():
     t.join(timeout=3.0)
     assert not t.is_alive()
     assert result == ["once"]
+
+
+def test_tui_confirm_timeout_auto_deny():
+    """O11: нет ответа за timeout → deny, поток не висит вечно."""
+    from tui.services.agent_runner import AgentRunner
+
+    runner = AgentRunner(
+        executor=types.SimpleNamespace(stop_run=lambda: None, add_message=lambda m: None)
+    )
+    result: list[str] = []
+    confirm = runner.make_tui_confirm(lambda *_a: True, timeout_sec=0.05)
+
+    def worker():
+        result.append(confirm(title="t", question="q", fields=[]))
+
+    t = threading.Thread(target=worker, daemon=True)
+    t.start()
+    t.join(timeout=3.0)
+    assert not t.is_alive()
+    assert result == ["deny"]
+
+
+def test_tui_confirm_stop_requested_denies_without_full_wait():
+    """stop_requested во время wait → deny быстрее полного timeout."""
+    from tui.services.agent_runner import AgentRunner
+
+    runner = AgentRunner(
+        executor=types.SimpleNamespace(stop_run=lambda: None, add_message=lambda m: None)
+    )
+    result: list[str] = []
+    confirm = runner.make_tui_confirm(lambda *_a: True, timeout_sec=30.0)
+
+    def worker():
+        result.append(confirm(title="t", question="q", fields=[]))
+
+    t = threading.Thread(target=worker, daemon=True)
+    t.start()
+    time.sleep(0.05)
+    runner._stop_requested = True
+    t.join(timeout=3.0)
+    assert not t.is_alive()
+    assert result == ["deny"]
 
 
 @pytest.mark.asyncio

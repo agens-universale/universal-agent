@@ -3,7 +3,8 @@ import html as html_lib
 import json
 import re
 import time
-from typing import Any, Dict, Optional
+from collections import OrderedDict
+from typing import Any, Dict, Optional, Tuple
 from urllib.parse import urljoin
 
 import requests
@@ -21,6 +22,12 @@ class _RedirectBlocked(Exception):
 class SimpleFetchUrl(AbstractSimpleTool):
     timeout_seconds = 20
     max_content_chars = 20_000
+    # LRU-лимит кэша извлечённого текста страниц (на тред/сессию).
+    # Кэш хранится в SharedStateData (per-thread, персистится в meta),
+    # поэтому лимит ограничивает и RAM, и размер JSON-meta треда.
+    # Должен совпадать с FetchUrl.fetch_url_cache_max_size — оба делят
+    # shared.fetch_url_cache.
+    fetch_url_cache_max_size = 10
     max_retries = 2
     retry_backoff_seconds = 1.0
     default_user_agent = (
@@ -124,15 +131,50 @@ class SimpleFetchUrl(AbstractSimpleTool):
         payload["preview"] = preview
         return json.dumps(payload, ensure_ascii=False)
 
-    def _get_cache(self) -> Optional[Dict[str, Any]]:
+    def _get_cache(self) -> Optional["OrderedDict[str, Any]"]:
         shared = getattr(self._state, "shared", None)
         if shared is None:
             return None
         cache = getattr(shared, "fetch_url_cache", None)
-        if not isinstance(cache, dict):
-            cache = {}
+        # Нормализация: из meta кэш восстанавливается как обычный dict,
+        # а для LRU нужен OrderedDict. Если тип не совпадает — пересобираем.
+        if not isinstance(cache, OrderedDict):
+            cache = OrderedDict(cache if isinstance(cache, dict) else {})
             setattr(shared, "fetch_url_cache", cache)
         return cache
+
+    def _get_from_cache(
+        self, url: str
+    ) -> Optional[Tuple[str, Dict[str, Optional[str]]]]:
+        """Возвращает (content, meta) для закэшированного URL или None.
+
+        При cache-hit обновляет LRU-порядок: только что читанный URL становится
+        самым свежим и не вытесняется следующими записями.
+        """
+        cache = self._get_cache()
+        if cache is None or url not in cache:
+            return None
+        cached = cache[url]
+        if isinstance(cached, dict):
+            content = cached.get("content", "")
+            meta = self._normalize_meta(cached.get("meta"))
+        else:
+            content = cached if isinstance(cached, str) else ""
+            meta = self._normalize_meta(None)
+        cache.move_to_end(url)
+        return content, meta
+
+    def _put_to_cache(
+        self, url: str, content: str, meta: Dict[str, Optional[str]]
+    ) -> None:
+        """Записывает страницу в кэш и эвиктирует самые старые при превышении лимита."""
+        cache = self._get_cache()
+        if cache is None:
+            return
+        cache[url] = {"content": content, "meta": meta}
+        cache.move_to_end(url, last=True)
+        while len(cache) > self.fetch_url_cache_max_size:
+            cache.popitem(last=False)
 
     @staticmethod
     def _normalize_meta(meta: Optional[Dict[str, Any]]) -> Dict[str, Optional[str]]:
@@ -371,15 +413,9 @@ class SimpleFetchUrl(AbstractSimpleTool):
                 error={"type": "invalid_argument", "field": "timeout_seconds", "message": "timeout_seconds must be greater than 0."},
             )
 
-        cache = self._get_cache()
-        if cache is not None and normalized_url in cache:
-            cached = cache[normalized_url]
-            if isinstance(cached, dict):
-                cached_content = cached.get("content", "")
-                cached_meta = self._normalize_meta(cached.get("meta"))
-            else:
-                cached_content = cached if isinstance(cached, str) else ""
-                cached_meta = self._normalize_meta(None)
+        cached = self._get_from_cache(normalized_url)
+        if cached is not None:
+            cached_content, cached_meta = cached
             sliced = self._slice_content(cached_content, offset, limit)
             return _result(
                 ok=True,
@@ -538,8 +574,7 @@ class SimpleFetchUrl(AbstractSimpleTool):
         page_meta = self._extract_meta(text)
         extracted = self._extract_simple_html_text(text)
         if extracted:
-            if cache is not None:
-                cache[normalized_url] = {"content": extracted, "meta": page_meta}
+            self._put_to_cache(normalized_url, extracted, page_meta)
             sliced = self._slice_content(extracted, offset, limit)
             return _result(
                 ok=True,

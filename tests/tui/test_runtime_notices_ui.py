@@ -26,10 +26,10 @@ async def test_runtime_notice_appears_in_card(tmp_path):
         pilot.app.refresh_notices_indicators()
         card = str(scr._mcp_status_row.render())
         assert "⚠ 1" in card
-        assert "[F4]/notices" in card
+        assert "F4/notices" in card
         footer = str(scr.query_one("#footer-left").render())
         assert "⚠ 1" in footer
-        assert "[F4]/notices" in footer
+        assert "F4/notices" in footer
 
         notices = scr._collect_notices()
         assert any(n.code == "llm_error_400" for n in notices)

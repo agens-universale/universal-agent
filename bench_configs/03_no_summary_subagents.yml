@@ -64,7 +64,6 @@ paths:
 logging:
   full_log_backend: false
   console_trace: true
-  dump_storage: false
   save_logs: true
 
 quality_gate:

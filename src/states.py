@@ -20,7 +20,7 @@ class SharedStateData:
     # ``<persistent_state>``. Intentionally not renamed in JSON/yaml (thread compat).
     working_memory: Dict[str, str] = field(default_factory=dict)
     notes_md: str = ""
-    fetch_url_cache: Dict[str, str] = field(default_factory=dict)
+    fetch_url_cache: Dict[str, Any] = field(default_factory=dict)
     confirm_rules: Dict[str, bool] = field(default_factory=dict)
 
 
@@ -95,6 +95,10 @@ class State:
         self.backend_api_mode = "responses"
         self.previous_response_id = None
         self.last_backend_response_id = None
+        # finish_reason последнего backend-ответа (None | "stop" | "length" | ...).
+        # Используется, чтобы при невалидном JSON tool-call отличить усечение
+        # (finish_reason=="length") от обычной ошибки генерации.
+        self.last_finish_reason: Optional[str] = None
         self.mode = mode
         self.call_id = call_id
         self.max_steps = max_steps

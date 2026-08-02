@@ -112,7 +112,6 @@ class TestBindClearThreadIdentity:
 
 class TestChildCtxCopiesThreadIdentity:
     def test_build_child_ctx_copies_identity_without_sink(self, tmp_path):
-        from persistence.state_storage import save_state
         from states import SharedStateData, State
         from tests.helpers.tool_ctx import local_ctx
         from tools.subagents.runner import SubagentRunner
@@ -130,7 +129,6 @@ class TestChildCtxCopiesThreadIdentity:
             shared=SharedStateData(),
         )
         state.backend_api_mode = "chat_completions"
-        save_state(state)
 
         cfg = {
             "save_logs": True,

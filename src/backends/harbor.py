@@ -7,8 +7,10 @@ File ops mirror deepagents' HarborSandbox: write/edit use native upload/download
 read/list use shell through exec.
 """
 import asyncio
+import base64
 import shlex
 import tempfile
+import uuid
 from pathlib import Path
 from typing import Any, Callable, Iterable, Optional
 
@@ -19,6 +21,11 @@ from backends.protocol import (
     bound_exec_result,
 )
 from backends.walk_util import iter_files_from_flat, iter_walk_from_flat
+from utils.file_text import (
+    decode_text_best_effort,
+    encode_text_for_append,
+    encode_text_for_write,
+)
 
 
 class HarborBackend(FsBackend):
@@ -92,21 +99,47 @@ class HarborBackend(FsBackend):
         command = f"python3 - <<'GC_HARBOR_PY_EOF'\n{code}\nGC_HARBOR_PY_EOF"
         return self.exec(command, cwd=cwd, timeout=timeout, env=env)
 
-    # --- file read (shell) ---
+    # --- file read (shell / download) ---
     def read(self, path: str) -> str:
-        res = self._await(self._env.exec(f"cat {shlex.quote(path)}"))
-        if res.return_code != 0:
+        # Raw bytes via download, then same codec as local ``read_text_for_edit``.
+        if not self.exists(path):
             raise FileNotFoundError(path)
-        return res.stdout or ""
+        text = decode_text_best_effort(self.read_bytes(path))
+        if text is not None:
+            return text
+        raise UnicodeDecodeError(
+            "utf-8",
+            b"",
+            0,
+            1,
+            f"undecodable or binary file: {path}",
+        )
+
+    def read_bytes(self, path: str) -> bytes:
+        with tempfile.NamedTemporaryFile("wb", delete=False) as tmp:
+            tmp_path = Path(tmp.name)
+        try:
+            self._await(self._env.download_file(path, tmp_path))
+            return tmp_path.read_bytes()
+        finally:
+            tmp_path.unlink(missing_ok=True)
 
     def iter_lines(self, path: str) -> Iterable[str]:
         return iter(self.read(path).splitlines(keepends=True))
 
     def read_head_bytes(self, path: str, n: int) -> bytes:
-        res = self.exec(f"head -c {int(n)} {shlex.quote(path)}")
+        """Raw file prefix. ``exec`` stdout is text — pipe via base64 to avoid mangling."""
+        n = max(0, int(n))
+        if n == 0:
+            return b""
+        # GNU coreutils in harbor images (same assumption as ``stat -c`` / ``find -printf``).
+        res = self.exec(f"head -c {n} {shlex.quote(path)} | base64 -w 0")
         if res.return_code != 0:
             raise OSError(res.stderr.strip() or f"head failed: {path}")
-        return (res.stdout or "").encode("utf-8", errors="surrogateescape")[:n]
+        try:
+            return base64.b64decode(res.stdout or "", validate=False)
+        except Exception as exc:
+            raise OSError(f"base64 decode failed for head of {path}") from exc
 
     def sha256_bytes(self, path: str) -> str:
         return self.sha256(path)
@@ -235,15 +268,8 @@ class HarborBackend(FsBackend):
 
     # --- file write/edit (native transfer) ---
     def write(self, path: str, content: str, encoding: str = "utf-8") -> None:
-        # encoding accepted for protocol compat; container writes are always utf-8
-        with tempfile.NamedTemporaryFile("w", delete=False, encoding="utf-8") as tmp:
-            tmp.write(content)
-            tmp_path = Path(tmp.name)
-        try:
-            self._await(self._env.exec(f"mkdir -p $(dirname {shlex.quote(path)})"))
-            self._await(self._env.upload_file(tmp_path, path))
-        finally:
-            tmp_path.unlink(missing_ok=True)
+        # Allowlist + strict encode on host → bytes upload (same path as write_bytes).
+        self.write_bytes(path, encode_text_for_write(content, encoding))
 
     def write_bytes(self, path: str, data: bytes) -> None:
         with tempfile.NamedTemporaryFile("wb", delete=False) as tmp:
@@ -256,9 +282,30 @@ class HarborBackend(FsBackend):
             tmp_path.unlink(missing_ok=True)
 
     def append(self, path: str, content: str, encoding: str = "utf-8") -> None:
-        # encoding accepted for protocol compat; container writes are always utf-8
-        current = self.read(path) if self.exists(path) else ""
-        self.write(path, current + content)
+        # Upload only the new chunk, then shell-append (no full-file download).
+        # Append payload WITHOUT a leading BOM: a second BOM in the middle of an
+        # existing utf-16 file decodes as U+FEFF (ZERO WIDTH NO-BREAK SPACE).
+        data = encode_text_for_append(content, encoding)
+        with tempfile.NamedTemporaryFile("wb", delete=False) as tmp:
+            tmp.write(data)
+            local_tmp = Path(tmp.name)
+        remote_tmp = f"{path}.gc-append-tmp.{uuid.uuid4().hex}"
+        try:
+            self._await(self._env.exec(f"mkdir -p $(dirname {shlex.quote(path)})"))
+            self._await(self._env.upload_file(local_tmp, remote_tmp))
+            res = self.exec(
+                f"cat {shlex.quote(remote_tmp)} >> {shlex.quote(path)}; "
+                f"rm -f {shlex.quote(remote_tmp)}"
+            )
+            if res.return_code != 0:
+                raise OSError(res.stderr.strip() or f"append failed: {path}")
+        finally:
+            local_tmp.unlink(missing_ok=True)
+            # Best-effort: upload/exec may leave remote_tmp if the cat+rm line never ran.
+            try:
+                self.exec(f"rm -f {shlex.quote(remote_tmp)}")
+            except Exception:
+                pass
 
     def copy(self, src: str, dst: str) -> None:
         res = self.exec(f"cp {shlex.quote(src)} {shlex.quote(dst)}")

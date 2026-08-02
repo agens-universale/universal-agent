@@ -197,9 +197,10 @@ mcp-servers:
 
 | Параметр | Тип | Описание |
 |---|---|---|
-| `path`, `sheet`, `filter`, `sort`, `limit`, `output` | — | Как у `query_xlsx` |
-| `groupby` | `[string]` | Колонки для группировки. Пустой массив = totals по всему датасету |
-| `agg` | `{col: AggFunc}` или `{col: [AggFunc, ...]}` | См. ниже |
+| `path` | `string` | **required** |
+| `agg` | `[{col, func}]` | **required** — `func`: AggFunc или `[AggFunc, ...]` |
+| `sheet`, `filter`, `sort`, `limit`, `output` | — | Как у `query_xlsx` |
+| `groupby` | `[string]` | Колонки для группировки. Пустой/omit = totals по всему датасету |
 | `having` | `[FilterClause]` | Фильтр по результатам агрегации |
 
 Имена результат-колонок: `<col>_<func>` (`hours_sum`, `id_count`).
@@ -208,10 +209,11 @@ mcp-servers:
 
 | Параметр | Тип | Описание |
 |---|---|---|
-| `path`, `sheet`, `filter`, `sort`, `limit`, `output` | — | Как у `query_xlsx` |
-| `index` | `string \| [string]` | Колонки для строк pivot |
-| `columns` | `string \| [string]` | Колонки для столбцов pivot |
-| `values` | `string` | Колонка для агрегирования |
+| `path` | `string` | **required** |
+| `index` | `string \| [string]` | **required** — колонки для строк pivot |
+| `columns` | `string \| [string]` | **required** — колонки для столбцов pivot |
+| `values` | `string` | **required** — колонка для агрегирования |
+| `sheet`, `filter`, `sort`, `limit`, `output` | — | Как у `query_xlsx` |
 | `aggfunc` | `AggFunc` | По умолчанию `sum` |
 | `fill_value` | `any` | Значение для пустых ячеек pivot |
 

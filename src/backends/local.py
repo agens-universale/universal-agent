@@ -14,7 +14,7 @@ from backends.protocol import (
     ExecResult,
     FsBackend,
 )
-from utils.file_text import read_text_for_edit
+from utils.file_text import encode_text_for_append, encode_text_for_write, read_text_for_edit
 
 
 class LocalFsBackend(FsBackend):
@@ -83,10 +83,14 @@ class LocalFsBackend(FsBackend):
     def read(self, path: str) -> str:
         return read_text_for_edit(path)
 
+    def read_bytes(self, path: str) -> bytes:
+        with open(path, "rb") as f:
+            return f.read()
+
     def iter_lines(self, path: str) -> Iterable[str]:
-        with open(path, "r", encoding="utf-8", errors="ignore") as f:
-            for line in f:
-                yield line
+        # Preserve raw line endings; same codec as read_text_for_edit.
+        text = self.read(path)
+        yield from text.splitlines(keepends=True)
 
     def read_head_bytes(self, path: str, n: int) -> bytes:
         with open(path, "rb") as f:
@@ -101,19 +105,8 @@ class LocalFsBackend(FsBackend):
 
     # --- write ---
     def write(self, path: str, content: str, encoding: str = "utf-8") -> None:
-        # Atomic: tmp + os.replace.
-        tmp_path = f"{path}.tmp"
-        try:
-            with open(tmp_path, "w", encoding=encoding, errors="replace") as fd:
-                fd.write(content)
-            os.replace(tmp_path, path)
-        except Exception:
-            try:
-                if os.path.exists(tmp_path):
-                    os.remove(tmp_path)
-            except Exception:
-                pass
-            raise
+        # Allowlist + strict encode → atomic bytes write (no errors=replace).
+        self.write_bytes(path, encode_text_for_write(content, encoding))
 
     def write_bytes(self, path: str, data: bytes) -> None:
         tmp_path = f"{path}.tmp"
@@ -130,8 +123,10 @@ class LocalFsBackend(FsBackend):
             raise
 
     def append(self, path: str, content: str, encoding: str = "utf-8") -> None:
-        with open(path, "a", encoding=encoding, errors="replace") as fd:
-            fd.write(content)
+        # Append payload WITHOUT a leading BOM: a second BOM in the middle of an
+        # existing utf-16 file decodes as U+FEFF (ZERO WIDTH NO-BREAK SPACE).
+        with open(path, "ab") as fd:
+            fd.write(encode_text_for_append(content, encoding))
 
     def copy(self, src: str, dst: str) -> None:
         with open(src, "rb") as s, open(dst, "wb") as d:
@@ -277,7 +272,7 @@ _READ_CHUNK = 8192
 _CAPTURED_READY_TIMEOUT_SEC = 30
 # Discard после cap — fire-and-forget: данные уже в sink. Короткий join, чтобы
 # не копить зомби-треды на типичном хвосте; если discard долгий — уходим с
-# captured, reader дочитает в фоне (non-daemon).
+# captured, reader дочитает в фоне как daemon (не блокирует process exit).
 _DRAIN_JOIN_TIMEOUT_SEC = 2
 
 
@@ -396,10 +391,16 @@ def _run_bounded_process(
             ready.set()
 
     t_out = threading.Thread(
-        target=_reader, args=(proc.stdout, stdout_buf, stdout_hit, stdout_ready)
+        target=_reader,
+        args=(proc.stdout, stdout_buf, stdout_hit, stdout_ready),
+        daemon=True,
+        name="exec-stdout-reader",
     )
     t_err = threading.Thread(
-        target=_reader, args=(proc.stderr, stderr_buf, stderr_hit, stderr_ready)
+        target=_reader,
+        args=(proc.stderr, stderr_buf, stderr_hit, stderr_ready),
+        daemon=True,
+        name="exec-stderr-reader",
     )
     t_out.start()
     t_err.start()

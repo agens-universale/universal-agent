@@ -1,4 +1,4 @@
-"""NoticesScreen — список уведомлений: стартовые + runtime (read-only, F4 /notices)."""
+"""NoticesScreen — список уведомлений: стартовые + runtime (read-only, F4/notices)."""
 from __future__ import annotations
 
 from typing import List

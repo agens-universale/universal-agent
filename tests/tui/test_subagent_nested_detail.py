@@ -1,4 +1,4 @@
-"""Шаг 6: Ctrl+click nested → ToolCallDetailScreen из sidecar / cache."""
+"""Шаг 6: Ctrl+click nested → ToolCallDetailScreen из sidecar на диске."""
 
 from __future__ import annotations
 
@@ -8,12 +8,7 @@ from pathlib import Path
 import pytest
 
 from thread_store import append_subagent_trace_record
-from tools.subagents.sidecar import (
-    clear_detail_cache,
-    lookup_tool_detail,
-    persist_subagent_trace,
-    warm_detail_cache_from_records,
-)
+from tools.subagents.sidecar import persist_subagent_trace
 from tui.services.subagent_sidecar_mapper import (
     detail_from_sidecar_records,
     resolve_nested_tool_detail,
@@ -54,61 +49,16 @@ def test_detail_from_sidecar_records_pairs_call_result():
     assert result_ev.full_payload["output"] == "a.txt\n"
 
 
-def test_resolve_prefers_cache_over_records():
-    # Пишем в тот же _DETAIL_CACHE, из которого resolve_nested_tool_detail
-    # читает через lookup_tool_detail (после stub/reload tools.* модули
-    # могут разъехаться — top-level import sidecar ≠ binding в mapper).
-    from tui.services.subagent_sidecar_mapper import lookup_tool_detail
-
-    cache = lookup_tool_detail.__globals__["_DETAIL_CACHE"]
-    cache.clear()
-    cache["c_cache"] = {
-        "call": {
-            "type": "function_call",
-            "name": "fs_read_file",
-            "arguments": '{"path":"cached.py"}',
-            "call_id": "c_cache",
-        },
-        "result": {
-            "type": "function_call_output",
-            "call_id": "c_cache",
-            "output": "from-cache",
-        },
-        "result_kind": "result",
-    }
-    try:
-        detail = resolve_nested_tool_detail(
-            "c_cache",
-            sidecar_records=[
-                {
-                    "seq": 1,
-                    "kind": "call",
-                    "payload": {
-                        "type": "function_call",
-                        "name": "fs_read_file",
-                        "arguments": '{"path":"disk.py"}',
-                        "call_id": "c_cache",
-                    },
-                }
-            ],
-        )
-        assert detail is not None
-        assert "cached.py" in detail["call"]["arguments"]
-    finally:
-        cache.clear()
-
-
-def test_warm_detail_cache_from_records():
-    clear_detail_cache()
+def test_resolve_uses_sidecar_records():
     records = [
         {
             "seq": 1,
             "kind": "call",
             "payload": {
                 "type": "function_call",
-                "name": "shell",
-                "arguments": '{"cmd":"pwd"}',
-                "call_id": "warm1",
+                "name": "fs_read_file",
+                "arguments": '{"path":"disk.py"}',
+                "call_id": "c_disk",
             },
         },
         {
@@ -116,17 +66,17 @@ def test_warm_detail_cache_from_records():
             "kind": "result",
             "payload": {
                 "type": "function_call_output",
-                "call_id": "warm1",
-                "output": "/tmp\n",
+                "call_id": "c_disk",
+                "output": "from-disk",
             },
         },
     ]
-    warm_detail_cache_from_records(records)
-    detail = lookup_tool_detail("warm1")
+    detail = resolve_nested_tool_detail("c_disk", sidecar_records=records)
     assert detail is not None
-    assert detail["call"]["name"] == "shell"
-    assert detail["result"]["output"] == "/tmp\n"
-    clear_detail_cache()
+    assert "disk.py" in detail["call"]["arguments"]
+    assert detail["result"]["output"] == "from-disk"
+    assert resolve_nested_tool_detail("c_disk", sidecar_records=None) is None
+    assert resolve_nested_tool_detail("missing", sidecar_records=records) is None
 
 
 def _write_parent_and_sidecar(tmp_path: Path, tid: str) -> None:
@@ -212,10 +162,8 @@ async def test_ctrl_click_nested_opens_detail_from_sidecar(tmp_path):
     from textual import events
     from tui.app import TuiApp
     from tui.screens.tool_call_detail import ToolCallDetailScreen
-    from tui.widgets.tool_call_row import ToolCallRow
 
     tid = "nested_detail"
-    clear_detail_cache()
     _write_parent_and_sidecar(tmp_path, tid)
 
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
@@ -258,8 +206,8 @@ async def test_ctrl_click_nested_opens_detail_from_sidecar(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_ctrl_click_nested_from_live_cache(tmp_path):
-    """Mid-session: detail из in-memory cache без чтения sidecar в _task_events."""
+async def test_ctrl_click_nested_from_persisted_sidecar(tmp_path):
+    """Mid-session: detail из sidecar на диске (persist), не из in-memory cache."""
     pytest.importorskip("textual")
     from textual import events
     from textual.containers import VerticalScroll
@@ -268,14 +216,13 @@ async def test_ctrl_click_nested_from_live_cache(tmp_path):
     from tui.screens.tool_call_detail import ToolCallDetailScreen
     from tui.widgets.tool_call_row import ToolCallRow
 
-    clear_detail_cache()
     threads = str(tmp_path)
     ctx = SimpleNamespace(
         parent_call_id="call_sub_1",
         run_id="run_c1",
         threads_dir=threads,
         system_id="cli",
-        thread_id="live_cache",
+        thread_id="live_disk",
     )
     persist_subagent_trace(
         ctx,
@@ -300,7 +247,7 @@ async def test_ctrl_click_nested_from_live_cache(tmp_path):
     app = TuiApp(threads_dir=threads, system="cli", config={"model": "M"})
     async with app.run_test() as pilot:
         scr = pilot.app.screen
-        scr._active_task_id = "live_cache"
+        scr._active_task_id = "live_disk"
         from tui.services.stores.file_store import FileTaskStore
 
         scr._store = FileTaskStore(threads_dir=threads, system="cli")
@@ -343,4 +290,3 @@ async def test_ctrl_click_nested_from_live_cache(tmp_path):
         )
         assert "pwd" in body
         assert "/tmp" in body
-        clear_detail_cache()

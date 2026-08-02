@@ -103,6 +103,30 @@ def test_native_fail_macos_silent(monkeypatch):
     assert app._calls["notify"] == []  # не package-hint
 
 
+def test_copy_out_async_schedules_worker(monkeypatch):
+    app = _app()
+    workers: list = []
+    written: list = []
+
+    def fake_worker(fn, **kw):
+        workers.append(kw.get("name"))
+        fn()  # sync for test
+        return None
+
+    app.run_worker = fake_worker
+    app.call_from_thread = lambda fn, *a, **k: fn(*a, **k)
+    monkeypatch.setattr(
+        clipboard_ops, "write_clipboard", lambda t: written.append(t) or True
+    )
+    assert clipboard_ops.copy_out(app, "hello", toast=True, blocking=False) is True
+    assert app._calls["osc"] == ["hello"]
+    assert written == ["hello"]
+    assert workers == ["clipboard-write"]
+    assert app._calls["notify"] == [
+        (clipboard_ops.MSG_COPIED, {"severity": "information"})
+    ]
+
+
 def test_is_ssh_session_env(monkeypatch):
     monkeypatch.delenv("SSH_CONNECTION", raising=False)
     monkeypatch.delenv("SSH_TTY", raising=False)

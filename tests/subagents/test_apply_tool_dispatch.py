@@ -6,7 +6,6 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from persistence.state_storage import save_state
 from states import State, SharedStateData
 from tools import apply_tool, WrongFunctionArgumentsException
 
@@ -25,7 +24,6 @@ def _make_state():
         shared=SharedStateData(),
     )
     state.backend_api_mode = "chat_completions"
-    save_state(state)
     return state
 
 

@@ -1,4 +1,4 @@
-"""Шаг 3: runtime persist call/result/error + in-memory detail cache (без sink)."""
+"""Шаг 3: runtime persist call/result/error на диск (без sink)."""
 
 from __future__ import annotations
 
@@ -6,10 +6,6 @@ import json
 from types import SimpleNamespace
 
 from thread_store import read_subagent_trace
-from tools.subagents.sidecar import (
-    clear_detail_cache,
-    lookup_tool_detail,
-)
 
 
 def _state(*, steps=3, max_steps=50):
@@ -61,9 +57,6 @@ def _patch_process(monkeypatch, *, apply_return='{"ok": true, "data": "hello"}')
 
 
 class TestSidecarPersistCallResult:
-    def setup_method(self):
-        clear_detail_cache()
-
     def test_persists_call_and_result_without_sink(self, tmp_path, monkeypatch):
         pr = _patch_process(monkeypatch)
         ctx = _child_ctx(tmp_path, sink=None)
@@ -86,11 +79,6 @@ class TestSidecarPersistCallResult:
         assert rows[1]["payload"]["call_id"] == "call_child_9"
         assert "hello" in rows[1]["payload"]["output"]
 
-        detail = lookup_tool_detail("call_child_9")
-        assert detail is not None
-        assert detail["call"]["arguments"] == args
-        assert "hello" in detail["result"]["output"]
-
     def test_no_persist_without_thread_identity(self, tmp_path, monkeypatch):
         pr = _patch_process(monkeypatch)
         ctx = SimpleNamespace(
@@ -107,7 +95,6 @@ class TestSidecarPersistCallResult:
             run_agent_func=None,
         )
         assert read_subagent_trace(str(tmp_path), "cli", "task-1") == []
-        assert lookup_tool_detail("c1") is None
 
     def test_error_kind_on_ok_false(self, tmp_path, monkeypatch):
         pr = _patch_process(

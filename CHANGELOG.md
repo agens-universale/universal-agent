@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Feature — limit trace summary (LIMIT_TRACE_SUMMARY_SPEC)
+
+- When the main agent or a subagent hits a limit (`step_limit` / `tool_call_limit` / `token_limit`), the trace is now summarized by a single auxiliary LLM call and returned as a JSON envelope `{ok:false, status, message, raw_trace_summary}` instead of a flat string.
+- `build_limit_envelope(state, reason, ctx)` in `src/summarize/limit_trace_summary.py` serializes `state.messages` (system prompt stripped; full trace, no truncation), calls `request_auxiliary_completion_text`, and returns the envelope. On LLM failure the envelope is still returned with an empty `raw_trace_summary`.
+- The auxiliary LLM call does NOT count as `state.steps` and does NOT turn the agent loop (spec §5.3). Finish detection keeps priority over limit (spec §6.3).
+- `SubagentRunner` limit branch is pure pass-through: it returns the child envelope unchanged (spec §6.2).
+- Config kill-switch: `agent.limit_trace_summary` (default `true`). Весь трейс обрабатывается целиком, без искусственных лимитов на размер входа или выхода; `max_tokens` ответа берётся из `chat_completions.llm.max_tokens` (как у прочих aux-вызовов).
+- Prompt: `prompts/limit_trace_summary.md`.
+- Old spec `docs_md/done/2026-07-31-step-limit-forced-finish-spec.md` marked **superseded**.
+
 ### Breaking — tool namespaces (TOOL_NAMESPACES_SPEC v1.1)
 
 - Builtin API names now use prefixes: `fs_*`, `exec_*`, `turn_*`, `session_*`, `project_*`; MCP `mcp_*`; subagent `subagent_*` (e.g. `subagent_special_agent`).

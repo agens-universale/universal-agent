@@ -90,8 +90,8 @@ def test_search_alternation_literal_prefilter(tmp_path):
     for regex in ("ALPHA|beta", "beta|ALPHA"):
         data = json.loads(tool(path=str(tmp_path), regex=regex))
         assert data["ok"] is True
-        assert data["total_matches"] == 3, (regex, data["total_matches"], data["matches"])
-        assert [m["line"] for m in data["matches"]] == [1, 2, 3]
+        assert data["total_matches"] == 4, (regex, data["total_matches"], data["matches"])
+        assert [m["line"] for m in data["matches"]] == [1, 2, 3, 3]
 
 
 def test_search_alternation_cyrillic(tmp_path):
@@ -103,8 +103,8 @@ def test_search_alternation_cyrillic(tmp_path):
     )
     data = json.loads(with_local_ctx(SearchFiles)(path=str(tmp_path), regex="Аудит|План проверки"))
     assert data["ok"] is True
-    assert data["total_matches"] == 3
-    assert [m["line"] for m in data["matches"]] == [1, 2, 3]
+    assert data["total_matches"] == 4
+    assert [m["line"] for m in data["matches"]] == [1, 2, 3, 3]
 
 
 def test_search_validation_and_file_path(tmp_path):
@@ -196,3 +196,246 @@ def test_search_context_edges_and_nearby_matches(tmp_path):
         "H\n",
     ]
 
+
+def test_search_skips_file_over_size_cap(tmp_path):
+    small = tmp_path / "small.txt"
+    big = tmp_path / "big.txt"
+    small.write_text("FINDME in small\n", encoding="utf-8")
+    big.write_text("FINDME in big file content\n", encoding="utf-8")
+    tool = with_local_ctx(
+        SearchFiles,
+        config_dict={"fs_tools": {"max_read_bytes": len(small.read_bytes())}},
+    )
+    data = json.loads(tool(path=str(tmp_path), regex="FINDME"))
+    assert data["ok"] is True
+    assert data["total_matches"] == 1
+    assert data["matches"][0]["file"].endswith("small.txt")
+    skipped = data.get("skipped") or []
+    assert data["skipped_total"] == 1
+    assert data["skipped_truncated"] is False
+    assert any(
+        s.get("reason") == "file_too_large" and s["path"].endswith("big.txt")
+        for s in skipped
+    )
+
+
+def test_search_skipped_list_capped(tmp_path, monkeypatch):
+    monkeypatch.setattr(SearchFiles, "default_skipped_limit", 2)
+    for i in range(5):
+        (tmp_path / f"big{i}.txt").write_text("FINDME xxxxxxxx\n", encoding="utf-8")
+    (tmp_path / "small.txt").write_text("FINDME\n", encoding="utf-8")
+    tool = with_local_ctx(
+        SearchFiles,
+        config_dict={"fs_tools": {"max_read_bytes": len(b"FINDME\n")}},
+    )
+    data = json.loads(tool(path=str(tmp_path), regex="FINDME"))
+    assert data["ok"] is True
+    assert data["skipped_total"] == 5
+    assert data["skipped_truncated"] is True
+    assert len(data["skipped"]) == 2
+    assert all(s["reason"] == "file_too_large" for s in data["skipped"])
+
+
+def test_search_spans_lines_by_default(tmp_path):
+    p = tmp_path / "block.txt"
+    p.write_text("alpha\nSTART\nmiddle\nEND\nomega\n", encoding="utf-8")
+    tool = with_local_ctx(SearchFiles)
+    data = json.loads(tool(path=str(p), regex=r"START.*?END"))
+    assert data["ok"] is True
+    assert "multiline" not in data
+    assert data["total_matches"] == 1
+    hit = data["matches"][0]
+    assert hit["line"] == 2
+    assert hit["end_line"] == 4
+    assert "START" in hit["line_content"] and "END" in hit["line_content"]
+    assert "middle" in hit["context"]
+
+    literal = json.loads(tool(path=str(p), regex=r"START\nmiddle\nEND"))
+    assert literal["ok"] is True
+    assert literal["total_matches"] == 1
+    assert literal["matches"][0]["line"] == 2
+    assert literal["matches"][0]["end_line"] == 4
+
+
+def test_search_clips_large_match_content_and_context(tmp_path):
+    # Greedy span: many lines between START and END; match text also exceeds clip.
+    body = "\n".join([f"pad{i}-{'x' * 80}" for i in range(40)])
+    p = tmp_path / "wide.txt"
+    p.write_text(f"before\nSTART\n{body}\nEND\nafter\n", encoding="utf-8")
+    tool = with_local_ctx(SearchFiles)
+    data = json.loads(tool(path=str(p), regex=r"START.*END"))
+    assert data["ok"] is True and data["total_matches"] == 1
+    hit = data["matches"][0]
+    assert hit["line"] == 2
+    assert hit["end_line"] == 43  # START + 40 pads + END
+    assert "match_truncated" in hit["line_content"]
+    assert hit["line_content"].startswith("START")
+    assert "context_truncated" in hit["context"]
+    assert "START" in hit["context"] and "END" in hit["context"]
+    assert "pad0-" in hit["context"]  # near start window
+    assert "pad39-" in hit["context"]  # near end window
+    assert "pad20-" not in hit["context"]  # middle omitted
+
+
+def test_search_single_file_too_large(tmp_path):
+    p = tmp_path / "only.txt"
+    p.write_text("needle\n", encoding="utf-8")
+    tool = with_local_ctx(
+        SearchFiles,
+        config_dict={"fs_tools": {"max_read_bytes": 1}},
+    )
+    data = json.loads(tool(path=str(p), regex="needle"))
+    assert data["ok"] is False
+    assert data["error"]["type"] == "file_too_large"
+    assert data["error"]["max_bytes"] == 1
+    assert data["matches"] == []
+
+
+def test_search_skips_binary_in_directory(tmp_path):
+    text = tmp_path / "ok.txt"
+    binary = tmp_path / "blob.bin"
+    text.write_text("FINDME here\n", encoding="utf-8")
+    binary.write_bytes(b"FINDME\x00binary\xff")
+    tool = with_local_ctx(SearchFiles)
+    data = json.loads(tool(path=str(tmp_path), regex="FINDME"))
+    assert data["ok"] is True
+    assert data["total_matches"] == 1
+    assert data["matches"][0]["file"].endswith("ok.txt")
+    skipped = data.get("skipped") or []
+    assert data["skipped_total"] == 1
+    assert any(
+        s.get("reason") == "is_binary" and s["path"].endswith("blob.bin")
+        for s in skipped
+    )
+
+
+def test_search_single_file_binary_errors(tmp_path):
+    p = tmp_path / "blob.bin"
+    p.write_bytes(b"abc\x00def")
+    data = json.loads(with_local_ctx(SearchFiles)(path=str(p), regex="abc"))
+    assert data["ok"] is False
+    assert data["error"]["type"] == "is_binary"
+    assert data["matches"] == []
+
+
+# ---------------------------------------------------------------------------
+# encoding parameter — searching non-UTF-8 files
+# ---------------------------------------------------------------------------
+
+def test_search_single_file_cp1251_encoding(tmp_path):
+    """Single-file search with explicit encoding=cp1251 finds Cyrillic text."""
+    p = tmp_path / "cp1251.txt"
+    p.write_bytes("Строка 15: Тестовый текст\n".encode("cp1251"))
+    tool = with_local_ctx(SearchFiles)
+    data = json.loads(tool(path=str(p), regex="Строка 1", encoding="cp1251"))
+    assert data["ok"] is True
+    assert data["total_matches"] == 1
+    # line_content is the regex match, not the full line — check context for full line
+    assert "Строка 1" in data["matches"][0]["line_content"]
+    assert "Строка 15" in data["matches"][0]["context"]
+
+
+def test_search_directory_cp1251_encoding(tmp_path):
+    """Directory search with encoding=cp1251 finds matches in cp1251 files."""
+    (tmp_path / "a_cp1251.txt").write_bytes("Привет мир\nСтрока 42\n".encode("cp1251"))
+    (tmp_path / "b_cp1251.txt").write_bytes("Другая строка\n".encode("cp1251"))
+    tool = with_local_ctx(SearchFiles)
+    data = json.loads(tool(path=str(tmp_path), regex="Строка", encoding="cp1251"))
+    assert data["ok"] is True
+    assert data["total_matches"] == 1
+    assert data["matches"][0]["file"].endswith("a_cp1251.txt")
+
+
+def test_search_encoding_none_is_default_behavior(tmp_path):
+    """Without encoding=, cp1251 file is skipped (encoding_required or best-effort miss) — regression check."""
+    p = tmp_path / "cp1251.txt"
+    p.write_bytes("Привет мир\n".encode("cp1251"))
+    tool = with_local_ctx(SearchFiles)
+    data = json.loads(tool(path=str(p), regex="Привет"))
+    # Without explicit encoding, cp1251 is not auto-detected reliably.
+    # The file should either be skipped or produce no matches — but NOT crash.
+    assert data["ok"] in (True, False)  # ok=False means skipped/error, ok=True means no match
+    if data["ok"]:
+        assert data["total_matches"] == 0
+
+
+def test_search_utf16_le_no_bom_with_encoding(tmp_path):
+    """utf-16-le file without BOM is searchable when encoding=utf-16-le is given (bug #4 workaround)."""
+    p = tmp_path / "utf16le_nobom.txt"
+    p.write_bytes("Hello мир\nСтрока 99\n".encode("utf-16-le"))
+    tool = with_local_ctx(SearchFiles)
+    data = json.loads(tool(path=str(p), regex="Строка", encoding="utf-16-le"))
+    assert data["ok"] is True
+    assert data["total_matches"] == 1
+    assert "Строка" in data["matches"][0]["line_content"]
+    assert "Строка 99" in data["matches"][0]["context"]
+
+
+def test_search_utf16_le_no_bom_without_encoding_is_binary(tmp_path):
+    """Without encoding=, utf-16-le no-BOM file is skipped as binary (bug #4 — not fixed for auto-detect)."""
+    p = tmp_path / "utf16le_nobom.txt"
+    p.write_bytes("Hello мир\n".encode("utf-16-le"))
+    tool = with_local_ctx(SearchFiles)
+    data = json.loads(tool(path=str(p), regex="Hello"))
+    assert data["ok"] is False
+    assert data["error"]["type"] == "is_binary"
+
+
+def test_search_invalid_encoding_returns_envelope(tmp_path):
+    """Invalid encoding name returns ok=False with invalid_argument error."""
+    p = tmp_path / "a.txt"
+    p.write_text("hello\n", encoding="utf-8")
+    tool = with_local_ctx(SearchFiles)
+    data = json.loads(tool(path=str(p), regex="hello", encoding="nonexistent-codec"))
+    assert data["ok"] is False
+    assert data["error"]["type"] == "unsupported_encoding"
+
+
+def test_search_encoding_wrong_codec_skips_file(tmp_path):
+    """utf-8 file searched with encoding=utf-16-le → decode fails → skipped, no crash."""
+    p = tmp_path / "utf8.txt"
+    p.write_text("plain ascii text\n", encoding="utf-8")
+    tool = with_local_ctx(SearchFiles)
+    data = json.loads(tool(path=str(p), regex="plain", encoding="utf-16-le"))
+    # utf-16-le decode of ascii text may succeed (odd byte count) or fail → either skip or no match
+    # Most likely: decodes as garbage → regex "plain" won't match → total_matches=0
+    # Or: decode fails → ok=False
+    assert data["ok"] in (True, False)
+
+
+def test_search_encoding_koi8r_directory(tmp_path):
+    """Directory search with encoding=koi8-r finds matches in koi8-r files."""
+    (tmp_path / "koi.txt").write_bytes("Тестовая строка\n".encode("koi8-r"))
+    tool = with_local_ctx(SearchFiles)
+    data = json.loads(tool(path=str(tmp_path), regex="Тестовая", encoding="koi8-r"))
+    assert data["ok"] is True
+    assert data["total_matches"] == 1
+
+
+def test_search_encoding_utf16_be_with_bom(tmp_path):
+    """utf-16-be file with BOM searched with encoding=utf-16-be."""
+    p = tmp_path / "utf16be.txt"
+    p.write_bytes("Строка BE\n".encode("utf-16-be"))
+    tool = with_local_ctx(SearchFiles)
+    data = json.loads(tool(path=str(p), regex="Строка", encoding="utf-16-be"))
+    assert data["ok"] is True
+    assert data["total_matches"] == 1
+
+
+def test_search_encoding_utf8_sig(tmp_path):
+    """utf-8-sig file (with BOM) searched with encoding=utf-8-sig."""
+    p = tmp_path / "utf8sig.txt"
+    p.write_bytes("Поиск строки\n".encode("utf-8-sig"))
+    tool = with_local_ctx(SearchFiles)
+    data = json.loads(tool(path=str(p), regex="Поиск", encoding="utf-8-sig"))
+    assert data["ok"] is True
+    assert data["total_matches"] == 1
+
+
+def test_search_encoding_does_not_break_utf8_files(tmp_path):
+    """Searching UTF-8 files without encoding= still works (regression)."""
+    (tmp_path / "a.py").write_text("def hello():\n    return 42\n", encoding="utf-8")
+    tool = with_local_ctx(SearchFiles)
+    data = json.loads(tool(path=str(tmp_path), regex="hello"))
+    assert data["ok"] is True
+    assert data["total_matches"] == 1

@@ -81,7 +81,7 @@ def build_agent_config_for_server(server_cfg: Dict[str, Any]) -> Dict[str, Any]:
     Логика:
     - Берём базовый config.yml через load_config().
     - Если в server_cfg задана секция logging — мержим её в cfg["logging_params"]
-      и синхронизируем плоские ключи (console_trace, dump_storage, save_logs, full_log_backend).
+      и синхронизируем плоские ключи (console_trace, save_logs, full_log_backend).
     - Если в server_cfg.agent задан server_agentmd_path:
         - резолвим путь относительно PROJECT_ROOT (если он относительный);
         - перезаписываем cfg["agent_md_path"] значением server_agentmd_path.
@@ -98,7 +98,6 @@ def build_agent_config_for_server(server_cfg: Dict[str, Any]) -> Dict[str, Any]:
         for key in (
             "full_log_backend",
             "console_trace",
-            "dump_storage",
             "save_logs",
         ):
             if key in log_block:

@@ -69,7 +69,6 @@ class ChatCompletionsPromptConfigTest(unittest.TestCase):
             self.assertEqual(cfg["summary_params"]["incremental_batch_chars"], 0)
             self.assertFalse(cfg["logging_params"]["full_log_backend"])
             self.assertTrue(cfg["logging_params"]["console_trace"])
-            self.assertFalse(cfg["logging_params"]["dump_storage"])
             self.assertTrue(cfg["logging_params"]["save_logs"])
 
     def test_summary_trigger_chars_is_normalized_to_int(self):

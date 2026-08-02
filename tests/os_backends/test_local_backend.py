@@ -67,6 +67,29 @@ def test_write_group_atomic_and_append(be, tmp_path):
     assert os.path.isdir(nd)
 
 
+def test_read_write_cp1251_round_trip(be, tmp_path):
+    p = str(tmp_path / "legacy.txt")
+    text = (
+        "Уважаемые коллеги! Настоящим сообщаем, что заседание рабочей группы "
+        "по внедрению системы состоится 15 марта 2024 года в переговорной.\n"
+    ) * 3
+    be.write(p, text, encoding="cp1251")
+    assert open(p, "rb").read() == text.encode("cp1251")
+    assert be.read(p) == text
+
+
+def test_write_unsupported_encoding_raises(be, tmp_path):
+    p = str(tmp_path / "x.txt")
+    with pytest.raises(ValueError, match="Unsupported encoding"):
+        be.write(p, "hi", encoding="ibm866")
+
+
+def test_write_encode_failed_raises(be, tmp_path):
+    p = str(tmp_path / "x.txt")
+    with pytest.raises(ValueError, match="Cannot encode"):
+        be.write(p, "Привет", encoding="latin-1")
+
+
 def test_traverse_and_paths(be, tmp_path):
     (tmp_path / "sub").mkdir()
     (tmp_path / "sub" / "f.txt").write_text("x", encoding="utf-8")
@@ -184,6 +207,28 @@ def test_exec_result_has_capture_cap_flags(be):
 
 def test_exec_default_capture_cap_is_60k(be):
     assert be.exec_output_capture_max_chars == 60_000
+
+
+def test_exec_reader_threads_are_daemon(be, monkeypatch):
+    """A12: stdout/stderr readers must be daemon so mid-drain exit is not blocked."""
+    import threading
+
+    from backends import local as local_mod
+
+    created = []
+    RealThread = threading.Thread
+
+    def TrackingThread(*args, **kwargs):
+        t = RealThread(*args, **kwargs)
+        created.append(t)
+        return t
+
+    monkeypatch.setattr(local_mod.threading, "Thread", TrackingThread)
+    res = be.exec("echo hi", timeout=10)
+    assert res.return_code == 0
+    readers = [t for t in created if t.name in ("exec-stdout-reader", "exec-stderr-reader")]
+    assert len(readers) == 2
+    assert all(t.daemon for t in readers)
 
 
 def test_exec_bounded_stdout_not_killed(be):

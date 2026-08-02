@@ -1,7 +1,7 @@
 """Footer-left контекстно зависит от наличия задачи и активного run.
 
-Idle: [F1]/help  [F2]/sessions  [F3]/diff  [F5]/config  [F6]/settings
-Running: [F1]/help  [F2]/sessions  [F3]/diff  [Ctrl+C]/stop
+Idle: F1/help  F2/sessions  F3/diff  F5/config  F6/settings  F7/buffer
+Running: F1/help  F2/sessions  F3/diff  F7/buffer  [Ctrl+C]/stop
 (/skills и /export из футера убраны — доступны через палитру; /mcp не дублируем —
 подсказка /mcp в бренд-карточке.)
 
@@ -32,11 +32,13 @@ async def test_footer_left_empty_state_no_back_no_stop_no_export():
 
     async with TuiApp().run_test() as pilot:
         rendered = str(pilot.app.query_one("#footer-left", Static).render())
-        assert "[F1]/help" in rendered
-        assert "[F2]/sessions" in rendered
-        assert "[F3]/diff" in rendered
-        assert "[F5]/config" in rendered
-        assert "[F6]/settings" in rendered
+        assert "F1/help" in rendered
+        assert "F2/sessions" in rendered
+        assert "F3/diff" in rendered
+        assert "F5/config" in rendered
+        assert "F6/settings" in rendered
+        assert "F7/buffer" in rendered
+        assert "[F1]" not in rendered
         assert "/mcp" not in rendered
         assert "/skills" not in rendered
         assert "/stop" not in rendered
@@ -63,11 +65,12 @@ async def test_footer_left_task_idle_no_stop(tmp_path):
         await pilot.pause()
 
         rendered = str(pilot.app.query_one("#footer-left", Static).render())
-        assert "[F2]/sessions" in rendered
-        assert "[F1]/help" in rendered
-        assert "[F5]/config" in rendered
-        assert "[F3]/diff" in rendered
-        assert "[F6]/settings" in rendered
+        assert "F2/sessions" in rendered
+        assert "F1/help" in rendered
+        assert "F5/config" in rendered
+        assert "F3/diff" in rendered
+        assert "F6/settings" in rendered
+        assert "F7/buffer" in rendered
         assert "/mcp" not in rendered
         assert "/skills" not in rendered
         assert "/export" not in rendered
@@ -99,9 +102,10 @@ async def test_footer_left_task_running_shows_stop(tmp_path):
 
         rendered = str(pilot.app.query_one("#footer-left", Static).render())
         assert "[Ctrl+C]/stop" in rendered
-        assert "[F2]/sessions" in rendered
-        assert "[F1]/help" in rendered
-        assert "[F3]/diff" in rendered
+        assert "F2/sessions" in rendered
+        assert "F1/help" in rendered
+        assert "F3/diff" in rendered
+        assert "F7/buffer" in rendered
         assert "/config" not in rendered
         assert "/settings" not in rendered
         assert "/mcp" not in rendered
@@ -140,7 +144,8 @@ async def test_footer_left_drops_stop_after_runner_finishes(tmp_path):
         rendered = str(pilot.app.query_one("#footer-left", Static).render())
         assert "/stop" not in rendered
         assert "/sessions" in rendered
-        assert "[F5]/config" in rendered
+        assert "F5/config" in rendered
+        assert "F7/buffer" in rendered
         assert "Ctrl+a" not in rendered
 
 

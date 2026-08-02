@@ -2,7 +2,6 @@
 
 from types import SimpleNamespace
 
-from persistence.state_storage import save_state
 from states import State, SharedStateData
 from tools.subagents.registry import SUBAGENT_CLASSES, is_subagent_tool
 from tools.subagents.runner import SubagentRunner
@@ -26,7 +25,6 @@ def _make_orchestrator_state(**overrides):
         **overrides,
     )
     state.backend_api_mode = "chat_completions"
-    save_state(state)
     return state
 
 

@@ -163,7 +163,6 @@ class BackendModeSwitchTest(unittest.TestCase):
                     "agent_md_path": None,
                     "limit_project_metadata": True,
                     "console_trace": False,
-                    "dump_storage": False,
                     "threads_data_path": tmp_dir,
                     "agent_url": "http://backend.local/v1/responses",
                     "completions_url": "http://backend.local/v1/chat/completions",

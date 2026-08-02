@@ -15,7 +15,6 @@ agent:
 logging:
   # при console_trace: false агент не будет печатать пошаговые сообщения в stdout.
   console_trace: false
-  dump_storage: false
   save_logs: false
 
 agent_overrides:

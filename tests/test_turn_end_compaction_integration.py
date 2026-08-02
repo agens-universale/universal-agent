@@ -425,9 +425,6 @@ def test_agent_executor_fail_open_turn_end_compaction(monkeypatch):
         return ([_submit_solution_call()], "resp_stub")
 
     recorded: list[str] = []
-
-    monkeypatch.setattr(ae, "save_state", lambda _state: None)
-    monkeypatch.setattr(ae, "dump_storage", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(
         intent_guard_guard,
         "validate_final_report_vs_user_intent",

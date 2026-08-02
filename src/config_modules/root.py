@@ -37,6 +37,7 @@ from config_modules.pricing import PricingConfig
 from config_modules.tui import TuiConfig
 from config_modules.update import UpdateConfig
 from config_modules.diff_tui import DiffTuiConfig
+from config_modules.fs_tools import FsToolsConfig
 from config_modules.summary import (
     DEFAULT_INCREMENTAL_BATCH_MULTIPLIER,
     DEFAULT_INTENT_LOG_PREVIEW_CHARS,
@@ -78,6 +79,7 @@ class AppConfig(BaseModel):
     tui: TuiConfig = Field(default_factory=TuiConfig)
     update: UpdateConfig = Field(default_factory=UpdateConfig)
     diff_tui: DiffTuiConfig = Field(default_factory=DiffTuiConfig)
+    fs_tools: FsToolsConfig = Field(default_factory=FsToolsConfig)
     strip_tags_projection: StripTagsProjectionConfig = Field(
         default_factory=StripTagsProjectionConfig
     )

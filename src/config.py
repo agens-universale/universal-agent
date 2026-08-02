@@ -35,7 +35,6 @@ _DEFAULT_LAST_DIALOG_STEP_MESSAGE_MAX_CHARS = (
 _LOGGING_SYNC_KEYS = (
     "full_log_backend",
     "console_trace",
-    "dump_storage",
     "save_logs",
     "logging_format",
     "log_level",
@@ -302,7 +301,6 @@ def flatten_app_config(app_cfg: AppConfig) -> Dict[str, Any]:
         "subagent_finish_gate_max_iterations": app_cfg.agent.subagent_finish_gate_max_iterations,
         "finish_gate_use_rule_hints": app_cfg.agent.finish_gate_use_rule_hints,
         "console_trace": app_cfg.logging.console_trace,
-        "dump_storage": app_cfg.logging.dump_storage,
         "save_logs": app_cfg.logging.save_logs,
         "logging_format": app_cfg.logging.format,
         "log_level": app_cfg.logging.log_level,
@@ -314,6 +312,7 @@ def flatten_app_config(app_cfg: AppConfig) -> Dict[str, Any]:
         "exec_output_capture_max_chars": app_cfg.agent.exec_output_capture_max_chars,
         "inject_tool_fields": dict(app_cfg.agent.inject_tool_fields),
         "model_steering": app_cfg.agent.model_steering,
+        "limit_trace_summary": app_cfg.agent.limit_trace_summary,
         "mcp-servers": {
             name: server.model_dump(by_alias=True) for name, server in app_cfg.mcp.servers.items()
         },
@@ -321,6 +320,7 @@ def flatten_app_config(app_cfg: AppConfig) -> Dict[str, Any]:
         "pricing": app_cfg.pricing.model_dump(),
         "agent_auth": app_cfg.agent_auth.model_dump() if app_cfg.agent_auth else {},
         "diff_tui": app_cfg.diff_tui.model_dump(),
+        "fs_tools": app_cfg.fs_tools.model_dump(),
         "strip_tags_projection": app_cfg.strip_tags_projection.model_dump(),
     }
 

@@ -51,6 +51,10 @@ class AgentConfig(BaseModel):
     # как max_steps; сабагент наследует те же значения на свой ран.
     session_token_limit: int | None = None
     max_tool_calls: int | None = None
+    # Kill-switch для аварийной LLM-суммаризации трейса при лимите
+    # (step_limit / tool_call_limit / token_limit). По умолчанию on.
+    # См. docs_md/actual/2026-08-01-limit-trace-summary-spec.md
+    limit_trace_summary: bool = True
     no_tool_call_max_count: int = 5
     max_unknown_tool_repeats: int = 5
     strict_turn_finish_validation: bool = True

@@ -95,6 +95,8 @@ def _make_ctx(**overrides):
         "console_trace": False,
         "no_tool_call_max_count": 5,
         "strict_turn_finish_validation": False,
+        # Без live LLM в unit-тестах: envelope возвращается с пустым summary.
+        "limit_trace_summary": False,
     }
     cfg.update(overrides)
     return SimpleNamespace(
@@ -126,8 +128,128 @@ def test_step_limit_sets_terminal_outcome(monkeypatch):
         _make_ctx(),
     )
 
-    assert "step" in result.lower() or "limit" in result.lower()
+    _env = json.loads(result)
+    assert _env["ok"] is False
+    assert _env["status"] == "step_limit"
+    assert "step" in _env["message"].lower() or "limit" in _env["message"].lower()
+    assert "raw_trace_summary" in _env
     assert state.terminal_outcome == "step_limit"
+
+
+def test_step_limit_still_executes_pending_function_calls(monkeypatch):
+    """Лимит шагов не отрезает уже присланный моделью batch tool calls.
+
+    Сценарий: budget уже исчерпан (steps >= max_steps), в messages — function_call.
+    Раньше run_agent стопорился до process_tool_calls → orphan call без output.
+    Теперь batch исполняется (step += 1 после batch), затем step_limit на
+    function_call_output без лишнего LLM-запроса.
+    """
+    applied = []
+
+    def _apply_tool(*, tool_name, arguments, **_kw):
+        applied.append((tool_name, arguments))
+        return json.dumps({"ok": True, "tool": tool_name})
+
+    def _fake_process_tool_outputs(*_a, **_k):
+        raise AssertionError(
+            "process_tool_outputs must not run after step_limit "
+            "(no extra LLM round once budget is exhausted)"
+        )
+
+    monkeypatch.setattr(processing_module, "apply_tool", _apply_tool)
+    monkeypatch.setattr(
+        processing_module, "process_tool_outputs", _fake_process_tool_outputs
+    )
+
+    state = _make_state(max_steps=1)
+    # Budget уже исчерпан; pending FC всё равно должны исполниться.
+    state.steps = 1
+
+    pending_batch = [
+        {
+            "type": "function_call",
+            "name": "session_think",
+            "arguments": json.dumps({"thought": "must-run-despite-step-limit"}),
+            "call_id": "call_pending_1",
+            "id": "fc_pending_1",
+            "status": "completed",
+        },
+        {
+            "type": "function_call",
+            "name": "session_think",
+            "arguments": json.dumps({"thought": "second-in-batch"}),
+            "call_id": "call_pending_2",
+            "id": "fc_pending_2",
+            "status": "completed",
+        },
+    ]
+
+    result = run_agent(pending_batch, state, _make_ctx())
+
+    assert len(applied) == 2, f"both pending tools must run, got {applied!r}"
+    assert applied[0][0] == "session_think"
+    assert applied[1][0] == "session_think"
+
+    _env = json.loads(result)
+    assert _env["ok"] is False
+    assert _env["status"] == "step_limit"
+    assert state.terminal_outcome == "step_limit"
+    # После batch ход посчитан (steps стал 2), stop на следующем half-turn.
+    assert state.steps >= 1
+
+    # Outputs попали в state — trace парный, ничего не потеряно.
+    outputs = [
+        m for m in state.messages
+        if m.get("type") == "function_call_output"
+    ]
+    assert {m.get("call_id") for m in outputs} >= {
+        "call_pending_1",
+        "call_pending_2",
+    }
+
+
+def test_step_counts_completed_model_turn_not_half_turn(monkeypatch):
+    """Один serial tool round-trip = 1 step (не 2 half-turn).
+
+    user_ask → LLM(FC) → exec batch → FCO → LLM(text bounce) → … до max_steps.
+    При max_steps=2 успеваем исполнить 2 tool-батча, затем step_limit.
+    """
+    llm_rounds = {"n": 0}
+    applied = []
+
+    def _fake_process_user_ask(_messages, _state, _ctx):
+        llm_rounds["n"] += 1
+        return _function_call_batch(1, llm_rounds["n"]), "resp_stub"
+
+    def _fake_process_tool_outputs(_messages, _state, _ctx):
+        llm_rounds["n"] += 1
+        # После tool outputs снова tool call, пока step budget позволяет.
+        return _function_call_batch(1, llm_rounds["n"]), "resp_stub"
+
+    def _apply_tool(*, tool_name, arguments, **_kw):
+        applied.append(tool_name)
+        return json.dumps({"ok": True, "tool": tool_name})
+
+    monkeypatch.setattr(processing_module, "process_user_ask", _fake_process_user_ask)
+    monkeypatch.setattr(
+        processing_module, "process_tool_outputs", _fake_process_tool_outputs
+    )
+    monkeypatch.setattr(processing_module, "apply_tool", _apply_tool)
+
+    state = _make_state(max_steps=2)
+    result = run_agent(
+        [{"role": "user", "content": "привет", "id": "m1"}],
+        state,
+        _make_ctx(),
+    )
+
+    _env = json.loads(result)
+    assert _env["status"] == "step_limit"
+    assert state.terminal_outcome == "step_limit"
+    assert state.steps == 2
+    # 2 полных хода = 2 tool call'а (по одному serial tool на ход).
+    assert len(applied) == 2
+    assert state.tool_calls == 2
 
 
 def _function_call_batch(n: int, step: int) -> list:
@@ -158,9 +280,13 @@ def test_tool_call_limit_sets_terminal_outcome(monkeypatch):
         state,
         _make_ctx(max_tool_calls=2),
     )
+    _env = json.loads(result)
+    assert _env["ok"] is False
+    assert _env["status"] == "tool_call_limit"
+    assert "2" in _env["message"]
+    assert "raw_trace_summary" in _env
     assert state.terminal_outcome == "tool_call_limit"
     assert state.tool_calls >= 2
-    assert "tool calls of 2 limit" in result
 
 
 def test_tool_calls_counter_counts_batch_none_limit(monkeypatch):
@@ -202,8 +328,12 @@ def test_token_limit_sets_terminal_outcome_aux_category(monkeypatch):
         state,
         _make_ctx(session_token_limit=10),
     )
+    _env = json.loads(result)
+    assert _env["ok"] is False
+    assert _env["status"] == "token_limit"
+    assert "token" in _env["message"].lower()
+    assert "raw_trace_summary" in _env
     assert state.terminal_outcome == "token_limit"
-    assert "session token limit" in result
 
 
 def test_token_limit_ignores_thread_cumulative(monkeypatch):
@@ -222,5 +352,6 @@ def test_token_limit_ignores_thread_cumulative(monkeypatch):
         _make_ctx(session_token_limit=500),
     )
     # ран ничего не потратил → до token_limit не дошли, упёрлись в шаги
-    assert state.terminal_outcome == "step_limit"
-    assert "token" not in result
+    _env = json.loads(result)
+    assert _env["status"] == "step_limit"
+    assert "token" not in _env["message"].lower()

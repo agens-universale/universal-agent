@@ -469,7 +469,7 @@ def test_run_concurrent_posts_only_one_starts(make_server, stub_runner):
     block_event = threading.Event()
     started_event = threading.Event()
 
-    def fake_start(swarm_cfg, *, system, task_id, payload):
+    def fake_start(swarm_cfg, *, system, task_id, payload, trace_id=None):
         sid = _swarm_sid(system, task_id)
         # Симулируем меdленный старт — записываем meta как running.
         import swarm.storage as storage

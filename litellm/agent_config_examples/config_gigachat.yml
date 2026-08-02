@@ -26,7 +26,6 @@ agent:
   verbose: true
   console_trace: true
   save_logs: false
-  dump_storage: false
   use_ask_human_tool: false
   stop_tools: []
   use_server_subagents: false

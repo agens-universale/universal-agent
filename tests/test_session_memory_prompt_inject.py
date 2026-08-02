@@ -22,10 +22,13 @@ def _root() -> Path:
 def test_summary_prompt_injects_register_names():
     raw = Path(default_prompt_path()).read_text(encoding="utf-8")
     assert SESSION_MEMORY_REGISTER_NAMES_PLACEHOLDER in raw
+    assert "never basename-only" in raw
     loaded = load_prompt_template(default_prompt_path())
     assert SESSION_MEMORY_REGISTER_NAMES_PLACEHOLDER not in loaded
     for name in REGISTER_ORDER:
         assert name in loaded
+    assert "never basename-only" in loaded
+    assert "absolute" in loaded.lower()
 
 
 def test_replace_prompt_still_uses_all_registers_from_canon():

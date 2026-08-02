@@ -48,6 +48,9 @@ agent:
   # Per-run лимиты надёжности (закомментировано = выключено):
   # session_token_limit: 200000   # бюджет input+output токенов на один ран
   # max_tool_calls: 100           # макс. вызовов инструментов на один ран
+  # Аварийная LLM-суммаризация трейса при лимите (step/tool/token limit).
+  # Возвращает envelope с raw_trace_summary; false — пустой summary.
+  limit_trace_summary: true
   no_tool_call_max_count: 3
   strict_turn_finish_validation: true
   # Имя HTTP-заголовка для внешнего trace_id (флаг gc-cli --trace-id или поле
@@ -108,7 +111,6 @@ update:
 logging:
   full_log_backend: false
   console_trace: true
-  dump_storage: false
   save_logs: true
   format: text                 # text — человекочитаемо; jsonl — структурный поток событий
   log_level: info              # debug | info | warning | error
@@ -137,6 +139,12 @@ intent_scope:
   # Финальная проза, закрывающая ход, пишется в intent log:
   # <= порога — как есть (raw); > порога — LLM-саммари (кап max_summary_chars).
   max_final_answer_raw_chars: 2000
+
+# Лимиты FS-тулов, которые поднимают файл целиком в память.
+# read — fs_read_file / fs_search_files; mutate — apply/replace (не append).
+fs_tools:
+  max_read_bytes: 8388608       # 8 MiB
+  max_mutate_bytes: 16777216    # 16 MiB (peak RAM ≈ ×2–3; raise via config if needed)
 
 security:
   command_moderation:
@@ -225,3 +233,12 @@ pricing:
   input: 0                     # впишите реальные ставки, когда будут известны
   output: 0
   # cache_read: 0              # опц.; нет → кэш биллится как input
+
+# -----------------------------------------------------------------------------
+# Сборка мусора (gc.collect) — точки C1/C2/C3.
+# C1 (после компакции истории) и C2 (после close_all в finally) — всегда вкл.
+# C3 (один collect после батча тулов, перед LLM-шагом) — управляется этим флагом.
+# Default: on для CLI/TUI, off для server (gc.collect глобален для процесса).
+# Явное значение перекрывает режимный default.
+# gc:
+#   force_collect: false

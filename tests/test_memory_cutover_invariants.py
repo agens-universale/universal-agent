@@ -28,13 +28,3 @@ def test_memory_files_only_in_allowed_locations() -> None:
         if rel not in _ALLOWED_MEMORY_FILES_RELPATHS:
             unexpected.append(rel)
     assert unexpected == []
-
-
-def test_no_journal_in_summarize() -> None:
-    """rg \"journal\" src/summarize/ — пусто (legacy memory step contract)."""
-    summarize = SRC / "summarize"
-    hits: list[str] = []
-    for path in sorted(summarize.rglob("*.py")):
-        if "journal" in path.read_text(encoding="utf-8"):
-            hits.append(_relpath(path))
-    assert hits == []

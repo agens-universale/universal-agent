@@ -223,6 +223,12 @@ class SessionsScreen(Screen):
             t.append("🔒 занято", style=ERR)
         t.append(" · ", style=MUTED)
         t.append(_short_id(task.thread_id), style=MUTED)
+        # Путь проекта сессии (абсолютный, обрезанный слева) — в самом конце,
+        # после short_id. Старые сессии без project_path → не показываем.
+        ppath = (task.tui_meta or {}).get("project_path")
+        if isinstance(ppath, str) and ppath.strip():
+            t.append(" · ", style=MUTED)
+            t.append(truncate_path_left(ppath, _PATH_MAXLEN), style=DEEP_DIM)
         return t
 
     def _card_text(self, task, *, selected: bool) -> Text:

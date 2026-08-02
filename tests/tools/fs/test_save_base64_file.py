@@ -2,6 +2,7 @@ import base64
 import json
 
 from tools.fs.save_base64_file import SaveBase64File
+from utils.file_text import sha256_hex_of_bytes
 
 
 from tests.helpers.tool_ctx import with_local_ctx
@@ -14,6 +15,7 @@ def test_save_base64_writes_file(tmp_path):
     assert res["ok"] is True
     assert (tmp_path / "out.bin").read_bytes() == raw
     assert res["bytes_written"] == len(raw)
+    assert res["sha256"] == sha256_hex_of_bytes(raw)
 
 
 def test_save_base64_parent_not_found(tmp_path):

@@ -111,6 +111,14 @@ ToolCallRow:focus, TraceRow:focus, UserReplyContainer:focus, AgentReplyLine:focu
     background: $focus-bg;
 }
 
+/* Whole-widget screen-selection для Table/Syntax (copy_text-путь, спека
+   2026-08-02 §5.2). CSS background — table/padding; у Syntax фон ячеек
+   переключается в AgentReplyLine._apply_syntax_select_bg (BAND↔FOCUS).
+   outline не используем: margin-left у .code-indent клипает левый край. */
+AgentReplyLine.-copy-selected {
+    background: $focus-bg;
+}
+
 /* TraceRow — 2-колоночный layout (prefix фиксированной ширины + content width:1fr) */
 .trace-prefix  { width: auto; height: auto; padding: 0; }
 .trace-content { width: 1fr;  height: auto; padding: 0; }

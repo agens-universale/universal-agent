@@ -29,6 +29,7 @@ from diff_tui.visual import (
     build_created_file_diff,
     build_visual_diff,
 )
+from utils.file_text import decode_text_best_effort
 
 PathLike = Union[str, Path]
 
@@ -300,9 +301,7 @@ class DiffService:
         if not orig.is_file():
             return "pending"
         try:
-            if disk.is_file() and disk.read_text(encoding="utf-8") == orig.read_text(
-                encoding="utf-8"
-            ):
+            if disk.is_file() and disk.read_bytes() == orig.read_bytes():
                 return "approved"
         except OSError:
             pass
@@ -642,11 +641,12 @@ class DiffService:
 
     @staticmethod
     def _read_disk(path: Path) -> Optional[str]:
+        """Decode path bytes for visual diff (utf-8 / BOM / chardet allowlist)."""
         if not path.is_file():
             return None
         try:
-            return path.read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError):
+            return decode_text_best_effort(path.read_bytes())
+        except OSError:
             return None
 
     def _visual_diff_cache(
@@ -662,8 +662,11 @@ class DiffService:
         if meta.get("status") == STATUS_CREATED and not meta.get("baseline_exists"):
             return self._visual_diff_as_created(key, disk)
         if orig.is_file() and not disk.is_file():
+            old = self._read_disk(orig)
+            if old is None:
+                return ""
             return build_visual_diff(
-                orig.read_text(encoding="utf-8"),
+                old,
                 "",
                 mode=mode,
                 full_file_max_lines=self.full_file_max_lines,
@@ -674,9 +677,13 @@ class DiffService:
             )
         if not orig.is_file() or not disk.is_file():
             return ""
+        old = self._read_disk(orig)
+        new = self._read_disk(disk)
+        if old is None or new is None:
+            return ""
         return build_visual_diff(
-            orig.read_text(encoding="utf-8"),
-            disk.read_text(encoding="utf-8"),
+            old,
+            new,
             mode=mode,
             full_file_max_lines=self.full_file_max_lines,
             preview_context_lines=self.preview_context_lines,

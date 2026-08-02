@@ -171,8 +171,8 @@ def select_active_substate(
 # (/skills, /export доступны через палитру — в футере лишние. /mcp не дублируем —
 # подсказка «/mcp» уже в бренд-карточке.)
 # Diff: F3 в базовом хроме футера; CTA в трейсе — пути pending + [F3]/diff.
-_FOOTER_LEFT = "[F1]/help  [F2]/sessions  [F3]/diff  [F5]/config  [F6]/settings"
-_FOOTER_RUNNING_LEFT = "[F1]/help  [F2]/sessions  [F3]/diff  [Ctrl+C]/stop"
+_FOOTER_LEFT = "F1/help  F2/sessions  F3/diff  F5/config  F6/settings  F7/buffer"
+_FOOTER_RUNNING_LEFT = "F1/help  F2/sessions  F3/diff  F7/buffer  [Ctrl+C]/stop"
 _PLACEHOLDER_READY = "опишите задачу или /команда"
 _HINT_TEXT = {
     "clear": "Esc ещё раз, чтобы очистить",
@@ -1626,9 +1626,6 @@ class TraceScreen(Screen):
         records = self._store.read_subagent_trace(task_id)
         if not records:
             return
-        from tools.subagents.sidecar import warm_detail_cache_from_records
-
-        warm_detail_cache_from_records(records)
         actions = plan_sidecar_nested_actions(records)
         apply_sidecar_nested_actions(
             actions,
@@ -2655,7 +2652,7 @@ class TraceScreen(Screen):
 
             ⚠ MCP: 3/5 подключены · /mcp             (только если заданы MCP-серверы)
 
-            ⚠ 2 · ℹ 1 · [F4]/notices                (только если есть уведомления)
+            ⚠ 2 · ℹ 1 · F4/notices                (только если есть уведомления)
 
             ↑ доступна новая версия · /settings → Обновление  (teal, если авто-чек нашёл)
 
@@ -3493,6 +3490,14 @@ class TraceScreen(Screen):
             branch = current_branch(self._current_cwd())
             if branch:
                 self._store.update_tui_meta(tid, {"branch": branch})
+            # Абсолютный путь проекта на момент создания сессии (исторический,
+            # не живой cwd). Безусловно — путь есть даже в не-git папке.
+            try:
+                ppath = str(Path(self._current_cwd()).resolve())
+            except Exception:
+                ppath = ""
+            if ppath:
+                self._store.update_tui_meta(tid, {"project_path": ppath})
             # _track_pending — после attach_active_task (которое чистит
             # _pending_user_widgets через _reset_render_state) и после
             # потенциальной первой записи meta исполнителем.
@@ -4559,7 +4564,7 @@ class TraceScreen(Screen):
         """Ctrl+click / Enter по row → детальный экран call + output.
 
         Parent-тулы — из ``_task_events`` (data_*). Nested child — из
-        in-memory cache writer'а или sidecar ``data_subagents_*``.
+        sidecar ``data_subagents_*``.
         """
         call_ev = None
         result_ev = None
@@ -4589,10 +4594,6 @@ class TraceScreen(Screen):
         records = None
         if self._store is not None and self._active_task_id:
             records = self._store.read_subagent_trace(self._active_task_id)
-            if records:
-                from tools.subagents.sidecar import warm_detail_cache_from_records
-
-                warm_detail_cache_from_records(records)
         detail = resolve_nested_tool_detail(call_id, sidecar_records=records)
         if not detail or not isinstance(detail.get("call"), dict):
             return None, None

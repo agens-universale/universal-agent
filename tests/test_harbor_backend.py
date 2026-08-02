@@ -15,6 +15,7 @@ class FakeEnv:
     def __init__(self):
         self.calls = []
         self.uploaded = []
+        self.uploaded_bytes = []
         self.downloaded = []
 
     async def exec(self, command, **kw):
@@ -22,7 +23,10 @@ class FakeEnv:
         return FakeExecResult(stdout=f"ran:{command}", return_code=0)
 
     async def upload_file(self, src, dst):
+        from pathlib import Path
+        data = Path(src).read_bytes()
         self.uploaded.append((str(src), dst))
+        self.uploaded_bytes.append(data)
 
     async def download_file(self, src, dst):
         from pathlib import Path
@@ -145,32 +149,34 @@ def test_append_creates_file_if_missing(loop_in_thread):
 
     env.exec = fake_exec
     backend.append("/work/new.txt", "hello")
-    assert env.uploaded and env.uploaded[0][1] == "/work/new.txt"
-
+    assert env.uploaded and ".gc-append-tmp." in env.uploaded[0][1]
+    assert env.uploaded[0][1].startswith("/work/new.txt.gc-append-tmp.")
+    assert any(">>" in c and "/work/new.txt" in c for c in env.calls)
 
 def test_append_concatenates_existing_content(loop_in_thread):
     env = FakeEnv()
-    uploaded_contents = []
+    uploaded_payloads = []
 
     async def fake_exec(command, **kw):
         env.calls.append(command)
-        if command.startswith("test -e"):
-            return FakeExecResult(stdout="", return_code=0)
-        if command.startswith("cat "):
-            return FakeExecResult(stdout="existing-", return_code=0)
         return FakeExecResult(stdout=f"ran:{command}", return_code=0)
 
     async def fake_upload_file(src, dst):
         from pathlib import Path
-        uploaded_contents.append(Path(src).read_text(encoding="utf-8"))
+        uploaded_payloads.append((dst, Path(src).read_bytes()))
         env.uploaded.append((str(src), dst))
 
     env.exec = fake_exec
     env.upload_file = fake_upload_file
     backend = HarborBackend(env, loop_in_thread)
     backend.append("/work/f.txt", "more")
-    assert uploaded_contents == ["existing-more"]
-
+    assert len(uploaded_payloads) == 1
+    remote_tmp, payload = uploaded_payloads[0]
+    assert remote_tmp.startswith("/work/f.txt.gc-append-tmp.")
+    assert ".gc-append-tmp." in remote_tmp
+    assert payload == b"more"
+    assert any("cat " in c and ">>" in c and "/work/f.txt" in c for c in env.calls)
+    assert not any(c.startswith("test -e") for c in env.calls)
 
 def test_exec_env_prefix_quoting(loop_in_thread):
     env = FakeEnv()
@@ -215,7 +221,17 @@ def test_write_and_append_accept_encoding_kwarg(loop_in_thread):
     backend = HarborBackend(env, loop_in_thread)
     backend.write("/work/a.txt", "data", encoding="utf-8")
     backend.append("/work/a.txt", "more", encoding="utf-8")
-    assert env.uploaded and env.uploaded[0][1] == "/work/a.txt"
+    assert any(dst == "/work/a.txt" for _, dst in env.uploaded)
+    assert any(".gc-append-tmp." in dst for _, dst in env.uploaded)
+
+def test_harbor_write_bytes_preserves_cp1251(loop_in_thread):
+    """Harbor text-write must encode on host and upload raw bytes (not force utf-8)."""
+    env = FakeEnv()
+    backend = HarborBackend(env, loop_in_thread)
+    text = "Привет"
+    backend.write("/work/ru.txt", text, encoding="cp1251")
+    assert env.uploaded_bytes[-1] == text.encode("cp1251")
+    assert env.uploaded_bytes[-1] != text.encode("utf-8")
 
 
 def _make_exec_returning(env, stdout, return_code=0):
@@ -242,16 +258,49 @@ def test_exec_propagates_timed_out_from_environment(loop_in_thread):
 
 
 def test_read_head_bytes_uses_head_not_full_file(loop_in_thread):
+    import base64
+
     env = FakeEnv()
+    raw = b"hel"
 
     async def head_exec(command, **kw):
         env.calls.append(command)
-        if command.startswith("head -c"):
-            return FakeExecResult(stdout="hel", return_code=0)
+        if "head -c" in command and "base64" in command:
+            return FakeExecResult(
+                stdout=base64.b64encode(raw).decode("ascii"),
+                return_code=0,
+            )
         return FakeExecResult(stdout="", return_code=1)
 
     env.exec = head_exec
     backend = HarborBackend(env, loop_in_thread)
     sample = backend.read_head_bytes("/work/a.bin", 3)
-    assert sample == b"hel"
-    assert any(c.startswith("head -c 3 ") for c in env.calls)
+    assert sample == raw
+    assert any(
+        c.startswith("head -c 3 ") and "| base64" in c for c in env.calls
+    )
+
+
+def test_read_head_bytes_preserves_non_utf8_bytes(loop_in_thread):
+    """D: raw bytes must survive exec (no utf-8/surrogateescape mangling)."""
+    import base64
+
+    env = FakeEnv()
+    # High bytes + NUL — would break under encode("utf-8") of a text stdout.
+    raw = bytes([0xCF, 0xF0, 0xE8, 0xE2, 0xE5, 0xF2, 0x00, 0xFF])
+
+    async def head_exec(command, **kw):
+        env.calls.append(command)
+        if "head -c" in command and "base64" in command:
+            return FakeExecResult(
+                stdout=base64.b64encode(raw).decode("ascii"),
+                return_code=0,
+            )
+        return FakeExecResult(stdout="", return_code=1)
+
+    env.exec = head_exec
+    backend = HarborBackend(env, loop_in_thread)
+    sample = backend.read_head_bytes("/work/legacy.txt", len(raw))
+    assert sample == raw
+    assert b"\x00" in sample
+    assert sample[0] == 0xCF

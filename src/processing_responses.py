@@ -1,8 +1,10 @@
+import gc
 import json
 import time
 from types import SimpleNamespace
 
 from config import parse_chat_completions_max_tokens, resolve_tui_stream_enabled
+from config_modules.gc import gc_force_collect_enabled
 from intent_guard.feedback import (
     build_finish_gate_feedback,
     build_finish_gate_reject_technical_user_content,
@@ -26,6 +28,7 @@ from intent_scope.final_answer import maybe_record_final_answer_intent
 from message_policy.cycle_stop import append_cycle_stop_tool_outputs_for_batch
 from message_policy.stop_persist import is_persist_discarded
 from message_policy.user_stop import not_started_due_to_user_stop_output
+from summarize.limit_trace_summary import build_limit_envelope
 from request_backend_policy import request_chat_completions_with_policy
 from tools import apply_tool, WrongFunctionArgumentsException, is_unknown_tool_output
 from tools.session.stored_outputs.wrapping import maybe_store_and_wrap_tool_output
@@ -351,6 +354,9 @@ def _request_backend_canonical_once(
         _ch0 = _choices_raw[0]
         if isinstance(_ch0, dict):
             _finish = _ch0.get("finish_reason")
+    # Сохраняем finish_reason на state — catch-блок WrongFunctionArgumentsException
+    # использует его, чтобы отличить усечённый JSON (length) от обычной невалидности.
+    state.last_finish_reason = _finish
     _run_log.info(
         "chat/completions response meta: max_tokens_requested=%s finish_reason=%s usage=%s",
         call_data.get("max_tokens"),
@@ -395,6 +401,18 @@ def check_mode(messages, logger) -> Union[str, None]:
     logger.debug(str(messages))
 
     raise ValueError('Undefined mode')
+
+
+def _batch_has_pending_function_calls(messages: List[Dict]) -> bool:
+    """True, если в батче есть function_call — их надо исполнить до step/token/tool лимитов.
+
+    Иначе лимит между «модель уже вернула tools» и process_tool_calls даёт
+    orphan call без output и теряет заявленную работу (sidecar/диск/summary).
+    """
+    for message in messages or []:
+        if message.get("type") == "function_call":
+            return True
+    return False
 
 
 def group_messages(messages: List[Dict]) -> Dict[str, List[Dict]]:
@@ -562,7 +580,7 @@ def process_tool_calls(
         # Live-прогресс субагента: «тул пошёл». На обычном parent-прогоне — no-op.
         # Sidecar persist параллельно (нужен thread identity; sink не требуется).
         # ask_human: только banner (ask_human/ask_human_done); nested tool-row
-        # без sidecar/cache → Ctrl+click молча no-op — не монтируем.
+        # без sidecar → Ctrl+click молча no-op — не монтируем.
         persist_tool_trace = (
             not is_intermediate and tool_name != ASK_HUMAN_TOOL_NAME
         )
@@ -751,6 +769,16 @@ def process_tool_calls(
         )
         tools_outputs = [*preserved, resume]
 
+    # C3: один collect на границе «батч тулов → LLM-шаг» — подбираем циклический
+    # мусор между шагами. Default on для CLI/TUI, off для server; явный
+    # gc.force_collect в конфиге перекрывает default.
+    if gc_force_collect_enabled(
+        getattr(ctx, "config_dict", {}) or {},
+        is_tui=bool(getattr(ctx, "is_tui", False)),
+        is_cli_mode=bool(getattr(ctx, "is_cli_mode", False)),
+    ):
+        gc.collect()
+
     return tools_outputs
 
 
@@ -816,6 +844,8 @@ def run_agent(
             continue
         mode_for_step_count = None
         mode = None
+        # step += 1 только после завершённого хода модели (см. конец итерации).
+        count_completed_step = False
         backend_mode = _get_backend_api_mode(ctx)
         try:
             for m in messages:
@@ -870,28 +900,31 @@ def run_agent(
                 state.messages += new_state_messages
             _maybe_persist(persist_messages_callback, messages, state)
 
-            if state.steps > state.max_steps:
-                state.terminal_outcome = "step_limit"
-                return f'Agent executed {state.max_steps} steps and doesn\'t finish his work because of step limits.'
+            # Лимиты (step / tool_calls / tokens) — только когда нет pending
+            # function_call: сначала дожимаем весь батч tools от модели, иначе
+            # call уже в state/jsonl, а exec/sidecar/result теряются.
+            # step = завершённый ход модели (после tool-batch / text), не half-turn.
+            pending_tool_exec = _batch_has_pending_function_calls(messages)
+            if not pending_tool_exec:
+                if state.steps >= state.max_steps:
+                    state.terminal_outcome = "step_limit"
+                    return build_limit_envelope(state, "step_limit", ctx)
 
-            if max_tool_calls_limit is not None and state.tool_calls >= max_tool_calls_limit:
-                state.terminal_outcome = "tool_call_limit"
-                return (
-                    f"Agent executed {state.tool_calls} tool calls of "
-                    f"{max_tool_calls_limit} limit and doesn't finish his work."
-                )
+                if (
+                    max_tool_calls_limit is not None
+                    and state.tool_calls >= max_tool_calls_limit
+                ):
+                    state.terminal_outcome = "tool_call_limit"
+                    return build_limit_envelope(state, "tool_call_limit", ctx)
 
-            if session_token_limit is not None:
-                _baseline = UsageAccount.from_meta(
-                    getattr(state, "run_start_usage_meta", None)
-                )
-                _spent = state.usage.delta_from(_baseline).totals()["total"]
-                if _spent >= session_token_limit:
-                    state.terminal_outcome = "token_limit"
-                    return (
-                        f"Agent spent {_spent} tokens of {session_token_limit} "
-                        f"session token limit and doesn't finish his work."
+                if session_token_limit is not None:
+                    _baseline = UsageAccount.from_meta(
+                        getattr(state, "run_start_usage_meta", None)
                     )
+                    _spent = state.usage.delta_from(_baseline).totals()["total"]
+                    if _spent >= session_token_limit:
+                        state.terminal_outcome = "token_limit"
+                        return build_limit_envelope(state, "token_limit", ctx)
 
             if tool_error_cnt > max_tool_errors:
                 state.terminal_outcome = "tool_errors"
@@ -962,6 +995,7 @@ def run_agent(
                     technical_type=TECHNICAL_TYPE_TECHNICAL,
                 )
             ]
+            count_completed_step = True
         else:
             # Вызовы backend не ловим здесь: после исчерпания transport/adaptive
             # ретраев исключение уходит наверх как есть.
@@ -994,6 +1028,7 @@ def run_agent(
                     if backend_mode == "responses":
                         state.previous_response_id = response_id
                     state.last_backend_response_id = response_id
+                    # Half-turn: ответ модели обработаем на следующей итерации.
                 elif mode == "function_call":
                     # Finish-turn handoff closes the CURRENT user turn only when we
                     # process fresh backend function_calls (mode == "function_call"),
@@ -1062,50 +1097,58 @@ def run_agent(
                                         technical_type=TECHNICAL_TYPE_TECHNICAL,
                                     )
                                 ]
-                                continue
-                            # accept / fail_open_error / fail_open_limit / прочее —
-                            # все завершают ход одинаково.
-                            state.flush_current_user_intent()
-                            if turn_end_compaction_hook is not None:
-                                turn_end_compaction_hook()
-                            # Сообщение, пришедшее во время (блокирующей) компакции, не
-                            # теряем: продолжаем новым ходом на уже сжатом контексте.
-                            if get_pending_messages is not None:
-                                pending = get_pending_messages()
-                                if pending:
-                                    messages = pending
-                                    continue
-                            return finish_arguments
+                                # Finish-reject — завершённый ход (batch + gate).
+                                count_completed_step = True
+                            else:
+                                # accept / fail_open_error / fail_open_limit / прочее —
+                                # все завершают ход одинаково.
+                                state.steps += 1
+                                state.flush_current_user_intent()
+                                if turn_end_compaction_hook is not None:
+                                    turn_end_compaction_hook()
+                                # Сообщение, пришедшее во время (блокирующей) компакции, не
+                                # теряем: продолжаем новым ходом на уже сжатом контексте.
+                                if get_pending_messages is not None:
+                                    pending = get_pending_messages()
+                                    if pending:
+                                        messages = pending
+                                        continue
+                                return finish_arguments
                         else:
                             state.current_user_intent = []
-                        return finish_arguments
-                    messages = process_tool_calls(
-                        messages, state, ctx, run_agent_func=run_agent,
-                        persist_messages_callback=persist_messages_callback,
-                    )
-                    n_unknown = int(
-                        getattr(state, "last_batch_unknown_tool_count", 0) or 0
-                    )
-                    if n_unknown > 0:
-                        tool_error_cnt += n_unknown
+                            state.steps += 1
+                            return finish_arguments
                     else:
-                        tool_error_cnt = 0
-                    if (
-                        int(getattr(state, "unknown_tool_repeat_count", 0) or 0)
-                        >= max_unknown_tool_repeats
-                    ):
-                        unknown_name = (
-                            getattr(state, "last_unknown_tool_name", None) or "unknown"
+                        messages = process_tool_calls(
+                            messages, state, ctx, run_agent_func=run_agent,
+                            persist_messages_callback=persist_messages_callback,
                         )
-                        state.terminal_outcome = "tool_errors"
-                        return (
-                            f"Agent stopped: repeated unknown tool '{unknown_name}'."
+                        n_unknown = int(
+                            getattr(state, "last_batch_unknown_tool_count", 0) or 0
                         )
+                        if n_unknown > 0:
+                            tool_error_cnt += n_unknown
+                        else:
+                            tool_error_cnt = 0
+                        if (
+                            int(getattr(state, "unknown_tool_repeat_count", 0) or 0)
+                            >= max_unknown_tool_repeats
+                        ):
+                            unknown_name = (
+                                getattr(state, "last_unknown_tool_name", None) or "unknown"
+                            )
+                            state.terminal_outcome = "tool_errors"
+                            return (
+                                f"Agent stopped: repeated unknown tool '{unknown_name}'."
+                            )
+                        # Полный ход: LLM уже вернул tools, batch исполнен.
+                        count_completed_step = True
                 elif mode == "function_call_output":
                     messages, response_id = process_tool_outputs(messages, state, ctx)
                     if backend_mode == "responses":
                         state.previous_response_id = response_id
                     state.last_backend_response_id = response_id
+                    # Half-turn: как user_ask — ждём разбора ответа модели.
                 elif mode == "text_response":
                     assistant_text = extract_last_assistant_text(messages)
                     decision = should_return_text_answer(ctx, state, assistant_text)
@@ -1113,6 +1156,7 @@ def run_agent(
                         # Финальная проза принята → TUI-индикатор «✓ завершаю…»
                         # на время записи/саммари/flush (mark_finalizing пишет
                         # runtime.finalizing в meta; снимаем строго в finally).
+                        state.steps += 1
                         if mark_finalizing is not None:
                             mark_finalizing(True)
                         try:
@@ -1146,11 +1190,21 @@ def run_agent(
                             technical_type=TECHNICAL_TYPE_TECHNICAL,
                         )
                     ]
+                    count_completed_step = True
                 else:
                     raise ValueError(f"unconventional mode: {mode}")
             except WrongFunctionArgumentsException as e:
                 run_logger.error(e, exc_info=True)
                 tool_error_cnt += 1
+                # Если finish_reason=="length" — JSON был усечён потолком
+                # max_tokens. Объясняем модели причину и советуем компактный
+                # вариант/разбиение на вызовы; иначе — feedback как есть.
+                if getattr(state, "last_finish_reason", None) == "length":
+                    e.extra_hint = (
+                        "⚠ Output was truncated: output token limit reached "
+                        "(finish_reason == \"length\"). Shorten the response "
+                        "or split it into multiple calls with smaller payloads."
+                    )
                 messages = [
                     _make_technical_feedback_user_message(
                         e.to_llm_feedback(),
@@ -1158,6 +1212,8 @@ def run_agent(
                         call_id=getattr(e, "call_id", None),
                     )
                 ]
+                # Аргументы отвалились на exec — ход модели всё равно «закрыт».
+                count_completed_step = True
             except Exception as backend_exc:
                 # Переполнение контекстного окна модели → не крашимся: форс-сжатие
                 # истории (безусловное, как /compact) и повтор запроса со сжатым
@@ -1179,12 +1235,13 @@ def run_agent(
                     continue
                 raise
 
-        # На первом `user_ask`-цикле при продолжении диалога по `-t` мы
-        # отправляем бэкенду всю историю треда. Чтобы старые сообщения
-        # не "сдвигали" контроль лимита шагов, пропускаем инкремент
-        # `state.steps` только в этом случае.
+        # step += 1 только после завершённого хода модели (tool-batch / text /
+        # bounce / pre-mode error). user_ask и function_call_output — half-turn
+        # к LLM, step не тратят. skip_initial: resume `-t` не считает первый ask.
         skip_initial_step = bool(
             getattr(state, "skip_initial_user_ask_step_when_history", False)
         )
-        if not (skip_initial_step and state.steps == 0 and mode_for_step_count == "user_ask"):
+        if skip_initial_step and state.steps == 0 and mode_for_step_count == "user_ask":
+            pass
+        elif count_completed_step:
             state.steps += 1

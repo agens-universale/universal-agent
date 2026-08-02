@@ -9,7 +9,6 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from message_policy.user_message_policy import wrap_technical_user_content
-from persistence.state_storage import save_state
 from states import SharedStateData, State
 from tools.subagents.active_scope import (
     activate_child_input,
@@ -20,17 +19,14 @@ from tools.subagents.active_scope import (
 )
 from tools.subagents.progress import QueueSubagentProgressSink
 from tools.subagents.runner import SubagentRunner
-from tools.subagents.sidecar import clear_detail_cache
 from thread_store import read_subagent_trace
 
 
 @pytest.fixture(autouse=True)
 def _clean_scope():
     reset_active_scope_for_tests()
-    clear_detail_cache()
     yield
     reset_active_scope_for_tests()
-    clear_detail_cache()
 
 
 def _make_orchestrator_state():
@@ -47,7 +43,6 @@ def _make_orchestrator_state():
         shared=SharedStateData(),
     )
     state.backend_api_mode = "chat_completions"
-    save_state(state)
     return state
 
 
