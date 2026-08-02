@@ -64,6 +64,25 @@ class ChatCompletionsHeadersTest(unittest.TestCase):
         headers = create_call_headers(_StateStub(), ctx)
         self.assertEqual(headers.get("Authorization"), "Bearer chat-token")
 
+    def test_chat_completion_headers_override_session_id(self):
+        """The overlay must replace the internal state UUID, not duplicate it.
+
+        `GcCliExternal._apply_polar_session` routes Polar trajectories through this key.
+        """
+        ctx = SimpleNamespace(
+            config_dict={
+                "x_cl_id": 12345,
+                "backend_api_mode": "chat_completions",
+                "chat_completion_headers": {"x-session-id": "sympy__sympy-12419"},
+            },
+            auth_connector=None,
+        )
+        headers = create_call_headers(_StateStub(), ctx)
+        self.assertEqual(headers.get("x-session-id"), "sympy__sympy-12419")
+        self.assertEqual(
+            [k for k in headers if k.lower() == "x-session-id"], ["x-session-id"]
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

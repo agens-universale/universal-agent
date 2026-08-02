@@ -141,6 +141,51 @@ def test_partial_trajectory_written_when_run_aborts(tmp_path, monkeypatch):
     assert context.metadata["total_steps"] == 2
 
 
+def _agent(**kwargs) -> GcCliExternal:
+    kwargs.setdefault("gc_cli_config", {})
+    kwargs["gc_cli_config"].setdefault("completions_url", "http://test/v1/chat/completions")
+    return GcCliExternal(logs_dir=Path("/tmp"), model_name="openai/m", **kwargs)
+
+
+def test_polar_session_id_goes_into_every_llm_call(monkeypatch):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    cfg = _agent(session_id="sympy__sympy-12419")._build_config()
+    headers = cfg["chat_completion_headers"]
+    # Lowercase key: it must REPLACE the core's internal state-UUID x-session-id.
+    assert headers["x-session-id"] == "sympy__sympy-12419"
+    assert headers["Authorization"] == "Bearer sympy__sympy-12419"
+
+
+def test_profile_authorization_wins_over_session_bearer(monkeypatch):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    cfg = _agent(
+        session_id="task-1",
+        gc_cli_config={"chat_completion_headers": {"Authorization": "Bearer real-key"}},
+    )._build_config()
+    headers = cfg["chat_completion_headers"]
+    assert headers["Authorization"] == "Bearer real-key"
+    assert headers["x-session-id"] == "task-1"  # session routing still applied
+
+
+def test_session_id_falls_back_to_openai_api_key_env(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "task-from-env")
+    cfg = _agent(api_base="http://polar/v1")._build_config()
+    assert cfg["chat_completion_headers"]["x-session-id"] == "task-from-env"
+
+
+def test_env_fallback_ignored_without_runner_api_base(monkeypatch):
+    """A real key in the env must not become a session id in a local / otk run."""
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-real-key")
+    cfg = _agent()._build_config()
+    assert "x-session-id" not in (cfg.get("chat_completion_headers") or {})
+
+
+def test_no_session_id_leaves_headers_untouched(monkeypatch):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    cfg = _agent()._build_config()
+    assert "x-session-id" not in (cfg.get("chat_completion_headers") or {})
+
+
 def test_runtime_url_and_model_beat_profile_overrides(monkeypatch):
     from pathlib import Path
 

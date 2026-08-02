@@ -200,11 +200,29 @@ class GcCliExternal(BaseAgent):
             )
         return url
 
+    @property
+    def _polar_session_id(self) -> str | None:
+        """Session id the runner registered with Polar; ``OPENAI_API_KEY`` is a fallback
+        only when api_base came too, else a local key would ship as the session id."""
+        raw = self._session_id or (self._api_base and os.environ.get("OPENAI_API_KEY"))
+        return raw.strip() or None if raw else None
+
+    @staticmethod
+    def _apply_polar_session(config_dict: dict, session_id: str | None) -> None:
+        """Send the Polar session id on every LLM call: the core sends a state UUID, so
+        completions land in an unregistered session and the merge finds no dialog.json."""
+        if not session_id:
+            return
+        headers = dict(config_dict.get("chat_completion_headers") or {})
+        headers["x-session-id"] = session_id
+        headers.setdefault("Authorization", f"Bearer {session_id}")
+        config_dict["chat_completion_headers"] = headers
+
     def _build_config(self) -> dict:
         # schema defaults < bench defaults < profile gc_cli_config < runtime (url/model).
         # See adapters.gc_cli_config — starting from the schema is what keeps a newly
         # added AppConfig key from KeyError-ing every bench run.
-        return build_gc_cli_config(
+        config = build_gc_cli_config(
             completions_url=self._backend_url,
             model=self._model,
             prompts_dir=_PROMPTS_DIR,
@@ -212,6 +230,8 @@ class GcCliExternal(BaseAgent):
             config_dir=str(_ADAPTER_DIR),
             overrides=self._overrides,
         )
+        self._apply_polar_session(config, self._polar_session_id)
+        return config
 
     @staticmethod
     def _apply_injected_skills(config_dict: dict, skills_path: str | None) -> None:
