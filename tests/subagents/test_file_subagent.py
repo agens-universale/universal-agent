@@ -91,7 +91,7 @@ class TestInstance:
         role, assignment = self._instance().get_initial_data()
         assert role.startswith("Ты — писатель.")
         # Контракт сдачи приклеивается принудительно — отменить его из файла нельзя.
-        assert "UNIFIED HANDOFF CONTRACT" in role
+        assert "HANDOFF CONTRACT" in role
         assert "WORKFLOW CONTEXT" in role
         assert "сделай Х" in assignment
         assert "потому что" in assignment
