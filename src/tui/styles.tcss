@@ -111,6 +111,13 @@ ToolCallRow:focus, TraceRow:focus, UserReplyContainer:focus, AgentReplyLine:focu
     background: $focus-bg;
 }
 
+/* Whole-widget screen-selection для Table/Syntax (copy_text-путь, спека
+   2026-08-02 §5.2). RichVisual не красит selection сам — подсвечиваем блок
+   целиком, паритет с «копируется целиком». Не посимвольно. */
+AgentReplyLine.-copy-selected {
+    background: $focus-bg;
+}
+
 /* TraceRow — 2-колоночный layout (prefix фиксированной ширины + content width:1fr) */
 .trace-prefix  { width: auto; height: auto; padding: 0; }
 .trace-content { width: 1fr;  height: auto; padding: 0; }

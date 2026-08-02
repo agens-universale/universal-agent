@@ -52,6 +52,7 @@ def render_code_block(content: str, lang: Optional[str], *,
             )
             return AgentReplyLine(
                 syntax, event_no=event_no, focusable=focusable, classes=cls,
+                copy_text=f"```{lang}\n{content}\n```",
             )
         except ClassNotFound:
             pass
@@ -68,7 +69,7 @@ def build_block_widgets(text: str, *, prose_bullet: bool, event_no: int,
     класс прозовых строк (intermediate_reply → «· »/line-intermediate). Код всегда панель,
     таблицы — AgentReplyLine(.table-block). focusable=True только у первого виджета события."""
     from tui.services.markdown_render import (
-        build_markdown_table, render_prose, segment_answer,
+        build_markdown_table, render_prose, segment_answer, table_block_to_markdown,
     )
     from tui.widgets.trace_row import TraceRow
 
@@ -88,6 +89,8 @@ def build_block_widgets(text: str, *, prose_bullet: bool, event_no: int,
             widgets.append(AgentReplyLine(
                 build_markdown_table(seg.headers or [], seg.rows or [], seg.aligns or []),
                 event_no=event_no, focusable=not focus_set, classes=table_classes,
+                copy_text=table_block_to_markdown(seg.headers or [], seg.rows or [],
+                                                  seg.aligns or []),
             ))
             focus_set = True
             continue

@@ -207,3 +207,26 @@ def build_markdown_table(headers: list[str], rows: list[list[str]],
     return table
 
 
+def table_block_to_markdown(headers: list[str], rows: list[list[str]],
+                            aligns: list[str]) -> str:
+    """Реконструировать валидный markdown таблицы из Block (для clipboard).
+
+    left → ``---`` (GFM-дефолт). ``|`` в ячейке → ``\\|`` для вставки в редактор.
+    Round-trip через текущий segment_answer для ячеек с ``|`` НЕ обещаем:
+    парсер режет по сырому ``|`` без escape.
+    """
+    def esc(cell: str) -> str:
+        return cell.replace("|", r"\|")
+
+    lines = ["| " + " | ".join(esc(h) for h in headers) + " |"]
+    sep: list[str] = []
+    for a in aligns:
+        sep.append(":---:" if a == "center"
+                   else "---:" if a == "right"
+                   else "---")
+    lines.append("| " + " | ".join(sep) + " |")
+    for row in rows:
+        lines.append("| " + " | ".join(esc(c) for c in row) + " |")
+    return "\n".join(lines)
+
+
