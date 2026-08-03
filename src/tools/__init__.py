@@ -17,6 +17,7 @@ from backends.factory import parse_os_backend_kind
 from backends.protocol import FsBackend
 from tools.skills.registry import SkillsRegistry
 from tools.subagents.registry import is_subagent_tool
+from tools.subagents.selection import subagents_enabled
 from tools.inject_tool_fields import (
     apply_injected_fields_to_spec,
     resolve_inject_tool_fields,
@@ -104,12 +105,84 @@ def _apply_openai_strict_tools_schema(spec: Dict[str, Any]) -> None:
         apply_openai_strict_parameters(params)
 
 
+SUBAGENT_TOOLS_ALLOW_KEY = "subagent_tools_allow"
+SUBAGENT_TOOLS_STOP_KEY = "subagent_tools_stop"
+
+
+def apply_subagent_tools_filter(
+    tools_data: Dict[str, Dict[str, Any]],
+    config_dict: Dict[str, Any],
+    *,
+    logger: Any = None,
+) -> Dict[str, Dict[str, Any]]:
+    """Сузить набор тулов дочернего рана по allow/stop из определения сабагента.
+
+    Точка применения — здесь, а не в раннере: детские тулы собираются в двух
+    местах (``_build_child_state`` и ``_build_child_ctx``), оба зовут
+    ``build_tools_data``. Фильтр в раннере пришлось бы дублировать, и два
+    call-site'а обязаны были бы оставаться синхронными.
+
+    Применяется ПОСЛЕ подмешивания скиллов и MCP (иначе ``mcp_*`` было бы не
+    отфильтровать, как это происходит с глобальным ``stop_tools``) и ДО сборки
+    ``tools_spec`` — иначе модель увидела бы в схеме тул, который не сможет
+    вызвать.
+    """
+    allow_raw = config_dict.get(SUBAGENT_TOOLS_ALLOW_KEY)
+    stop_raw = config_dict.get(SUBAGENT_TOOLS_STOP_KEY)
+    allow = set(allow_raw) if allow_raw is not None else None
+    stop = set(stop_raw or ())
+    if allow is None and not stop:
+        return tools_data
+
+    from tools.subagents.custom.file_subagent import REQUIRED_TOOL_NAMES
+
+    known = set(tools_data)
+    unknown = sorted(((allow or set()) | stop) - known)
+    if unknown:
+        # Опечатка в имени тула не должна ронять ран: определение уже прошло
+        # проверку обязательных тулов, а остальное — предпочтения оператора.
+        subagent_names = [name for name in unknown if name.startswith("subagent_")]
+        rest = [name for name in unknown if not name.startswith("subagent_")]
+        log = logger or _fallback_logger
+        if subagent_names:
+            # Глубина всегда 1: ребёнку сабагенты не выдаются в принципе.
+            log.warning(
+                "subagent_tools_filter_nested_ignored names=%s",
+                ", ".join(subagent_names),
+                extra={
+                    "event": "subagent_tools_filter_nested_ignored",
+                    "names": subagent_names,
+                },
+            )
+        if rest:
+            log.warning(
+                "subagent_tools_filter_unknown names=%s",
+                ", ".join(rest),
+                extra={"event": "subagent_tools_filter_unknown", "names": rest},
+            )
+
+    filtered = {
+        name: entry
+        for name, entry in tools_data.items()
+        if (allow is None or name in allow) and name not in stop
+    }
+    # Служебное ядро возвращается безусловно: перечислять его в `tools` не нужно,
+    # и `stop_tools` его не отбирает (попытка запрета логируется в реестре). Если
+    # ядра нет в исходном наборе — его убрал глобальный stop_tools или harbor, и
+    # восстанавливать несуществующее нечего.
+    for name in REQUIRED_TOOL_NAMES:
+        if name in tools_data:
+            filtered[name] = tools_data[name]
+    return filtered
+
+
 def build_tools_data(
     config_dict: Dict[str, Any],
     on_progress=None,
     *,
     os_backend: FsBackend | None = None,
     skills_registry: SkillsRegistry | None = None,
+    logger: Any = None,
 ) -> Tuple[Dict[str, Dict[str, Any]], list, list, dict]:
     """
     Собрать единый словарь tools_data и производные списки spec/description
@@ -130,17 +203,21 @@ def build_tools_data(
     for k, v in mcp_tools_data.items():
         tools_data[k] = v
 
-    use_local_subagents = config_dict.get("use_local_subagents", False)
+    local_subagents_cfg = config_dict.get("use_local_subagents", False)
     backend_mode = str(config_dict.get("backend_api_mode", "responses")).strip().lower()
-    if use_local_subagents and backend_mode == "chat_completions":
+    if subagents_enabled(local_subagents_cfg) and backend_mode == "chat_completions":
         from tools.subagents.registry import get_subagents_tools_data
-        subagent_tools = get_subagents_tools_data()
+        # Реестр уже применил список из use_local_subagents к кастомным;
+        # встроенные семь доступны всегда, пока фича включена.
+        subagent_tools = get_subagents_tools_data(config_dict, logger=logger)
         for k, v in subagent_tools.items():
             tools_data[k] = v
 
     if parse_os_backend_kind(config_dict) == "harbor":
         # Host-only: writes to local disk; not available in harbor/sandbox mode.
         tools_data.pop("download_file", None)
+
+    tools_data = apply_subagent_tools_filter(tools_data, config_dict, logger=logger)
 
     # Логирование оставляем модульным, так как build_tools_data вызывается
     # при создании RunContext, когда logger ещё не привязан к контексту.
@@ -209,8 +286,12 @@ def apply_tool(
     ):
         return f"{tool_name} call"
 
-    use_local_subagents = config_dict.get("use_local_subagents", False)
-    if use_local_subagents and is_subagent_tool(tool_name):
+    local_subagents_cfg = config_dict.get("use_local_subagents", False)
+    # Отдельная сверка со списком не нужна: реестр уже отдаёт только разрешённых
+    # кастомных, поэтому is_subagent_tool на отфильтрованном вернёт False.
+    if subagents_enabled(local_subagents_cfg) and is_subagent_tool(
+        tool_name, config_dict
+    ):
         from tools.subagents.runner import SubagentRunner  # lazy: runner imports from tools
         orchestrator_state = kwargs.get("state")
         run_agent_func = kwargs.get("run_agent_func")

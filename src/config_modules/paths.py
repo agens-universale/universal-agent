@@ -6,6 +6,9 @@ class PathsConfig(BaseModel):
     agent_md_path: str = ""
     chat_completions_system_prompt_path: str | None = None
     chat_completions_intent_guard_prompt_path: str | None = None
+    # Промпт для кастомных (файловых) сабагентов. None → prompts/
+    # chat_completions_custom_subagent_system_prompt.md рядом с конфигом либо bundled.
+    chat_completions_custom_subagent_system_prompt_path: str | None = None
     chat_completions_special_instructions_path: str | None = None
     threads_data_path: str | None = None
     skills_data_path: str | None = None

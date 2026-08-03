@@ -157,7 +157,7 @@ class BackendModeSwitchTest(unittest.TestCase):
                 config_dict = {
                     "verbose": False,
                     "model": "CodeChat",
-                    "max_steps": 0,
+                    "max_steps": 1,
                     "system_prompt_id": "v1",
                     "use_server_subagents": False,
                     "agent_md_path": None,
@@ -176,6 +176,9 @@ class BackendModeSwitchTest(unittest.TestCase):
                     "summary_params": {
                         "chat_completions_summary_trigger_chars": 0,
                     },
+                    # limit-trace-summary делает реальный LLM-вызов при step_limit;
+                    # этот тест про маршрутизацию режима бэкенда, не про summarize.
+                    "limit_trace_summary": False,
                 }
                 ctx = SimpleNamespace(
                     config_dict=config_dict,
@@ -222,7 +225,7 @@ class BackendModeSwitchTest(unittest.TestCase):
                         system="cli",
                         verbose=False,
                     )
-                    self.assertIn("step limits", result_step_1)
+                    self.assertIn("step limit", result_step_1)
 
                     config_dict["backend_api_mode"] = "chat_completions"
                     result_step_2 = executor.run(
@@ -231,7 +234,7 @@ class BackendModeSwitchTest(unittest.TestCase):
                         system="cli",
                         verbose=False,
                     )
-                    self.assertIn("step limits", result_step_2)
+                    self.assertIn("step limit", result_step_2)
 
                     threads_dir = resolve_threads_dir(config_dict)
                     meta_after_chat = load_thread_meta(threads_dir, "cli", thread_id)
@@ -250,7 +253,7 @@ class BackendModeSwitchTest(unittest.TestCase):
                         system="cli",
                         verbose=False,
                     )
-                    self.assertIn("step limits", result_step_3)
+                    self.assertIn("step limit", result_step_3)
 
                     self.assertEqual(len(responses_calls), 2)
                     self.assertGreaterEqual(len(completions_calls), 1)

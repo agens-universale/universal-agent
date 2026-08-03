@@ -148,8 +148,25 @@ agent:
   #   Prefer the next concrete action over a broad survey; targeted reads that unlock that action are fine.
   system_prompt_id: v1
   use_server_subagents: false
+  # true/false либо список имён. Список выбирает КАСТОМНЫХ сабагентов; встроенные
+  # семь доступны всегда, пока значение не false (префикс subagent_ необязателен):
+  #   use_local_subagents: [db_migrator]
   use_local_subagents: true
   subagent_max_steps: 50
+  # Кастомные сабагенты из файлов: папка с .md (YAML-frontmatter + тело-роль).
+  # Не задана — доступны только семь встроенных. Подробнее: docs/subagents.md.
+  #   subagents_dir: ./agents
+  #   subagents_max_count: 20       # предел числа подхватываемых определений
+  # Файл выглядит так:
+  #   ---
+  #   name: subagent_db_migrator    # обязателен префикс subagent_
+  #   description: Пишет и проверяет миграции БД. Вызывать, когда нужна схема.
+  #   tools:                        # опционально: allowlist конечных имён
+  #     - fs_read_file              # turn_finish и session_read_stored_tool_output
+  #     - fs_write_file             # выдаются всегда, перечислять не нужно
+  #   stop_tools: [exec_python]     # опционально; дополняет глобальный stop_tools
+  #   ---
+  #   Ты — инженер по миграциям базы данных.
   client_name: mini_cli_pub_agent_1
   x_cl_id: "12345"
   verbose: true
