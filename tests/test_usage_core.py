@@ -15,11 +15,17 @@ from usage.report import format_money, format_tokens, render_cost_report
 # ---------------- normalize ----------------
 
 def test_normalize_chat_completions_shape():
-    assert normalize_usage({"prompt_tokens": 100, "completion_tokens": 20}) == (100, 20, 0)
+    s = normalize_usage({"prompt_tokens": 100, "completion_tokens": 20})
+    assert (s.input, s.output, s.cached) == (100, 20, 0)
+    assert s.cost is None
+    assert s.billed is False
 
 
 def test_normalize_responses_shape():
-    assert normalize_usage({"input_tokens": 5, "output_tokens": 7}) == (5, 7, 0)
+    s = normalize_usage({"input_tokens": 5, "output_tokens": 7})
+    assert (s.input, s.output, s.cached) == (5, 7, 0)
+    assert s.cost is None
+    assert s.billed is False
 
 
 def test_normalize_missing_returns_none():
@@ -31,31 +37,76 @@ def test_normalize_missing_returns_none():
 
 
 def test_normalize_partial_fills_zero():
-    assert normalize_usage({"prompt_tokens": 10}) == (10, 0, 0)
-    assert normalize_usage({"completion_tokens": 3}) == (0, 3, 0)
+    s1 = normalize_usage({"prompt_tokens": 10})
+    assert (s1.input, s1.output, s1.cached) == (10, 0, 0)
+    s2 = normalize_usage({"completion_tokens": 3})
+    assert (s2.input, s2.output, s2.cached) == (0, 3, 0)
 
 
 def test_normalize_cached_openai_style():
     # RouterAI/OpenAI: prompt_tokens_details.cached_tokens
     u = {"prompt_tokens": 14722, "completion_tokens": 50,
          "prompt_tokens_details": {"cached_tokens": 14464}}
-    assert normalize_usage(u) == (14722, 50, 14464)
+    s = normalize_usage(u)
+    assert (s.input, s.output, s.cached) == (14722, 50, 14464)
 
 
 def test_normalize_cached_deepseek_native():
     # DeepSeek-native: prompt_cache_hit_tokens
     u = {"prompt_tokens": 1000, "completion_tokens": 10, "prompt_cache_hit_tokens": 800}
-    assert normalize_usage(u) == (1000, 10, 800)
+    s = normalize_usage(u)
+    assert (s.input, s.output, s.cached) == (1000, 10, 800)
 
 
 def test_normalize_cached_clamped_to_input():
     u = {"prompt_tokens": 100, "completion_tokens": 5, "prompt_tokens_details": {"cached_tokens": 999}}
-    assert normalize_usage(u) == (100, 5, 100)  # cached не превышает input
+    s = normalize_usage(u)
+    assert (s.input, s.output, s.cached) == (100, 5, 100)  # cached не превышает input
 
 
 def test_normalize_no_cache_details_zero():
     u = {"prompt_tokens": 100, "completion_tokens": 5, "prompt_tokens_details": None}
-    assert normalize_usage(u) == (100, 5, 0)
+    s = normalize_usage(u)
+    assert (s.input, s.output, s.cached) == (100, 5, 0)
+
+
+def test_normalize_extracts_cost():
+    s = normalize_usage({"prompt_tokens": 100, "completion_tokens": 10, "cost": 0.0058})
+    assert s.cost == 0.0058
+    assert s.billed is True
+
+
+def test_normalize_zero_cost_is_a_fact():
+    # Бесплатная модель: 0 — это факт «бесплатно», а не «цена неизвестна».
+    s = normalize_usage({"prompt_tokens": 100, "completion_tokens": 10, "cost": 0})
+    assert s.cost == 0.0
+    assert s.billed is True
+
+
+def test_normalize_without_cost_is_not_billed():
+    s = normalize_usage({"prompt_tokens": 100, "completion_tokens": 10})
+    assert s.cost is None
+    assert s.billed is False
+
+
+def test_normalize_rejects_broken_cost():
+    for bad in ("0.5", -1, True, float("inf"), None):
+        s = normalize_usage({"prompt_tokens": 100, "completion_tokens": 10, "cost": bad})
+        assert s.billed is False, bad
+        assert s.cost is None, bad
+
+
+def test_normalize_byok_is_not_billed():
+    # При BYOK неизвестно, комиссия в cost или полная цена — факту не доверяем.
+    s = normalize_usage({"prompt_tokens": 100, "completion_tokens": 10,
+                         "cost": 0.0058, "is_byok": True})
+    assert s.billed is False
+    assert s.cost is None
+
+
+def test_normalize_indexing_still_works():
+    s = normalize_usage({"prompt_tokens": 100, "completion_tokens": 10, "cost": 0.5})
+    assert (s[0], s[1], s[2]) == (100, 10, 0)
 
 
 # ---------------- account ----------------
@@ -98,6 +149,77 @@ def test_account_meta_roundtrip():
     assert restored.totals() == acc.totals()
     assert UsageAccount.from_meta(None).is_empty()
     assert UsageAccount.from_meta({"garbage": 1}).is_empty()
+
+
+def test_add_records_billed_shelf():
+    acc = UsageAccount()
+    acc.add(CATEGORY_MAIN, 1000, 100, 0, cost=0.5, billed=True)
+    acc.add(CATEGORY_MAIN, 2000, 200)          # без цены
+    b = acc.by_category[CATEGORY_MAIN]
+    assert b["calls"] == 2
+    assert b["billed_calls"] == 1
+    assert b["input"] == 3000
+    assert b["billed_input"] == 1000
+    assert b["cost"] == 0.5
+
+
+def test_zero_cost_counts_as_billed():
+    acc = UsageAccount()
+    acc.add(CATEGORY_MAIN, 100, 10, 0, cost=0.0, billed=True)
+    b = acc.by_category[CATEGORY_MAIN]
+    assert b["billed_calls"] == 1
+    assert b["cost"] == 0.0
+
+
+def test_cost_survives_meta_roundtrip():
+    acc = UsageAccount()
+    acc.add(CATEGORY_MAIN, 1000, 100, 0, cost=0.0058, billed=True)
+    restored = UsageAccount.from_meta(acc.to_meta())
+    assert restored.by_category[CATEGORY_MAIN]["cost"] == 0.0058
+    assert restored.by_category[CATEGORY_MAIN]["billed_calls"] == 1
+
+
+def test_old_meta_without_new_fields_reads_as_unbilled():
+    old = {"by_category": {"main": {"input": 100, "output": 10, "cached": 0, "calls": 1}}}
+    acc = UsageAccount.from_meta(old)
+    b = acc.by_category["main"]
+    assert b["billed_calls"] == 0
+    assert b["cost"] == 0.0
+
+
+def test_merge_carries_cost_and_shelf():
+    parent, child = UsageAccount(), UsageAccount()
+    child.add(CATEGORY_MAIN, 1000, 100, 0, cost=0.25, billed=True)
+    parent.merge(child, as_category=CATEGORY_SUBAGENT)
+    b = parent.by_category[CATEGORY_SUBAGENT]
+    assert b["cost"] == 0.25
+    assert b["billed_input"] == 1000
+
+
+def test_delta_from_subtracts_cost():
+    base = UsageAccount()
+    base.add(CATEGORY_MAIN, 1000, 100, 0, cost=0.25, billed=True)
+    now = UsageAccount.from_meta(base.to_meta())
+    now.add(CATEGORY_MAIN, 500, 50, 0, cost=0.10, billed=True)
+    delta = now.delta_from(base)
+    assert delta.by_category[CATEGORY_MAIN]["input"] == 500
+    assert abs(delta.by_category[CATEGORY_MAIN]["cost"] - 0.10) < 1e-12
+
+
+def test_delta_epsilon_does_not_create_category():
+    # Float-хвост вида 1.7e-17 не должен порождать категорию: иначе она создаёт
+    # валюту, multi_currency становится True и футер прячет цену целиком.
+    base = UsageAccount()
+    base.add(CATEGORY_MAIN, 1000, 100, 0, cost=0.1 + 0.2, billed=True)
+    now = UsageAccount.from_meta(base.to_meta())
+    now.by_category[CATEGORY_MAIN]["cost"] = 0.3       # тот же ноль с точностью до эпсилон
+    assert now.delta_from(base).is_empty()
+
+
+def test_totals_keeps_cost_as_float():
+    acc = UsageAccount()
+    acc.add(CATEGORY_MAIN, 100, 10, 0, cost=0.75, billed=True)
+    assert acc.totals()["cost"] == 0.75
 
 
 def test_label_to_category():
