@@ -7,8 +7,7 @@ from tools.subagents.custom.file_definitions import SubagentDefinition
 from tools.subagents.custom.file_subagent import (
     REQUIRED_TOOL_NAMES,
     FileDefinedSubagent,
-    build_tool_specification,
-    required_tools_banned_in_definition,
+    BoundFileSubagent,
 )
 
 REQUIRED = ("turn_finish", "session_read_stored_tool_output")
@@ -34,29 +33,31 @@ class TestRequiredTools:
     """
 
     def test_absent_allowlist_reports_nothing(self):
-        assert required_tools_banned_in_definition(_definition()) == []
+        assert FileDefinedSubagent.required_tools_banned(_definition()) == []
 
     def test_allowlist_without_required_is_not_a_problem(self):
         # Главное изменение: ядро не нужно упоминать в tools.
-        assert required_tools_banned_in_definition(_definition(tools=("fs_read_file",))) == []
+        assert FileDefinedSubagent.required_tools_banned(
+            _definition(tools=("fs_read_file",))
+        ) == []
 
     def test_empty_allowlist_is_not_a_problem(self):
-        assert required_tools_banned_in_definition(_definition(tools=())) == []
+        assert FileDefinedSubagent.required_tools_banned(_definition(tools=())) == []
 
     @pytest.mark.parametrize("banned", REQUIRED)
     def test_stop_tools_ban_is_reported(self, banned):
         # Запрет не исполняется, но оператор должен узнать, что он проигнорирован.
-        assert required_tools_banned_in_definition(
+        assert FileDefinedSubagent.required_tools_banned(
             _definition(stop_tools=(banned,))
         ) == [banned]
 
     def test_all_bans_reported_at_once(self):
-        assert required_tools_banned_in_definition(
+        assert FileDefinedSubagent.required_tools_banned(
             _definition(stop_tools=REQUIRED)
         ) == sorted(REQUIRED)
 
     def test_unrelated_stop_tools_are_ignored(self):
-        assert required_tools_banned_in_definition(
+        assert FileDefinedSubagent.required_tools_banned(
             _definition(stop_tools=("exec_python",))
         ) == []
 
@@ -66,7 +67,7 @@ class TestRequiredTools:
 
 class TestSpecification:
     def test_shape(self):
-        spec = build_tool_specification(_definition())
+        spec = FileDefinedSubagent.tool_specification(_definition())
         assert spec["name"] == "subagent_doc_writer"
         assert spec["description"] == "Пишет документацию."
         assert spec["strict"] is True
@@ -109,3 +110,53 @@ class TestInstance:
             )
         )
         assert inst.task == "t"
+
+
+class TestBoundFileSubagent:
+    """BoundFileSubagent замыкает definition на контракт раннера/реестра."""
+
+    def test_bound_is_frozen_dataclass(self):
+        bound = FileDefinedSubagent.bound(_definition())
+        assert isinstance(bound, BoundFileSubagent)
+
+    def test_agent_name_comes_from_definition(self):
+        bound = FileDefinedSubagent.bound(_definition())
+        assert bound.agent_name == "subagent_doc_writer"
+
+    def test_spec_matches_tool_specification(self):
+        defn = _definition()
+        bound = FileDefinedSubagent.bound(defn)
+        assert bound.get_agent_specification() == FileDefinedSubagent.tool_specification(defn)
+
+    def test_create_instance_proxies_task_and_reason(self):
+        bound = FileDefinedSubagent.bound(_definition())
+        inst = asyncio.run(bound.create_instance(task="t", reason="r"))
+        assert inst.task == "t"
+        assert inst.reason == "r"
+        assert inst.get_agent_name() == "subagent_doc_writer"
+
+    def test_create_instance_tolerates_extra_runner_kwargs(self):
+        bound = FileDefinedSubagent.bound(_definition())
+        inst = asyncio.run(
+            bound.create_instance(
+                task="t",
+                reason="r",
+                model="какая-то-модель",
+                config_dict={"a": 1},
+                runtime_notices_enabled=True,
+            )
+        )
+        assert inst.task == "t"
+
+    def test_create_instance_ignores_definition_kwarg(self):
+        # definition только из bound; случайный definition в kwargs не переопределяет.
+        bound = FileDefinedSubagent.bound(_definition())
+        other = _definition(role="Другая роль")
+        inst = asyncio.run(bound.create_instance(task="t", reason="r", definition=other))
+        assert inst.definition.role == "Ты — писатель."
+
+    def test_class_get_agent_specification_raises_with_bound_hint(self):
+        with pytest.raises(NotImplementedError) as exc_info:
+            FileDefinedSubagent.get_agent_specification()
+        msg = str(exc_info.value)
+        assert "bound" in msg

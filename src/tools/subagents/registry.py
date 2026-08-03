@@ -15,11 +15,7 @@ from tools.subagents.custom.file_definitions import (
     resolve_max_count,
 )
 from tools.subagents.selection import subagents_allowlist_ordered
-from tools.subagents.custom.file_subagent import (
-    FileDefinedSubagent,
-    build_tool_specification,
-    required_tools_banned_in_definition,
-)
+from tools.subagents.custom.file_subagent import FileDefinedSubagent
 
 SUBAGENT_CLASSES: List[Type[AbstractSubagent]] = [
     Worker,
@@ -51,25 +47,6 @@ _log = logging.getLogger(__name__)
 def builtin_subagent_names() -> set:
     """Имена встроенных сабагентов — они выигрывают коллизию у кастомных."""
     return set(_SUBAGENT_MAP.keys())
-
-
-class _FileSubagentFactory:
-    """Замыкание определения на контракт ``create_instance``.
-
-    Раннер обращается к результату ``get_subagent_class`` только за
-    ``create_instance`` (``runner.py:124``), поэтому полноценный класс на каждое
-    определение не нужен — достаточно объекта с этим методом.
-    """
-
-    def __init__(self, definition: SubagentDefinition) -> None:
-        self.definition = definition
-        self.agent_name = definition.name
-
-    async def create_instance(self, **kwargs: Any) -> FileDefinedSubagent:
-        kwargs.pop("definition", None)
-        return await FileDefinedSubagent.create_instance(
-            definition=self.definition, **kwargs
-        )
 
 
 def _apply_allowlist_and_limit(
@@ -164,7 +141,7 @@ def resolve_subagent_definitions(
     )
     config_dict[SUBAGENT_DIAGNOSTICS_KEY] = diagnostics
     for definition in definitions:
-        banned = required_tools_banned_in_definition(definition)
+        banned = FileDefinedSubagent.required_tools_banned(definition)
         if banned:
             # Запрет не исполняется — служебное ядро выдаётся всегда. Но указание
             # оператора явное, поэтому о его игнорировании сообщаем.
@@ -196,7 +173,7 @@ def get_subagent_class(
     if builtin is not None:
         return builtin
     definition = resolve_subagent_definitions(config_dict).get(tool_name)
-    return _FileSubagentFactory(definition) if definition is not None else None
+    return FileDefinedSubagent.bound(definition) if definition is not None else None
 
 
 def is_subagent_tool(
@@ -225,7 +202,8 @@ def get_subagents_tools_data(
     for name, definition in resolve_subagent_definitions(
         config_dict, logger=logger
     ).items():
-        spec = build_tool_specification(definition)
+        bound = FileDefinedSubagent.bound(definition)
+        spec = bound.get_agent_specification()
         result[name] = {
             "spec": spec,
             "description": definition.description,
