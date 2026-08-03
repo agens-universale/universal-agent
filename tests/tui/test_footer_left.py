@@ -1,7 +1,7 @@
 """Footer-left контекстно зависит от наличия задачи и активного run.
 
 Idle: F1/help  F2/sessions  F3/diff  F5/config  F6/settings  F7/buffer
-Running: F1/help  F2/sessions  F3/diff  F7/buffer  [Ctrl+C]/stop
+Running: F1/help  F2/sessions  F3/diff  F7/buffer  Ctrl+C/stop
 (/skills и /export из футера убраны — доступны через палитру; /mcp не дублируем —
 подсказка /mcp в бренд-карточке.)
 
@@ -101,7 +101,7 @@ async def test_footer_left_task_running_shows_stop(tmp_path):
         await pilot.pause(0.4)
 
         rendered = str(pilot.app.query_one("#footer-left", Static).render())
-        assert "[Ctrl+C]/stop" in rendered
+        assert "Ctrl+C/stop" in rendered
         assert "F2/sessions" in rendered
         assert "F1/help" in rendered
         assert "F3/diff" in rendered
