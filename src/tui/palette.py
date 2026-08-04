@@ -10,7 +10,6 @@
 """
 from __future__ import annotations
 
-
 # Базовые
 BG = "#0E1119"
 INK = "#ebe9e6"
@@ -35,6 +34,16 @@ BRAND = "#9A6DD7"
 # Поверхности
 BAND_BG = "#1f2128"
 FOCUS_BG = "#363b47"     # подсветка строки трассы в фокусе (только CSS :focus) — светлее user-band
+
+# Выделение текста мышью. Тот же синий, которым Textual выделяет текст в
+# TextArea (экран /buffer): #368AE9 с прозрачностью 40% поверх фона даёт
+# примерно это значение — интерфейс говорит про выделение одним цветом.
+#
+# Почему не светлее: комментарии в подсветке кода тёмные, и на более светлом
+# фоне их контраст падает ниже читаемого. Пара «этот фон + комментарии на $dim»
+# (см. services/code_render) подобрана так, чтобы читаемым осталось всё.
+# Границы закреплены тестами в tests/tui/test_palette_sync.py.
+SCREEN_SELECTION_BACKGROUND = "#1e416c"
 CARD_SELECT_BG = "#2e323d"  # выбранная карточка (/sessions, /skills, /mcp) — мягче focus-bg, светлее band-bg
 FRAME_ARCHIVE = "#4b525d"  # серая рамка «архив/история» (отвеченный вопрос)
 
@@ -42,11 +51,13 @@ FRAME_ARCHIVE = "#4b525d"  # серая рамка «архив/история»
 def css_variables() -> dict[str, str]:
     """Токены → CSS-переменные (kebab-имена как в TCSS). Инжектится в
     `TuiApp.get_css_variables()`; TCSS ссылается на них через `$name`."""
-    return {
+    variables = {
         "bg": BG, "ink": INK, "bright": BRIGHT, "dim": DIM, "muted": MUTED,
         "deep-dim": DEEP_DIM, "accent": ACCENT, "code": CODE, "tool-name": TOOL_NAME,
         "code-block": CODE_BLOCK, "ok": OK, "run-color": RUN_COLOR, "olive": OLIVE,
         "err": ERR, "warn": WARN, "info": INFO, "brand": BRAND,
-        "band-bg": BAND_BG, "focus-bg": FOCUS_BG, "card-select-bg": CARD_SELECT_BG,
-        "frame-archive": FRAME_ARCHIVE,
+        "band-bg": BAND_BG, "focus-bg": FOCUS_BG,
+        "screen-selection-background": SCREEN_SELECTION_BACKGROUND,
+        "card-select-bg": CARD_SELECT_BG, "frame-archive": FRAME_ARCHIVE,
     }
+    return variables
