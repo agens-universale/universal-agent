@@ -24,3 +24,13 @@ class SummaryToggleRequest(Message):
     def __init__(self, event_no: int) -> None:
         super().__init__()
         self.event_no = event_no
+
+
+class CopyBlockRequest(Message):
+    """Кнопка ❐ или двойной клик по блоку → экран копирует payload целиком.
+
+    Виджет не обращается к буферу сам: главный экран дополнительно пишет копию
+    в буфер сессии, экран превью — нет (там нет своей активной сессии)."""
+    def __init__(self, payload: str) -> None:
+        super().__init__()
+        self.payload = payload
