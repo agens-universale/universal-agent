@@ -27,6 +27,7 @@ from runtime_notices import collect_unread_runtime_notices
 from startup_notices import collect_startup_notices
 from tools.registry import all_builtin_tool_names
 from tui.commands import build_default_registry, closest_command
+from tui.messages import CopyBlockRequest
 from tui.models import TaskCursor
 from rich.text import Text
 from tui.palette import ACCENT as _ACCENT
@@ -37,6 +38,7 @@ from tui.palette import INK as _INK
 from tui.services.context_meter import render_context_meter
 from tui.services.notices_ui import format_notices_badge, format_notices_footer_suffix
 from tui.services.usage_meter import compose_adaptive_footer_right, usage_segments
+from tui.services.clipboard_ops import copy_out
 from tui.services.export import export_thread
 from tui.services.path_display import truncate_path
 from tui.services.git_info import current_branch
@@ -4559,6 +4561,20 @@ class TraceScreen(Screen):
             body.add_class("hidden")
             if marker is not None:
                 marker.set_prefix("▸ ")
+
+    def on_copy_block_request(self, event: CopyBlockRequest) -> None:
+        """Кнопка ❐ или двойной клик по блоку: копия наружу + в буфер сессии.
+
+        Буфер сессии — как у Ctrl+C: это явный жест копирования, а не побочный
+        эффект выделения. Двойной клик перед этим сам рождает TextSelected
+        (выделение тела) и ставит в очередь отложенную автокопию видимого —
+        её нужно отменить, иначе она затрёт payload позже (гонка copy-on-select)."""
+        payload = event.payload
+        if not payload:
+            return
+        self.app.cancel_pending_select_copy()
+        copy_out(self.app, payload, toast=True, blocking=False)
+        self.app._push_session_copy_buffer(payload)
 
     def on_open_tool_call_detail_request(self, message) -> None:
         """Ctrl+click / Enter по row → детальный экран call + output.

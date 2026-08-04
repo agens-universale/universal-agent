@@ -11,6 +11,8 @@ from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import Screen
 from textual.widgets import Static
 
+from tui.messages import CopyBlockRequest
+from tui.services.clipboard_ops import copy_out
 from tui.services.skill_view import truncate_path_left
 
 _PATH_MAXLEN = 48
@@ -77,3 +79,14 @@ class PreviewScreen(Screen[bool]):
             body.add_class("hidden")
             if marker is not None:
                 marker.set_prefix("▸ ")
+
+    def on_copy_block_request(self, event: CopyBlockRequest) -> None:
+        """Копия наружу без буфера сессии: превью показывает ЧУЖОЙ тред, а
+        _push_session_copy_buffer пишет в активную сессию главного экрана.
+
+        Двойной клик перед этим сам рождает TextSelected и ставит в очередь
+        отложенную автокопию видимого — отменяем, иначе она затрёт payload
+        позже (гонка copy-on-select)."""
+        if event.payload:
+            self.app.cancel_pending_select_copy()
+            copy_out(self.app, event.payload, toast=True, blocking=False)
