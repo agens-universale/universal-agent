@@ -424,9 +424,6 @@ class GcCliExternal(BaseAgent):
         container_skills = (
             skills_dir if skills_dir and await environment.is_dir(skills_dir) else None
         )
-        # A profile that ships its own skills means a runner-local directory: the
-        # registry reads through the backend, so it has to cross into the container
-        # first before the agent can see it.
         skill_sources: dict[str, str] = {}
         profile_skills = self._overrides.get("skills_data_path")
         if profile_skills:
