@@ -134,6 +134,13 @@ class SummaryMarker(TraceRow):
 
     def on_key(self, event: events.Key) -> None:
         if event.key == "enter":
+            # Как ClickModelMixin: при security-confirm Enter — ответ баннеру,
+            # не toggle сводки (focused-строка получает Key раньше Screen).
+            try:
+                if getattr(self.screen, "_confirm_active", False):
+                    return
+            except Exception:
+                pass
             event.stop()
             from tui.messages import SummaryToggleRequest
             self.post_message(SummaryToggleRequest(self._event_no))

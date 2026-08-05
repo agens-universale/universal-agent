@@ -188,6 +188,92 @@ async def test_confirm_banner_down_then_enter_answers_session(tmp_path):
         assert len(pilot.app.query(ConfirmBanner)) == 0
 
 
+@pytest.mark.asyncio
+async def test_confirm_enter_not_open_tool_detail_when_row_focused(tmp_path):
+    """Регресс: фокус на running ToolCallRow + confirm → Enter/Y отвечают
+    баннеру, а не открывают ToolCallDetailScreen.
+
+    Раньше Key шёл в ClickModelMixin.on_key строки (stop) до Screen.on_key,
+    и Enter открывал viewer деталей вызова вместо once/deny.
+    """
+    pytest.importorskip("textual")
+    from tui.app import TuiApp
+    from tui.models import TraceEvent
+    from tui.screens.tool_call_detail import ToolCallDetailScreen
+    from tui.widgets.confirm_banner import ConfirmBanner
+    from tui.widgets.tool_call_row import ToolCallRow
+
+    runner = _StubRunner()
+    app = TuiApp(threads_dir=str(tmp_path), system="cli",
+                 config={"model": "M", "backend_api_mode": "chat_completions"})
+    app.active_runner = runner
+
+    async with app.run_test() as pilot:
+        scr = pilot.app.screen
+        call_ev = TraceEvent(
+            no=1,
+            event_ts_utc_iso="t",
+            kind="call",
+            title="exec_command",
+            summary="curl",
+            full_payload={
+                "type": "function_call",
+                "name": "exec_command",
+                "arguments": '{"command":"curl"}',
+                "call_id": "c1",
+            },
+            call_id="c1",
+            tool_name="exec_command",
+        )
+        scr._task_events = [call_ev]
+        row = ToolCallRow(
+            call_id="c1", tool_name="exec_command", args_summary="curl",
+        )
+        await scr.query_one("#trace").mount(row)
+        await pilot.pause(0.05)
+
+        scr.show_confirm_banner("Команда", "Разрешить?", [("Command", "curl")])
+        await pilot.pause(0.05)
+        # Симулируем клик/Tab по строке тула во время confirm (фокус украден).
+        row.focus()
+        await pilot.pause(0.05)
+        assert isinstance(pilot.app.focused, ToolCallRow)
+
+        await pilot.press("enter")
+        await pilot.pause(0.1)
+
+        stack = [type(s).__name__ for s in pilot.app.screen_stack]
+        assert "ToolCallDetailScreen" not in stack, stack
+        assert not any(isinstance(s, ToolCallDetailScreen) for s in pilot.app.screen_stack)
+        assert runner.replies == ["once"]
+        assert not scr._confirm_active
+        assert len(pilot.app.query(ConfirmBanner)) == 0
+
+
+@pytest.mark.asyncio
+async def test_confirm_banner_receives_focus_on_show(tmp_path):
+    """show_confirm_banner ставит фокус на баннер (не None / не tool-row)."""
+    pytest.importorskip("textual")
+    from tui.app import TuiApp
+    from tui.widgets.confirm_banner import ConfirmBanner
+    from tui.widgets.tool_call_row import ToolCallRow
+
+    app = TuiApp(threads_dir=str(tmp_path), system="cli",
+                 config={"model": "M", "backend_api_mode": "chat_completions"})
+
+    async with app.run_test() as pilot:
+        scr = pilot.app.screen
+        row = ToolCallRow(call_id="c1", tool_name="exec_command", args_summary="x")
+        await scr.query_one("#trace").mount(row)
+        row.focus()
+        await pilot.pause(0.05)
+
+        scr.show_confirm_banner("T", "Q?")
+        await pilot.pause(0.05)
+
+        assert isinstance(pilot.app.focused, ConfirmBanner)
+
+
 # ── Tests for Ctrl+C / _reset_render_state confirm handling ──────────────────
 
 @pytest.mark.asyncio

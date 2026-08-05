@@ -51,6 +51,14 @@ class ClickModelMixin:
 
     def on_key(self, event: events.Key) -> None:
         if event.key == "enter":
+            # Confirm-баннер перехватывает Enter на Screen, но focused-строка
+            # получает Key раньше (bubble). Не открывать detail/viewer, пока
+            # висит security-confirm — иначе [Y]/Enter открывает tool detail.
+            try:
+                if getattr(self.screen, "_confirm_active", False):
+                    return
+            except Exception:
+                pass
             message = self._open_request()
             if message is not None:
                 event.stop()

@@ -76,6 +76,9 @@ def choice_for(selected: int) -> str:
 
 class ConfirmBanner(Vertical):
     DEFAULT_CSS = ""  # стили в styles.tcss (.confirm-banner)
+    # Фокус на баннере, пока висит confirm: иначе Tab/клик по ToolCallRow
+    # перехватывает Enter (открывает detail) до Screen.on_key.
+    can_focus = True
 
     def __init__(
         self,

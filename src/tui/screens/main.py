@@ -2012,15 +2012,15 @@ class TraceScreen(Screen):
         self.query_one("#root", Vertical).mount(banner, before=inp_row)
         self.call_after_refresh(self._sync_trace_max_height)
         inp_row.add_class("hidden")
-        # Инпут на время confirm: blur + СИНХРОННО disabled. Одного set_focus(None)
-        # мало — он применяется асинхронно (след. цикл pump), и под нагрузкой первый
-        # «y» успевает уйти в ещё-сфокусированную TextArea ДО blur (плавающий баг).
-        # disabled=True снимает виджет с обработки клавиш немедленно — гонки нет.
+        # Инпут на время confirm: СИНХРОННО disabled (иначе «y» утекает в TextArea).
+        # Фокус — на сам баннер, не set_focus(None): при None следующий Tab/клик
+        # по running ToolCallRow перехватывает Enter и открывает tool detail
+        # вместо _answer_confirm (Key идёт focused→bubble, Screen.on_key позже).
         try:
             self.query_one("#cmdinput", CommandTextArea).disabled = True
         except Exception:
             pass
-        self.set_focus(None)
+        self.set_focus(banner)
         if self._stick_bottom:
             self._scroll_trace_end()
 
