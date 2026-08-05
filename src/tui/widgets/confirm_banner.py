@@ -7,12 +7,17 @@
 fields — структурированные детали решения (Tool/Path/Command/Reason/Risk),
 которые приходят из confirm-порта (request_confirm). Рендерятся строками между
 вопросом и вариантами — чтобы баннер был информативен (CLI-промпт их печатает,
-здесь — тоже)."""
+здесь — тоже).
+
+Layout: скроллируемое тело (команда/код как есть) + Y/O/N/T с ``dock: bottom``.
+При ``max_height`` от ``_cap_sticky_banner`` main.py выставляет ``height=cap``,
+иначе Textual клипает box, а дети layout'ятся полной высотой и опции уезжают.
+"""
 from __future__ import annotations
 
 from rich.text import Text
 from textual.app import ComposeResult
-from textual.containers import Vertical
+from textual.containers import Vertical, VerticalScroll
 from textual.widgets import Static
 
 from tui.palette import ACCENT, BG, BRIGHT, DIM, RUN_COLOR
@@ -21,6 +26,13 @@ from tui.palette import ACCENT, BG, BRIGHT, DIM, RUN_COLOR
 # Width-safe-кандидат; если ⚠ в целевом терминале рендерится шире 1 ячейки —
 # заменить на "▲" или "!" (единственная точка правки).
 GUARD_GLYPH = "⚠"
+
+# Payload as-is in the scroll body. Only a pathological safety net (agent can
+# dump huge blobs into exec_python) — normal scripts/curls are never cut.
+_PAYLOAD_SAFETY_CHAR_LIMIT = 100_000
+
+# Rows reserved for docked options (padding-top spacer + 4 choice lines).
+_OPTIONS_RESERVED_ROWS = 5
 
 
 def build_guard_label(title: str, via: str | None = None) -> Text:
@@ -54,17 +66,27 @@ def _is_payload_label(label: str) -> bool:
     return str(label).strip().casefold() in _PAYLOAD_LABELS
 
 
-def _fmt_payload_value(value: object, *, limit: int = 500) -> str:
-    """Multiline payload: newlines preserved; over limit → head + ``… (+N chars)``."""
+def _fmt_payload_value(
+    value: object,
+    *,
+    safety_limit: int = _PAYLOAD_SAFETY_CHAR_LIMIT,
+) -> str:
+    """Full multiline payload for confirm body (scroll handles overflow).
+
+    Newlines preserved. No soft 500-char / line caps — user must see the real
+    command/script. Only ``safety_limit`` clips pathological megabyte blobs.
+    """
     if isinstance(value, (list, tuple)):
         text = "\n".join(str(x) for x in value)
     else:
         text = str(value)
     text = text.strip()
-    if len(text) <= limit:
+    if not text:
         return text
-    omitted = len(text) - limit
-    return f"{text[:limit]}\n… (+{omitted} chars)"
+    if safety_limit > 0 and len(text) > safety_limit:
+        omitted = len(text) - safety_limit
+        return f"{text[:safety_limit]}\n… (+{omitted} chars)"
+    return text
 
 
 def _fmt_field_value(value: object, *, limit: int = 200) -> str:
@@ -106,6 +128,9 @@ class ConfirmBanner(Vertical):
     # Фокус на баннере, пока висит confirm: иначе Tab/клик по ToolCallRow
     # перехватывает Enter (открывает detail) до Screen.on_key.
     can_focus = True
+    # Сигнал для main._cap_sticky_banner: при обрезке нужен height=cap
+    # (docked options + scroll body), иначе max_height клипает box впустую.
+    needs_height_when_capped = True
 
     def __init__(
         self,
@@ -126,24 +151,38 @@ class ConfirmBanner(Vertical):
         self.selected: int = 0  # 0 = Y/affirmative по умолчанию
         self._options_static: Static | None = None
 
-    def compose(self) -> ComposeResult:
-        yield Static(
-            build_guard_label(self.banner_title, via=self.via),
-            classes="cb-label",
-            markup=False,
-        )
-        yield Static(self.question, classes="cb-question", markup=False)
+    @property
+    def desired_height(self) -> int:
+        """Честная высота контента + рамка (для cap/trace chrome)."""
+        body_lines = 2  # title, question
         for label, value in self.fields:
             if _is_payload_label(label):
                 text = _fmt_payload_value(value)
-                css_class = "cb-payload"
             else:
                 text = _fmt_field_value(value)
-                css_class = "cb-field"
             if not text:
-                continue  # пустые поля (напр. Reason="") не засоряют баннер
-            yield Static(f"  {label}: {text}", classes=css_class, markup=False)
-        yield Static("", classes="cb-spacer")  # пустая строка отделяет инфо от вариантов
+                continue
+            body_lines += text.count("\n") + 1
+        return body_lines + _OPTIONS_RESERVED_ROWS + 2  # +2 border
+
+    def compose(self) -> ComposeResult:
+        with VerticalScroll(classes="cb-body"):
+            yield Static(
+                build_guard_label(self.banner_title, via=self.via),
+                classes="cb-label",
+                markup=False,
+            )
+            yield Static(self.question, classes="cb-question", markup=False)
+            for label, value in self.fields:
+                if _is_payload_label(label):
+                    text = _fmt_payload_value(value)
+                    css_class = "cb-payload"
+                else:
+                    text = _fmt_field_value(value)
+                    css_class = "cb-field"
+                if not text:
+                    continue  # пустые поля (напр. Reason="") не засоряют баннер
+                yield Static(f"  {label}: {text}", classes=css_class, markup=False)
         opts = Static(_render_options(self.selected), classes="cb-options")
         self._options_static = opts
         yield opts

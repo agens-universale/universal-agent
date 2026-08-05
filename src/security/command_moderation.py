@@ -720,12 +720,13 @@ def _ask_user_confirmation(
     ctx: Any = None,
 ) -> bool:
     primary_label = _primary_payload_label(context.tool_name)
-    # Payload first (bright), then dim meta — SPEC §3.5b. Tool already in question.
+    # Full payload as-is: TUI banner scrolls body + docks Y/O/N/T (no 500-char cut).
+    # _payload_preview stays for block-error JSON previews only.
     return request_confirm(
         title="Проверка команды",
         question=f"Разрешить запуск? ({context.tool_name})",
         fields=[
-            (primary_label, _payload_preview(payload)),
+            (primary_label, payload),
             ("Причина", decision.reason),
             ("Риски", ", ".join(decision.risk_flags) or "-"),
         ],

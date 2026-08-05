@@ -4,7 +4,7 @@ T8:  config fields command_moderation and write_guard are separate
 T9:  judge prompt doc contains insession_examples / allowed / denied strings
 T11c: CLI prompt_user_confirmation_choice accepts latin+cyrillic same-key sets
 T13: write guard still works (bool) with 4-choice ids
-T16: long payload: multiline preserved + soft cap 500 chars
+T16: long payload: multiline as-is (scroll body + docked options)
 """
 import io
 import sys
@@ -169,7 +169,7 @@ def test_t13_write_guard_allow_choices_are_bool():
     assert DENY_REMEMBER != DENY_ONCE
 
 
-# ── T16: long payload multiline + soft cap 500 ───────────────────────────────
+# ── T16: long payload multiline as-is (scroll + docked options) ──────────────
 
 def test_t16_fmt_payload_value_preserves_multiline():
     """_fmt_payload_value preserves newlines (unlike _fmt_field_value which collapses)."""
@@ -182,19 +182,19 @@ def test_t16_fmt_payload_value_preserves_multiline():
     assert "line2" in result
 
 
-def test_t16_fmt_payload_value_truncates_at_500():
-    """Payload longer than 500 chars: head 500 + footer ``… (+N chars)``."""
+def test_t16_fmt_payload_value_keeps_full_long_script():
+    """Long python/curl payloads are not soft-cut — body scrolls, options stay docked."""
     from tui.widgets.confirm_banner import _fmt_payload_value
 
-    long_text = "x" * 600
-    result = _fmt_payload_value(long_text)
-    assert result.startswith("x" * 500)
-    assert result.endswith("… (+100 chars)")
-    assert "\n" in result
+    body = "\n".join(f"row{i} = {i}" for i in range(80))
+    result = _fmt_payload_value(body)
+    assert result == body
+    assert "row79" in result
+    assert "… (+" not in result
 
 
-def test_t16_fmt_payload_value_preserves_short_multiline_under_cap():
-    """Short multiline payload is fully preserved, not truncated."""
+def test_t16_fmt_payload_value_preserves_short_multiline():
+    """Short multiline payload is fully preserved."""
     from tui.widgets.confirm_banner import _fmt_payload_value
 
     payload = "curl https://api.example.com \\\n  -H 'Accept: json' \\\n  -d 'data'"
@@ -246,13 +246,16 @@ def test_t15_ask_confirmation_fields_payload_first_ru_labels(monkeypatch):
         risk_flags=["network_to_private"],
         requires_confirmation=True,
     )
-    _ask_user_confirmation("curl http://x", ctx, decision, ctx=None)
+    long_cmd = "curl http://x\n" + ("# pad\n" * 40)
+    _ask_user_confirmation(long_cmd, ctx, decision, ctx=None)
     labels = [lab for lab, _ in captured["fields"]]
     assert labels[0] == "Команда"
     assert "Preview" not in labels
     assert "Tool" not in labels
     assert labels == ["Команда", "Причина", "Риски"]
-    assert captured["decision_key"] == "command:curl http://x"
+    # Confirm gets full payload (not _payload_preview 500-char cut).
+    assert captured["fields"][0][1] == long_cmd
+    assert captured["decision_key"] == f"command:{long_cmd}"
     assert "exec_command" in captured["question"]
 
     py_ctx = ModerationContext(tool_name="exec_python", launch_root="/tmp", mode="ask")
@@ -260,7 +263,8 @@ def test_t15_ask_confirmation_fields_payload_first_ru_labels(monkeypatch):
     assert captured["fields"][0][0] == "Код"
 
 
-def test_t15_payload_preview_soft_cap_with_omitted_count():
+def test_t15_payload_preview_still_caps_block_errors():
+    """_payload_preview remains for block-error JSON only (not confirm banner)."""
     from security.command_moderation import _payload_preview
 
     body = "c" * 550

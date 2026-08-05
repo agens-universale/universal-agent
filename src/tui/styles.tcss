@@ -362,21 +362,37 @@ CopyBufferScreen #root { height: 1fr; }
 TextArea.ask-human-mode { border: solid $run-color; }
 
 /* confirm banner — служебный/security, бирюзовый (accent) вместо янтарного.
- * max-height как у ask_human: длинные fields не выдавливают футер. */
+ * Тело (.cb-body) скроллится; .cb-options dock:bottom — Y/O/N/T всегда видны.
+ * При cap main.py ставит height=cap (needs_height_when_capped): одного max_height
+ * мало — Textual клипает box, а undocked-дети layout'ятся полной высотой. */
 .confirm-banner {
     background: #161A23;
     border: round $accent;
     padding: 0 1;
     margin: 0 1;
     height: auto;
-    max-height: 50%;
     width: 1fr;
+    layout: vertical;
+    overflow-y: hidden;
 }
-.cb-label    { color: $bright; text-style: bold; }
-.cb-question { color: $ink; }
-.cb-field    { color: $dim; }
-.cb-payload  { color: $bright; text-style: bold; }
-.cb-options  { color: $accent; }
+.confirm-banner > .cb-body {
+    height: 1fr;
+    width: 1fr;
+    scrollbar-size-vertical: 1;
+}
+.cb-label    { color: $bright; text-style: bold; height: auto; }
+.cb-question { color: $ink; height: auto; }
+.cb-field    { color: $dim; height: auto; }
+.cb-payload  { color: $bright; text-style: bold; height: auto; }
+.cb-options  {
+    dock: bottom;
+    color: $accent;
+    height: auto;
+    min-height: 5;       /* padding-top + 4 choice rows */
+    padding-top: 1;
+    background: #161A23;
+    width: 100%;
+}
 
 /* скрытый input-row при confirm (одиночные клавиши y/N без TextArea) */
 #input-row.hidden { display: none; }

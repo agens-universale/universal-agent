@@ -1126,7 +1126,12 @@ class TraceScreen(Screen):
         """Потолок sticky-баннера: длинный вопрос не выдавливает input/footer.
 
         Как у input-оверлея — ≤ половины экрана и оставляет min строк трейса.
-        Возвращает желаемую (уже ужатую) высоту баннера для расчёта #trace."""
+        Возвращает желаемую (уже ужатую) высоту баннера для расчёта #trace.
+
+        ConfirmBanner (docked Y/O/N/T + scroll body): одного max_height мало —
+        Textual клипает box, а дети layout'ятся полной высотой и опции уезжают
+        за клип. При overflow ставим height=cap, чтобы dock/scroll работали
+        внутри реальной высоты (см. needs_height_when_capped)."""
         cap = min(self.size.height // 2,
                   self.size.height - chrome - self._MIN_TRACE_WITH_OVERLAY)
         if cap <= 0:
@@ -1135,14 +1140,28 @@ class TraceScreen(Screen):
         # После layout region уже включает round-border и ≤ cap — самый точный замер.
         # До layout / пока region ещё не ужат: virtual_size = контент без рамки (+2),
         # иначе chrome занижается на 2 и футер уезжает за край экрана.
-        region_h = banner.region.height
-        if 0 < region_h <= cap:
-            return region_h
         try:
             content_h = banner.virtual_size.height
         except Exception:
             content_h = 0
-        estimated = (content_h + 2) if content_h > 0 else (len(banner.children) + 2)
+        desired = getattr(banner, "desired_height", None)
+        if isinstance(desired, int) and desired > 0:
+            estimated = desired
+        elif content_h > 0:
+            estimated = content_h + 2
+        else:
+            estimated = len(banner.children) + 2
+        # Force real height when content exceeds cap and banner needs it
+        # (ConfirmBanner docked options). AskHuman is VerticalScroll — max_height
+        # alone is enough; clearing height keeps hug-content behaviour.
+        if getattr(banner, "needs_height_when_capped", False):
+            if estimated > cap:
+                banner.styles.height = cap
+            else:
+                banner.styles.height = None  # auto / hug content
+        region_h = banner.region.height
+        if 0 < region_h <= cap:
+            return region_h
         return min(estimated, cap)
 
     def _sync_trace_max_height(self) -> None:
