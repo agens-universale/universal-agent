@@ -304,17 +304,18 @@ def decide_command_execution(
 
 def make_block_error(
     decision: ExecutionDecision,
-    payload: str,
-    tool_name: str,
     mode: str,
 ) -> dict[str, Any]:
-    preview_key = "code_preview" if tool_name == EXEC_PYTHON_NAME else "command_preview"
+    """Tool-result error for a blocked/cancelled command.
+
+    No command/code preview: the model already has the full payload in the
+    preceding function_call arguments; duplicating a truncated copy wastes tokens.
+    """
     error = {
         "type": decision.error_type or "unsafe_command_blocked",
         "mode": mode,
         "reason": decision.reason,
         "risk_flags": decision.risk_flags,
-        preview_key: _payload_preview(payload),
     }
     return {key: value for key, value in error.items() if value is not None}
 
@@ -422,12 +423,7 @@ def moderate_command_execution(
                     error_type=decision.error_type,
                 )
                 return func(*args, **kwargs)
-            error = make_block_error(
-                decision,
-                payload,
-                moderation_context.tool_name,
-                moderation_context.mode,
-            )
+            error = make_block_error(decision, moderation_context.mode)
             audit_policy_decision(
                 context,
                 tool_name=moderation_context.tool_name,
@@ -553,15 +549,6 @@ def _string_list(raw: Any, *, field_name: str) -> list[str]:
 
 def _join_reasons(reasons: list[str], *, default: str) -> str:
     return "; ".join(reason for reason in reasons if reason) or default
-
-
-def _payload_preview(payload: str, limit: int = 500) -> str:
-    """Payload preview for confirm: multiline kept; over limit → head + ``… (+N chars)``."""
-    text = payload.strip()
-    if len(text) <= limit:
-        return text
-    omitted = len(text) - limit
-    return f"{text[:limit]}\n… (+{omitted} chars)"
 
 
 def _default_judge_client(args: tuple[Any, ...], kwargs: dict[str, Any]) -> Callable[[dict[str, Any]], dict[str, Any]]:
@@ -720,8 +707,7 @@ def _ask_user_confirmation(
     ctx: Any = None,
 ) -> bool:
     primary_label = _primary_payload_label(context.tool_name)
-    # Full payload as-is: TUI banner scrolls body + docks Y/O/N/T (no 500-char cut).
-    # _payload_preview stays for block-error JSON previews only.
+    # Full payload as-is: TUI banner scrolls body + docks Y/O/N/T.
     return request_confirm(
         title="Проверка команды",
         question=f"Разрешить запуск? ({context.tool_name})",

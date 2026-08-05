@@ -116,7 +116,7 @@ def test_function_call_output_command_moderation_block_is_error_not_agent():
         "cwd": "/work", "exit_code": None, "timed_out": False, "truncated": False,
         "error": {"type": "unsafe_command_blocked", "mode": "deny",
                   "reason": "Judge is unavailable; fail-closed policy blocks execution.",
-                  "risk_flags": [], "command_preview": "rm -rf /"},
+                  "risk_flags": []},
         "stdout": "", "stderr": "",
     })
     ev = map_message({"type": "function_call_output", "name": "exec_command",

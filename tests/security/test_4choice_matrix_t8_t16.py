@@ -253,7 +253,7 @@ def test_t15_ask_confirmation_fields_payload_first_ru_labels(monkeypatch):
     assert "Preview" not in labels
     assert "Tool" not in labels
     assert labels == ["Команда", "Причина", "Риски"]
-    # Confirm gets full payload (not _payload_preview 500-char cut).
+    # Confirm gets full payload (banner scrolls; no soft-cut for the human).
     assert captured["fields"][0][1] == long_cmd
     assert captured["decision_key"] == f"command:{long_cmd}"
     assert "exec_command" in captured["question"]
@@ -263,14 +263,27 @@ def test_t15_ask_confirmation_fields_payload_first_ru_labels(monkeypatch):
     assert captured["fields"][0][0] == "Код"
 
 
-def test_t15_payload_preview_still_caps_block_errors():
-    """_payload_preview remains for block-error JSON only (not confirm banner)."""
-    from security.command_moderation import _payload_preview
+def test_t15_block_error_has_no_command_preview():
+    """Tool-result block error: type/reason/flags only — no duplicated payload preview."""
+    from security.command_moderation import ExecutionDecision, make_block_error
 
-    body = "c" * 550
-    out = _payload_preview(body, limit=500)
-    assert out.startswith("c" * 500)
-    assert out.endswith("… (+50 chars)")
+    decision = ExecutionDecision(
+        allowed=False,
+        decision="blocked",
+        reason_code="judge_verdict",
+        reason="dangerous",
+        risk_flags=["privilege_escalation"],
+        error_type="unsafe_command_blocked",
+    )
+    err = make_block_error(decision, "deny")
+    assert err == {
+        "type": "unsafe_command_blocked",
+        "mode": "deny",
+        "reason": "dangerous",
+        "risk_flags": ["privilege_escalation"],
+    }
+    assert "command_preview" not in err
+    assert "code_preview" not in err
 
 
 def test_t15_cli_prints_payload_before_meta(fake_tty, monkeypatch):
