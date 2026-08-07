@@ -4,7 +4,10 @@ import pytest
 pytest.importorskip("textual")
 
 from textual.widgets import Static
-from tests.tui.conftest import open_settings_section, settings_section_index
+from tests.tui.conftest import (open_settings_section, recording_probe,
+                                settings_connection, settings_mcp_section,
+                                settings_section_index,
+                                wait_until)
 
 
 def _cfg():
@@ -84,6 +87,35 @@ async def test_settings_menu_lists_sections_with_values(tmp_path):
         assert any("Модель" in r and "test-model" in r for r in rows)
 
 
+async def test_connection_editor_lookup_takes_the_fresh_one():
+    """Сохранение секции обязано читать поля СВЕЖЕГО редактора.
+
+    `remove()` в Textual отложенный: после перерисовки секции старый редактор ещё в
+    дереве. `query_one` на двух матчах не падает, а молча отдаёт ПЕРВЫЙ, обречённый, —
+    и в конфиг уехали бы значения прошлого рендера. Канон — брать последний; для
+    «Подключения» его не соблюдали (находка 2026-08-07)."""
+    import tui.app as app_mod
+    from tui.editors.connection import ConnectionEditor
+    app = app_mod.TuiApp(config=_cfg())
+    async with app.run_test() as pilot:
+        app.push_screen(_mk_screen())
+        await pilot.pause()
+        scr = app.screen
+        await pilot.press("enter")                    # секция «Подключение»
+        await pilot.pause()
+
+        doomed = scr._connection_editor()
+        doomed.remove()                               # отложенное удаление: пока в дереве
+        fresh = ConnectionEditor(url_current="http://fresh.example/v1/chat/completions",
+                                 auth_header=None)
+        doomed.parent.mount(fresh, after=doomed)
+        assert len(list(scr.query(ConnectionEditor))) == 2, \
+            "не удалось воспроизвести два матча — тест перестал проверять то, что должен"
+
+        assert scr._connection_editor() is fresh, "взят обречённый редактор вместо свежего"
+        assert scr.query_one(ConnectionEditor) is doomed   # чем и был плох голый query_one
+
+
 async def test_settings_enter_opens_section_and_esc_returns():
     import tui.app as app_mod
     app = app_mod.TuiApp(config=_cfg())
@@ -98,6 +130,8 @@ async def test_settings_enter_opens_section_and_esc_returns():
         assert "Настройки · Подключение" in header
         assert "(1/5)" not in header                  # без счётчика
         assert not scr.query(".set-current")          # v2: строка «Текущая» удалена
+        await pilot.press("escape")                   # пресет-лист адреса раскрыт сразу (канон §2.1) — свернуть его
+        assert scr._view == 0                          # секция ещё открыта
         await pilot.press("escape")                   # назад в меню
         assert scr._view == "menu"
         await pilot.press("escape")                   # из меню — закрыть экран
@@ -106,6 +140,7 @@ async def test_settings_enter_opens_section_and_esc_returns():
 
 
 async def test_settings_ctrl_pgup_pgdn_switch_sections():
+    from tui.screens.settings import _MCP, _MODES, _UPDATE
     import tui.app as app_mod
     app = app_mod.TuiApp(config=_cfg())
     async with app.run_test() as pilot:
@@ -113,15 +148,15 @@ async def test_settings_ctrl_pgup_pgdn_switch_sections():
         await pilot.pause()
         scr = app.screen
         await pilot.press("down", "down", "enter")   # секция MCP
-        assert scr._view == 2
+        assert scr._view == _MCP
         await pilot.press("ctrl+pagedown")                   # → Режимы работы
-        assert scr._view == 3
+        assert scr._view == _MODES
         await pilot.press("ctrl+pagedown")                   # → Обновление (5/5)
-        assert scr._view == 4
+        assert scr._view == _UPDATE
         await pilot.press("ctrl+pagedown")                   # край: остаёмся (без wrap)
-        assert scr._view == 4
+        assert scr._view == _UPDATE
         await pilot.press("ctrl+pageup")
-        assert scr._view == 3
+        assert scr._view == _MODES
 
 
 async def test_ctrl_pgdn_works_with_focus_in_input():
@@ -507,15 +542,235 @@ async def test_settings_auth_no_auth_writes_empty_header(tmp_path):
         scr = app.screen
         # открыть секцию «Подключение» (idx=0 в меню)
         open_settings_section(scr, "Подключение")
-        await pilot.pause()
+        await pilot.pause()               # дать редактору домонтироваться (on_mount → _presets_ctrl)
         assert not scr.query(".set-current")          # v2: строка «Текущая» удалена
         from tui.editors.connection import ConnectionEditor
-        scr.query_one(ConnectionEditor).move(2)   # выбрать «без авторизации»
+        ed = scr.query_one(ConnectionEditor)
+        # Пресет-лист не раскрыт: адрес свой, не совпадает ни с одним пресетом
+        # (спека-отклонение №5) — вызов ниже на всякий случай, без эффекта.
+        ed.escape_presets()
+        ed.move(2)                        # адрес → токен → галка «без авторизации»
+        ed.toggle_no_auth()               # ● без авторизации
         await pilot.press("enter")                     # применить (умный Enter → probe → ok)
         await pilot.pause(); await pilot.pause()
         content = cfg_file.read_text(encoding="utf-8")
         assert 'Authorization: ""' in content
         assert applied == [1]
+
+
+async def test_space_on_galka_toggles_no_auth_and_freezes_token(tmp_path):
+    """Space на позиции строки-галки «без авторизации» (настоящая клавиша, не
+    прямой вызов метода) переключает её: поле токена гаснет — disabled, пусто."""
+    cfg_file = _write_cfg(tmp_path, auth='"Bearer old-token"')
+    cfg = _loaded(cfg_file)
+    import tui.app as app_mod
+    from textual.widgets import Input
+    from tui.editors.connection import ConnectionEditor
+    app = app_mod.TuiApp(config=cfg)
+    async with app.run_test() as pilot:
+        scr = await _open_settings(app, pilot, cfg_file, cfg)
+        open_settings_section(scr, "Подключение")
+        await pilot.pause()
+        ed = scr.query_one(ConnectionEditor)
+        # Пресет-лист не раскрывается: адрес в поле свой, не совпадает ни с одним
+        # пресетом (спека-отклонение №5) — ↓/↓ сразу ходят по форме.
+        assert ed.presets_open is False
+        await pilot.press("down", "down")               # курсор → галка «без авторизации»
+        await pilot.pause()
+        assert ed._no_auth is False
+        await pilot.press("space")                      # ● включить
+        await pilot.pause()
+        tok = ed.query_one("#conn-token", Input)
+        assert ed._no_auth is True
+        assert tok.disabled is True
+        assert tok.value == ""
+
+
+async def test_space_off_galka_types_space_and_does_not_toggle(tmp_path):
+    """Space, когда курсор НЕ на галке, — обычный пробел уходит в сфокусированный
+    Input (например, токен); галка не переключается."""
+    cfg_file = _write_cfg(tmp_path, auth='"Bearer old-token"')
+    cfg = _loaded(cfg_file)
+    import tui.app as app_mod
+    from textual.widgets import Input
+    from tui.editors.connection import ConnectionEditor
+    app = app_mod.TuiApp(config=cfg)
+    async with app.run_test() as pilot:
+        scr = await _open_settings(app, pilot, cfg_file, cfg)
+        open_settings_section(scr, "Подключение")
+        await pilot.pause()
+        ed = scr.query_one(ConnectionEditor)
+        # Пресет-лист не раскрывается: адрес свой, не совпадает ни с одним пресетом
+        # (спека-отклонение №5) — ↓ сразу ходит по форме.
+        assert ed.presets_open is False
+        await pilot.press("down")                       # курсор → поле токена (НЕ галка)
+        await pilot.pause()
+        await pilot.press("space")
+        await pilot.pause()
+        tok = ed.query_one("#conn-token", Input)
+        assert ed._no_auth is False                     # галка не тронута
+        assert tok.value == " "                          # пробел допечатался в поле
+
+
+async def test_connection_section_esc_collapses_presets_enter_substitutes(tmp_path):
+    """Поле адреса пустое (спека-отклонение №5: список раскрывается только на
+    пустом/пресетном значении — см. test_preset_list.py) — вход в него раскрывает
+    пресеты сразу (канон §2.1); Esc сворачивает СПИСОК, секция остаётся открытой;
+    повторный вход на адрес раскрывает список заново; Enter подставляет url
+    выделенного пресета; список уже свёрнут — следующий Enter обычный submit (не
+    падает на повторном mount тех же id)."""
+    from tui.screens.settings import SettingsScreen
+    import tui.app as app_mod
+    from textual.widgets import Input
+    cfg_file = tmp_path / "c.yml"
+    cfg_file.write_text('backend:\n  completions_url: ""\n', encoding="utf-8")
+    app = app_mod.TuiApp(config=_cfg())
+    async with app.run_test() as pilot:
+        scr = SettingsScreen(config=_cfg(), config_path=str(cfg_file),
+                             on_apply=lambda: None, probe_fn=_fake_probe(_probe_ok()))
+        app.push_screen(scr)
+        await pilot.pause()
+        open_settings_section(scr, "Подключение")
+        await pilot.pause(); await pilot.pause()   # дать call_after_refresh дорисовать строки
+        assert scr.query_one("#conn-url", Input).value == ""
+        rows = [str(w.render()) for w in scr.query(".conn-preset-row")]
+        assert any("OpenRouter" in r for r in rows)
+        assert any("Cloud.ru" in r for r in rows)
+        assert any("GigaCode" in r for r in rows)
+
+        await pilot.press("escape")                            # свернуть список (не закрыть секцию)
+        await pilot.pause()
+        assert not scr.query(".conn-preset-row")               # список свернулся…
+        assert scr._view == settings_section_index("Подключение")   # …секция осталась открытой
+
+        await pilot.press("up"); await pilot.press("down")      # уйти с адреса и вернуться → раскрыть заново
+        await pilot.pause()
+        assert scr.query(".conn-preset-row")
+        await pilot.press("enter")                             # подставить выделенный (первый) пресет
+        await pilot.pause()
+        assert scr.query_one("#conn-url", Input).value == "https://openrouter.ai/api/v1/chat/completions"
+        assert not scr.query(".conn-preset-row")               # список свернулся
+
+        await pilot.press("enter")                             # список уже закрыт — обычный submit, без краха
+        await pilot.pause()
+        assert app.screen is scr
+
+
+async def test_connection_preset_hint_follows_the_cursor_after_esc(tmp_path):
+    """Свернув пресет-лист адреса `Esc`, человек должен видеть, чем его вернуть
+    (спека 2026-08-06 §4.4) — общий хинт-механизм списков (`show_closed_hint`,
+    дословно `LIST_CLOSED_HINT`). До правки `escape_presets`
+    сворачивал список молча — способа узнать про `Alt+↓` не было.
+
+    Фикс-раунд 1 (ревью): подсказка не переживает уход курсора с адреса — с чужого
+    поля `Alt+↓` список адреса уже не раскрывает (`reload_presets` гейтует именно
+    позицию курсора), и висящий текст врал бы про несуществующий путь. Полный путь:
+    Esc → хинт появился → стрелкой ушли на «Токен» → хинта нет → стрелкой вернулись →
+    список раскрылся заново, хинт снова канонный (`PRESET_HINT`)."""
+    from tui.editors.field_list import LIST_CLOSED_HINT
+    from tui.editors.preset_list import PRESET_HINT
+    cfg_file = _write_cfg(tmp_path, url='""')
+    cfg = _loaded(cfg_file)
+    import tui.app as app_mod
+    app = app_mod.TuiApp(config=cfg)
+    async with app.run_test() as pilot:
+        scr = await _open_settings(app, pilot, cfg_file, cfg)
+        open_settings_section(scr, "Подключение")
+        await pilot.pause()
+        assert scr.query(".conn-preset-row")          # предусловие: список раскрыт
+        await pilot.press("escape")                    # свернуть список, секция жива
+        await pilot.pause()
+        assert scr._view == settings_section_index("Подключение")
+        hints = scr.query(".conn-url-preset-hint")
+        assert hints and str(hints[-1].render()) == LIST_CLOSED_HINT
+        await pilot.press("down")                       # уйти с адреса на токен
+        await pilot.pause()
+        assert not scr.query(".conn-url-preset-hint")   # подсказка ушла вместе с курсором
+        await pilot.press("up")                         # вернуться на адрес
+        await pilot.pause()
+        assert scr.query(".conn-preset-row")            # список раскрылся заново
+        hints = scr.query(".conn-url-preset-hint")
+        assert hints and str(hints[-1].render()) == PRESET_HINT
+
+
+async def test_alt_down_over_own_address_opens_without_a_highlight(tmp_path):
+    """Находка A финального ревью 2026-08-06: Alt+↓ раскрывает пресет-лист поверх
+    своего адреса, которого нет среди пресетов (спека §2.4) — строки видны все,
+    подсвеченной нет. Хинт под рамкой и футер обязаны звать Enter «оставить свой
+    адрес», а не «подставить» — иначе первый Enter только сворачивает список, ничего
+    не сохраняя."""
+    from tui.editors.connection import ConnectionEditor
+    from tui.editors.preset_list import PRESET_HINT_NO_MATCH
+    from tui.screens.settings import _FOOTER_PRESET_LIST_NO_MATCH
+    cfg_file = _write_cfg(tmp_path)          # адрес по умолчанию не входит в пресеты
+    cfg = _loaded(cfg_file)
+    import tui.app as app_mod
+    app = app_mod.TuiApp(config=cfg)
+    async with app.run_test() as pilot:
+        scr = await _open_settings(app, pilot, cfg_file, cfg)
+        open_settings_section(scr, "Подключение")
+        await pilot.pause()
+        ed = scr.query_one(ConnectionEditor)
+        assert ed.presets_open is False      # предусловие: свой адрес, список закрыт
+        await pilot.press("alt+down")
+        await pilot.pause()
+        assert ed.presets_open is True
+        rows = [str(w.render()) for w in scr.query(".conn-preset-row")]
+        assert rows and not any(r.startswith("▸") for r in rows)   # видны все, подсвеченной нет
+        hint = str(list(scr.query(".conn-url-preset-hint"))[-1].render())
+        assert hint == PRESET_HINT_NO_MATCH
+        footer = str(scr.query_one("#set-footer", Static).render())
+        assert footer == _FOOTER_PRESET_LIST_NO_MATCH
+
+
+async def test_connection_footer_names_alt_down_only_on_the_url_field(tmp_path):
+    """Находка D финального ревью 2026-08-06: Alt+↓ раскрывает список только с адреса
+    (`ConnectionEditor.on_url_field` гейтит именно эту позицию, `reload_presets`) —
+    на «Токене»/«Прокси» клавиша молчит, и футер не должен её там обещать."""
+    from config_modules.endpoint_presets import DEFAULT_ENDPOINT_PRESETS
+    cfg_file = _write_cfg(tmp_path, url=f'"{DEFAULT_ENDPOINT_PRESETS[0].url}"')
+    cfg = _loaded(cfg_file)
+    import tui.app as app_mod
+    app = app_mod.TuiApp(config=cfg)
+    async with app.run_test() as pilot:
+        scr = await _open_settings(app, pilot, cfg_file, cfg)
+        open_settings_section(scr, "Подключение")
+        await pilot.pause()
+        await pilot.press("escape")          # свернуть список, курсор остаётся на адресе
+        await pilot.pause()
+        footer = str(scr.query_one("#set-footer", Static).render())
+        assert "Alt+↓ — показать список" in footer
+        await pilot.press("down")            # адрес → токен
+        await pilot.pause()
+        footer2 = str(scr.query_one("#set-footer", Static).render())
+        assert "Alt+↓" not in footer2
+        await pilot.press("up")              # обратно на адрес — список раскрылся заново
+        await pilot.pause()
+        await pilot.press("escape")
+        await pilot.pause()
+        footer3 = str(scr.query_one("#set-footer", Static).render())
+        assert "Alt+↓ — показать список" in footer3
+
+
+async def test_esc_with_presets_closed_exits_section_as_before(tmp_path):
+    """Esc при уже свёрнутом пресет-листе закрывает секцию — как раньше
+    (регресс-проверка): первый Esc сворачивает список, второй — выходит в меню.
+    Адрес пустой — только так список раскрыт с самого начала (спека-отклонение
+    №5), иначе сворачивать было бы нечего."""
+    cfg_file = _write_cfg(tmp_path, url='""')
+    cfg = _loaded(cfg_file)
+    import tui.app as app_mod
+    app = app_mod.TuiApp(config=cfg)
+    async with app.run_test() as pilot:
+        scr = await _open_settings(app, pilot, cfg_file, cfg)
+        open_settings_section(scr, "Подключение")
+        await pilot.pause()
+        await pilot.press("escape")                     # 1-й Esc: список раскрыт по умолчанию → свернуть
+        await pilot.pause()
+        assert scr._view == settings_section_index("Подключение")   # секция ещё жива
+        await pilot.press("escape")                     # 2-й Esc: список уже свёрнут → выйти из секции
+        await pilot.pause()
+        assert scr._view == "menu"
 
 
 async def test_mcp_section_mounts_editor(tmp_path, monkeypatch):
@@ -836,9 +1091,10 @@ async def test_editor_section_frame_hugs_content(tmp_path):
         await pilot.press("enter")                     # секция 0 (Подключение)
         await pilot.pause()
         ed = app.screen.query_one(ConnectionEditor)
-        # контент-высота (hint+url+hint+варианты авторизации, framed-отступы), не заполнение
-        # экрана (~24 строки) — виджет крупнее одиночного EndpointEditor, но всё ещё компактен
-        assert ed.size.height <= 18
+        # контент-высота (hint+url+пресет-лист(раскрыт по умолчанию)+токен+галка+прокси,
+        # framed-отступы), не заполнение экрана (~24 строки) — виджет крупнее одиночного
+        # EndpointEditor, но всё ещё компактен
+        assert ed.size.height <= 20
 
 
 async def test_hub_glyphs_ok_after_config_probe():
@@ -942,9 +1198,9 @@ async def test_config_probe_survives_entering_section_while_flying():
 
 
 async def test_open_connection_autoruns_differential_probe(tmp_path):
-    """Вход в «Подключение» сам запускает differential-проверку (как Tab):
+    """Вход в «Подключение» сам запускает differential-проверку (как Ctrl+Space):
     контроль без токена, затем повтор с токеном — полный вердикт сразу,
-    без ручного Tab. Проверяем сам факт вызовов probe_fn."""
+    без ручной клавиши. Проверяем сам факт вызовов probe_fn."""
     import tui.app as app_mod
     from tui.screens.settings import SettingsScreen
     from tui.services.settings_probe import ProbeResult
@@ -1055,12 +1311,14 @@ async def test_smart_enter_unknown_saves_immediately_with_warn(tmp_path):
         assert "Сохранено" in flash and "не удалось" in flash
 
 
-async def test_tab_probes_draft_without_saving(tmp_path):
+async def test_ctrl_space_probes_draft_without_saving(tmp_path):
     import tui.app as app_mod
     app = app_mod.TuiApp(config=_cfg())
     async with app.run_test() as pilot:
         scr, cfg_file = await _open_addr_with_probe(app, pilot, tmp_path, _probe_ok())
-        await pilot.press("tab")
+        # Развод клавиш (спека 2026-08-06 §2): Ctrl+Space больше не спрашивает
+        # пресет-лист — одно нажатие сразу уходит в пробу.
+        await pilot.press("ctrl+space")
         await pilot.pause(); await pilot.pause()
         assert "new" not in cfg_file.read_text(encoding="utf-8")   # НЕ сохранено
         probe_line = str(scr.query_one(".set-probe", Static).render())
@@ -1068,6 +1326,8 @@ async def test_tab_probes_draft_without_saving(tmp_path):
         # без токена уже отвечает ok → совокупный вердикт «авторизация не требуется»
         # (probe адреса отдельно от probe токена больше не существует).
         assert "авторизация не требуется" in probe_line
+        # Пресет-лист не раскрывался (адрес чужой, Ctrl+Space его больше не спрашивает) —
+        # Enter сразу про сохранение, свернуть нечего.
         await pilot.press("enter")                    # проверено → Enter сохраняет без повтора
         await pilot.pause()
         assert scr._view == "menu"
@@ -1131,14 +1391,17 @@ async def test_draft_probe_no_auth_choice_probes_without_old_token(tmp_path):
         await pilot.pause()
         open_settings_section(scr, "Подключение")
         await pilot.pause()
-        scr.query_one(ConnectionEditor).move(2)          # выбор «без авторизации»
+        ed = scr.query_one(ConnectionEditor)
+        ed.escape_presets()               # свернуть пресет-лист (открыт по умолчанию на адресе)
+        ed.move(2)                        # адрес → токен → галка «без авторизации»
+        ed.toggle_no_auth()               # ● без авторизации
         scr._start_draft_probe(0)
         await pilot.pause(); await pilot.pause()
         assert captured                                    # probe вызван
         assert captured[-1] is None                         # НЕ "Bearer old"
 
 
-async def test_tab_in_auth_without_saved_address_hints_locally(tmp_path):
+async def test_ctrl_space_in_auth_without_saved_address_hints_locally(tmp_path):
     import tui.app as app_mod
     from tui.screens.settings import SettingsScreen
     cfg = {"chat_completion_headers": {"Authorization": "Bearer x"}, "model": "m"}
@@ -1154,7 +1417,7 @@ async def test_tab_in_auth_without_saved_address_hints_locally(tmp_path):
         await pilot.pause()
         await pilot.press("enter")                    # секция «Подключение»
         await pilot.pause()
-        await pilot.press("tab")
+        await pilot.press("ctrl+space")
         await pilot.pause()
         assert calls == []                            # сети не было
         assert "адрес" in str(scr.query_one(".set-probe", Static).render())
@@ -1203,16 +1466,16 @@ async def test_dirty_marker_model_section_toggles_on_move(tmp_path, monkeypatch)
         await pilot.pause()
         title = scr.query_one("#set-title", Static)
         assert "изменено" not in str(title.render())    # исходный выбор == модель конфига
-        await pilot.press("down"); await pilot.press("down")   # → manual → other-model
+        await pilot.press("down")                              # → other-model
         await pilot.pause()
         assert "изменено" in str(title.render())
-        await pilot.press("up"); await pilot.press("up")        # обратно → test-model
+        await pilot.press("up")                                # обратно → test-model
         await pilot.pause()
         assert "изменено" not in str(title.render())
 
 
-async def test_tab_in_readonly_section_does_not_crash():
-    """C1: Tab в read-only секции (пакетный шаблон) не должен ронять приложение —
+async def test_ctrl_space_in_readonly_section_does_not_crash():
+    """C1: ручная проверка в read-only секции (пакетный шаблон) не должна ронять приложение —
     редактора нет, значит и проверять нечего."""
     import tui.app as app_mod
     from tui.screens.settings import SettingsScreen
@@ -1227,7 +1490,7 @@ async def test_tab_in_readonly_section_does_not_crash():
         await pilot.press("enter")         # открыть секцию «Адрес» (read-only)
         await pilot.pause()
         assert scr._view == 0
-        await pilot.press("tab")           # попытка проверки — не должна крашить
+        await pilot.press("ctrl+space")    # попытка проверки — не должна крашить
         await pilot.pause()
         assert app.screen is scr           # приложение живо
 
@@ -1327,7 +1590,10 @@ async def test_draft_probe_no_auth_401_shows_requires_auth_hint(tmp_path):
         await pilot.pause()
         open_settings_section(scr, "Подключение")
         await pilot.pause()
-        scr.query_one(ConnectionEditor).move(2)          # выбор «без авторизации»
+        ed = scr.query_one(ConnectionEditor)
+        ed.escape_presets()               # свернуть пресет-лист (открыт по умолчанию на адресе)
+        ed.move(2)                        # адрес → токен → галка «без авторизации»
+        ed.toggle_no_auth()               # ● без авторизации
         scr._start_draft_probe(0)
         await pilot.pause(); await pilot.pause()
         probe_line = str(scr.query_one(".set-probe", Static).render())
@@ -1367,10 +1633,10 @@ async def test_auth_draft_probe_server_ignores_token(tmp_path):
         open_settings_section(scr, "Подключение")            # токен в поле
         from tests.tui.conftest import wait_until
         # авто-differential входа шлёт контроль auth=None (config-probe маунта — с токеном);
-        # его появление заодно гарантирует, что поля редактора смонтированы для ручного Tab
+        # его появление заодно гарантирует, что поля редактора смонтированы для ручной проверки
         await wait_until(pilot, lambda: None in captured, "auto-probe on entry")
         captured.clear()             # отбросить config-probe маунта и авто-probe входа
-        scr._start_draft_probe(0)                         # Tab
+        scr._start_draft_probe(0)                         # ручная проверка
         await pilot.pause(); await pilot.pause()
         assert captured == [None]                          # только контроль без токена (control ok → без 2-го)
         probe_line = str(scr.query_one(".set-probe", Static).render())
@@ -1410,7 +1676,7 @@ async def test_connection_probe_line_combined_verdicts(tmp_path):
 
 
 async def test_connection_probe_line_neutral_when_token_unknown(tmp_path):
-    """Config-probe (до Tab, detail='доступен') не утверждает «токен принят» — нейтрально."""
+    """Config-probe (до ручной пробы, detail='доступен') не утверждает «токен принят» — нейтрально."""
     from tui.screens.settings import SettingsScreen, _CONNECTION
     from tui.services.settings_probe import ProbeResult
     import tui.app as app_mod
@@ -1531,7 +1797,7 @@ async def test_draft_probe_worker_exception_resolves_as_unknown(tmp_path, monkey
         await pilot.pause()
         await pilot.press("enter")                       # секция «Адрес»
         await pilot.pause()
-        await pilot.press("tab")
+        await pilot.press("ctrl+space")
         await pilot.pause(); await pilot.pause()
         assert scr._draft_checked is not None
         assert scr._draft_checked.verdict == "unknown"
@@ -1541,7 +1807,7 @@ async def test_update_menu_glyph_arrow_when_available(tmp_path, monkeypatch):
     """Меню «Обновление» ещё не открывали (_update_check_result is None) — глиф
     зеркалит персист-флаг app._update_available, найденный авто-чеком при старте."""
     import app_version, tui.app as app_mod
-    from tui.screens.settings import SettingsScreen
+    from tui.screens.settings import SettingsScreen, _UPDATE
     monkeypatch.setattr(app_version, "install_source",
                         lambda _read=None: app_version.InstallSource("https://x/y", "master", "old", False))
     cfg = tmp_path / "c.yml"; cfg.write_text("backend: {}\n", encoding="utf-8")
@@ -1551,18 +1817,15 @@ async def test_update_menu_glyph_arrow_when_available(tmp_path, monkeypatch):
                              probe_fn=lambda *a, **k: None)
         app.push_screen(scr); await pilot.pause()
         app._update_available = True
-        glyph, _ = scr._menu_glyph(4)
+        glyph, _ = scr._menu_glyph(_UPDATE)
         assert glyph == "↑"
 
 
-async def test_ctrl_d_in_mcp_section_reaches_screen(tmp_path, monkeypatch):
-    """Ctrl+D в секции MCP поднимает confirm удаления — клавиша доходит до экрана.
+async def test_delete_key_in_mcp_section_reaches_screen(tmp_path, monkeypatch):
+    """Del в секции MCP поднимает confirm удаления (§5.3: MCP переведён с Ctrl+D на Del).
 
-    App держит priority-биндинг Ctrl+D → /diff. Без гейта check_action Textual
-    проверяет priority-привязки ДО форварда события экрану и считает действие
-    выполненным по факту существования action_diff — даже когда тот сразу выходит
-    по _can_open_tool. Итог был: /diff не открывается, удаление не срабатывает,
-    а футер секции обещает «Ctrl+D — удалить».
+    Прогон на настоящем `mcp_runtime.cli`, а не на облегчённом `settings_mcp_section`:
+    статусы пакетов приходят фоновым воркером, как в реальном приложении.
     """
     import tui.app as app_mod
     from tui.screens.settings import SettingsScreen
@@ -1591,10 +1854,10 @@ async def test_ctrl_d_in_mcp_section_reaches_screen(tmp_path, monkeypatch):
             await pilot.pause()
         assert ed._states["office"].installed is True        # предусловие: пакет есть, есть что удалять
 
-        await pilot.press("ctrl+d")
+        await pilot.press("delete")
         await pilot.pause()
         assert ed.awaiting_confirm is True                   # клавиша дошла до экрана
-        assert isinstance(app.screen, SettingsScreen)        # /diff поверх настроек не открылся
+        assert isinstance(app.screen, SettingsScreen)        # экран настроек не покинут
 
 
 # --- ссылки на переменные окружения ${ENV:VAR} (настоящий файл + настоящий os.environ) ---
@@ -1685,7 +1948,7 @@ async def test_literal_over_env_ref_needs_confirm_then_writes(tmp_path, monkeypa
         scr = await _open_settings(app, pilot, cfg_file, cfg)
         open_settings_section(scr, "Подключение")
         await pilot.pause()
-        await pilot.press("down")                             # курсор → Bearer: поле токена показано
+        await pilot.press("down")                             # курсор → токен
         await pilot.pause()
         scr.query_one("#conn-token", Input).value = "sk-typed-by-hand"
         await pilot.press("enter")                            # probe → запись → confirm
@@ -1712,7 +1975,7 @@ async def test_literal_token_edit_saves_without_confirm(tmp_path):
         scr = await _open_settings(app, pilot, cfg_file, cfg)
         open_settings_section(scr, "Подключение")
         await pilot.pause()
-        await pilot.press("down")                             # курсор → Bearer: поле токена показано
+        await pilot.press("down")                             # курсор → токен
         await pilot.pause()
         scr.query_one("#conn-token", Input).value = "sk-new"
         await pilot.press("enter")
@@ -1731,12 +1994,16 @@ async def test_bearer_without_token_hints_instead_of_nothing_changed(tmp_path):
     cfg = _loaded(cfg_file)
     import tui.app as app_mod
     from textual.widgets import Static
+    from tui.editors.connection import ConnectionEditor
     app = app_mod.TuiApp(config=cfg)
     async with app.run_test() as pilot:
         scr = await _open_settings(app, pilot, cfg_file, cfg)
         open_settings_section(scr, "Подключение")
         await pilot.pause()
-        await pilot.press("down")                         # курсор → Bearer, токен НЕ введён
+        ed = scr.query_one(ConnectionEditor)
+        ed.escape_presets()               # свернуть пресет-лист (открыт по умолчанию на адресе)
+        ed.move(2)                         # курсор → галка «без авторизации» (единств. вариант — Bearer)
+        ed.toggle_no_auth()                # снять галку → выбран Bearer, токен НЕ введён
         await pilot.pause()
         await pilot.press("enter")                        # попытка сохранить
         await pilot.pause()
@@ -1872,7 +2139,7 @@ async def test_saving_overridden_field_warns_it_will_not_apply(tmp_path, monkeyp
     app = app_mod.TuiApp(config=cfg)
     async with app.run_test() as pilot:
         scr = await _open_model_section(app, pilot, cfg_file, cfg)
-        await pilot.press("down"); await pilot.press("down")   # выбрать другую модель в списке
+        await pilot.press("down")                              # выбрать другую модель в списке
         await pilot.press("enter")           # сохранить
         await pilot.pause(); await pilot.pause()
         text = _screen_text(scr)
@@ -2064,10 +2331,11 @@ async def test_save_without_session_does_not_warn_about_counters(tmp_path):
 
 
 def test_sections_composition_merged():
-    """5 секций, «Подключение» первая, «Режимы работы» между MCP и Обновлением;
-    редакторные {conn,model}, probe {conn}."""
+    """5 секций, «Подключение» первая, «Режимы работы» между MCP-группой и
+    Обновлением; редакторные {conn,model}, probe {conn}."""
     from tui.screens import settings as s
-    assert s.SECTIONS == ("Подключение", "Модель", "MCP-серверы", "Режимы работы", "Обновление")
+    assert s.SECTIONS == ("Подключение", "Модель", "MCP-серверы",
+                          "Режимы работы", "Обновление")
     assert (s._CONNECTION == 0 and s._MODEL == 1 and s._MCP == 2
             and s._MODES == 3 and s._UPDATE == 4)
     assert s._EDITOR_SECTIONS == {s._CONNECTION, s._MODEL}
@@ -2076,7 +2344,8 @@ def test_sections_composition_merged():
 
 def test_sections_order_contains_modes():
     from tui.screens.settings import SECTIONS
-    assert SECTIONS == ("Подключение", "Модель", "MCP-серверы", "Режимы работы", "Обновление")
+    assert SECTIONS == ("Подключение", "Модель", "MCP-серверы",
+                        "Режимы работы", "Обновление")
 
 
 def test_fit_mode_pairs_whole_pairs_only():
@@ -2683,8 +2952,8 @@ async def test_settings_model_filter_and_save(tmp_path, monkeypatch):
     # (локальный импорт) → мокать надо СИМВОЛ в model_picker, не в модуле settings.
     # Три модели: активная (glm) + совпадающая с "gpt" + НЕ совпадающая (deepseek).
     # Без non-match фильтр был бы no-op: _other_models() и так исключает активную, и
-    # видимый список из 2 моделей байт-в-байт совпадал бы до и после фильтра — сломанный
-    # #model-filter прошёл бы тест зелёным. deepseek доказывает, что фильтр сузил.
+    # видимый список из 2 моделей байт-в-байт совпадал бы до и после фильтра — сломанная
+    # фильтрация прошла бы тест зелёным. deepseek доказывает, что фильтр сузил.
     monkeypatch.setattr("model_picker.fetch_models",
                         lambda *a, **k: [type("M", (), {"id": "glm-5.2-fp8", "tool_capable": True})(),
                                          type("M", (), {"id": "openai/gpt-5.6-terra", "tool_capable": True})(),
@@ -2698,18 +2967,225 @@ async def test_settings_model_filter_and_save(tmp_path, monkeypatch):
         scr = await _open_settings(app, pilot, cfg_file, cfg)
         open_settings_section(scr, "Модель")
         await pilot.pause(); await pilot.pause()           # fetch-воркер
-        scr.query_one("#model-filter", Input).value = "gpt"
+        scr.query_one("#onb-model", Input).value = "gpt"   # поле само себе фильтр (§3.2.6)
         await pilot.pause()
         # Фильтр реально сузил список на уровне интеграции SettingsScreen (до навигации):
-        rows = [str(w.render()) for w in scr.query(".onb-option")]
+        # Фильтр гасит строки через `display`, а не сносит их (общая механика
+        # `FieldListController`) — «на экране» и значит `w.display`.
+        rows = [str(w.render()) for w in scr.query(".onb-option") if w.display]
         assert any("gpt-5.6-terra" in r for r in rows)     # match остался
         assert not any("deepseek" in r for r in rows)      # non-match отфильтрован
-        # ряды после фильтра: текущая (glm-5.2-fp8) → вписать вручную → gpt-5.6-terra —
-        # первый down уводит на «вписать вручную» (порядок рядов из Task 1/2), второй —
-        # на отфильтрованную модель; ↑↓ доходят до ed.move() при фокусе в фильтре.
-        await pilot.press("down")
+        # ряды после фильтра: текущая (glm-5.2-fp8) → gpt-5.6-terra. Строки «вписать
+        # вручную» больше нет, поэтому одного down хватает; ↑↓ доходят до ed.move()
+        # при фокусе в поле-фильтре.
         await pilot.press("down")
         await pilot.press("enter")                          # сохранить выбранную
         await pilot.pause(); await pilot.pause()
         content = cfg_file.read_text(encoding="utf-8")
         assert 'model: "openai/gpt-5.6-terra"' in content   # точное поле, не подстрока
+
+
+def test_settings_header_hides_the_number_when_running_from_sources(monkeypatch):
+    """Шапка спрашивала номер напрямую и показывала его даже из исходников — рядом с
+    секцией «Обновление», которая честно писала «установка из исходников». Одно
+    состояние называлось на двух экранах по-разному."""
+    import app_version
+    from tui.screens.settings import SettingsScreen
+
+    scr = SettingsScreen(config={}, config_path=None, on_apply=lambda: None)
+    monkeypatch.setattr(app_version, "install_source",
+                        lambda: app_version.InstallSource("u", None, None, True))
+    assert scr._version_text() == "gc-ua · dev"
+
+    monkeypatch.setattr(app_version, "install_source",
+                        lambda: app_version.InstallSource("u", "master", "c", False))
+    monkeypatch.setattr(app_version, "agent_version", lambda: "1.2.3")
+    assert scr._version_text() == "gc-ua · v1.2.3"
+
+
+# --- одна клавиша удаления объекта под курсором: Del в MCP (§5.3) ---
+
+
+async def test_delete_key_removes_mcp_server(tmp_path):
+    """Del удаляет сервер в MCP."""
+    from tui.services.mcp_manager import McpState
+    async with settings_mcp_section(tmp_path, servers=["ctx7"]) as (pilot, scr):
+        ed = scr._mcp_editor()
+        for _ in range(50):                                  # статус пакета грузит фоновый воркер
+            if ed.status_ready("ctx7"):
+                break
+            await pilot.pause()
+        ed._states["ctx7"] = McpState(True, None, None)      # статус: пакет установлен
+        await pilot.press("delete")
+        await pilot.pause()
+        assert ed.awaiting_confirm, "Del должен запросить подтверждение удаления"
+
+
+# --- Ctrl+Space: перечитать то, на чём стою (§5.1) ---------------------------
+
+
+async def test_ctrl_space_on_plain_field_reprobes(tmp_path):
+    """Курсор на поле без списка (токен): клавиша шлёт пробу — так же, как и на
+    адресе (развод §2 спеки 2026-08-06: Ctrl+Space про список нигде не спрашивает,
+    роль от курсора не зависит)."""
+    calls = []
+    async with settings_connection(tmp_path, probe=recording_probe(calls)) as (pilot, scr):
+        await pilot.press("down")                  # с адреса на токен — не обязательно, но и не мешает
+        await pilot.pause()
+        calls.clear()                              # забыть автопробу входа в секцию
+        await pilot.press("ctrl+space")
+        await wait_until(pilot, lambda: bool(calls), "ручная проверка должна уйти")
+
+
+async def test_ctrl_space_reprobe_ignores_debounce_snapshot(tmp_path):
+    """Ручная проверка проходит и при неизменных полях — иначе залипший красный вердикт
+    нечем сбросить (спека §5.2)."""
+    calls = []
+    async with settings_connection(tmp_path, probe=recording_probe(calls)) as (pilot, scr):
+        await pilot.press("down")                  # на токен — не обязательно: на адресе тоже проба
+        await pilot.pause()
+        calls.clear()
+        await pilot.press("ctrl+space")
+        await wait_until(pilot, lambda: len(calls) == 1, "первая ручная проверка ушла")
+        await pilot.press("ctrl+space")            # поля не трогали
+        await wait_until(pilot, lambda: len(calls) == 2,
+                         "снимок против дребезга не должен глушить ручную")
+
+
+async def test_alt_down_on_the_agent_model_field_reloads_the_list(tmp_path, monkeypatch):
+    """Первая строка таблицы §2.5: поле моделей АГЕНТА — поле со списком с сервера,
+    и Alt+↓ идёт за списком заново (спека 2026-08-06 §2: раскрытие/перечитывание —
+    его роль, Ctrl+Space в этой секции пробы не даёт вовсе, см. §5.2 спеки).
+
+    Сценарий — ровно тот, ради которого клавиша расширялась: сервер лежал (список не
+    пришёл, на экране одинокое поле), потом ожил. Сессионный кэш списков этому не
+    мешает — неудачу он не хранит (`make_cached_fetch`: `if models:`)."""
+    from tui.editors.model import ModelEditor
+    calls = []
+
+    def fake_fetch(*a, **k):
+        calls.append(1)
+        if len(calls) == 1:
+            return None                                    # сервер лежал
+        return [type("M", (), {"id": "glm-5.2-fp8", "tool_capable": True})(),
+                type("M", (), {"id": "deepseek-v3-base", "tool_capable": True})()]
+
+    # Локальный импорт в _mount_section_body → мокаем СИМВОЛ в model_picker.
+    monkeypatch.setattr("model_picker.fetch_models", fake_fetch, raising=False)
+    cfg_file = _write_cfg(tmp_path, model='""')
+    cfg = _loaded(cfg_file)
+    import tui.app as app_mod
+    app = app_mod.TuiApp(config=cfg)
+    async with app.run_test() as pilot:
+        scr = await _open_settings(app, pilot, cfg_file, cfg)
+        open_settings_section(scr, "Модель")
+        await wait_until(pilot, lambda: bool(scr.query(ModelEditor))
+                         and scr.query(ModelEditor).first().models_loaded, "models loaded")
+        assert not scr.query(".onb-option"), "предусловие: сервер списка не отдал"
+        await pilot.press("alt+down")
+        await wait_until(pilot, lambda: any("deepseek" in str(w.render())
+                                            for w in scr.query(".onb-option")),
+                         "список перечитан с сервера")
+
+
+async def test_alt_down_on_the_agent_model_field_goes_past_the_session_cache(
+        tmp_path, monkeypatch):
+    """Список УЖЕ загрузился удачно — и клавиша всё равно обязана сходить на сервер
+    (§2.5 спеки «идём на сервер за списком», Alt+↓ шлёт всегда).
+
+    Без обхода кэша она была бы ДЕТЕРМИНИРОВАННЫМ no-op, а не «иногда вернёт старое»:
+    ключ кэша — (url, auth, verify, proxy), и все четыре заморожены в конструкторе
+    ModelEditor. Тот же ключ — тот же ответ, всегда. Голосовой список-сосед той же
+    природы ходит мимо кэша вовсе, и разъезд одной клавиши на двух полях — ровно то,
+    против чего написан канон."""
+    from tui.editors.model import ModelEditor
+
+    def _m(mid):
+        return type("M", (), {"id": mid, "tool_capable": True})()
+
+    calls = []
+
+    def fake_fetch(*a, **k):
+        calls.append(1)
+        if len(calls) == 1:
+            return [_m("glm-5.2-fp8")]                 # что сервер отдавал сначала
+        return [_m("glm-5.2-fp8"), _m("deepseek-v3-base")]
+
+    monkeypatch.setattr("model_picker.fetch_models", fake_fetch, raising=False)
+    cfg_file = _write_cfg(tmp_path, model='""')
+    cfg = _loaded(cfg_file)
+    import tui.app as app_mod
+    app = app_mod.TuiApp(config=cfg)
+    async with app.run_test() as pilot:
+        scr = await _open_settings(app, pilot, cfg_file, cfg)
+        open_settings_section(scr, "Модель")
+        await wait_until(pilot, lambda: bool(scr.query(ModelEditor))
+                         and scr.query(ModelEditor).first().models_loaded, "models loaded")
+        rows = lambda: [str(w.render()) for w in scr.query(".onb-option")]
+        assert any("glm-5.2-fp8" in r for r in rows())    # предусловие: список пришёл
+        assert not any("deepseek" in r for r in rows())
+        await pilot.press("alt+down")
+        await wait_until(pilot, lambda: any("deepseek" in r for r in rows()),
+                         "перечитывание должно идти мимо сессионного кэша")
+
+
+async def test_alt_down_on_the_agent_model_field_keeps_the_chosen_row(tmp_path, monkeypatch):
+    """В /settings пометки ● нет — выбор и есть курсор. Перечитывание не имеет права
+    молча вернуть его на якорь: секция перестала бы читаться «изменено», а Enter не
+    сохранил бы ничего."""
+    from tui.editors.model import ModelEditor
+
+    def _m(mid):
+        return type("M", (), {"id": mid, "tool_capable": True})()
+
+    calls = []
+
+    def fake_fetch(*a, **k):
+        calls.append(1)
+        base = [_m("glm-5.2-fp8"), _m("openai/gpt-5.6-terra")]
+        return base if len(calls) == 1 else base + [_m("deepseek-v3-base")]
+
+    monkeypatch.setattr("model_picker.fetch_models", fake_fetch, raising=False)
+    cfg_file = _write_cfg(tmp_path, model='"glm-5.2-fp8"')
+    cfg = _loaded(cfg_file)
+    import tui.app as app_mod
+    app = app_mod.TuiApp(config=cfg)
+    async with app.run_test() as pilot:
+        scr = await _open_settings(app, pilot, cfg_file, cfg)
+        open_settings_section(scr, "Модель")
+        await wait_until(pilot, lambda: bool(scr.query(ModelEditor))
+                         and scr.query(ModelEditor).first().models_loaded, "models loaded")
+        ed = scr.query_one(ModelEditor)
+        await pilot.press("down")                              # текущая → gpt
+        assert ed.peek() == "openai/gpt-5.6-terra"             # предусловие: выбор сделан
+        await pilot.press("alt+down")
+        await wait_until(pilot, lambda: any("deepseek" in str(w.render())
+                                            for w in scr.query(".onb-option")),
+                         "список перечитан")
+        assert ed.peek() == "openai/gpt-5.6-terra", "несохранённый выбор выброшен"
+
+
+async def test_ctrl_space_on_the_model_section_does_nothing(tmp_path, monkeypatch):
+    """Пробы в «Модели» нет (§2.5, §5.2 спеки 2026-08-06) — Ctrl+Space съедается
+    молча: ни перечитывания списка, ни падения, ни провала в глобальные биндинги
+    (курсор и выбор остаются на месте)."""
+    from tui.editors.model import ModelEditor
+
+    def fake_fetch(*a, **k):
+        return [type("M", (), {"id": "glm-5.2-fp8", "tool_capable": True})()]
+
+    monkeypatch.setattr("model_picker.fetch_models", fake_fetch, raising=False)
+    cfg_file = _write_cfg(tmp_path, model='"glm-5.2-fp8"')
+    cfg = _loaded(cfg_file)
+    import tui.app as app_mod
+    app = app_mod.TuiApp(config=cfg)
+    async with app.run_test() as pilot:
+        scr = await _open_settings(app, pilot, cfg_file, cfg)
+        open_settings_section(scr, "Модель")
+        await wait_until(pilot, lambda: bool(scr.query(ModelEditor))
+                         and scr.query(ModelEditor).first().models_loaded, "models loaded")
+        rows_before = [str(w.render()) for w in scr.query(".onb-option")]
+        await pilot.press("ctrl+space")
+        await pilot.pause()
+        assert app.screen is scr                       # приложение живо
+        assert [str(w.render()) for w in scr.query(".onb-option")] == rows_before

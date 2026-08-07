@@ -68,3 +68,57 @@ def test_probe_fetch_dedups_identical_network_errors(monkeypatch):
     out = mp.probe_fetch("http://x/v1", None, verify=False)
     assert out.status is None
     assert out.network_error.count(err) == 1        # дедуп: не дважды
+
+
+class _FakeResp:
+    status = 200
+
+    def read(self):
+        return b'{"data": []}'
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
+def _capture_user_agents(monkeypatch) -> list:
+    seen = []
+
+    def _urlopen(req, timeout=None, context=None):
+        seen.append(req.get_header("User-agent"))
+        return _FakeResp()
+
+    monkeypatch.setattr("urllib.request.urlopen", _urlopen)
+    return seen
+
+
+def test_requests_introduce_themselves_by_product_name(monkeypatch):
+    """Каждый исходящий запрос несёт визитку продукта. Без неё Python подставляет
+    `Python-urllib/X.Y`, и щит провайдера (Cloudflare у Groq — проверено живьём)
+    отвечает 403 ещё ДО проверки токена: список моделей молчал бы на рабочем ключе."""
+    import app_version
+    seen = _capture_user_agents(monkeypatch)
+
+    mp._urllib_get("https://h/v1/models", {"Content-Type": "application/json"}, True)
+    mp._urllib_get_ex("https://h/v1/models", {}, True)
+    mp._urllib_post_ex("https://h/v1/chat/completions", {}, {"model": "m"}, True)
+
+    expected = f"{app_version.DIST_NAME}/{app_version.agent_version()}"
+    assert seen == [expected] * 3
+    assert seen[0].startswith("gc-ua/") and "urllib" not in seen[0]
+
+
+def test_the_user_agent_carries_the_live_version(monkeypatch):
+    """Имя и версия — из метаданных пакета, не из строки в коде: подняли версию в
+    pyproject — визитка поехала сама."""
+    import app_version
+    monkeypatch.setattr(app_version, "agent_version", lambda: "9.9.9")
+    mp._user_agent.cache_clear()
+    try:
+        seen = _capture_user_agents(monkeypatch)
+        mp._urllib_get("https://h/v1/models", {}, True)
+        assert seen == ["gc-ua/9.9.9"]
+    finally:
+        mp._user_agent.cache_clear()

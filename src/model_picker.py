@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass
+from functools import lru_cache
 from typing import Callable, Optional
 
 
@@ -72,6 +73,37 @@ def api_base(completions_url: str) -> str:
         if u.endswith(suffix):
             return u[: -len(suffix)]
     return u
+
+
+@lru_cache(maxsize=1)
+def _user_agent() -> str:
+    """Визитка продукта из метаданных пакета — имя и версия не задаются здесь."""
+    import app_version
+    return f"{app_version.DIST_NAME}/{app_version.agent_version()}"
+
+
+def _request(url: str, headers: dict, *, data=None, method=None):
+    """urllib-запрос, представленный по имени. Без User-Agent Python шлёт
+    `Python-urllib/X.Y`, и щит провайдера (Cloudflare у Groq — проверено живьём)
+    отвечает 403 ещё ДО проверки токена: с рабочим ключом список моделей молчал бы.
+    Дефолт идёт первым — заголовок вызывающего его перекрывает."""
+    import urllib.request
+    return urllib.request.Request(
+        url, data=data, method=method,
+        headers={"User-Agent": _user_agent(), **headers})
+
+def _headers(auth_header: Optional[str]) -> dict:
+    """Заголовки запроса: тип, визитка продукта, авторизация.
+
+    Визитка обязательна и ставится здесь, а не в транспорте: транспортов теперь два
+    (requests-сессия backend'а и urllib-фолбэк), и без User-Agent библиотека шлёт свой
+    дефолт («python-requests/X.Y», «Python-urllib/X.Y») — щит провайдера (Cloudflare у
+    Groq, проверено живьём) отвечает 403 ещё ДО проверки токена, и список моделей
+    молчит на рабочем ключе."""
+    headers = {"Content-Type": "application/json", "User-Agent": _user_agent()}
+    if auth_header:
+        headers["Authorization"] = auth_header
+    return headers
 
 
 def _payload_dict(raw) -> Optional[dict]:
@@ -146,7 +178,7 @@ def _urllib_get_ex(url: str, headers: dict, verify: bool) -> HttpReply:
     import urllib.error
     import urllib.request
     ctx = None if verify else ssl._create_unverified_context()
-    req = urllib.request.Request(url, headers=headers)
+    req = _request(url, headers)
     try:
         with urllib.request.urlopen(req, timeout=5, context=ctx) as resp:
             try:
@@ -168,7 +200,7 @@ def _urllib_post_ex(url: str, headers: dict, body: dict, verify: bool) -> HttpRe
     import urllib.request
     ctx = None if verify else ssl._create_unverified_context()
     data = json.dumps(body).encode("utf-8")
-    req = urllib.request.Request(url, data=data, headers=headers, method="POST")
+    req = _request(url, headers, data=data, method="POST")
     try:
         with urllib.request.urlopen(req, timeout=5, context=ctx) as resp:
             try:
@@ -193,9 +225,7 @@ def probe_fetch(completions_url: str, auth_header: Optional[str], *,
     else:
         get_ex = http_get_ex
     base = api_base(completions_url)
-    headers = {"Content-Type": "application/json"}
-    if auth_header:
-        headers["Authorization"] = auth_header
+    headers = _headers(auth_header)
     t0 = time.monotonic()
     if not base:
         return FetchOutcome(None, None, "пустой адрес", 0)
@@ -235,9 +265,7 @@ def probe_post(completions_url: str, auth_header: Optional[str], model: str, *,
             return _requests_post_ex(url, headers, body, verify, config_proxy=config_proxy)
     else:
         post_ex = http_post_ex
-    headers = {"Content-Type": "application/json"}
-    if auth_header:
-        headers["Authorization"] = auth_header
+    headers = _headers(auth_header)
     body = {"model": model, "messages": [{"role": "user", "content": "ping"}],
             "max_tokens": 1, "stream": False}
     t0 = time.monotonic()
@@ -250,7 +278,7 @@ def _urllib_get(url: str, headers: dict, verify: bool) -> dict:
     import ssl
     import urllib.request
     ctx = None if verify else ssl._create_unverified_context()
-    req = urllib.request.Request(url, headers=headers)
+    req = _request(url, headers)
     with urllib.request.urlopen(req, timeout=10, context=ctx) as resp:
         return json.loads(resp.read().decode("utf-8"))
 
@@ -271,9 +299,7 @@ def fetch_models(completions_url: str, auth_header: Optional[str], *,
     base = api_base(completions_url)
     if not base:
         return None
-    headers = {"Content-Type": "application/json"}
-    if auth_header:
-        headers["Authorization"] = auth_header
+    headers = _headers(auth_header)
     try:
         cfg = get(base + "/config", headers, verify)
         parsed = parse_config_models(cfg)
