@@ -162,7 +162,7 @@ def uncomment_template_block(template_text: str, top_key: str) -> str:
     `#<indent>k: v` — без ведущего '#'.
 
     Для опциональных секций, которые шаблон несёт ЗАКОММЕНТИРОВАННЫМИ (пример:
-    gc — сборка мусора не настраивается «из коробки»). KeyError, если блока нет.
+    voice — фича не включена «из коробки»). KeyError, если блока нет.
     """
     lines = template_text.splitlines(keepends=True)
     head_re = re.compile(_COMMENTED_TOP_KEY_RE_TMPL.format(key=re.escape(top_key)))

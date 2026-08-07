@@ -6,7 +6,7 @@ pytest.importorskip("textual")
 from textual.widgets import Static
 from tests.tui.conftest import (open_settings_section, recording_probe,
                                 settings_connection, settings_mcp_section,
-                                settings_section_index,
+                                settings_section_index, settings_voice_section,
                                 wait_until)
 
 
@@ -81,7 +81,7 @@ async def test_settings_menu_lists_sections_with_values(tmp_path):
         app.push_screen(_mk_screen(config_path=str(cfg_file)))
         await pilot.pause()
         rows = _menu_lines(app.screen)
-        assert len(rows) == 5
+        assert len(rows) == 6
         assert any("Подключение" in r and "http://host" in r and "Bearer" in r for r in rows)
         assert not any("secret-token" in r for r in rows)  # маска!
         assert any("Модель" in r and "test-model" in r for r in rows)
@@ -92,8 +92,8 @@ async def test_connection_editor_lookup_takes_the_fresh_one():
 
     `remove()` в Textual отложенный: после перерисовки секции старый редактор ещё в
     дереве. `query_one` на двух матчах не падает, а молча отдаёт ПЕРВЫЙ, обречённый, —
-    и в конфиг уехали бы значения прошлого рендера. Канон — брать последний; для
-    «Подключения» его не соблюдали (находка 2026-08-07)."""
+    и в конфиг уехали бы значения прошлого рендера. Канон файла (`_voice_editor`) —
+    брать последний; для «Подключения» его не соблюдали (находка 2026-08-07)."""
     import tui.app as app_mod
     from tui.editors.connection import ConnectionEditor
     app = app_mod.TuiApp(config=_cfg())
@@ -140,7 +140,7 @@ async def test_settings_enter_opens_section_and_esc_returns():
 
 
 async def test_settings_ctrl_pgup_pgdn_switch_sections():
-    from tui.screens.settings import _MCP, _MODES, _UPDATE
+    from tui.screens.settings import _MCP, _MODES, _UPDATE, _VOICE
     import tui.app as app_mod
     app = app_mod.TuiApp(config=_cfg())
     async with app.run_test() as pilot:
@@ -149,9 +149,11 @@ async def test_settings_ctrl_pgup_pgdn_switch_sections():
         scr = app.screen
         await pilot.press("down", "down", "enter")   # секция MCP
         assert scr._view == _MCP
+        await pilot.press("ctrl+pagedown")                   # → Голосовой ввод
+        assert scr._view == _VOICE
         await pilot.press("ctrl+pagedown")                   # → Режимы работы
         assert scr._view == _MODES
-        await pilot.press("ctrl+pagedown")                   # → Обновление (5/5)
+        await pilot.press("ctrl+pagedown")                   # → Обновление (6/6)
         assert scr._view == _UPDATE
         await pilot.press("ctrl+pagedown")                   # край: остаёмся (без wrap)
         assert scr._view == _UPDATE
@@ -434,7 +436,7 @@ async def test_update_section_shows_version_and_sync_row(tmp_path, monkeypatch):
                                        on_apply=lambda: None,
                                        probe_fn=_fake_probe(_probe_ok())))
         await pilot.pause()
-        await pilot.press("down", "down", "down", "down", "enter")   # меню → Обновление (5/5)
+        await pilot.press("down", "down", "down", "down", "down", "enter")   # меню → Обновление (6/6)
         await pilot.pause()
         body = " ".join(str(w.render()) for w in app.screen.query(".set-dyn"))
         assert "v0.3.0" in body and "master" in body
@@ -469,7 +471,7 @@ async def test_update_section_sync_runs_and_reports(tmp_path, monkeypatch):
                                        on_apply=lambda: applied.append(1),
                                        probe_fn=_fake_probe(_probe_ok())))
         await pilot.pause()
-        await pilot.press("down", "down", "down", "down", "enter", "enter")  # секция → выполнить sync
+        await pilot.press("down", "down", "down", "down", "down", "enter", "enter")  # секция → выполнить sync
         await pilot.pause()
         assert called["path"] == str(cfg_file)
         assert applied == [1]                          # конфиг перечитан после sync
@@ -509,7 +511,7 @@ async def test_update_section_dev_install_hides_source(monkeypatch, tmp_path):
                                        on_apply=lambda: None,
                                        probe_fn=_fake_probe(_probe_ok())))
         await pilot.pause()
-        await pilot.press("down", "down", "down", "down", "enter")
+        await pilot.press("down", "down", "down", "down", "down", "enter")
         body = " ".join(str(w.render()) for w in app.screen.query(".set-dyn"))
         assert "установка из исходников" in body
         assert "Обновить config.yml" in body           # sync доступен и для dev
@@ -658,8 +660,8 @@ async def test_connection_section_esc_collapses_presets_enter_substitutes(tmp_pa
 
 async def test_connection_preset_hint_follows_the_cursor_after_esc(tmp_path):
     """Свернув пресет-лист адреса `Esc`, человек должен видеть, чем его вернуть
-    (спека 2026-08-06 §4.4) — общий хинт-механизм списков (`show_closed_hint`,
-    дословно `LIST_CLOSED_HINT`). До правки `escape_presets`
+    (спека 2026-08-06 §4.4) — тот же хинт и то же слово, что у голосовых списков
+    (`show_closed_hint`, дословно `LIST_CLOSED_HINT`). До правки `escape_presets`
     сворачивал список молча — способа узнать про `Alt+↓` не было.
 
     Фикс-раунд 1 (ревью): подсказка не переживает уход курсора с адреса — с чужого
@@ -1040,7 +1042,7 @@ async def test_run_sync_on_apply_error_shows_notice(tmp_path, monkeypatch):
             probe_fn=_fake_probe(_probe_ok())))
         await pilot.pause()
         scr = app.screen
-        await pilot.press("down", "down", "down", "down", "enter", "enter")
+        await pilot.press("down", "down", "down", "down", "down", "enter", "enter")
         await pilot.pause()
         body = " ".join(str(w.render()) for w in scr.query(".set-dyn"))
         assert "не перечитан" in body and "reload failed" in body
@@ -1068,7 +1070,7 @@ async def test_esc_from_editor_section_clears_editor_and_restores_menu(tmp_path)
         await pilot.press("escape")                    # назад в меню
         await pilot.pause()
         assert not scr.query(ConnectionEditor)         # редактор удалён (баг 2)
-        assert len(scr.query(".set-menurow")) == 5         # меню восстановлено во фрейме
+        assert len(scr.query(".set-menurow")) == 6         # меню восстановлено во фрейме
         # мусор редактора (hint/input) не остался
         from textual.widgets import Input
         assert not scr.query(Input)
@@ -1807,7 +1809,7 @@ async def test_update_menu_glyph_arrow_when_available(tmp_path, monkeypatch):
     """Меню «Обновление» ещё не открывали (_update_check_result is None) — глиф
     зеркалит персист-флаг app._update_available, найденный авто-чеком при старте."""
     import app_version, tui.app as app_mod
-    from tui.screens.settings import SettingsScreen, _UPDATE
+    from tui.screens.settings import SettingsScreen
     monkeypatch.setattr(app_version, "install_source",
                         lambda _read=None: app_version.InstallSource("https://x/y", "master", "old", False))
     cfg = tmp_path / "c.yml"; cfg.write_text("backend: {}\n", encoding="utf-8")
@@ -1817,12 +1819,13 @@ async def test_update_menu_glyph_arrow_when_available(tmp_path, monkeypatch):
                              probe_fn=lambda *a, **k: None)
         app.push_screen(scr); await pilot.pause()
         app._update_available = True
-        glyph, _ = scr._menu_glyph(_UPDATE)
+        glyph, _ = scr._menu_glyph(5)
         assert glyph == "↑"
 
 
 async def test_delete_key_in_mcp_section_reaches_screen(tmp_path, monkeypatch):
-    """Del в секции MCP поднимает confirm удаления (§5.3: MCP переведён с Ctrl+D на Del).
+    """Del в секции MCP поднимает confirm удаления (§5.3: MCP переведён с Ctrl+D на Del,
+    та же клавиша, что в голосовой секции).
 
     Прогон на настоящем `mcp_runtime.cli`, а не на облегчённом `settings_mcp_section`:
     статусы пакетов приходят фоновым воркером, как в реальном приложении.
@@ -2331,20 +2334,20 @@ async def test_save_without_session_does_not_warn_about_counters(tmp_path):
 
 
 def test_sections_composition_merged():
-    """5 секций, «Подключение» первая, «Режимы работы» между MCP-группой и
-    Обновлением; редакторные {conn,model}, probe {conn}."""
+    """6 секций, «Подключение» первая, «Голосовой ввод» между MCP и «Режимы работы»,
+    «Режимы работы» между MCP-группой и Обновлением; редакторные {conn,model}, probe {conn}."""
     from tui.screens import settings as s
-    assert s.SECTIONS == ("Подключение", "Модель", "MCP-серверы",
+    assert s.SECTIONS == ("Подключение", "Модель", "MCP-серверы", "Голосовой ввод",
                           "Режимы работы", "Обновление")
-    assert (s._CONNECTION == 0 and s._MODEL == 1 and s._MCP == 2
-            and s._MODES == 3 and s._UPDATE == 4)
+    assert (s._CONNECTION == 0 and s._MODEL == 1 and s._MCP == 2 and s._VOICE == 3
+            and s._MODES == 4 and s._UPDATE == 5)
     assert s._EDITOR_SECTIONS == {s._CONNECTION, s._MODEL}
     assert s._PROBE_SECTIONS == {s._CONNECTION}
 
 
 def test_sections_order_contains_modes():
     from tui.screens.settings import SECTIONS
-    assert SECTIONS == ("Подключение", "Модель", "MCP-серверы",
+    assert SECTIONS == ("Подключение", "Модель", "MCP-серверы", "Голосовой ввод",
                         "Режимы работы", "Обновление")
 
 
@@ -3003,11 +3006,11 @@ def test_settings_header_hides_the_number_when_running_from_sources(monkeypatch)
     assert scr._version_text() == "gc-ua · v1.2.3"
 
 
-# --- одна клавиша удаления объекта под курсором: Del в MCP (§5.3) ---
+# --- одна клавиша удаления: Del в MCP, тот же гейт по фокусу, что у голоса (§5.3) ---
 
 
 async def test_delete_key_removes_mcp_server(tmp_path):
-    """Del удаляет сервер в MCP."""
+    """Del удаляет сервер в MCP так же, как локальный сервис в голосе."""
     from tui.services.mcp_manager import McpState
     async with settings_mcp_section(tmp_path, servers=["ctx7"]) as (pilot, scr):
         ed = scr._mcp_editor()
@@ -3019,6 +3022,33 @@ async def test_delete_key_removes_mcp_server(tmp_path):
         await pilot.press("delete")
         await pilot.pause()
         assert ed.awaiting_confirm, "Del должен запросить подтверждение удаления"
+
+
+async def test_delete_in_input_edits_text(tmp_path):
+    """Фокус в поле ввода — Del правит текст, а не удаляет объект.
+
+    Секция MCP полей ввода не имеет, поэтому гейт проверяем там, где они есть,
+    и где Del теперь тоже удаляет объект — в голосовой секции. Гейт общий, его
+    достаточно проверить один раз на живом поле.
+    """
+    from textual.widgets import Input
+    async with settings_voice_section(tmp_path, mode="cloud") as (pilot, scr):
+        await pilot.press("tab")                        # в группу полей: фокус в #voice-url
+        await pilot.pause()
+        inp = scr.query_one("#voice-url", Input)
+        inp.value = "abc"
+        inp.cursor_position = 0
+        await pilot.pause()
+        await pilot.press("delete")
+        await pilot.pause()
+        assert inp.value == "bc", "Del в поле обязан править текст"
+
+
+def test_local_lang_footer_does_not_promise_delete():
+    """Курсор на «Язык» локальной панели: Del здесь не работает (гейт по фокусу
+    плюс требование позиции), значит футер его не обещает (спека §2.11)."""
+    from tui.screens.settings import _VOICE_FOOTER_LOCAL_LANG
+    assert "Del" not in _VOICE_FOOTER_LOCAL_LANG
 
 
 # --- Ctrl+Space: перечитать то, на чём стою (§5.1) ---------------------------

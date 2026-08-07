@@ -38,6 +38,33 @@ def test_api_base():
     assert mp.api_base("https://h/v1/chat/completions") == "https://h/v1"
 
 
+def test_api_base_cuts_audio_methods_too():
+    """STT-endpoint голосового ввода — тот же OpenAI-совместимый корень: без стрижки
+    суффикса список моделей уходил бы в `…/audio/transcriptions/models`."""
+    assert mp.api_base("https://h/v1/audio/transcriptions") == "https://h/v1"
+    assert mp.api_base("https://h/v1/audio/translations") == "https://h/v1"
+    assert mp.api_base("http://127.0.0.1:8735/v1/audio/transcriptions/") == "http://127.0.0.1:8735/v1"
+    # чужой корень не трогаем (адрес без известного суффикса — уже база)
+    assert mp.api_base("https://h/v1") == "https://h/v1"
+    assert mp.api_base("https://h/v1/audio") == "https://h/v1/audio"
+
+
+def test_fetch_models_from_an_stt_endpoint_hits_the_v1_root():
+    """Список моделей своего STT-endpoint: запрос уходит в корень `/v1`, а не под
+    `/audio/transcriptions` (сервер speaches отдаёт whisper-модели именно там)."""
+    seen = []
+
+    def _get(url, headers, verify):
+        seen.append(url)
+        if url.endswith("/config"):
+            raise RuntimeError("404")
+        return {"data": [{"id": "Systran/faster-whisper-small"}]}
+
+    got = mp.fetch_models("http://127.0.0.1:8735/v1/audio/transcriptions", None, http_get=_get)
+    assert [m.id for m in got] == ["Systran/faster-whisper-small"]
+    assert seen == ["http://127.0.0.1:8735/v1/config", "http://127.0.0.1:8735/v1/models"]
+
+
 def test_fetch_prefers_config_then_models_then_none():
     calls = []
     def get_config_ok(url, headers, verify):

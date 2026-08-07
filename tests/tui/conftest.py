@@ -152,6 +152,18 @@ def blocking_probe(release, calls=None, result=None):
     return probe
 
 
+def recording_loader(loads, models=()):
+    """Загрузчик списка моделей голосового фасада (`voice_setup.list_models`):
+    пишет `(url, token, verify, config_proxy)` в `loads` и отдаёт `models`.
+
+    `models=None` — «не достучались» (это НЕ то же самое, что пустой список:
+    пустой значит «сервер ответил, но моделей не отдал», см. voice_setup)."""
+    def list_models(url, token, verify=True, config_proxy=None):
+        loads.append((url, token, verify, config_proxy))
+        return models
+    return list_models
+
+
 # --- монтаж экранов форм ------------------------------------------------------
 #
 # Каждый хелпер — асинхронный контекст-менеджер, отдающий `(pilot, экран)` уже в
@@ -202,6 +214,41 @@ async def settings_connection(tmp_path, *, probe=None, wait_probe=True, url=None
             if wait_probe:
                 await wait_until(pilot, lambda: scr._draft_checked is not None,
                                  "автопроба секции «Подключение» осела")
+            yield pilot, scr
+
+
+@asynccontextmanager
+async def settings_voice_section(tmp_path, *, mode="cloud", probe=None,
+                                 list_models=None, installed=False):
+    """/settings → секция «Голосовой ввод».
+
+    `mode` — действующий режим ("local" | "cloud" | "off"), `installed` — стоит ли
+    локальная батарейка. `probe` — ProbeResult, который отдаёт `probe_endpoint`
+    фасада (у голоса инъецируется результат, а не функция), `list_models` — что
+    отдаёт загрузчик списка моделей (None = не достучались).
+
+    Реальные слои конфига и каталог данных батарейки подменены на tmp: без этого
+    вердикт секции зависел бы от машины (~/.gc/config.local.yml пишет наш же UI)."""
+    import tui.app as app_mod
+    from tests.tui.test_settings_voice import CLOUD_CONFIG, _mk_screen
+    from tui.services.voice_setup import VoiceStatus
+    status = VoiceStatus(
+        installed=installed,
+        service_alive=installed and mode == "local",
+        port=8735 if installed else None,
+        model="Systran/faster-whisper-small" if installed else None,
+        mode=mode)
+    config_text = CLOUD_CONFIG if mode == "cloud" else "model: m\n"
+    with _isolated_config_layers(tmp_path), _isolated_voice_data(tmp_path):
+        app = app_mod.TuiApp(config={"voice": {}})
+        async with app.run_test() as pilot:
+            scr, fake = _mk_screen(tmp_path, status, config_text=config_text)
+            fake.probe_result = probe
+            fake.models = list_models
+            await pilot.app.push_screen(scr)
+            await pilot.pause()
+            open_settings_section(scr, "Голосовой ввод")
+            await pilot.pause()
             yield pilot, scr
 
 
@@ -266,23 +313,65 @@ async def mounted_model_editor(tmp_path, *, models):
 
 
 @asynccontextmanager
+async def wizard_voice_step(tmp_path, *, mode="cloud", installed=False, models=None):
+    """Мастер первого запуска на шаге «Голосовой ввод», курсор — на строке `mode`
+    ("local" | "cloud" | "skip"). Пометку (Space) хелпер НЕ ставит: показ полей
+    зависит от курсора, а выбор — отдельное действие, и тесты про него разные.
+
+    `models` — что отдаст endpoint на запрос списка (None = не достучались)."""
+    from tests.tui.test_onboarding_voice_step import FakeVoice, _screen, _to_voice_step
+    from tui.app import TuiApp
+    from tui.screens.onboarding import _VOICE_OPTIONS, _VOICE_STEP
+    keys = [k for k, _t, _d in _VOICE_OPTIONS]
+    with _isolated_voice_data(tmp_path):
+        app = TuiApp(config={"model": "M"})
+        async with app.run_test() as pilot:
+            voice = FakeVoice(installed=installed)
+            voice.models = models
+            screen = _screen(app, voice)
+            await app.push_screen(screen)
+            await _to_voice_step(pilot, screen)
+            # По кольцу: курсор может стоять не на нулевой строке (шаг открывается
+            # на ДЕЙСТВУЮЩЕМ режиме, _prefill_voice_from_config), и простая разность
+            # шагов молча дала бы ноль нажатий вместо доводки до нужной строки.
+            steps = (keys.index(mode) - screen._idx.get(_VOICE_STEP, 0)) % len(keys)
+            for _ in range(steps):
+                await pilot.press("down")
+            await pilot.pause()
+            yield pilot, screen
+
+
+@asynccontextmanager
 async def wizard_connection_step(tmp_path):
     """Мастер первого запуска на шаге «Подключение» (первый экран, как его видит
     новичок): пресет-лист адреса раскрыт сам — вход на поле его раскрывает."""
-    from tests.tui.test_onboarding_screen import _screen
+    from tests.tui.test_onboarding_voice_step import FakeVoice, _screen
     from tui.app import TuiApp
-    app = TuiApp(config={"model": "M"})
-    async with app.run_test() as pilot:
-        screen = _screen()
-        await app.push_screen(screen)
-        await pilot.pause()          # ConnectionEditor.focus_input идёт call_after_refresh
-        await pilot.pause()
-        yield pilot, screen
+    with _isolated_voice_data(tmp_path):
+        app = TuiApp(config={"model": "M"})
+        async with app.run_test() as pilot:
+            screen = _screen(app, FakeVoice())
+            await app.push_screen(screen)
+            await pilot.pause()          # ConnectionEditor.focus_input идёт call_after_refresh
+            await pilot.pause()
+            yield pilot, screen
+
+
+@contextmanager
+def _isolated_voice_data(tmp_path):
+    """Каталог данных голосовой батарейки — на tmp: `_voice_installed`,
+    `current_model_short` и статус секции читают реальный ~/.gc иначе."""
+    with mock.patch("voice_runtime.paths.voice_data_dir",
+                    lambda: tmp_path / "voice_data"), \
+         mock.patch("voice_runtime.state.voice_state_path",
+                    lambda: tmp_path / "voice_data" / "state.json"):
+        yield
 
 
 @contextmanager
 def _isolated_config_layers(tmp_path):
-    """Слои поверх базового config.yml — на tmp. Нужны любой секции /settings:
+    """Слои поверх базового config.yml — на tmp (тот же приём, что автофикстура
+    _isolate_config_layers в test_settings_voice). Нужны любой секции /settings:
     `SettingsScreen.__init__` → `_read_origins()` читает настоящие
     `~/.gc/config.local.yml` и `<cwd>/.gc/config.yml`, и перекрытое там поле
     добавляет в секцию строку «⚠ действует … — перекрыто»."""

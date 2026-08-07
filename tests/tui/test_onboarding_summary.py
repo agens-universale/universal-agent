@@ -30,3 +30,14 @@ def test_long_values_truncated_single_line():
                         model="x" * 80, mcp_count=0)
     assert "\n" not in line
     assert "…" in line
+
+
+def test_voice_segment_appended_when_present():
+    line = summary_line(url="", auth=None, model="", mcp_count=0, voice="локально")
+    assert line == ("сервер: —  ·  токен: —  ·  модель: —  ·  MCP: —"
+                     "  ·  голосовой ввод: локально")
+
+
+def test_voice_segment_absent_when_empty():
+    line = summary_line(url="", auth=None, model="", mcp_count=0)
+    assert "голос" not in line
