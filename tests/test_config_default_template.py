@@ -146,6 +146,18 @@ EXPERT_ONLY_KEYS: set = {
     # Путь к манифесту рекомендованных MCP; управляется gc-mcp.
     "mcp.meta.recommended_mcp_manifest",
 
+    # --- voice: голосовой ввод (опциональная секция) ---
+    # В шаблоне — осознанно закомментированный пример (voice выключен по умолчанию);
+    # заполняется юзером вручную или целиком пишется gc-voice install в config.local.yml.
+    "voice.provider",
+    "voice.url",
+    "voice.token",
+    "voice.model",
+    "voice.language",
+    "voice.max_seconds",
+    "voice.timeout_seconds",
+    "voice.verify_ssl",
+
     # --- paths: кастомные пути к промптам и runtime-данным ---
     # По умолчанию все пути берутся из XDG/GC_HOME; явное задание — только для sandbox.
     "paths.threads_data_path",

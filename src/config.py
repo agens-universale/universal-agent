@@ -223,7 +223,18 @@ def flatten_app_config(app_cfg: AppConfig) -> Dict[str, Any]:
         "update": app_cfg.update.model_dump(),  # спека D: check/extra_args
         "tui_bang_shell": app_cfg.tui.bang_shell.model_dump(),
         "tui_file_view": app_cfg.tui.file_view.model_dump(),
+        "voice": {
+            "provider": app_cfg.voice.provider,
+            "url": app_cfg.voice.url,
+            "token": app_cfg.voice.token,
+            "model": app_cfg.voice.model,
+            "language": app_cfg.voice.language,
+            "max_seconds": app_cfg.voice.max_seconds,
+            "timeout_seconds": app_cfg.voice.timeout_seconds,
+            "verify_ssl": app_cfg.voice.verify_ssl,
+        },
         "endpoint_presets": [p.model_dump() for p in app_cfg.endpoint_presets],
+        "voice_endpoint_presets": [p.model_dump() for p in app_cfg.voice_endpoint_presets],
         "command_moderation": {
             "enabled": app_cfg.security.command_moderation.enabled,
             "mode": app_cfg.security.command_moderation.mode,
@@ -337,13 +348,25 @@ def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
     with open(path, "r", encoding="utf-8") as file:
         raw_config = yaml.safe_load(file) or {}
 
+    # Сохранить base-voice для дефекта перекрытия (до мержа managed).
+    _base_voice = dict(raw_config.get("voice") or {})
+
     # Machine-managed overlay (gc-mcp install/remove): ~/.gc/config.local.yml.
     # Мёржится поверх base, под project-local. mcp.servers аккумулируются.
     managed_path = managed_config_path()
+    managed_raw: Dict[str, Any] = {}
     if managed_path.is_file() and os.path.abspath(str(managed_path)) != os.path.abspath(path):
         with open(managed_path, "r", encoding="utf-8") as file:
             managed_raw = yaml.safe_load(file) or {}
         raw_config = deep_merge(raw_config, managed_raw)
+
+    # Перекрыт ли юзерский voice managed-слоем (gc-voice install) — для notices. Правило
+    # общее с установкой: она предупреждает о том же факте, и вердикт обязан совпадать.
+    _voice_overridden: Optional[str] = None
+    _mv = managed_raw.get("voice") or {}
+    if _mv:
+        from voice_runtime.wire import overridden_user_voice
+        _voice_overridden = overridden_user_voice(_base_voice, str(_mv.get("url") or ""))
 
     # Layered loading: project <cwd>/.gc/config.yml поверх глобального.
     project_path = _project_local_config_path()
@@ -366,6 +389,8 @@ def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
     config_dict = flatten_app_config(app_cfg)
     # Не поле схемы: результат разбора СЫРОГО конфига compat-слоем — докладывает загрузчик.
     config_dict["compat_notices"] = _compat_notices
+    # Не поле схемы: факт перекрытия юзерского voice managed-слоем — знает только загрузчик.
+    config_dict["voice_overridden_by_managed"] = _voice_overridden
 
     apply_swarm_env_overrides(config_dict, config_dir)
 
