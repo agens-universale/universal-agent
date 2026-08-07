@@ -97,6 +97,10 @@ def build_default_registry() -> CommandRegistry:
                 hotkey="F5 · Ctrl+G"),
         Command("settings", (), "", "Настройки: подключение, модель, MCP, обновление",
                 hotkey="F6"),
+        # Стоп и отмена здесь не перечисляются: их показывает сама пилюля записи
+        # («Ctrl+T / Enter — стоп · Esc — отмена»), пока диктовка идёт.
+        Command("voice", (), "", "Голосовой ввод: надиктовать сообщение",
+                hotkey="Ctrl+T"),
         Command("export", (), "[txt|json|log-txt|log-json]", "Экспорт сессии",
                 arg_options=(("txt", "Вся сессия в читаемом виде"),
                              ("json", "Структурированные данные сессии"),

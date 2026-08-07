@@ -83,6 +83,7 @@ from tui.services.session_title import (
     normalize_prompt_title,
 )
 from tui.services.reasoning_clock import COGNITIVE_TOOLS, ReasoningClock
+from tui.services.voice_pill import render_pill
 
 
 def resolve_terminal_outcome(*, runner_error, stop_requested, terminal_outcome):
@@ -337,6 +338,12 @@ class TraceScreen(Screen):
         # _consume_pending_prefix, монтируется после реплики (_mount_user_reply).
         self._pending_skill_marker: Optional[tuple[str, bool]] = None
 
+        # Голосовой ввод (спека docs/tui/specs/2026-07-05-voice-input-design.md):
+        # flow собирается лениво на первый Ctrl+T; таймер листает кадры пилюли.
+        self._voice = None            # type: Optional["VoiceInputFlow"]
+        self._voice_timer = None      # textual.Timer | None
+        self._voice_frame: int = 0
+
     def compose(self) -> ComposeResult:
         with Vertical(id="root"):
             left_text, right_text = self._compose_header_segments()
@@ -455,20 +462,24 @@ class TraceScreen(Screen):
 
     def _footer_right_available_width(self) -> int:
         """Сколько ширины остаётся футер-right'у, чтобы footer-left остался виден.
-        total − ширина фактического контента слева − небольшой запас."""
+        total − ширина фактического контента слева − небольшой запас. Во время
+        записи голосом слева не команды, а пилюля + хвост клавиш — она шире."""
         try:
             total = self.app.size.width
         except Exception:
             total = 80
-        # Ширина ФАКТИЧЕСКОЙ левой части, включая суффикс уведомлений: без него
-        # правой части отдавалось место, рассчитанное на футер без счётчика, и
-        # «⚠ N» упиралось в имя модели — читалось как предупреждение о модели.
-        # cell_len, а не len: ширина в ячейках терминала не равна числу символов
-        # (эмодзи с вариационным селектором и CJK шире одной ячейки).
-        # Текст может быть двухстрочным (блок уведомлений уехал вниз целиком) —
-        # правой колонке мешает САМАЯ ДЛИННАЯ строка, а не сумма строк.
-        left_len = max(cell_len(line)
-                       for line in self._footer_left_text().split("\n"))
+        if self._voice is not None and self._voice.state != "idle":
+            left_len = self._voice_footer_render().cell_len
+        else:
+            # Ширина ФАКТИЧЕСКОЙ левой части, включая суффикс уведомлений: без него
+            # правой части отдавалось место, рассчитанное на футер без счётчика, и
+            # «⚠ N» упиралось в имя модели — читалось как предупреждение о модели.
+            # cell_len, а не len: ширина в ячейках терминала не равна числу символов
+            # (эмодзи с вариационным селектором и CJK шире одной ячейки).
+            # Текст может быть двухстрочным (блок уведомлений уехал вниз целиком) —
+            # правой колонке мешает САМАЯ ДЛИННАЯ строка, а не сумма строк.
+            left_len = max(cell_len(line)
+                           for line in self._footer_left_text().split("\n"))
         # −5 = хром футера (padding #footer 0 1 → 2 + padding-right #footer-right → 1)
         # + зазор между колонками 2. Зазор держит padding-right у #footer-left, здесь
         # он учитывается, чтобы решение «свернуть правую часть на 2-ю строку»
@@ -598,6 +609,10 @@ class TraceScreen(Screen):
         """Обновить счётчик уведомлений в footer-left (без затрагивания footer-right)."""
         if self._footer_hint_active:
             return
+        # Во время голосовой стадии footer-left занят пилюлей — событийный
+        # runtime-notice не должен её затирать (тик записи восстановит счётчик).
+        if self._voice is not None and self._voice.state != "idle":
+            return
         try:
             self.query_one("#footer-left", Static).update(self._footer_left_text())
         except Exception:
@@ -618,6 +633,10 @@ class TraceScreen(Screen):
         try:
             left = self.query_one("#footer-left", Static)
         except Exception:
+            return
+        # Голосовая пилюля вытесняет остальной footer-left, пока стадия активна.
+        if self._voice is not None and self._voice.state != "idle":
+            left.update(self._voice_footer_render())
             return
         if not self._footer_hint_active:
             left.update(self._footer_left_text())
@@ -652,6 +671,130 @@ class TraceScreen(Screen):
             self._footer_hint_timer.stop()
             self._footer_hint_timer = None
         self._refresh_footer()
+
+    # --- голосовой ввод (Ctrl+T) ---------------------------------------
+
+    def _voice_config(self) -> dict:
+        """voice-секция + прокси агента: у голоса своего поля прокси нет, а в облако
+        он ходит по тем же правилам, что backend (копия — оригинал не трогаем)."""
+        cfg = getattr(self.app, "_config", None) or {}
+        voice = dict(cfg.get("voice") or {})
+        voice.setdefault("proxy", cfg.get("proxy"))
+        return voice
+
+    def _ensure_voice_flow(self):
+        """Ленивая сборка flow (импорты voice-модулей — только по факту)."""
+        if self._voice is not None:
+            return self._voice
+        from tui.services.voice_input import VoiceInputFlow
+        from voice.recorder import MicRecorder
+        from voice.transcriber import transcribe
+        self._voice = VoiceInputFlow(
+            self._voice_config(),
+            recorder_factory=MicRecorder,
+            transcribe=transcribe,
+            ui_call=self.app.call_from_thread,
+            on_state=self._on_voice_state,
+            on_text=self._insert_transcribed,
+            on_error=self._on_voice_error,
+        )
+        return self._voice
+
+    def config_reloaded(self) -> None:
+        """Hot-reload конфига (app.reload_config): сбросить кэш voice-flow — он держит
+        voice-секцию, снятую при сборке, и без сброса смена endpoint'а в /settings
+        не подействовала бы до перезапуска. Живую запись не рвём: пересоберётся на
+        следующем Ctrl+T, когда flow вернётся в idle."""
+        if self._voice is None or self._voice.state != "idle":
+            return
+        self._voice = None
+        if self._voice_timer is not None:
+            self._voice_timer.stop()
+            self._voice_timer = None
+
+    def _voice_toggle(self) -> None:
+        from config_modules.voice import voice_enabled
+        try:
+            inp = self.query_one("#cmdinput", CommandTextArea)
+        except Exception:
+            return
+        if inp.disabled or self._any_picker_open:
+            return
+        if self._voice is not None and self._voice.state != "idle":
+            self._voice.toggle()
+            return
+        if not voice_enabled(self._voice_config()):
+            self.notify(
+                "голосовой ввод не настроен — /settings → Голосовой ввод",
+                severity="warning",
+            )
+            return
+        from voice.recorder import available
+        if not available():
+            self.notify(
+                "голосовой ввод: аудио-стек sounddevice недоступен "
+                "(Linux: установите libportaudio2)",
+                severity="warning",
+            )
+            return
+        self._ensure_voice_flow().toggle()
+
+    def _voice_footer_render(self):
+        """Пилюля + dim-хвост клавиш (хвост — только на записи)."""
+        # Кадр анимации — по стадии. Записи частый тик нужен эквалайзеру, но мигание
+        # «● REC» отмерено в кадрах и на ускоренном тике задрожало бы: ему отдаём
+        # каждый второй. Волне распознавания частые кадры, наоборот, в плюс — она
+        # летит дробными позициями, и чем мельче шаг, тем ровнее полёт.
+        frame = (self._voice_frame if self._voice.state == "transcribing"
+                 else self._voice_frame // 2)
+        pill = render_pill(self._voice.state, self._voice.elapsed_seconds,
+                           frame, bands=self._voice.input_bands)
+        if self._voice.state == "recording":
+            pill.append("  Ctrl+T / Enter — стоп · Esc — отмена", style=_DIM)
+        return pill
+
+    def _on_voice_state(self, state: str) -> None:
+        try:
+            row = self.query_one("#input-row", Horizontal)
+            row.set_class(state == "recording", "recording")
+        except Exception:
+            pass
+        if state == "idle":
+            if self._voice_timer is not None:
+                self._voice_timer.stop()
+                self._voice_timer = None
+        elif self._voice_timer is None:
+            self._voice_frame = 0
+            # 0.08 с (было 0.15): эквалайзер обязан успевать за голосом, а звук теперь
+            # приходит порциями по 32 мс. Расчёт кадра дешёвый и вне звукового потока.
+            self._voice_timer = self.set_interval(0.08, self._voice_tick)
+        if state == "transcribing":
+            self._voice_frame = 0   # эмиттер rec-режима стартует с пустой ленты
+        self._refresh_footer()
+
+    def _voice_tick(self) -> None:
+        if self._voice is None or self._voice.state == "idle":
+            return
+        self._voice_frame += 1
+        self._voice.tick()          # авто-стоп max_seconds
+        self._refresh_footer()
+
+    def _on_voice_error(self, message: str) -> None:
+        self.notify(message, severity="warning")
+
+    def _insert_transcribed(self, text: str) -> None:
+        """Вставить распознанный текст в позицию курсора (+ авто-пробел)."""
+        try:
+            inp = self.query_one("#cmdinput", CommandTextArea)
+        except Exception:
+            return
+        row, col = inp.cursor_location
+        if col > 0:
+            line = inp.document.get_line(row)
+            if col <= len(line) and line[col - 1] not in (" ", "\t"):
+                text = " " + text
+        inp.insert(text)
+        inp.focus()
 
     def on_mount(self) -> None:
         self.query_one("#cmdinput", CommandTextArea).focus()
@@ -2882,6 +3025,14 @@ class TraceScreen(Screen):
         if event.key != "escape" and self._esc_confirm_kind is not None:
             self._clear_footer_hint()
 
+        # Голосовой ввод: Ctrl+T — toggle записи (не работает при открытых
+        # пикерах и disabled-инпуте; во время transcribing toggle игнорируется).
+        if event.key == "ctrl+t":
+            event.stop()
+            event.prevent_default()
+            self._voice_toggle()
+            return
+
         # Input history: ↑/↓ для навигации (smart line-position check).
         # ↑ → history prev только если курсор на верхней ВИЗУАЛЬНОЙ строке.
         # ↓ → history next только если курсор на нижней ВИЗУАЛЬНОЙ строке.
@@ -2923,6 +3074,13 @@ class TraceScreen(Screen):
         # /stop или Ctrl+C.
         if event.key == "escape" and len(self.app.screen_stack) == 1 \
                 and not self._any_picker_open:
+            # Запись голосом: Esc — отмена записи (самый локальный контекст).
+            if self._voice is not None and self._voice.state == "recording":
+                self._voice.cancel_recording()
+                event.stop()
+                event.prevent_default()
+                return
+
             # Пока идёт `!` — cancel bang, не quit / не Esc-лестница выхода.
             if self._bang is not None and self._bang.is_running:
                 self._bang.cancel()
@@ -3414,6 +3572,11 @@ class TraceScreen(Screen):
         self, event: CommandTextArea.Submitted
     ) -> None:
         inp = self.query_one("#cmdinput", CommandTextArea)
+        # Запись голосом: Enter = стоп+распознать (НЕ отправка сообщения).
+        if self._voice is not None and self._voice.state == "recording":
+            self._voice.stop_and_transcribe()
+            return
+
         # Skill picker открыт → выполнить выбранный skill (или ввод как есть)
         if self._skill_picker is not None:
             skill = self._skill_picker.selected_skill()
@@ -4612,6 +4775,11 @@ class TraceScreen(Screen):
         if name == "compact":
             self._cmd_compact()
             return
+        if name == "voice":
+            self._voice_toggle()
+            return
+        # Тоггл-команды опознаются по флагу реестра (develop обобщил перечисление
+        # имён): /voice выше — не тоггл, а действие, поэтому идёт своей веткой.
         if cmd.is_toggle:
             self._toggle_info_command(name)
             return

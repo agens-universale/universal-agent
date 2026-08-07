@@ -29,9 +29,9 @@ class PasteInput(Input):
         self._sync_group_disabled()
 
     def on_mount(self) -> None:
-        # Поле, отключённое ЕЩЁ ДО монтирования (`PasteInput(disabled=True)` в
-        # конструкторе хоста), watcher уже отработало вхолостую: родителя тогда
-        # не было. Догоняем на монтировании.
+        # Поле, отключённое ЕЩЁ ДО монтирования (`PasteInput(disabled=True)` —
+        # так строятся поля-факты голосового редактора), watcher уже отработало
+        # вхолостую: родителя тогда не было. Догоняем на монтировании.
         self._sync_group_disabled()
 
     def _paste_from_os_clipboard(self) -> bool:
