@@ -402,10 +402,58 @@ security:
   - `config_dict["my_custom_flag"] == True`,
   - `config_dict["extra_param"] == "some value"`.
 
-## Пресеты адресов (`endpoint_presets`)
+## Голосовой ввод (`voice:`)
 
-Выпадающий список под полем адреса. Его содержимое можно менять — список берётся из
-конфига, а не зашит в код; ключа нет или он битый → берутся значения по умолчанию.
+Диктовка в TUI (`Ctrl+T` / `/voice`): запись с микрофона уходит на STT-сервис, текст
+возвращается в поле ввода. Настраивается мышкой — секция «Голосовой ввод» в `/settings`
+(там же проверка связи и установка локального сервиса); ниже — те же ключи для правки
+руками.
+
+| Ключ | Значение | По умолчанию |
+|---|---|---|
+| `provider` | Пока одно значение — `openai` (endpoint, совместимый с `/v1/audio/transcriptions`) | `openai` |
+| `url` | Полный адрес endpoint'а — вместе с `/v1/audio/transcriptions` | `""` |
+| `token` | Bearer-токен endpoint'а | `""` |
+| `model` | Имя модели распознавания (только `openai`) | `whisper-1` |
+| `language` | Язык распознавания, ISO-код | `ru` |
+| `max_seconds` | Предохранитель: запись сама останавливается через столько секунд | `120` |
+| `timeout_seconds` | HTTP-таймаут запроса к STT | `60` |
+| `verify-ssl` | `true \| false \| "/path/ca-bundle.pem"` — как `backend.use_ssl` | `true` |
+
+Фича включается самим фактом настройки: достаточно `url` — токен не обязателен,
+локальный сервис и открытые endpoint'ы его не спрашивают. Пусто — `Ctrl+T` молчит.
+
+**Ключ пишется через дефис — `verify-ssl`**, в отличие от остальных ключей секции.
+Форма с подчёркиванием конфиг не пройдёт.
+
+Наружу голос ходит по тем же правилам, что запросы к модели: прокси берётся из
+`backend.proxy` (или переменных окружения), `~/.netrc` игнорируется. Локальный сервис —
+исключение: к нему всегда напрямую, мимо прокси.
+
+Облачный endpoint:
+
+```yaml
+voice:
+  url: "https://api.groq.com/openai/v1/audio/transcriptions"
+  token: "${ENV:GROQ_API_KEY}"
+  model: "whisper-large-v3-turbo"
+  language: "ru"
+```
+
+Локальный сервис («батарейка», ~0.9 ГБ на диске) ставится командой `gc-voice install`
+или из `/settings` и поднимается сам при старте `gc-ua`. Свою секцию он пишет не в ваш
+`config.yml`, а в машинный `config.local.yml`, и она **мёржится поверх** вашей: пока
+батарейка подключена, `voice:` из `config.yml` не действует. Про такой конфликт агент
+предупреждает при установке и на старте.
+
+Поэтому вписать свой endpoint руками мало — нужно ещё отключить локальный слой:
+`/settings` делает это само при сохранении своего endpoint'а, вручную —
+`gc-voice remove` (снос сервиса) либо удаление секции `voice:` из `config.local.yml`.
+
+## Пресеты адресов (`endpoint_presets`, `voice_endpoint_presets`)
+
+Выпадающие списки под полями адреса. Их содержимое можно менять — списки берутся из
+конфига, а не зашиты в код; ключа нет или он битый → берутся значения по умолчанию.
 
 ```yaml
 # адрес API-сервера агента (мастер первого запуска и /settings → «Подключение»)
@@ -414,9 +462,21 @@ endpoint_presets:
     url: https://openrouter.ai/api/v1/chat/completions
   - name: Cloud.ru
     url: https://foundation-models.api.cloud.ru/v1/chat/completions
+
+# адрес STT-сервиса (/settings → «Голосовой ввод» → «Свой endpoint»)
+voice_endpoint_presets:
+  - name: OpenAI
+    url: https://api.openai.com/v1/audio/transcriptions
+  - name: Groq
+    url: https://api.groq.com/openai/v1/audio/transcriptions
+  - name: Mistral
+    url: https://api.mistral.ai/v1/audio/transcriptions
 ```
 
 Свой адрес вписывается прямо в поле — список ему не мешает и не подставляется поверх.
+Голосовые пресеты годятся для сервисов, говорящих на протоколе
+`/v1/audio/transcriptions` (`voice.provider: openai`); у сервисов со своим API
+(Deepgram, AssemblyAI, SpeechKit) другой протокол, и одним адресом они не настраиваются.
 
 ## Кастомные сабагенты
 
