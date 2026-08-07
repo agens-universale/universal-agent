@@ -490,7 +490,7 @@ async def test_trace_mounts_pending_cta(tmp_path, launch_root):
         pilot.app.screen._maybe_mount_diff_pending_cta()
         await pilot.pause()
         found = any(
-            "[F3]/diff" in str(row._content)
+            "F3/diff" in str(row._content)
             for row in pilot.app.screen.query(TraceRow)
         )
         assert found, "expected pending CTA in trace"
@@ -525,15 +525,20 @@ async def test_flush_cta_survives_after_clear_trace(tmp_path, launch_root):
         scr._flush_diff_pending_cta()
         await pilot.pause()
         found = any(
-            "[F3]/diff" in str(row._content)
+            "F3/diff" in str(row._content)
             for row in scr.query(TraceRow)
         )
         assert found
 
 
 @pytest.mark.asyncio
-async def test_cta_always_shows_when_pending(tmp_path, launch_root):
-    """После каждого turn при pending>0 — CTA, без дедупа по тексту."""
+async def test_cta_shows_when_pending(tmp_path, launch_root):
+    """При pending>0 после turn монтируется ровно одна CTA-строка.
+
+    Дедуп повторных одинаковых CTA подряд (правило A) и связанный gate по
+    счётчику событий (правило B) — отдельный контракт, живёт в
+    tests/tui/test_diff_cta_dedup.py; здесь не про дедуп, а про то, что CTA
+    вообще появляется."""
     pytest.importorskip("textual")
     from tui.app import TuiApp
     from tui.screens.main import TraceScreen
@@ -549,14 +554,13 @@ async def test_cta_always_shows_when_pending(tmp_path, launch_root):
         assert isinstance(scr, TraceScreen)
         scr.attach_active_task("t1")
         scr._maybe_mount_diff_pending_cta()
-        scr._maybe_mount_diff_pending_cta()
         await pilot.pause()
         ctas = [
             row
             for row in scr.query(TraceRow)
-            if "[F3]/diff" in str(row._content)
+            if "F3/diff" in str(row._content)
         ]
-        assert len(ctas) == 2
+        assert len(ctas) == 1
 
 
 @pytest.mark.asyncio

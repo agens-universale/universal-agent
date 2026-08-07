@@ -39,7 +39,7 @@ def test_tokens_and_cost_when_pricing_on():
     last_run = _meta(1_000_000, 0)     # total 1.0M, cost 1.0 ₽
     m = render_usage_meter(session, last_run, _PRICING_ON, _MODEL)
     assert m is not None
-    assert m.plain == "запрос 1.0M/1.0₽  ·  сессия 2.0M/2.0₽"
+    assert m.plain == "запрос 1.0M/1.0₽ · сессия 2.0M/2.0₽"
 
 
 def test_tokens_only_when_pricing_off():
@@ -47,7 +47,7 @@ def test_tokens_only_when_pricing_off():
     last_run = _meta(1_000_000, 0)
     m = render_usage_meter(session, last_run, _PRICING_OFF, _MODEL)
     assert m is not None
-    assert m.plain == "запрос 1.0M  ·  сессия 2.0M"
+    assert m.plain == "запрос 1.0M · сессия 2.0M"
 
 
 def test_session_only_when_no_request_total():

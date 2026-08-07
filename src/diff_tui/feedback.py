@@ -85,10 +85,10 @@ _PENDING_CTA_PREVIEW = 5
 
 
 def format_pending_cta(paths: Sequence[str]) -> str | None:
-    """Post-turn CTA в трейсе: до 5 путей + ``[F3]/diff``.
+    """Post-turn CTA в трейсе: до 5 путей + ``F3/diff``.
 
     Если pending больше лимита — список режется и хвост
-    ``(5 из N) [F3]/diff``; иначе просто ``[F3]/diff``.
+    ``(5 из N) F3/diff``; иначе просто ``F3/diff``.
     """
     keys = [p for p in paths if p]
     n = len(keys)
@@ -97,9 +97,9 @@ def format_pending_cta(paths: Sequence[str]) -> str | None:
     shown = keys[:_PENDING_CTA_PREVIEW]
     lines = list(shown)
     if n > _PENDING_CTA_PREVIEW:
-        lines.append(f"({_PENDING_CTA_PREVIEW} из {n}) [F3]/diff")
+        lines.append(f"({_PENDING_CTA_PREVIEW} из {n}) F3/diff")
     else:
-        lines.append("[F3]/diff")
+        lines.append("F3/diff")
     return "\n".join(lines)
 
 

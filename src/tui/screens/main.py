@@ -28,6 +28,7 @@ from startup_notices import collect_startup_notices
 from tools.registry import all_builtin_tool_names
 from tui.commands import build_default_registry, closest_command
 from tui.models import TaskCursor
+from rich.cells import cell_len
 from rich.text import Text
 from tui.palette import ACCENT as _ACCENT
 from tui.palette import DEEP_DIM as _DEEP_DIM
@@ -35,7 +36,7 @@ from tui.palette import DIM as _DIM
 from tui.palette import ERR as _ERR_RED
 from tui.palette import INK as _INK
 from tui.services.context_meter import render_context_meter
-from tui.services.notices_ui import format_notices_badge, format_notices_footer_suffix
+from tui.services.notices_ui import footer_left_with_badge, format_notices_badge
 from tui.services.usage_meter import compose_adaptive_footer_right, usage_segments
 from tui.services.export import export_thread
 from tui.services.path_display import truncate_path
@@ -170,7 +171,12 @@ def select_active_substate(
 # Футер с функциональными клавишами; /stop добавляется только при активном run.
 # (/skills, /export доступны через палитру — в футере лишние. /mcp не дублируем —
 # подсказка «/mcp» уже в бренд-карточке.)
-# Diff: F3 в базовом хроме футера; CTA в трейсе — пути pending + [F3]/diff.
+# Diff: F3 в базовом хроме футера; CTA в трейсе — пути pending + F3/diff.
+# Отступ колонки статусов от логотипа — тот же, что в CSS (#brand-mcp padding-left):
+# порог узости считается по нему, и разъехаться они не должны.
+_MCP_COL_PAD = 6
+# F7/buffer пришёл из develop (синк 2026-08-06) — клавиша живёт в хроме наравне с
+# остальными; при активном run уходят config/settings, а buffer остаётся.
 _FOOTER_LEFT = "F1/help  F2/sessions  F3/diff  F5/config  F6/settings  F7/buffer"
 _FOOTER_RUNNING_LEFT = "F1/help  F2/sessions  F3/diff  F7/buffer  Ctrl+C/stop"
 _PLACEHOLDER_READY = "опишите задачу или /команда"
@@ -198,6 +204,8 @@ class TraceScreen(Screen):
         self._registry = build_default_registry()
         self._palette: CommandPalette | None = None
         self._brand: Vertical | None = None
+        self._brand_wide: bool | None = None   # раскладка карточки: статусы сбоку/снизу
+        self._brand_row = None                 # контейнер карточки (ссылка, не запрос)
         self._task_events: list = []  # list[TraceEvent]; пополняется в _render_record/_render_segments
         self._last_agent_summary: Optional[str] = None  # A1: дедуп равных user-facing рядов
         self._store: Optional[FileTaskStore] = None
@@ -306,8 +314,11 @@ class TraceScreen(Screen):
         # Флаг состояния runner на предыдущем тике — для детекта спадающего фронта.
         self._was_running: bool = False
         self._was_summarizing: bool = False   # для baseline last_compact_msg_count
-        # Post-turn CTA «Изменено N · /diff» — один раз на falling-edge прогона.
-        self._diff_pending_cta_pending: bool = False
+        # Post-turn CTA «Изменено N · /diff». Причина взвода — ровно два случая,
+        # правило B (не показывать после хода без событий) применимо только к
+        # первому: "turn_end" — обычный итог хода; "wipe_restore" — wipe трейса
+        # стёр уже смонтированную CTA, её возвращают независимо от итога хода.
+        self._diff_pending_cta_pending: str | None = None
         # Транзиентная подсказка в footer-left (esc-confirm и paste-hint делят слот).
         self._esc_confirm_kind: Optional[str] = None  # "clear" | "stop" | None
         self._footer_hint_timer = None                # textual.Timer
@@ -371,6 +382,10 @@ class TraceScreen(Screen):
         self._refresh_header()   # пересчитать усечение пути под новую ширину
         self._refresh_footer()   # адаптивная вёрстка usage (стек сессии) под новую ширину
         self._sync_trace_max_height()   # потолок #trace под новую высоту экрана
+        # Раскладка бренд-карточки выбиралась только при сборке: сузив окно уже после
+        # старта, человек получал колонку статусов в пару символов шириной — слова
+        # рвались по буквам («подк / люче / ны»), а совсем узко она схлопывалась в ноль.
+        self._apply_brand_layout(self._brand_fits_beside(event.size.width))
 
     def on_click(self, event: events.Click) -> None:
         """Клик в ЛЮБОЙ части трейса → фокус на #trace, чтобы колесо/стрелки/PgUp-
@@ -420,15 +435,16 @@ class TraceScreen(Screen):
     def _compose_footer_right(self) -> "Text":
         """Правый край футера: модель · контекст · запрос · сессия.
 
-        Адаптивно: если по ширине не влезает, «сессия» уезжает на 2-ю строку
-        под «запрос» (футер height:2) — чтобы команды слева не вытеснялись."""
+        Адаптивно: если по ширине не влезает, токен-блок «запрос · сессия»
+        уезжает на 2-ю строку целиком (футер height:2) — чтобы команды слева
+        не вытеснялись."""
         cfg = getattr(self.app, "_config", None) or {}
         model = cfg.get("model", "?")
         head = Text()
         head.append(str(model), style=_INK)
         meter = self._context_meter()
         if meter is not None:
-            head.append("  ·  ", style=_DIM)
+            head.append(" · ", style=_DIM)
             head.append_text(meter)
         request_seg, session_seg = self._usage_segments()
         if request_seg is None and session_seg is None:
@@ -438,20 +454,26 @@ class TraceScreen(Screen):
         )
 
     def _footer_right_available_width(self) -> int:
-        """Сколько ширины остаётся футер-right'у, чтобы команды слева (footer-left)
-        остались видны. total − длина активной строки команд − небольшой запас."""
+        """Сколько ширины остаётся футер-right'у, чтобы footer-left остался виден.
+        total − ширина фактического контента слева − небольшой запас."""
         try:
             total = self.app.size.width
         except Exception:
             total = 80
-        runner = getattr(self.app, "active_runner", None)
-        is_running_fn = getattr(runner, "is_running", None)
-        try:
-            is_running = bool(is_running_fn()) if callable(is_running_fn) else False
-        except Exception:
-            is_running = False
-        left = _FOOTER_RUNNING_LEFT if is_running else _FOOTER_LEFT
-        return max(10, total - len(left) - 3)   # −3: padding-right + зазор
+        # Ширина ФАКТИЧЕСКОЙ левой части, включая суффикс уведомлений: без него
+        # правой части отдавалось место, рассчитанное на футер без счётчика, и
+        # «⚠ N» упиралось в имя модели — читалось как предупреждение о модели.
+        # cell_len, а не len: ширина в ячейках терминала не равна числу символов
+        # (эмодзи с вариационным селектором и CJK шире одной ячейки).
+        # Текст может быть двухстрочным (блок уведомлений уехал вниз целиком) —
+        # правой колонке мешает САМАЯ ДЛИННАЯ строка, а не сумма строк.
+        left_len = max(cell_len(line)
+                       for line in self._footer_left_text().split("\n"))
+        # −5 = хром футера (padding #footer 0 1 → 2 + padding-right #footer-right → 1)
+        # + зазор между колонками 2. Зазор держит padding-right у #footer-left, здесь
+        # он учитывается, чтобы решение «свернуть правую часть на 2-ю строку»
+        # принималось по тому же месту, которое реально останется левой.
+        return max(10, total - left_len - 5)
 
     def _usage_segments(self) -> "tuple[Text | None, Text | None]":
         """Раздельные сегменты («запрос», «сессия») для адаптивной вёрстки, или
@@ -557,10 +579,20 @@ class TraceScreen(Screen):
         return _FOOTER_RUNNING_LEFT if is_running else _FOOTER_LEFT
 
     def _footer_left_text(self) -> str:
-        """Команды footer-left + счётчик уведомлений (если есть)."""
+        """Команды footer-left + счётчик уведомлений, собранные по фактической ширине.
+
+        Сборку делает footer_left_with_badge: блок уведомлений либо стоит в строке с
+        командами (тогда перед ним разделитель-точка), либо уходит вниз целиком и без
+        точки. Ширина — контентная ширина самого #footer-left; до первого layout она
+        нулевая, и сборка оптимистична — resize/refresh пересоберут по месту (канон
+        бренд-карточки: раскладку выбирает фактическая ширина, а не момент сборки)."""
         base = self._footer_left_commands()
-        suffix = format_notices_footer_suffix(self._collect_footer_notices())
-        return base + suffix if suffix else base
+        badge = format_notices_badge(self._collect_footer_notices())
+        try:
+            width = self.query_one("#footer-left", Static).content_size.width
+        except Exception:
+            width = 0
+        return footer_left_with_badge(base, badge, width=width)
 
     def _refresh_notices_footer(self) -> None:
         """Обновить счётчик уведомлений в footer-left (без затрагивания footer-right)."""
@@ -2348,8 +2380,12 @@ class TraceScreen(Screen):
             self._skills_cache = None
             # CTA про pending-диффы — после turn (не compact). Монтаж отложен
             # до конца poll / после stream_reset: иначе compaction стирает строку.
+            # Правило B здесь НЕ проверяем: _events_since_last_user_send для
+            # этого тика ещё может быть нулевым — хвост событий рендерится
+            # позже в этом же _poll_active (_render_records ниже по методу).
+            # Решение — в _flush_diff_pending_cta, там счётчик уже актуален.
             if _kind != "compact":
-                self._diff_pending_cta_pending = True
+                self._diff_pending_cta_pending = "turn_end"
         # Спадающий фронт прогона True→False → зафиксировать терминальный статус
         # в meta.tui.status (TUI-owned), чтобы бейдж пережил переоткрытие сессии.
         if self._was_running and not is_running and self._store is not None \
@@ -2587,9 +2623,12 @@ class TraceScreen(Screen):
             self._mount_failed_from_meta(self._active_task_id)
             self._refresh_header()
             self._refresh_footer()
-            # Wipe стёр CTA: если idle и есть pending — показать снова.
+            # Wipe стёр CTA: если idle и есть pending — показать снова. Правило B
+            # тут ни при чём (не про итог хода, а про физическую потерю строки
+            # при перерисовке трейса) — reason="wipe_restore" явно исключает
+            # его в _flush_diff_pending_cta.
             if not is_running:
-                self._diff_pending_cta_pending = True
+                self._diff_pending_cta_pending = "wipe_restore"
             self._flush_diff_pending_cta()
             return
         self._cursor = tail.next_cursor
@@ -2597,7 +2636,11 @@ class TraceScreen(Screen):
         self._refresh_header()
         self._flush_diff_pending_cta()
 
-    _BRAND_WIDE_MIN = 84  # ниже — MCP под логотип (адаптив A2)
+    # Ширина хрома вокруг колонки статусов: рамка карточки, её padding и padding
+    # трейса. Порог узости считается по факту (`_brand_fits_beside`), а не константой:
+    # длина строк статусов зависит от MCP и уведомлений, и фиксированный порог либо
+    # рвал слова в колонке, либо уводил её вниз раньше времени.
+    _BRAND_CHROME = 4
 
     def _show_brand(self) -> None:
         if self._brand is not None and self._brand.parent is not None:
@@ -2607,21 +2650,57 @@ class TraceScreen(Screen):
         # цвет MCP-колонки задаёт #brand-mcp (color: $deep-dim).
         self._mcp_status_row = Static("", id="brand-mcp", markup=False)
         try:
-            wide = self.app.size.width >= self._BRAND_WIDE_MIN
+            wide = self._brand_fits_beside(self.app.size.width)
         except Exception:
             wide = True
         logo = Static(branding.logo_text(), classes="brand-logo")
         # Тэглайн — отдельной строкой под логотипом, центрирован по ширине лого
         # (а не border_subtitle: тот центрируется по всей рамке, не под брендом).
         tagline = Static(branding.tagline_under_logo(), classes="brand-tagline", markup=False)
-        left = Vertical(logo, tagline, id="brand-left")
-        if wide:
-            inner = Horizontal(left, self._mcp_status_row, id="brand-row")
-        else:
-            inner = Vertical(left, self._mcp_status_row, id="brand-row")
+        # Версия — своей строкой под тэглайном, с воздухом над ней (CSS): карточка это
+        # визитка продукта, и номер читается там же, где имя. Рядом же появляется
+        # «↑ доступна новая версия» — текущая версия и предложение обновиться
+        # складываются в одну мысль.
+        version = Static(branding.version_under_logo(), classes="brand-version", markup=False)
+        left = Vertical(logo, tagline, version, id="brand-left")
+        inner = Horizontal(left, self._mcp_status_row, id="brand-row")
+        self._brand_row = inner          # раскладку ставит _apply_brand_layout ниже
+        self._brand_wide = None
         brand = Vertical(inner, id="brand-block")
         trace.mount(brand)
         self._brand = brand
+        self._apply_brand_layout(wide)
+
+    def _brand_fits_beside(self, width: int) -> bool:
+        """Влезает ли колонка статусов СБОКУ от логотипа целиком.
+
+        Считаем по самой длинной строке статусов, а не по фиксированному порогу: их
+        длина зависит от MCP и уведомлений, и любое постоянное число либо рвало слова
+        («подк / люче / ны»), либо уводило колонку вниз там, где она помещалась."""
+        from tui import branding
+        lines = self._compose_card_lines(self._last_mcp_card_line).plain.splitlines()
+        need = max((len(line) for line in lines), default=0)
+        logo_w = max((len(line) for line in branding.LOGO.splitlines()), default=0)
+        return width >= logo_w + _MCP_COL_PAD + need + self._BRAND_CHROME
+
+    def _apply_brand_layout(self, wide: bool) -> None:
+        """Статусы сбоку от логотипа (широкое окно) или под ним (узкое).
+
+        Меняем layout уже смонтированного контейнера, а не пересобираем карточку:
+        `remove()` у Textual отложенный, и на кадр в трейсе оказались бы две карточки.
+        Под логотипом первой строке нужен воздух сверху, сбоку — нет."""
+        row = self._brand_row
+        if row is None or self._brand_wide == wide:
+            return
+        # Ссылку на контейнер держим сами: сразу после mount он ещё не находится
+        # запросом (монтирование у Textual отложенное), а раскладку надо поставить
+        # уже на сборке — иначе старт в узком окне остался бы в широкой раскладке.
+        row.styles.layout = "horizontal" if wide else "vertical"
+        if self._mcp_status_row is not None:
+            toggle = (self._mcp_status_row.remove_class if wide
+                      else self._mcp_status_row.add_class)
+            toggle("brand-mcp-stacked")
+        self._brand_wide = wide          # только после успешного применения
 
     def _collect_notices(self):
         """Бейдж КАРТОЧКИ: стартовые + unread runtime (без обновления — оно там строкой).
@@ -2652,7 +2731,7 @@ class TraceScreen(Screen):
 
             ⚠ MCP: 3/5 подключены · /mcp             (только если заданы MCP-серверы)
 
-            ⚠ 2 · ℹ 1 · F4/notices                (только если есть уведомления)
+            ⚠2 ℹ1 · F4/notices                  (только если есть уведомления)
 
             ↑ доступна новая версия · /settings → Обновление  (teal, если авто-чек нашёл)
 
@@ -2723,6 +2802,13 @@ class TraceScreen(Screen):
         if mcp_line is not None:
             self._last_mcp_card_line = mcp_line
         self._mcp_status_row.update(self._compose_card_lines(self._last_mcp_card_line))
+        # Строки статусов только что могли стать длиннее (осели MCP, пришли
+        # уведомления) — раскладку пересчитываем по НИМ, иначе колонка осталась бы
+        # сбоку и рвала бы свежий текст по буквам.
+        try:
+            self._apply_brand_layout(self._brand_fits_beside(self.app.size.width))
+        except Exception:
+            pass
 
     # Шапка трейса: переживает пересборку (#brand-block — бренд,
     # MCP-статус живёт внутри карточки как #brand-mcp).
@@ -3721,18 +3807,40 @@ class TraceScreen(Screen):
             return
         self._append_technical_to_thread(msg)
 
+    def _should_arm_diff_cta(self) -> bool:
+        """Стоит ли напоминать про диффы по итогам хода.
+
+        Ноль событий от агента = ход ничего не сделал (отмена по Esc до первого
+        ответа — тот же счётчик, на котором держится _cancel_with_undo). Диффы
+        измениться не могли, а откат уже убрал реплику из трейса: концовка
+        «небывшего» хода читается как мусор (смок 2026-08-02)."""
+        return self._events_since_last_user_send > 0
+
     def _flush_diff_pending_cta(self) -> None:
-        """Смонтировать post-turn CTA, если флаг выставлен и runner idle."""
-        if not self._diff_pending_cta_pending:
+        """Смонтировать post-turn CTA, если флаг выставлен и runner idle.
+
+        Правило B проверяем здесь, а не в момент взвода: _events_since_last_user_send
+        для текущего тика обновляется в _render_records/_render_event, которые
+        внутри _poll_active выполняются ПОСЛЕ падающего фронта is_running. На
+        момент взвода счётчик мог быть ещё нулевым, хотя хвост событий этого
+        же тика вот-вот отрендерится (напр. ошибка провайдера прилетает
+        быстрее одного polling-интервала) — решение по счётчику раньше
+        времени отсекло бы законный CTA.
+        reason="wipe_restore" правилу B не подчиняется: это не про итог хода,
+        а про возврат строки, физически стёртой перерисовкой трейса."""
+        reason = self._diff_pending_cta_pending
+        if not reason:
             return
         runner = getattr(self.app, "active_runner", None)
         if runner is not None and runner.is_running():
             return
-        self._diff_pending_cta_pending = False
+        self._diff_pending_cta_pending = None
+        if reason == "turn_end" and not self._should_arm_diff_cta():
+            return
         self._maybe_mount_diff_pending_cta()
 
     def _maybe_mount_diff_pending_cta(self) -> None:
-        """После turn: если есть незаапрувленные диффы — пути + ``[F3]/diff``."""
+        """После turn: если есть незаапрувленные диффы — пути + ``F3/diff``."""
         from diff_tui.feedback import format_pending_cta
 
         svc = self._diff_service_for_preview()
@@ -3744,6 +3852,12 @@ class TraceScreen(Screen):
             return
         text = format_pending_cta(keys)
         if not text:
+            return
+        # Отменённый ход — тоже ход: спадающий фронт is_running зовёт нас снова.
+        # Если состав диффов не менялся и CTA уже стоит последним — повтор ничего
+        # не сообщает, а копит одинаковые блоки (смок 2026-08-02). Дальше первой
+        # строки не смотрим: вывод между ходами делает напоминание снова уместным.
+        if self._last_trace_row_content() == text:
             return
         self._mount_trace_row(
             prefix="", content=text, kind_class="line-meta", focusable=False,
@@ -4817,6 +4931,19 @@ class TraceScreen(Screen):
         if suggestion:
             line.append(f" (вы имели в виду /{suggestion}?)", style=_DEEP_DIM)
         self._trace_mount(Static(line, classes="line-error", markup=False))
+
+    def _last_trace_row_content(self) -> str | None:
+        """Содержимое последней строки трейса или None (трейс пуст / не смонтирован)."""
+        from tui.widgets.trace_row import TraceRow
+        try:
+            trace = self.query_one("#trace", VerticalScroll)
+        except Exception:
+            return None
+        # Смотрим ровно ПОСЛЕДНЕГО ребёнка (дедуп CTA сравнивает с ним): цикл «иду с
+        # конца» обещал бы поиск, которого нет — оба его пути выходили на первом шаге.
+        kids = trace.children
+        last = kids[-1] if kids else None
+        return getattr(last, "_content", None) if isinstance(last, TraceRow) else None
 
     def _mount_trace_row(
         self,
