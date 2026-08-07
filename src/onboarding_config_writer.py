@@ -153,6 +153,40 @@ def insert_missing(text: str, dotted_key: str, template_text: str) -> str:
     return text[:insert_at] + block + text[insert_at:]
 
 
+_COMMENTED_TOP_KEY_RE_TMPL = r"^#(?P<key>{key}):[ \t]*.*$"
+
+
+def uncomment_template_block(template_text: str, top_key: str) -> str:
+    """Блок `#<top_key>:` шаблона: прикреплённое описание (строки `# …` над
+    блоком) остаётся комментарием как есть; строки `#<top_key>:` и вложенные
+    `#<indent>k: v` — без ведущего '#'.
+
+    Для опциональных секций, которые шаблон несёт ЗАКОММЕНТИРОВАННЫМИ (пример:
+    gc — сборка мусора не настраивается «из коробки»). KeyError, если блока нет.
+    """
+    lines = template_text.splitlines(keepends=True)
+    head_re = re.compile(_COMMENTED_TOP_KEY_RE_TMPL.format(key=re.escape(top_key)))
+    start = next((i for i, line in enumerate(lines) if head_re.match(line)), None)
+    if start is None:
+        raise KeyError(top_key)
+    # Прикреплённое описание: подряд идущие строки-комментарии прямо над якорем.
+    cstart = start
+    while cstart > 0 and lines[cstart - 1].startswith("#"):
+        cstart -= 1
+    # Тело: подряд строки `#key: value`, которые после снятия '#' выглядят как
+    # отступленный (вложенный) ключ — закомментированные поля блока.
+    end = start + 1
+    while end < len(lines):
+        line = lines[end]
+        if line.startswith("#") and line[1:2] in (" ", "\t") and _KEY_LINE_RE.match(line[1:]):
+            end += 1
+            continue
+        break
+    out = [lines[i] for i in range(cstart, start)]      # описание — как есть
+    out += [lines[i][1:] for i in range(start, end)]    # шапка + поля — раскомментированы
+    return "".join(out)
+
+
 def write_values(path, values: dict, *, template_path=None, validate=None) -> list[str]:
     """Записать {ключ: значение} в YAML-файл path (атомарно).
 
@@ -181,6 +215,22 @@ def write_values(path, values: dict, *, template_path=None, validate=None) -> li
                 continue
             except KeyError:
                 pass
+            try:
+                find_anchor(text, key.split(".")[0])
+            except KeyError:
+                # Секции нет в файле вообще (не только у этого ключа) — можно
+                # безопасно развернуть блок шаблона. Если секция уже живая
+                # (юзер завёл её сам, частично) — трогать текст нельзя: второй
+                # top-level блок задублировал бы ключ, а PyYAML на дублях не
+                # ругается и молча берёт последний, затирая юзерские значения.
+                try:
+                    block = uncomment_template_block(template_text, key.split(".")[0])
+                    sep = "" if text.endswith("\n") else "\n"
+                    text = text + sep + "\n" + block
+                    text = setter(text, key, value)
+                    continue
+                except KeyError:
+                    pass
         missing.append(key)
     if validate is not None:
         validate(text)  # ValueError → наружу, файл не тронут

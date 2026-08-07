@@ -37,6 +37,22 @@ def mask_authorization(header: str) -> str:
     return "***"
 
 
+def mask_secret(raw: str) -> str:
+    """Mask a bare secret (a key with no scheme: `gsk_…`, `sk-…`): first 4 chars + … + last 4.
+
+    mask_authorization masks a HEADER — it shows the scheme, and for a bare key
+    (no space) degrades to '***', which no longer identifies anything. Here the
+    recognisable edges stay visible instead. Short secrets are not cut at all:
+    what remains would exceed what is hidden.
+
+    Threshold is 16, not 10: the visible edges take 8 characters, so anything
+    shorter shows more than it hides — a 10-character key rendered 8 of its 10
+    on screen, exactly the case this rule exists to exclude.
+    """
+    s = str(raw)
+    return f"{s[:4]}…{s[-4:]}" if len(s) >= 16 else "***"
+
+
 ENV_REF_RESOLVED = "переменная подставилась"
 ENV_REF_MISSING = "переменной нет"
 
@@ -56,8 +72,14 @@ def display_value(raw: Any) -> str:
 
 def display_secret(raw: Any) -> str:
     """То же для секрета: литерал — под маской. Ссылка секретом не является и
-    показывается как есть: маска выдавала бы «токен задан» там, где его нет."""
-    return display_value(raw) if env_ref_status(raw) else mask_authorization(raw)
+    показывается как есть: маска выдавала бы «токен задан» там, где его нет.
+
+    Маску выбираем по форме значения: заголовок «схема секрет» прячем
+    mask_authorization (схему показать осмысленно — Bearer/Basic), голый ключ —
+    mask_secret (у него схемы нет, и заголовочная маска вырождалась в «***»)."""
+    if env_ref_status(raw):
+        return display_value(raw)
+    return mask_authorization(raw) if " " in str(raw) else mask_secret(raw)
 
 
 def _valid_endpoint_url(raw: str) -> bool:

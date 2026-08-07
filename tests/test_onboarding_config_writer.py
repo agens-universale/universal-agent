@@ -1,5 +1,4 @@
 import pytest
-from pathlib import Path
 
 import onboarding_config_writer as w
 
@@ -24,7 +23,7 @@ def test_replaces_empty_value():
 
 
 def test_ignores_commented_line_and_raises_when_absent():
-    text = "voice:\n#  model: whisper-1\n"
+    text = "agent:\n#  model: gigacode_agent_v1.6_rc\n"
     with pytest.raises(KeyError):
         w.set_scalar(text, "model", "x")
 
@@ -55,3 +54,16 @@ def test_write_values_updates_file_and_reports_missing(tmp_path):
     assert '    Authorization: "Bearer sk-1"' in out
     assert '  model: "gigacode_agent_v1.6_rc"' in out    # не тронут
     assert missing == ["nope"]
+
+
+# ── Task 5: §6.4 — write_values разворачивает закомментированный блок шаблона ──
+
+def test_uncomment_template_block_shape():
+    tpl = ("# Описание секции\n"
+           "#gizmo:\n"
+           "#  provider: openai\n"
+           "#  url: https://x\n")
+    block = w.uncomment_template_block(tpl, "gizmo")
+    assert "# Описание секции\n" in block          # описание остаётся комментарием
+    assert "\ngizmo:\n" in "\n" + block            # шапка раскомментирована
+    assert "  provider: openai" in block

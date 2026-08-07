@@ -29,7 +29,7 @@ async def test_onboarding_mcp_row_shows_description(tmp_path):
         scr = _screen()
         await pilot.app.push_screen(scr)
         await pilot.pause()
-        scr._step = 3
+        scr._step = 2
         scr._render_step()
         await pilot.pause()
         blob = " ".join(str(w.render()) for w in scr.query(".onb-option"))
