@@ -402,6 +402,22 @@ security:
   - `config_dict["my_custom_flag"] == True`,
   - `config_dict["extra_param"] == "some value"`.
 
+## Пресеты адресов (`endpoint_presets`)
+
+Выпадающий список под полем адреса. Его содержимое можно менять — список берётся из
+конфига, а не зашит в код; ключа нет или он битый → берутся значения по умолчанию.
+
+```yaml
+# адрес API-сервера агента (мастер первого запуска и /settings → «Подключение»)
+endpoint_presets:
+  - name: OpenRouter
+    url: https://openrouter.ai/api/v1/chat/completions
+  - name: Cloud.ru
+    url: https://foundation-models.api.cloud.ru/v1/chat/completions
+```
+
+Свой адрес вписывается прямо в поле — список ему не мешает и не подставляется поверх.
+
 ## Кастомные сабагенты
 
 Сабагентов можно описывать файлами: `.md` с YAML-frontmatter в папке, путь к которой
