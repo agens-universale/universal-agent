@@ -20,7 +20,14 @@ Screen {
           padding: 0 1; }
 #diff-status { height: 1; background: $bg; color: $accent;
                content-align: left middle; padding: 0 1; }
-#footer-left  { width: 1fr; color: $dim; }
+/* padding-right: 2 — ФИЗИЧЕСКИЙ зазор между колонками футера. Правая колонка
+   width:auto забирает своё по содержимому, левая (1fr) получает остаток — и без этих
+   двух столбцов её текст упирался в имя модели вплотную (живая приёмка). Арифметика
+   `_footer_right_available_width` про «≥1 пробел» решала только, сворачивать ли правую
+   часть на вторую строку, и на раскладку колонок не влияла вовсе.
+   Что не влезло — левая переносит сама (футер height:2): счётчики уведомлений в её
+   хвосте важнее ровной одной строки, и терять их на многоточии нельзя. */
+#footer-left  { width: 1fr; color: $dim; padding-right: 2; }
 #footer-right { width: auto; color: $deep-dim; text-align: right; padding-right: 1; }
 
 /* Контентная зона трейса. Разделитель снизу даёт border-top у #input-row —
@@ -218,9 +225,17 @@ ToolCallRow.tool-group-start { margin-top: 1; }
 /* Бренд-блок пустого состояния (§2.8) */
 .brand-logo { color: $brand; text-style: bold; width: auto; height: auto; }
 .brand-tagline { color: $dim; width: auto; height: auto; margin-top: 1; }
+/* Версия — своей строкой под тэглайном, через отступ: вплотную она читалась
+   как часть тэглайна. Тише его: это справка, а не часть бренда. */
+.brand-version { color: $deep-dim; width: auto; height: auto; margin-top: 1; }
 #brand-left { width: auto; height: auto; }
 #brand-row { width: 1fr; height: auto; }
 #brand-mcp  { width: 1fr; color: $deep-dim; padding-left: 6; height: auto; content-align: left top; }
+/* Тот же блок, когда он под брендом (узкое окно): воздух сверху и левый край без
+   отступа — под логотипом колонке не от чего отступать, отступ там читался как
+   случайный сдвиг. Отдельным правилом, а не в шортхенде выше: per-side margin из
+   разных правил Textual перетирает целиком. */
+#brand-mcp.brand-mcp-stacked { margin-top: 1; padding-left: 0; }
 
 /* ThinkingIndicator — «думаю…» (spec 2026-05-26) */
 /* padding слева = 0: глиф встаёт по колонке буллетов ●/> строк трейса
@@ -235,7 +250,11 @@ ToolCallRow.tool-group-start { margin-top: 1; }
 
 /* Палитра команд (overlay, Task 3.3) */
 .palette       { background: #161A23; border: round $run-color; height: auto; max-height: 80%; }
-.palette-row   { color: $ink; padding: 0 1; }
+/* nowrap+ellipsis — канон .onb-mcp-row/.set-rowtext и одновременно инвариант
+   геометрии: desired_height палитры считает ОДНУ строку на команду, и перенос
+   длинного описания на вторую строку делал фактическую высоту больше заявленной —
+   main.py отдавал трейсу лишнее место, нижняя рамка и футер уезжали за экран. */
+.palette-row   { color: $ink; padding: 0 1; text-wrap: nowrap; text-overflow: ellipsis; }
 /* $focus-bg, не $band-bg: фон оверлея (#161A23) почти совпадает с $band-bg —
    выделение было слепым; focus-bg = подсветка фокуса в трейсе, заметно светлее. */
 .palette-row.selected { background: $focus-bg; color: $bright; }
@@ -259,7 +278,9 @@ ToolCallRow.tool-group-start { margin-top: 1; }
     color: $ink;
     padding: 0 1;
 }
-.help-row.help-row-alt { background: #181c26; }
+/* Зебра: полоса заметно светлее фона ($bg #0E1119) — на #181c26 разница почти
+   не читалась; светлее $band-bg, но темнее выделения строки. */
+.help-row.help-row-alt { background: #232836; }
 /* Фиксированная левая колонка — глаза не бегают через весь терминал */
 .help-row-cmd {
     width: 18;
@@ -271,6 +292,12 @@ ToolCallRow.tool-group-start { margin-top: 1; }
     width: 1fr;
     color: $dim;
     padding-left: 1;
+    padding-right: 1;
+}
+/* Хоткей команды — своей колонкой справа (в хвосте описаний он вставал лесенкой) */
+.help-row-key {
+    width: 13;
+    color: $deep-dim;
     padding-right: 1;
 }
 
@@ -409,8 +436,8 @@ TextArea.ask-human-mode { border: solid $run-color; }
 #onb-summary { height: 1; margin-bottom: 1; }   /* строка сводки — клип по краю, без переноса; воздух перед заголовком шага */
 #onb-body { height: auto; padding: 0; margin-bottom: 1; }   /* воздух под заголовком шага (как #set-title) */
 /* Поля ввода — плоские, как #config-filter (без дефолтной рамки Input, что мусорит box-символами). */
-#onb-endpoint, #onb-token, #onb-model, #conn-url, #conn-token { height: 1; width: 1fr; border: none; padding: 0; background: $bg; color: $ink; }
-#onb-endpoint:focus, #onb-token:focus, #onb-model:focus, #conn-url:focus, #conn-token:focus { border: none; background: $band-bg; }
+#onb-model, #conn-url, #conn-token, #conn-proxy { height: 1; width: 1fr; border: none; padding: 0; background: $bg; color: $ink; }
+#onb-model:focus, #conn-url:focus, #conn-token:focus, #conn-proxy:focus { border: none; background: $band-bg; }
 .onb-option { height: auto; padding: 0 1; width: 1fr; }
 /* Выбор — только фон, БЕЗ border-left: полоса сдвигала контент на 1 колонку,
    отчего кружки ●/○ в /settings-секциях съезжали друг относительно друга. */
@@ -421,17 +448,10 @@ TextArea.ask-human-mode { border: solid $run-color; }
    shorthand — раздельные longhand'ы .set-gap+.set-spaced на одном элементе Textual перетирает
    (последний .set-gap обнулял margin-bottom → пропадал воздух под первым действием). */
 .set-spaced-gap { margin: 1 0 1 0; }
-.auth-nested { margin-left: 4; }
 .onb-hint { color: $deep-dim; padding: 0; }
 .set-group-gap { margin-top: 1; }   /* отступ между группами секции (Адрес ↔ Авторизация) */
 .onb-warn { color: $warn; padding: 0; }
 #config-filter:focus { border: none; }
-
-/* Поле фильтра моделей — паттерн /sessions: «> » (accent) + плоский Input, без amber-рамки. */
-.model-filter-row { height: 1; width: 1fr; margin-bottom: 1; }
-.model-filter-prompt { width: 2; color: $accent; height: 1; }
-.model-filter { height: 1; width: 1fr; border: none; padding: 0; background: $bg; color: $ink; }
-.model-filter:focus { border: none; background: $band-bg; }
 
 /* /settings — хаб настроек (визуальный контракт §2-3; идиомы = onb-*) */
 #set-header { height: 2; background: $bg; color: $deep-dim; padding: 0 1; border-bottom: solid $deep-dim; }
@@ -474,17 +494,72 @@ TextArea.ask-human-mode { border: solid $run-color; }
 .set-flash-ok   { background: $band-bg; border-left: outer $ok;   padding: 0 1; margin-top: 1; color: $ok; }
 .set-flash-warn { background: $band-bg; border-left: outer $warn; padding: 0 1; margin-top: 1; color: $warn; }
 #set-notice { margin-top: 1; }              /* отделить notice (итог install/удаления) от контента над ним */
+/* Обёртка слота-синглтона (_singleton): нужна, чтобы новая плашка не столкнулась id'ом
+   с ещё не отсоединённой старой. Собственной высоты не имеет — только содержимое. */
+.set-slot { height: auto; width: 1fr; }
 /* Поле ввода в /settings — скруглённая amber-рамка (id+class специфичнее flat
    #onb-* → онбординг остаётся без рамки, как принят). */
-#onb-endpoint.set-framed, #onb-token.set-framed, #onb-model.set-framed,
-#conn-url.set-framed, #conn-token.set-framed {
+#onb-model.set-framed,
+#conn-url.set-framed, #conn-token.set-framed, #conn-proxy.set-framed {
     border: round $run-color; height: 3; width: 1fr; padding: 0 1; background: $bg;
 }
-#onb-endpoint.set-framed:focus, #onb-token.set-framed:focus, #onb-model.set-framed:focus,
-#conn-url.set-framed:focus, #conn-token.set-framed:focus {
+#onb-model.set-framed:focus,
+#conn-url.set-framed:focus, #conn-token.set-framed:focus, #conn-proxy.set-framed:focus {
     border: round $run-color; background: $band-bg;
 }
+/* Замороженное поле токена при «● без авторизации»: поле на месте, но disabled —
+   рамка приглушается, чтобы читалось «не участвует». */
+#conn-token.set-framed:disabled { border: round $deep-dim; }
+/* Placeholder говорит одно из двух, и это должно быть видно, не читая текст
+   (спека 2026-08-03 §3.4): подсказка-объяснение приглушена, маска сохранённого
+   значения — цветом значения. Своего правила на placeholder у нас не было вовсе,
+   поэтому базовый случай тоже задан явно — иначе остался бы на дефолте Textual.
+   Базовое — по ТИПУ поля, а не по классу: поле, переехавшее в группу, теряет
+   set-framed (у #conn-url так и вышло) и молча проваливалось бы на дефолт, а
+   «тускло» обязано быть одним токеном, иначе оппозиция с маской не читается.
+   PasteInput — поля форм; фильтры вне форм (config/sessions/skills) на голом
+   Input, их правило не задевает. Заодно честнеет спор: .has-saved (0,2,0)
+   выигрывает у PasteInput (0,1,1) по специфичности, а не по порядку строк. */
+PasteInput > .input--placeholder { color: $deep-dim; }
+.has-saved > .input--placeholder { color: $ink; }
+/* Выпадающие списки (языки/модели) — потолок высоты + собственный скролл:
+   длинный список крутится внутри, страница не раскатывается (смок 2026-07-30);
+   короткий — сжимается по контенту (height: auto). Рамка — слой-пикер, как
+   палитра (смок: список читается отдельным блоком). Textual меряет height
+   border-box'ом: 14 = ~12 контентных строк + рамка. Скроллбар — единый стиль
+   VerticalScroll выше. */
+.dropdown-scroll { height: auto; max-height: 14; border: round $run-color; }
+
+/* Группа «поле + его список» — одна рамка на обоих (спека 2026-08-03 §3.1).
+   Раньше поле и список были соседями с двумя одинаковыми рамками, и список
+   читался отдельным блоком: человек не понимал, что это выпадающий список поля. */
+.field-group { height: auto; width: 1fr; border: round $run-color; padding: 0; background: $bg; }
+.field-group:focus-within { border: round $run-color; background: $band-bg; }
+/* Отключённое поле в группе: рамку рисует группа, значит и гаснет она (спека §3.3,
+   тот же $deep-dim, что у одинокого поля ниже). Селектор по классу, а не
+   `:has(:disabled)`: `:has` Textual 8.2.7 не знает (VALID_PSEUDO_CLASSES) —
+   признак ставит само поле, там же, где меняется disabled (PasteInput).
+   ДОЛЖНО СТОЯТЬ НИЖЕ :focus-within — специфичность у них равная ((0,2,0) обе:
+   псевдокласс считается за класс), и спор решает файловый порядок. Переставите
+   выше — замороженная группа с фокусом внутри снова получит рабочую рамку. */
+.field-group.set-disabled { border: round $deep-dim; }
+/* Воздух даёт САМО поле, а не группа: с padding у группы подсветка выбранной
+   строки (.onb-option.selected) не доходила до рамки — щель в колонку с каждой
+   стороны. Своё padding: 0 1 у строк остаётся, поэтому текст поля и текст строк
+   встают вровень, как в макете спеки §3.1.
+   Воздух отмерен margin'ом, а не padding'ом: padding этих полей задан ПО ID
+   (`#conn-url, … { padding: 0 }` выше), и правило по двум классам проиграло бы
+   ему по специфичности — поле прилипло бы к рамке. У margin спора нет вовсе, а
+   выглядит так же: фон у группы и у поля один и тот же.
+   background-tint: Input на фокусе осветляет себя сам (foreground 5%), и внутри
+   одной рамки выходили две полосы разного оттенка — края от группы, середина от
+   поля. По §3.3 цвет сфокусированной группы — ровно $band-bg, поэтому гасим тинт
+   у поля, а не подгоняем группу под чужое магическое число. */
+.field-group > .group-field { margin: 0 1; background-tint: 0%; }
+/* Скролл внутри группы рамку не рисует — она одна, на контейнере. Потолок 12, а
+   не 14: рамка уехала на группу, height больше не border-box списка (спека §3.3). */
+.field-group > .dropdown-scroll { border: none; max-height: 12; }
 
 /* Редакторы полей — Vertical по дефолту height:1fr и растягивают рамку;
    принудительно height:auto, чтобы рамка (#onb-frame/#set-frame) обнимала контент. */
-EndpointEditor, AuthEditor, ModelEditor, McpSectionEditor, ConnectionEditor { height: auto; }
+ModelEditor, McpSectionEditor, ConnectionEditor { height: auto; }

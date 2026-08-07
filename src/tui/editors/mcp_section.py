@@ -187,7 +187,7 @@ class McpSectionEditor(Vertical):
         self.refresh_action_rows()
 
     def status_ready(self, name: str) -> bool:
-        """Статус строки пришёл (Ctrl+U/Ctrl+D активны только тогда, §4)."""
+        """Статус строки пришёл (Ctrl+U/Del активны только тогда, §4)."""
         return name in self._states
 
     # --- строки-действия ⤓/⟳ (за разделителем, скрываются если нечего делать) ---
