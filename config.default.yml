@@ -234,6 +234,15 @@ pricing:
   output: 0
   # cache_read: 0              # опц.; нет → кэш биллится как input
 
+# Пресеты выпадающего списка в полях «Адрес API-сервера» (можно дополнять своими).
+endpoint_presets:
+  - name: OpenRouter
+    url: https://openrouter.ai/api/v1/chat/completions
+  - name: Cloud.ru
+    url: https://foundation-models.api.cloud.ru/v1/chat/completions
+  - name: GigaCode
+    url: https://litellm-proxy.sberai-rnd.ru/v1/chat/completions
+
 # -----------------------------------------------------------------------------
 # Сборка мусора (gc.collect) — точки C1/C2/C3.
 # C1 (после компакции истории) и C2 (после close_all в finally) — всегда вкл.

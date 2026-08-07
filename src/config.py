@@ -223,6 +223,7 @@ def flatten_app_config(app_cfg: AppConfig) -> Dict[str, Any]:
         "update": app_cfg.update.model_dump(),  # спека D: check/extra_args
         "tui_bang_shell": app_cfg.tui.bang_shell.model_dump(),
         "tui_file_view": app_cfg.tui.file_view.model_dump(),
+        "endpoint_presets": [p.model_dump() for p in app_cfg.endpoint_presets],
         "command_moderation": {
             "enabled": app_cfg.security.command_moderation.enabled,
             "mode": app_cfg.security.command_moderation.mode,
