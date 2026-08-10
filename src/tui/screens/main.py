@@ -571,7 +571,7 @@ class TraceScreen(Screen):
     def _footer_left_commands(self) -> str:
         """Базовые команды footer-left без суффикса уведомлений."""
         if self.app.tui_state.ask_human_state is not None:
-            return "[Esc] /stop  [Enter] ответить"
+            return "Esc/stop  Enter/ответить"
         if self.app.tui_state.active_task_id is None:
             return _FOOTER_LEFT
         runner = getattr(self.app, "active_runner", None)
