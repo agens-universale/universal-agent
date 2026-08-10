@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import os
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from bundled_assets import bundled_root
 from config_modules import env_vars
@@ -54,6 +54,13 @@ from config_modules.strip_tags_projection import (
     StripTagsProjectionConfig,
     normalize_strip_tags_projection_config,
 )
+from config_modules.model_registry import (
+    AssignConfig,
+    ModelEntry,
+    SlotsConfig,
+    validate_level_value,
+    validate_model_alias,
+)
 
 
 class AgentAuthConfig(BaseModel):
@@ -86,6 +93,28 @@ class AppConfig(BaseModel):
         default_factory=StripTagsProjectionConfig
     )
     agent_auth: AgentAuthConfig | None = None
+
+    # Профили v2 (волна A, фаза 1): реестр моделей + уровни + привязки + указатели.
+    # Ссылочная целостность (слоты/привязки против merged-реестра) — фаза 2.
+    profile: str = ""
+    level: str = "default"
+    models: dict[str, ModelEntry] = Field(default_factory=dict)
+    slots: SlotsConfig = Field(default_factory=SlotsConfig)
+    assign: AssignConfig = Field(default_factory=AssignConfig)
+
+    @field_validator("level")
+    @classmethod
+    def _validate_level(cls, value: str) -> str:
+        return validate_level_value(value)
+
+    @field_validator("models")
+    @classmethod
+    def _validate_model_aliases(
+        cls, value: dict[str, ModelEntry]
+    ) -> dict[str, ModelEntry]:
+        for alias in value:
+            validate_model_alias(alias)
+        return value
 
 
 def _prompt_default(config_dir: str, name: str) -> str:

@@ -13,7 +13,7 @@ from agent_executor import AgentExecutor  # type: ignore  # noqa: E402
 from utils.generate_message_id import (  # type: ignore  # noqa: E402
     generate_msg_id_sha256 as generate_message_id_func,
 )
-from config import build_auth_connector  # type: ignore  # noqa: E402
+from config import build_auth_connector, cli_forces_legacy_model  # type: ignore  # noqa: E402
 from thread_store import (  # type: ignore  # noqa: E402
     load_thread_messages,
     load_thread_meta,
@@ -369,7 +369,13 @@ async def events_webhook(request: Request):
         # BASE_AGENT_CONFIG нельзя, он процесс-глобальный.
         config_dict["trace_id"] = trace_id
     auth_connector = build_auth_connector(config_dict)
-    ctx = create_run_context(config_dict, auth_connector=auth_connector)
+    # Легаси-форс (спека §2): agent_overrides.model/completions_url поверх непустого
+    # реестра моделей — тот же контракт, что CLI --model (agent_overrides перекрывают
+    # config.yml так же, как CLI-аргументы).
+    force_legacy = cli_forces_legacy_model(config_dict)
+    if force_legacy:
+        logger.warning("agent_overrides: уровни отключены на этот запуск (легаси-форс)")
+    ctx = create_run_context(config_dict, auth_connector=auth_connector, force_legacy=force_legacy)
 
     agent_run_registry.start_if_absent(
         system=system,

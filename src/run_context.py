@@ -19,6 +19,7 @@ from backends.factory import resolve_os_backend
 from backends.protocol import FsBackend
 from config_modules.env_vars import project_gc_dir as _resolve_project_gc_dir
 from trace_id import trace_id_from_config, trace_header_name
+from model_router import CircuitBreaker, ModelRouter
 
 
 @dataclass
@@ -36,7 +37,9 @@ class RunContext:
     - tools_data / tools_spec / tools_description — подготовленные данные о тулах;
     - project_gc_dir — папка project-local артефактов (<cwd>/.gc/);
     - os_backend — физический I/O порт (local FS или Harbor container);
-    - workspace — root + backend в координатах среды исполнения.
+    - workspace — root + backend в координатах среды исполнения;
+    - model_router — резолвит consumer -> ResolvedModel (спека §6); фиксация на ход —
+      см. turn_boundary.begin_turn.
     """
 
     config_dict: Dict[str, Any]
@@ -53,6 +56,7 @@ class RunContext:
     os_backend: FsBackend
     skills_registry: SkillsRegistry
     workspace: ExecutionWorkspace
+    model_router: ModelRouter
     # Внешний trace_id этого рана; "" = отсутствует. Производное чтение
     # config_dict["trace_id"] — источник правды один, вычисление в одном месте
     # (create_run_context), чтобы значения не разъехались.
@@ -77,6 +81,9 @@ def create_run_context(
     on_stream_delta=None,
     on_messages_evicted: Optional[Callable[[List[Dict[str, Any]]], None]] = None,
     is_tui: bool = False,
+    level_provider: Optional[Callable[[], str]] = None,
+    circuit_breaker: Optional[CircuitBreaker] = None,
+    force_legacy: bool = False,
 ) -> RunContext:
     """
     Создать RunContext для одного запуска агента.
@@ -88,6 +95,14 @@ def create_run_context(
     - ``os_backend`` собирается фабрикой из ``config_dict['os_backend']`` (default: local).
       Для ``harbor`` нужны ``environment`` и ``loop``; тесты могут передать ``os_backend=``.
     - ``is_tui=True`` + LocalFsBackend → ``TrackingFsBackend`` (Diff journal/snapshot).
+    - ``level_provider`` — источник активного уровня для ``model_router`` (спека §6.4).
+      CLI/server не передают его → константный провайдер из ключа ``config_dict["level"]``.
+      TUI (сессионный слой) передаёт живой callable. run_context не импортирует tui —
+      инверсия зависимости через этот параметр.
+    - ``circuit_breaker`` — предохранитель модели (спека §8); по умолчанию свежий.
+    - ``force_legacy`` — легаси-форс (спека §2): CLI `--model`/`--completions_url`
+      поверх непустого реестра моделей отключает резолв уровней/алиасов на этот
+      запуск (детект — ``config.cli_forces_legacy_model``).
     """
     effective_run_id = run_id or generate_run_id()
     backend = resolve_os_backend(
@@ -152,6 +167,16 @@ def create_run_context(
     chat_completions_llm = chat_completions_llm_from_config_dict(config_dict)
     workspace = build_execution_workspace(backend, config_dict)
 
+    effective_level_provider = level_provider or (
+        lambda: config_dict.get("level") or "default"
+    )
+    model_router = ModelRouter(
+        config_dict,
+        level_provider=effective_level_provider,
+        breaker=circuit_breaker,
+        force_legacy=force_legacy,
+    )
+
     ctx = RunContext(
         config_dict=config_dict,
         run_id=effective_run_id,
@@ -171,6 +196,7 @@ def create_run_context(
         os_backend=backend,
         skills_registry=skills_registry,
         workspace=workspace,
+        model_router=model_router,
         on_stream_delta=on_stream_delta,
         on_messages_evicted=on_messages_evicted,
     )

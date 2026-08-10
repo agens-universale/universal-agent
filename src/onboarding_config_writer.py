@@ -153,6 +153,55 @@ def insert_missing(text: str, dotted_key: str, template_text: str) -> str:
     return text[:insert_at] + block + text[insert_at:]
 
 
+def create_pointer_file(path, name: str) -> None:
+    """Создать НОВЫЙ config.yml с единственной строкой `profile: "<name>"`.
+
+    Единственный случай, когда writer сам создаёт файл (спека §11/§12.3 — активация
+    профиля из проекта, где `.gc/config.yml` ещё не существует); `write_values`
+    по контракту требует существующего файла."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    text = f"profile: {_quote(name)}\n"
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    try:
+        tmp.write_text(text, encoding="utf-8")
+        atomic_replace(str(tmp), str(path))
+    finally:
+        if tmp.exists():
+            tmp.unlink(missing_ok=True)
+
+
+def ensure_pointer_anchor(path, template_path, key: str = "profile") -> None:
+    """Гарантировать топ-уровневый якорь `key:` (`profile:`/`level:`) в СУЩЕСТВУЮЩЕМ
+    config.yml.
+
+    Якорь уже есть (любое значение) — идемпотентный no-op. Иначе вставляет блок
+    `<key>: <умолчание>` (с прикреплёнными комментами) из шаблона (`template_path`,
+    обычно `config.default.yml`) в конец файла — тем же приёмом, что
+    `insert_missing`. После вставки `write_values`/`set_scalar_at_path` находят
+    якорь и правят значение обычным путём.
+
+    Нужен именно топ-уровневым скалярам: их `write_values` сам дописать не может —
+    его фоллбэк на шаблон работает только для dotted-ключей (`секция.поле`), а
+    конфиги, созданные до появления ключа, этой строки просто не содержат."""
+    path = Path(path)
+    text = path.read_text(encoding="utf-8")
+    try:
+        find_anchor(text, key)
+        return
+    except KeyError:
+        pass
+    template_text = Path(template_path).read_text(encoding="utf-8")
+    new_text = insert_missing(text, key, template_text)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    try:
+        tmp.write_text(new_text, encoding="utf-8")
+        atomic_replace(str(tmp), str(path))
+    finally:
+        if tmp.exists():
+            tmp.unlink(missing_ok=True)
+
+
 _COMMENTED_TOP_KEY_RE_TMPL = r"^#(?P<key>{key}):[ \t]*.*$"
 
 
@@ -223,11 +272,16 @@ def write_values(path, values: dict, *, template_path=None, validate=None) -> li
                 # (юзер завёл её сам, частично) — трогать текст нельзя: второй
                 # top-level блок задублировал бы ключ, а PyYAML на дублях не
                 # ругается и молча берёт последний, затирая юзерские значения.
+                # Разворот — в отдельную переменную, а не в `text`: если ключа нет
+                # и в блоке шаблона, setter упадёт KeyError уже ПОСЛЕ разворота, и
+                # присвоенный `text` дошёл бы до записи. Юзер получил бы включённой
+                # секцию, которую сознательно держал закомментированной, — при том
+                # что ключ честно отчитан как не записанный.
                 try:
                     block = uncomment_template_block(template_text, key.split(".")[0])
                     sep = "" if text.endswith("\n") else "\n"
-                    text = text + sep + "\n" + block
-                    text = setter(text, key, value)
+                    expanded = text + sep + "\n" + block
+                    text = setter(expanded, key, value)
                     continue
                 except KeyError:
                     pass

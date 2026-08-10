@@ -10,6 +10,8 @@ _logger = logging.getLogger(__name__)
 DEFAULT_PROJECT_MEMORY_MAX_CHARS = 10_000
 DEFAULT_PROJECT_MEMORY_MAX_APPEND_CHARS = 3_000
 DEFAULT_PROJECT_MEMORY_CHECK_INTERVAL_MESSAGES = 5
+# Roughly enough for compressed project_memory.md (append-overflow compaction).
+DEFAULT_PROJECT_MEMORY_COMPACTION_MAX_TOKENS = 4_000
 
 
 class ProjectMemoryConfig(BaseModel):
@@ -21,6 +23,7 @@ class ProjectMemoryConfig(BaseModel):
     check_interval_messages: int = DEFAULT_PROJECT_MEMORY_CHECK_INTERVAL_MESSAGES
     max_chars: int = DEFAULT_PROJECT_MEMORY_MAX_CHARS
     max_append_chars: int = DEFAULT_PROJECT_MEMORY_MAX_APPEND_CHARS
+    compaction_max_tokens: int = DEFAULT_PROJECT_MEMORY_COMPACTION_MAX_TOKENS
 
 
 def normalize_project_memory_config(cfg: ProjectMemoryConfig) -> None:
@@ -45,6 +48,13 @@ def normalize_project_memory_config(cfg: ProjectMemoryConfig) -> None:
             DEFAULT_PROJECT_MEMORY_MAX_APPEND_CHARS,
         )
         cfg.max_append_chars = DEFAULT_PROJECT_MEMORY_MAX_APPEND_CHARS
+    if cfg.compaction_max_tokens <= 0:
+        _logger.warning(
+            "project_memory.compaction_max_tokens=%s must be > 0; using default %s",
+            cfg.compaction_max_tokens,
+            DEFAULT_PROJECT_MEMORY_COMPACTION_MAX_TOKENS,
+        )
+        cfg.compaction_max_tokens = DEFAULT_PROJECT_MEMORY_COMPACTION_MAX_TOKENS
 
 
 def project_memory_from_config_dict(
