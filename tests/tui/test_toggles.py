@@ -182,8 +182,10 @@ def test_rigor_toggle_spec_shape():
 
 
 def test_rigor_is_first_and_details_hidden_by_default():
-    from tui.toggles import TOGGLES
-    assert list(TOGGLES.keys())[0] == "rigor"
+    from tui.toggles import TOGGLES, group_toggle_names
+    # rigor — первый в СВОЕЙ группе (спека §12.1: /level и /profiles — новая
+    # группа «чем работаем» выше rigor, отдельная семья, group_toggle_names).
+    assert group_toggle_names("rigor")[0] == "rigor"
     assert TOGGLES["gate"].palette_default is False
     assert TOGGLES["answers"].palette_default is False
 

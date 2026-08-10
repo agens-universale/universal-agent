@@ -9,9 +9,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from difflib import get_close_matches
-from typing import Optional
+from typing import Any, Callable, Optional
 
-from tui.toggles import TOGGLES
+from tui.toggles import TOGGLES, profile_picker_hint, profile_picker_options
 
 
 @dataclass(frozen=True)
@@ -30,6 +30,11 @@ class Command:
     # Тоггл палитры (/gate, /answers): Enter циклит значение вместо запуска
     # команды; состояние живёт в tui/toggles.py, не здесь (§ CLAUDE.md Architecture).
     is_toggle: bool = False
+    # Динамические варианты аргумента (app -> [(value, описание)]): ArgPicker для
+    # команд, чей список известен только в рантайме (/profiles — файлы профилей).
+    # Взаимоисключимо с arg_options; хинт подвала пикера — arg_hint_provider.
+    arg_options_provider: Optional[Callable[[Any], tuple]] = None
+    arg_hint_provider: Optional[Callable[[Any, Optional[str]], str]] = None
 
     @property
     def requires_args(self) -> bool:
@@ -95,7 +100,13 @@ def build_default_registry() -> CommandRegistry:
         Command("new", (), "", "Новая сессия в этом окне", hotkey="Ctrl+N"),
         Command("config", (), "", "Конфиг сессии + пути к файлам",
                 hotkey="F5 · Ctrl+G"),
-        Command("settings", (), "", "Настройки: подключение, модель, MCP, обновление",
+        # Перечисляет секции экрана (`SECTIONS`, tui/screens/settings.py) — строку
+        # видно при каждом открытии палитры, расхождение с составом читается как
+        # «секции нет». Без ведущего «Настройки:»: имя команды стоит колонкой слева,
+        # а описание тут самое длинное — префикс двигал бы колонку хоткеев вправо
+        # ради слова, которое уже прочитано.
+        Command("settings", (), "",
+                "Подключение, модель, профили, MCP, режимы, обновление",
                 hotkey="F6"),
         Command("export", (), "[txt|json|log-txt|log-json]", "Экспорт сессии",
                 arg_options=(("txt", "Вся сессия в читаемом виде"),
@@ -111,6 +122,20 @@ def build_default_registry() -> CommandRegistry:
         Command("mcp", (), "", "MCP-серверы и их тулы"),
         Command("buffer", (), "", "Буфер сессии — текст собранных копий", hotkey="F7"),
         Command("quit", (), "", "Выход", hotkey="Esc"),
+        # Переключатели палитры «чем работаем» (←/→/Enter, спека §12.1):
+        # уровень модели и профиль — над группой строгости завершения хода.
+        Command(
+            "level", ("models",), "",
+            _cap(f"{TOGGLES['level'].label}: {TOGGLES['level'].summary}"),
+            is_toggle=True,
+        ),
+        Command(
+            "profiles", (), "[профиль]",
+            _cap(f"{TOGGLES['profiles'].label}: {TOGGLES['profiles'].summary}"),
+            is_toggle=True,
+            arg_options_provider=profile_picker_options,
+            arg_hint_provider=profile_picker_hint,
+        ),
         # Переключатели палитры (←/→/Enter): самопроверка хода и формат финала.
         Command(
             "rigor", (), "",

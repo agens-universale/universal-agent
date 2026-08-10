@@ -34,7 +34,11 @@ def _patch_entry_prereqs(monkeypatch, tmp_path, config_dict, *, unconfigured=Tru
 
     # Patch config functions used in main()
     import config as cfg_mod
-    monkeypatch.setattr(cfg_mod, "load_config", lambda path=None: dict(config_dict))
+    from config_modules.profiles import ProfileMeta
+    monkeypatch.setattr(
+        cfg_mod, "load_config_ex",
+        lambda path=None, **kw: (dict(config_dict), ProfileMeta(active_name=None, ref=None, mtime_set={})),
+    )
     monkeypatch.setattr(cfg_mod, "apply_cli_overrides", lambda d: None)
     monkeypatch.setattr(cfg_mod, "user_config_path", lambda: tmp_path / "config.yml")
     monkeypatch.setattr(cfg_mod, "_bootstrap_user_config", lambda: True)

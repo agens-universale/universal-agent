@@ -55,7 +55,7 @@ def test_default_registry_is_exactly_keep_set():
     assert names == sorted([
         "sessions", "new", "stop", "skill", "skills",
         "status", "config", "settings", "mcp", "notices", "diff", "view", "export", "help", "init", "compact", "quit",
-        "buffer", "rigor", "gate", "answers",
+        "buffer", "level", "profiles", "rigor", "gate", "answers",
     ])
 
 
@@ -121,7 +121,7 @@ def test_default_registry_frequency_order():
     assert names == [
         "help", "sessions", "diff", "view", "notices", "new", "config", "settings",
         "export", "compact", "init", "skills", "skill", "status",
-        "stop", "mcp", "buffer", "quit", "rigor", "gate", "answers",
+        "stop", "mcp", "buffer", "quit", "level", "profiles", "rigor", "gate", "answers",
     ]
 
 
@@ -149,9 +149,17 @@ def test_hotkeys_match_app_bindings():
             assert normalize(token) in binding_keys, f"{cmd.name}: {token}"
 
 
-def test_settings_command_description_mentions_server_address():
-    reg = build_default_registry()
-    assert reg.lookup("settings").description == "Настройки: подключение, модель, MCP, обновление"
+def test_settings_command_description_lists_all_sections():
+    """Описание /settings перечисляет секции экрана. Строку видно при каждом
+    открытии палитры, и не названная в ней секция читается как несуществующая —
+    сторож ловит расхождение с `SECTIONS`, а не конкретную формулировку
+    (проверка по литералу уже проморгала «Режимы работы» и «Профили»)."""
+    from tui.screens.settings import SECTIONS
+
+    description = build_default_registry().lookup("settings").description.lower()
+    for section in SECTIONS:
+        head = section.lower().split()[0].split("-")[0]
+        assert head in description, f"секция «{section}» не названа в: {description}"
 
 
 def test_compact_command_registered_with_alias():
