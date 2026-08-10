@@ -1,16 +1,9 @@
 from typing import Any, Dict
 
-from config_modules.backend import parse_chat_completions_max_tokens
-from request_backend_policy import request_chat_completions_with_policy
+from config_modules.chat_completions import subagent_role_max_tokens_from_ctx
+from model_router import SUBAGENT_CONSUMER_PREFIX
 from tools.subagents.abstract_subagent import AbstractSubagent
-from trace_id import (
-    trace_id_from_config,
-    trace_header_name,
-    model_trace_header_enabled,
-)
-from utils.ssl_config import get_backend_client_cert
-
-_ROLE_GENERATION_MAX_TOKENS = 4096
+from utils.llm_chat_client import request_chat_completion_text
 
 
 _ROLE_GENERATE_PROMPT = """Write prompt for AI assistant by role name and short role descriptions. Please make prompt as good as possible according with some examples.
@@ -161,17 +154,12 @@ class SpecialAgent(AbstractSubagent):
         task: str,
         reason: str,
         model: str,
-        config_dict: Dict[str, Any],
-        *,
-        runtime_notices_enabled: bool = False,
     ):
         self.role = role
         self.role_description = role_description
         self.task = task
         self.reason = reason
         self.model = model
-        self.config_dict = config_dict
-        self._runtime_notices_enabled = runtime_notices_enabled
         self.agent_role: str | None = None
 
     @classmethod
@@ -180,96 +168,37 @@ class SpecialAgent(AbstractSubagent):
         reason: str = "",
         config_dict: Dict[str, Any] | None = None, **kwargs,
     ):
-        instance = cls(
-            role,
-            role_description,
-            task,
-            reason,
-            model,
-            config_dict or {},
-            runtime_notices_enabled=bool(kwargs.get("runtime_notices_enabled", False)),
-        )
-        instance.agent_role = instance._generate_role(role, role_description, model)
-        return instance
+        # config_dict/runtime_notices_enabled: не используются больше здесь — роль
+        # резолвится позже через finalize_role(ctx, state) (у ребёнка есть router/
+        # сетевые параметры); принимаются для совместимости единого вызова
+        # SubagentRunner._run_internal (тот же create_instance(**extra) для всех субагентов).
+        return cls(role, role_description, task, reason, model)
 
-    def _generate_role(self, role: str, role_description: str, model: str) -> str:
+    def finalize_role(self, ctx: Any, state: Any) -> None:
+        """Генерирует системный промпт роли через общую воронку chat/completions
+        (``request_chat_completion_text``) — вызывается runner'ом после сборки
+        child-контекста (нужны ``ctx.model_router``/сетевые параметры для Bearer)."""
+        self.agent_role = self._generate_role(ctx, state)
+
+    def _generate_role(self, ctx: Any, state: Any) -> str:
         """Генерирует системный промпт для роли через LLM-вызов chat/completions."""
         prompt = (
             _ROLE_GENERATE_PROMPT
-            .replace("{{role}}", role)
-            .replace("{{role_description}}", role_description)
+            .replace("{{role}}", self.role)
+            .replace("{{role_description}}", self.role_description)
         )
         messages = [
             {"role": "system", "content": "You are a helpful assistant."},
             {"role": "user", "content": prompt},
         ]
-
-        url = self.config_dict.get("completions_url", "")
-        verify = self.config_dict.get("use_ssl", True)
-        cert = get_backend_client_cert(self.config_dict)
-        headers: Dict[str, str] = {}
-        raw_headers = self.config_dict.get("chat_completion_headers")
-        if isinstance(raw_headers, dict):
-            for key, raw_val in raw_headers.items():
-                if not isinstance(key, str):
-                    continue
-                k = key.strip()
-                if not k:
-                    continue
-                if raw_val is None:
-                    continue
-                v = str(raw_val).strip()
-                if not v:
-                    continue
-                headers[k] = v
-
-        # Второй, независимый от create_call_headers сборщик заголовков. Без этой
-        # строки утверждение «trace_id уходит на каждом запросе к модели» ложно:
-        # генерация роли сабагента делает реальный chat/completions-запрос.
-        _trace_id = trace_id_from_config(self.config_dict)
-        if _trace_id and model_trace_header_enabled(self.config_dict):
-            headers[trace_header_name(self.config_dict, "x_trace_id")] = _trace_id
-
-        protected = {"model", "messages", "max_tokens", "max_completion_tokens"}
-        extra = self.config_dict.get("chat_completion_kwargs")
-        use_max_tokens_param = bool(self.config_dict.get("use_max_tokens_param", False))
-
-        def payload_factory(max_tokens: int) -> Dict[str, Any]:
-            call_data: Dict[str, Any] = {
-                "model": model,
-                "messages": messages,
-            }
-            if use_max_tokens_param:
-                call_data["max_tokens"] = max_tokens
-            else:
-                call_data["max_completion_tokens"] = max_tokens
-            if isinstance(extra, dict) and extra:
-                for key, value in extra.items():
-                    if key in protected:
-                        continue
-                    call_data[key] = value
-            return call_data
-
-        min_response_tokens = parse_chat_completions_max_tokens(
-            self.config_dict.get("chat_completions_min_response_tokens", 1024),
-            default=1024,
-        )
-        res_data, _call_data = request_chat_completions_with_policy(
-            payload_factory=payload_factory,
-            initial_max_tokens=_ROLE_GENERATION_MAX_TOKENS,
-            min_response_tokens=min_response_tokens,
-            headers=headers,
-            url=url,
-            verify=verify,
-            cert=cert,
-            use_retry=bool(self.config_dict.get("use_retry", False)),
+        return request_chat_completion_text(
+            ctx=ctx,
+            state=state,
+            messages=messages,
+            max_tokens=subagent_role_max_tokens_from_ctx(ctx),
+            consumer=f"{SUBAGENT_CONSUMER_PREFIX}{self.agent_name}",
             request_label="subagent_special_agent",
-            runtime_notices_enabled=self._runtime_notices_enabled,
-            notice_url=url,
-            timeout=float(self.config_dict["backend_request_timeout_sec"]),
-            config_proxy=self.config_dict.get("proxy"),
         )
-        return res_data["choices"][0]["message"]["content"]
 
     def get_initial_data(self):
         role_prompt = self.agent_role or ""

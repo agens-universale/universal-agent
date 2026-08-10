@@ -103,6 +103,27 @@ def test_auth_error_unrelated_false():
     assert is_auth_error(BackendStreamError("x")) is False
 
 
+def test_model_unavailable_covers_network_errors():
+    from utils.backend_errors import is_model_unavailable_error
+    assert is_model_unavailable_error(requests.exceptions.ConnectTimeout("timeout")) is True
+    assert is_model_unavailable_error(requests.exceptions.SSLError("tls")) is True
+    assert is_model_unavailable_error(requests.exceptions.ProxyError("proxy")) is True
+
+
+def test_model_unavailable_ignores_non_network_request_exceptions():
+    """Предохранитель гасит алиас на ВСЮ сессию, поэтому «недоступность» — только
+    сетевые ошибки и 5xx/401/403/404. Битое тело ответа живого провайдера и кривой
+    url/прокси — тоже `RequestException`, но моделью не лечатся: смена уровня или
+    профиля их не исправит, а алиас остался бы закрытым до правки конфига."""
+    from utils.backend_errors import is_model_unavailable_error
+    assert is_model_unavailable_error(requests.exceptions.MissingSchema("no scheme")) is False
+    assert is_model_unavailable_error(requests.exceptions.InvalidURL("bad url")) is False
+    assert is_model_unavailable_error(requests.exceptions.TooManyRedirects("loop")) is False
+    assert is_model_unavailable_error(
+        requests.exceptions.JSONDecodeError("Expecting value", "<html>", 0)
+    ) is False
+
+
 def test_finish_known_accept():
     for fr in ("stop", "tool_calls", "length"):
         d = normalize_finish_reason(fr, has_content=True, has_tool_calls=False)

@@ -60,7 +60,7 @@ def setup_module(_module) -> None:
 
 
 def test_chat_completions_logs_raw_backend_payload_on_conversion_error(caplog, monkeypatch):
-    def _fake_create_call_headers(_state, _ctx):
+    def _fake_create_call_headers(_state, _ctx, resolved=None):
         return {"Authorization": "Bearer fake"}
 
     def _fake_create_call_data(_messages, _state, **_kwargs):

@@ -37,6 +37,9 @@ def test_finally_merge_folds_child_usage_into_parent(monkeypatch):
 
     # Подменяем тяжёлые шаги: create_instance/build/run заменяем на лёгкие заглушки.
     class _Inst:
+        def finalize_role(self, ctx, state):
+            return None
+
         def get_initial_data(self):
             return "role", "assignment"
 

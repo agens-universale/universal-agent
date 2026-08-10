@@ -110,6 +110,14 @@ def test_label_to_category():
     assert category_for_request_label("whatever") == CATEGORY_MAIN
 
 
+def test_label_to_category_subagent_prefix():
+    """Регресс (ревью Task 7): вспомогательные LLM-вызовы субагентов (напр.
+    special_agent role generation, request_label="subagent_special_agent") должны
+    падать в категорию subagent, не main — request_chat_completion_text резолвит
+    категорию именно через этот маппер (usage/account.py)."""
+    assert category_for_request_label("subagent_special_agent") == CATEGORY_SUBAGENT
+
+
 # ---------------- context ----------------
 
 def test_usage_scope_records_to_account():

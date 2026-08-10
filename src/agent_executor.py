@@ -11,7 +11,7 @@ import threading
 from copy import copy as _shallow_copy_msg
 from typing import Any, Optional
 
-from processing_responses import run_agent
+from processing_responses import run_agent, begin_turn_main_trace
 from run_context import RunContext
 from config_modules.stored_outputs import get_stored_tool_outputs_max_entries
 from message_policy.chat_completions import repair_tool_call_pairing
@@ -280,6 +280,12 @@ class AgentExecutor:
         if subagents_enabled(config_dict.get("use_local_subagents", False)):
             state_data["specific_role"] = ORCHESTRATOR_SPECIFIC_ROLE
         state = State(**state_data)
+        # Старт рана — первая из двух точек начала хода (спека §6.4): фиксируем
+        # модель этого хода через Router, дальше внутри хода не перечитываем.
+        # Открытый активный алиас (trip прошлого хода / персист breaker при attach)
+        # → честная ошибка класса 2 ДО транспорта (спека §8), не сырой
+        # AliasCircuitOpenError на старте рана.
+        begin_turn_main_trace(state, self._ctx)
         state.tool_call_outputs_store.set_max_entries(
             get_stored_tool_outputs_max_entries(config_dict)
         )
@@ -604,6 +610,18 @@ class AgentExecutor:
         Изменения state — только под этим замком.
         """
         return self._lock
+
+    def get_model_router(self):
+        """Router, зафиксированный при сборке ЭТОГО executor'а (``RunContext.model_router``,
+        см. ``src/run_context.py``) — снимок ``models``/``slots``/``assign`` неизменен всю
+        его жизнь (пересборка — только следующим ``get_runner()`` после ``invalidate_runner``).
+
+        Футеру TUI (Task 15) нужен именно этот Router для резолва уровня, зафиксированного
+        на ход (``state.turn_level``): живой ``display_router()`` TUI отражает /profiles
+        мгновенно и подменил бы «факт» на модель уже переключившегося профиля раньше, чем
+        ход её реально увидит. ``None`` — у ``ctx`` нет ``model_router`` (тестовые двойники).
+        """
+        return getattr(self._ctx, "model_router", None)
 
     def usage_meta_snapshot(self) -> Optional[tuple[dict, Optional[dict]]]:
         """Снимок usage для TUI-футера: ``(session_meta, request_meta | None)``.

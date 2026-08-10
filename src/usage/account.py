@@ -40,6 +40,8 @@ def category_for_request_label(request_label: str | None) -> str:
     label = (request_label or "").strip().lower()
     if not label:
         return CATEGORY_MAIN
+    if label.startswith("subagent"):
+        return CATEGORY_SUBAGENT
     if label.startswith("summary"):
         return CATEGORY_SUMMARY
     if "finish_gate" in label or "intent_guard" in label:
