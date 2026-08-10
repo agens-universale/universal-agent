@@ -1,7 +1,9 @@
 """Footer-left контекстно зависит от наличия задачи и активного run.
 
 Idle: F1/help  F2/sessions  F3/diff  F5/config  F6/settings  F7/buffer
-Running: F1/help  F2/sessions  F3/diff  F7/buffer  Ctrl+C/stop
+Running: Ctrl+C/stop — и больше ничего (Task 17, решение юзера): F-подсказки во
+время хода не показываются никогда, место нужно правой колонке — там живут
+стрелка перехода и сегмент «запрос».
 (/skills и /export из футера убраны — доступны через палитру; /mcp не дублируем —
 подсказка /mcp в бренд-карточке.)
 
@@ -81,8 +83,14 @@ async def test_footer_left_task_idle_no_stop(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_footer_left_task_running_shows_stop(tmp_path):
-    """Task active + active_runner.is_running() → /stop вместо config/settings."""
+async def test_footer_left_task_running_shows_only_stop_at_any_width(tmp_path):
+    """Task active + active_runner.is_running() → слева ТОЛЬКО Ctrl+C/stop.
+
+    Task 17 (решение юзера): F-подсказки во время хода не показываются никогда —
+    ни на широком окне, ни на узком. Это безусловное правило, а не ступень
+    деградации по ширине: пользователь клавиши уже знает, а место во время хода
+    нужно правой колонке (стрелка перехода, сегмент «запрос»). Бейдж
+    уведомлений — исключение: он виден всегда."""
     pytest.importorskip("textual")
     from textual.widgets import Static
     from tui.app import TuiApp
@@ -93,26 +101,26 @@ async def test_footer_left_task_running_shows_stop(tmp_path):
 
     tid = "run1"
     _write_task(tmp_path, tid)
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
-    async with app.run_test() as pilot:
-        pilot.app.screen.attach_active_task(tid)
-        pilot.app.active_runner = _FakeRunner()
-        # Footer обновляется в _poll_active каждые 250ms — подождём один тик.
-        await pilot.pause(0.4)
+    for width in (200, 60):
+        app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+        async with app.run_test(size=(width, 30)) as pilot:
+            pilot.app._update_available = True      # непустой бейдж уведомлений
+            pilot.app.screen.attach_active_task(tid)
+            pilot.app.active_runner = _FakeRunner()
+            # Footer обновляется в _poll_active каждые 250ms — подождём один тик.
+            await pilot.pause(0.4)
 
-        rendered = str(pilot.app.query_one("#footer-left", Static).render())
-        assert "Ctrl+C/stop" in rendered
-        assert "F2/sessions" in rendered
-        assert "F1/help" in rendered
-        assert "F3/diff" in rendered
-        assert "F7/buffer" in rendered
-        assert "/config" not in rendered
-        assert "/settings" not in rendered
-        assert "/mcp" not in rendered
-        assert "/skills" not in rendered
-        assert "/export" not in rendered
-        assert "Esc" not in rendered
-        assert "back" not in rendered
+            rendered = str(pilot.app.query_one("#footer-left", Static).render())
+            assert "Ctrl+C/stop" in rendered, width
+            assert "F4/notices" in rendered, width      # бейдж виден всегда
+            for key in ("F1/help", "F2/sessions", "F3/diff", "F5/config",
+                        "F6/settings", "F7/buffer"):
+                assert key not in rendered, (width, key)
+            assert "/mcp" not in rendered
+            assert "/skills" not in rendered
+            assert "/export" not in rendered
+            assert "Esc" not in rendered
+            assert "back" not in rendered
 
 
 @pytest.mark.asyncio
@@ -260,3 +268,60 @@ async def test_footer_columns_never_touch_and_left_wraps_instead():
             if len(lines) > 1 and lines[1][:right.region.x].strip():
                 wrapped_somewhere = True
     assert wrapped_somewhere, "ни на одной ширине хвост левой части не перенёсся вниз"
+
+
+def _rendered_rows(text: str, width: int) -> int:
+    from rich.console import Console
+    from rich.text import Text
+    console = Console(width=width)
+    return sum(max(1, len(Text(line).wrap(console, width)))
+               for line in text.split("\n"))
+
+
+def test_footer_left_never_renders_three_rows():
+    """Инвариант Task 17: сборка левой колонки НИКОГДА не занимает три ряда.
+
+    Футер высотой 2 — третий ряд просто обрезается, и обрезался бы именно бейдж
+    уведомлений: он выселяется отдельной строкой ПОД команды, а команды на узкой
+    ширине сами переносятся Rich'ем на два ряда. Раньше не всплывало, потому что
+    левую колонку никогда не сужали.
+
+    Перебор идёт с ОДНОЙ колонки (фикс-раунд 2 по ревью): ширины уже бейджа —
+    не теория, туда левую загоняет безусловная последняя ступень лесенки правой
+    колонки, и там сборка возвращала голый бейдж на три и больше рядов.
+
+    Порядок жертв: подсказка «F4/notices» уходит раньше счётчиков, счётчики —
+    раньше команд."""
+    from rich.cells import cell_len
+    from tui.services.notices_ui import INFO_GLYPH, WARN_GLYPH, footer_left_with_badge
+
+    commands = "F1/help  F2/sessions  F3/diff  F5/config  F6/settings  F7/buffer"
+    counts = f"{WARN_GLYPH}3 {INFO_GLYPH}2"               # 7 колонок
+    badge = f"{counts} · F4/notices"                      # 20 колонок — длинный
+    for width in range(1, 91):
+        text = footer_left_with_badge(commands, badge, width=width)
+        rows = _rendered_rows(text, width)
+        assert rows <= 2, f"ширина {width}: {rows} ряда — третий обрежется: {text!r}"
+        if width >= cell_len(counts):
+            assert counts in text, f"ширина {width}: счётчики потеряны: {text!r}"
+
+
+def test_footer_left_guard_keeps_stop_key_at_any_width():
+    """`Ctrl+C/stop` виден ВСЕГДА — инвариант юзера, без оговорок про ширину.
+
+    Регресс, найденный ревью: сторож двух рядов выбрасывал команды ЦЕЛИКОМ,
+    когда бейдж не влезал в один ряд. Во время хода это оставляло пользователя
+    без единственного способа остановить агента — и было хуже, чем на базе, где
+    терялся хвост бейджа. Ужимается бейдж; команды — последнее, что снимается
+    слева."""
+    from rich.cells import cell_len
+    from tui.services.notices_ui import INFO_GLYPH, WARN_GLYPH, footer_left_with_badge
+
+    commands = "Ctrl+C/stop"
+    badge = f"{WARN_GLYPH}4 {INFO_GLYPH}2 · F4/notices"
+    # Ниже собственной ширины стоп-клавишу не показать целиком ни при какой
+    # раскладке — там остаётся только потолок в два ряда (тест выше).
+    for width in range(cell_len(commands), 91):
+        text = footer_left_with_badge(commands, badge, width=width)
+        assert commands in text, f"ширина {width}: стоп-клавиша потеряна: {text!r}"
+        assert _rendered_rows(text, width) <= 2, f"ширина {width}: {text!r}"

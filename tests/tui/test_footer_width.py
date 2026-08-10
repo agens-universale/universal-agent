@@ -1,13 +1,36 @@
 """Правая часть футера не должна отбирать место у левой: при уведомлениях левая
 вырастает на суффикс «  ·  ⚠N · F4/notices», и без учёта этого счётчик наезжает
-на имя модели (смок 2026-08-02)."""
+на имя модели (смок 2026-08-02).
+
+Task 17 переставил механику: правая колонка (#footer-right, width:auto)
+ЗАЯВЛЯЕТ потребность, левая (1fr) получает остаток — а лесенка
+`_compose_footer_right` заявляет ровно столько, чтобы левой хватило её рядов.
+Поэтому сторожим не промежуточный «бюджет», а ИТОГ этого решения: фактическую
+композицию правой рядом с фактической левой."""
 import pytest
 from rich.cells import cell_len
 
+_CHROME = 5   # хром футера: padding'и + зазор между колонками (main.py)
+
+
+def _need(scr) -> int:
+    """Ширина, которую правая колонка заявляет по факту композиции."""
+    return max(cell_len(line)
+               for line in scr._compose_footer_right().plain.split("\n"))
+
+
+def _left_rows(scr, total: int, need: int) -> int:
+    from tui.services.notices_ui import footer_left_rows, format_notices_badge
+    return footer_left_rows(scr._footer_left_commands(),
+                            format_notices_badge(scr._collect_footer_notices()),
+                            width=total - need - _CHROME)
+
 
 @pytest.mark.asyncio
-async def test_right_budget_accounts_for_notices_suffix():
-    """Бюджет правой части + фактическая левая ≤ ширина окна."""
+async def test_right_column_leaves_room_for_notices_suffix():
+    """Правая колонка + фактическая левая ≤ ширины окна, и левой хватает ОДНОГО
+    ряда: суффикс уведомлений стоит рядом с командами, а не выдавлен и не наехал
+    на имя модели."""
     from tui.app import TuiApp
     from tui.screens.main import TraceScreen
     from startup_notices import Notice
@@ -21,24 +44,21 @@ async def test_right_budget_accounts_for_notices_suffix():
             Notice("warning", f"c{i}", f"msg{i}") for i in range(3)
         ]
         await pilot.pause()
+        need = _need(scr)
         left = cell_len(scr._footer_left_text())
-        budget = scr._footer_right_available_width()
-        assert left + budget <= 120, (
-            f"левая часть {left} + бюджет правой {budget} > ширины окна 120: "
+        assert need + left + _CHROME <= 120, (
+            f"правая часть {need} + левая {left} > ширины окна 120: "
             "правая часть налезет на счётчик уведомлений")
-        # Односторонний assert выше не ловит и излишне зажатый бюджет (вычитаемый
-        # запас раздут вместо небольшого хрома футера) — правая часть тогда режется
-        # без нужды. Допуск (6) шире фактического запаса (5, main.py: хром 3 + зазор
-        # между колонками 2), чтобы не
-        # спотыкаться о его точное значение, но много меньше явной порчи бюджета.
-        assert left + budget >= 120 - 6, (
-            f"левая часть {left} + бюджет правой {budget} < 120 − 6: "
-            "бюджет правой части занижен сильнее, чем нужно для хрома футера")
+        assert _left_rows(scr, 120, need) == 1, (
+            "левую загнали в два ряда там, где места хватало на один")
+        # Односторонние assert'ы выше не ловят излишне зажатую правую часть —
+        # она тогда режется без нужды; имя модели на этой ширине обязано быть целым.
+        assert "anthropic/claude-opus-5" in scr._compose_footer_right().plain
 
 
 @pytest.mark.asyncio
-async def test_right_budget_without_notices_is_unchanged():
-    """Без уведомлений суффикса нет — бюджет считается как раньше."""
+async def test_right_column_without_notices_is_unchanged():
+    """Без уведомлений суффикса нет — та же проверка на голой левой части."""
     from tui.app import TuiApp
 
     app = TuiApp(config={"model": "m"})
@@ -46,7 +66,6 @@ async def test_right_budget_without_notices_is_unchanged():
         scr = app.screen_stack[0]
         app.collect_footer_notices = lambda: []
         await pilot.pause()
-        left = cell_len(scr._footer_left_text())
-        budget = scr._footer_right_available_width()
-        assert left + budget <= 120
-        assert left + budget >= 120 - 6   # бюджет не занижен сильнее хрома футера
+        need = _need(scr)
+        assert need + cell_len(scr._footer_left_text()) + _CHROME <= 120
+        assert _left_rows(scr, 120, need) == 1

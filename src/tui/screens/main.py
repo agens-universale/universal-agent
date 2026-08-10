@@ -6,6 +6,7 @@ import os
 import threading
 import time
 import uuid
+from collections import namedtuple
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional, TYPE_CHECKING
@@ -36,7 +37,11 @@ from tui.palette import DIM as _DIM
 from tui.palette import ERR as _ERR_RED
 from tui.palette import INK as _INK
 from tui.services.context_meter import render_context_meter
-from tui.services.notices_ui import footer_left_with_badge, format_notices_badge
+from tui.services.notices_ui import (
+    footer_left_rows,
+    footer_left_with_badge,
+    format_notices_badge,
+)
 from tui.services.usage_meter import compose_adaptive_footer_right, usage_segments
 from tui.services.export import export_thread
 from tui.services.path_display import truncate_path
@@ -58,9 +63,12 @@ from tui.services.subagent_sidecar_mapper import (
 from tui.services.trace_mapper import collect_skipped_call_ids, map_message
 from tui.services.trace_render import build_compaction_label
 from tui.screens.tool_call_detail import ToolCallDetailScreen
-from tui.session_settings import read_from_meta
+from tui.session_settings import read_breaker_from_meta, read_from_meta
 from tui.toggles import (
+    PROFILE_NONE_VALUE,
+    TOGGLES,
     apply_toggle,
+    dynamic_toggle_hint,
     next_toggle_value,
     preset_custom_hint,
     preset_track_extra,
@@ -176,9 +184,14 @@ def select_active_substate(
 # порог узости считается по нему, и разъехаться они не должны.
 _MCP_COL_PAD = 6
 # F7/buffer пришёл из develop (синк 2026-08-06) — клавиша живёт в хроме наравне с
-# остальными; при активном run уходят config/settings, а buffer остаётся.
+# остальными.
 _FOOTER_LEFT = "F1/help  F2/sessions  F3/diff  F5/config  F6/settings  F7/buffer"
-_FOOTER_RUNNING_LEFT = "F1/help  F2/sessions  F3/diff  F7/buffer  Ctrl+C/stop"
+# Во время хода слева остаётся ТОЛЬКО остановка (Task 17, решение юзера):
+# F-подсказки не показываются никогда, независимо от ширины терминала —
+# пользователь их уже знает, а место во время хода нужно правой колонке, там
+# живут стрелка перехода и сегмент «запрос». Это безусловное правило, а не
+# ступень деградации по ширине.
+_FOOTER_RUNNING_LEFT = "Ctrl+C/stop"
 _PLACEHOLDER_READY = "опишите задачу или /команда"
 _HINT_TEXT = {
     "clear": "Esc ещё раз, чтобы очистить",
@@ -186,6 +199,49 @@ _HINT_TEXT = {
 }
 _PASTE_HINT_TEXT = "вставьте ещё раз, чтобы развернуть"
 # Модель и backend-режим показываются в шапке экрана (_compose_header_segments).
+
+# Лесенка усечения имени профиля в футере (Task 9, docs
+# 2026-08-09-profiles-a-migration-plan): потолок пробуется ВСЕГДА, даже когда
+# места хватает с избытком — длинное имя не должно отжирать футер; дальше
+# ужимается по факту нехватки ширины вплоть до минимума, ниже которого имя
+# снимается целиком.
+_PROFILE_NAME_MAX_COLS = 14   # потолок: 13 символов + «…»
+_PROFILE_NAME_MIN_COLS = 5    # минимум: 4 символа + «…» (Task 17)
+
+# Хром футера: padding #footer (0 1 → 2) + padding-right #footer-right (1) +
+# зазор между колонками, который держит padding-right у #footer-left (2). На
+# столько ширина всего футера больше суммы контента обеих колонок.
+_FOOTER_CHROME_COLS = 5
+# Раскладка usage-блока внутри варианта правой колонки: «всё одной строкой» и
+# «цены вниз» — не результат подбора ширины, а РАЗНЫЕ ступени лесенки, поэтому
+# `compose_adaptive_footer_right` получает не бюджет, а заведомый предел,
+# включающий нужную ветку.
+_RIGHT_ONE_LINE = 10 ** 6
+_RIGHT_PRICES_DOWN = 0
+# «Ещё не резолвили» для необязательных аргументов, у которых None — законное
+# значение (плашка контекста скрыта).
+_UNRESOLVED = object()
+
+# Снимок футер-головы (Task 15, docs 2026-08-09-profiles-a-migration-plan):
+# profile/level_color/model — «факт» (пин хода или, вне хода, живой резолв);
+# transition — (цвет_нового_уровня_или_None, новая_модель) или None (переход
+# не нужен). См. `TraceScreen._footer_head_snapshot`.
+_FooterHeadSnapshot = namedtuple(
+    "_FooterHeadSnapshot", ("profile", "level_color", "model", "transition")
+)
+
+
+def _truncate_profile_name(name: str, max_cols: int) -> str:
+    """Режет ХВОСТ имени профиля до `max_cols` колонок (cell-width), с «…» на
+    конце, если целиком не влезает."""
+    if cell_len(name) <= max_cols:
+        return name
+    out = ""
+    for ch in name:
+        if cell_len(out + ch) > max_cols - 1:
+            break
+        out += ch
+    return out + "…"
 
 
 class TraceScreen(Screen):
@@ -432,48 +488,275 @@ class TraceScreen(Screen):
             inp.focus()
         inp._handle_paste(event.text)
 
-    def _compose_footer_right(self) -> "Text":
-        """Правый край футера: модель · контекст · запрос · сессия.
+    def _footer_model_name(self) -> str:
+        """Действующая модель СЛЕДУЮЩЕГО хода из Router (спека §12.2), не
+        плоский ключ `cfg["model"]`: должна отражать активный уровень/профиль
+        сразу после /level или /profiles, до пересборки executor (Router
+        витрин строится от `effective_config()` на каждый вызов, §6.4).
 
-        Адаптивно: если по ширине не влезает, токен-блок «запрос · сессия»
-        уезжает на 2-ю строку целиком (футер height:2) — чтобы команды слева
-        не вытеснялись."""
-        cfg = getattr(self.app, "_config", None) or {}
-        model = cfg.get("model", "?")
+        Легаси-плейсхолдер шаблона (Task 14) — не имя модели, показывать нечего."""
+        from onboarding import MODEL_SENTINEL
+        display_router = getattr(self.app, "display_router", None)
+        if not callable(display_router):
+            cfg = getattr(self.app, "_config", None) or {}
+            model = cfg.get("model")
+            return model if model and model != MODEL_SENTINEL else "?"
+        # check_breaker=False: витрина показывает модель честно даже при открытом
+        # активном алиасе (спека §12.2) — иначе футер молча замирал бы (§8).
+        resolved = display_router().resolve("main", check_breaker=False)
+        model = resolved.alias or resolved.model
+        return model if model and model != MODEL_SENTINEL else "?"
+
+    def _footer_live_level(self) -> str:
+        """Активный уровень ЖИВОГО резолва (спека §12.1/§12.2): реагирует на
+        /level и активацию профиля сразу, без пересборки executor. Общий
+        источник для цвета точки будущего состояния и сравнения «уровень
+        менялся?» посреди хода (спека Task 15)."""
+        display_router = getattr(self.app, "display_router", None)
+        return display_router().active_level() if callable(display_router) else "default"
+
+    def _level_color(self, level: str) -> str:
+        """Цвет точки-индикатора для конкретного уровня — из ЕДИНОГО источника
+        `TOGGLES["level"]` (спека §12.1): не хардкод, будущий авто-режим со
+        своим цветом подхватится сам."""
+        colors = {v.value: v.color for v in TOGGLES["level"].values}
+        return colors.get(level, _INK)
+
+    def _footer_level_color(self) -> str:
+        """Цвет точки-индикатора уровня ЖИВОГО резолва — та же Router-витрина,
+        что у `_footer_model_name`."""
+        return self._level_color(self._footer_live_level())
+
+    def _footer_profile_name(self) -> "str | None":
+        """Имя активного профиля для футера, или None — тот же источник, что
+        `/config`/`/status` (`app.active_profile_ref`)."""
+        ref_fn = getattr(self.app, "active_profile_ref", None)
+        ref = ref_fn() if callable(ref_fn) else None
+        return ref.name if ref is not None else None
+
+    def _footer_pinned_resolution(self) -> "tuple[str, str, str] | None":
+        """(уровень, цвет, имя модели) ХОДА, зафиксированного на пине (спека
+        Task 15) — «факт», на чём реально идут запросы, а не живой резолв.
+
+        None — активного хода нет (раннер отсутствует / не бежит), пина нет
+        (легаси-старт не через `begin_turn`) или у раннера нет Router'а этого
+        executor'а. Резолвит `pinned_level()` ЧЕРЕЗ `pinned_router()` — снимок
+        `models`/`slots`/`assign`, зафиксированный при сборке ИМЕННО этого
+        executor'а, — не живой `display_router()` TUI: тот отражает /profiles
+        мгновенно и подменил бы «факт» на модель уже переключившегося профиля
+        раньше, чем ход её реально увидит."""
+        runner = getattr(self.app, "active_runner", None)
+        is_running = getattr(runner, "is_running", None)
+        if runner is None or not callable(is_running) or not is_running():
+            return None
+        pinned_level_fn = getattr(runner, "pinned_level", None)
+        pinned_router_fn = getattr(runner, "pinned_router", None)
+        if not callable(pinned_level_fn) or not callable(pinned_router_fn):
+            return None
+        level = pinned_level_fn()
+        router = pinned_router_fn()
+        if not level or router is None:
+            return None
+        from model_router import AliasCircuitOpenError
+        from onboarding import MODEL_SENTINEL
+        try:
+            resolved = router.resolve_level(level)
+        except AliasCircuitOpenError as exc:
+            resolved = exc.resolved
+        except ValueError:
+            return None
+        model = resolved.alias or resolved.model
+        if not model or model == MODEL_SENTINEL:
+            return None
+        return (level, self._level_color(level), model)
+
+    def _footer_head_snapshot(self) -> "_FooterHeadSnapshot":
+        """Снимок футер-головы — один резолв на отрисовку футера.
+
+        `profile`/`level_color`/`model` — «факт»: то, на чём реально идёт
+        текущий ход (пин, спека Task 15), либо, вне хода, живой резолв, как
+        раньше. `transition` — `(цвет_нового_уровня_или_None, новая_модель)`,
+        что применится ПОСЛЕ хода, или `None` — переход не нужен (хода нет,
+        будущая модель совпадает с фактической). Каждый резолв недёшев: имя
+        профиля глобит оба корня профилей (диск), цвет/модель строят Router
+        витрин от `effective_config()` — лесенка усечения в
+        `_compose_footer_right` обязана получить снимок готовым, не резолвить
+        заново на каждой ступени."""
+        profile = self._footer_profile_name()
+        live_level = self._footer_live_level()
+        live_color = self._level_color(live_level)
+        live_model = str(self._footer_model_name())
+        pinned = self._footer_pinned_resolution()
+        if pinned is None:
+            return _FooterHeadSnapshot(profile, live_color, live_model, None)
+        pinned_level, fact_color, fact_model = pinned
+        if fact_model == live_model:
+            return _FooterHeadSnapshot(profile, fact_color, fact_model, None)
+        transition = (live_color if pinned_level != live_level else None, live_model)
+        return _FooterHeadSnapshot(profile, fact_color, fact_model, transition)
+
+    def _footer_head(self, *, with_profile: bool,
+                      profile_name_cols: int = _PROFILE_NAME_MAX_COLS,
+                      snapshot: "_FooterHeadSnapshot | None" = None,
+                      with_transition: bool = True,
+                      meter: "Text | None | object" = _UNRESOLVED) -> "Text":
+        """head = [профиль ] ● модель[ → [● ]модель][ · контекст]. Точка —
+        жирная, цвет уровня, сама и есть разделитель перед моделью (спека
+        Task 8). Переход «сейчас → станет» (спека Task 15) — только посреди
+        хода и только если будущая модель отличается от фактической; точка
+        нового уровня — только если уровень менялся.
+
+        Имя профиля режется ХВОСТОМ до `profile_name_cols` колонок (Task 9):
+        потолок — `_PROFILE_NAME_MAX_COLS`, чтобы длинное имя не отжирало
+        футер даже на широком экране.
+
+        `snapshot` — готовый результат `_footer_head_snapshot()`; не передан —
+        резолвим сами (одиночный вызов вне лесенки). `with_transition=False` —
+        порядок жертв по ширине (спека Task 15): блок за стрелкой снимается
+        ПОСЛЕ того, как имя профиля снято целиком — точка и факт-модель
+        остаются всегда.
+
+        `meter` — готовая плашка контекста (`None` = скрыта); не передана —
+        резолвим сами. Как и `snapshot`, это ОДИН резолв на кадр: метр читает
+        meta треда с диска, а лесенка строит голову до 22 раз."""
+        if snapshot is None:
+            snapshot = self._footer_head_snapshot()
+        if meter is _UNRESOLVED:
+            meter = self._context_meter()
+        profile, level_color, model_name, transition = snapshot
         head = Text()
-        head.append(str(model), style=_INK)
-        meter = self._context_meter()
+        if with_profile and profile:
+            head.append(_truncate_profile_name(profile, profile_name_cols), style=_INK)
+            head.append(" ")
+        head.append("●", style=f"bold {level_color}")
+        head.append(" ")
+        head.append(model_name, style=_INK)
+        if with_transition and transition is not None:
+            future_color, future_model = transition
+            head.append(" → ", style=_DIM)
+            if future_color is not None:
+                head.append("●", style=f"bold {future_color}")
+                head.append(" ")
+            head.append(future_model, style=_INK)
         if meter is not None:
             head.append(" · ", style=_DIM)
             head.append_text(meter)
+        return head
+
+    def _compose_footer_right(self) -> "Text":
+        """Правый край футера: [профиль ]● модель[ → …] · контекст [+ цены вниз].
+
+        Единая лесенка жертв (Task 17, порядок — дословное решение юзера);
+        первое подошедшее и есть ответ:
+
+        1. всё одной строкой справа, левая в одну строку, имя профиля в потолке;
+        2. цены («запрос · сессия») уезжают на 2-ю строку справа, контекст
+           остаётся наверху; левая ещё в одну строку, имя в потолке;
+        3. левая переносит подсказки на свою 2-ю строку (по одной с хвоста —
+           это делает Rich-wrap); имя профиля ВСЁ ЕЩЁ в потолке;
+        4. имя профиля ужимается `_PROFILE_NAME_MAX_COLS` → `_MIN_COLS`;
+        5. имя профиля снимается целиком;
+        6. снимается блок за стрелкой — последняя жертва.
+
+        Ступени 1-3 ничего не теряют: вторая строка футера (height: 2)
+        зарезервирована в ОБЕИХ колонках и так, и перенос подсказок вниз — то же
+        перекладывание в уже оплаченное место, что и перенос цен. Потеря
+        информации начинается с 4-й. Отсюда и порядок (живой смок юзера,
+        фикс-раунд 3): бесплатные ходы идут раньше платных, поэтому перебор
+        имени живёт ЦЕЛИКОМ во втором проходе, а в первом пробуется только
+        потолок — раньше имя ужималось при левой, спокойно стоявшей в один ряд.
+
+        Лесенка МОНОТОННА по СОДЕРЖИМОМУ: при сужении окна цены, имя профиля и
+        переход не возвращаются. Поэтому вариант «всё одной строкой» живёт лишь
+        в первом проходе — иначе на границе ступени 3 (левой разрешили 2 ряда,
+        места стало больше) цены прыгали бы обратно наверх, а это ровно то
+        дёрганье, против которого задача и заведена. Уехали вниз — остались
+        внизу. По той же причине во втором проходе перебор имени начинается с
+        потолка: имя, ужатое в первом проходе, иначе «подросло» бы обратно.
+
+        Число рядов ЛЕВОЙ монотонности не подчиняется, и запирать его не надо
+        (решение по ревью): на ступенях 5-6 освободившаяся ширина может вернуть
+        левую в один ряд. Это зеркало того же обмена «ряд слева ↔ сегмент
+        справа», информации при этом не теряется, а искусственный запрет
+        тратил бы место впустую.
+
+        Ширину правая колонка не «получает», а ЗАЯВЛЯЕТ: #footer-right —
+        width: auto, #footer-left — 1fr, остаток достаётся левой. Поэтому
+        лесенка перебирает варианты правой с предикатом «сколько рядов при
+        этом остатке занимает левая», а не считает бюджет от левой (так было
+        до Task 17: левая не отдавала ни колонки никогда, и правая заранее
+        теряла имя профиля и переход — живой смок).
+
+        «Рядов левой» считает `footer_left_rows` — то же ядро, что её и
+        рисует: параллельный оценщик разъехался бы с отрисовкой.
+
+        `snapshot` резолвится ОДИН раз на кадр (perf, cfccade9) — лесенка
+        получает его готовым и заново не резолвит."""
         request_seg, session_seg = self._usage_segments()
-        if request_seg is None and session_seg is None:
-            return head
-        return compose_adaptive_footer_right(
-            head, request_seg, session_seg, self._footer_right_available_width()
-        )
+        available = self._footer_right_available_width()
+        total = self._footer_total_width()
+        snapshot = self._footer_head_snapshot()
+        meter = self._context_meter()
+        left_commands = self._footer_left_commands()
+        left_badge = format_notices_badge(self._collect_footer_notices())
+
+        def build(profile_cols: "int | None", layout_width: int,
+                  *, with_transition: bool = True) -> "Text":
+            head = self._footer_head(with_profile=profile_cols is not None,
+                                      profile_name_cols=profile_cols or _PROFILE_NAME_MAX_COLS,
+                                      snapshot=snapshot, with_transition=with_transition,
+                                      meter=meter)
+            if request_seg is None and session_seg is None:
+                return head
+            return compose_adaptive_footer_right(head, request_seg, session_seg, layout_width)
+
+        def fits(result: "Text", allowed_left_rows: int) -> bool:
+            lines = result.plain.split("\n")
+            need = max(cell_len(line) for line in lines)
+            if len(lines) > 2 or need > available:
+                return False
+            left_width = total - need - _FOOTER_CHROME_COLS
+            return left_width > 0 and footer_left_rows(
+                left_commands, left_badge, width=left_width) <= allowed_left_rows
+
+        # Первый проход (левая в один ряд) — только бесплатные ступени 1-2, имя
+        # всегда в потолке. Всё платное живёт во втором (левая в два ряда):
+        # перебор имени 14 → 5 и его снятие. «Одной строкой» во второй проход не
+        # переходит — монотонность, см. докстринг.
+        prices_down = [(cols, _RIGHT_PRICES_DOWN) for cols in
+                       range(_PROFILE_NAME_MAX_COLS, _PROFILE_NAME_MIN_COLS - 1, -1)]
+        passes = ((1, [(_PROFILE_NAME_MAX_COLS, _RIGHT_ONE_LINE),
+                       (_PROFILE_NAME_MAX_COLS, _RIGHT_PRICES_DOWN)]),
+                  (2, [*prices_down, (None, _RIGHT_PRICES_DOWN)]))
+        for allowed_left_rows, variants in passes:
+            for cols, layout_width in variants:
+                result = build(cols, layout_width)
+                if fits(result, allowed_left_rows):
+                    return result
+
+        # Ступень 6: не подошло ничего — снимаем блок за стрелкой; точка
+        # уровня, факт-модель и плашка контекста остаются всегда. Раскладка
+        # самая узкая из возможных (цены внизу), чтобы отобрать у левой
+        # минимум. Возврат БЕЗУСЛОВНЫЙ, без предиката: на этом шаге левой
+        # может достаться меньше, чем ей нужно даже на два ряда — в два ряда
+        # её укладывает собственный сторож (`footer_left_with_badge`), он
+        # самодостаточен и на эту лесенку не полагается.
+        return build(None, _RIGHT_PRICES_DOWN, with_transition=False)
+
+    def _footer_total_width(self) -> int:
+        """Ширина всего футера — её и делят между собой колонки."""
+        try:
+            return int(self.app.size.width)
+        except Exception:
+            return 80
 
     def _footer_right_available_width(self) -> int:
-        """Сколько ширины остаётся футер-right'у, чтобы footer-left остался виден.
-        total − ширина фактического контента слева − небольшой запас."""
-        try:
-            total = self.app.size.width
-        except Exception:
-            total = 80
-        # Ширина ФАКТИЧЕСКОЙ левой части, включая суффикс уведомлений: без него
-        # правой части отдавалось место, рассчитанное на футер без счётчика, и
-        # «⚠ N» упиралось в имя модели — читалось как предупреждение о модели.
-        # cell_len, а не len: ширина в ячейках терминала не равна числу символов
-        # (эмодзи с вариационным селектором и CJK шире одной ячейки).
-        # Текст может быть двухстрочным (блок уведомлений уехал вниз целиком) —
-        # правой колонке мешает САМАЯ ДЛИННАЯ строка, а не сумма строк.
-        left_len = max(cell_len(line)
-                       for line in self._footer_left_text().split("\n"))
-        # −5 = хром футера (padding #footer 0 1 → 2 + padding-right #footer-right → 1)
-        # + зазор между колонками 2. Зазор держит padding-right у #footer-left, здесь
-        # он учитывается, чтобы решение «свернуть правую часть на 2-ю строку»
-        # принималось по тому же месту, которое реально останется левой.
-        return max(10, total - left_len - 5)
+        """ЖЁСТКИЙ потолок ширины правой колонки: вся строка футера минус хром.
+
+        Не «остаток от левой» (так было до Task 17): #footer-right (width:auto)
+        заявляет потребность первым, а сколько при этом останется левой — решает
+        лесенка `_compose_footer_right` по числу её рядов."""
+        return max(10, self._footer_total_width() - _FOOTER_CHROME_COLS)
 
     def _usage_segments(self) -> "tuple[Text | None, Text | None]":
         """Раздельные сегменты («запрос», «сессия») для адаптивной вёрстки, или
@@ -797,12 +1080,20 @@ class TraceScreen(Screen):
         )
         # Настройки режимов принадлежат треду (спека 2026-07-20-session-scoped-settings):
         # берём его значения; их нет (старый тред) — сессия возвращается к умолчанию.
-        saved = read_from_meta(self._store.get_task_meta(task_id))
+        task_meta = self._store.get_task_meta(task_id)
+        saved = read_from_meta(task_meta)
+        # Предохранитель моделей (спека §8) — тоже владение треда: restore ЦЕЛИКОМ
+        # заменяет breaker окна под новый тред (старое состояние не должно течь).
+        self.app.load_circuit_breaker(read_breaker_from_meta(task_meta))
         # Пересобираем executor только при РЕАЛЬНОЙ смене набора: attach идёт и на
         # каждом автосозданном треде, и на возврате к тому же — прогретый раннер
         # (с уже пройденным MCP-дискавери) выбрасывать зря нельзя.
         if self.app.load_session_overrides(saved or {}):
             self.app.invalidate_runner()
+        # Сессионный выбор профиля, ставший битым под текущей базой (§9.4) — снять
+        # + notice + пересборка; санация ПОСЛЕ load_session_overrides — проверяет то,
+        # что реально стало активным оверрайдом этого треда.
+        self.app.sanitize_session_profile()
         # read_all_events — атомарный снимок live-файла + cursor (как раньше).
         # Была ли компакция, определяем по голове live-снимка (после turn_end
         # первая запись = сводка) — без доп. I/O. Тред без компакции рендерим
@@ -2636,11 +2927,16 @@ class TraceScreen(Screen):
         self._refresh_header()
         self._flush_diff_pending_cta()
 
-    # Ширина хрома вокруг колонки статусов: рамка карточки, её padding и padding
-    # трейса. Порог узости считается по факту (`_brand_fits_beside`), а не константой:
-    # длина строк статусов зависит от MCP и уведомлений, и фиксированный порог либо
-    # рвал слова в колонке, либо уводил её вниз раньше времени.
-    _BRAND_CHROME = 4
+    # Ширина хрома вокруг колонки статусов. Порог узости считается по факту
+    # (`_brand_fits_beside`), а не константой: длина строк статусов зависит от MCP и
+    # уведомлений, и фиксированный порог либо рвал слова в колонке, либо уводил её
+    # вниз раньше времени. Слагаемые (styles.tcss, поэтому и продублированы здесь,
+    # как _MCP_COL_PAD): border round у #brand-block — 2, его padding 1 2 — 4,
+    # padding 0 1 у #trace — 2, вертикальный скроллбар трейса — 1. Скроллбар
+    # считаем всегда: в живой сессии он есть, а на пустом старте лишняя колонка
+    # стоит одной пограничной ширины, где статусы встанут под логотипом — это
+    # легальная раскладка, в отличие от «подк / люче / ны».
+    _BRAND_CHROME = 9
 
     def _show_brand(self) -> None:
         if self._brand is not None and self._brand.parent is not None:
@@ -3087,6 +3383,14 @@ class TraceScreen(Screen):
         elif event.key in ("left", "right"):
             cmd = self._palette.selected_command()
             if cmd is not None and cmd.is_toggle:
+                spec = TOGGLES.get(cmd.name)
+                if spec is not None and spec.session_switch_profile:
+                    # /profiles — пикер, не цикл (спека §12.1, ревизия 2026-07-28):
+                    # список произвольной длины не листается вслепую.
+                    self._open_profiles_picker(cmd.name)
+                    event.stop()
+                    event.prevent_default()
+                    return
                 # Мгновенная модель (спека §1): ←/→ применяет в сессию сразу.
                 # custom не выбирается (ревизия 4) — /rigor крутит только
                 # low/medium/high, ровно как Settings.
@@ -3186,9 +3490,11 @@ class TraceScreen(Screen):
                     self._skill_picker.set_filter(rest)
                 return
 
-            # Состояние 3: /<cmd> <фильтр>, где у команды есть arg_options → arg-picker.
+            # Состояние 3: /<cmd> <фильтр>, где у команды есть arg_options
+            # (статические или динамические через arg_options_provider) → arg-picker.
             cmd_obj = self._registry.lookup(cmd)
-            if cmd_obj is not None and cmd_obj.arg_options:
+            if cmd_obj is not None and (cmd_obj.arg_options
+                                        or cmd_obj.arg_options_provider is not None):
                 if self._suppress_picker_reopen:
                     self._suppress_picker_reopen = False
                     return
@@ -3197,7 +3503,14 @@ class TraceScreen(Screen):
                 if self._skill_picker is not None:
                     self._close_skill_picker()
                 if self._arg_picker is None:
-                    self._open_arg_picker(options=list(cmd_obj.arg_options), prefix=rest)
+                    options = (list(cmd_obj.arg_options) if cmd_obj.arg_options
+                               else list(cmd_obj.arg_options_provider(self.app)))
+                    hint_provider = None
+                    if cmd_obj.arg_hint_provider is not None:
+                        provider = cmd_obj.arg_hint_provider
+                        hint_provider = lambda value: provider(self.app, value)
+                    self._open_arg_picker(options=options, prefix=rest,
+                                          hint_provider=hint_provider)
                 else:
                     self._arg_picker.set_filter(rest)
                 return
@@ -3274,6 +3587,7 @@ class TraceScreen(Screen):
             toggle_state=lambda name: toggle_state(self.app, name),
             toggle_extra=lambda name: preset_track_extra(self.app, name),
             toggle_custom_hint=lambda name: preset_custom_hint(self.app, name),
+            toggle_dynamic_hint=lambda name, value: dynamic_toggle_hint(self.app, name, value),
         )
         self._palette = palette
         self._mount_input_overlay(palette)
@@ -3300,13 +3614,24 @@ class TraceScreen(Screen):
         self._skill_picker.remove()
         self._skill_picker = None
 
-    def _open_arg_picker(self, *, options: list[tuple[str, str]], prefix: str) -> None:
+    def _open_arg_picker(self, *, options: list[tuple[str, str]], prefix: str,
+                         hint_provider=None) -> None:
         if self._arg_picker is not None:
             return
         from tui.widgets.arg_picker import ArgPicker
-        picker = ArgPicker(options, initial_filter=prefix)
+        picker = ArgPicker(options, initial_filter=prefix, hint_provider=hint_provider)
         self._arg_picker = picker
         self._mount_input_overlay(picker)
+
+    def _open_profiles_picker(self, name: str = "profiles") -> None:
+        """Раскрыть пикер /profiles (спека §12.1, ревизия 2026-07-28): текст
+        `/profiles ` в input → on_text_area_changed (состояние 3) сам откроет
+        ArgPicker с динамическими опциями и хинтом состава слотов."""
+        inp = self.query_one("#cmdinput", CommandTextArea)
+        if self._palette is not None:
+            self._close_palette()
+        inp.text = f"/{name} "
+        inp.move_cursor(inp.document.end)
 
     def _close_arg_picker(self) -> None:
         if self._arg_picker is None:
@@ -3461,6 +3786,11 @@ class TraceScreen(Screen):
         if self._palette is not None:
             cmd = self._palette.selected_command()
             if cmd is not None and cmd.is_toggle:
+                spec = TOGGLES.get(cmd.name)
+                if spec is not None and spec.session_switch_profile:
+                    # /profiles: Enter раскрывает пикер (спека §12.1, ревизия).
+                    self._open_profiles_picker(cmd.name)
+                    return
                 # Toggle-строка: Enter не сабмитит текст — циклит (+1) и
                 # применяет мгновенно, тот же путь, что ←/→ (спека 2026-07-18
                 # §1). custom не выбирается (ревизия 4) — тот же роутинг, что
@@ -3688,10 +4018,18 @@ class TraceScreen(Screen):
 
     def _cmd_config(self) -> None:
         from tui.screens.config import ConfigScreen
+        ref = self.app.active_profile_ref()
+        profile_source = None
+        profile_path = None
+        if ref is not None:
+            profile_source = "проектный" if ref.root_kind == "project" else "глобальный"
+            profile_path = str(ref.path)
         self.app.push_screen(ConfigScreen(
-            config=self.app.screen_config(),
+            config=self.app.effective_config(),
             config_path=getattr(self.app, "_config_path", None),
             project_local=getattr(self.app, "_config_project_local", None),
+            profile_source=profile_source,
+            profile_path=profile_path,
         ))
 
     def _cmd_view(self, arg: str) -> None:
@@ -4612,9 +4950,41 @@ class TraceScreen(Screen):
         if name == "compact":
             self._cmd_compact()
             return
+        if name == "profiles":
+            self._cmd_profiles(arg)
+            return
         if cmd.is_toggle:
             self._toggle_info_command(name)
             return
+
+    def _cmd_profiles(self, arg: str) -> None:
+        """`/profiles [профиль]` (спека §12.1, ревизия 2026-07-28): без аргумента —
+        раскрыть пикер; «—» — сессионное снятие профиля (§9.1: работать чистым
+        конфигом); имя — сессионный выбор; неизвестное имя — честный отказ."""
+        value = arg.strip()
+        if not value:
+            self._open_profiles_picker()
+            return
+        if value == PROFILE_NONE_VALUE:
+            target = ""
+        else:
+            from tui.toggles import effective_toggle_names
+            available = effective_toggle_names(self.app, "profiles")
+            if value not in available:
+                tail = f" · доступно: {', '.join(available)}" if available else ""
+                self._show_footer_hint(f'✗ профиль "{value}" не найден{tail}')
+                return
+            target = value
+        # Единственная точка вызова на оба исхода: `apply_session_override`
+        # осознанно ре-райзит OSError после отката (каталог тредов недоступен,
+        # диск полон), а пере-мерж — ValueError, если файл профиля исчез между
+        # листингом и выбором. Здесь мы внутри обработчика клавиш: непойманное
+        # исключение уронило бы приложение. Тот же «✗ не сохранено», что и в
+        # палитре (см. `_on_key` ветку apply_toggle).
+        try:
+            self.app.switch_session_profile(target)
+        except (ValueError, OSError) as exc:
+            self._show_footer_hint(f"✗ не сохранено: {exc}")
 
     def _toggle_info_command(self, name: str) -> None:
         """`/gate` или `/answers`, набранные и подтверждённые текстом (не через
@@ -4819,6 +5189,13 @@ class TraceScreen(Screen):
 
         runner = self.app.active_runner
         ah = self.app.tui_state.ask_human_state
+        cfg = self.app.effective_config()
+        router = self.app.display_router()
+        # check_breaker=False: /status показывает модель честно даже при открытом
+        # активном алиасе (спека §12.2); недоступность отражаем отдельным флагом.
+        resolved = router.resolve("main", check_breaker=False)
+        breaker_open = bool(resolved.alias) and router.breaker.is_open(resolved.alias)
+        ref = self.app.active_profile_ref()
         payload["runtime"] = {
             "active_task_id": tid,
             "runner_is_running": bool(runner and runner.is_running()),
@@ -4828,6 +5205,14 @@ class TraceScreen(Screen):
                 if ah is not None else None
             ),
             "last_runner_error": getattr(self.app, "last_runner_error", None),
+            "profile": {
+                "name": cfg.get("profile") or None,
+                "source": ("проектный" if ref is not None and ref.root_kind == "project"
+                           else "глобальный" if ref is not None else None),
+                "level": router.active_level(),
+                "model": resolved.alias or resolved.model,
+                "circuit_breaker_open": breaker_open,
+            },
         }
 
         self.app.push_screen(ViewerScreen(
