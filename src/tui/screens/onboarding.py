@@ -93,6 +93,10 @@ class OnboardingScreen(Screen):
                     yield Static(self._stepper_text(), id="onb-stepper", markup=False)
                     yield Static(self._summary_text(), id="onb-summary",
                                  classes="onb-hint", markup=False)
+                    profile_note = onboarding.active_profile_or_registry_note(self._config or {})
+                    if profile_note:
+                        yield Static(profile_note, id="onb-profile-warn",
+                                     classes="onb-warn", markup=False)
                     yield Static(self._body_placeholder(), id="onb-body", markup=False)
             yield Static(self._footer_text(), id="onb-footer", markup=False)
 

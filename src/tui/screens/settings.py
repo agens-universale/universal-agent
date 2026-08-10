@@ -16,9 +16,9 @@ from rich.text import Text
 from tui.palette import ACCENT, DEEP_DIM, DIM, ERR, INK, OK, WARN
 from tui.widgets.loading_wave import WAVE_INTERVAL, WAVE_SEQ, wave_glyph
 
-SECTIONS = ("Подключение", "Модель", "MCP-серверы", "Режимы работы", "Обновление")
+SECTIONS = ("Подключение", "Модель", "Профили", "MCP-серверы", "Режимы работы", "Обновление")
 
-_CONNECTION, _MODEL, _MCP, _MODES, _UPDATE = 0, 1, 2, 3, 4
+_CONNECTION, _MODEL, _PROFILES, _MCP, _MODES, _UPDATE = 0, 1, 2, 3, 4, 5
 _EDITOR_SECTIONS = {_CONNECTION, _MODEL}   # редакторные: writable, dirty-tracked, submit
 _PROBE_SECTIONS = {_CONNECTION}            # server-probe: ручная проверка, глиф из config-probe
 
@@ -48,6 +48,7 @@ _FOOTERS = {
     _MCP: "↑/↓ · Enter — установить · Space — вкл/выкл · Ctrl+U — обновить версию · Del — удалить · PgUp/PgDn — секции · Esc",
     _MODES: "↑/↓ — выбор · ←/→/Enter — переключить · PgUp/PgDn — секции · Esc — меню",
     _UPDATE: "↑/↓ · Enter — выполнить · PgUp/PgDn — секции · Esc — меню",
+    _PROFILES: "↑/↓ — выбор  ·  Enter — активировать  ·  PgUp/PgDn — секции  ·  Esc — меню",
 }
 _FOOTER_READONLY = "PgUp/PgDn — секции  ·  Esc — меню"
 # Раскрытый пресет-лист адреса забирает клавиши себе — футер на это время становится
@@ -73,6 +74,12 @@ _FOOTER_PRESET_LIST_NO_MATCH = ("↑/↓  ·  Enter — оставить сво�
 # финального ревью 2026-08-06, D). Тот же текст без сегмента про Alt+↓.
 _FOOTER_CONNECTION_FIELD = ("Enter — сохранить  ·  "
                             "Ctrl+Space — проверить связь  ·  PgUp/PgDn — секции  ·  Esc — меню")
+# Строка уровня (последняя в секции «Профили») — тот же позиционный приём, что и
+# «Подключение» выше: обычный `_FOOTERS[_PROFILES]` обещал бы «Enter —
+# активировать» там, где Enter (и ←/→) на самом деле переключают уровень —
+# ложь того же рода, что нашёл финальный обзор 2026-08-06, D.
+_FOOTER_PROFILES_LEVEL = ("↑/↓ — выбор  ·  ←/→/Enter — переключить  ·  "
+                          "PgUp/PgDn — секции  ·  Esc — меню")
 # Бюджет ширины футера — `#set-footer` две строки БЕЗ скролла (тот же контракт у
 # `#onb-footer` мастера): что не влезло, то отрезано вместе с хвостом «Esc — меню».
 # Меряется он ПЕРЕНОСОМ на самом узком окне, а не числом символов: перенос идёт по
@@ -102,6 +109,26 @@ def fit_mode_pairs(pairs: list[str], width: int) -> str:
     return " · ".join(out) + tail if out else "…"
 
 
+def fit_overlay_suffix(names: list[str], width: int) -> str:
+    """Суффикс секций-оверлеев профиля («+security+summary»), усечённый ЦЕЛЫМИ
+    именами под `width` (тот же приём, что и `fit_mode_pairs`, но без разделителя
+    между именами). `width <= 0` — строка ещё не смонтирована — без усечения."""
+    if not names:
+        return ""
+    full = "".join(f"+{n}" for n in names)
+    if width <= 0 or len(full) <= width:
+        return full
+    tail = "+…"
+    out: list[str] = []
+    for n in names:
+        candidate = "".join(f"+{x}" for x in out + [n]) + tail
+        if len(candidate) <= width:
+            out.append(n)
+        else:
+            break
+    return ("".join(f"+{x}" for x in out) + tail) if out else "+…"
+
+
 class SettingsScreen(Screen):
     def __init__(self, *, config, config_path, on_apply, probe_fn=None) -> None:
         super().__init__()
@@ -111,9 +138,11 @@ class SettingsScreen(Screen):
         self._origins = self._read_origins()   # происхождение полей: чем перекрыто, что действует
         self._on_apply = on_apply
         self._pending_env_save = None   # (section, values, warn_detail) — ждёт confirm перезаписи ссылки
-        self._view: object = "menu"     # "menu" | int(0..4)
+        self._view: object = "menu"     # "menu" | int(0..5)
         self._menu_idx = 0
         self._modes_idx = 0             # курсор строки подэкрана «Режимы работы»
+        self._profiles_idx = 0          # курсор строки подэкрана «Профили»
+        self._profiles_disk_cache: dict = {}   # дисковые чтения секции «Профили» на один проход UI
         from tui.services.settings_probe import probe as _default_probe
         self._probe_fn = probe_fn or _default_probe
         self._probe_config = None       # ProbeResult сохранённых значений → глифы хаба
@@ -135,6 +164,7 @@ class SettingsScreen(Screen):
         self._update_check_result = None    # CheckResult последней проверки (Task 7)
         self._update_checking = False       # воркер check_for_update в полёте
         self._update_awaiting_confirm = False   # confirm-баннер обновления/рестарта висит
+        self._reset_awaiting_confirm = False    # confirm-баннер «сбросить конфиг к умолчанию»
 
     # --- хром ---
     def compose(self) -> ComposeResult:
@@ -174,6 +204,8 @@ class SettingsScreen(Screen):
             # «Прокси» клавиша молчит (`on_url_field` гейтит ровно эту позицию,
             # находка финального ревью 2026-08-06, D), и обещать её там значило бы врать.
             return _FOOTERS[_CONNECTION] if self._connection_on_url() else _FOOTER_CONNECTION_FIELD
+        if self._view == _PROFILES:
+            return _FOOTER_PROFILES_LEVEL if self._profiles_on_level_row() else _FOOTERS[_PROFILES]
         return _FOOTERS.get(self._view, _FOOTER_READONLY)
 
     def _connection_editor(self):
@@ -300,6 +332,9 @@ class SettingsScreen(Screen):
         elif i == _MODEL:
             model = self._raw_value("model")
             v.append(display_value(model) if model else "—", style=DIM)
+        elif i == _PROFILES:
+            name = self._config.get("profile") or None
+            v.append(name if name else "не выбран", style=DIM)
         elif i == _MCP:
             try:
                 import mcp_runtime.cli as mcp_mod
@@ -313,9 +348,12 @@ class SettingsScreen(Screen):
         elif i == _MODES:
             from tui.toggles import TOGGLES, toggle_state_base
             # Превью меню — детальные пары (preset-тоггл rigor показывается витриной
-            # в самой секции, не дублируется в одну строку меню).
+            # в самой секции, не дублируется в одну строку меню). Скоуп — только
+            # "rigor"-семья: тогглы «чем работаем» (/level, /profiles) живут в
+            # своей секции «Профили», не здесь.
             pairs = [f"{spec.label}: {toggle_state_base(self.app, name)}"
-                     for name, spec in TOGGLES.items() if not spec.preset_keys]
+                     for name, spec in TOGGLES.items()
+                     if spec.group == "rigor" and not spec.preset_keys]
             v.append(fit_mode_pairs(pairs, self._modes_preview_width()), style=DIM)
         else:
             v.append(self._version_text().split("·", 1)[-1].strip(), style=DIM)
@@ -452,10 +490,13 @@ class SettingsScreen(Screen):
             if self._update_checking or getattr(self.app, "_update_checking", False):
                 return "…", DEEP_DIM              # стартовый чек в полёте — вердикт вот-вот будет
             return "—", DEEP_DIM
+        if i == _PROFILES:
+            return ("✓", OK) if self._config.get("profile") else ("—", DEEP_DIM)
         return "—", DEEP_DIM
 
     # --- рендер (полная замена тела фрейма, кроме персистентного #set-title) ---
     def _render_view(self) -> None:
+        self._profiles_disk_cache = {}   # новый кадр — данные секции «Профили» перечитываются
         self.query_one("#header-left", Static).update(self._title_text())
         frame = self.query_one("#set-frame", Vertical)
         title = self.query_one("#set-title", Static)
@@ -487,6 +528,9 @@ class SettingsScreen(Screen):
             if self._view == _MODES:
                 self.call_after_refresh(self._refresh_modes_hint)
                 self.call_after_refresh(self._refresh_modes_rows)
+            elif self._view == _PROFILES:
+                self.call_after_refresh(self._refresh_profiles_hint)
+                self.call_after_refresh(self._refresh_profiles_rows)
         # Футер — про тело, поэтому считается ПОСЛЕ него (канон мастера
         # `_mount_step_body`): состав тела задаёт и состав обещаний.
         self._refresh_footer()
@@ -780,6 +824,26 @@ class SettingsScreen(Screen):
         write-guard пакетного шаблона, применимым к секциям 0/1."""
         return self._view == _MCP or self._writable()
 
+    def _target_writable(self, target) -> bool:
+        """Тот же guard пакетного шаблона, что `_writable`, но по ЦЕЛИ записи.
+
+        Секция «Профили» пишет не всегда в `self._config_path`: цель бывает
+        проектной (`.gc/config.yml`, всегда писуча и создаётся при отсутствии) —
+        поэтому проверять надо конкретный файл, а не путь запуска. Без этого
+        запуск на пакетном шаблоне (GC_HOME не настроен, `--init-config` не
+        запускали) писал бы `profile:`/`level:` внутрь установленного пакета."""
+        from pathlib import Path
+        from config import _default_config_path
+        try:
+            return Path(target).resolve() != Path(_default_config_path()).resolve()
+        except OSError:
+            return False
+
+    _TEMPLATE_WRITE_REFUSAL = (
+        "✗ не сохранено: конфиг недоступен для записи — используется пакетный "
+        "шаблон (настройте GC_HOME или запустите gc-ua --init-config)"
+    )
+
     _SECRET_FIELD = "Authorization"   # действующее значение секрета маскируем, не печатаем как есть
 
     def _effective_display(self, key: str, effective) -> str:
@@ -809,8 +873,8 @@ class SettingsScreen(Screen):
 
         origin = self._origin(key)
         if origin is not None and origin.is_overridden:
-            from config_origin import OVERLAY_LABELS
-            source = OVERLAY_LABELS[origin.overlay_kind]
+            from config_origin import overlay_label
+            source = overlay_label(origin)
             shown = self._effective_display(key, origin.effective)
             frame.mount(Static(
                 f"⚠ действует {shown} — перекрыто {source}",
@@ -837,6 +901,7 @@ class SettingsScreen(Screen):
             self._mount_field_hints(frame, "completions_url")
             self._mount_field_hints(frame, "Authorization")
             self._mount_field_hints(frame, "proxy")
+            self._mount_shadow_hint(frame)
             frame.mount(Static(self._probe_line_text(self._probe_config, _CONNECTION),
                                classes="set-hint set-dyn set-probe"))
         elif section == _MODEL:
@@ -856,6 +921,7 @@ class SettingsScreen(Screen):
                 # а подпись ниже говорит именно это — экран не должен спорить сам с собой.
                 active_overridden=bool(origin is not None and origin.is_overridden)))
             self._mount_field_hints(frame, "model")
+            self._mount_shadow_hint(frame)
         elif section == _MCP:
             from tui.editors.mcp_section import McpSectionEditor
             from tui.services.mcp_manager import McpManager
@@ -863,8 +929,33 @@ class SettingsScreen(Screen):
             frame.mount(McpSectionEditor(manager=mgr, on_change=self._mcp_changed))
         elif section == _MODES:
             self._mount_modes_section(frame)
-        else:
+        elif section == _UPDATE:
             self._mount_update_section(frame)
+        else:
+            self._mount_profiles_section(frame)
+
+    def _shadow_hint_text(self) -> str | None:
+        """«действует профиль work / реестр моделей — эти поля база для незаданного»
+        в секциях «Подключение»/«Модель» — плоские ключи легаси остаются источником
+        наследования, но не действующим резолвом, когда есть merged-реестр (с
+        профилем или без него) или активный профиль.
+
+        Профиль важнее голого реестра (реестр без профиля — частный случай, но явный
+        выбранный профиль — более конкретная причина «эти поля не действуют»).
+        Источник — effective_config(): сессионный выбор профиля обязан отразиться в
+        подсказке немедленно, как и everywhere в TUI."""
+        cfg = self.app.effective_config() if hasattr(self.app, "effective_config") else self._config
+        profile_name = cfg.get("profile") or None
+        if profile_name:
+            return f"действует профиль {profile_name} · эти поля — база для незаданного"
+        if cfg.get("models"):
+            return "действует реестр моделей · эти поля — база для незаданного"
+        return None
+
+    def _mount_shadow_hint(self, frame: Vertical) -> None:
+        text = self._shadow_hint_text()
+        if text is not None:
+            frame.mount(Static(text, classes="set-hint set-dyn"))
 
     # --- секция «Режимы работы» (дизайн 2026-07-18-settings-work-modes-design §3-4) ---
     def _modes_is_child(self, name: str) -> bool:
@@ -901,9 +992,11 @@ class SettingsScreen(Screen):
         сужает колонку ни для одной строки, только потенциально резервирует
         на символ-два больше, чем строго необходимо, зато без разбора
         preset/не-preset)."""
-        from tui.toggles import PRESET_CUSTOM, TOGGLES
+        from tui.toggles import PRESET_CUSTOM, TOGGLES, group_toggle_names
+        names = group_toggle_names("rigor")
         widths = []
-        for name, spec in TOGGLES.items():
+        for name in names:
+            spec = TOGGLES[name]
             if spec.preset_keys or self._modes_is_child(name):
                 widths.append(len(f"{name} · {spec.label}"))
             else:
@@ -912,7 +1005,8 @@ class SettingsScreen(Screen):
         base_w = 0
         extra_w = 0
         value_names = [PRESET_CUSTOM]
-        for spec in TOGGLES.values():
+        for name in names:
+            spec = TOGGLES[name]
             base_w = max(base_w, 2 * len(spec.values) - 1)
             if spec.preset_keys:
                 extra_w = max(extra_w, 3)
@@ -992,8 +1086,8 @@ class SettingsScreen(Screen):
         return t
 
     def _mount_modes_section(self, frame: Vertical) -> None:
-        from tui.toggles import TOGGLES
-        names = list(TOGGLES.keys())
+        from tui.toggles import TOGGLES, group_toggle_names
+        names = group_toggle_names("rigor")
         self._modes_idx = min(self._modes_idx, len(names) - 1)
         for i, name in enumerate(names):
             selected = i == self._modes_idx
@@ -1029,8 +1123,9 @@ class SettingsScreen(Screen):
         динамический custom-хинт (спека §5)."""
         from tui.toggles import (
             _fit_value_hint, TOGGLES, toggle_state_base, preset_custom_hint, PRESET_CUSTOM,
+            group_toggle_names,
         )
-        names = list(TOGGLES.keys())
+        names = group_toggle_names("rigor")
         if not names:
             return ""
         name = names[self._modes_idx]
@@ -1066,8 +1161,8 @@ class SettingsScreen(Screen):
         идут последними)."""
         if self._view != _MODES:
             return
-        from tui.toggles import TOGGLES
-        names = list(TOGGLES.keys())
+        from tui.toggles import group_toggle_names
+        names = group_toggle_names("rigor")
         widgets = list(self.query(".set-row"))
         for i, row in enumerate(widgets[-len(names):]):
             row.update(self._mode_row_text(names[i], i == self._modes_idx))
@@ -1081,8 +1176,8 @@ class SettingsScreen(Screen):
         переопределения НЕ трогаем — их перекрытие показывает пометка §6.2."""
         import onboarding_config_writer as w
         from config import _default_config_path, validate_config_text
-        from tui.toggles import cycle_value, TOGGLES, toggle_state_base, PRESETS
-        names = list(TOGGLES.keys())
+        from tui.toggles import cycle_value, TOGGLES, toggle_state_base, PRESETS, group_toggle_names
+        names = group_toggle_names("rigor")
         name = names[self._modes_idx]
         spec = TOGGLES[name]
         current = toggle_state_base(self.app, name)
@@ -1112,9 +1207,475 @@ class SettingsScreen(Screen):
             return
         self._render_view()
 
+    # --- секция «Профили» (витрина обоих корней + единое правило записи) ---
+    def _profiles_base_path(self):
+        from pathlib import Path
+        from config import _default_config_path
+        return Path(self._config_path or _default_config_path())
+
+    def _profiles_rows(self) -> list[dict]:
+        """Строки секции: одна на каждое найденное имя профиля (тёзки — ОДНОЙ
+        строкой, побеждает проектный) + редактируемая строка «уровень по
+        умолчанию» (←/→/Enter) — она всегда последняя и всегда есть, даже без
+        единого профиля."""
+        import os
+        from pathlib import Path
+        from config_modules.profiles import discover_all_refs, profile_roots
+        roots = profile_roots(Path(os.getcwd()), self._profiles_base_path())
+        grouped = discover_all_refs(roots)
+        rows = []
+        for name in sorted(grouped):
+            refs = grouped[name]
+            rows.append({
+                "kind": "profile", "name": name, "ref": refs[0],
+                "shadow": refs[1] if len(refs) > 1 else None,
+            })
+        if rows:
+            # «— без профиля» — первой строкой: глобальная деактивация; в пустом
+            # состоянии (профилей нет) строка бессмысленна — деактивировать нечего.
+            rows.insert(0, {"kind": "none"})
+        rows.append({"kind": "level"})
+        return rows
+
+    def _profiles_on_level_row(self) -> bool:
+        """Курсор секции «Профили» — на строке уровня (последняя, всегда есть):
+        футер тогда обещает ←/→/Enter вместо Enter-активации (позиционный
+        футер, тот же приём, что у `_CONNECTION`)."""
+        rows = self._profiles_rows()
+        return bool(rows) and self._profiles_idx == len(rows) - 1
+
+    def _project_config_candidate_path(self):
+        from config_modules.env_vars import project_gc_dir
+        return project_gc_dir() / "config.yml"
+
+    def _profile_summary(self, path):
+        """Сводка файла профиля через кэш прохода (`_profiles_disk_cache`).
+
+        Чтение + разбор YAML — самая дорогая часть отрисовки секции: строки
+        спрашивают минимум четыре независимых места за кадр (футер, монтирование,
+        refresh строк, refresh подсказки), и без кэша каждый файл парсился заново
+        на каждом из них. Кэш живёт один проход UI — сбрасывается на входе в
+        `_render_view` и на обработке клавиши, поэтому правка профиля извне
+        по-прежнему видна с первого же нажатия."""
+        from config_modules.profiles import profile_display_summary
+        cache = self._profiles_disk_cache.setdefault("summaries", {})
+        key = str(path)
+        if key not in cache:
+            cache[key] = profile_display_summary(path)
+        return cache[key]
+
+    def _project_config_doc(self) -> dict:
+        """Сырой документ проектного `.gc/config.yml` через тот же кэш прохода:
+        его спрашивает КАЖДАЯ строка списка (источник записи, пометка «выбран
+        проектом»), то есть N раз за проход вместо одного."""
+        cache = self._profiles_disk_cache
+        if "project_doc" not in cache:
+            import config_raw
+            from config import _project_local_config_path
+            project_path = _project_local_config_path()
+            cache["project_doc"] = (
+                config_raw.read_document(project_path) if project_path is not None else {}
+            )
+        return cache["project_doc"]
+
+    def _project_config_sets(self, key: str) -> bool:
+        """Проектный `.gc/config.yml` уже несёт топ-уровневый ключ `key` (любое
+        значение, даже пустую строку — deep-merge отдаёт победу оверлею по факту
+        наличия ключа, не по его «истинности») — тогда запись ЭТОГО ключа в базовый
+        конфиг была бы молчаливым no-op: проектный слой всё равно перекроет её."""
+        return key in self._project_config_doc()
+
+    def _project_sets_profile_pointer(self) -> bool:
+        return self._project_config_sets("profile")
+
+    def _profile_activation_target(self, ref):
+        """Единое правило записи: проектный профиль → проектный конфиг (создаётся
+        при отсутствии); профиль «рядом с базой» → базовый конфиг запуска, ЕСЛИ
+        проектный конфиг уже не задаёт указатель сам — иначе тоже проектный (иначе
+        активация была бы молчаливым no-op: проектный слой всё равно победит).
+        Никогда не пишет указатель на проектный профиль в базовый конфиг."""
+        if ref.root_kind == "project" or self._project_sets_profile_pointer():
+            return self._project_config_candidate_path()
+        return self._profiles_base_path()
+
+    def _write_profile_pointer(self, path, name: str) -> None:
+        """Запись `profile: "<name>"`: якорь гарантируется `ensure_pointer_anchor`
+        (топ-уровневый `profile:` из пакетного шаблона, идемпотентно), значение —
+        существующим `write_values`. Файл, которого ещё нет (проектный
+        `.gc/config.yml`), создаёт отдельная простая функция — `write_values` по
+        контракту требует существующего файла."""
+        from pathlib import Path
+        import onboarding_config_writer as ocw
+        from config import _default_config_path, validate_config_text
+        path = Path(path)
+        if not path.is_file():
+            ocw.create_pointer_file(path, name)
+            return
+        ocw.ensure_pointer_anchor(path, template_path=_default_config_path())
+        missing = ocw.write_values(path, {"profile": name}, validate=validate_config_text)
+        if missing:
+            raise ValueError(f"не удалось записать: {', '.join(missing)}")
+
+    def _deactivation_target(self):
+        """Куда пишется `profile: ""` при деактивации — то же единое правило, что
+        у активации: слой, где запись возымеет эффект. Проектный конфиг задаёт
+        указатель → туда (запись в базовый была бы молчаливым no-op); иначе —
+        базовый конфиг запуска."""
+        if self._project_sets_profile_pointer():
+            return self._project_config_candidate_path()
+        return self._profiles_base_path()
+
+    def _deactivate_profile(self) -> None:
+        """Enter на «— без профиля»: деактивация записью `profile: ""` по единому
+        правилу записи; «ничего не активно» — честный no-op."""
+        config_active = self._config.get("profile") or None
+        if config_active is None:
+            self._title_note("профиль не выбран")
+            return
+        target = self._deactivation_target()
+        if not self._target_writable(target):
+            self._notice(self._TEMPLATE_WRITE_REFUSAL)
+            return
+        try:
+            self._write_profile_pointer(target, "")
+        except (ValueError, OSError) as exc:
+            self._notice(f"✗ не сохранено: {exc}")
+            return
+        try:
+            self._on_apply()
+            self._config = getattr(self.app, "_config", None) or self._config
+        except Exception as exc:
+            self._notice(f"записано в {target}, но конфиг не перечитан: {exc}")
+            return
+        self._raw = self._read_raw()
+        self._origins = self._read_origins()
+        session_overrides = getattr(self.app, "_session_overrides", None) or {}
+        session_name = session_overrides.get("profile")
+        if session_name:
+            effect = f'текущая сессия остаётся на "{session_name}" (сессионный выбор /profiles)'
+        else:
+            effect = "применится со следующего хода агента"
+        self._render_view()
+        self._flash(f"Профиль деактивирован — {target}. {effect}")
+
+    def _activate_profile(self, name: str, ref) -> None:
+        """Enter на строке профиля. «Уже активен» — сравнение с КОНФИГ-указателем
+        (`self._config["profile"]`, то, что реально пишет Enter), не с сессионным
+        выбором: сессия — отдельный механизм (`/profiles`), запись файла её не трогает."""
+        config_active = self._config.get("profile") or None
+        if name == config_active:
+            self._title_note("уже активен")
+            return
+        target = self._profile_activation_target(ref)
+        if not self._target_writable(target):
+            self._notice(self._TEMPLATE_WRITE_REFUSAL)
+            return
+        try:
+            self._write_profile_pointer(target, name)
+        except (ValueError, OSError) as exc:
+            self._notice(f"✗ не сохранено: {exc}")
+            return
+        try:
+            self._on_apply()
+            self._config = getattr(self.app, "_config", None) or self._config
+        except Exception as exc:
+            self._notice(f"записано в {target}, но конфиг не перечитан: {exc}")
+            return
+        self._raw = self._read_raw()
+        self._origins = self._read_origins()
+        session_overrides = getattr(self.app, "_session_overrides", None) or {}
+        session_name = session_overrides.get("profile")
+        if session_name and session_name != name:
+            effect = f'текущая сессия остаётся на "{session_name}" (сессионный выбор /profiles)'
+        else:
+            effect = "применится со следующего хода агента"
+        self._render_view()
+        self._flash(f"Профиль «{name}» активирован — {target}. {effect}")
+
+    def _level_write_target(self):
+        """Куда пишется `level` — то же единое правило, что у активации/деактивации
+        профиля рядом (`_deactivation_target`), но по СВОЕМУ ключу: проектный
+        `.gc/config.yml` уже несёт `level:` → пишем туда (запись в базовый была бы
+        перекрыта оверлеем проекта); иначе — базовый конфиг запуска. Указатель
+        `profile:` проекта тут ни при чём — он перекрывает выбор профиля, а не
+        уровень; прочие перекрытия (`level` внутри самого файла профиля) ловятся
+        по факту — `_level_apply` сверяет действующее значение после перечитки."""
+        if self._project_config_sets("level"):
+            return self._project_config_candidate_path()
+        return self._profiles_base_path()
+
+    def _level_apply(self, direction: int) -> None:
+        """←/→/Enter на строке уровня (канон «Режимов работы» — `_modes_apply`):
+        переключить уровень по кругу от ТЕКУЩЕГО значения (`TOGGLES["level"].values`
+        — единый источник, будущие значения подхватятся сами) и записать в файл
+        (`_level_write_target` — то же правило, что у активации профиля рядом).
+        `self._config["level"]` выставляется сразу — строка/подсказка/футер
+        отражают новое значение без ожидания реального reload."""
+        import onboarding_config_writer as w
+        from config import _default_config_path, validate_config_text
+        from tui.toggles import cycle_value
+        current = str(self._config.get("level") or "default")
+        new_value = cycle_value("level", current, direction)
+        target = self._level_write_target()
+        if not self._target_writable(target):
+            self._notice(self._TEMPLATE_WRITE_REFUSAL)
+            return
+        try:
+            # Якорь `level:` — как у указателя профиля рядом (`_write_profile_pointer`):
+            # в конфигах, созданных до появления ключа, строки нет, а сам write_values
+            # топ-уровневый скаляр не дописывает.
+            w.ensure_pointer_anchor(target, template_path=_default_config_path(), key="level")
+            missing = w.write_values(
+                target, {"level": new_value},
+                template_path=_default_config_path(),
+                validate=validate_config_text,
+            )
+            if missing:
+                raise ValueError(f"не удалось записать: {', '.join(missing)}")
+        except (ValueError, OSError) as exc:
+            self._notice(f"✗ не сохранено: {exc}")
+            return
+        self._config["level"] = new_value
+        self._raw = self._read_raw()
+        try:
+            self._on_apply()
+            fresh = getattr(self.app, "_config", None)
+            if fresh is not None:
+                self._config = fresh
+        except Exception as exc:
+            self._notice(f"записано в {target}, но конфиг не перечитан: {exc}")
+            return
+        self._render_view()
+        # Записанное значение может быть перекрыто слоем выше (проектный конфиг,
+        # файл профиля) — тогда честнее сказать, что действует, чем показывать
+        # «установлен» и рисовать строку/футер по значению, которого нет.
+        effective = str(self._config.get("level") or "default")
+        if effective != new_value:
+            self._notice(f"записано в {target}, но действует «{effective}» — "
+                         "значение перекрыто слоем выше (проектный конфиг или профиль)")
+            return
+        self._flash(f"Уровень «{new_value}» установлен — {target}")
+
+    def _profiles_name_width(self, rows: list[dict]) -> int:
+        names = [r["name"] for r in rows if r["kind"] == "profile"]
+        return max((len(n) for n in names), default=0) + 3
+
+    def _profiles_row_width(self) -> int:
+        """Ширина строки внутри рамки (padding 0 1 — минус 2) — carry-fix того же
+        рода, что `_modes_row_width`: региона нет до layout-прохода при монтировании."""
+        widgets = list(self.query(".set-profiles-row"))
+        if not widgets:
+            return 0
+        return max(0, widgets[-1].region.width - 2)
+
+    _LEVEL_HEAD = "level · уровень модели по умолчанию"
+
+    def _level_columns(self) -> tuple[int, int, int, int]:
+        """(label_w, base_w, extra_w, value_w) — тот же приём и те же формулы,
+        что `_modes_columns` (Task 13: канон «Режимов работы» переносится
+        строкой целиком, не по элементам — урок живого смока 2026-08-10). В
+        этой секции строка одна, но паддинг всё равно считается формулой, а
+        не подбирается на глаз."""
+        from tui.toggles import TOGGLES
+        spec = TOGGLES["level"]
+        label_w = len(self._LEVEL_HEAD) + 3 + 2
+        base_w = 2 * len(spec.values) - 1
+        extra_w = 0
+        value_w = max(len(v) for v in spec.names)
+        return label_w, base_w, extra_w, value_w
+
+    def _level_row_text(self, selected: bool) -> Text:
+        """Task 13: грамматика строки — целиком по канону `_mode_row_text`
+        (не по кусочкам, как переносили раньше): «имя ручки · описание» одним
+        выровненным блоком INK -> канонный трек (Task 12, `padded_track`,
+        tui/toggles.py) -> значение INK. «по умолчанию» в описании сохранено
+        — отличает постоянное значение (пишется в файл) от сессионного
+        `/level`. Число позиций трека — из `TOGGLES["level"].values` (единый
+        источник, будущий авто-режим сделает трек четырёхпозиционным сам);
+        цвет горящей позиции — тот же визуальный язык, что точка-индикатор
+        футера (`main.py::_footer_level_color`)."""
+        from tui.toggles import TOGGLES, padded_track
+        spec = TOGGLES["level"]
+        level = str(self._config.get("level") or "default")
+        label_w, base_w, extra_w, value_w = self._level_columns()
+        track = padded_track(spec, level, extra_lit=None, base_w=base_w, extra_w=extra_w)
+        t = Text()
+        t.append("▸ " if selected else "  ", style=ACCENT)
+        t.append(self._LEVEL_HEAD.ljust(label_w - 2), style=INK)
+        t.append_text(track)
+        t.append("  ")
+        t.append(level.ljust(value_w), style=INK)
+        return t
+
+    def _profile_row_text(self, row: dict, rows: list[dict], selected: bool) -> Text:
+        name, ref = row["name"], row["ref"]
+        config_active = self._config.get("profile") or None
+        name_w = self._profiles_name_width(rows)
+        t = Text()
+        t.append("▸ " if selected else "  ", style=ACCENT)
+        t.append(f"{name:<{name_w}}", style=INK)
+        source = "проектный" if ref.root_kind == "project" else "глобальный"
+        t.append(f"{source:<11}", style=DIM)
+        active_marker = "● активен"
+        if name == config_active:
+            t.append(active_marker, style=OK)
+            if self._project_sets_profile_pointer() and ref.root_kind != "project":
+                t.append(" · выбран проектом", style=DEEP_DIM)
+        else:
+            t.append(" " * len(active_marker), style=DEEP_DIM)
+        summary = self._profile_summary(ref.path)
+        tail = ""
+        if summary.slots:
+            tail += "   " + " · ".join(f"{lvl} {alias}" for lvl, alias in summary.slots.items())
+        if summary.overlay_sections:
+            width = self._profiles_row_width()
+            if width <= 0:
+                tail += "".join(f"+{n}" for n in summary.overlay_sections)
+            else:
+                budget = max(0, width - len(t.plain) - len(tail))
+                tail += fit_overlay_suffix(summary.overlay_sections, budget)
+        if tail:
+            t.append(tail, style=DIM)
+        session_overrides = getattr(self.app, "_session_overrides", None) or {}
+        session_name = session_overrides.get("profile")
+        if session_name == name and session_name != config_active:
+            t.append("   · выбран в текущей сессии", style=DEEP_DIM)
+        return t
+
+    def _none_row_text(self, rows: list[dict], selected: bool) -> Text:
+        """Строка «— без профиля»: глобальная деактивация; `● активен` — когда
+        конфиг-указатель пуст."""
+        config_active = self._config.get("profile") or None
+        name_w = self._profiles_name_width(rows)
+        t = Text()
+        t.append("▸ " if selected else "  ", style=ACCENT)
+        label = "без профиля"
+        t.append(label.ljust(max(name_w + 11, len(label) + 3)), style=INK)
+        active_marker = "● активен"
+        if config_active is None:
+            t.append(active_marker, style=OK)
+        else:
+            t.append(" " * len(active_marker), style=DEEP_DIM)
+        session_overrides = getattr(self.app, "_session_overrides", None) or {}
+        if session_overrides.get("profile") == "" and config_active is not None:
+            t.append("   · выбран в текущей сессии", style=DEEP_DIM)
+        return t
+
+    def _profiles_row_under_cursor(self, rows: list[dict]) -> dict:
+        """Строка под курсором с клампом индекса: набор строк перечитывается с диска
+        на каждый рендер и на каждое нажатие, а файл профиля мог исчезнуть под ногами
+        между ними (правка/удаление извне) — курсор тогда указывает за конец."""
+        self._profiles_idx = min(self._profiles_idx, len(rows) - 1)
+        return rows[self._profiles_idx]
+
+    def _profiles_hint_text(self, rows: list[dict]) -> str:
+        row = self._profiles_row_under_cursor(rows)
+        if row["kind"] == "level":
+            from tui.toggles import _LEVEL_ROLE_TEXT
+            level = str(self._config.get("level") or "default")
+            role = _LEVEL_ROLE_TEXT.get(level, "")
+            head = f"{level} — {role}" if role else level
+            target = self._level_write_target()
+            lines = [head, f"←/→/Enter — переключить (запись: {target})",
+                    "на сессию — /level"]
+            return "\n".join(lines)
+        if row["kind"] == "none":
+            if (self._config.get("profile") or None) is None:
+                return "профиль не выбран — действует чистый конфиг"
+            return f"Enter — деактивировать (запись: {self._deactivation_target()})"
+        name, ref = row["name"], row["ref"]
+        lines = [str(ref.path)]
+        target = self._profile_activation_target(ref)
+        lines.append(f"Enter — активировать (запись: {target})")
+        if row.get("shadow") is not None:
+            lines.append(f"тёзка перекрыта: {row['shadow'].path}")
+        if self._project_sets_profile_pointer() and (self._config.get("profile") or None) == name \
+                and ref.root_kind != "project":
+            lines.append("выбор задан .gc/config.yml проекта")
+        summary = self._profile_summary(ref.path)
+        if summary.error:
+            lines.append(f"не удалось прочитать: {summary.error}")
+        elif summary.overlay_sections:
+            lines.append("секции: " + ", ".join(summary.overlay_sections))
+        return "\n".join(lines)
+
+    def _mount_profiles_section(self, frame: Vertical) -> None:
+        rows = self._profiles_rows()
+        self._profiles_idx = min(self._profiles_idx, len(rows) - 1)
+        profile_rows = [r for r in rows if r["kind"] == "profile"]
+        if not profile_rows:
+            frame.mount(Static(
+                "Профиль — отдельный файл-конфиг: переключаемый набор ЛЮБЫХ "
+                "настроек — модели, уровни, гварды и любые другие секции конфига",
+                classes="set-hint set-dyn"))
+            frame.mount(Static(
+                "Чтобы создать профиль — сохраните файл ~/.gc/profiles/<имя>.yml, "
+                "например:",
+                classes="set-hint set-dyn"))
+            skeleton = (
+                "models:\n"
+                "  flash:\n"
+                "    url: https://openrouter.ai/api/v1/chat/completions\n"
+                "    token: sk-or-...\n"
+                "slots:\n"
+                "  default: flash\n"
+                "  light: flash"
+            )
+            frame.mount(Static(skeleton, classes="set-hint set-dyn", markup=False))
+        else:
+            for i, row in enumerate(rows):
+                if row["kind"] == "level":
+                    continue
+                selected = i == self._profiles_idx
+                cls = "set-row set-dyn set-spaced set-profiles-row" + (" selected" if selected else "")
+                text = (self._none_row_text(rows, selected) if row["kind"] == "none"
+                        else self._profile_row_text(row, rows, selected))
+                frame.mount(Static(text, classes=cls))
+            # Черта перед строкой уровня: уровень — не «ещё один профиль»,
+            # отделяем как группы «Режимов работы».
+            frame.mount(Rule(classes="set-group-sep"))
+        level_idx = len(rows) - 1
+        selected = level_idx == self._profiles_idx
+        # в пустом состоянии сверху скелет-подсказка без нижнего отступа —
+        # даём строке уровня воздух сверху и снизу (set-spaced-gap, не пара
+        # раздельных классов: longhand-margins в Textual перетирают друг друга)
+        spacing = "set-spaced" if profile_rows else "set-spaced-gap"
+        cls = f"set-row set-dyn {spacing} set-profiles-row" + (" selected" if selected else "")
+        frame.mount(Static(self._level_row_text(selected), classes=cls))
+        frame.mount(Static(self._profiles_hint_text(rows),
+                           classes="set-hint set-dyn set-profiles-hint"))
+
+    def _refresh_profiles_rows(self) -> None:
+        """Carry-fix (тот же приём, что `_refresh_modes_rows`): досчитать усечение
+        суффикса секций-оверлеев ПОСЛЕ layout-прохода, когда регион уже известен."""
+        if self._view != _PROFILES:
+            return
+        rows = self._profiles_rows()
+        widgets = list(self.query(".set-profiles-row"))
+        if not widgets:
+            return
+        fresh = widgets[-len(rows):]
+        for i, row in enumerate(rows):
+            selected = i == self._profiles_idx
+            if row["kind"] == "level":
+                fresh[i].update(self._level_row_text(selected))
+            elif row["kind"] == "none":
+                fresh[i].update(self._none_row_text(rows, selected))
+            else:
+                fresh[i].update(self._profile_row_text(row, rows, selected))
+
+    def _refresh_profiles_hint(self) -> None:
+        if self._view != _PROFILES:
+            return
+        rows = self._profiles_rows()
+        widgets = list(self.query(".set-profiles-hint"))
+        if widgets:
+            widgets[-1].update(self._profiles_hint_text(rows))
+
     _UPDATE_ACTION_UPDATE = "Обновить агента"
     _UPDATE_ACTION_CHECK = "Проверить обновления"
     _UPDATE_ACTION_SYNC = "Обновить config.yml до текущей версии"
+    _UPDATE_ACTION_RESET = "Сбросить конфиг к умолчанию"
 
     def _update_confirm_text(self) -> str:
         """I4: «в отдельном окне» правда только на Windows — на остальных платформах
@@ -1154,8 +1715,9 @@ class SettingsScreen(Screen):
             line.append(src.url, style=DIM)
             frame.mount(Static(line, classes="set-info set-dyn"))
             frame.mount(Static(self._checked_line_text(), classes="set-info set-dyn"))
-        actions = [self._UPDATE_ACTION_SYNC] if dev else [
-            self._UPDATE_ACTION_UPDATE, self._UPDATE_ACTION_CHECK, self._UPDATE_ACTION_SYNC]
+        actions = [self._UPDATE_ACTION_SYNC, self._UPDATE_ACTION_RESET] if dev else [
+            self._UPDATE_ACTION_UPDATE, self._UPDATE_ACTION_CHECK,
+            self._UPDATE_ACTION_SYNC, self._UPDATE_ACTION_RESET]
         self._update_actions = actions
         if self._update_idx is None or self._update_idx >= len(actions):
             self._update_idx = 0     # дефолт — верхнее действие (главный смысл секции)
@@ -1174,6 +1736,9 @@ class SettingsScreen(Screen):
             frame.mount(Static(row, classes=cls))
         if self._update_awaiting_confirm:
             frame.mount(Static(Text(self._update_confirm_text(), style=WARN),
+                               classes="set-confirm set-dyn"))
+        elif self._reset_awaiting_confirm:
+            frame.mount(Static(Text(self._reset_confirm_text(), style=WARN),
                                classes="set-confirm set-dyn"))
         else:
             frame.mount(Static(
@@ -1215,8 +1780,12 @@ class SettingsScreen(Screen):
         if action == self._UPDATE_ACTION_CHECK:
             return (f"Спросит у источника установки ({resolved.url} · {resolved.ref or 'master'}), "
                     "появились ли новые версии. Ничего не устанавливает.")
-        return ("Перепишет файл по образцу текущей версии, ваши значения сохранятся, "
-                "старый файл — в бэкап. На работу агента не влияет.")
+        if action == self._UPDATE_ACTION_SYNC:
+            return ("Перепишет файл по образцу текущей версии, ваши значения сохранятся, "
+                    "старый файл — в бэкап. На работу агента не влияет.")
+        return ("Заменит config.yml пакетным умолчанием текущей версии — ваши правки уйдут "
+                "в бэкап. Файлы профилей и настройки сессии останутся, но выбор профиля "
+                "в config.yml сбросится.")
 
     def _run_update_action(self) -> None:
         if not self._update_actions:
@@ -1228,6 +1797,8 @@ class SettingsScreen(Screen):
             self._check_updates_now()
         elif action == self._UPDATE_ACTION_UPDATE:
             self._request_update()
+        elif action == self._UPDATE_ACTION_RESET:
+            self._request_reset()
 
     def _check_updates_now(self) -> None:
         """Enter на «Проверить обновления»: фоновый воркер check_for_update, результат —
@@ -1350,6 +1921,55 @@ class SettingsScreen(Screen):
         if report.reenter:
             lines.append(f"задайте заново: {', '.join(report.reenter)}")
         lines.append(f"бэкап: {report.backup_path}")
+        self._notice("\n".join(lines))
+
+    def _reset_confirm_text(self) -> str:
+        return ("config.yml будет заменён пакетным умолчанием текущей версии, ваш файл — "
+                "в бэкап. Файлы профилей и настройки сессии останутся, но выбор профиля "
+                "в config.yml сбросится. Enter — сбросить · Esc — отмена")
+
+    def _request_reset(self) -> None:
+        """Enter на «Сбросить конфиг к умолчанию»: confirm-баннер (канон §5)."""
+        if self._reset_awaiting_confirm:
+            return
+        self._reset_awaiting_confirm = True
+        self._render_view()
+
+    def _cancel_reset(self) -> None:
+        self._reset_awaiting_confirm = False
+        self._render_view()
+
+    def _confirm_reset(self) -> None:
+        if not self._reset_awaiting_confirm:
+            return
+        self._reset_awaiting_confirm = False
+        if not self._writable():
+            self._render_view()
+            self._notice("✗ пакетный шаблон не сбрасывается")
+            return
+        import config_sync
+        try:
+            report = config_sync.reset_config(self._config_path)
+        except (ValueError, OSError) as exc:
+            self._render_view()
+            self._notice(f"✗ config.yml НЕ сброшен: {exc}")
+            return
+        self._raw = self._read_raw()          # файл заменён шаблоном — перечитать
+        self._origins = self._read_origins()
+        lines = [f"✓ config.yml сброшен к умолчанию · бэкап: {report.backup_path}"]
+        try:
+            self._on_apply()
+            self._config = getattr(self.app, "_config", None) or self._config
+        except Exception as exc:
+            lines.append(f"сброшено, но конфиг не перечитан: {exc}")
+        session_overrides = getattr(self.app, "_session_overrides", None) or {}
+        session_profile = session_overrides.get("profile")
+        if session_profile:
+            lines.append(f'сессия остаётся на профиле "{session_profile}" (/profiles) — сброс базы это не меняет')
+        import onboarding
+        if onboarding.is_unconfigured(self._config or {}):
+            lines.append("настройка не завершена — откройте помощник (--init-config) или впишите поля вручную")
+        self._render_view()
         self._notice("\n".join(lines))
 
     # --- MCP-секция (спека C) ---
@@ -1509,9 +2129,9 @@ class SettingsScreen(Screen):
         if warn_detail:
             extras.append(warn_detail)
         if overridden:
-            from config_origin import OVERLAY_LABELS
+            from config_origin import overlay_label
             origin = self._origin(overridden[0])
-            source = OVERLAY_LABELS[origin.overlay_kind]
+            source = overlay_label(origin)
             # «применится со следующего запуска» здесь НЕ говорим — не применится вовсе.
             # Поле называем по имени: флеш виден уже на хабе, где секции не видно.
             lines = ["✓ записано в config.yml — но сейчас не действует:",
@@ -1701,6 +2321,10 @@ class SettingsScreen(Screen):
                 event.stop()
                 self._cancel_update()
                 return
+            if self._view == _UPDATE and self._reset_awaiting_confirm:
+                event.stop()
+                self._cancel_reset()
+                return
             if self._view in _EDITOR_SECTIONS and self._pending_env_save is not None:
                 event.stop()
                 self._cancel_env_confirm()     # отмена подтверждения, из секции не выходим
@@ -1726,6 +2350,11 @@ class SettingsScreen(Screen):
             event.stop()
             if event.key == "enter":
                 self._confirm_update()
+            return                                     # прочие клавиши — no-op, пока висит confirm
+        if self._view == _UPDATE and self._reset_awaiting_confirm:
+            event.stop()
+            if event.key == "enter":
+                self._confirm_reset()
             return                                     # прочие клавиши — no-op, пока висит confirm
         if event.key in ("pageup", "pagedown", "ctrl+pageup", "ctrl+pagedown"):
             event.stop()                          # Ctrl+ — тихий алиас для мышечной памяти
@@ -1874,8 +2503,8 @@ class SettingsScreen(Screen):
                 self._render_view()
             return
         if self._view == _MODES:
-            from tui.toggles import TOGGLES
-            rows = list(TOGGLES.keys())
+            from tui.toggles import group_toggle_names
+            rows = group_toggle_names("rigor")
             if event.key in ("up", "down"):
                 step = -1 if event.key == "up" else 1
                 self._modes_idx = (self._modes_idx + step) % len(rows)
@@ -1885,6 +2514,29 @@ class SettingsScreen(Screen):
             event.stop()
             self._modes_apply(-1 if event.key == "left" else 1)
             return
+        if self._view == _PROFILES:
+            self._profiles_disk_cache = {}   # нажатие — свежий взгляд на диск
+            rows = self._profiles_rows()
+            if event.key in ("up", "down"):
+                event.stop()
+                step = -1 if event.key == "up" else 1
+                self._profiles_idx = (self._profiles_idx + step) % len(rows)
+                self._render_view()
+                return
+            row = self._profiles_row_under_cursor(rows)
+            if event.key in ("left", "right") and row["kind"] == "level":
+                event.stop()
+                self._level_apply(-1 if event.key == "left" else 1)
+                return
+            if event.key == "enter":
+                event.stop()
+                if row["kind"] == "level":
+                    self._level_apply(1)
+                elif row["kind"] == "profile":
+                    self._activate_profile(row["name"], row["ref"])
+                elif row["kind"] == "none":
+                    self._deactivate_profile()
+                return
         if self._view == _MCP and self._writable_or_mcp():
             ed = self._mcp_editor()
             if ed is not None:
