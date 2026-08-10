@@ -5,13 +5,46 @@ from typing import Any, Callable, Dict, Optional, Tuple
 from config_modules.backend import DEFAULT_REQUEST_TIMEOUT_SEC
 from runtime_notices import maybe_push_llm_failure_notice
 from utils.connect_backend import request_backend_chat_completions
-from utils.backend_errors import is_retriable_backend_error
+from utils.backend_errors import EmbeddedChoiceError, is_retriable_backend_error
 
 _CHAT_COMPLETIONS_HTTP_RETRY_DELAY_SEC = 3.0
 _CHAT_COMPLETIONS_HTTP_RETRY_FACTOR = 0.5
 # До 5 попыток с понижением max_tokens после HTTP-ошибки (один HTTP-запрос
 # на шаг, без transport-ретраев — сеть уже отработала на первой попытке).
 _CHAT_COMPLETIONS_ADAPTIVE_MAX_TOKEN_STEPS = 5
+
+
+def _raise_on_embedded_choice_error(response: Dict[str, Any]) -> None:
+    """Поднять EmbeddedChoiceError, если провайдер зашил ошибку внутрь HTTP-200.
+
+    Прокси вроде OpenRouter возвращают 200 с choices[0].error = {code, message,
+    metadata} (напр. 504 "Upstream idle timeout exceeded"). Без этой проверки
+    такая ошибка «успешно» проходит транспорт и ретрай-политику и фаталит позже
+    в конвертации (get_output_list), уже без шанса на ретрай. Вызывается ДО
+    выхода из retry-границы, поэтому embedded-ошибка получает тот же адаптивный
+    ретрай-цикл, что и обычные HTTP-ошибки."""
+    if not isinstance(response, dict):
+        return
+    choices = response.get("choices")
+    if not isinstance(choices, list) or not choices:
+        return
+    ch0 = choices[0]
+    if not isinstance(ch0, dict):
+        return
+    err = ch0.get("error")
+    if not isinstance(err, dict):
+        return
+    code = err.get("code")
+    try:
+        status = int(code) if code is not None else None
+    except (TypeError, ValueError):
+        status = None
+    raise EmbeddedChoiceError(
+        "provider returned embedded choice error: "
+        f"code={code!r} message={err.get('message')!r}",
+        status_code=status,
+        metadata=err.get("metadata"),
+    )
 
 
 def _reduced_chat_completions_max_tokens(*, configured: int, minimum: int) -> int:
@@ -29,6 +62,7 @@ def request_chat_completions_with_policy(
     verify: bool,
     cert: Optional[Tuple[str, str]] = None,
     use_retry: bool,
+    retry_embedded_choice_errors: bool = True,
     logger: logging.Logger | None = None,
     on_delta=None,
     request_label: Optional[str] = None,
@@ -62,6 +96,8 @@ def request_chat_completions_with_policy(
             timeout=timeout,
             config_proxy=config_proxy,
         )
+        if retry_embedded_choice_errors:
+            _raise_on_embedded_choice_error(response)
         return response, payload
 
     try:

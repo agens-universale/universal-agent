@@ -23,6 +23,21 @@ _CONTEXT_OVERFLOW_MARKERS = (
 )
 
 
+class EmbeddedChoiceError(Exception):
+    """Ошибка, зашитая провайдером-прокси внутрь HTTP-200 ответа
+    (choices[0].error = {code, message, metadata}; стиль OpenRouter).
+
+    Поверхностно запрос «успешен», поэтому транспорт её не ретраит, а фаталит
+    она позже — в конвертации ответа, уже за границей retry-политики.
+    Несём status_code (из error.code), чтобы is_retriable_backend_error
+    классифицировал её как обычную HTTP-ошибку бэкенда."""
+
+    def __init__(self, message, *, status_code=None, metadata=None):
+        super().__init__(message)
+        self.status_code = status_code
+        self.metadata = metadata
+
+
 def is_auth_error(exc: BaseException) -> bool:
     """401 от бэкенда — истёкший/невалидный токен доступа. Лечится пере-выпуском
     токена (`auth_connector.get_token(force=True)`) + повтор запроса один раз
@@ -46,6 +61,8 @@ def is_retriable_backend_error(exc: BaseException) -> bool:
     if isinstance(exc, requests.exceptions.HTTPError):
         status_code = getattr(getattr(exc, "response", None), "status_code", None)
     elif isinstance(exc, BackendStreamError):
+        status_code = exc.status_code
+    elif isinstance(exc, EmbeddedChoiceError):
         status_code = exc.status_code
     else:
         return False

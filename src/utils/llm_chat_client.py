@@ -202,6 +202,7 @@ def request_chat_completion_text(
             verify=cfg.get("use_ssl", True),
             cert=get_backend_client_cert(cfg),
             use_retry=cfg.get("use_retry", False),
+            retry_embedded_choice_errors=cfg.get("retry_embedded_choice_errors", True),
             logger=getattr(ctx, "logger", None),
             request_label=request_label,
             runtime_notices_enabled=bool(getattr(ctx, "is_tui", False)),
