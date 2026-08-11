@@ -84,3 +84,36 @@ def test_flag_disabled_passes_response_through(monkeypatch):
     res, _payload = _run_policy(retry_embedded_choice_errors=False)
     assert calls["n"] == 1  # старое поведение: ответ уходит наверх как есть
     assert res["choices"][0]["error"]["code"] == 504
+
+
+def _finish_error_empty_response():
+    # Вторая форма embedded-ошибки (регрессия: прогон H4, триал oqskzA3):
+    # finish_reason="error" без error-поля и без контента. Раньше улетала
+    # фатальным ValueError в get_output_list уже за retry-границей.
+    return {"choices": [{"finish_reason": "error", "message": {}}]}
+
+
+def test_finish_reason_error_empty_retried_then_succeeds(monkeypatch):
+    calls = _patch_transport(
+        monkeypatch,
+        lambda n: _finish_error_empty_response() if n == 1 else _ok_response(),
+    )
+    res, _payload = _run_policy()
+    assert res["choices"][0]["message"]["content"] == "ok"
+    assert calls["n"] == 2  # error-финиш в 200 → адаптивный ретрай → успех
+
+
+def test_finish_reason_error_with_content_accepted(monkeypatch):
+    # Ответ с контентом — пригоден: permissive-путь normalize_finish_reason
+    # принимает его (с warning). Ретрай не нужен, исключения нет.
+    calls = _patch_transport(
+        monkeypatch,
+        lambda _n: {
+            "choices": [
+                {"finish_reason": "error", "message": {"content": "partial"}}
+            ]
+        },
+    )
+    res, _payload = _run_policy()
+    assert calls["n"] == 1
+    assert res["choices"][0]["message"]["content"] == "partial"

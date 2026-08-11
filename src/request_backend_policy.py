@@ -15,36 +15,38 @@ _CHAT_COMPLETIONS_ADAPTIVE_MAX_TOKEN_STEPS = 5
 
 
 def _raise_on_embedded_choice_error(response: Dict[str, Any]) -> None:
-    """Поднять EmbeddedChoiceError, если провайдер зашил ошибку внутрь HTTP-200.
-
-    Прокси вроде OpenRouter возвращают 200 с choices[0].error = {code, message,
-    metadata} (напр. 504 "Upstream idle timeout exceeded"). Без этой проверки
-    такая ошибка «успешно» проходит транспорт и ретрай-политику и фаталит позже
-    в конвертации (get_output_list), уже без шанса на ретрай. Вызывается ДО
-    выхода из retry-границы, поэтому embedded-ошибка получает тот же адаптивный
-    ретрай-цикл, что и обычные HTTP-ошибки."""
+    """Поднять EmbeddedChoiceError, если провайдер зашил ошибку внутрь HTTP-200:
+    choices[0].error = {code, message, metadata} (стиль OpenRouter, напр. 504
+    "Upstream idle timeout") или finish_reason="error" с пустым выбором (без
+    content/tool_calls). Иначе такая ошибка «успешно» проходит транспорт и
+    фаталит позже в конвертации, уже за retry-границей; вызывается до выхода
+    из неё, поэтому получает тот же ретрай-цикл, что и HTTP-ошибки.
+    finish_reason="error" С контентом не трогаем: его принимает permissive-путь
+    normalize_finish_reason (с warning)."""
     if not isinstance(response, dict):
         return
     choices = response.get("choices")
-    if not isinstance(choices, list) or not choices:
+    if not isinstance(choices, list) or not choices or not isinstance(choices[0], dict):
         return
     ch0 = choices[0]
-    if not isinstance(ch0, dict):
-        return
     err = ch0.get("error")
-    if not isinstance(err, dict):
-        return
-    code = err.get("code")
-    try:
-        status = int(code) if code is not None else None
-    except (TypeError, ValueError):
-        status = None
-    raise EmbeddedChoiceError(
-        "provider returned embedded choice error: "
-        f"code={code!r} message={err.get('message')!r}",
-        status_code=status,
-        metadata=err.get("metadata"),
-    )
+    if isinstance(err, dict):
+        code = err.get("code")
+        try:
+            status = int(code) if code is not None else None
+        except (TypeError, ValueError):
+            status = None
+        raise EmbeddedChoiceError(
+            "provider returned embedded choice error: "
+            f"code={code!r} message={err.get('message')!r}",
+            status_code=status,
+            metadata=err.get("metadata"),
+        )
+    fr = ch0.get("finish_reason")
+    if isinstance(fr, str) and fr.lower() == "error":
+        msg = ch0.get("message") or {}
+        if not (msg.get("content") or msg.get("tool_calls")):
+            raise EmbeddedChoiceError("provider returned finish_reason='error' with empty choice")
 
 
 def _reduced_chat_completions_max_tokens(*, configured: int, minimum: int) -> int:
