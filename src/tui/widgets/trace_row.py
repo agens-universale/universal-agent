@@ -76,7 +76,6 @@ class TraceRow(ClickModelMixin, Widget):
         super().__init__(**kwargs)
         self._prefix = prefix
         self._content = content
-        self._kind_class = kind_class
         self._event_no = event_no
         # Apply kind_class to TraceRow itself so CSS rules (margin-top etc.)
         # push the whole row, keeping prefix-Static and content-Static aligned.

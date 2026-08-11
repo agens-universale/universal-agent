@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from tui.widgets.ask_human_banner import AskHumanBanner
+    pass
 
 from textual import events
 from textual.app import ComposeResult
@@ -24,8 +24,6 @@ from textual.widgets import Static, TextArea
 from intent_log.record import ACTION_USER_ASK
 from intent_log.serialize import deserialize_list
 from runtime_notices import collect_unread_runtime_notices
-from startup_notices import collect_startup_notices
-from tools.registry import all_builtin_tool_names
 from tui.commands import build_default_registry, closest_command
 from tui.models import TaskCursor
 from rich.text import Text
@@ -3657,49 +3655,6 @@ class TraceScreen(Screen):
             )
         )
 
-    def action_diff_approve_all(self) -> None:
-        """Принять все pending (оставлен для явного вызова; хоткей Ctrl+A — на /diff)."""
-        from diff_tui.feedback import format_approve_ack, format_bulk_approve_ack
-
-        svc = self._diff_service_for_preview()
-        if svc is None:
-            self._mount_trace_row(
-                prefix="· ",
-                content="принять все: launch_root не задан",
-                kind_class="line-meta",
-            )
-            return
-        try:
-            pending = svc.list_entries(pending_only=True)
-        except Exception:
-            self._mount_trace_row(
-                prefix="· ",
-                content="принять все: не удалось прочитать pending",
-                kind_class="line-meta",
-            )
-            return
-        n = len(pending)
-        if n == 0:
-            self._mount_trace_row(
-                prefix="· ",
-                content="Нет изменений для принятия",
-                kind_class="line-meta",
-            )
-            return
-        try:
-            result = svc.approve_all()
-        except Exception:
-            self._mount_trace_row(
-                prefix="· ",
-                content="принять все: ошибка",
-                kind_class="line-meta",
-            )
-            return
-        if svc.mode == "git-mode" and (result.git_count or result.cache_count):
-            ack = format_bulk_approve_ack(result.git_count, result.cache_count)
-        else:
-            ack = format_approve_ack(n)
-        self._on_diff_ui_ack(ack or f"Принято {n}")
 
     def _on_diff_ui_ack(self, text: str) -> None:
         """TUI-only строка в трейсе после принять/откатить (не в thread модели)."""

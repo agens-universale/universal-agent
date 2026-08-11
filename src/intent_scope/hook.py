@@ -85,7 +85,6 @@ def _append_aggregated_tool_intent(
         )
         return
 
-    before = len(getattr(state, "current_user_intent", []) or [])
     appended = append_tool_aggregated_to_current(
         state, tool_name, summary_line, fallback=used_fallback
     )

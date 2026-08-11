@@ -326,7 +326,7 @@ Find all Markdown files under a tree:
         """List only immediate children of the directory."""
         try:
             entries = self._backend.listdir(root_path)
-        except PermissionError as e:
+        except PermissionError:
             raise PermissionError(f"Permission denied: cannot list contents of '{root_path}'")
         except Exception as e:
             raise RuntimeError(f"Failed to list directory '{root_path}': {str(e)}")

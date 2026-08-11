@@ -5,12 +5,13 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict
 
-from config_modules.project_memory import (
+# Re-export'ы project_memory: потребители (config_modules.root, message_policy.*, тесты)
+# импортируют эти имена отсюда — в самом модуле они не используются.
+from config_modules.project_memory import (  # noqa: F401
     ProjectMemoryConfig,
     ProjectMemoryConfig as ProjectMemoryNoticeConfig,
     normalize_project_memory_config,
     normalize_project_memory_config as normalize_project_memory_notice_config,
-    project_memory_from_config_dict,
     project_memory_from_config_dict as project_memory_notice_from_config_dict,
     project_memory_notice_enabled,
 )

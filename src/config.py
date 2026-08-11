@@ -9,7 +9,7 @@ import yaml
 
 from config_modules.auth import build_auth_connector
 from config_modules.env_vars import project_gc_dir
-from config_modules.backend import parse_chat_completions_max_tokens
+from config_modules.backend import parse_chat_completions_max_tokens  # noqa: F401  # re-export: processing_responses импортирует из config
 from config_modules.common import (
     apply_swarm_env_overrides,
 )

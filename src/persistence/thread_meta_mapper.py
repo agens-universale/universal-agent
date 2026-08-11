@@ -4,10 +4,9 @@ from __future__ import annotations
 
 from typing import Any, Dict, Mapping, Optional
 
-from intent_log.serialize import deserialize_list, serialize_for_meta
+from intent_log.serialize import serialize_for_meta
 from persistence.schema import (
     STATE_SCHEMA_VERSION,
-    StateSchemaError,
     normalize_working_memory,
     reject_legacy_memory_keys,
     serialize_shared_block,
