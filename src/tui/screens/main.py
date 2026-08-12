@@ -179,7 +179,7 @@ def select_active_substate(
 # подсказка «/mcp» уже в бренд-карточке.)
 # Diff: F3 в базовом хроме футера; CTA в трейсе — пути pending + [F3]/diff.
 _FOOTER_LEFT = "F1/help  F2/sessions  F3/diff  F5/config  F6/settings  F7/buffer"
-_FOOTER_RUNNING_LEFT = "F1/help  F2/sessions  F3/diff  F7/buffer  [Ctrl+C]/stop"
+_FOOTER_RUNNING_LEFT = "F1/help  F2/sessions  F3/diff  F7/buffer  Ctrl+C/stop"
 _PLACEHOLDER_READY = "опишите задачу или /команда"
 _HINT_TEXT = {
     "clear": "Esc ещё раз, чтобы очистить",

@@ -24,8 +24,12 @@ from intent_log.user_turn import append_user_asks_from_messages, init_subagent_o
 from run_context import RunContext
 from tools.skills.registry import get_skills_registry
 from states import State
-from tools import build_tools_data
-from tools.subagents.registry import get_subagent_class
+from tools import (
+    SUBAGENT_TOOLS_ALLOW_KEY,
+    SUBAGENT_TOOLS_STOP_KEY,
+    build_tools_data,
+)
+from tools.subagents.registry import get_subagent_class, resolve_subagent_definitions
 from usage.account import CATEGORY_SUBAGENT as USAGE_CATEGORY_SUBAGENT
 from usage.account import UsageAccount
 from usage.context import usage_scope
@@ -71,6 +75,9 @@ class SubagentRunner:
         self._orchestrator_state = orchestrator_state
         self._config = config_dict
         self._parent_call_id: str = ""
+        # Имя тула текущего вызова: нужно сборке child_config, а до неё
+        # доезжают не все методы (у _build_child_state его в сигнатуре нет).
+        self._active_tool_name: str = ""
         # Уже влитый в parent снимок child.usage — для incremental delta (без double-count).
         self._usage_pushed = UsageAccount()
         # То же для счётчика вызовов тулов ребёнка: сколько его вызовов уже
@@ -87,7 +94,8 @@ class SubagentRunner:
         parent_call_id: Optional[str] = None,
     ) -> str:
         self._parent_call_id = parent_call_id or ""
-        subagent_cls = get_subagent_class(tool_name)
+        self._active_tool_name = tool_name
+        subagent_cls = get_subagent_class(tool_name, self._config)
         if subagent_cls is None:
             return self._error_response(
                 tool_name=tool_name,
@@ -443,12 +451,37 @@ class SubagentRunner:
         self._push_usage_delta(child_state, child_ctx)
         self._push_tool_calls_delta(child_state)
 
+    def _build_child_config(self) -> Dict[str, Any]:
+        """Единственная сборка конфига дочернего рана.
+
+        Метод общий для _build_child_state и _build_child_ctx намеренно: раньше
+        словарь собирался в двух местах независимо, и они обязаны были оставаться
+        синхронными — ровно на этом уже разъезжались ctx.trace_id и config_dict.
+
+        ``stop_tools`` файла ДОПОЛНЯЕТ глобальный ``agent.stop_tools``, а не
+        заменяет: глобальный уже вычтен внутри get_builtin_tools_data, а этот
+        список применяется поверх, к полному набору (включая mcp_*). Снять
+        глобальный запрет из файла сабагента нельзя.
+        """
+        child_config = {**self._config, "use_local_subagents": False}
+        definition = resolve_subagent_definitions(self._config).get(
+            self._active_tool_name
+        )
+        if definition is not None:
+            child_config[SUBAGENT_TOOLS_ALLOW_KEY] = (
+                list(definition.tools) if definition.tools is not None else None
+            )
+            child_config[SUBAGENT_TOOLS_STOP_KEY] = list(definition.stop_tools)
+        return child_config
+
     def _build_child_state(self, agent_role: str) -> State:
         """Создать дочерний State, наследуя общие данные от оркестратора."""
-        child_config = {**self._config, "use_local_subagents": False}
+        child_config = self._build_child_config()
         parent_backend = getattr(self._ctx, "os_backend", None)
         child_tools_data, child_tools_spec, child_tools_descr, _mcp_status = build_tools_data(
-            child_config, os_backend=parent_backend
+            child_config,
+            os_backend=parent_backend,
+            logger=getattr(self._ctx, "logger", None),
         )
         child_system_prompt = self._resolve_subagent_system_prompt()
 
@@ -478,17 +511,30 @@ class SubagentRunner:
         child_state.discard_writes_after_stop = parent.discard_writes_after_stop
         return child_state
 
+    def _is_custom_subagent(self) -> bool:
+        """Задан ли текущий сабагент файлом, а не классом."""
+        return self._active_tool_name in resolve_subagent_definitions(self._config)
+
     def _resolve_subagent_system_prompt(self) -> Optional[str]:
-        """Вернуть системный промпт для субагента с fallback на промпт родителя."""
-        prompt_path_raw = self._config.get("chat_completions_subagent_system_prompt_path")
+        """Вернуть системный промпт для субагента с fallback на промпт родителя.
+
+        У кастомных (файловых) сабагентов промпт свой: он предупреждает модель,
+        что роль написана оператором в локальном файле, прав не выдаёт и может
+        расходиться с фактическим набором инструментов.
+        """
+        if self._is_custom_subagent():
+            config_key = "chat_completions_custom_subagent_system_prompt_path"
+            default_name = "chat_completions_custom_subagent_system_prompt.md"
+        else:
+            config_key = "chat_completions_subagent_system_prompt_path"
+            default_name = "chat_completions_subagent_system_prompt.md"
+
+        prompt_path_raw = self._config.get(config_key)
         candidate_paths: List[str] = []
         if isinstance(prompt_path_raw, str) and prompt_path_raw.strip():
             candidate_paths.append(os.path.abspath(prompt_path_raw.strip()))
         # bundled_root() — единый резолвер ассетов (editable → repo, wheel → site-packages).
-        default_prompt_path = str(
-            bundled_root() / "prompts" / "chat_completions_subagent_system_prompt.md"
-        )
-        candidate_paths.append(default_prompt_path)
+        candidate_paths.append(str(bundled_root() / "prompts" / default_name))
 
         for prompt_path in candidate_paths:
             if not prompt_path:
@@ -543,7 +589,7 @@ class SubagentRunner:
 
     def _build_child_ctx(self, tool_name: str) -> Any:
         """Построить RunContext для дочернего агента (без субагентов в tools)."""
-        child_config = {**self._config, "use_local_subagents": False}
+        child_config = self._build_child_config()
         child_run_id = generate_run_id()
         child_agent_kind = tool_name
         child_logger, child_log_path, child_summary_trace_path = create_run_logger(
@@ -564,6 +610,7 @@ class SubagentRunner:
             child_config,
             os_backend=parent_backend,
             skills_registry=child_skills_registry,
+            logger=child_logger,
         )
 
         child_ctx = RunContext(

@@ -16,8 +16,16 @@ class AgentConfig(BaseModel):
     model: str = "MiniMax-M2.7"
     system_prompt_id: str = "v1"
     use_server_subagents: bool = False
-    use_local_subagents: bool = False
+    # bool или список имён. Список выбирает КАСТОМНЫХ; встроенные семь доступны
+    # всегда, пока значение не false. Пустой список = только встроенные.
+    use_local_subagents: bool | list[str] = False
     subagent_max_steps: int = 100
+    # Папка с файлами-определениями кастомных сабагентов. None/пусто → папка не
+    # читается вовсе и доступны только встроенные классы.
+    subagents_dir: str | None = None
+    # Предел числа подхватываемых кастомных сабагентов. ge=1: ноль означал бы
+    # «папка задана, но агентов нет» — тихая и необъяснимая для оператора ситуация.
+    subagents_max_count: int = Field(default=20, ge=1)
     client_name: str = "mini_cli_pub_agent_1"
     x_cl_id: str = "12345"
     # Имя HTTP-заголовка для внешнего trace_id. None → дефолты по назначению:
