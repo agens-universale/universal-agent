@@ -13,6 +13,7 @@ from typing import Any
 from config_modules.todo import todo_reminder_steps_from_config
 from constants.tool_names import SESSION_TODO_TOOL_NAME
 from message_policy.todo_context import format_todo_snapshot
+from message_policy.tool_availability import tool_is_available
 from message_policy.tool_usage_notice.policy import (
     batch_used_tool,
     wrap_thread_memory_technical_user_message,
@@ -74,13 +75,22 @@ def apply_todo_reminder(
     config_dict: Any,
     *,
     step_messages: list[dict[str, Any]],
+    available_tools: set[str] | None = None,
 ) -> list[dict[str, Any]]:
     """+1 за persist-batch без вызова session_todo при незакрытых пунктах;
-    на пороге — один reminder со снапшотом списка и сброс счётчика."""
+    на пороге — один reminder со снапшотом списка и сброс счётчика.
+
+    ``available_tools`` — набор тулов рана (``None`` = неизвестен, гейт не
+    применяется). Звать модель к туду, которого в ране нет, нельзя: ``_stopped``
+    видит только глобальный ``stop_tools``, а набор сужается ещё и файлом
+    сабагента / harbor / неподнявшимся MCP.
+    """
     steps_limit = todo_reminder_steps_from_config(
         config_dict if isinstance(config_dict, dict) else None
     )
     if steps_limit <= 0 or _stopped(config_dict):
+        return messages
+    if not tool_is_available(available_tools, SESSION_TODO_TOOL_NAME):
         return messages
 
     items = _todo_items(state)
