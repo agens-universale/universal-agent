@@ -14,6 +14,8 @@ from config_modules.intent_scope import intent_scope_from_config_dict
 from execution_workspace import ExecutionWorkspace
 from run_summary_coordinator import RunSummaryCoordinator
 from summarize.config import parse_summary_trigger_chars
+from constants.tool_names import SESSION_MEMORY_TOOL_NAME
+from message_policy.tool_availability import available_tool_names, tool_is_available
 from message_policy.tool_usage_notice.policy import (
     get_thread_memory_registers_from_shared,
     subagent_thread_memory_bootstrap_text,
@@ -163,7 +165,17 @@ class SubagentRunner:
         messages = self._build_initial_messages(child_state, agent_role, user_message)
         init_subagent_open_turn(child_state, initial_message)
         shared_mf = get_thread_memory_registers_from_shared(child_state.shared)
-        bootstrap_text = subagent_thread_memory_bootstrap_text(self._config, shared_mf)
+        # Bootstrap памяти директивен («update persistent registers with the thread
+        # memory tool»), поэтому шлём его только если тул у ребёнка есть. Конфиг
+        # здесь родительский — набор ребёнка знает только его State, собранный
+        # выше уже с учётом tools/stop_tools из файла сабагента.
+        bootstrap_text = (
+            subagent_thread_memory_bootstrap_text(self._config, shared_mf)
+            if tool_is_available(
+                available_tool_names(child_state), SESSION_MEMORY_TOOL_NAME
+            )
+            else None
+        )
         if bootstrap_text:
             messages.append(
                 wrap_thread_memory_technical_user_message(

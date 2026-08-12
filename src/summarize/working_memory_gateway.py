@@ -217,13 +217,30 @@ def read_snapshot_from_state(state: Any) -> WorkingMemorySnapshot:
 MEMORY_DELTAS_FORMAT_REPAIR_REQUEST_LABEL = "working_memory_deltas_format_repair"
 
 
-def render_persistent_state_for_prompt(snapshot: WorkingMemorySnapshot) -> str:
+def render_persistent_state_for_prompt(
+    snapshot: WorkingMemorySnapshot,
+    session_todo: Any = None,
+) -> str:
+    # nested: message_policy → tool_usage_notice → states → tools → summarize
+    from message_policy.todo_context import render_todo_for_persistent_state
+
     data = snapshot.to_dict()
     parts = ["<persistent_state>", "<session_memory>"]
     for name in REGISTER_ORDER:
         parts.extend((f"<{name}>", data.get(name, ""), f"</{name}>"))
-    parts.extend(("</session_memory>", "</persistent_state>"))
+    parts.append("</session_memory>")
+    # Чеклист задачи — рядом с памятью, чтобы сводка пронесла план через сжатие.
+    # Пустой чеклист тега не добавляет.
+    todo_block = render_todo_for_persistent_state(session_todo)
+    if todo_block:
+        parts.append(todo_block)
+    parts.append("</persistent_state>")
     return "\n".join(parts)
+
+
+def read_session_todo_from_state(state: Any) -> list:
+    raw = getattr(state, "session_todo", None)
+    return raw if isinstance(raw, list) else []
 
 
 def resolve_persistent_state_block(
@@ -233,7 +250,10 @@ def resolve_persistent_state_block(
     """Возвращает готовый блок для prompt: явный аргумент или snapshot из state."""
     if persistent_state_block is not None:
         return str(persistent_state_block)
-    return render_persistent_state_for_prompt(read_snapshot_from_state(state))
+    return render_persistent_state_for_prompt(
+        read_snapshot_from_state(state),
+        session_todo=read_session_todo_from_state(state),
+    )
 
 
 def build_memory_deltas_format_repair_messages(

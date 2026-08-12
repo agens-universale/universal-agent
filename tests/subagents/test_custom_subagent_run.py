@@ -5,7 +5,12 @@ from run_context import create_run_context
 from tools import SUBAGENT_TOOLS_ALLOW_KEY, SUBAGENT_TOOLS_STOP_KEY
 from tools.subagents.runner import SubagentRunner
 
-REQUIRED = ("turn_finish", "session_read_stored_tool_output")
+REQUIRED = (
+    "turn_finish",
+    "session_read_stored_tool_output",
+    "session_memory",
+    "session_todo",
+)
 
 
 def _agent_file(tmp_path, name="subagent_alpha", tools=None, stop_tools=()):

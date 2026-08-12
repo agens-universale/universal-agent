@@ -111,3 +111,61 @@ class TestConsumerApply:
         assert len(finished) == 1
         assert finished[0]["ok"] is True
         assert heartbeats  # at least one after end
+
+    def test_session_todo_tool_start_routes_to_todo_mount(self):
+        consumer = SubagentProgressConsumer()
+        mounted: list[tuple[str, dict]] = []
+        ev = _ev(
+            kind="tool_start",
+            tool_name="session_todo",
+            tool_call_id="c1",
+            todo_items=[{"content": "a", "status": "pending"}],
+        )
+        consumer.apply_drained(
+            [ev],
+            mount_nested_tool=lambda **kw: mounted.append(("tool", kw)),
+            finish_nested_tool=lambda **kw: None,
+            mount_nested_prose=lambda **kw: None,
+            parent_heartbeat=lambda **kw: None,
+            mount_nested_todo=lambda **kw: mounted.append(("todo", kw)),
+        )
+        kinds = [k for k, _ in mounted]
+        assert "todo" in kinds and "tool" not in kinds
+
+    def test_session_todo_every_call_routes_to_todo_mount(self):
+        """v3 спеки: разворачиваем каждый вызов, включая смену только статусов."""
+        consumer = SubagentProgressConsumer()
+        mounted: list[tuple[str, dict]] = []
+        first = _ev(
+            kind="tool_start", tool_name="session_todo", tool_call_id="c1",
+            todo_items=[{"content": "a", "status": "pending"}],
+        )
+        second = _ev(
+            kind="tool_start", tool_name="session_todo", tool_call_id="c2",
+            todo_items=[{"content": "a", "status": "completed"}],
+        )
+        consumer.apply_drained(
+            [first, second],
+            mount_nested_tool=lambda **kw: mounted.append(("tool", kw)),
+            finish_nested_tool=lambda **kw: None,
+            mount_nested_prose=lambda **kw: None,
+            parent_heartbeat=lambda **kw: None,
+            mount_nested_todo=lambda **kw: mounted.append(("todo", kw)),
+        )
+        assert [k for k, _ in mounted] == ["todo", "todo"]
+
+    def test_session_todo_without_todo_callback_falls_back_to_tool_row(self):
+        consumer = SubagentProgressConsumer()
+        mounted: list[tuple[str, dict]] = []
+        ev = _ev(
+            kind="tool_start", tool_name="session_todo", tool_call_id="c1",
+            todo_items=[{"content": "a", "status": "pending"}],
+        )
+        consumer.apply_drained(
+            [ev],
+            mount_nested_tool=lambda **kw: mounted.append(("tool", kw)),
+            finish_nested_tool=lambda **kw: None,
+            mount_nested_prose=lambda **kw: None,
+            parent_heartbeat=lambda **kw: None,
+        )
+        assert [k for k, _ in mounted] == ["tool"]
