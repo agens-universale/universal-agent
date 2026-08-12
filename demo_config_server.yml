@@ -27,7 +27,6 @@ agent_overrides:
     - fs_list_files
     - fs_find_files_by_name
     - fs_find_in_files
-    - fs_search_files
     - fs_search_and_replace
     - exec_command
     - exec_python
