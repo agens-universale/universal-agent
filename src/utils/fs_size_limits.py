@@ -17,6 +17,7 @@ from typing import Any, Mapping, Optional
 
 DEFAULT_FS_READ_MAX_BYTES = 8 * 1024 * 1024
 DEFAULT_FS_MUTATE_MAX_BYTES = 16 * 1024 * 1024
+DEFAULT_FS_FIND_IN_FILES_MAX_FILE_BYTES = 16 * 1024 * 1024
 
 
 def _positive_int(raw: Any, default: int) -> int:
@@ -46,6 +47,25 @@ def fs_mutate_max_bytes(config: Optional[Mapping[str, Any]] = None) -> int:
     if "max_mutate_bytes" in fs:
         return _positive_int(fs.get("max_mutate_bytes"), DEFAULT_FS_MUTATE_MAX_BYTES)
     return DEFAULT_FS_MUTATE_MAX_BYTES
+
+
+def _find_in_files_section(config: Optional[Mapping[str, Any]]) -> Mapping[str, Any]:
+    fs = _fs_tools_section(config)
+    raw = fs.get("find_in_files")
+    return raw if isinstance(raw, Mapping) else {}
+
+
+def fs_find_in_files_max_bytes(config: Optional[Mapping[str, Any]] = None) -> int:
+    """Unified file-size cap for ``fs_find_in_files`` (file or directory mode).
+
+    Reads ``fs_tools.find_in_files.max_file_bytes`` (default 16 MiB). Does NOT
+    fall back to ``max_read_bytes`` / ``max_mutate_bytes`` — find_in_files has its
+    own cap per spec.
+    """
+    fif = _find_in_files_section(config)
+    if "max_file_bytes" in fif:
+        return _positive_int(fif.get("max_file_bytes"), DEFAULT_FS_FIND_IN_FILES_MAX_FILE_BYTES)
+    return DEFAULT_FS_FIND_IN_FILES_MAX_FILE_BYTES
 
 
 def file_too_large_error(

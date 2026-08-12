@@ -5,7 +5,7 @@
 запись не покрывает все кейсы сразу:
 
 - ``stored_tool_output_truncated.json`` — запись stored_tool_output из треда
-  ``data_cli_1319dcec...`` (source_tool=fs_list_files): поле ``content`` —
+  ``data_cli_1319dcec...`` (source_tool=fs_list_files legacy): поле ``content`` —
   ОБОРВАННЫЙ на inline-лимите (10000 симв.) JSON, который не парсится.
   В реальных данных content у stored_tool_output всегда усечён (стор срабатывает
   только на больших выводах) — проверяем, что разворачивание не падает и

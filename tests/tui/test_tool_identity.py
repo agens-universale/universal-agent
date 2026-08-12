@@ -13,6 +13,7 @@ def test_fs_tools_new_to_legacy():
     assert tool_id("fs_write_file") == "write_to_file"
     assert tool_id("fs_append_file") == "append_to_file"
     assert tool_id("fs_list_files") == "list_files"
+    assert tool_id("fs_find_files_by_name") == "find_files_by_name"
     assert tool_id("fs_search_files") == "search_files"
     assert tool_id("fs_search_and_replace") == "search_and_replace"
 

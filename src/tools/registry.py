@@ -7,6 +7,8 @@ from tools.fs.list_files import ListFiles
 from tools.fs.read_file import ReadFile
 from tools.fs.save_base64_file import SaveBase64File
 from tools.fs.search_and_replace import SearchAndReplace
+from tools.fs.find_files_by_name import FindFilesByName
+from tools.fs.find_in_files import FindInFiles
 from tools.fs.search_files import SearchFiles
 from tools.fs.write_to_file_tool import WriteToFile
 from tools.exec.download_file import DownloadFile
@@ -47,7 +49,9 @@ def _fs_registry() -> Dict[str, Dict[str, Any]]:
         "fs_read_file": _tool_entry(ReadFile),
         "fs_file_info": _tool_entry(FileInfo),
         "fs_list_files": _tool_entry(ListFiles),
+        "fs_find_files_by_name": _tool_entry(FindFilesByName),
         "fs_search_files": _tool_entry(SearchFiles),
+        "fs_find_in_files": _tool_entry(FindInFiles),
         "fs_search_and_replace": _tool_entry(SearchAndReplace),
         "fs_save_base64_file": _tool_entry(SaveBase64File),
     }

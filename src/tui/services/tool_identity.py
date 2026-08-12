@@ -34,6 +34,7 @@ _NEW_TO_CANONICAL: dict[str, str] = {
     # Тулы без core-константы (имена сняты в Task 3 на merged-дереве):
     "fs_append_file": "append_to_file",
     "fs_list_files": "list_files",
+    "fs_find_files_by_name": "find_files_by_name",
     "fs_search_files": "search_files",
     "fs_search_and_replace": "search_and_replace",
 }

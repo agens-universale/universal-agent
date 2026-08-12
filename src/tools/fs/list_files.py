@@ -18,10 +18,7 @@ from tools.fs.agent_hidden import is_agent_hidden
 
 
 class ListFiles(AbstractSimpleTool):
-    """
-    Tool to list files and directories in a given path.
-    Supports flat and depth-limited listing.
-    """
+    """List files and directories under a path with optional depth and glob filter."""
 
     @classmethod
     def tool_description(cls):
@@ -29,28 +26,30 @@ class ListFiles(AbstractSimpleTool):
             "type": "function",
             "name": "fs_list_files",
             "description": (
-                "Lists files and directories by path/name (not file contents); "
-                "does not search text inside files. Returns only the immediate children of `path` "
-                "by default (max_depth=0). To descend into subdirectories, set `max_depth` > 0 — "
-                "required for any glob containing '/' or '**' (e.g. '**/*.md', 'src/*.py'), "
-                "otherwise only top-level matches are returned. Returns: ok, path, max_depth, "
-                "max_entries, truncated, count, entries, and optional glob/error."
+                "List files and directories under an absolute directory `path` "
+                "(directory browse / tree listing). "
+                "Default max_depth=0 returns only immediate children; set max_depth > 0 to "
+                "descend that many levels. "
+                "Optional `glob` filters listed relative paths (listing filter only). "
+                "Does NOT search text inside files. "
+                "Returns: ok, path, max_depth, max_entries, truncated, count, entries, "
+                "optional glob/error."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "path": {
                         "type": "string",
-                        "description": "The absolute path of the directory to list contents from. Must be a valid existing directory."
+                        "description": (
+                            "Absolute path of the directory to list. "
+                            "Must be an existing directory."
+                        ),
                     },
                     "glob": {
                         "type": "string",
                         "description": (
-                            "Glob to find files/dirs by relative path from `path` "
-                            "(e.g., '*.py', '**/*.md', 'src/**'). Filters by name/path only, "
-                            "not by file contents. When unset, all entries are returned. "
-                            "Note: globs containing '/' or '**' require max_depth > 0 to match "
-                            "files in subdirectories."
+                            "Optional glob filter on relative paths from `path` while listing "
+                            "(e.g. '*.py', 'src/*'). Globs with '/' or '**' need max_depth > 0."
                         ),
                     },
                     "max_depth": {
@@ -58,9 +57,8 @@ class ListFiles(AbstractSimpleTool):
                         "minimum": 0,
                         "description": (
                             "Max directory depth to traverse. "
-                            "0 means only immediate children of `path` (default if omitted). "
-                            "Raise this for any glob with '/' or '**' (e.g. '**/*.md' needs "
-                            "depth 10+, '*/config.yml' needs depth 1)."
+                            "0 = only immediate children of `path` (default if omitted). "
+                            "Increase to list deeper levels of the tree."
                         )
                     },
                     "max_entries": {
@@ -80,16 +78,17 @@ class ListFiles(AbstractSimpleTool):
 
     @classmethod
     def prompt_description(cls):
-        description = '''Tool name: fs_list_files  
-Tool description: Lists files and directories by path/name (not contents); does not search text inside files. Returns only immediate children of `path` by default (max_depth=0). To descend into subdirectories, set max_depth > 0 — required for any glob containing '/' or '**' (e.g. '**/*.md', 'src/*.py').
-Input schema: {"type": "object", "properties": {"path": {"type": "string", "description": "The directory absolute path to list contents for."}, "max_depth": {"type": "integer", "minimum": 0, "description": "Max directory depth to traverse. Default 0 = only immediate children; raise for globs with '/' or '**' (**/*.md needs 10+, */config.yml needs 1)."}, "max_entries": {"type": "integer", "minimum": 1, "description": "Max number of returned entries. Default 200."}, "glob": {"type": "string", "description": "Glob by relative path (e.g. **/*.md). Name/path listing only — not content search."}}, "required": ["path"], "additionalProperties": false}
+        description = '''Tool name: fs_list_files
+Tool description: List files/directories under an absolute path with depth control. Default max_depth=0 = immediate children only; raise max_depth to list deeper. Optional glob filters the listing. Does NOT search text inside files.
+Input schema: {"type": "object", "properties": {"path": {"type": "string", "description": "Absolute directory to list."}, "max_depth": {"type": "integer", "minimum": 0, "description": "Max depth. Default 0 = immediate children."}, "max_entries": {"type": "integer", "minimum": 1, "description": "Max returned entries. Default 200."}, "glob": {"type": "string", "description": "Optional listing filter glob on relative paths."}}, "required": ["path"], "additionalProperties": false}
 
 Usage:
-- Use this tool to explore directory structure or **find files by name/glob**.
-- Always provide an **absolute path**.
-- Prefer `max_depth` to control how deep the traversal goes. Default **0** = only immediate children. Any glob with `/` or `**` (e.g. `**/*.md`, `src/*.py`, `*/config.yml`) requires `max_depth` > 0 — use depth 10+ for `**`, or at least the number of `/` in the glob.
-- Set `max_entries` to limit output size.
-- This tool does **not** search text/code inside files — only names and directory structure.
+- Browse a folder or limited-depth tree (ls / tree).
+- Always provide an **absolute** directory `path`.
+- Default **max_depth=0** = only immediate children.
+- Optional `glob` only filters what this listing returns.
+- Does **not** search text inside files.
+- Prefer this tool over shell `ls` / `dir`.
 - Return format (JSON string):
 {
   "tool": "fs_list_files",
@@ -107,9 +106,9 @@ Usage:
 }
 
 Important Rules:
-- **NEVER** use external commands like `ls`, `dir`, `find`, etc. — this tool is safe and cross-platform.
+- **NEVER** use external `ls` / `dir` for ordinary listing — this tool is safe and cross-platform.
 - The `path` must be a valid directory.
-- If the directory does not exist or is inaccessible, an error will be raised.
+- If the directory does not exist or is inaccessible, an error is returned.
 - Hidden files (like `.gitignore`) are included regardless of platform.
 - On Windows, uses file attributes to detect hidden files.
 
@@ -119,17 +118,17 @@ List top-level contents:
   "path": "/home/user/project"
 }
 
-List deeper files (example):
+List two levels deep:
 {
   "path": "/home/user/project",
-  "max_depth": 10
+  "max_depth": 2
 }
 
-Find all Markdown files under a tree:
+List only top-level Python files:
 {
   "path": "/home/user/project",
-  "glob": "**/*.md",
-  "max_depth": 20
+  "glob": "*.py",
+  "max_depth": 0
 }
 '''
         return description
