@@ -10,7 +10,12 @@ from tools.subagents.custom.file_subagent import (
     BoundFileSubagent,
 )
 
-REQUIRED = ("turn_finish", "session_read_stored_tool_output")
+REQUIRED = (
+    "turn_finish",
+    "session_read_stored_tool_output",
+    "session_memory",
+    "session_todo",
+)
 
 
 def _definition(tools=None, stop_tools=(), role="Ты — писатель."):
@@ -61,7 +66,7 @@ class TestRequiredTools:
             _definition(stop_tools=("exec_python",))
         ) == []
 
-    def test_required_set_is_exactly_two(self):
+    def test_required_set_is_exact(self):
         assert REQUIRED_TOOL_NAMES == set(REQUIRED)
 
 
