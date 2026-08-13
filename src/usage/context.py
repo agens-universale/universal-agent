@@ -76,7 +76,10 @@ def record_usage(raw_usage: Any) -> None:
     if parsed is None:
         ctx.account.add_missing(ctx.category)
     else:
-        ctx.account.add(ctx.category, parsed[0], parsed[1], parsed[2])
+        ctx.account.add(
+            ctx.category, parsed.input, parsed.output, parsed.cached,
+            cost=parsed.cost, billed=parsed.billed,
+        )
 
 
 class _OrphanAccount:
@@ -90,7 +93,10 @@ class _OrphanAccount:
         if parsed is None:
             self.account.add_missing(CATEGORY_UNCATEGORIZED)
         else:
-            self.account.add(CATEGORY_UNCATEGORIZED, parsed[0], parsed[1], parsed[2])
+            self.account.add(
+                CATEGORY_UNCATEGORIZED, parsed.input, parsed.output, parsed.cached,
+                cost=parsed.cost, billed=parsed.billed,
+            )
 
 
 _orphan_account = _OrphanAccount()

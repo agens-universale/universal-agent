@@ -127,3 +127,25 @@ def test_streaming_requests_usage_via_stream_options(monkeypatch):
     )
     assert captured["payload"].get("stream") is True
     assert captured["payload"].get("stream_options") == {"include_usage": True}
+
+
+# -------- Task 3: фактическая стоимость от провайдера --------
+
+
+def test_record_usage_delivers_cost():
+    """Фактическая стоимость от провайдера доезжает в накопитель через record_usage."""
+    from usage.context import record_usage
+    account = UsageAccount()
+    with usage_scope(account, CATEGORY_MAIN):
+        record_usage({"prompt_tokens": 100, "completion_tokens": 10, "cost": 0.0058})
+    assert account.by_category[CATEGORY_MAIN]["cost"] == 0.0058
+    assert account.by_category[CATEGORY_MAIN]["billed_calls"] == 1
+
+
+def test_orphan_account_delivers_cost():
+    """Фактическая стоимость записывается в orphan-аккаунт при отсутствии контекста."""
+    from usage.context import _orphan_account
+    before = _orphan_account.account.totals()["cost"]
+    from usage.context import record_usage
+    record_usage({"prompt_tokens": 10, "completion_tokens": 1, "cost": 0.25})
+    assert _orphan_account.account.totals()["cost"] == before + 0.25
