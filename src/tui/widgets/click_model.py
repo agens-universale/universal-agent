@@ -4,7 +4,7 @@
 выделение + открытие экрана события. Двойной клик события не открывает
 (заменён Ctrl+кликом). Меняешь модификатор или порядок действий — меняешь
 здесь, а не в четырёх виджетах (TraceRow, ToolCallRow, UserReplyContainer,
-AgentReplyLine).
+BlockPanel).
 """
 from __future__ import annotations
 

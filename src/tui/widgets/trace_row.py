@@ -7,7 +7,7 @@ Textual wrap'ит его внутри этой колонки. Wrapped-стро�
 
 Используется для всех типов строк трассы кроме:
 - user reply (UserReplyContainer / band)
-- fenced code-block panel (AgentReplyLine + rich.syntax)
+- fenced code-block panel (BlockPanel)
 - tool-вызовов (ToolCallRow — собственный compose, тоже Horizontal-based)
 """
 from __future__ import annotations

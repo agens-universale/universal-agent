@@ -8,8 +8,6 @@ import json
 import re
 from typing import Optional
 
-from tui.palette import BAND_BG, CODE_BLOCK
-from tui.widgets.agent_reply_line import AgentReplyLine
 from tui.services.duration_format import format_compact_int
 
 # Парсер `[tag] rest` для default meta-кейса (трейс и read-only превью).
@@ -40,46 +38,14 @@ def build_compaction_label(num: int, comp: dict) -> str:
     return label
 
 
-def render_code_block(content: str, lang: Optional[str], *,
-                      event_no: int, focusable: bool = False,
-                      indent: bool = False) -> "AgentReplyLine":
-    """AgentReplyLine с подсветкой (rich.syntax) или fallback на $code-block-цвет.
-    CSS-класс `.code-block-panel`. `indent` (трейс/превью) добавляет `.code-indent`
-    → отступ под текст реплики; без него (баннер) — вровень с прозой на колонке 0."""
-    from rich.syntax import Syntax
-    from rich.text import Text
-    from pygments.lexers import get_lexer_by_name
-    from pygments.util import ClassNotFound
-
-    cls = "code-block-panel code-indent" if indent else "code-block-panel"
-    if lang:
-        try:
-            get_lexer_by_name(lang)
-            syntax = Syntax(
-                content, lexer=lang, theme="monokai",
-                background_color=BAND_BG, word_wrap=False,
-            )
-            return AgentReplyLine(
-                syntax, event_no=event_no, focusable=focusable, classes=cls,
-                copy_text=f"```{lang}\n{content}\n```",
-            )
-        except ClassNotFound:
-            pass
-    return AgentReplyLine(
-        Text(content, style=CODE_BLOCK),
-        event_no=event_no, focusable=focusable, classes=cls,
-    )
-
-
 def build_block_widgets(text: str, *, prose_bullet: bool, event_no: int,
                         bullet: str = "● ", kind_class_base: str = "line-agent") -> list:
     """Markdown → виджеты трейса. `prose_bullet` — префикс `bullet` на прозе (трейс/превью);
     False — без него (баннер ask_human). `bullet`/`kind_class_base` переопределяют маркер и
-    класс прозовых строк (intermediate_reply → «· »/line-intermediate). Код всегда панель,
-    таблицы — AgentReplyLine(.table-block). focusable=True только у первого виджета события."""
-    from tui.services.markdown_render import (
-        build_markdown_table, render_prose, segment_answer, table_block_to_markdown,
-    )
+    класс прозовых строк (intermediate_reply → «· »/line-intermediate). Код и таблицы —
+    BlockPanel. focusable=True только у первого виджета события."""
+    from tui.services.markdown_render import render_prose, segment_answer
+    from tui.widgets.block_panel import BlockPanel
     from tui.widgets.trace_row import TraceRow
 
     widgets: list = []
@@ -87,19 +53,16 @@ def build_block_widgets(text: str, *, prose_bullet: bool, event_no: int,
     first_prose_seen = False
     for seg in segment_answer(text):
         if seg.kind == "code-block":
-            widgets.append(render_code_block(
+            widgets.append(BlockPanel.for_code(
                 seg.content, seg.lang, event_no=event_no,
                 focusable=not focus_set, indent=prose_bullet,
             ))
             focus_set = True
             continue
         if seg.kind == "table":
-            table_classes = "table-block table-indent" if prose_bullet else "table-block"
-            widgets.append(AgentReplyLine(
-                build_markdown_table(seg.headers or [], seg.rows or [], seg.aligns or []),
-                event_no=event_no, focusable=not focus_set, classes=table_classes,
-                copy_text=table_block_to_markdown(seg.headers or [], seg.rows or [],
-                                                  seg.aligns or []),
+            widgets.append(BlockPanel.for_table(
+                seg.headers or [], seg.rows or [], seg.aligns or [],
+                event_no=event_no, focusable=not focus_set, indent=prose_bullet,
             ))
             focus_set = True
             continue

@@ -73,6 +73,36 @@ def open_settings_section(scr, name: str) -> None:
     scr._open_section(idx)
 
 
+@pytest.fixture
+def tui_app_factory():
+    """Мини-хост с реальными стилями приложения — для проверки CSS-контракта.
+
+    styles.tcss ссылается на кастомные переменные ($bg, $ink, ...), которые
+    в проде инжектит TuiApp.get_css_variables() из tui.palette — без этого
+    переопределения обычный App падает на парсинге стилшита
+    (UnresolvedVariableError), поэтому мини-хост его тоже переопределяет.
+    """
+    from textual.app import App, ComposeResult
+
+    from tui import palette
+
+    def _factory(widget):
+        class _StyledHost(App):
+            CSS_PATH = str(Path(__file__).resolve().parents[2] / "src" / "tui" / "styles.tcss")
+
+            def get_css_variables(self) -> dict:
+                variables = super().get_css_variables()
+                variables.update(palette.css_variables())
+                return variables
+
+            def compose(self) -> ComposeResult:
+                yield widget
+
+        return _StyledHost()
+
+    return _factory
+
+
 @pytest.fixture(scope="session", autouse=True)
 def _copy_raw_snapshots_to_svg():
     """After tests, copy every __snapshots__/**/*.raw to a sibling .svg.
