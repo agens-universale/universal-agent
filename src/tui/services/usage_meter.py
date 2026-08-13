@@ -15,7 +15,7 @@ from typing import Any, Optional
 from rich.text import Text
 
 from usage.account import UsageAccount
-from usage.cost import PROVIDER_CURRENCY, CostReport, compute_cost
+from usage.cost import CostReport, compute_cost
 from usage.report import format_money, format_tokens
 
 from tui.palette import DIM, INK
@@ -27,6 +27,19 @@ _VALUE = INK
 _SEP = "  ·  "
 
 
+def _fact_currency(report: CostReport) -> Optional[str]:
+    """Валюта фактической части отчёта или None, если факта нет.
+
+    Берётся из самого отчёта, а не из константы: валюта факта зависит от
+    провайдера (см. ``usage.currency``), поэтому «долларом» её считать нельзя.
+    """
+    for category in report.categories:
+        for part in category.parts:
+            if part.source == "provider":
+                return part.currency
+    return None
+
+
 def _dominant_currency(report: CostReport) -> str:
     """Валюта с наибольшей долей токенов (суммы в разных валютах несравнимы,
     токены — всегда). При равенстве долей — валюта факта (детерминированность)."""
@@ -35,8 +48,9 @@ def _dominant_currency(report: CostReport) -> str:
         return next(iter(report.by_currency))
     max_tokens = max(tokens.values())
     candidates = [c for c, t in tokens.items() if t == max_tokens]
-    if PROVIDER_CURRENCY in candidates:
-        return PROVIDER_CURRENCY
+    fact = _fact_currency(report)
+    if fact is not None and fact in candidates:
+        return fact
     return candidates[0]
 
 
@@ -70,16 +84,21 @@ def _headline_amount(report: CostReport, currency: str | None = None) -> Optiona
     return (amount, currency, marks)
 
 
-def format_nonzero_cost(meta: Any, pricing: Any, model: str | None) -> Optional[str]:
+def format_nonzero_cost(meta: Any, pricing: Any, model: str | None,
+                        endpoint_url: str | None = None) -> Optional[str]:
     """Стоимость сессии («35.1 ₽», «10.5 $~») или None, если считать нечего / 0.
 
     Для списка /sessions: показываем даже крошечную ненулевую сумму (как
     «<0.01 $», а не молча прячем). Источник — персистентный ``meta.token_usage``.
+
+    ``endpoint_url`` — текущий адрес бэкенда. Эндпоинт в meta не хранится,
+    поэтому валюта факта старой сессии считается по нынешнему конфигу — так же,
+    как и модель для резолва тарифа.
     """
     account = UsageAccount.from_meta(meta)
     if account.is_empty():
         return None
-    report: CostReport = compute_cost(account, pricing, model)
+    report: CostReport = compute_cost(account, pricing, model, endpoint_url)
     headline = _headline_amount(report)
     if headline is None:
         return None
@@ -103,16 +122,19 @@ def _segment_from_report(label: str, report: CostReport, currency: str | None = 
 
 
 def _segment(label: str, meta: Any, pricing: Any, model: str | None,
-             currency: str | None = None) -> Optional[tuple[str, str]]:
+             currency: str | None = None, *,
+             endpoint_url: str | None = None) -> Optional[tuple[str, str]]:
     """(label, «<tok>» либо «<tok>/<cost>») или None, если в meta нет вызовов.
 
-    ``currency`` — навязанная валюта (парный показ с другим сегментом), см.
-    ``_headline_amount``.
+    Две разные вещи, которые легко перепутать: ``currency`` — навязанная валюта
+    ПОКАЗА (парный показ с другим сегментом, см. ``_headline_amount``);
+    ``endpoint_url`` — источник валюты ФАКТА. Поэтому ``endpoint_url`` —
+    keyword-only: позиционно он встал бы на место ``currency``.
     """
     account = UsageAccount.from_meta(meta)
     if account.is_empty():
         return None
-    report: CostReport = compute_cost(account, pricing, model)
+    report: CostReport = compute_cost(account, pricing, model, endpoint_url)
     return _segment_from_report(label, report, currency)
 
 
@@ -128,9 +150,11 @@ def _to_text(seg: tuple[str, str] | None) -> Text | None:
 
 
 def _segment_text(label: str, meta: Any, pricing: Any, model: str | None,
-                   currency: str | None = None) -> Text | None:
+                   currency: str | None = None, *,
+                   endpoint_url: str | None = None) -> Text | None:
     """Rich-Text одного сегмента «<label> <tok>[/<cost>]» или None."""
-    return _to_text(_segment(label, meta, pricing, model, currency))
+    return _to_text(_segment(label, meta, pricing, model, currency,
+                             endpoint_url=endpoint_url))
 
 
 def _join(parts: list[Text], sep: str = _SEP) -> Text:
@@ -147,6 +171,7 @@ def usage_segments(
     request_meta: Any,
     pricing: Any,
     model: str | None,
+    endpoint_url: str | None = None,
 ) -> tuple[Text | None, Text | None]:
     """Раздельные сегменты ``(request_text, session_text)`` для адаптивной вёрстки.
 
@@ -160,11 +185,12 @@ def usage_segments(
     session_account = UsageAccount.from_meta(session_meta)
     if session_account.is_empty():
         return (None, None)
-    session_report: CostReport = compute_cost(session_account, pricing, model)
+    session_report: CostReport = compute_cost(session_account, pricing, model, endpoint_url)
     session_headline = _headline_amount(session_report)
     currency = session_headline[1] if session_headline is not None else None
     session = _to_text(_segment_from_report("сессия", session_report, currency))
-    request = _segment_text("запрос", request_meta, pricing, model, currency)
+    request = _segment_text("запрос", request_meta, pricing, model, currency,
+                            endpoint_url=endpoint_url)
     return (request, session)
 
 
@@ -197,9 +223,11 @@ def render_usage_meter(
     last_run_meta: Any,
     pricing: Any,
     model: str | None,
+    endpoint_url: str | None = None,
 ) -> Text | None:
     """Rich-Text «запрос …/… · сессия …/…» одной строкой или None (совместимость)."""
-    request, session = usage_segments(session_meta, last_run_meta, pricing, model)
+    request, session = usage_segments(session_meta, last_run_meta, pricing, model,
+                                      endpoint_url)
     if session is None:
         return None
     return _join([s for s in (request, session) if s is not None])

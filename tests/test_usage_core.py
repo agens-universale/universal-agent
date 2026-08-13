@@ -497,6 +497,79 @@ def test_tariff_remainder_accounts_for_cached():
     assert CostPart(64.0, "₽", "tariff") in r.categories[0].parts
 
 
+# ---------------- валюта факта по эндпоинту ----------------
+
+_RU_URL = "https://routerai.ru/api/v1/chat/completions"
+_USD_URL = "https://openrouter.ai/api/v1/chat/completions"
+
+
+def test_fact_currency_defaults_to_dollars_without_url():
+    # Гард обратной совместимости: трёхаргументный вызов работает как раньше.
+    acc = UsageAccount()
+    acc.add(CATEGORY_MAIN, 1000, 100, 0, cost=7.5, billed=True)
+    assert compute_cost(acc, _PRICING_RUB, "m").by_currency == {"$": 7.5}
+
+
+def test_fact_currency_follows_ru_endpoint():
+    acc = UsageAccount()
+    acc.add(CATEGORY_MAIN, 1000, 100, 0, cost=7.5, billed=True)
+    r = compute_cost(acc, _PRICING_RUB, "m", _RU_URL)
+    assert r.categories[0].parts == [CostPart(7.5, "₽", "provider")]
+    assert r.by_currency == {"₽": 7.5}
+
+
+def test_ru_endpoint_and_rub_tariff_collapse_into_one_currency():
+    # Ради этого случая правило и вводилось: факт и тариф сходятся в рублях,
+    # а не расходятся на два подытога с маркером неполноты.
+    acc = UsageAccount()
+    acc.add(CATEGORY_MAIN, 1_000_000, 100_000, 0, cost=7.5, billed=True)
+    acc.add(CATEGORY_MAIN, 500_000, 50_000)
+    r = compute_cost(acc, _PRICING_RUB, "m", _RU_URL)
+    assert set(r.by_currency) == {"₽"}
+    assert r.multi_currency is False
+    assert r.has_unpriced is False
+    assert r.categories[0].cost_source == "mixed"
+
+
+def test_ru_endpoint_with_usd_tariff_still_splits():
+    # Если тариф задан в долларах, валюты по-прежнему две — это не регресс.
+    pricing = {"enabled": True, "currency": "₽", "per_tokens": 1_000_000,
+               "models": {"m": {"input": 100, "output": 200, "currency": "$"}}}
+    acc = UsageAccount()
+    acc.add(CATEGORY_MAIN, 1_000_000, 100_000, 0, cost=7.5, billed=True)
+    acc.add(CATEGORY_MAIN, 500_000, 50_000)
+    r = compute_cost(acc, pricing, "m", _RU_URL)
+    assert set(r.by_currency) == {"₽", "$"}
+    assert r.multi_currency is True
+
+
+def test_non_ru_endpoint_and_garbage_url_give_dollars():
+    acc = UsageAccount()
+    acc.add(CATEGORY_MAIN, 1000, 100, 0, cost=7.5, billed=True)
+    assert compute_cost(acc, _PRICING_RUB, "m", _USD_URL).by_currency == {"$": 7.5}
+    assert compute_cost(acc, _PRICING_RUB, "m", "мусор").by_currency == {"$": 7.5}
+    assert compute_cost(acc, _PRICING_RUB, "m", None).by_currency == {"$": 7.5}
+
+
+def test_disabled_pricing_with_ru_endpoint_shows_no_money():
+    acc = UsageAccount()
+    acc.add(CATEGORY_MAIN, 1000, 100, 0, cost=7.5, billed=True)
+    r = compute_cost(acc, _PRICING_OFF, "m", _RU_URL)
+    assert r.has_cost is False
+    assert r.by_currency == {}
+    assert r.total_input == 1000
+
+
+def test_ru_endpoint_report_has_single_total_without_subtotals():
+    acc = UsageAccount()
+    acc.add(CATEGORY_MAIN, 1_000_000, 100_000, 0, cost=7.5, billed=True)
+    acc.add(CATEGORY_MAIN, 500_000, 50_000)
+    text = render_cost_report(compute_cost(acc, _PRICING_RUB, "m", _RU_URL), model_name="m")
+    assert "subtotals by currency" not in text
+    assert "$" not in text
+    assert "~" in text  # обе стороны есть — тильда на месте
+
+
 # ---------------- report formatting ----------------
 
 def test_format_tokens():
@@ -561,8 +634,8 @@ def test_report_category_without_any_price_shows_dash_not_dash_plus():
 
 def test_subtotal_label_reflects_sources_not_currency():
     # Метка подытога — из фактических источников частей в этой валюте, а не по
-    # самой валюте: сегодняшний выбор по currency == PROVIDER_CURRENCY совпадает
-    # с источником случайно (см. finding 9); собираем CostReport вручную, чтобы
+    # самой валюте: совпадение валюты с источником случайно и ломается, как только
+    # тариф задан в той же валюте, что и факт. Собираем CostReport вручную, чтобы
     # проверить рендер независимо от того, может ли compute_cost сегодня
     # породить такую валютную корзину.
     from usage.cost import CategoryCost, CostReport

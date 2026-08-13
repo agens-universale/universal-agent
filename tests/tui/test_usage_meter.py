@@ -182,3 +182,39 @@ def test_tilde_present_on_real_mix():
     acc.add(CATEGORY_MAIN, 500_000, 50_000)
     text = render_usage_meter(acc.to_meta(), acc.to_meta(), _PRICING_RUB, "m").plain
     assert "~" in text
+
+
+# ---------------- валюта факта по эндпоинту ----------------
+
+_RU_URL = "https://routerai.ru/api/v1/chat/completions"
+
+
+def test_footer_shows_rubles_on_ru_endpoint():
+    # Факт от .ru-провайдера + рублёвый тариф: одна валюта, тильда есть,
+    # маркера неполноты нет (раньше факт был в долларах и давал «+»).
+    acc = UsageAccount()
+    acc.add(CATEGORY_MAIN, 1_000_000, 100_000, 0, cost=10.45, billed=True)
+    acc.add(CATEGORY_MAIN, 500_000, 50_000)
+    text = render_usage_meter(acc.to_meta(), acc.to_meta(), _PRICING_RUB, _MODEL, _RU_URL).plain
+    assert "₽" in text
+    assert "$" not in text
+    assert "~" in text
+    assert "+" not in text
+
+
+def test_sessions_label_uses_ru_currency():
+    acc = UsageAccount()
+    acc.add(CATEGORY_MAIN, 1000, 100, 0, cost=7.5, billed=True)
+    assert format_nonzero_cost(acc.to_meta(), _PRICING_RUB, _MODEL, _RU_URL) == "7.50 ₽"
+
+
+def test_tie_break_prefers_fact_currency_not_dollar():
+    # Доли токенов равны (1M против 1M) — побеждает валюта ФАКТА, а она теперь
+    # зависит от эндпоинта. Этот тест ловит регресс _fact_currency.
+    acc = UsageAccount()
+    acc.add(CATEGORY_MAIN, 1_000_000, 0, 0, cost=1.0, billed=True)
+    acc.add(CATEGORY_MAIN, 1_000_000, 0)
+    ru = render_usage_meter(acc.to_meta(), acc.to_meta(), _PRICING_RUB, _MODEL, _RU_URL).plain
+    assert "₽" in ru and "$" not in ru
+    usd = render_usage_meter(acc.to_meta(), acc.to_meta(), _PRICING_RUB, _MODEL).plain
+    assert "$" in usd

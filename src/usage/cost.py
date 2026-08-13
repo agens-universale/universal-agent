@@ -5,8 +5,9 @@
 (вызовы, для которых факта нет). Если для остатка тарифа тоже нет —
 категория помечается ``unpriced``, а не молча теряет деньги.
 
-Валюта факта провайдера всегда ``PROVIDER_CURRENCY`` ("$" — OpenRouter);
-валюта тарифа — из ``pricing``. При смешении получаем несколько валют
+Валюта факта определяется по адресу эндпоинта (см. ``usage.currency``): домен
+``.ru`` — рубли, всё остальное — доллары; без адреса — доллары. Валюта тарифа —
+из ``pricing``. Если валюты разошлись, получаем несколько валют
 (``multi_currency``) — общий total не считаем, показываем сабтоталы.
 """
 
@@ -17,8 +18,7 @@ from typing import Dict
 
 from config_modules.pricing import ResolvedTariff, coerce_pricing, resolve_model_tariff
 from usage.account import UsageAccount
-
-PROVIDER_CURRENCY = "$"
+from usage.currency import provider_currency_for_url
 
 
 @dataclass(frozen=True)
@@ -93,11 +93,14 @@ def compute_cost(
     account: UsageAccount,
     pricing: object,
     model_name: str | None,
+    endpoint_url: str | None = None,
 ) -> CostReport:
     """Построить ``CostReport`` по аккаунту и тарифам.
 
     ``pricing`` — ``PricingConfig`` или сырой dict из config. ``model_name`` —
-    модель прогона. Токены/вызовы по категориям считаются всегда, независимо
+    модель прогона. ``endpoint_url`` — адрес бэкенда (плоский ключ
+    ``completions_url``): из него выводится валюта фактической цены, без него —
+    валюта по умолчанию. Токены/вызовы по категориям считаются всегда, независимо
     от ``pricing.enabled`` (счётчик usage не зависит от показа денег). Деньги
     считаются только если ``pricing.enabled`` — тогда для каждой категории
     стоимость собирается из факта провайдера (биллённая часть вызовов) и
@@ -106,6 +109,8 @@ def compute_cost(
     """
     pricing_cfg = coerce_pricing(pricing)
     tariff = resolve_model_tariff(pricing_cfg, model_name)
+    # Один разбор адреса на отчёт: эндпоинт в пределах прогона всегда один.
+    provider_currency = provider_currency_for_url(endpoint_url)
     report = CostReport()
 
     # Порядок категорий стабильный: по убыванию суммарных токенов, потом по имени.
@@ -135,7 +140,7 @@ def compute_cost(
             if billed_calls:
                 parts.append(CostPart(
                     float(bucket.get("cost", 0.0) or 0.0),
-                    PROVIDER_CURRENCY, "provider"))
+                    provider_currency, "provider"))
                 billed_tokens = billed_input + billed_output
 
             rest_in = inp - billed_input
