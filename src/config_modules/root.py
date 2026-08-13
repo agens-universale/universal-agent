@@ -24,6 +24,7 @@ from config_modules.working_memory import (
     WorkingMemoryConfig,
     normalize_working_memory_config,
 )
+from config_modules.todo import TodoConfig, normalize_todo_config
 from config_modules.message_notice import (
     ToolUsageNoticeRule,
     normalize_tool_usage_notice_rules,
@@ -70,6 +71,7 @@ class AppConfig(BaseModel):
     quality_gate: QualityGateConfig = Field(default_factory=QualityGateConfig)
     intent_scope: IntentScopeConfig = Field(default_factory=IntentScopeConfig)
     working_memory: WorkingMemoryConfig = Field(default_factory=WorkingMemoryConfig)
+    todo: TodoConfig = Field(default_factory=TodoConfig)
     tool_usage_notice: list[ToolUsageNoticeRule] = Field(default_factory=list)
     project_memory: ProjectMemoryConfig = Field(default_factory=ProjectMemoryConfig)
     paths: PathsConfig = Field(default_factory=PathsConfig)
@@ -177,6 +179,7 @@ def resolve_paths(cfg: AppConfig, config_dir: str) -> None:
         )
     normalize_quality_gate_config(cfg.quality_gate)
     normalize_working_memory_config(cfg.working_memory)
+    normalize_todo_config(cfg.todo)
     cfg.tool_usage_notice = normalize_tool_usage_notice_rules(cfg.tool_usage_notice)
     normalize_project_memory_config(cfg.project_memory)
     normalize_intent_scope_config(cfg.intent_scope)

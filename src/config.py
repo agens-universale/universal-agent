@@ -249,6 +249,7 @@ def flatten_app_config(app_cfg: AppConfig) -> Dict[str, Any]:
         # Limits for ``session_memory`` tool; yaml/config keys stay ``working_memory*``.
         "working_memory": app_cfg.working_memory,
         "working_memory_params": app_cfg.working_memory.model_dump(),
+        "todo_params": app_cfg.todo.model_dump(),
         "working_memory_max_chars_goal": app_cfg.working_memory.max_chars_goal,
         "working_memory_max_chars_constraints": app_cfg.working_memory.max_chars_constraints,
         "working_memory_max_chars_state": app_cfg.working_memory.max_chars_state,

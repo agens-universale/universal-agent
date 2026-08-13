@@ -39,8 +39,8 @@ async def test_footer_shows_request_and_session(tmp_path):
         app.active_runner = _FakeRunner((_meta(2_000_000, 0), _meta(1_000_000, 0)))
 
         right = scr._compose_footer_right().plain
-        assert "запрос 1.0M/1.0₽" in right
-        assert "сессия 2.0M/2.0₽" in right
+        assert "запрос 1.0M/1.00₽" in right
+        assert "сессия 2.0M/2.00₽" in right
 
 
 @pytest.mark.asyncio
@@ -59,12 +59,12 @@ async def test_request_reflects_live_snapshot(tmp_path):
         # Ход в процессе: «запрос» = live-дельта, растёт вместе с сессией.
         app.active_runner = _FakeRunner((_meta(3_000_000, 0), _meta(1_000_000, 0)))
         right = scr._compose_footer_right().plain
-        assert "запрос 1.0M/1.0₽" in right
-        assert "сессия 3.0M/3.0₽" in right
+        assert "запрос 1.0M/1.00₽" in right
+        assert "сессия 3.0M/3.00₽" in right
 
         # Тик позже дельта выросла — футер обновляется без кэша.
         app.active_runner = _FakeRunner((_meta(3_500_000, 0), _meta(1_500_000, 0)))
-        assert "запрос 1.5M/1.5₽" in scr._compose_footer_right().plain
+        assert "запрос 1.5M/1.50₽" in scr._compose_footer_right().plain
 
 
 @pytest.mark.asyncio
@@ -82,7 +82,7 @@ async def test_request_hidden_until_first_tokens(tmp_path):
         app.active_runner = _FakeRunner((_meta(2_000_000, 0), UsageAccount().to_meta()))
         right = scr._compose_footer_right().plain
         assert "запрос" not in right
-        assert "сессия 2.0M/2.0₽" in right
+        assert "сессия 2.0M/2.00₽" in right
 
 
 @pytest.mark.asyncio

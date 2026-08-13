@@ -27,12 +27,14 @@ from summarize.summary_message_body import (
 )
 from summarize.summary_spec import agent_summary_slice_mode, slice_summary
 from summarize.thread_summarizer import summarize_dialog_via_chat_completions
+from message_policy.todo_context import render_todo_for_persistent_state
 from summarize.working_memory_gateway import (
     REGISTER_ORDER,
     WorkingMemoryDeltas,
     apply_memory_patch,
     apply_summary_memory_patch,
     coerce_working_memory_deltas,
+    read_session_todo_from_state,
     read_snapshot_from_state,
     render_persistent_state_for_prompt,
     render_session_memory_for_summary_message,
@@ -126,6 +128,11 @@ def apply_summary_state_patch(
     shared.working_memory = wm_dict
 
     session_memory_block = render_session_memory_for_summary_message(snapshot)
+    # Чек-лист едет в baseline дословно, как session_memory: после сжатия
+    # вызовы session_todo вырезаны, и это единственный канал до модели.
+    session_todo_block = render_todo_for_persistent_state(
+        read_session_todo_from_state(state)
+    )
     closed_records = list(getattr(state, "user_intent_log", []) or [])
     open_records = list(getattr(state, "current_user_intent", []) or [])
     preview_chars = (
@@ -137,6 +144,7 @@ def apply_summary_state_patch(
         summary_text=str(raw_summary or ""),
         last_dialog_steps=str(last_dialog_steps or ""),
         session_memory_block=session_memory_block,
+        session_todo_block=session_todo_block,
         user_intent_log_preview=tail_preview(closed_records, preview_chars),
         current_user_intent_jsonl=serialize(open_records),
     )
@@ -222,7 +230,10 @@ def run_summary_compaction(
         ctx=ctx,
         state=state,
         full_history_messages=full_messages,
-        persistent_state_block=render_persistent_state_for_prompt(memory_snapshot),
+        persistent_state_block=render_persistent_state_for_prompt(
+            memory_snapshot,
+            session_todo=read_session_todo_from_state(state),
+        ),
         user_intent_log=source_user_log,
         current_user_intent=source_current_intent,
         steps_offset=int(getattr(state, "dialog_steps_offset", 0) or 0),
@@ -279,15 +290,17 @@ def run_summary_compaction(
             final_out["summary_message_content"] = summary_message_content
     log_summary_message_body(logger, log_ctx, summary_message_content)
 
+    # nested: cycle with persistence → states → tools → summarize
+    from persistence.schema import serialize_shared_block
+
     _shared = getattr(state, "shared", None)
     summary_payload = {
         "summary_message_content": summary_message_content,
-        "shared": {
-            "working_memory": dict(getattr(_shared, "working_memory", None) or {})
-            if _shared
-            else {},
-            "notes_md": str(getattr(_shared, "notes_md", "") or "") if _shared else "",
-        },
+        # Весь shared-блок целиком, а не выборка полей: thread_store этим объектом
+        # ПОЛНОСТЬЮ заменяет meta["shared"], поэтому ручной список терял остальные
+        # поля (confirm_rules, fetch_url_cache, …) — детерминированно при ручном
+        # /compact (там нет post-run heal) и при обрыве рана.
+        "shared": serialize_shared_block(_shared),
         "user_intent_log": serialize_for_meta(
             list(getattr(state, "user_intent_log", []) or [])
         ),

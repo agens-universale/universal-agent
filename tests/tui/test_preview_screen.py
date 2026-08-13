@@ -146,6 +146,65 @@ async def test_preview_enter_resumes_when_row_focused():
 
 
 @pytest.mark.asyncio
+async def test_preview_mounts_nested_subagent_rows():
+    """Превью с sidecar-records показывает вложенные вызовы субагента
+    и развёрнутый чек-лист (spec 2026-07-31 §4, канал превью)."""
+    pytest.importorskip("textual")
+    from textual.app import App
+    from tui.screens.preview import PreviewScreen
+    from tui.widgets.tool_call_row import ToolCallRow
+    segments = [{"index": 0, "compacted_by": None, "messages": [
+        _rec({"type": "function_call", "id": "fc1", "call_id": "parent1",
+              "name": "subagent_worker", "arguments": '{"task": "x"}'}),
+    ]}]
+    records = [
+        {"parent_call_id": "parent1", "seq": 1, "kind": "call",
+         "payload": {"call_id": "n1", "name": "fs_read_file",
+                     "arguments": {"path": "a.py"}}},
+        {"parent_call_id": "parent1", "seq": 2, "kind": "call",
+         "payload": {"call_id": "n2", "name": "session_todo",
+                     "arguments": {"todos": [
+                         {"content": "step", "status": "pending"}]}}},
+    ]
+
+    class _A(App):
+        def on_mount(self):
+            self.push_screen(
+                PreviewScreen(segments=segments, thread_id="t", project_path="p",
+                              subagent_records=records))
+
+    async with _A().run_test() as pilot:
+        scr = pilot.app.screen
+        nested_tools = scr.query(ToolCallRow).filter(".nested-tool")
+        assert len(nested_tools) == 1                     # fs_read_file
+        todo_rows = scr.query(".line-todo-nested")
+        assert len(todo_rows) == 1                        # развёрнутый чек-лист
+
+
+@pytest.mark.asyncio
+async def test_preview_without_records_unchanged():
+    """Без records превью рендерится как раньше (ни одного nested-виджета)."""
+    pytest.importorskip("textual")
+    from textual.app import App
+    from tui.screens.preview import PreviewScreen
+    from tui.widgets.tool_call_row import ToolCallRow
+    segments = [{"index": 0, "compacted_by": None, "messages": [
+        _rec({"type": "function_call", "id": "fc1", "call_id": "parent1",
+              "name": "subagent_worker", "arguments": '{"task": "x"}'}),
+    ]}]
+
+    class _A(App):
+        def on_mount(self):
+            self.push_screen(
+                PreviewScreen(segments=segments, thread_id="t", project_path="p"))
+
+    async with _A().run_test() as pilot:
+        scr = pilot.app.screen
+        assert len(scr.query(ToolCallRow).filter(".nested-tool")) == 0
+        assert len(scr.query(".line-todo-nested")) == 0
+
+
+@pytest.mark.asyncio
 async def test_preview_escape_false():
     pytest.importorskip("textual")
     from textual.app import App

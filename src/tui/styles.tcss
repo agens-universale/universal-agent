@@ -108,7 +108,7 @@ TraceScreen #trace { height: auto; }
 /* Фокус строки события — сдвиг-безопасная подсветка фона (заменила [N]-префикс:
    background не рефлоунит контент, в отличие от prefix/border). */
 ToolCallRow:focus, TraceRow:focus, UserReplyContainer:focus,
-BlockPanel:focus {
+BlockPanel:focus, TodoBlock:focus {
     background: $focus-bg;
 }
 
@@ -166,6 +166,16 @@ BlockPanel:focus {
     padding: 0 1;
 }
 
+/* чек-лист session_todo — маркер фазы хода, как ● и ·: обособлен пустой строкой
+   сверху. Только margin-top (общая конвенция трейса — разделение через отступ
+   СЛЕДУЮЩЕГО элемента, см. .user-band); нижний дал бы двойной зазор перед тулами. */
+.line-todo      { color: $ink; }        /* заголовок; воздух — на .todo-block */
+.line-todo-nested { color: $dim; }      /* заголовок чек-листа субагента */
+/* Воздух вокруг чек-листа — на блоке-контейнере: у основного только сверху
+   (снизу отделяет отступ следующей фазы), у субагентского с обеих сторон —
+   соседние nested-строки своих отступов не имеют. */
+.todo-block        { margin-top: 1; }
+.todo-block-nested { margin: 1 0; }
 .line-tool      { color: $dim; }       /* |- механика тула */
 /* Первый tool в группе (предыдущий ряд — не tool) отделён верхним отступом;
    подряд идущие tool-строки компактны (класс вешается в коде — Textual CSS

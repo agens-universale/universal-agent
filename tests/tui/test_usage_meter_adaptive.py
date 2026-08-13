@@ -14,9 +14,10 @@ def _meta(i, o):
 
 
 def test_segments_returns_request_and_session_separately():
+    # Чисто тарифный отчёт (нет факта провайдера) — тильды нет.
     req, sess = usage_segments(_meta(2_000_000, 0), _meta(1_000_000, 0), _PRICING, "m")
-    assert req.plain == "запрос 1.0M/1.0₽"
-    assert sess.plain == "сессия 2.0M/2.0₽"
+    assert req.plain == "запрос 1.0M/1.00₽"
+    assert sess.plain == "сессия 2.0M/2.00₽"
 
 
 def test_segments_none_none_when_session_empty():
@@ -26,7 +27,7 @@ def test_segments_none_none_when_session_empty():
 def test_segments_request_none_when_no_request():
     req, sess = usage_segments(_meta(2_000_000, 0), None, _PRICING, "m")
     assert req is None
-    assert sess.plain == "сессия 2.0M/2.0₽"
+    assert sess.plain == "сессия 2.0M/2.00₽"
 
 
 def _head():

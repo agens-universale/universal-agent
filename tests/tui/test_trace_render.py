@@ -330,3 +330,137 @@ async def test_intermediate_reply_row_has_top_margin(tmp_path):
         scr.query_one("#trace", VerticalScroll).mount(row)
         await pilot.pause()
         assert row.styles.margin.top == 1
+
+
+def test_dispatch_readonly_renders_todo_checklist():
+    """C1: read-only preview должен рендерить session_todo как чек-лист
+    (паритет с живым путём main.py), а не ронять в generic line-meta."""
+    pytest.importorskip("textual")
+    import json
+    from tui.services.trace_mapper import map_message
+    from tui.services.trace_render import _dispatch_readonly
+    from tui.widgets.trace_row import TraceRow
+
+    ev = map_message(
+        {"type": "function_call", "name": "session_todo", "call_id": "c1",
+         "arguments": json.dumps({"todos": [
+             {"content": "Изучить", "status": "completed"},
+             {"content": "Тест", "status": "in_progress"},
+         ]}, ensure_ascii=False)},
+        no=1, ts="t",
+    )
+    assert ev.kind == "todo"
+
+    mounted = []
+
+    class _FakeTarget:
+        def mount(self, w):
+            mounted.append(w)
+
+    _dispatch_readonly(_FakeTarget(), ev, {})
+    # v5: чек-лист — один блок-виджет (единица выделения), строки внутри него.
+    assert len(mounted) == 1
+    block = mounted[0]
+    assert block.has_class("todo-block") and block.can_focus
+    rows = block.todo_rows
+    assert len(rows) == 3
+    assert all(isinstance(row, TraceRow) for row in rows)
+    assert rows[0].has_class("line-todo")      # НЕ line-meta
+
+
+def test_kind_literal_includes_todo():
+    """C2: тип Kind должен объявлять 'todo' (честность контракта)."""
+    from typing import get_args
+    from tui.models import Kind
+    assert "todo" in get_args(Kind)
+
+
+def test_todo_event_renders_rich_text_with_glyph_colors():
+    """kind=todo → TraceRow с rich.Text (канон §2), а не plain-строкой."""
+    from rich.text import Text as RichText
+    from tui.models import TraceEvent
+    from tui.services.trace_render import _dispatch_readonly
+
+    todos = [{"content": "Шаг раз", "status": "completed"},
+             {"content": "Шаг два", "status": "in_progress"}]
+    payload = {"type": "function_call", "name": "session_todo",
+               "arguments": {"todos": todos}}
+    ev = TraceEvent(no=1, event_ts_utc_iso="", kind="todo", title="session_todo",
+                    summary="чек-лист 1/2", full_payload=payload,
+                    call_id="c1", tool_name="session_todo")
+
+    mounted = []
+
+    class _Target:
+        def mount(self, w, **kw):
+            mounted.append(w)
+
+    _dispatch_readonly(_Target(), ev, calls={})
+    # v5: один блок-виджет; строки внутри — заголовок + строка на пункт.
+    assert len(mounted) == 1
+    rows = mounted[0].todo_rows
+    header = rows[0]._content
+    assert isinstance(header, RichText)
+    assert header.plain == "session_todo   чек-лист 1/2"
+    # Текст пункта — в content-колонке, отступ+глиф — в prefix: перенос
+    # длинного пункта выравнивается под началом текста.
+    assert rows[1]._prefix.plain == "     ✓ "
+    assert rows[1]._content.plain == "Шаг раз"
+    assert rows[2]._prefix.plain == "     → "
+    assert rows[2]._content.plain == "Шаг два"
+    # Tab-стоп один — сам блок; строки внутри не фокусируются.
+    assert mounted[0].can_focus and not any(r.can_focus for r in rows)
+
+
+def test_readonly_error_msg_finalizes_its_call_row():
+    """Схемная ошибка вызова (technical error_message с call_id) обязана
+    финализировать строку вызова ✗, как в живом трейсе (_render_error_msg).
+
+    Иначе в превью строка навсегда остаётся «выполняется» (пульсирующий ▸),
+    а ошибка уезжает отдельной [!]-строкой — так выглядел битый session_todo.
+    """
+    pytest.importorskip("textual")
+    from tui.models import TraceEvent
+    from tui.services.trace_render import _dispatch_readonly
+    from tui.widgets.tool_call_row import ToolCallRow
+
+    mounted = []
+
+    class _Target:
+        children = ()          # is_tool_group_start смотрит на потомков контейнера
+
+        def mount(self, w, **kw):
+            mounted.append(w)
+
+    calls: dict = {}
+    call_ev = TraceEvent(no=1, event_ts_utc_iso="", kind="call", title="session_todo",
+                         summary="session_todo(todos=<list 1>)", full_payload={},
+                         call_id="c1", tool_name="session_todo")
+    _dispatch_readonly(_Target(), call_ev, calls)
+    err_ev = TraceEvent(no=2, event_ts_utc_iso="", kind="error_msg", title="",
+                        summary="Wrong arguments for `session_todo`", full_payload={},
+                        call_id="c1")
+    _dispatch_readonly(_Target(), err_ev, calls)
+
+    assert len(mounted) == 1, "ошибка не должна добавлять отдельную [!]-строку"
+    row = mounted[0]
+    assert isinstance(row, ToolCallRow)
+    assert row._is_error is True and row._result is not None
+
+
+def test_readonly_error_msg_without_call_row_still_shown():
+    """Ошибка без известного вызова — прежняя [!]-строка, ничего не теряем."""
+    pytest.importorskip("textual")
+    from tui.models import TraceEvent
+    from tui.services.trace_render import _dispatch_readonly
+
+    mounted = []
+
+    class _Target:
+        def mount(self, w, **kw):
+            mounted.append(w)
+
+    ev = TraceEvent(no=1, event_ts_utc_iso="", kind="error_msg", title="",
+                    summary="что-то сломалось", full_payload={}, call_id="unknown")
+    _dispatch_readonly(_Target(), ev, {})
+    assert len(mounted) == 1
