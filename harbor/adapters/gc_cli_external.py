@@ -16,7 +16,9 @@ Usage:
         --model openai/MiniMaxAI/MiniMax-M2.7
 """
 import asyncio
+import json
 import os
+import shlex
 from pathlib import Path
 from typing import Any
 
@@ -45,6 +47,10 @@ from adapters.gc_cli_config import build_gc_cli_config
 # gc-cli chat roles → ATIF step sources. ATIF has no "tool" source: tool results are
 # folded into the preceding agent step's `observation` (see _messages_to_steps).
 _ROLE_TO_SOURCE = {"system": "system", "user": "user", "assistant": "agent"}
+
+# Container root harbor uploads injected skills to (harbor/models/trial/paths.py:41).
+# Used when a profile ships skills but the task injected none.
+DEFAULT_CONTAINER_SKILLS_ROOT = "/harbor/skills"
 
 # Dependency files (prompts/, skills/) are copied next to adapters/ in the image
 # (see harbor/Dockerfile) and live at repo-root in editable/local runs. Resolve them
@@ -244,6 +250,124 @@ class GcCliExternal(BaseAgent):
         config_dict["skills_data_path"] = skills_path or "/harbor/.gc_no_skills"
 
     @staticmethod
+    def _resolve_profile_skill_dirs(skills_root: Path) -> list[Path]:
+        """SKILL.md-bearing directories under a runner-local skills root.
+
+        Mirrors the rule the fleet runner applies to task skills
+        (`dind_runner._resolve_task_skill_paths`): a SKILL.md directly in the root
+        makes the root one skill, otherwise every immediate subdirectory holding a
+        SKILL.md is one. Unrelated siblings are skipped rather than rejected —
+        harbor's stricter `resolve_skills` would refuse the whole set.
+        """
+        if not skills_root.is_dir():
+            return []
+        if (skills_root / "SKILL.md").is_file():
+            return [skills_root]
+        return [
+            child
+            for child in sorted(skills_root.iterdir())
+            if child.is_dir() and (child / "SKILL.md").is_file()
+        ]
+
+    async def _merge_profile_skills(
+        self, environment: BaseEnvironment, container_root: str | None
+    ) -> tuple[str, dict[str, str]]:
+        """Upload the profile's skills next to harbor-injected ones.
+
+        `upload_dir` is `docker cp <src>/. <target>`, which merges — task skills
+        survive. A name already in the container wins: benchmark skills are part of
+        the measurement, so the profile copy is skipped rather than overwriting it.
+        """
+        skills_data_path = self._overrides.get("skills_data_path")
+        if not skills_data_path:
+            raise RuntimeError(
+                "gc_cli_config.skills_data_path is missing or empty — the profile "
+                "must set it to a directory on the runner filesystem before calling "
+                "_merge_profile_skills."
+            )
+        local_root = Path(str(skills_data_path))
+        if not local_root.is_dir():
+            raise RuntimeError(
+                f"gc_cli_config.skills_data_path does not exist on the runner: "
+                f"{local_root}. It must be a directory on the runner filesystem — "
+                "the adapter uploads it into the task container."
+            )
+        root = container_root or DEFAULT_CONTAINER_SKILLS_ROOT
+        await environment.exec(f"mkdir -p {shlex.quote(root)}")
+        candidates = self._resolve_profile_skill_dirs(local_root)
+        if not candidates:
+            self.logger.warning(
+                "No SKILL.md found under %s — no profile skills uploaded", local_root
+            )
+            return root, {}
+        sources: dict[str, str] = {}
+        for skill_dir in candidates:
+            target = f"{root}/{skill_dir.name}"
+            if await environment.is_dir(target):
+                sources[skill_dir.name] = "skipped"
+                self.logger.warning(
+                    "Skill %s already present in %s — profile copy skipped",
+                    skill_dir.name,
+                    root,
+                )
+                continue
+            await environment.exec(f"mkdir -p {shlex.quote(target)}")
+            await environment.upload_dir(skill_dir, target)
+            sources[skill_dir.name] = "profile"
+        return root, sources
+
+    def _write_skills_debug(self, ctx: Any, sources: dict[str, str]) -> None:
+        """Dump the skills the registry actually loaded to ``logs_dir/skills.json``.
+
+        Authoritative by construction: the listing comes from the same registry and
+        backend the agent uses, so an empty set is visible instead of silent. Written
+        beside trajectory.json, which harbor syncs into the task results. Best-effort —
+        a debug artifact must never fail a run.
+        """
+        try:
+            from tools.skills.registry import get_skills_registry
+
+            config_dict = getattr(ctx, "config_dict", {}) or {}
+            root = config_dict.get("skills_data_path")
+            registry = get_skills_registry(config_dict, backend=ctx.os_backend)
+            loaded = sorted(str(s["id"]) for s in registry.list_skills())
+            payload = {
+                "skills_root": root,
+                # A name in `sources` mapped to "skipped" means the profile's copy was
+                # NOT uploaded because the task already provided that name — the copy
+                # the agent actually sees still comes from the task, not the profile.
+                # Only an explicit "profile" entry means the profile's copy won.
+                "loaded": [
+                    {
+                        "id": sid,
+                        "source": "profile" if sources.get(sid) == "profile" else "task",
+                    }
+                    for sid in loaded
+                ],
+                "skipped": sorted(k for k, v in sources.items() if v == "skipped"),
+                "counts": {
+                    "loaded": len(loaded),
+                    "profile": sum(1 for v in sources.values() if v == "profile"),
+                    "skipped": sum(1 for v in sources.values() if v == "skipped"),
+                },
+            }
+            path = self.logs_dir / "skills.json"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(payload, ensure_ascii=False, indent=2))
+            counts = payload["counts"]
+            # Counters and the root only: runner stdout is buffered whole into the
+            # main container's memory, so this line must stay small.
+            self.logger.info(
+                "skills: %s loaded from %s (profile=%s, skipped=%s)",
+                counts["loaded"],
+                root,
+                counts["profile"],
+                counts["skipped"],
+            )
+        except Exception:
+            self.logger.error("Failed to write skills.json", exc_info=True)
+
+    @staticmethod
     def _nudge_instruction(instruction: str, skills_path: str | None) -> str:
         """Append a one-line, model-agnostic hint to discover skills natively."""
         if not skills_path:
@@ -300,6 +424,12 @@ class GcCliExternal(BaseAgent):
         container_skills = (
             skills_dir if skills_dir and await environment.is_dir(skills_dir) else None
         )
+        skill_sources: dict[str, str] = {}
+        profile_skills = self._overrides.get("skills_data_path")
+        if profile_skills:
+            container_skills, skill_sources = await self._merge_profile_skills(
+                environment, container_skills
+            )
         self._apply_injected_skills(config_dict, container_skills)
         instruction = self._nudge_instruction(instruction, container_skills)
 
@@ -318,6 +448,7 @@ class GcCliExternal(BaseAgent):
                 loop=loop,
                 on_messages_evicted=_on_messages_evicted,
             )
+            self._write_skills_debug(ctx, skill_sources)
             executor = AgentExecutor(ctx)
             executor.run([instruction])
             return executor.get_state()

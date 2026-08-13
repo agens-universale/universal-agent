@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from typing import Any, Literal, Optional, Union
 
 
-Kind = Literal["user", "agent", "call", "result", "error", "error_msg", "system", "ask_human", "summary"]
+Kind = Literal["user", "agent", "call", "result", "error", "error_msg", "system", "ask_human", "summary", "todo"]
 Status = Literal["running", "stopped", "completed", "failed"]
 
 

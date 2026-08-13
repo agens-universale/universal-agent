@@ -22,6 +22,11 @@ class SharedStateData:
     notes_md: str = ""
     fetch_url_cache: Dict[str, Any] = field(default_factory=dict)
     confirm_rules: Dict[str, bool] = field(default_factory=dict)
+    # Чек-лист текущей задачи ОРКЕСТРАТОРА (тул ``session_todo``): [{content, status}],
+    # status ∈ persistence.schema.TODO_STATUSES. Replace-семантика на каждый вызов.
+    # Субагент ведёт свой — см. ``State.session_todo``: shared у них общий, и
+    # replace-семантика затирала бы план родителя.
+    session_todo: List[Dict[str, str]] = field(default_factory=list)
 
 
 class State:
@@ -117,6 +122,10 @@ class State:
         self.last_batch_unknown_tool_count: int = 0
         self.project_memory_content_hash: Optional[str] = None
         self.tool_usage_notice_cnt: dict[str, int] = {}
+        # Шаги без вызова session_todo (todo_reminder); переживает ход через meta.
+        self.todo_reminder_cnt: int = 0
+        # Мягкая подсказка «заведи чек-лист» — один раз за прогон (per-run).
+        self.todo_create_nudge_sent: bool = False
         self.tool_call_outputs_store = ToolCallOutputsStore()
         # Учёт токенов прогона по категориям (main/summary/finish_gate/.../subagent).
         # ``usage`` — кумулятив по треду (гидрируется из meta на resume).
@@ -128,6 +137,29 @@ class State:
         # По нему футер считает live-«запрос» текущего хода (usage − baseline),
         # пока last_run_usage ещё не выставлен. Транзиентный (per-run), не биллится.
         self.run_start_usage_meta: Optional[dict] = None
+        # Чек-лист субагента: собственный, эфемерный (см. property session_todo).
+        self.subagent_todo: List[Dict[str, str]] = []
+
+    @property
+    def session_todo(self) -> List[Dict[str, str]]:
+        """Чек-лист ТЕКУЩЕГО агента (тул ``session_todo``).
+
+        Оркестратор ведёт его в ``shared`` — там он персистится и переживает
+        компакцию. Субагент получает ``shared`` родителя по ссылке, а у тула
+        replace-семантика, поэтому его чек-лист живёт в собственном поле: свой
+        план ребёнка не должен затирать план родителя. Ребёнок умирает вместе
+        с прогоном — персистить нечего.
+        """
+        if self.parent_state_id is not None:
+            return self.subagent_todo
+        return self.shared.session_todo
+
+    @session_todo.setter
+    def session_todo(self, items: List[Dict[str, str]]) -> None:
+        if self.parent_state_id is not None:
+            self.subagent_todo = items
+        else:
+            self.shared.session_todo = items
 
     def set_call_metadata(self):
         metadata: Dict[str, Any] = dict()
@@ -225,6 +257,7 @@ class State:
         """Субагент: изолированный meta/state; wiki общая через shared (D34)."""
         self.project_memory_content_hash = None
         self.tool_usage_notice_cnt = {}
+        self.todo_reminder_cnt = 0
 
     def flush_current_user_intent(self) -> None:
         """Flush open turn records into closed log and increment ``user_turn_seq``.

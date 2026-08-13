@@ -26,11 +26,13 @@ class PreviewScreen(Screen[bool]):
     ]
 
     def __init__(self, *, segments: list, thread_id: str = "",
-                 project_path: str = "") -> None:
+                 project_path: str = "",
+                 subagent_records: list | None = None) -> None:
         super().__init__()
         self._segments = segments
         self._thread_id = thread_id
         self._project_path = project_path
+        self._subagent_records = subagent_records
 
     def compose(self) -> ComposeResult:
         with Vertical(id="root"):
@@ -45,8 +47,12 @@ class PreviewScreen(Screen[bool]):
                 id="preview-footer", markup=False)
 
     def on_mount(self) -> None:
-        from tui.services.trace_render import render_segments_readonly
-        render_segments_readonly(self.query_one("#trace", VerticalScroll), self._segments)
+        from tui.services.trace_render import (
+            merge_nested_readonly, render_segments_readonly)
+        trace = self.query_one("#trace", VerticalScroll)
+        calls = render_segments_readonly(trace, self._segments)
+        if self._subagent_records:
+            merge_nested_readonly(trace, self._subagent_records, calls)
 
     def action_resume(self) -> None:
         self.dismiss(True)

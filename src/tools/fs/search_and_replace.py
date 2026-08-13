@@ -58,6 +58,7 @@ class SearchAndReplace(AbstractSimpleTool):
                 "Replaces exact text in a file using literal matching. "
                 "Uses literal string matching (case-sensitive, no regex). "
                 "Supports dry-run, occurrence selection, optional backup, and optional unified diff output. "
+                "When occurrence='all', expected_matches is required (tool fails without it). "
                 "Always returns a JSON string with fields: ok, applied, matched, replaced, path, message, error."
             ),
             "parameters": {
@@ -82,10 +83,17 @@ class SearchAndReplace(AbstractSimpleTool):
                     "expected_matches": {
                         "type": "integer",
                         "minimum": 0,
-                        "description": "If provided, tool fails unless the total number of matches in file equals this value."
+                        "description": (
+                            "Required when occurrence='all' (tool fails with invalid_argument if omitted). "
+                            "Otherwise optional: if provided, tool fails unless the total number of matches "
+                            "in the file equals this value."
+                        ),
                     },
                     "occurrence": {
-                        "description": "Which occurrence to replace: 'first' (default), 'last', 'all', or 1-based integer index.",
+                        "description": (
+                            "Which occurrence to replace: 'first' (default), 'last', 'all', or 1-based integer index. "
+                            "When 'all', you must also pass expected_matches equal to the total match count."
+                        ),
                         "anyOf": [
                             {"type": "string", "enum": ["first", "last", "all"]},
                             {"type": "integer", "minimum": 1}
@@ -142,9 +150,10 @@ Usage:
 - Modifies a **single file** by replacing one occurrence of `search` with `replace`.
 - The `search` string must match **exactly** (case-sensitive).
 - By default, only the **first match** is replaced. You can choose `occurrence="last"`, `occurrence="all"`, or a 1-based occurrence number.
+- When `occurrence="all"`, `expected_matches` is **required** (must equal the total match count); omitting it fails with invalid_argument.
 - File is rewritten safely (write + replace) to prevent data loss.
 - Optional `dry_run=true` computes result without writing.
-- Optional `expected_matches` guards against unintended edits when total match count differs.
+- Optional `expected_matches` (always required for `occurrence="all"`) guards against unintended edits when total match count differs.
 - Matching is done across the ENTIRE file — there are no start_line/end_line scope args.
 - For disambiguation use a wide enough unique snippet in search (with surrounding context),
   or use occurrence/first/last/all and expected_matches.
