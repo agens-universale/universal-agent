@@ -746,7 +746,8 @@ async def healthcheck():
     return {"status": "ok"}
 
 
-if __name__ == "__main__":
+def serve() -> int:
+    """Поднять REST-сервер по config_server.yml. Тело точки входа gc-serve."""
     server_cfg = SERVER_CONFIG.get("server", {}) or {}
     host = str(server_cfg.get("host", "0.0.0.0"))
     port_raw = server_cfg.get("port", 8000)
@@ -755,5 +756,13 @@ if __name__ == "__main__":
     except (TypeError, ValueError):
         port = 8000
 
-    uvicorn.run("src.server:app", host=host, port=port)
+    # Было "src.server:app": под установленным колесом (sources = ["src"]) модуль
+    # называется server, поэтому строка резолвилась только при запуске из корня
+    # репозитория, а из wheel падала ModuleNotFoundError.
+    uvicorn.run("server:app", host=host, port=port)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(serve())
 

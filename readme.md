@@ -30,20 +30,38 @@ Background и CLI-клиент для работы с агентом GigaCode: �
 
 > 📄 **Наглядная инструкция по установке (HTML):** [docs/gc-ua-install.html](docs/gc-ua-install.html) — пошаговая страница, откройте локально в браузере.
 
+Агент ставится профилями: базовая установка — headless-ядро с `gc-cli`,
+фронтенды доезжают через extras.
+
+| Профиль | Что приезжает | Точки входа |
+|---|---|---|
+| `gc-ua` | ядро + CLI + MCP-рантайм | `gc-cli`, `gc-mcp`, `gc-mcp-install` |
+| `gc-ua[tui]` | + `textual`, `rich`, `pygments` | + `gc-ua` |
+| `gc-ua[server]` | + `fastapi`, `uvicorn`, `psutil` | + `gc-serve` |
+| `gc-ua[all]` | всё | всё |
+
 ```bash
-uv tool install -e .   # gc-cli + gc-ua (TUI по умолчанию). При реинсталле добавьте --force
-gc-mcp install duckduckgo_search   # поставить один MCP + авто-подключить в ~/.gc/config.local.yml
-# gc-mcp install   # поставить все MCP из манифеста
+# из клона репозитория (кавычки обязательны: в zsh [tui] — glob-паттерн)
+uv tool install -e .                 # только gc-cli
+uv tool install -e ".[tui]"          # + TUI
+gc-mcp install duckduckgo_search     # один MCP + авто-подключение в ~/.gc/config.local.yml
+# gc-mcp install                     # все MCP из манифеста
 ```
 
 ```bash
-# установка без клонирования репо gc-cli + gc-ua (TUI по умолчанию)
-uv tool install "git+https://gitverse.ru/gigacode-ai/universal-agent"
+# без клонирования, прямо из git
+uv tool install "gc-ua @ git+https://gitverse.ru/gigacode-ai/universal-agent"
+uv tool install "gc-ua[tui] @ git+https://gitverse.ru/gigacode-ai/universal-agent"
+uv tool install "gc-ua[server] @ git+https://gitverse.ru/gigacode-ai/universal-agent"
 gc-mcp install   # MCP → ~/.local/share/gc/recommended_mcp/venv + авто-wire в ~/.gc/config.local.yml
 # Примечание: source-MCP (office/science/computer) устанавливаются напрямую из git-подкаталога репо
 # (pip install "git+...#subdirectory=external/<name>") — клонировать репо не нужно.
 # Требуется: git на PATH + доступ к сети.
 ```
+
+> Смена набора extras — это переустановка: добавьте `--force`, иначе uv увидит
+> конфликт имён скриптов. Скрипты `gc-ua` и `gc-serve` кладутся в PATH всегда,
+> независимо от extras, и без своего профиля печатают, чем доставить недостающее.
 
 После установки `gc-ua` / `gc-cli` работают **без `--config`**: при первом запуске конфиг создаётся сам (Windows — `~/.gc/config.yml`, macOS/Linux — `~/.config/gc/config.yml`).
 

@@ -314,13 +314,13 @@ class OnboardingScreen(Screen):
 
     def _commit(self) -> None:
         import onboarding_config_writer as w
-        from config import _default_config_path, validate_config_text
+        from config import default_config_path, validate_config_text
         from onboarding import FIELD_ANCHOR_PATHS
         dotted = {FIELD_ANCHOR_PATHS.get(k, k): v for k, v in self._values.items()}
         try:
             w.write_values(
                 self._config_path, dotted,
-                template_path=_default_config_path(),
+                template_path=default_config_path(),
                 validate=validate_config_text,
             )
         except ValueError as exc:

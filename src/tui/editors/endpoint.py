@@ -33,13 +33,13 @@ class EndpointEditor(Vertical):
     def submit(self) -> tuple[bool, str | None]:
         """(ok, url|None). Пусто = None («оставить как есть»). Невалидно →
         (False, None), ошибка показана внутри редактора."""
-        from onboarding import _valid_endpoint_url
+        from onboarding import valid_endpoint_url
         raw = self.query_one(Input).value.strip()
         for e in self.query("#onb-error"):
             e.remove()
         if not raw:
             return True, None
-        if not _valid_endpoint_url(raw):
+        if not valid_endpoint_url(raw):
             self.mount(Static(_ERROR, id="onb-error", classes="onb-warn onb-dyn"))
             return False, None
         return True, raw

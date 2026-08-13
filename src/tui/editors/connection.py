@@ -166,7 +166,7 @@ class ConnectionEditor(Vertical):
         if url != self._initial_url:
             if not url:
                 return None, None, _URL_EMPTY, proxy
-            if not onboarding._valid_endpoint_url(url):
+            if not onboarding.valid_endpoint_url(url):
                 return None, None, _URL_ERROR, proxy
             out_url = url
         elif not url:                        # был пуст и остался пуст, но адрес обязателен

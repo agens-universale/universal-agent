@@ -126,6 +126,30 @@ def _bootstrap_user_config() -> bool:
     return True
 
 
+# --- Публичный контракт для необязательных модулей (extras) -------------------
+# tui/ и swarm/ живут за extras и обязаны зависеть только от ядра, причём через
+# публичные имена: тянуться в приватные `_foo` через границу дистрибутива —
+# значит ломаться от любого внутреннего рефакторинга config.py.
+#
+# Это ДЕЛЕГИРУЮЩИЕ обёртки, а не алиасы вида `foo = _foo`. Алиас захватывает
+# объект функции на импорте, и тогда monkeypatch приватного имени (так делают
+# существующие тесты — например tests/tui/test_settings_screen.py:2504) до
+# публичного имени не доходит. Обёртка резолвит приватное имя в момент вызова.
+def default_config_path() -> str:
+    """Публичное имя для `_default_config_path`."""
+    return _default_config_path()
+
+
+def project_local_config_path() -> Optional[str]:
+    """Публичное имя для `_project_local_config_path`."""
+    return _project_local_config_path()
+
+
+def bootstrap_user_config() -> bool:
+    """Публичное имя для `_bootstrap_user_config`."""
+    return _bootstrap_user_config()
+
+
 def resolve_base_config_path(config_path: Optional[str] = None) -> str:
     """Резолвить путь к base config.yml без загрузки YAML.
 

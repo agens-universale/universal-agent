@@ -13,21 +13,35 @@
 В корне проекта выполните:
 
 ```bash
-uv sync                # зависимости (dev + test)
-uv tool install -e .   # gc-cli + gc-ua (TUI в зависимостях по умолчанию)
+uv sync                      # окружение разработки (dev + test; тянет все extras)
+uv tool install -e .         # только gc-cli (headless-ядро)
+uv tool install -e ".[tui]"  # + gc-ua (TUI)
 ```
 
 > В корпоративной сети Сбера к командам `uv tool install` добавляйте `--system-certs` — иначе TLS-перехват ломает установку.
 
-### Минимальная установка gc-cli без TUI
+### Профили установки
 
-Для headless-серверов, где нужен только `gc-cli` (без `gc-ua` и `textual`/`rich`):
+Базовая установка headless: ядро агента, `gc-cli` и MCP-рантайм. Фронтенды —
+через extras, они только **добавляют** зависимости.
+
+| Профиль | Добавляет | Появляется |
+|---|---|---|
+| `gc-ua` | — | `gc-cli`, `gc-mcp`, `gc-mcp-install` |
+| `gc-ua[tui]` | `textual`, `rich`, `pygments` | `gc-ua` |
+| `gc-ua[server]` | `fastapi`, `uvicorn`, `psutil` | `gc-serve` |
+| `gc-ua[all]` | всё сразу | всё |
 
 ```bash
-uv tool install -e . --excludes packaging/cli-only-excludes.txt
+uv tool install "gc-ua[tui] @ git+https://gitverse.ru/gigacode-ai/universal-agent"
 ```
 
-`pip install -e .` всегда тянет TUI-зависимости; для минимального runtime используйте `uv tool` с `--excludes`, как выше.
+Кавычки обязательны: в zsh `[tui]` — glob-паттерн, без них будет
+`no matches found`. Смена набора extras — переустановка, нужен `--force`.
+
+Скрипты `gc-ua` и `gc-serve` кладутся в PATH при любой установке (uv ставит все
+точки входа дистрибутива независимо от extras). Без своего профиля они не падают
+трейсбеком, а печатают в stderr, чем доставить недостающее, и возвращают 1.
 
 Проверка после установки: `uv sync` и `uv run pytest` — см. [Тесты](testing.md).
 

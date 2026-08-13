@@ -2,7 +2,13 @@ import os
 from typing import Any, Dict
 
 from config_modules import env_vars
-from rest_api.server_config import PROJECT_ROOT
+from bundled_assets import bundled_root
+
+# Корень bundled-ассетов. Раньше брался из rest_api.server_config — это была
+# единственная зависимость swarm → server, причём там PROJECT_ROOT объявлен как
+# тот же str(bundled_root()) над ядром. Импортируем напрямую, чтобы swarm
+# зависел только от core.
+PROJECT_ROOT = str(bundled_root())
 
 
 def _resolve_path(maybe_path: Any, default_rel: str) -> str:

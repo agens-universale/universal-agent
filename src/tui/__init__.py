@@ -12,8 +12,12 @@ import sys
 from typing import Optional, Sequence
 
 
+# Одна строка — не косметика: tests/tui/test_runner_no_textual.py требует
+# err.count("\n") <= 1, чтобы падение точки входа оставалось однострочным.
 _MISSING_TEXTUAL_MSG = (
-    "TUI mode requires 'textual'. Reinstall: uv tool install -e . --force"
+    "TUI требует пакет textual (extra 'tui'). Переустановите: "
+    'uv tool install --force "gc-ua[tui] @ '
+    'git+https://gitverse.ru/gigacode-ai/universal-agent"'
 )
 
 
@@ -90,9 +94,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         load_config,
         apply_cli_overrides,
         resolve_config_path,
-        _project_local_config_path,
+        project_local_config_path,
         user_config_path,
-        _bootstrap_user_config,
+        bootstrap_user_config,
     )
     import onboarding
 
@@ -100,14 +104,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     onboarding_mode = None
 
     if getattr(args, "init_config", False):
-        just_created = _bootstrap_user_config()
+        just_created = bootstrap_user_config()
         config_dict = load_config(None)
         if not _interactive():
             print(onboarding.setup_guide(str(onb_write_path), config_dict, program="gc-ua", just_created=just_created), file=sys.stderr)
             return 0
         onboarding_mode = "review"
     else:
-        just_created = _bootstrap_user_config() if args.config is None else False
+        just_created = bootstrap_user_config() if args.config is None else False
         config_dict = load_config(args.config)
         apply_cli_overrides(config_dict)
 
@@ -133,7 +137,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     app = _app_mod.TuiApp(threads_dir=threads_dir, system="cli", config=config_dict)
     app.set_config_path(onb_write_path if onboarding_mode else resolve_config_path(args.config))
-    app._config_project_local = _project_local_config_path()  # str | None
+    app._config_project_local = project_local_config_path()  # str | None
     app._onboarding_mode = onboarding_mode
     app._onboarding_config_path = onb_write_path
     import upgrade_gate

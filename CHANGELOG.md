@@ -2,6 +2,44 @@
 
 ## Unreleased
 
+### Breaking — раздельная установка профилей через extras (0.2.3 → 0.3.0)
+
+- **Базовая установка `gc-ua` больше не тянет TUI.** Кто ставил `uv tool install -e .`
+  и ждал `gc-ua`, должен дописать extra: `uv tool install -e ".[tui]"` (или
+  `uv tool install "gc-ua[tui] @ git+https://gitverse.ru/gigacode-ai/universal-agent"`).
+  Extras умеют только добавлять зависимости, вычесть нельзя — поэтому дефолт
+  сделан headless, иначе облегчённого профиля не существовало бы вовсе.
+- Профили: `gc-ua` (ядро + CLI + MCP-рантайм) · `[tui]` — `textual`, `rich`,
+  `pygments` · `[server]` — `fastapi`, `uvicorn[standard]`, `psutil` (swarm
+  входит сюда же: он запускается только через `POST /swarm/run`) · `[mcp]` —
+  пустой по зависимостям, заведён для явности профилей · `[all]`.
+- `pygments` объявлен явно: его импортируют `tui/services/{trace_render,file_view}.py`,
+  а в зависимостях он не значился и приезжал транзитивно через `rich`.
+- `pytest` / `pytest-asyncio` убраны из runtime-зависимостей в
+  `[dependency-groups] test` — раньше их получал каждый пользователь.
+- Новая точка входа `gc-serve`. Заодно починен запуск сервера из установленного
+  колеса: в `server.py` стояло `uvicorn.run("src.server:app", ...)`, но под
+  колесом (`sources = ["src"]`) модуль называется `server`, и строка
+  резолвилась только при запуске из корня репозитория.
+- `server_requirements.txt` удалён: он пинил `uvicorn<0.31.0`, что несовместимо
+  с `mcp==1.26.0` (требует `uvicorn>=0.31.1`). Конфликт не всплывал только
+  потому, что файл ставили отдельно, мимо резолвера. Верхняя граница снята.
+- `packaging/cli-only-excludes.txt` удалён — приём `uv tool install --excludes`
+  вытеснен профилями.
+- Точки входа `gc-ua` / `gc-serve` кладутся в PATH всегда (uv ставит все скрипты
+  дистрибутива независимо от extras) и без своего профиля печатают однострочную
+  подсказку в stderr с готовой командой, возвращая 1 — вместо трейсбека.
+- Направление зависимостей приведено в порядок: `swarm/config.py` больше не
+  импортирует `rest_api.server_config` (берёт `bundled_root()` из ядра), а
+  `tui` / `swarm` обращаются к ядру только через публичные имена
+  `config.default_config_path` / `project_local_config_path` /
+  `bootstrap_user_config` и `onboarding.valid_endpoint_url` вместо подчёркнутых.
+  Подчёркнутые имена сохранены, публичные — делегирующие обёртки, поэтому
+  monkeypatch приватных имён в тестах продолжает работать.
+- `create_run_context(is_tui=True)` переживает отсутствие пакета `diff_tui`
+  (едет с `[tui]`): импорт под `try/except ImportError`, без diff-журнала
+  прогон полностью работоспособен.
+
 ### Feature — limit trace summary (LIMIT_TRACE_SUMMARY_SPEC)
 
 - When the main agent or a subagent hits a limit (`step_limit` / `tool_call_limit` / `token_limit`), the trace is now summarized by a single auxiliary LLM call and returned as a JSON envelope `{ok:false, status, message, raw_trace_summary}` instead of a flat string.

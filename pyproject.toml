@@ -6,10 +6,14 @@ build-backend = "hatchling.build"
 name = "gc-ua"
 # Релизная дисциплина (спека 2026-07-11-config-foundation): бампать при нарезке
 # release/vX.Y.Z — стамп агента сверяет версию+коммит, notice «обновлён» берёт отсюда.
-version = "0.2.3"
-description = "GigaCode Universal Agent — TUI/CLI клиент агента GigaCode"
+# 0.3.0 — раздельная установка профилей через extras. ЛОМАЮЩЕЕ: базовая
+# установка больше НЕ тянет TUI-стек; для gc-ua нужен extra [tui].
+version = "0.3.0"
+description = "GigaCode Universal Agent — клиент агента GigaCode (CLI / TUI / server)"
 readme = "readme.md"
 requires-python = ">=3.11"
+# ЯДРО. Нужно всем профилям: агентный цикл, тулы, конфиг, безопасность,
+# суммаризация, MCP-клиент. Разложено по графу импортов, а не на глаз.
 dependencies = [
     "pyyaml>=6.0.3",
     "pydantic>=2.9.0",
@@ -21,20 +25,44 @@ dependencies = [
     "httpx[socks]>=0.27.0",
     "httpx-sse>=0.4.0",
     "mcp==1.26.0",
-    "pytest>=9.0.3",
-    "pytest-asyncio>=0.23",
-    "textual>=0.55",
-    "rich>=13",
     "chardet>=7.4.3",
 ]
 
 [project.scripts]
 gc-cli = "cli:main"
 gc-ua = "tui:main"
+gc-serve = "serve_entry:main"
 gc-mcp-install = "mcp_runtime.install_cli:main"
 gc-mcp = "mcp_runtime.cli:main"
 
 [project.optional-dependencies]
+# Textual-фронтенд (gc-ua). pygments импортируют tui/services/{trace_render,
+# file_view}.py напрямую — раньше он не был объявлен вовсе и приезжал
+# транзитивно через rich, что делало установку зависимой от чужого графа.
+tui = [
+    "textual>=0.55",
+    "rich>=13",
+    "pygments>=2.13",
+]
+# FastAPI-режим (gc-serve). psutil здесь же: он нужен swarm'у, а swarm
+# запускается только через POST /swarm/run, то есть без server бесполезен.
+# Без psutil swarm деградирует до disk+timeout enforcement (см. docs/swarm.md).
+server = [
+    "fastapi>=0.115.0",
+    # server_requirements.txt пинил uvicorn<0.31.0 — это НЕСОВМЕСТИМО с
+    # mcp==1.26.0, который требует uvicorn>=0.31.1. Раньше конфликт не всплывал:
+    # server_requirements.txt ставили отдельно, мимо резолвера. uvicorn и так
+    # приезжает транзитивно из mcp; здесь нужен именно extra [standard].
+    "uvicorn[standard]>=0.31.1",
+    "psutil>=5.9,<7",
+]
+# MCP-инсталлятор (gc-mcp, gc-mcp-install). Сторонних пакетов ему не нужно:
+# рантайм-клиент MCP уже в ядре, а инсталлятор — это stdlib + рецепты из
+# recommended_mcp/, которые едут в колесе всегда. Extra заведён ради явности
+# профилей в доке; файлы он не гейтит — extras этого не умеют в принципе.
+mcp = []
+all = ["gc-ua[tui,server,mcp]"]
+
 dev-tui = [
     "textual>=0.85",
     "rich>=13",
@@ -59,8 +87,13 @@ dev = [
     { include-group = "test" },
 ]
 test = [
+    # Раньше жили в runtime-dependencies и приезжали каждому пользователю.
+    "pytest>=9.0.3",
+    "pytest-asyncio>=0.23",
     "office-mcp",
     "harbor>=0.16; python_version >= '3.12'",
+    # Тестовый набор целиком гоняет и TUI, и server, и swarm.
+    "gc-ua[tui,server]",
 ]
 
 [tool.uv]

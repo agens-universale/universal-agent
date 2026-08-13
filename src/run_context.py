@@ -177,12 +177,20 @@ def create_run_context(
     ctx.is_tui = bool(is_tui)
 
     if is_tui and os_backend is None:
-        from diff_tui.tracking import wrap_local_for_tui
+        # diff_tui едет вместе с extra [tui]: в headless-профиле пакета нет.
+        # Ядро обязано это пережить — без diff-журнала прогон полностью
+        # работоспособен, поэтому деградируем в no-op, а не роняем сборку
+        # контекста (тот же приём, что в mcp_daemon_autostart).
+        try:
+            from diff_tui.tracking import wrap_local_for_tui
+        except ImportError:
+            wrap_local_for_tui = None
 
-        wrapped = wrap_local_for_tui(backend, ctx)
-        if wrapped is not backend:
-            ctx.os_backend = wrapped
-            ctx.workspace = build_execution_workspace(wrapped, config_dict)
+        if wrap_local_for_tui is not None:
+            wrapped = wrap_local_for_tui(backend, ctx)
+            if wrapped is not backend:
+                ctx.os_backend = wrapped
+                ctx.workspace = build_execution_workspace(wrapped, config_dict)
 
     run_logger.debug(
         "Created RunContext (run_id=%s, logging_path=%s, os_backend=%s, workspace_root=%s)",

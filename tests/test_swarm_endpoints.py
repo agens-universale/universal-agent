@@ -18,10 +18,10 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-# Server-side зависимости (fastapi, starlette) ставятся через server_requirements.txt
+# Server-side зависимости (fastapi, starlette) ставятся через extra [server]
 # и могут отсутствовать в основном venv проекта. Если их нет — skip всех тестов.
-pytest.importorskip("fastapi", reason="server-side dep, install via server_requirements.txt")
-pytest.importorskip("starlette", reason="server-side dep, install via server_requirements.txt")
+pytest.importorskip("fastapi", reason="server-side dep, install via extra [server]")
+pytest.importorskip("starlette", reason="server-side dep, install via extra [server]")
 
 # Swarm runs the CLI inside a bubblewrap (bwrap) sandbox — Linux-only. Off Linux
 # (e.g. macOS dev) these endpoint tests can't exercise real swarm behavior, so skip.

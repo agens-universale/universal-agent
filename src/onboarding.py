@@ -66,6 +66,14 @@ def _valid_endpoint_url(raw: str) -> bool:
     parsed = urlparse(raw)
     return parsed.scheme in ("http", "https") and bool(parsed.netloc)
 
+
+# Публичное имя для tui/ (живёт за extra [tui] и обязано зависеть от ядра только
+# через публичный контракт). Делегирующая обёртка, а не алиас: алиас захватил бы
+# объект функции на импорте и сломал monkeypatch приватного имени в тестах.
+def valid_endpoint_url(raw: str) -> bool:
+    """Публичное имя для `_valid_endpoint_url`."""
+    return _valid_endpoint_url(raw)
+
 # Сентинелы из config.default.yml (страж совпадения — tests/test_onboarding.py).
 URL_SENTINEL = "http://your-backend:PORT/v1/chat/completions"
 TOKEN_SENTINEL = "Bearer <ВПИШИТЕ_ТОКЕН>"

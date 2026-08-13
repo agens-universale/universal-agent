@@ -6,19 +6,22 @@
 
 ## Установка
 
-TUI (`textual`, `rich`) входит в зависимости по умолчанию — ставится вместе с `gc-cli`:
+TUI-стек (`textual`, `rich`, `pygments`) живёт за extra `[tui]` — базовая
+установка его НЕ тянет, она headless и даёт только `gc-cli`:
 
 ```bash
-uv tool install -e .
+uv tool install -e ".[tui]"
+# без клонирования репозитория:
+uv tool install "gc-ua[tui] @ git+https://gitverse.ru/gigacode-ai/universal-agent"
 # или
-pip install -e .
+pip install -e ".[tui]"
 ```
 
-Минимальная headless-установка только `gc-cli` (без TUI) — см.
-[Установка и запуск](usage.md#минимальная-установка-gc-cli-без-tui).
+Кавычки обязательны: в zsh `[tui]` — glob-паттерн, без них будет `no matches found`.
+Полная таблица профилей — [Установка и запуск](usage.md#профили-установки).
 
-Если `textual` отсутствует (например, после cli-only install), `gc-ua` печатает в stderr
-короткую подсказку переустановить пакет и завершается с кодом 1 — без трейсбэка.
+Если `textual` отсутствует (базовый профиль без `[tui]`), `gc-ua` печатает в stderr
+однострочную подсказку с готовой командой и завершается с кодом 1 — без трейсбэка.
 
 ## Запуск
 
