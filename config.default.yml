@@ -144,7 +144,7 @@ intent_scope:
   max_final_answer_raw_chars: 2000
 
 # Лимиты FS-тулов, которые поднимают файл целиком в память.
-# read — fs_read_file / fs_search_files; mutate — apply/replace (не append).
+# read — fs_read_file; mutate — apply/replace (не append).
 fs_tools:
   max_read_bytes: 8388608       # 8 MiB
   max_mutate_bytes: 16777216    # 16 MiB (peak RAM ≈ ×2–3; raise via config if needed)
@@ -163,8 +163,10 @@ fs_tools:
     top_level_dirs_cap: 20
     default_limit: 100                # limit if caller omits it
     max_total_matches: 300            # hard ceiling: limit_eff = min(requested, 300)
-    exclude_dot_dirs: true            # skip nested dirs whose name starts with '.'
-    exclude_dir_names: [venv, __pycache__, node_modules]
+    exclude_dot_dirs: true            # nested '.' dirs (hard floor always on)
+    # Extra basenames only; hard floor always includes venv, __pycache__,
+    # node_modules, .git (clearing this list does not re-open them).
+    exclude_dir_names: []
 
 # Чек-лист задачи (session_todo): каждые reminder_steps шагов без вызова тула —
 # напоминание. Есть незакрытые пункты — директивное «обнови список»; активного

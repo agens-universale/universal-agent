@@ -1,7 +1,7 @@
 """Shared FS load-size limits for tools that lift file content into memory.
 
 Two knobs (not one):
-- **read** — ``fs_read_file`` / ``fs_search_files`` (content surfaces to the model).
+- **read** — ``fs_read_file`` (content surfaces to the model).
 - **mutate** — ``fs_apply_file_edits`` / ``fs_search_and_replace`` (full-file load).
 
 ``fs_append_file`` is not under mutate: it checks a head sample and appends.

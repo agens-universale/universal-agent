@@ -20,6 +20,12 @@ from tools.fs.agent_hidden import is_agent_hidden
 from tools.schema_optional import coalesce_optional_string
 from tools.simple_tool_base import AbstractSimpleTool
 from utils.file_text import BINARY_SAMPLE_BYTES, classify_content_from_sample, guess_encoding
+from utils.fs_search_walk import (
+    HARD_EXCLUDE_NESTED_DOT_DIRS,
+    effective_exclude_dir_names,
+    hard_exclude_dir_names_for_prompt,
+    should_skip_nested_dir_name,
+)
 from utils.glob_to_regex import glob_to_regex
 from utils.tool_report_paths import tool_report_abspath
 
@@ -29,8 +35,6 @@ _GLOB_META_RE = re.compile(r"[*?\[\]]")
 DEFAULT_MAX_MATCHES = 100
 HARD_MAX_MATCHES = 200
 DEFAULT_MAX_VISITED = 500_000
-# Nested dir basenames never descended into (start path itself is always kept).
-DEFAULT_EXCLUDE_DIR_NAMES = frozenset({"venv", "__pycache__", "node_modules", ".git"})
 
 
 def _compile_glob_fullmatch(pattern: str, *, case_insensitive: bool) -> re.Pattern:
@@ -43,18 +47,22 @@ class FindFilesByName(AbstractSimpleTool):
 
     @classmethod
     def tool_description(cls) -> Dict[str, Any]:
+        skip = hard_exclude_dir_names_for_prompt()
         return {
             "type": "function",
             "name": "fs_find_files_by_name",
             "description": (
-                "Locate files and directories by name, glob pattern, or path fragment under "
-                "an absolute directory `path`. Walks the whole tree (not depth-limited listing). "
-                "Matches names/paths only — does NOT search text inside files. "
-                "`query`: plain substring (basename or relative path), or a glob "
-                "(e.g. '*.py', '**/list_files.py', 'src/tools/**'). "
-                "Skips agent scaffolding (.gc), common junk dirs (node_modules, venv, "
-                "__pycache__, .git), and nested dot-directories. "
-                "Returns matching paths up to max_matches (default 100, max 200); may set truncated."
+                "Find files and directories by name, path fragment, or glob under an absolute "
+                "directory path. Searches the whole tree under path. "
+                "Matches names and paths only — does not search file contents. "
+                "query is a plain substring (file/dir name or path under path) or a glob "
+                "(e.g. '*.py', '**/Config*.yml'). Short plain queries can match many paths. "
+                f"Does not enter nested directories named `.gc`, {skip}, or any nested "
+                "directory whose name starts with '.'. "
+                "If path itself is such a directory, it is still searched. "
+                "case_insensitive defaults to true. "
+                "At most max_matches results (default 100, maximum 200); "
+                "truncated=true if the search stopped early."
             ),
             "parameters": {
                 "type": "object",
@@ -68,18 +76,18 @@ class FindFilesByName(AbstractSimpleTool):
                     "query": {
                         "type": "string",
                         "description": (
-                            "What to find: file/dir name fragment (e.g. 'list_files'), "
-                            "path fragment (e.g. 'tools/fs'), or glob "
+                            "Name or path fragment (e.g. 'list_files', 'tools/fs') or glob "
                             "(e.g. '*.py', '**/*Config*.yml'). "
-                            "Plain text matches if it is a substring of the basename or of the "
-                            "relative path from `path`. Globs match the relative path; a glob "
-                            "without '/' also matches any depth (as **/pattern)."
+                            "Plain text matches a substring of the file/dir name or of the "
+                            "path relative to path. "
+                            "Globs match the path relative to path; a glob without '/' "
+                            "matches at any depth."
                         ),
                     },
                     "case_insensitive": {
                         "type": "boolean",
                         "description": (
-                            "Match query without regard to case. Default true. "
+                            "Ignore letter case when matching. Default true. "
                             "Set false for case-sensitive match."
                         ),
                     },
@@ -88,8 +96,8 @@ class FindFilesByName(AbstractSimpleTool):
                         "minimum": 1,
                         "maximum": 200,
                         "description": (
-                            "Max matches to return. Default 100, hard max 200. "
-                            "Search stops early when reached (truncated=true if more may exist)."
+                            "Maximum matches to return. Default 100, maximum 200. "
+                            "truncated=true if more matches may exist."
                         ),
                     },
                 },
@@ -101,16 +109,19 @@ class FindFilesByName(AbstractSimpleTool):
 
     @classmethod
     def prompt_description(cls) -> str:
+        skip = hard_exclude_dir_names_for_prompt()
         return (
             "Tool name: fs_find_files_by_name\n"
-            "Locate files/dirs by name, glob, or path fragment under an absolute directory. "
-            "Full-tree walk. Name/path only — does NOT search text inside files. "
-            "Skips .gc, node_modules, venv, __pycache__, .git, nested dot-dirs. "
-            "Prefer over shell find.\n"
-            "Args: path (abs dir), query (required), case_insensitive=true, "
-            "max_matches=100 (max 200).\n"
-            "Plain query matches basename or rel-path substring; globs match rel-path "
-            "(basename-only globs apply at any depth).\n"
+            "Find files/directories by name, path fragment, or glob under an absolute directory. "
+            "Searches the whole tree. Matches names/paths only — not file contents.\n"
+            f"Does not enter nested `.gc`, nested dirs named {skip}, or nested dirs whose "
+            "name starts with '.'. If path itself is such a directory, it is still searched.\n"
+            "query: plain substring of the name or relative path (short strings match many "
+            "paths), or a glob (basename globs like '*.py' match at any depth).\n"
+            "Args: path (required, absolute directory), query (required), "
+            "case_insensitive (default true), max_matches (default 100, maximum 200).\n"
+            "Response: ok, matches[{path, type, …}], count, truncated, "
+            "walk_stats (visited, stop_reason).\n"
         )
 
     def _result(
@@ -281,6 +292,15 @@ class FindFilesByName(AbstractSimpleTool):
 
         if not isinstance(path, str):
             return _result(ok=False, error={"type": "invalid_argument", "field": "path"})
+        if not os.path.isabs(path):
+            return _result(
+                ok=False,
+                error={
+                    "type": "invalid_argument",
+                    "field": "path",
+                    "message": "path must be absolute",
+                },
+            )
         if not isinstance(query, str) or not query.strip():
             return _result(
                 ok=False,
@@ -317,15 +337,19 @@ class FindFilesByName(AbstractSimpleTool):
         stop_reason = "completed"
         root_norm = os.path.normpath(path)
 
+        exclude_names = effective_exclude_dir_names()
+
         def _should_descend(abs_dir: str) -> bool:
             name = os.path.basename(os.path.normpath(abs_dir))
             if os.path.normpath(abs_dir) == root_norm:
                 return True
             if is_agent_hidden(name):
                 return False
-            if name.startswith("."):
-                return False
-            if name in DEFAULT_EXCLUDE_DIR_NAMES:
+            if should_skip_nested_dir_name(
+                name,
+                exclude_names=exclude_names,
+                exclude_dot_dirs=HARD_EXCLUDE_NESTED_DOT_DIRS,
+            ):
                 return False
             if not self._read_guard_pass(abs_dir, _rg_cfg, _rg_root, _rg_extra):
                 return False

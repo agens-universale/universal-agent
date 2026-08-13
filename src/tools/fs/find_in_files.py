@@ -32,6 +32,12 @@ from utils.file_text import (
 from utils.fs_size_limits import (
     fs_find_in_files_max_bytes,
 )
+from utils.fs_search_walk import (
+    HARD_EXCLUDE_NESTED_DOT_DIRS,
+    effective_exclude_dir_names,
+    hard_exclude_dir_names_for_prompt,
+    should_skip_nested_dir_name,
+)
 from utils.glob_to_regex import compile_glob
 from utils.tool_report_paths import tool_report_abspath
 from tools.simple_tool_base import AbstractSimpleTool
@@ -91,40 +97,49 @@ class FindInFiles(AbstractSimpleTool):
             "pattern": {
                 "type": "string",
                 "description": (
-                    "Search string. text = fixed substring; "
-                    "python-regexp = Python re."
+                    "What to search for. "
+                    "query_mode=text: exact substring. "
+                    "query_mode=python-regexp: Python regular expression."
                 ),
             },
             "query_mode": {
                 "type": "string",
                 "enum": ["text", "python-regexp"],
                 "description": (
-                    "How to interpret pattern. "
-                    "text: fixed substring as-is. "
-                    "python-regexp: Python regular expression."
+                    "Required. How to read pattern. "
+                    "text: exact substring (use for normal searches). "
+                    "python-regexp: Python regular expression "
+                    "('.' matches newline; ^/$ are line edges); "
+                    "use only when you need regex features."
                 ),
             },
             "limit": {
                 "type": "integer",
-                "description": "Max matches. Default 100, max 300.",
+                "description": (
+                    "Maximum matches to return. Default 100, maximum 300. "
+                    "There is no page offset — only the first matches."
+                ),
                 "default": 100,
             },
             "case_insensitive": {
                 "type": "boolean",
-                "description": "Default false.",
+                "description": "Ignore letter case. Default false.",
                 "default": False,
             },
             "file_pattern": {
                 "type": "string",
                 "description": (
-                    "Glob when path is a directory. Ignored for a single file."
+                    "When path is a directory: only search files whose path relative to "
+                    "path matches this glob (e.g. '*.py', 'src/**/*.ts'). "
+                    "Ignored when path is a single file."
                 ),
             },
             "exclude_dirs": {
                 "type": "array",
                 "items": {"type": "string"},
                 "description": (
-                    "Absolute dirs to skip (self+descendants). Max 32."
+                    "Extra absolute directories to skip (each directory and everything under it). "
+                    "At most 32 entries."
                 ),
             },
         },
@@ -134,22 +149,28 @@ class FindInFiles(AbstractSimpleTool):
 
     @classmethod
     def tool_description(cls) -> Dict[str, Any]:
+        skip = hard_exclude_dir_names_for_prompt()
         return {
             "type": "function",
             "name": "fs_find_in_files",
             "description": (
-                "Search text/regex inside a single file or recursively inside a directory "
-                "(file contents — not names). "
-                "path must be absolute. "
-                "Set query_mode=text for a fixed substring, or "
-                "query_mode=python-regexp for a Python re pattern (DOTALL+MULTILINE). "
-                "Returns the first N matches (default 100, max 300) with line numbers, context and "
-                "the matching text. Binary files are skipped; oversized files are skipped. "
-                "Hidden/excluded directories are skipped. .gitignore is NOT consulted. "
-                "Directory scans may refuse when the candidate surface is too large for the "
-                "pattern mode (too_many_candidate_files) — narrow path / exclude_dirs / file_pattern. "
-                "Before concluding 'not found', read scan_complete, more_matches_may_exist, "
-                "stop_reason, stop_summary and guidance."
+                "Search for text inside a single absolute file or under a directory "
+                "(file contents, not file names). "
+                "query_mode is required: text = exact substring; python-regexp = Python "
+                "regular expression. Prefer text unless you need regex. "
+                "case_insensitive defaults to false. "
+                "Returns at most limit matches (default 100, maximum 300); no later page. "
+                "Each match has line, end_line, line_content, and context. "
+                "Skips binary and very large files. "
+                f"Under a directory, does not enter nested `.gc`, nested dirs named {skip}, "
+                "or nested directories whose name starts with '.'. "
+                "If path itself is such a directory, it is still searched. "
+                "Does not use .gitignore. "
+                "If the tree is too large for the search, the tool may stop early "
+                "(see stop_reason / guidance) — narrow path, file_pattern, exclude_dirs, "
+                "or pattern. "
+                "Empty matches is not proof the text is absent: check scan_complete, "
+                "more_matches_may_exist, stop_reason, stop_summary, and guidance."
             ),
             "parameters": cls._PARAM_SCHEMA,
             "strict": True,
@@ -157,16 +178,27 @@ class FindInFiles(AbstractSimpleTool):
 
     @classmethod
     def prompt_description(cls) -> str:
+        skip = hard_exclude_dir_names_for_prompt()
         return (
-            "fs_find_in_files(path, pattern, query_mode, limit=100, case_insensitive=false, "
-            "file_pattern=None, exclude_dirs=None): "
-            "Search inside a single absolute file or directory (recursively). "
-            "query_mode=text: fixed substring. "
-            "query_mode=python-regexp: Python re (DOTALL+MULTILINE). "
-            "Returns first N matches with line numbers and context (default 100, max 300). "
-            "exclude_dirs: absolute dirs to skip. "
-            "Binary/oversized skipped; excluded/hidden dirs skipped. "
-            ".gitignore is not consulted."
+            "Tool name: fs_find_in_files\n"
+            "Search for text inside one absolute file or under a directory (recursively). "
+            "Searches file contents, not file names.\n"
+            "Required: path, pattern, query_mode.\n"
+            "query_mode=text: exact substring (prefer for normal searches).\n"
+            "query_mode=python-regexp: Python regular expression "
+            "('.' matches newline; ^/$ are line edges); use only when you need regex.\n"
+            "Optional: limit (default 100, maximum 300; first matches only, no page offset), "
+            "case_insensitive (default false), file_pattern (directory only), "
+            "exclude_dirs (extra absolute directories to skip, at most 32).\n"
+            f"Under a directory, does not enter nested `.gc`, nested dirs named {skip}, "
+            "or nested dirs whose name starts with '.'. "
+            "If path itself is such a directory, it is still searched. "
+            "Skips binary and very large files. Does not use .gitignore.\n"
+            "Response: matches with line, end_line, line_content, context; also "
+            "scan_complete, more_matches_may_exist, stop_reason, stop_summary, guidance.\n"
+            "Do not treat empty matches as proof the text is absent — read those fields. "
+            "If the search stops early, narrow path, file_pattern, exclude_dirs, or pattern; "
+            "there is no next page.\n"
         )
 
     @enforce_read_guard(path_arg="path")
@@ -174,7 +206,7 @@ class FindInFiles(AbstractSimpleTool):
         self,
         path: str,
         pattern: str,
-        query_mode: str = "python-regexp",
+        query_mode: str,
         limit: int = 100,
         case_insensitive: bool = False,
         file_pattern: Optional[str] = None,
@@ -1144,8 +1176,10 @@ class FindInFiles(AbstractSimpleTool):
                 return False
             return True
 
-        exclude_dot = config.exclude_dot_dirs
-        exclude_names = set(config.exclude_dir_names or [])
+        # Hard floor always on; config may only add basenames. Nested dot-dirs
+        # stay hard-on even if exclude_dot_dirs is set false in YAML.
+        exclude_names = effective_exclude_dir_names(config.exclude_dir_names)
+        exclude_dot = HARD_EXCLUDE_NESTED_DOT_DIRS or bool(config.exclude_dot_dirs)
         excluded_dirs: List[Dict[str, str]] = []
 
         def _should_descend(dirpath: str) -> bool:
@@ -1154,23 +1188,18 @@ class FindInFiles(AbstractSimpleTool):
                 return True
             if is_agent_hidden(name):
                 return False
-            if exclude_dot and name.startswith("."):
+            skip_reason = should_skip_nested_dir_name(
+                name,
+                exclude_names=exclude_names,
+                exclude_dot_dirs=exclude_dot,
+            )
+            if skip_reason is not None:
                 excluded_dirs.append(
                     {
                         "path": tool_report_abspath(
                             dirpath, workspace=self._workspace
                         ),
-                        "reason": "hidden_dot_directory",
-                    }
-                )
-                return False
-            if name in exclude_names:
-                excluded_dirs.append(
-                    {
-                        "path": tool_report_abspath(
-                            dirpath, workspace=self._workspace
-                        ),
-                        "reason": "excluded_directory_name",
+                        "reason": skip_reason,
                     }
                 )
                 return False

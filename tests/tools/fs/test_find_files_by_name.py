@@ -108,6 +108,19 @@ def test_find_skips_excluded_dirs(tmp_path: Path):
     assert Path(res["matches"][0]["path"]) == visible.resolve()
 
 
+def test_find_skips_venv_hard_floor(tmp_path: Path):
+    nest = tmp_path / "venv" / "lib"
+    nest.mkdir(parents=True)
+    (nest / "secret.py").write_text("x", encoding="utf-8")
+    visible = tmp_path / "secret.py"
+    visible.write_text("x", encoding="utf-8")
+
+    res = json.loads(_tool()(path=str(tmp_path), query="secret.py"))
+    assert res["ok"] is True
+    assert res["count"] == 1
+    assert Path(res["matches"][0]["path"]) == visible.resolve()
+
+
 def test_find_skips_nested_dot_dirs(tmp_path: Path):
     dot = tmp_path / ".cache" / "x"
     dot.mkdir(parents=True)
@@ -168,6 +181,10 @@ def test_find_validation(tmp_path: Path):
     tool = _tool()
     empty = json.loads(tool(path=str(tmp_path), query="  "))
     assert empty["ok"] is False and empty["error"]["field"] == "query"
+
+    rel = json.loads(tool(path="relative/dir", query="x"))
+    assert rel["ok"] is False and rel["error"]["field"] == "path"
+    assert "absolute" in rel["error"].get("message", "").lower()
 
     missing = json.loads(tool(path=str(tmp_path / "nope"), query="x"))
     assert missing["ok"] is False and missing["error"]["type"] == "not_found"

@@ -36,6 +36,9 @@ def test_list_validation_and_not_found(tmp_path):
     tool = with_local_ctx(ListFiles)
     bad = json.loads(tool(path=123))  # type: ignore[arg-type]
     assert bad["ok"] is False and bad["error"]["field"] == "path"
+    rel = json.loads(tool(path="relative/dir"))
+    assert rel["ok"] is False and rel["error"]["field"] == "path"
+    assert "absolute" in rel["error"].get("message", "").lower()
     missing = json.loads(tool(path=str(tmp_path / "missing")))
     assert missing["ok"] is False and missing["error"]["type"] == "not_found"
 

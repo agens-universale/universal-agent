@@ -320,7 +320,8 @@ class TestExcludedDirs:
             "main.py": "target\n",
             "venv/lib.py": "target\n",
             "__pycache__/c.py": "target\n",
-            ".git/config": "target\n",
+            ".git/config": "target\n",  # hard floor basename (.git)
+            ".cache/x.py": "target\n",  # nested dot-dir (not in name floor)
             "node_modules/pkg.py": "target\n",
         })
         data = _call(with_local_ctx(FindInFiles), path=str(tmp_path), pattern="target")
@@ -328,9 +329,36 @@ class TestExcludedDirs:
         reasons = {e["reason"] for e in excluded}
         assert "excluded_directory_name" in reasons
         assert "hidden_dot_directory" in reasons
-        # venv, __pycache__, .git, node_modules = 4 excluded dirs
-        assert len(excluded) == 4
+        # venv, __pycache__, .git, node_modules + .cache
+        assert len(excluded) == 5
         assert data["count"] == 1  # only main.py
+
+    def test_hard_floor_survives_empty_config_exclude_list(self, tmp_path):
+        """Clearing fs_tools.find_in_files.exclude_dir_names must not re-open junk."""
+        _make_tree(tmp_path, {
+            "main.py": "target\n",
+            "venv/lib.py": "target\n",
+            "node_modules/pkg.py": "target\n",
+        })
+        cfg = {
+            "fs_tools": {
+                "find_in_files": {
+                    "exclude_dir_names": [],
+                    "exclude_dot_dirs": False,
+                }
+            }
+        }
+        data = _call(
+            with_local_ctx(FindInFiles, config_dict=cfg),
+            path=str(tmp_path),
+            pattern="target",
+            query_mode="text",
+        )
+        assert data["ok"] is True
+        assert data["count"] == 1
+        paths = {m["file"] for m in data["matches"]}
+        assert any(p.endswith("main.py") for p in paths)
+        assert not any("venv" in p or "node_modules" in p for p in paths)
 
     def test_start_path_not_excluded(self, tmp_path):
         """If path itself is an excluded name (e.g. venv/), search inside."""
@@ -939,7 +967,7 @@ class TestMatchFormat:
         assert "context" in m
 
     def test_line_content_single_line(self, tmp_path):
-        """line_content = match.group(0) (matched text), consistent with fs_search_files.
+        """line_content = match.group(0) (matched text), not the full source line.
         Surrounding lines are available via `context`."""
         f = tmp_path / "t.py"
         f.write_text("alpha\nneedle here\nbeta\n", encoding="utf-8")

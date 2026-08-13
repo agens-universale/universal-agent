@@ -61,11 +61,19 @@ class FsFindInFilesConfig(BaseModel):
     )
     exclude_dot_dirs: bool = Field(
         default=True,
-        description="Do not descend into nested directories whose name starts with a dot.",
+        description=(
+            "Nested dirs whose name starts with '.' are never descended into. "
+            "Hard policy: false does not re-enable nested dot-dirs."
+        ),
     )
     exclude_dir_names: list[str] = Field(
-        default_factory=lambda: ["venv", "__pycache__", "node_modules"],
-        description="Directory base names never descended into (nested only; start is kept).",
+        default_factory=list,
+        description=(
+            "Extra directory base names never descended into when nested "
+            "(merged with a non-removable hard floor: venv, __pycache__, "
+            "node_modules, .git). Start path itself is always kept. "
+            "Clearing this list does not remove the hard floor."
+        ),
     )
 
 
@@ -76,7 +84,7 @@ class FsToolsConfig(BaseModel):
 
     max_read_bytes: int = Field(
         default=8 * 1024 * 1024,
-        description="fs_read_file / fs_search_files: refuse files larger than this.",
+        description="fs_read_file: refuse files larger than this.",
     )
     max_mutate_bytes: int = Field(
         default=16 * 1024 * 1024,
