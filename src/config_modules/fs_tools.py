@@ -48,8 +48,8 @@ class FsFindInFilesConfig(BaseModel):
         description="Hard cap on call-time exclude_dirs length after normalize.",
     )
     top_level_dirs_cap: int = Field(
-        default=20,
-        description="Max top_level_dirs entries in refuse/partial breakdown.",
+        default=5,
+        description="Max top_level_dirs entries in refuse breakdown (agent response).",
     )
     default_limit: int = Field(
         default=100,

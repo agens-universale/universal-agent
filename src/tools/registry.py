@@ -1,3 +1,4 @@
+import copy
 from typing import Any, Dict
 
 from tools.fs.append_to_file import AppendToFile
@@ -33,9 +34,15 @@ except ModuleNotFoundError:
 
 
 def _tool_entry(tool_cls: type) -> Dict[str, Any]:
+    # Deep-copy: inject_tool_fields / strict schema mutate the spec in place.
+    # Several tools return a shared class-level parameters dict from
+    # tool_description(); without a copy the second build_tools_data() in the
+    # same process sees the field already present, skips inject, leaves
+    # injected_fields empty, and strip_injected_tool_args never removes it
+    # (TypeError: unexpected keyword argument 'reason').
     return {
         "tool_fabric": tool_cls,
-        "spec": tool_cls.tool_description(),
+        "spec": copy.deepcopy(tool_cls.tool_description()),
         "description": tool_cls.prompt_description(),
     }
 

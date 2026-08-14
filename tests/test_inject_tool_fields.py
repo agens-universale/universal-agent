@@ -358,3 +358,62 @@ class TestSubagentChildBuild:
         child = {**parent, "use_local_subagents": False}
         tools_data, _, _, _ = build_tools_data(child)
         assert tools_data["fs_read_file"]["injected_fields"] == [_REASON]
+
+
+class TestInjectDoesNotPolluteClassSchema:
+    def test_second_build_still_tracks_injected_fields(self):
+        """Regression: inject must not mutate shared class-level parameters.
+
+        Without a deepcopy in the registry/tool_description, the first
+        build_tools_data() leaves ``reason`` on the class schema; the second
+        build then skips inject (field already present) and leaves
+        injected_fields empty — apply_tool forwards reason → TypeError.
+        """
+        cfg = _base_config(inject_tool_fields=_reason_fields())
+        first, _, _, _ = build_tools_data(cfg)
+        second, _, _, _ = build_tools_data(cfg)
+
+        for name in ("fs_find_in_files", "fs_write_file", "fs_read_file"):
+            assert first[name]["injected_fields"] == [_REASON]
+            assert second[name]["injected_fields"] == [_REASON]
+            # class-level / fresh tool_description stays clean of inject
+            fabric = second[name]["tool_fabric"]
+            fresh = fabric.tool_description()
+            assert _REASON not in (fresh.get("parameters") or {}).get("properties", {})
+
+    def test_second_build_strips_reason_on_apply(self):
+        cfg = _base_config(inject_tool_fields=_reason_fields())
+        build_tools_data(cfg)  # first build (pollution attempt)
+        tools_data, _, _, _ = build_tools_data(cfg)  # second — must still strip
+
+        received = {}
+
+        class FakeTool:
+            def __init__(self, **kw):
+                pass
+
+            def __call__(self, **kwargs):
+                received["args"] = kwargs
+                return "ok"
+
+        tools_data["fs_find_in_files"]["tool_fabric"] = FakeTool
+        apply_tool(
+            tool_name="fs_find_in_files",
+            arguments=json.dumps(
+                {
+                    _REASON: "test",
+                    "path": "/tmp/x",
+                    "pattern": "def test_",
+                    "query_mode": "python-re",
+                    "limit": 5,
+                }
+            ),
+            ctx=SimpleNamespace(
+                config_dict=cfg,
+                tools_data=tools_data,
+                logger=None,
+            ),
+        )
+        assert _REASON not in received["args"]
+        assert received["args"]["path"] == "/tmp/x"
+        assert received["args"]["pattern"] == "def test_"

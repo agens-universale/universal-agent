@@ -9,6 +9,7 @@ Hits / context / stop A/B/C — FINAL-SPEC.
 from __future__ import annotations
 
 import bisect
+import copy
 import json
 import os
 import re
@@ -50,9 +51,6 @@ from security.read_guard import (
 )
 from security.path_policy import resolve_tool_context, _extract_config_dict
 
-_SORT_ORDER_DIR = "basename_needle,depth,path"
-_SORT_ORDER_FILE = "single_file"
-
 # affix_or re-open budget is the only per-mode open cap (spec §5 / §6.3).
 _MODE_CANDIDATE_LIMIT_ATTR = {
     PatternMode.LIKE: "max_candidates_like",
@@ -81,7 +79,8 @@ class _ScanShared:
 class FindInFiles(AbstractSimpleTool):
     """Поиск совпадений текста/регулярки внутри файлов файловой системы."""
 
-    max_match_content_chars = 2000
+    max_line_content_chars = 500
+    line_content_match_pad = 50
 
     QUERY_MODE_TEXT = "text"
     QUERY_MODE_RE = "python-re"
@@ -147,6 +146,16 @@ class FindInFiles(AbstractSimpleTool):
                     "At most 32 entries."
                 ),
             },
+            "show_excluded_dirs": {
+                "type": "boolean",
+                "description": (
+                    "Include the full list of directories skipped during the walk. "
+                    "Default false. Turn on only when you need to verify which dirs "
+                    "were not entered (hard excludes, dot-dirs, call exclude_dirs). "
+                    "Does not include search_stats."
+                ),
+                "default": False,
+            },
         },
         "required": ["path", "pattern", "query_mode"],
         "additionalProperties": False,
@@ -159,28 +168,18 @@ class FindInFiles(AbstractSimpleTool):
             "type": "function",
             "name": "fs_find_in_files",
             "description": (
-                "Search for text inside a single absolute file or under a directory "
-                "(file contents, not file names). "
-                "query_mode is required: text = exact substring; "
-                "python-re = Python regular expression ('.' does not match newline); "
-                "python-re-dotall = same regex with '.' matching newline for cross-line "
-                "matches. Prefer text unless you need regex; use python-re-dotall only "
-                "when a match must span lines. "
-                "case_insensitive defaults to false. "
-                "Returns at most limit matches (default 100, maximum 300); no later page. "
-                "Each match has line, end_line, line_content, and context. "
-                "Skips binary and very large files. "
-                f"Under a directory, does not enter nested `.gc`, nested dirs named {skip}, "
-                "or nested directories whose name starts with '.'. "
-                "If path itself is such a directory, it is still searched. "
-                "Does not use .gitignore. "
-                "If the tree is too large for the search, the tool may stop early "
-                "(see stop_reason / guidance) — narrow path, file_pattern, exclude_dirs, "
-                "or pattern. "
-                "Empty matches is not proof the text is absent: check scan_complete, "
-                "more_matches_may_exist, stop_reason, stop_summary, and guidance."
+                "Search file contents under an absolute file or directory "
+                "(not file names). Required: path, pattern, query_mode — prefer text; "
+                "regex only if needed (see query_mode). "
+                "At most limit matches (default 100, max 300); no pagination. "
+                "Skips binary/large files; no .gitignore. "
+                f"Does not enter nested `.gc`, dirs named {skip}, or nested dot-dirs "
+                "(path itself is still searched if it is one of those). "
+                "Empty matches ≠ absent if the scan stopped early — check "
+                "scan_complete / stop_* / guidance."
             ),
-            "parameters": cls._PARAM_SCHEMA,
+            # Copy: callers (inject_tool_fields) mutate parameters in place.
+            "parameters": copy.deepcopy(cls._PARAM_SCHEMA),
             "strict": True,
         }
 
@@ -189,26 +188,15 @@ class FindInFiles(AbstractSimpleTool):
         skip = hard_exclude_dir_names_for_prompt()
         return (
             "Tool name: fs_find_in_files\n"
-            "Search for text inside one absolute file or under a directory (recursively). "
-            "Searches file contents, not file names.\n"
-            "Required: path, pattern, query_mode.\n"
-            "query_mode=text: exact substring (prefer for normal searches).\n"
-            "query_mode=python-re: Python regular expression "
-            "('.' does not match newline; ^/$ are line edges); use when you need regex.\n"
-            "query_mode=python-re-dotall: same as python-re but '.' also matches newline; "
-            "use only when a match must span lines.\n"
-            "Optional: limit (default 100, maximum 300; first matches only, no page offset), "
-            "case_insensitive (default false), file_pattern (directory only), "
-            "exclude_dirs (extra absolute directories to skip, at most 32).\n"
-            f"Under a directory, does not enter nested `.gc`, nested dirs named {skip}, "
-            "or nested dirs whose name starts with '.'. "
-            "If path itself is such a directory, it is still searched. "
-            "Skips binary and very large files. Does not use .gitignore.\n"
-            "Response: matches with line, end_line, line_content, context; also "
-            "scan_complete, more_matches_may_exist, stop_reason, stop_summary, guidance.\n"
-            "Do not treat empty matches as proof the text is absent — read those fields. "
-            "If the search stops early, narrow path, file_pattern, exclude_dirs, or pattern; "
-            "there is no next page.\n"
+            "Search file contents under an absolute file or directory (not file names).\n"
+            "Required: path, pattern, query_mode (prefer text; regex only if needed).\n"
+            "Optional: limit (default 100, max 300; no pagination), case_insensitive, "
+            "file_pattern (directory only), exclude_dirs, "
+            "show_excluded_dirs (default false; full skipped-dirs list when needed).\n"
+            f"Skips nested `.gc`, dirs named {skip}, nested dot-dirs, binary/large files; "
+            "no .gitignore. If path itself is a skipped-name dir, it is still searched.\n"
+            "Empty matches ≠ proof the text is absent when the scan stops early — "
+            "read scan_complete, stop_*, guidance; narrow path/file_pattern/pattern.\n"
         )
 
     @enforce_read_guard(path_arg="path")
@@ -221,6 +209,7 @@ class FindInFiles(AbstractSimpleTool):
         case_insensitive: bool = False,
         file_pattern: Optional[str] = None,
         exclude_dirs: Optional[List[str]] = None,
+        show_excluded_dirs: bool = False,
     ) -> str:
         return self._dispatch(
             path,
@@ -230,6 +219,7 @@ class FindInFiles(AbstractSimpleTool):
             case_insensitive,
             file_pattern,
             exclude_dirs,
+            show_excluded_dirs,
         )
 
     def _resolve_config(self) -> Tuple[Any, FsFindInFilesConfig, Dict[str, Any]]:
@@ -266,6 +256,7 @@ class FindInFiles(AbstractSimpleTool):
         case_insensitive: bool,
         file_pattern: Optional[str],
         exclude_dirs: Optional[List[str]],
+        show_excluded_dirs: bool = False,
     ) -> str:
         if not isinstance(path, str):
             return self._error("invalid_argument", "path")
@@ -293,6 +284,8 @@ class FindInFiles(AbstractSimpleTool):
             return self._error("invalid_argument", "file_pattern")
         if exclude_dirs is not None and not isinstance(exclude_dirs, list):
             return self._error("invalid_argument", "exclude_dirs")
+        if not isinstance(show_excluded_dirs, bool):
+            return self._error("invalid_argument", "show_excluded_dirs")
 
         # text / python-re: line-oriented '.' ; python-re-dotall: '.' spans newlines.
         flags = re.MULTILINE
@@ -358,7 +351,6 @@ class FindInFiles(AbstractSimpleTool):
                 pattern,
                 query_mode,
                 pattern_mode,
-                case_insensitive,
                 effective_ci,
                 limit_requested,
                 limit_eff,
@@ -374,7 +366,6 @@ class FindInFiles(AbstractSimpleTool):
                 pattern,
                 query_mode,
                 pattern_mode,
-                case_insensitive,
                 effective_ci,
                 file_pattern,
                 exclude_dirs,
@@ -386,6 +377,7 @@ class FindInFiles(AbstractSimpleTool):
                 config,
                 rg_context,
                 cfg_dict,
+                show_excluded_dirs=show_excluded_dirs,
             )
         return self._error("not_a_directory")
 
@@ -437,14 +429,84 @@ class FindInFiles(AbstractSimpleTool):
             return len(line_starts)
         return bisect.bisect_right(line_starts, offset)
 
-    def _clip_match_content(self, content: str) -> str:
-        max_chars = self.max_match_content_chars
-        if len(content) <= max_chars:
+    def _clip_line_content(
+        self,
+        content: str,
+        *,
+        match_start: int = 0,
+        match_end: int = 0,
+    ) -> str:
+        """Start-line text for a hit; long lines keep the match visible.
+
+        - ``len <= max_line_content_chars`` → full line.
+        - Match fully inside the head window → first N chars + head marker.
+        - Otherwise → window around the match (± ``line_content_match_pad``),
+          clipped to the same N-char body budget, with left/right ellipsis
+          and a total-length marker.
+        """
+        max_chars = self.max_line_content_chars
+        pad = self.line_content_match_pad
+        total = len(content)
+        if total <= max_chars:
             return content
-        return (
-            content[:max_chars]
-            + f"...[match_truncated: showing first {max_chars} of {len(content)} chars]"
-        )
+
+        ms = max(0, min(total, match_start))
+        me = max(ms, min(total, match_end))
+
+        # Prefer a plain head prefix when the whole match is already visible.
+        if me <= max_chars:
+            return (
+                content[:max_chars]
+                + f"...[line_truncated: showing first {max_chars} of {total} chars]"
+            )
+
+        match_len = me - ms
+        if match_len >= max_chars:
+            # Oversized match on one line: show head of the match only.
+            lo = ms
+            hi = ms + max_chars
+            body = content[lo:hi]
+        else:
+            # Fixed ±pad around match (not a second 500-char dump).
+            left_budget = min(pad, ms)
+            right_budget = min(pad, total - me)
+            # If match+2*pad still exceeds max_chars, shrink pads symmetrically.
+            remain = max_chars - match_len
+            if left_budget + right_budget > remain:
+                left_budget = min(left_budget, remain // 2)
+                right_budget = min(right_budget, remain - left_budget)
+            lo = ms - left_budget
+            hi = me + right_budget
+            body = content[lo:hi]
+
+        parts: List[str] = []
+        if lo > 0:
+            parts.append("...")
+        parts.append(body)
+        if hi < total:
+            parts.append("...")
+        parts.append(f"[line_truncated: total {total} chars]")
+        return "".join(parts)
+
+    def _start_line_content(
+        self,
+        lines: List[str],
+        line_starts: List[int],
+        start_line: int,
+        match_start: int,
+        match_end: int,
+    ) -> str:
+        idx = start_line - 1
+        if idx < 0 or idx >= len(lines):
+            return ""
+        line_text = lines[idx].rstrip("\r\n")
+        line_abs = line_starts[idx] if idx < len(line_starts) else 0
+        # Intersection of [match_start, match_end) with this line's content
+        # (excluding line endings). Multiline → from match start to EOL.
+        n = len(line_text)
+        ms = max(0, min(n, match_start - line_abs))
+        me = max(ms, min(n, match_end - line_abs))
+        return self._clip_line_content(line_text, match_start=ms, match_end=me)
 
     def _build_match_context(
         self,
@@ -501,7 +563,13 @@ class FindInFiles(AbstractSimpleTool):
                     "file": report_path,
                     "line": start_line,
                     "end_line": end_line,
-                    "line_content": self._clip_match_content(match.group(0)),
+                    "line_content": self._start_line_content(
+                        lines,
+                        line_starts,
+                        start_line,
+                        start,
+                        end,
+                    ),
                     "context": self._build_match_context(lines, start_line, end_line),
                 }
             )
@@ -514,35 +582,23 @@ class FindInFiles(AbstractSimpleTool):
         limit_capped: bool,
         limit_requested: int,
         limit_eff: int,
-        max_total_matches: int,
-    ):
+        count: int = 0,
+    ) -> Tuple[Optional[str], Optional[str]]:
+        """Return (stop_reason, guidance) when only limit was capped."""
         if not limit_capped:
-            return None, None, None
+            return None, None
         return (
             "requested_limit_capped",
-            f"Requested limit {limit_requested} exceeds the maximum of "
-            f"{max_total_matches}; working with limit {limit_eff}.",
-            f"The requested limit was capped to {limit_eff}. "
-            "Rerun with a limit within the maximum if needed.",
+            f"Requested limit {limit_requested} was capped to {limit_eff}; "
+            f"scan finished within limit_eff with {count} matches.",
         )
 
-    def _needles_payload(self, needles: Needles) -> Dict[str, Any]:
-        return {
-            "required_literal": needles.required_literal,
-            "or_group": list(needles.or_group) if needles.or_group else None,
-            "effective_ci": needles.effective_ci,
-        }
-
-    def _stats_needles(self, needles: Needles) -> Dict[str, Any]:
-        return {
-            "prefilter": "literal" if needles.has_prefilter else "none",
-            "and_needles": (
-                [needles.required_literal]
-                if needles.required_literal is not None
-                else []
-            ),
-            "or_needles": list(needles.or_group) if needles.or_group else [],
-        }
+    @staticmethod
+    def _match_limit_guidance(limit_eff: int) -> str:
+        return (
+            f"Stopped after {limit_eff} matches (limit_eff). More may exist. "
+            "Work with these hits or narrow path/pattern and search again."
+        )
 
     # ------------------------------------------------------------------
     # per-file funnel (§6.2)
@@ -638,7 +694,6 @@ class FindInFiles(AbstractSimpleTool):
         pattern: str,
         query_mode: str,
         pattern_mode: PatternMode,
-        case_insensitive_arg: bool,
         effective_ci: bool,
         limit_requested: int,
         limit_eff: int,
@@ -650,14 +705,7 @@ class FindInFiles(AbstractSimpleTool):
         backend = self._backend
         report_path = tool_report_abspath(path, workspace=self._workspace)
         stop_reason: Optional[str] = None
-        stop_summary: Optional[str] = None
         guidance: Optional[str] = None
-        scan_complete = False
-        skipped_binary = 0
-        skipped_encoding = 0
-        bytes_read = 0
-        files_opened_regex = 0
-        content_paths_touched = 0
 
         try:
             size = backend.getsize(path)
@@ -665,231 +713,78 @@ class FindInFiles(AbstractSimpleTool):
             return self._error("stat_failed", message=str(e))
 
         if size > max_bytes:
-            stop_reason = "file_too_large"
-            stop_summary = (
-                f"File is {size} bytes; the size limit is {max_bytes} bytes. "
-                "Content was not read."
-            )
-            guidance = (
-                "Use shell rg/grep for a one-off string search, or analyse this "
-                "file with a script (read it in chunks/line-by-line). Do not assume "
-                "the pattern is absent."
-            )
             return self._build_response(
-                ok=True,
                 matches=[],
                 count=0,
-                stop_reason=stop_reason,
-                stop_summary=stop_summary,
-                guidance=guidance,
+                stop_reason="file_too_large",
+                guidance=(
+                    "File exceeds size limit; content not read. Use shell rg/grep "
+                    "on this file or read it in chunks. Do not assume the pattern "
+                    "is absent."
+                ),
                 scan_complete=False,
                 more_matches_may_exist=False,
                 limit_requested=limit_requested,
                 limit_eff=limit_eff,
+                limit_capped=limit_capped,
                 path=report_path,
                 pattern=pattern,
                 query_mode=query_mode,
-                pattern_mode=pattern_mode.value,
                 mode="file",
-                case_insensitive_arg=case_insensitive_arg,
                 effective_ci=effective_ci,
-                excluded_dirs=[],
-                exclude_dirs_accepted=None,
-                exclude_dir_errors=None,
-                candidate_count=None,
-                breakdown=None,
-                needles=None,
-                content_workers=None,
-                search_stats={
-                    "files_walked": 0,
-                    "after_glob": 0,
-                    "after_size": 0,
-                    "candidates": 0,
-                    **self._stats_needles(needles),
-                    "case_insensitive_arg": case_insensitive_arg,
-                    "effective_ci": effective_ci,
-                    "query_mode": query_mode,
-                    "pattern_mode": pattern_mode.value,
-                    "sort_order": _SORT_ORDER_FILE,
-                    "content_paths_touched": 0,
-                    "shortlist_len": 0,
-                    "shortlist_len_is_lower_bound": False,
-                    "files_opened_regex": 0,
-                    "skipped_binary": 0,
-                    "skipped_encoding": 0,
-                    "bytes_read": 0,
-                },
-                limit_capped=limit_capped,
             )
 
-        text, bytes_read, skip = self._open_decode_text(path, file_size=size)
+        text, _bytes_read, skip = self._open_decode_text(path, file_size=size)
         if skip == "read_error":
             return self._error("read_failed", message="Failed to read file")
-        if skip == "binary":
-            skipped_binary = 1
-            scan_complete = True
-            _sr, _ss, _g = self._cap_stop_info(
-                limit_capped, limit_requested, limit_eff, config.max_total_matches
+        if skip in ("binary", "encoding"):
+            _sr, _g = self._cap_stop_info(
+                limit_capped, limit_requested, limit_eff, count=0
             )
             return self._build_response(
-                ok=True,
                 matches=[],
                 count=0,
                 stop_reason=_sr,
-                stop_summary=_ss,
                 guidance=_g,
-                scan_complete=scan_complete,
+                scan_complete=True,
                 more_matches_may_exist=False,
                 limit_requested=limit_requested,
                 limit_eff=limit_eff,
+                limit_capped=limit_capped,
                 path=report_path,
                 pattern=pattern,
                 query_mode=query_mode,
-                pattern_mode=pattern_mode.value,
                 mode="file",
-                case_insensitive_arg=case_insensitive_arg,
                 effective_ci=effective_ci,
-                excluded_dirs=[],
-                exclude_dirs_accepted=None,
-                exclude_dir_errors=None,
-                candidate_count=None,
-                breakdown=None,
-                needles=None,
-                content_workers=None,
-                search_stats={
-                    "files_walked": 1,
-                    "after_glob": 1,
-                    "after_size": 1,
-                    "candidates": 1,
-                    **self._stats_needles(needles),
-                    "case_insensitive_arg": case_insensitive_arg,
-                    "effective_ci": effective_ci,
-                    "query_mode": query_mode,
-                    "pattern_mode": pattern_mode.value,
-                    "sort_order": _SORT_ORDER_FILE,
-                    "content_paths_touched": 0,
-                    "shortlist_len": 0,
-                    "shortlist_len_is_lower_bound": False,
-                    "files_opened_regex": 0,
-                    "skipped_binary": 1,
-                    "skipped_encoding": 0,
-                    "bytes_read": bytes_read,
-                },
-                limit_capped=limit_capped,
-            )
-        if skip == "encoding":
-            skipped_encoding = 1
-            content_paths_touched = 1
-            scan_complete = True
-            _sr, _ss, _g = self._cap_stop_info(
-                limit_capped, limit_requested, limit_eff, config.max_total_matches
-            )
-            return self._build_response(
-                ok=True,
-                matches=[],
-                count=0,
-                stop_reason=_sr,
-                stop_summary=_ss,
-                guidance=_g,
-                scan_complete=scan_complete,
-                more_matches_may_exist=False,
-                limit_requested=limit_requested,
-                limit_eff=limit_eff,
-                path=report_path,
-                pattern=pattern,
-                query_mode=query_mode,
-                pattern_mode=pattern_mode.value,
-                mode="file",
-                case_insensitive_arg=case_insensitive_arg,
-                effective_ci=effective_ci,
-                excluded_dirs=[],
-                exclude_dirs_accepted=None,
-                exclude_dir_errors=None,
-                candidate_count=None,
-                breakdown=None,
-                needles=None,
-                content_workers=None,
-                search_stats={
-                    "files_walked": 1,
-                    "after_glob": 1,
-                    "after_size": 1,
-                    "candidates": 1,
-                    **self._stats_needles(needles),
-                    "case_insensitive_arg": case_insensitive_arg,
-                    "effective_ci": effective_ci,
-                    "query_mode": query_mode,
-                    "pattern_mode": pattern_mode.value,
-                    "sort_order": _SORT_ORDER_FILE,
-                    "content_paths_touched": 1,
-                    "shortlist_len": 0,
-                    "shortlist_len_is_lower_bound": False,
-                    "files_opened_regex": 0,
-                    "skipped_binary": 0,
-                    "skipped_encoding": 1,
-                    "bytes_read": bytes_read,
-                },
-                limit_capped=limit_capped,
             )
 
         assert text is not None
-        content_paths_touched = 1
 
         # literal gate only (no match possible)
         if needles.required_literal is not None and not self._literal_in(
             text, needles.required_literal, needles.effective_ci
         ):
-            scan_complete = True
-            _sr, _ss, _g = self._cap_stop_info(
-                limit_capped, limit_requested, limit_eff, config.max_total_matches
+            _sr, _g = self._cap_stop_info(
+                limit_capped, limit_requested, limit_eff, count=0
             )
             return self._build_response(
-                ok=True,
                 matches=[],
                 count=0,
                 stop_reason=_sr,
-                stop_summary=_ss,
                 guidance=_g,
-                scan_complete=scan_complete,
+                scan_complete=True,
                 more_matches_may_exist=False,
                 limit_requested=limit_requested,
                 limit_eff=limit_eff,
+                limit_capped=limit_capped,
                 path=report_path,
                 pattern=pattern,
                 query_mode=query_mode,
-                pattern_mode=pattern_mode.value,
                 mode="file",
-                case_insensitive_arg=case_insensitive_arg,
                 effective_ci=effective_ci,
-                excluded_dirs=[],
-                exclude_dirs_accepted=None,
-                exclude_dir_errors=None,
-                candidate_count=None,
-                breakdown=None,
-                needles=self._needles_payload(needles),
-                content_workers=None,
-                search_stats={
-                    "files_walked": 1,
-                    "after_glob": 1,
-                    "after_size": 1,
-                    "candidates": 1,
-                    **self._stats_needles(needles),
-                    "case_insensitive_arg": case_insensitive_arg,
-                    "effective_ci": effective_ci,
-                    "query_mode": query_mode,
-                    "pattern_mode": pattern_mode.value,
-                    "sort_order": _SORT_ORDER_FILE,
-                    "content_paths_touched": 1,
-                    "shortlist_len": 0,
-                    "shortlist_len_is_lower_bound": False,
-                    "files_opened_regex": 0,
-                    "skipped_binary": 0,
-                    "skipped_encoding": 0,
-                    "bytes_read": bytes_read,
-                },
-                limit_capped=limit_capped,
             )
 
-        matches, ran_re = self._match_decoded_text(
+        matches, _ran_re = self._match_decoded_text(
             text=text,
             abs_path=path,
             compiled=compiled,
@@ -897,8 +792,6 @@ class FindInFiles(AbstractSimpleTool):
             pattern_mode=pattern_mode,
             limit_remaining=limit_eff,
         )
-        if ran_re:
-            files_opened_regex = 1
         count = len(matches)
         scan_complete = True
         more_matches_may_exist = False
@@ -907,75 +800,27 @@ class FindInFiles(AbstractSimpleTool):
             stop_reason = "match_limit"
             more_matches_may_exist = True
             scan_complete = False
-            stop_summary = (
-                f"Stopped after collecting {limit_eff} matches (the limit). "
-                "More matches may exist in this file."
-            )
-            guidance = (
-                "This is a top-N result; more matches may exist. Narrow the pattern "
-                "or work with these matches."
-            )
-            if limit_capped:
-                stop_summary = (
-                    f"Requested limit {limit_requested} was capped to {limit_eff}. "
-                    f"Stopped after collecting {limit_eff} matches. More may exist."
-                )
+            guidance = self._match_limit_guidance(limit_eff)
         elif limit_capped:
-            stop_reason = "requested_limit_capped"
-            stop_summary = (
-                f"Requested limit {limit_requested} exceeds the maximum of "
-                f"{config.max_total_matches}; working with limit {limit_eff}."
-            )
-            guidance = (
-                f"The requested limit was capped to {limit_eff}. "
-                "Rerun with a limit within the maximum if needed."
+            stop_reason, guidance = self._cap_stop_info(
+                True, limit_requested, limit_eff, count=count
             )
 
         return self._build_response(
-            ok=True,
             matches=matches,
             count=count,
             stop_reason=stop_reason,
-            stop_summary=stop_summary,
             guidance=guidance,
             scan_complete=scan_complete,
             more_matches_may_exist=more_matches_may_exist,
             limit_requested=limit_requested,
             limit_eff=limit_eff,
+            limit_capped=limit_capped,
             path=report_path,
             pattern=pattern,
             query_mode=query_mode,
-            pattern_mode=pattern_mode.value,
             mode="file",
-            case_insensitive_arg=case_insensitive_arg,
             effective_ci=effective_ci,
-            excluded_dirs=[],
-            exclude_dirs_accepted=None,
-            exclude_dir_errors=None,
-            candidate_count=None,
-            breakdown=None,
-            needles=self._needles_payload(needles),
-            content_workers=None,
-            search_stats={
-                "files_walked": 1,
-                "after_glob": 1,
-                "after_size": 1,
-                "candidates": 1,
-                **self._stats_needles(needles),
-                "case_insensitive_arg": case_insensitive_arg,
-                "effective_ci": effective_ci,
-                "query_mode": query_mode,
-                "pattern_mode": pattern_mode.value,
-                "sort_order": _SORT_ORDER_FILE,
-                "content_paths_touched": content_paths_touched,
-                "shortlist_len": 1 if ran_re or count else 0,
-                "shortlist_len_is_lower_bound": False,
-                "files_opened_regex": files_opened_regex,
-                "skipped_binary": skipped_binary,
-                "skipped_encoding": skipped_encoding,
-                "bytes_read": bytes_read,
-            },
-            limit_capped=limit_capped,
         )
 
     # ------------------------------------------------------------------
@@ -1062,27 +907,22 @@ class FindInFiles(AbstractSimpleTool):
         candidates: List[Tuple[str, int, str]],
         config: FsFindInFilesConfig,
     ) -> Dict[str, Any]:
-        """candidates: (abs_path, depth, relpath)."""
+        """candidates: (abs_path, depth, relpath). Agent-facing refuse breakdown."""
         start_norm = os.path.normpath(start_path)
         files_at_root = 0
         dir_counts: Dict[str, int] = {}
 
-        for abs_path, _depth, relpath in candidates:
+        for _abs_path, _depth, relpath in candidates:
             if "/" not in relpath and relpath != ".":
                 files_at_root += 1
                 continue
-            # first path segment under start
             first = relpath.split("/", 1)[0]
             child = os.path.normpath(os.path.join(start_norm, first))
             dir_counts[child] = dir_counts.get(child, 0) + 1
 
-        # also count empty top-level dirs? Spec: child-dirs 1st level with candidates
         ranked = sorted(dir_counts.items(), key=lambda kv: (-kv[1], kv[0]))
         top_n = config.top_level_dirs_cap
         top = ranked[:top_n]
-        omitted = ranked[top_n:]
-        other = sum(c for _, c in omitted)
-
         top_level_dirs = [
             {
                 "path": tool_report_abspath(p, workspace=self._workspace),
@@ -1090,14 +930,15 @@ class FindInFiles(AbstractSimpleTool):
             }
             for p, c in top
         ]
-        return {
+        out: Dict[str, Any] = {
             "candidate_count": len(candidates),
-            "files_at_root": files_at_root,
             "top_level_dirs": top_level_dirs,
-            "top_level_dir_count": len(dir_counts),
-            "top_level_dirs_omitted": max(0, len(dir_counts) - len(top_level_dirs)),
-            "other_candidate_count": other,
+            "top_level_dirs_shown": len(top_level_dirs),
+            "top_level_dirs_total": len(dir_counts),
         }
+        if files_at_root > 0:
+            out["files_at_root"] = files_at_root
+        return out
 
     def _refuse_guidance(
         self,
@@ -1108,25 +949,74 @@ class FindInFiles(AbstractSimpleTool):
         breakdown: Dict[str, Any],
     ) -> str:
         parts = [
-            f"Candidate surface is too large for pattern_mode={pattern_mode.value}: "
-            f"{n} candidates exceed the limit of {limit_n}. "
-            "Content was not searched.",
-            "Narrow path, add exclude_dirs, or tighten file_pattern. "
-            "Use top_level_dirs in the response to pick a smaller subtree.",
+            f"{n} candidate files exceed limit {limit_n}; content was not searched.",
         ]
+        shown = int(breakdown.get("top_level_dirs_shown") or 0)
+        total = int(breakdown.get("top_level_dirs_total") or 0)
+        if total > shown and shown > 0:
+            parts.append(
+                f"Showing top {shown} of {total} top-level dirs by candidate count (desc)."
+            )
+
+        top: List[Dict[str, Any]] = list(breakdown.get("top_level_dirs") or [])
+        # Retry path= : dirs that fit under candidate_limit (likely pass gate).
+        fitting = [t for t in top if int(t.get("candidate_count") or 0) <= limit_n]
+        if fitting:
+            retry = fitting[:2]
+        elif top:
+            # No fitting dirs in shown list → suggest the smallest shown.
+            retry = [top[-1]]
+        else:
+            retry = []
+
+        if retry:
+            if len(retry) == 1:
+                t0 = retry[0]
+                parts.append(
+                    f"You may retry with a narrower path, e.g. path={t0['path']} "
+                    f"({t0['candidate_count']} candidates)."
+                )
+            else:
+                t0, t1 = retry[0], retry[1]
+                parts.append(
+                    f"You may retry with a narrower path, e.g. path={t0['path']} "
+                    f"({t0['candidate_count']} candidates) "
+                    f"or path={t1['path']} ({t1['candidate_count']})."
+                )
+
+        oversized = [
+            t for t in top if int(t.get("candidate_count") or 0) > limit_n
+        ]
+        if not oversized and top and n > 0:
+            # optional: single dir ≥ ~50% of total surface
+            half = n * 0.5
+            heavy = [
+                t for t in top if int(t.get("candidate_count") or 0) >= half
+            ]
+            if heavy:
+                oversized = [heavy[0]]
+        if oversized:
+            t = oversized[0]
+            parts.append(
+                f'You may also pass exclude_dirs=["{t["path"]}"] '
+                f"({t['candidate_count']} candidates) to shrink the surface."
+            )
+
         if pattern_mode is PatternMode.COMPLEX:
             parts.append(
-                "complex patterns have no cheap prefilter (limit 50k). "
-                "Simplify to a literal/or/affix form, or use query_mode=text, "
-                "or narrow the tree."
+                "You may simplify the pattern or use query_mode=text "
+                "if a literal search is enough."
             )
-        top = breakdown.get("top_level_dirs") or []
-        if top:
-            sample = ", ".join(
-                f"{t['path']}({t['candidate_count']})" for t in top[:5]
-            )
-            parts.append(f"Largest top-level dirs: {sample}.")
         return " ".join(parts)
+
+    @staticmethod
+    def _sort_excluded_dirs(
+        excluded_dirs: List[Dict[str, str]],
+    ) -> List[Dict[str, str]]:
+        return sorted(
+            excluded_dirs,
+            key=lambda e: (e.get("reason") or "", e.get("path") or ""),
+        )
 
     # ------------------------------------------------------------------
     # directory (§3 / §5 / §6)
@@ -1138,7 +1028,6 @@ class FindInFiles(AbstractSimpleTool):
         pattern: str,
         query_mode: str,
         pattern_mode: PatternMode,
-        case_insensitive_arg: bool,
         effective_ci: bool,
         file_pattern: Optional[str],
         exclude_dirs: Optional[List[str]],
@@ -1150,6 +1039,8 @@ class FindInFiles(AbstractSimpleTool):
         config: FsFindInFilesConfig,
         rg_context: Any,
         cfg_dict: Dict[str, Any],
+        *,
+        show_excluded_dirs: bool = False,
     ) -> str:
         backend = self._backend
         report_path = tool_report_abspath(path, workspace=self._workspace)
@@ -1241,21 +1132,16 @@ class FindInFiles(AbstractSimpleTool):
 
             glob_matcher = _glob_match
 
-        files_walked = 0
-        after_glob_count = 0
-        after_size_count = 0
         # (abs_path, depth, relpath)
         candidates: List[Tuple[str, int, str]] = []
 
         for relpath, is_dir in backend.iter_walk(path, should_descend=_should_descend):
             if is_dir:
                 continue
-            files_walked += 1
             abs_path = backend.join(path, relpath)
 
             if glob_matcher is not None and not glob_matcher(relpath):
                 continue
-            after_glob_count += 1
 
             try:
                 fsize = backend.getsize(abs_path)
@@ -1263,7 +1149,6 @@ class FindInFiles(AbstractSimpleTool):
                 continue
             if fsize > max_bytes:
                 continue
-            after_size_count += 1
 
             depth = relpath.count("/") if relpath != "." else 0
             candidates.append((abs_path, depth, relpath))
@@ -1276,12 +1161,6 @@ class FindInFiles(AbstractSimpleTool):
             breakdown = self._build_breakdown(
                 start_path=path, candidates=candidates, config=config
             )
-            stop_reason = "too_many_candidate_files"
-            stop_summary = (
-                f"Surface too large for pattern_mode={pattern_mode.value}: "
-                f"{n} candidate files exceed the limit of {candidate_limit}. "
-                "Content was not searched."
-            )
             guidance = self._refuse_guidance(
                 pattern_mode=pattern_mode,
                 n=n,
@@ -1289,54 +1168,30 @@ class FindInFiles(AbstractSimpleTool):
                 breakdown=breakdown,
             )
             return self._build_response(
-                ok=True,
                 matches=[],
                 count=0,
-                stop_reason=stop_reason,
-                stop_summary=stop_summary,
+                stop_reason="too_many_candidate_files",
                 guidance=guidance,
                 scan_complete=False,
                 more_matches_may_exist=True,
                 limit_requested=limit_requested,
                 limit_eff=limit_eff,
+                limit_capped=limit_capped,
                 path=report_path,
                 pattern=pattern,
                 query_mode=query_mode,
-                pattern_mode=pattern_mode.value,
                 mode="dir",
-                case_insensitive_arg=case_insensitive_arg,
                 effective_ci=effective_ci,
-                excluded_dirs=excluded_dirs,
-                exclude_dirs_accepted=[
-                    tool_report_abspath(p, workspace=self._workspace)
-                    for p in accepted_excludes
-                ],
+                file_pattern=file_pattern,
                 exclude_dir_errors=exclude_soft_errors or None,
                 candidate_count=n,
                 candidate_limit=candidate_limit,
                 breakdown=breakdown,
-                needles=None,  # refuse: no needles
-                content_workers=None,
-                search_stats={
-                    "files_walked": files_walked,
-                    "after_glob": after_glob_count,
-                    "after_size": after_size_count,
-                    "candidates": n,
-                    "case_insensitive_arg": case_insensitive_arg,
-                    "effective_ci": effective_ci,
-                    "query_mode": query_mode,
-                    "pattern_mode": pattern_mode.value,
-                    "sort_order": _SORT_ORDER_DIR,
-                    "content_paths_touched": 0,
-                    "shortlist_len": 0,
-                    "shortlist_len_is_lower_bound": False,
-                    "files_opened_regex": 0,
-                    "skipped_binary": 0,
-                    "skipped_encoding": 0,
-                    "bytes_read": 0,
-                    "candidate_limit": candidate_limit,
-                },
-                limit_capped=limit_capped,
+                excluded_dirs=(
+                    self._sort_excluded_dirs(excluded_dirs)
+                    if show_excluded_dirs
+                    else None
+                ),
             )
 
         # --- sort (§6.1) ---
@@ -1463,129 +1318,54 @@ class FindInFiles(AbstractSimpleTool):
                         break
 
         all_matches = shared.matches[:limit_eff]
-        files_opened_regex = shared.files_opened_regex
-        content_paths_touched = shared.content_paths_touched
-        skipped_binary = shared.skipped_binary
-        skipped_encoding = shared.skipped_encoding
-        bytes_read = shared.bytes_read
-        shortlist_len = shared.shortlist_len
-        shortlist_len_is_lower_bound = False
+        count = len(all_matches)
 
         stop_reason: Optional[str] = None
-        stop_summary: Optional[str] = None
         guidance: Optional[str] = None
         scan_complete = True
         more_matches_may_exist = False
 
-        if shared.stop_reason == "match_limit" or len(all_matches) >= limit_eff:
+        if shared.stop_reason == "match_limit" or count >= limit_eff:
             stop_reason = "match_limit"
             more_matches_may_exist = True
             scan_complete = False
-            stop_summary = (
-                f"Stopped after collecting {limit_eff} matches (the limit). "
-                "More matches may exist in unscanned files."
-            )
-            guidance = (
-                "This is a top-N result; more matches may exist. Narrow the path/pattern "
-                "or work with these matches."
-            )
-            if limit_capped:
-                stop_summary = (
-                    f"Requested limit {limit_requested} was capped to {limit_eff}. "
-                    f"Stopped after collecting {limit_eff} matches. More may exist."
-                )
+            guidance = self._match_limit_guidance(limit_eff)
         elif shared.stop_reason == "too_many_files_opened":
             stop_reason = "too_many_files_opened"
             more_matches_may_exist = True
             scan_complete = False
-            shortlist_len_is_lower_bound = True
-            stop_summary = (
-                f"Opened {files_opened_regex} files for full regex "
-                f"(affix_or open limit {max_re_opens}); "
-                f"at least {shortlist_len} passed the cheap filter. "
-                "The remaining candidates were not scanned."
-            )
             guidance = (
-                "The scan was partial — more matches may exist in the unscanned files. "
-                "Narrow the path/pattern or use a shell tool (rg/grep)."
+                "Partial scan (regex open budget). More matches may exist. "
+                f"Narrow path (e.g. path={report_path}) or simplify pattern; "
+                "shell rg is a fallback."
             )
-        else:
-            stop_reason = None
-            more_matches_may_exist = False
-            scan_complete = True
-            if limit_capped:
-                stop_reason = "requested_limit_capped"
-                stop_summary = (
-                    f"Requested limit {limit_requested} exceeds the maximum of "
-                    f"{config.max_total_matches}; working with limit {limit_eff}."
-                )
-                guidance = (
-                    f"The requested limit was capped to {limit_eff}. "
-                    "Rerun with a limit within the maximum if needed."
-                )
-
-        breakdown: Optional[Dict[str, Any]] = None
-        if not scan_complete:
-            breakdown = self._build_breakdown(
-                start_path=path, candidates=candidates, config=config
+        elif limit_capped:
+            stop_reason, guidance = self._cap_stop_info(
+                True, limit_requested, limit_eff, count=count
             )
-
-        coverage_ratio: Optional[float] = None
-        if not shortlist_len_is_lower_bound and shortlist_len > 0:
-            coverage_ratio = files_opened_regex / shortlist_len
 
         return self._build_response(
-            ok=True,
             matches=all_matches,
-            count=len(all_matches),
+            count=count,
             stop_reason=stop_reason,
-            stop_summary=stop_summary,
             guidance=guidance,
             scan_complete=scan_complete,
             more_matches_may_exist=more_matches_may_exist,
             limit_requested=limit_requested,
             limit_eff=limit_eff,
+            limit_capped=limit_capped,
             path=report_path,
             pattern=pattern,
             query_mode=query_mode,
-            pattern_mode=pattern_mode.value,
             mode="dir",
-            case_insensitive_arg=case_insensitive_arg,
             effective_ci=effective_ci,
-            excluded_dirs=excluded_dirs,
-            exclude_dirs_accepted=[
-                tool_report_abspath(p, workspace=self._workspace)
-                for p in accepted_excludes
-            ],
+            file_pattern=file_pattern,
             exclude_dir_errors=exclude_soft_errors or None,
-            candidate_count=n,
-            candidate_limit=None,
-            breakdown=breakdown,
-            needles=self._needles_payload(needles),
-            content_workers=workers,
-            search_stats={
-                "files_walked": files_walked,
-                "after_glob": after_glob_count,
-                "after_size": after_size_count,
-                "candidates": n,
-                **self._stats_needles(needles),
-                "case_insensitive_arg": case_insensitive_arg,
-                "effective_ci": effective_ci,
-                "query_mode": query_mode,
-                "pattern_mode": pattern_mode.value,
-                "sort_order": _SORT_ORDER_DIR,
-                "content_paths_touched": content_paths_touched,
-                "shortlist_len": shortlist_len,
-                "shortlist_len_is_lower_bound": shortlist_len_is_lower_bound,
-                "files_opened_regex": files_opened_regex,
-                "max_open_files": max_re_opens,
-                "coverage_ratio": coverage_ratio,
-                "skipped_binary": skipped_binary,
-                "skipped_encoding": skipped_encoding,
-                "bytes_read": bytes_read,
-                "content_workers": workers,
-            },
-            limit_capped=limit_capped,
+            excluded_dirs=(
+                self._sort_excluded_dirs(excluded_dirs)
+                if show_excluded_dirs
+                else None
+            ),
         )
 
     # ------------------------------------------------------------------
@@ -1621,79 +1401,78 @@ class FindInFiles(AbstractSimpleTool):
 
     def _build_response(
         self,
-        ok: bool,
+        *,
         matches: List[Dict[str, Any]],
         count: int,
         stop_reason: Optional[str],
-        stop_summary: Optional[str],
         guidance: Optional[str],
         scan_complete: bool,
         more_matches_may_exist: bool,
         limit_requested: int,
         limit_eff: int,
+        limit_capped: bool,
         path: str,
         pattern: str,
         query_mode: str,
-        pattern_mode: str,
         mode: str,
-        case_insensitive_arg: bool,
         effective_ci: bool,
-        excluded_dirs: List[Dict[str, str]],
-        exclude_dirs_accepted: Optional[List[str]],
-        exclude_dir_errors: Optional[List[Dict[str, str]]],
-        candidate_count: Optional[int],
-        breakdown: Optional[Dict[str, Any]],
-        needles: Optional[Dict[str, Any]],
-        content_workers: Optional[int],
-        search_stats: Dict[str, Any],
-        limit_capped: bool,
+        file_pattern: Optional[str] = None,
+        exclude_dir_errors: Optional[List[Dict[str, str]]] = None,
+        candidate_count: Optional[int] = None,
         candidate_limit: Optional[int] = None,
+        breakdown: Optional[Dict[str, Any]] = None,
+        excluded_dirs: Optional[List[Dict[str, str]]] = None,
     ) -> str:
+        """Slim agent-facing payload (RESPONSE-CONTRACT). Omit-if-absent."""
         payload: Dict[str, Any] = {
             "tool": FindInFiles.registered_tool_name(),
-            "ok": ok,
+            "ok": True,
             "path": path,
             "pattern": pattern,
             "query_mode": query_mode,
-            "pattern_mode": pattern_mode,
             "mode": mode,
             "matches": matches,
             "count": count,
             "scan_complete": scan_complete,
             "more_matches_may_exist": more_matches_may_exist,
-            "stop_reason": stop_reason,
-            "stop_summary": stop_summary,
-            "guidance": guidance,
-            "limit_requested": limit_requested,
-            "limit_eff": limit_eff,
-            "limit_capped": limit_capped,
-            "case_insensitive_arg": case_insensitive_arg,
-            "case_insensitive": case_insensitive_arg,  # back-compat alias
-            "effective_ci": effective_ci,
-            "excluded_dirs": excluded_dirs,
-            "search_scope": {
-                "path": path,
-                "mode": mode,
-                "limit_eff": limit_eff,
-            },
-            "search_stats": search_stats,
+            "case_insensitive": effective_ci,
         }
-        if candidate_count is not None:
-            payload["candidate_count"] = candidate_count
-        if candidate_limit is not None:
-            payload["candidate_limit"] = candidate_limit
-        if breakdown is not None:
-            # full breakdown fields at top level for refuse/partial
-            for k, v in breakdown.items():
-                if k == "candidate_count" and "candidate_count" in payload:
-                    continue
-                payload[k] = v
-        if needles is not None:
-            payload["needles"] = needles
-        if content_workers is not None:
-            payload["content_workers"] = content_workers
-        if exclude_dirs_accepted is not None:
-            payload["exclude_dirs"] = exclude_dirs_accepted
+        if stop_reason is not None:
+            payload["stop_reason"] = stop_reason
+        if guidance is not None:
+            payload["guidance"] = guidance
+
+        # Limits: only when capped or match_limit (agent needs N).
+        if limit_capped:
+            payload["limit_capped"] = True
+            payload["limit_eff"] = limit_eff
+            payload["limit_requested"] = limit_requested
+        elif stop_reason == "match_limit":
+            payload["limit_eff"] = limit_eff
+
+        if file_pattern:
+            payload["file_pattern"] = file_pattern
         if exclude_dir_errors:
             payload["exclude_dir_errors"] = exclude_dir_errors
+
+        # Refuse breakdown only (too_many_candidate_files).
+        if stop_reason == "too_many_candidate_files":
+            if candidate_count is not None:
+                payload["candidate_count"] = candidate_count
+            if candidate_limit is not None:
+                payload["candidate_limit"] = candidate_limit
+            if breakdown is not None:
+                if breakdown.get("files_at_root"):
+                    payload["files_at_root"] = breakdown["files_at_root"]
+                top = breakdown.get("top_level_dirs") or []
+                total = int(breakdown.get("top_level_dirs_total") or 0)
+                if top or total > 0:
+                    payload["top_level_dirs"] = top
+                    payload["top_level_dirs_shown"] = len(top)
+                    payload["top_level_dirs_total"] = total
+
+        # Opt-in full skip list (show_excluded_dirs); omit empty.
+        if excluded_dirs:
+            payload["excluded_dirs"] = excluded_dirs
+
         return json.dumps(payload, ensure_ascii=False)
