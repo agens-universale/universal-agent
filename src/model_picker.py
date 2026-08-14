@@ -192,28 +192,6 @@ def _urllib_get_ex(url: str, headers: dict, verify: bool) -> HttpReply:
         return HttpReply(status=None, payload=None, network_error=str(exc) or exc.__class__.__name__)
 
 
-def _urllib_post_ex(url: str, headers: dict, body: dict, verify: bool) -> HttpReply:
-    """Legacy urllib POST (без proxy). Оставлен для unit-тестов транспорта."""
-    import socket
-    import ssl
-    import urllib.error
-    import urllib.request
-    ctx = None if verify else ssl._create_unverified_context()
-    data = json.dumps(body).encode("utf-8")
-    req = _request(url, headers, data=data, method="POST")
-    try:
-        with urllib.request.urlopen(req, timeout=5, context=ctx) as resp:
-            try:
-                payload = json.loads(resp.read().decode("utf-8"))
-            except ValueError:
-                payload = None
-            return HttpReply(status=resp.status, payload=payload)
-    except urllib.error.HTTPError as exc:
-        return HttpReply(status=exc.code, payload=None)
-    except (urllib.error.URLError, socket.timeout, ssl.SSLError, OSError, ValueError) as exc:
-        return HttpReply(status=None, payload=None, network_error=str(exc) or exc.__class__.__name__)
-
-
 def probe_fetch(completions_url: str, auth_header: Optional[str], *,
                 verify: bool = True, config_proxy: Optional[str] = None,
                 http_get_ex: Optional[Callable] = None) -> FetchOutcome:
@@ -272,15 +250,6 @@ def probe_post(completions_url: str, auth_header: Optional[str], model: str, *,
     reply = post_ex(completions_url, headers, body, verify)
     return (reply.status, reply.network_error, int((time.monotonic() - t0) * 1000),
             reply.payload is not None)
-
-
-def _urllib_get(url: str, headers: dict, verify: bool) -> dict:
-    import ssl
-    import urllib.request
-    ctx = None if verify else ssl._create_unverified_context()
-    req = _request(url, headers)
-    with urllib.request.urlopen(req, timeout=10, context=ctx) as resp:
-        return json.loads(resp.read().decode("utf-8"))
 
 
 def fetch_models(completions_url: str, auth_header: Optional[str], *,
