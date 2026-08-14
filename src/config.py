@@ -203,6 +203,7 @@ def flatten_app_config(app_cfg: AppConfig) -> Dict[str, Any]:
         "chat_completion_kwargs": app_cfg.backend.chat_completion_kwargs,
         "use_max_tokens_param": app_cfg.backend.use_max_tokens_param,
         "openai_strict_tools_schema": app_cfg.backend.openai_strict_tools_schema,
+        "send_tool_strict": app_cfg.backend.send_tool_strict,
         "use_ssl": app_cfg.backend.use_ssl,
         "cert_path": app_cfg.backend.cert_path,
         "key_path": app_cfg.backend.key_path,
