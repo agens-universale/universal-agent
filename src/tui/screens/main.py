@@ -8,10 +8,7 @@ import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional, TYPE_CHECKING
-
-if TYPE_CHECKING:
-    pass
+from typing import Optional
 
 from textual import events
 from textual.app import ComposeResult
@@ -25,6 +22,7 @@ from intent_log.record import ACTION_USER_ASK
 from intent_log.serialize import deserialize_list
 from runtime_notices import collect_unread_runtime_notices
 from tui.commands import build_default_registry, closest_command
+from tui.messages import CopyBlockRequest
 from tui.models import TaskCursor
 from rich.text import Text
 from tui.palette import ACCENT as _ACCENT
@@ -35,6 +33,7 @@ from tui.palette import INK as _INK
 from tui.services.context_meter import render_context_meter
 from tui.services.notices_ui import format_notices_badge, format_notices_footer_suffix
 from tui.services.usage_meter import compose_adaptive_footer_right, usage_segments
+from tui.services.clipboard_ops import copy_out
 from tui.services.export import export_thread
 from tui.services.path_display import truncate_path
 from tui.services.git_info import current_branch
@@ -53,7 +52,14 @@ from tui.services.subagent_sidecar_mapper import (
     trace_events_from_nested_detail,
 )
 from tui.services.trace_mapper import collect_skipped_call_ids, map_message
-from tui.services.trace_render import build_compaction_label
+from tui.services.trace_render import (
+    LINE_INTERMEDIATE_CLASS,
+    LINE_USER_CLASS,
+    NESTED_PREFIX,
+    NESTED_PROSE_PREFIX,
+    NESTED_USER_PREFIX,
+    build_compaction_label,
+)
 from tui.screens.tool_call_detail import ToolCallDetailScreen
 from tui.session_settings import read_from_meta
 from tui.toggles import (
@@ -1474,6 +1480,19 @@ class TraceScreen(Screen):
             self._on_ask_human_event(ev, live=live)
             return
 
+        if ev.kind == "todo":
+            # Чек-лист — пассивный прогресс: TraceRow без running-глифа/result.
+            # Когнитивное событие — эпизод раздумья не рвём (как session_think).
+            # Канон spec 2026-07-31 §2 — строки собирает общий билдер
+            # (он же у read-only канала), здесь только монтируем.
+            from tools.subagents.progress import todo_items_from_arguments
+            from tui.services.todo_render import build_todo_block
+            items = todo_items_from_arguments(
+                (ev.full_payload or {}).get("arguments"))
+            self._trace_mount(build_todo_block(
+                items, subagent=False, indent="   ", event_no=ev.no))
+            return
+
         if ev.kind == "call":
             if ev.tool_name in COGNITIVE_TOOLS:
                 # Когнитивный тул продолжает эпизод (без call_id — просто no-op,
@@ -1608,6 +1627,7 @@ class TraceScreen(Screen):
             show_ask_human=self._show_child_ask_human,
             hide_ask_human=self._hide_child_ask_human,
             mount_nested_user=self._mount_nested_user,
+            mount_nested_todo=self._mount_nested_todo,
         )
 
     def _nested_parent_row(self, parent_call_id: str):
@@ -1632,6 +1652,7 @@ class TraceScreen(Screen):
             mount_nested_prose=self._mount_nested_prose,
             mount_nested_summary=self._mount_nested_child_summary,
             mount_nested_user=self._mount_nested_user,
+            mount_nested_todo=self._mount_nested_todo,
         )
 
     def _nested_mount_after(self, parent_call_id: str, widget) -> None:
@@ -1695,19 +1716,39 @@ class TraceScreen(Screen):
         prose: str,
         **_kw,
     ) -> None:
+        """Read-only счёт-в-счёт с merge_nested_readonly._prose (trace_render.py)."""
         if self._nested_parent_row(parent_call_id) is None:
             return
         text = (prose or "").strip()
         if not text:
             return
         row = TraceRow(
-            prefix="       · ",
+            prefix=NESTED_PROSE_PREFIX,
             content=text,
-            kind_class="line-intermediate",
+            kind_class=LINE_INTERMEDIATE_CLASS,
             event_no=0,
             focusable=False,
         )
         self._nested_mount_after(parent_call_id, row)
+
+    def _mount_nested_todo(
+        self,
+        *,
+        parent_call_id: str,
+        tool_call_id: str = "",
+        todo_items: list | None = None,
+        **_kw,
+    ) -> None:
+        """Развёрнутый чек-лист субагента (spec 2026-07-31 §3).
+
+        Пассивные todo-строки (не ToolCallRow): в _nested_tool_rows НЕ
+        регистрируются, поэтому finish по их call_id — естественный no-op.
+        Строки собирает общий билдер (он же у merge_nested_readonly)."""
+        if self._nested_parent_row(parent_call_id) is None:
+            return
+        from tui.services.todo_render import build_todo_block
+        self._nested_mount_after(parent_call_id, build_todo_block(
+            todo_items or [], subagent=True, indent=NESTED_PREFIX))
 
     def _mount_nested_user(
         self,
@@ -1716,16 +1757,18 @@ class TraceScreen(Screen):
         prose: str,
         **_kw,
     ) -> None:
-        """Mid-run user steer under active subagent_* (active-scope input)."""
+        """Mid-run user steer under active subagent_* (active-scope input).
+
+        Read-only счёт-в-счёт с merge_nested_readonly._user (trace_render.py)."""
         if self._nested_parent_row(parent_call_id) is None:
             return
         text = (prose or "").strip()
         if not text:
             return
         row = TraceRow(
-            prefix="       > ",
+            prefix=NESTED_USER_PREFIX,
             content=text,
-            kind_class="line-user",
+            kind_class=LINE_USER_CLASS,
             event_no=0,
             focusable=False,
         )
@@ -4514,6 +4557,20 @@ class TraceScreen(Screen):
             body.add_class("hidden")
             if marker is not None:
                 marker.set_prefix("▸ ")
+
+    def on_copy_block_request(self, event: CopyBlockRequest) -> None:
+        """Кнопка ❐ или двойной клик по блоку: копия наружу + в буфер сессии.
+
+        Буфер сессии — как у Ctrl+C: это явный жест копирования, а не побочный
+        эффект выделения. Двойной клик перед этим сам рождает TextSelected
+        (выделение тела) и ставит в очередь отложенную автокопию видимого —
+        её нужно отменить, иначе она затрёт payload позже (гонка copy-on-select)."""
+        payload = event.payload
+        if not payload:
+            return
+        self.app.cancel_pending_select_copy()
+        copy_out(self.app, payload, toast=True, blocking=False)
+        self.app._push_session_copy_buffer(payload)
 
     def on_open_tool_call_detail_request(self, message) -> None:
         """Ctrl+click / Enter по row → детальный экран call + output.

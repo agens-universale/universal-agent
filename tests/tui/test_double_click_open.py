@@ -82,7 +82,7 @@ async def test_ctrl_click_on_agent_prose_opens_correct_event(tmp_path):
     from textual import events
     from tui.app import TuiApp
     from tui.screens.viewer import ViewerScreen
-    from tui.widgets.agent_reply_line import AgentReplyLine
+    from tui.widgets.block_panel import BlockPanel
     from tui.widgets.trace_row import TraceRow
 
     tid = "agent_click"
@@ -111,12 +111,12 @@ async def test_ctrl_click_on_agent_prose_opens_correct_event(tmp_path):
         await pilot.pause(0.3)
 
         scr = pilot.app.screen
-        # Prose-блоки — TraceRow с event_no; code-block panel — AgentReplyLine.
+        # Prose-блоки — TraceRow с event_no; code-block panel — BlockPanel.
         prose_rows = [
             r for r in scr.query(TraceRow)
             if r.has_class("line-agent")
         ]
-        code_panels = list(scr.query(AgentReplyLine))
+        code_panels = list(scr.query(BlockPanel))
         # Минимум: 2 prose-блока ("Готово:" и "Конец.") + 1 code-panel.
         assert len(prose_rows) >= 2
         assert len(code_panels) >= 1
@@ -144,13 +144,13 @@ async def test_ctrl_click_on_agent_prose_opens_correct_event(tmp_path):
 
 @pytest.mark.asyncio
 async def test_ctrl_click_on_agent_code_panel_opens_correct_event(tmp_path):
-    """Тот же сценарий, но Ctrl+клик — реально по AgentReplyLine (code-panel),
+    """Тот же сценарий, но Ctrl+клик — реально по BlockPanel (code-panel),
     а не по соседнему TraceRow (prose)."""
     pytest.importorskip("textual")
     from textual import events
     from tui.app import TuiApp
     from tui.screens.viewer import ViewerScreen
-    from tui.widgets.agent_reply_line import AgentReplyLine
+    from tui.widgets.block_panel import BlockPanel
 
     tid = "agent_click_panel"
     (Path(tmp_path) / f"meta_cli_{tid}.json").write_text(
@@ -176,7 +176,7 @@ async def test_ctrl_click_on_agent_code_panel_opens_correct_event(tmp_path):
         await pilot.pause(0.3)
 
         scr = pilot.app.screen
-        code_panels = list(scr.query(AgentReplyLine))
+        code_panels = list(scr.query(BlockPanel))
         assert len(code_panels) >= 1
         target = code_panels[0]
         agent_no = target._event_no

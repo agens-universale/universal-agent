@@ -452,6 +452,7 @@ class SessionsScreen(Screen):
             return
         tid = task.thread_id
         segments = self._store.read_segments(tid)
+        subagent_records = self._store.read_subagent_trace(tid)
         from tui.screens.preview import PreviewScreen
 
         def _on_result(resume: bool) -> None:
@@ -460,6 +461,7 @@ class SessionsScreen(Screen):
 
         self.app.push_screen(
             PreviewScreen(segments=segments, thread_id=tid,
-                          project_path=self._project_path()),
+                          project_path=self._project_path(),
+                          subagent_records=subagent_records),
             _on_result,
         )
