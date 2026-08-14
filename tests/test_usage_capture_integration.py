@@ -5,7 +5,7 @@ import json
 import pytest
 
 import utils.connect_backend as cb
-from usage.account import CATEGORY_MAIN, CATEGORY_SUMMARY, UsageAccount
+from usage.account import CATEGORY_MAIN, CATEGORY_SUMMARY, MONEY_FIELD, UsageAccount
 from usage.context import usage_scope
 
 
@@ -137,15 +137,40 @@ def test_record_usage_delivers_cost():
     from usage.context import record_usage
     account = UsageAccount()
     with usage_scope(account, CATEGORY_MAIN):
-        record_usage({"prompt_tokens": 100, "completion_tokens": 10, "cost": 0.0058})
-    assert account.by_category[CATEGORY_MAIN]["cost"] == 0.0058
+        record_usage({"prompt_tokens": 100, "completion_tokens": 10, "cost": 0.0058},
+                     "https://openrouter.ai/api/v1/chat/completions")
+    assert account.by_category[CATEGORY_MAIN][MONEY_FIELD] == {"$": 0.0058}
     assert account.by_category[CATEGORY_MAIN]["billed_calls"] == 1
+
+
+def test_record_usage_fixes_currency_by_endpoint():
+    """Валюта берётся из адреса ИМЕННО ЭТОГО вызова, а не из общего конфига:
+    смена провайдера посреди треда не должна складывать рубли с долларами."""
+    from usage.context import record_usage
+    account = UsageAccount()
+    with usage_scope(account, CATEGORY_MAIN):
+        record_usage({"prompt_tokens": 100, "completion_tokens": 10, "cost": 2.0},
+                     "https://openrouter.ai/api/v1/chat/completions")
+        record_usage({"prompt_tokens": 100, "completion_tokens": 10, "cost": 200.0},
+                     "https://routerai.ru/v1/chat/completions")
+    assert account.by_category[CATEGORY_MAIN][MONEY_FIELD] == {"$": 2.0, "₽": 200.0}
+
+
+def test_record_usage_without_url_keeps_currency_unknown():
+    """Без адреса валюта не выдумывается: сумма ждёт разрешения при показе."""
+    from usage.account import LEGACY_CURRENCY
+    from usage.context import record_usage
+    account = UsageAccount()
+    with usage_scope(account, CATEGORY_MAIN):
+        record_usage({"prompt_tokens": 100, "completion_tokens": 10, "cost": 0.5})
+    assert account.by_category[CATEGORY_MAIN][MONEY_FIELD] == {LEGACY_CURRENCY: 0.5}
 
 
 def test_orphan_account_delivers_cost():
     """Фактическая стоимость записывается в orphan-аккаунт при отсутствии контекста."""
     from usage.context import _orphan_account
-    before = _orphan_account.account.totals()["cost"]
+    before = _orphan_account.account.totals()[MONEY_FIELD].get("$", 0.0)
     from usage.context import record_usage
-    record_usage({"prompt_tokens": 10, "completion_tokens": 1, "cost": 0.25})
-    assert _orphan_account.account.totals()["cost"] == before + 0.25
+    record_usage({"prompt_tokens": 10, "completion_tokens": 1, "cost": 0.25},
+                 "https://openrouter.ai/api/v1/chat/completions")
+    assert _orphan_account.account.totals()[MONEY_FIELD]["$"] == before + 0.25

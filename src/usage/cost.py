@@ -5,10 +5,12 @@
 (вызовы, для которых факта нет). Если для остатка тарифа тоже нет —
 категория помечается ``unpriced``, а не молча теряет деньги.
 
-Валюта факта определяется по адресу эндпоинта (см. ``usage.currency``): домен
-``.ru`` — рубли, всё остальное — доллары; без адреса — доллары. Валюта тарифа —
-из ``pricing``. Если валюты разошлись, получаем несколько валют
-(``multi_currency``) — общий total не считаем, показываем сабтоталы.
+Валюта факта фиксируется в момент вызова (см. ``usage.context``) и хранится
+вместе с суммой, поэтому смена провайдера посреди треда не переразмечает
+исторические деньги. ``endpoint_url`` здесь нужен только для старых ``meta``,
+где валюта не записана. Валюта тарифа — из ``pricing``. Если валюты разошлись,
+получаем несколько валют (``multi_currency``) — общий total не считаем,
+показываем сабтоталы.
 """
 
 from __future__ import annotations
@@ -17,7 +19,7 @@ from dataclasses import dataclass, field
 from typing import Dict
 
 from config_modules.pricing import ResolvedTariff, coerce_pricing, resolve_model_tariff
-from usage.account import UsageAccount
+from usage.account import LEGACY_CURRENCY, MONEY_FIELD, UsageAccount
 from usage.currency import provider_currency_for_url
 
 
@@ -56,12 +58,11 @@ class CategoryCost:
 @dataclass
 class CostReport:
     categories: list[CategoryCost] = field(default_factory=list)
-    # currency -> суммарная стоимость (учтённые категории)
+    # currency -> суммарная стоимость (учтённые категории). Порядок ключей —
+    # порядок первого появления валюты при обходе категорий (категории идут по
+    # убыванию токенов), то есть валюта основной работы оказывается первой.
+    # Порядок обязан быть стабильным: по нему строится строка футера.
     by_currency: Dict[str, float] = field(default_factory=dict)
-    # currency -> сумма токенов (input+output), которые в эту валюту попали.
-    # Используется для выбора валюты по доле токенов (см. usage_meter._headline_amount) —
-    # суммы в разных валютах несравнимы, токены сравнимы всегда.
-    tokens_by_currency: Dict[str, int] = field(default_factory=dict)
     total_input: int = 0
     total_output: int = 0
     total_cached: int = 0
@@ -99,8 +100,8 @@ def compute_cost(
 
     ``pricing`` — ``PricingConfig`` или сырой dict из config. ``model_name`` —
     модель прогона. ``endpoint_url`` — адрес бэкенда (плоский ключ
-    ``completions_url``): из него выводится валюта фактической цены, без него —
-    валюта по умолчанию. Токены/вызовы по категориям считаются всегда, независимо
+    ``completions_url``): нужен только для сумм из старых ``meta``, записанных
+    версией без валюты. Токены/вызовы по категориям считаются всегда, независимо
     от ``pricing.enabled`` (счётчик usage не зависит от показа денег). Деньги
     считаются только если ``pricing.enabled`` — тогда для каждой категории
     стоимость собирается из факта провайдера (биллённая часть вызовов) и
@@ -109,8 +110,9 @@ def compute_cost(
     """
     pricing_cfg = coerce_pricing(pricing)
     tariff = resolve_model_tariff(pricing_cfg, model_name)
-    # Один разбор адреса на отчёт: эндпоинт в пределах прогона всегда один.
-    provider_currency = provider_currency_for_url(endpoint_url)
+    # Валюта для сумм без записанной валюты (старые meta) — по текущему конфигу,
+    # то есть ровно как вела себя предыдущая версия. Разбор один на отчёт.
+    legacy_currency = provider_currency_for_url(endpoint_url)
     report = CostReport()
 
     # Порядок категорий стабильный: по убыванию суммарных токенов, потом по имени.
@@ -135,13 +137,16 @@ def compute_cost(
             billed_calls = int(bucket.get("billed_calls", 0) or 0)
             billed_input = int(bucket.get("billed_input", 0) or 0)
             billed_output = int(bucket.get("billed_output", 0) or 0)
-            billed_tokens = 0
-            tariff_tokens = 0
             if billed_calls:
-                parts.append(CostPart(
-                    float(bucket.get("cost", 0.0) or 0.0),
-                    provider_currency, "provider"))
-                billed_tokens = billed_input + billed_output
+                # По части на валюту факта. Суммы без записанной валюты (старые
+                # meta) сливаются с legacy-валютой — в одну часть, а не в две
+                # одинаковых.
+                billed: Dict[str, float] = {}
+                for cur, amount in (bucket.get(MONEY_FIELD) or {}).items():
+                    key = legacy_currency if cur == LEGACY_CURRENCY else cur
+                    billed[key] = billed.get(key, 0.0) + float(amount or 0.0)
+                for cur, amount in billed.items():
+                    parts.append(CostPart(amount, cur, "provider"))
 
             rest_in = inp - billed_input
             rest_out = out - billed_output
@@ -156,16 +161,11 @@ def compute_cost(
                     parts.append(CostPart(
                         _tariff_cost(tariff, rest_in, rest_out, rest_cached),
                         tariff.currency, "tariff"))
-                    tariff_tokens = rest_in + rest_out
                 else:
                     unpriced = True
 
             for part in parts:
                 report.by_currency[part.currency] = report.by_currency.get(part.currency, 0.0) + part.amount
-                tokens = billed_tokens if part.source == "provider" else tariff_tokens
-                report.tokens_by_currency[part.currency] = (
-                    report.tokens_by_currency.get(part.currency, 0) + tokens
-                )
             report.has_unpriced = report.has_unpriced or unpriced
 
         report.categories.append(

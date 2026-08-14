@@ -5,19 +5,19 @@ import types
 import agent_executor as ae
 import manual_compaction as mc
 from thread_store import load_thread_meta
-from usage.account import CATEGORY_MAIN, UsageAccount
+from usage.account import CATEGORY_MAIN, MONEY_FIELD, UsageAccount
 
 
 def test_cost_survives_meta_write_and_read():
     acc = UsageAccount()
-    acc.add(CATEGORY_MAIN, 1000, 100, 0, cost=0.0058, billed=True)
+    acc.add(CATEGORY_MAIN, 1000, 100, 0, cost=0.0058, billed=True, currency="$")
 
     meta = {"token_usage": acc.to_meta()}
     restored = UsageAccount.from_meta(meta["token_usage"])
 
-    assert restored.by_category[CATEGORY_MAIN]["cost"] == 0.0058
+    assert restored.by_category[CATEGORY_MAIN][MONEY_FIELD] == {"$": 0.0058}
     assert restored.by_category[CATEGORY_MAIN]["billed_calls"] == 1
-    assert restored.totals()["cost"] == 0.0058
+    assert restored.totals()[MONEY_FIELD] == {"$": 0.0058}
 
 
 class _UsageState:
@@ -53,7 +53,7 @@ class _Coord:
 def test_cost_survives_manual_compaction(monkeypatch, tmp_path):
     """Ручной /compact: фактическая цена и billed_calls доживают до записанной meta."""
     baseline = UsageAccount()
-    baseline.add(CATEGORY_MAIN, 1000, 100, 0, cost=0.0058, billed=True)
+    baseline.add(CATEGORY_MAIN, 1000, 100, 0, cost=0.0058, billed=True, currency="$")
 
     monkeypatch.setattr(
         mc, "ThreadSession",
@@ -82,5 +82,5 @@ def test_cost_survives_manual_compaction(monkeypatch, tmp_path):
 
     saved = load_thread_meta(str(tmp_path), "cli", "t1") or {}
     persisted = UsageAccount.from_meta(saved.get("token_usage"))
-    assert persisted.by_category[CATEGORY_MAIN]["cost"] == 0.0058
+    assert persisted.by_category[CATEGORY_MAIN][MONEY_FIELD] == {"$": 0.0058}
     assert persisted.by_category[CATEGORY_MAIN]["billed_calls"] == 1

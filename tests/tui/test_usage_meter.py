@@ -88,19 +88,21 @@ def test_format_nonzero_cost_hidden_when_zero_or_no_pricing():
 
 def test_footer_shows_provider_currency_and_tilde_on_mixed():
     acc = UsageAccount()
-    acc.add(CATEGORY_MAIN, 1_000_000, 100_000, 0, cost=10.45, billed=True)
+    acc.add(CATEGORY_MAIN, 1_000_000, 100_000, 0, cost=10.45, billed=True, currency="$")
     acc.add(CATEGORY_MAIN, 500_000, 50_000)
     text = render_usage_meter(acc.to_meta(), acc.to_meta(), _PRICING_RUB, "m")
-    assert "10.5$~" in text.plain
+    assert "10.5$+60.0₽~" in text.plain
 
 
-def test_footer_marks_incomplete_sum_on_mixed_currencies():
-    # Тарифная часть в другой валюте в цифру не вошла — это «+», а не только «~».
+def test_footer_shows_every_currency_never_hides_money():
+    # Обе валюты видны целиком: доля токенов не пропорциональна деньгам, поэтому
+    # свернуть картину до одной цифры значило бы спрятать неизвестно какую сумму.
     acc = UsageAccount()
-    acc.add(CATEGORY_MAIN, 1_000_000, 100_000, 0, cost=10.45, billed=True)
+    acc.add(CATEGORY_MAIN, 1_000_000, 100_000, 0, cost=10.45, billed=True, currency="$")
     acc.add(CATEGORY_MAIN, 500_000, 50_000)
-    text = render_usage_meter(acc.to_meta(), acc.to_meta(), _PRICING_RUB, "m")
-    assert "10.5$~+" in text.plain
+    text = render_usage_meter(acc.to_meta(), acc.to_meta(), _PRICING_RUB, "m").plain
+    assert "10.5$" in text and "60.0₽" in text
+    assert "?" not in text          # неполноты нет: у каждой траты есть цена
 
 
 def test_footer_plain_when_all_billed():
@@ -111,38 +113,55 @@ def test_footer_plain_when_all_billed():
     assert "~" not in text.plain
 
 
-def test_footer_marks_unpriced_with_plus():
+def test_footer_marks_unpriced_with_question():
+    # «?» — есть трата, цену которой узнать нечем (ни факта, ни тарифа).
     acc = UsageAccount()
-    acc.add(CATEGORY_MAIN, 1000, 100, 0, cost=0.5, billed=True)
+    acc.add(CATEGORY_MAIN, 1000, 100, 0, cost=0.5, billed=True, currency="$")
     acc.add(CATEGORY_MAIN, 1000, 100)
     text = render_usage_meter(acc.to_meta(), acc.to_meta(), _PRICING_NO_RATES, "m")
-    assert "0.50$+" in text.plain
+    assert "0.50$?" in text.plain
+
+
+def test_footer_marks_two_currencies_and_unpriced_together():
+    # Худший случай: провайдера меняли посреди треда (две валюты факта), а тарифа
+    # нет — значит часть трат осталась без цены вовсе. Знаки «+» и «?» вместе.
+    # Тильды здесь быть не может: тариф резолвится на весь отчёт, поэтому «часть
+    # посчитана по тарифу» и «тарифа нет» — взаимоисключающие состояния.
+    acc = UsageAccount()
+    acc.add(CATEGORY_MAIN, 1_000_000, 100_000, 0, cost=2.0, billed=True, currency="$")
+    acc.add(CATEGORY_MAIN, 500_000, 50_000, 0, cost=200.0, billed=True, currency="₽")
+    acc.add(CATEGORY_MAIN, 1000, 100)                                # цены нет вовсе
+    text = render_usage_meter(acc.to_meta(), acc.to_meta(), _PRICING_NO_RATES, "m").plain
+    assert "2.00$+200.0₽?" in text
+    assert "~" not in text
 
 
 def test_sessions_shows_tiny_cost_instead_of_hiding():
     acc = UsageAccount()
-    acc.add(CATEGORY_MAIN, 1000, 100, 0, cost=0.002, billed=True)
+    acc.add(CATEGORY_MAIN, 1000, 100, 0, cost=0.002, billed=True, currency="$")
     assert format_nonzero_cost(acc.to_meta(), _PRICING_RUB, "m") == "<0.01 $"
 
 
-def test_sessions_shows_fact_on_mixed_currencies():
+def test_sessions_shows_all_currencies():
     acc = UsageAccount()
-    acc.add(CATEGORY_MAIN, 1_000_000, 100_000, 0, cost=10.45, billed=True)
+    acc.add(CATEGORY_MAIN, 1_000_000, 100_000, 0, cost=10.45, billed=True, currency="$")
     acc.add(CATEGORY_MAIN, 500_000, 50_000)
-    # Тарифный остаток осел в другой валюте (₽) и в headline-сумму (только $) не вошёл — «+».
-    assert format_nonzero_cost(acc.to_meta(), _PRICING_RUB, "m") == "10.5 $~+"
+    # Карточка сессии шире футера — обе валюты помещаются полностью.
+    assert format_nonzero_cost(acc.to_meta(), _PRICING_RUB, "m") == "10.5 $+60.0 ₽~"
 
 
-def test_footer_uses_one_currency_for_both_segments():
-    # В сессии есть факт, в текущем ходе — только тарифная часть.
-    # Оба сегмента обязаны быть в одной валюте, а не «запрос в рублях, сессия в долларах».
+def test_footer_segments_keep_their_own_currencies():
+    # В сессии есть факт в долларах, в текущем ходе — только тарифная часть в рублях.
+    # Каждый сегмент показывает свои деньги: подгонять их друг под друга нельзя —
+    # это скрыло бы часть суммы.
     session = UsageAccount()
-    session.add(CATEGORY_MAIN, 1_000_000, 100_000, 0, cost=10.45, billed=True)
+    session.add(CATEGORY_MAIN, 1_000_000, 100_000, 0, cost=10.45, billed=True, currency="$")
     session.add(CATEGORY_MAIN, 500_000, 50_000)
     request = UsageAccount()
     request.add(CATEGORY_MAIN, 500_000, 50_000)
     text = render_usage_meter(session.to_meta(), request.to_meta(), _PRICING_RUB, "m").plain
-    assert "₽" not in text
+    assert "запрос 550.0k/60.0₽" in text
+    assert "сессия 1.6M/10.5$+60.0₽~" in text
 
 
 def test_same_currency_mix_marks_tilde_only():
@@ -155,14 +174,14 @@ def test_same_currency_mix_marks_tilde_only():
     assert "+" not in text
 
 
-def test_footer_currency_follows_token_share():
-    # Валюта блока — та, на которую приходится больше токенов, а не та, где есть факт.
+def test_footer_currency_order_follows_token_share():
+    # Порядок валют детерминирован: первой идёт валюта категории с наибольшими
+    # токенами. Иначе футер прыгал бы между перерисовками.
     acc = UsageAccount()
-    acc.add(CATEGORY_MAIN, 5_000_000, 200_000)
-    acc.add(CATEGORY_FINISH_GATE, 3_000, 100, 0, cost=0.004, billed=True)
+    acc.add(CATEGORY_MAIN, 5_000_000, 200_000)                                 # тариф ₽
+    acc.add(CATEGORY_FINISH_GATE, 3_000, 100, 0, cost=0.004, billed=True, currency="$")
     text = render_usage_meter(acc.to_meta(), acc.to_meta(), _PRICING_RUB, "m").plain
-    assert "540.0₽" in text
-    assert "$" not in text
+    assert "540.0₽+<0.01$~" in text
 
 
 def test_tilde_only_when_both_sides_present():
@@ -191,30 +210,38 @@ _RU_URL = "https://routerai.ru/api/v1/chat/completions"
 
 def test_footer_shows_rubles_on_ru_endpoint():
     # Факт от .ru-провайдера + рублёвый тариф: одна валюта, тильда есть,
-    # маркера неполноты нет (раньше факт был в долларах и давал «+»).
+    # соединителя «+» нет — складывать нечего.
     acc = UsageAccount()
-    acc.add(CATEGORY_MAIN, 1_000_000, 100_000, 0, cost=10.45, billed=True)
+    acc.add(CATEGORY_MAIN, 1_000_000, 100_000, 0, cost=10.45, billed=True, currency="₽")
     acc.add(CATEGORY_MAIN, 500_000, 50_000)
     text = render_usage_meter(acc.to_meta(), acc.to_meta(), _PRICING_RUB, _MODEL, _RU_URL).plain
-    assert "₽" in text
+    assert "70.5₽~" in text
     assert "$" not in text
-    assert "~" in text
     assert "+" not in text
 
 
 def test_sessions_label_uses_ru_currency():
     acc = UsageAccount()
-    acc.add(CATEGORY_MAIN, 1000, 100, 0, cost=7.5, billed=True)
-    assert format_nonzero_cost(acc.to_meta(), _PRICING_RUB, _MODEL, _RU_URL) == "7.50 ₽"
+    acc.add(CATEGORY_MAIN, 1000, 100, 0, cost=7.5, billed=True, currency="₽")
+    assert format_nonzero_cost(acc.to_meta(), _PRICING_RUB, _MODEL) == "7.50 ₽"
 
 
-def test_tie_break_prefers_fact_currency_not_dollar():
-    # Доли токенов равны (1M против 1M) — побеждает валюта ФАКТА, а она теперь
-    # зависит от эндпоинта. Этот тест ловит регресс _fact_currency.
+def test_legacy_meta_currency_resolved_by_endpoint():
+    # Суммы старых сессий валюты не несут — она берётся из текущего конфига,
+    # ровно как вела себя предыдущая версия.
     acc = UsageAccount()
-    acc.add(CATEGORY_MAIN, 1_000_000, 0, 0, cost=1.0, billed=True)
-    acc.add(CATEGORY_MAIN, 1_000_000, 0)
+    acc.add(CATEGORY_MAIN, 1_000_000, 0, 0, cost=1.0, billed=True)   # без валюты
     ru = render_usage_meter(acc.to_meta(), acc.to_meta(), _PRICING_RUB, _MODEL, _RU_URL).plain
-    assert "₽" in ru and "$" not in ru
+    assert "1.00₽" in ru and "$" not in ru
     usd = render_usage_meter(acc.to_meta(), acc.to_meta(), _PRICING_RUB, _MODEL).plain
-    assert "$" in usd
+    assert "1.00$" in usd
+
+
+def test_legacy_and_fresh_sums_merge_into_one_part():
+    # Старая сумма (без валюты) и новая в той же валюте — одно слагаемое, не два.
+    acc = UsageAccount()
+    acc.add(CATEGORY_MAIN, 1_000_000, 0, 0, cost=1.0, billed=True)               # legacy
+    acc.add(CATEGORY_MAIN, 1_000_000, 0, 0, cost=2.0, billed=True, currency="₽")
+    text = render_usage_meter(acc.to_meta(), acc.to_meta(), _PRICING_RUB, _MODEL, _RU_URL).plain
+    assert "3.00₽" in text
+    assert "+" not in text
