@@ -74,10 +74,8 @@ def main():
     # Импорты после добавления path
     from tools.connect_mcp.client import (
         _init_mcp_session,
-        _send_initialized_notification,
         _tools_list_request,
         _call_mcp_tool,
-        _get_or_init_session_id,
         _MCP_SESSIONS,
     )
 

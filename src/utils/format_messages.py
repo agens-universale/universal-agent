@@ -2,7 +2,6 @@ import json
 from copy import deepcopy
 
 from message_projection import project_assistant_text
-from utils.convertations import output_chat_completion_to_response
 
 cut_message = 350
 
@@ -90,25 +89,6 @@ def format_message_responses(message):
     else:
         return format_others_responses(message)
 
-
-def format_message_completions(message):
-    m_type = message.get('role', None)
-    if m_type == 'user':
-        return format_type_message(message)
-    elif m_type == 'tool':
-        return format_type_function_call_output(message)
-    elif m_type == 'assistant':
-        tool_calls = []
-        for t in message.get('tool_calls', []):
-            d = deepcopy(t['function'])
-            d['call_id'] = t['id']
-            tool_calls.append(d)
-        parts = [format_type_message(message)]
-        for t in tool_calls:
-            parts.append(format_type_functions_call(t))
-        return '\n\n'.join(parts)
-    else:
-        return format_others_responses(message)
 
 
 def _extract_text_from_canonical_message_content(content):

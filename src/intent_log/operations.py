@@ -13,7 +13,7 @@ from intent_log.record import (
     IntentRecord,
     validate_record,
 )
-from intent_log.serialize import deserialize_list, serialize
+from intent_log.serialize import serialize
 
 
 def utc_now_ts() -> str:

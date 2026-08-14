@@ -447,40 +447,6 @@ def prompt_user_confirmation_choice(
     return "deny"
 
 
-def prompt_user_confirmation(
-    *,
-    title: str,
-    fields: list[tuple[str, Any]],
-    question: str,
-) -> bool:
-    """
-    Унифицированный prompt подтверждения для security-слоёв.
-
-    Формат:
-        {title}: confirmation required.
-        {field_1}: {value_1}
-        {field_2}: {value_2}
-        ...
-        {question} [y/N]:
-
-    Возвращает True при ответе yes/y, иначе False.
-    Auto-decline если stdin не tty (фоновый/CI запуск).
-    """
-    if not sys.stdin or not sys.stdin.isatty():
-        return False
-    lines = [f"\n{title}: confirmation required."]
-    for label, value in fields:
-        lines.append(f"{label}: {value}")
-    lines.append(f"{question} [y/N]: ")
-    prompt = "\n".join(lines)
-    try:
-        print(prompt, file=sys.stderr, end="")
-        sys.stderr.flush()
-        answer = input().strip().lower()
-    except (EOFError, KeyboardInterrupt):
-        return False
-    return answer in {"y", "yes"}
-
 
 def _ask_user_confirmation_for_write(
     *,

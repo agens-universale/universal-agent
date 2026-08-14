@@ -148,7 +148,7 @@ def insert_missing(text: str, dotted_key: str, template_text: str) -> str:
     if deepest == 0:
         sep = "" if text.endswith("\n") else "\n"
         return text + sep + "\n" + block
-    p_start, p_end, p_indent, _ = find_anchor(text, ".".join(parts[:deepest]))
+    _, p_end, p_indent, _ = find_anchor(text, ".".join(parts[:deepest]))
     insert_at = section_end(text, p_end, p_indent)
     return text[:insert_at] + block + text[insert_at:]
 

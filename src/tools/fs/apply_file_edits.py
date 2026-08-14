@@ -16,7 +16,6 @@ from tools.fs.edit_suggestions import build_edit_miss_suggestions
 from tools.schema_optional import coalesce_optional_string
 from tools.simple_tool_base import AbstractSimpleTool
 from utils.tool_report_paths import tool_report_abspath
-from utils.atomic_io import atomic_replace
 
 class ApplyFileEdits(AbstractSimpleTool):
     default_diff_context_lines = 3
@@ -157,19 +156,6 @@ class ApplyFileEdits(AbstractSimpleTool):
             ensure_ascii=False,
         )
 
-    def _root_box_blocked_result(self, error: Dict[str, Any], path: str, edits: list, **kwargs) -> str:
-        return self._result(
-            path=path,
-            ok=False,
-            applied=False,
-            edits_would_apply=0,
-            total_would_replace=0,
-            edits_applied=0,
-            total_replaced=0,
-            edit_results=[],
-            message=error.get("message", "Path policy blocked."),
-            error=error,
-        )
 
     @staticmethod
     def _build_unified_diff(

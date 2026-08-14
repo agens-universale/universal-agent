@@ -10,11 +10,9 @@ Loop работает асинхронно от HTTP-запросов: даже 
 
 import logging
 import threading
-import time
-from typing import Dict, Optional, Set
+from typing import Optional, Set
 
 import swarm.lifecycle as lifecycle
-import swarm.storage as storage
 
 
 logger = logging.getLogger(__name__)

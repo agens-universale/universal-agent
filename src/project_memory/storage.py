@@ -7,7 +7,6 @@ correctness is on the atomic os.replace.
 from __future__ import annotations
 
 import hashlib
-import os
 import shutil
 import threading
 from dataclasses import dataclass
