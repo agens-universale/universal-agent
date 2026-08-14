@@ -8,12 +8,19 @@ import json
 import re
 from typing import Optional
 
-from tui.palette import BAND_BG, CODE_BLOCK
-from tui.widgets.agent_reply_line import AgentReplyLine
 from tui.services.duration_format import format_compact_int
 
 # Парсер `[tag] rest` для default meta-кейса (трейс и read-only превью).
 TAG_RE = re.compile(r"^\[(?P<tag>[^\]]+)\]\s*(?P<rest>.*)$")
+
+# Общие литералы вложенных (nested) строк под subagent_* — одинаковы в живом
+# трейсе (TraceScreen._mount_nested_*, main.py) и read-only превью
+# (merge_nested_readonly ниже).
+NESTED_PREFIX = "       "  # nested под subagent: +4 пробела к _PREFIX тула
+NESTED_PROSE_PREFIX = "       · "
+NESTED_USER_PREFIX = "       > "
+LINE_INTERMEDIATE_CLASS = "line-intermediate"
+LINE_USER_CLASS = "line-user"
 
 
 def build_compaction_label(num: int, comp: dict) -> str:
@@ -31,46 +38,14 @@ def build_compaction_label(num: int, comp: dict) -> str:
     return label
 
 
-def render_code_block(content: str, lang: Optional[str], *,
-                      event_no: int, focusable: bool = False,
-                      indent: bool = False) -> "AgentReplyLine":
-    """AgentReplyLine с подсветкой (rich.syntax) или fallback на $code-block-цвет.
-    CSS-класс `.code-block-panel`. `indent` (трейс/превью) добавляет `.code-indent`
-    → отступ под текст реплики; без него (баннер) — вровень с прозой на колонке 0."""
-    from rich.syntax import Syntax
-    from rich.text import Text
-    from pygments.lexers import get_lexer_by_name
-    from pygments.util import ClassNotFound
-
-    cls = "code-block-panel code-indent" if indent else "code-block-panel"
-    if lang:
-        try:
-            get_lexer_by_name(lang)
-            syntax = Syntax(
-                content, lexer=lang, theme="monokai",
-                background_color=BAND_BG, word_wrap=False,
-            )
-            return AgentReplyLine(
-                syntax, event_no=event_no, focusable=focusable, classes=cls,
-                copy_text=f"```{lang}\n{content}\n```",
-            )
-        except ClassNotFound:
-            pass
-    return AgentReplyLine(
-        Text(content, style=CODE_BLOCK),
-        event_no=event_no, focusable=focusable, classes=cls,
-    )
-
-
 def build_block_widgets(text: str, *, prose_bullet: bool, event_no: int,
                         bullet: str = "● ", kind_class_base: str = "line-agent") -> list:
     """Markdown → виджеты трейса. `prose_bullet` — префикс `bullet` на прозе (трейс/превью);
     False — без него (баннер ask_human). `bullet`/`kind_class_base` переопределяют маркер и
-    класс прозовых строк (intermediate_reply → «· »/line-intermediate). Код всегда панель,
-    таблицы — AgentReplyLine(.table-block). focusable=True только у первого виджета события."""
-    from tui.services.markdown_render import (
-        build_markdown_table, render_prose, segment_answer, table_block_to_markdown,
-    )
+    класс прозовых строк (intermediate_reply → «· »/line-intermediate). Код и таблицы —
+    BlockPanel. focusable=True только у первого виджета события."""
+    from tui.services.markdown_render import render_prose, segment_answer
+    from tui.widgets.block_panel import BlockPanel
     from tui.widgets.trace_row import TraceRow
 
     widgets: list = []
@@ -78,19 +53,16 @@ def build_block_widgets(text: str, *, prose_bullet: bool, event_no: int,
     first_prose_seen = False
     for seg in segment_answer(text):
         if seg.kind == "code-block":
-            widgets.append(render_code_block(
+            widgets.append(BlockPanel.for_code(
                 seg.content, seg.lang, event_no=event_no,
                 focusable=not focus_set, indent=prose_bullet,
             ))
             focus_set = True
             continue
         if seg.kind == "table":
-            table_classes = "table-block table-indent" if prose_bullet else "table-block"
-            widgets.append(AgentReplyLine(
-                build_markdown_table(seg.headers or [], seg.rows or [], seg.aligns or []),
-                event_no=event_no, focusable=not focus_set, classes=table_classes,
-                copy_text=table_block_to_markdown(seg.headers or [], seg.rows or [],
-                                                  seg.aligns or []),
+            widgets.append(BlockPanel.for_table(
+                seg.headers or [], seg.rows or [], seg.aligns or [],
+                event_no=event_no, focusable=not focus_set, indent=prose_bullet,
             ))
             focus_set = True
             continue
@@ -239,10 +211,28 @@ def _dispatch_readonly(mount_target, ev, calls: dict) -> None:
             mount_target, ev.summary or "контекст сжат",
             (ev.summary_content or "").strip(), ev.no)
     elif ev.kind == "error_msg":
-        mount_target.mount(TraceRow(prefix="[!] ", content=ev.summary,
-                                    kind_class="line-error", event_no=ev.no))
+        # Паритет с живым путём (TraceScreen._render_error_msg): ошибка с известным
+        # call_id финализирует свою строку-вызов ✗ и не дублируется [!]-строкой.
+        # Иначе строка навсегда осталась бы «выполняется»: схемные ошибки приходят
+        # техническим error_message с call_id, а не function_call_output.
+        err_row = calls.get(ev.call_id) if ev.call_id else None
+        if err_row is not None:
+            err_row.set_result(summary=ev.summary, error=True)
+            calls.pop(ev.call_id, None)
+        else:
+            mount_target.mount(TraceRow(prefix="[!] ", content=ev.summary,
+                                        kind_class="line-error", event_no=ev.no))
     elif ev.kind == "ask_human":
         mount_target.mount(build_answered_question_widget(ev.summary, event_no=ev.no))
+    elif ev.kind == "todo":
+        # Канон spec 2026-07-31 §2: строки собирает общий билдер (он же у
+        # живого канала в main.py), здесь только монтируем.
+        from tools.subagents.progress import todo_items_from_arguments
+        from tui.services.todo_render import build_todo_block
+        items = todo_items_from_arguments(
+            (ev.full_payload or {}).get("arguments"))
+        mount_target.mount(build_todo_block(
+            items, subagent=False, indent="   ", event_no=ev.no))
     else:
         m = TAG_RE.match(ev.summary or "")
         if m:
@@ -306,10 +296,12 @@ def render_thread_readonly(mount_target, records: list) -> None:
         no = _render_record_readonly(mount_target, rec, no, calls, skipped)
 
 
-def render_segments_readonly(mount_target, segments: list) -> None:
+def render_segments_readonly(mount_target, segments: list) -> dict:
     """Read-only превью из сегментов: полная история (все сегменты сырьём) +
     нумерованные маркеры сжатий #K между ними. Паритет рендера с основным
-    трейсом (hidden/policy скрыто, summary/error_msg/intermediate как там)."""
+    трейсом (hidden/policy скрыто, summary/error_msg/intermediate как там).
+    Возвращает `calls` (`{call_id: ToolCallRow}`) — нужен вызывающему для
+    домонтирования вложенного трейса субагентов (см. `merge_nested_readonly`)."""
     from tui.services.trace_mapper import collect_skipped_call_ids
     no = 1
     calls: dict = {}
@@ -337,3 +329,80 @@ def render_segments_readonly(mount_target, segments: list) -> None:
             _mount_summary_widgets(
                 mount_target, label, (comp.get("synthesis") or "").strip(), no)
             no += 1
+    return calls
+
+
+def merge_nested_readonly(mount_target, records: list, calls: dict) -> None:
+    """Read-only домонтирование вложенного трейса субагентов из sidecar-records
+    (превью). Паритет с MainScreen._merge_sidecar_nested: те же plan/apply,
+    якорение «после parent или последнего nested» — локальными anchors."""
+    from tui.services.subagent_sidecar_mapper import (
+        CHILD_SUMMARY_LABEL,
+        apply_sidecar_nested_actions,
+        plan_sidecar_nested_actions,
+    )
+    from tui.services.todo_render import build_todo_block
+    from tui.widgets.tool_call_row import ToolCallRow
+    from tui.widgets.trace_row import TraceRow
+
+    anchors: dict = {}       # parent_call_id -> последний смонтированный nested
+    nested_rows: dict = {}   # tool_call_id -> ToolCallRow (для finish)
+
+    def _mount_after(pid: str, widget) -> None:
+        parent = calls.get(pid)
+        if parent is None:
+            return
+        anchor = anchors.get(pid, parent)
+        try:
+            mount_target.mount(widget, after=anchor)
+        except Exception:
+            mount_target.mount(widget)
+        anchors[pid] = widget
+
+    def _tool(*, parent_call_id, tool_name, tool_call_id, args_summary, **_kw):
+        row = ToolCallRow(call_id=tool_call_id or f"_nested_{tool_name}",
+                          tool_name=tool_name, args_summary=args_summary or "",
+                          nested=True, waiting=False)
+        if tool_call_id:
+            nested_rows[tool_call_id] = row
+        _mount_after(parent_call_id, row)
+
+    def _finish(*, parent_call_id, tool_call_id="", ok=True,
+                error_brief=None, **_kw):
+        row = nested_rows.get(tool_call_id)
+        if row is not None:
+            row.set_result(summary="" if ok else (error_brief or "error"),
+                           error=not ok)
+
+    def _prose(*, parent_call_id, prose, **_kw):
+        text = (prose or "").strip()
+        if not text:
+            return
+        _mount_after(parent_call_id, TraceRow(
+            prefix=NESTED_PROSE_PREFIX, content=text,
+            kind_class=LINE_INTERMEDIATE_CLASS, event_no=0, focusable=False))
+
+    def _user(*, parent_call_id, prose, **_kw):
+        text = (prose or "").strip()
+        if not text:
+            return
+        _mount_after(parent_call_id, TraceRow(
+            prefix=NESTED_USER_PREFIX, content=text,
+            kind_class=LINE_USER_CLASS, event_no=0, focusable=False))
+
+    def _child_summary(*, parent_call_id, prose="", **_kw):
+        _prose(parent_call_id=parent_call_id, prose=prose or CHILD_SUMMARY_LABEL)
+
+    def _todo(*, parent_call_id, tool_call_id="", todo_items=None, **_kw):
+        _mount_after(parent_call_id, build_todo_block(
+            todo_items or [], subagent=True, indent=NESTED_PREFIX))
+
+    apply_sidecar_nested_actions(
+        plan_sidecar_nested_actions(records),
+        mount_nested_tool=_tool,
+        finish_nested_tool=_finish,
+        mount_nested_prose=_prose,
+        mount_nested_user=_user,
+        mount_nested_summary=_child_summary,
+        mount_nested_todo=_todo,
+    )

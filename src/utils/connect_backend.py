@@ -11,7 +11,6 @@ from typing import List, Dict, Optional, Tuple
 from config_modules.backend import DEFAULT_REQUEST_TIMEOUT_SEC
 from message_policy.chat_completions import prepare_chat_completion_messages_for_api
 from utils.schema_markers import schema_without_internal_markers
-from utils.convertations import output_chat_completion_to_response
 from utils.format_messages import format_message_chat_completions_to_send_backend
 from utils.http_proxy import resolve_proxies
 from utils.http_session import NO_NETRC_SESSION as _NO_NETRC_SESSION

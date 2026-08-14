@@ -7,6 +7,7 @@ from typing import Any, Dict, Mapping
 from intent_log.serialize import deserialize_list, serialize_for_meta
 from persistence.schema import (
     STATE_SCHEMA_VERSION,
+    normalize_session_todo,
     normalize_working_memory,
     serialize_shared_block,
     validate_state_snapshot_for_load,
@@ -44,9 +45,15 @@ def load_state_from_snapshot(payload: Mapping[str, Any]) -> State:
             working_memory=normalize_working_memory(shared_raw.get("working_memory")),
             notes_md=str(shared_raw.get("notes_md") or ""),
             fetch_url_cache=dict(shared_raw.get("fetch_url_cache") or {}),
+            session_todo=normalize_session_todo(shared_raw.get("session_todo")),
         )
     elif not isinstance(shared_raw, SharedStateData):
         state.shared = SharedStateData()
+
+    # Чек-лист субагента (State.session_todo маршрутизирует сюда по parent_state_id).
+    # Снапшоты старше этого поля его не содержат — иначе property падает на getattr.
+    if not isinstance(state.__dict__.get("subagent_todo"), list):
+        state.subagent_todo = []
 
     store_raw = state.__dict__.get("tool_call_outputs_store")
     if isinstance(store_raw, dict):

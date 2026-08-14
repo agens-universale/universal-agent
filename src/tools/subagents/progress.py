@@ -12,6 +12,8 @@ from collections import deque
 from dataclasses import dataclass
 from typing import Any, Deque, Dict, List, Literal, Optional, Protocol, runtime_checkable
 
+from constants.tool_names import SESSION_TODO_TOOL_NAME
+
 ProgressKind = Literal[
     "started",
     "tool_start",
@@ -48,6 +50,7 @@ class SubagentProgressEvent:
     ok: Optional[bool] = None
     error_brief: Optional[str] = None  # ≤120 chars when set by emitters
     usage_delta: Optional[Dict[str, Any]] = None
+    todo_items: Optional[List[Dict[str, str]]] = None
 
 
 @runtime_checkable
@@ -98,7 +101,75 @@ def child_progress_enabled(ctx: Any) -> bool:
     return getattr(ctx, "subagent_progress_sink", None) is not None
 
 
-def brief_args_summary(arguments: Any, *, limit: int = _ARGS_SUMMARY_MAX) -> str:
+def _todo_args_summary(todos: Any, *, limit: int = _ARGS_SUMMARY_MAX) -> str:
+    """`чек-лист K/M · текущий пункт` — одной строкой для строки трассы.
+
+    Запасной путь для потребителей, которые не умеют рисовать развёрнутый блок;
+    ``limit`` соблюдается как во всех прочих ветках ``brief_args_summary`` —
+    иначе длинный пункт расползается на несколько строк.
+    """
+    total = 0
+    done = 0
+    current = ""
+    for item in todos if isinstance(todos, list) else []:
+        if not isinstance(item, dict):
+            continue
+        content = str(item.get("content") or "").strip()
+        status = item.get("status")
+        if not content:
+            continue
+        total += 1
+        if status == "completed":
+            done += 1
+        elif status == "in_progress" and not current:
+            current = content
+    if not total:
+        return "чек-лист очищен"
+    head = f"чек-лист {done}/{total}"
+    text = f"{head} · {current}" if current else head
+    return text if len(text) <= limit else text[:limit].rstrip() + "…"
+
+
+_TODO_ITEM_STATUSES = ("pending", "in_progress", "completed")
+
+
+def todo_items_from_arguments(arguments: Any) -> Optional[List[Dict[str, str]]]:
+    """Пункты чек-листа из аргументов вызова session_todo — или ``None``.
+
+    Понимает str-JSON и dict. Валидация ЗЕРКАЛИТ тул (``tools/session/todo.py``):
+    он отклоняет вызов целиком на первом же кривом пункте и состояние не меняет,
+    поэтому и рендер обязан классифицировать «всё или ничего». Иначе частично
+    битый вызов рисуется как «чек-лист очищен» при живом списке.
+
+    ``None`` — аргументы не читаются как чек-лист (битый JSON, нет ``todos``,
+    ``todos`` не список, любой невалидный пункт): такой вызов рендерится обычной
+    tool-строкой, где статус сбоя виден механикой. ``[]`` — валидная очистка."""
+    data: Any = arguments
+    if isinstance(arguments, str):
+        try:
+            data = json.loads(arguments) if arguments.strip() else {}
+        except json.JSONDecodeError:
+            return None
+    todos = data.get("todos") if isinstance(data, dict) else None
+    if not isinstance(todos, list):
+        return None
+    out: List[Dict[str, str]] = []
+    for item in todos:
+        if not isinstance(item, dict) or set(item) - {"content", "status"}:
+            return None
+        content = item.get("content")
+        status = item.get("status")
+        if not isinstance(content, str) or not content.strip():
+            return None
+        if status not in _TODO_ITEM_STATUSES:
+            return None
+        out.append({"content": content.strip(), "status": status})
+    return out
+
+
+def brief_args_summary(
+    arguments: Any, *, tool_name: Optional[str] = None, limit: int = _ARGS_SUMMARY_MAX
+) -> str:
     """Compact one-line args preview for progress events (no TUI dependency)."""
     data: Any = arguments
     if isinstance(arguments, str):
@@ -107,6 +178,11 @@ def brief_args_summary(arguments: Any, *, limit: int = _ARGS_SUMMARY_MAX) -> str
         except json.JSONDecodeError:
             text = " ".join(arguments.split())
             return text if len(text) <= limit else text[:limit].rstrip() + "…"
+    if tool_name == SESSION_TODO_TOOL_NAME:
+        items = todo_items_from_arguments(data)
+        if items is not None:
+            return _todo_args_summary(items)
+        # битые аргументы — генерик-превью, «чек-лист очищен» не врём
     if not isinstance(data, dict) or not data:
         return ""
     pairs: list[str] = []
@@ -188,6 +264,7 @@ def emit_progress(
     ok: Optional[bool] = None,
     error_brief: Optional[str] = None,
     usage_delta: Optional[Dict[str, Any]] = None,
+    todo_items: Optional[List[Dict[str, str]]] = None,
 ) -> None:
     """Emit a progress event when running as a child with a sink; else no-op."""
     if not child_progress_enabled(ctx):
@@ -210,6 +287,7 @@ def emit_progress(
             ok=ok,
             error_brief=error_brief,
             usage_delta=usage_delta,
+            todo_items=todo_items,
         )
     )
 

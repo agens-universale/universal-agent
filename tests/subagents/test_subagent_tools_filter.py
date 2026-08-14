@@ -9,7 +9,12 @@ from tools import (
     apply_subagent_tools_filter,
 )
 
-REQUIRED = ("turn_finish", "session_read_stored_tool_output")
+REQUIRED = (
+    "turn_finish",
+    "session_read_stored_tool_output",
+    "session_memory",
+    "session_todo",
+)
 
 
 def _tools_data(*names):
@@ -82,6 +87,16 @@ class TestCore:
         cfg = {SUBAGENT_TOOLS_ALLOW_KEY: ("fs_read_file",)}
         out = apply_subagent_tools_filter(dict(BASE), cfg)
         assert set(out) == {"fs_read_file", *REQUIRED}
+
+    def test_memory_and_todo_survive_a_narrow_allowlist(self):
+        """Регрессия: харнес шлёт ребёнку подсказки про session_memory/session_todo
+        (bootstrap памяти в runner, tool_usage_notice, todo_reminder), и все три
+        текста рождаются из ГЛОБАЛЬНОГО конфига — про `tools` файла они не знают.
+        Убрав тулы из ядра, мы вернём «велят вызвать то, чего у тебя нет»."""
+        cfg = {SUBAGENT_TOOLS_ALLOW_KEY: ("fs_read_file",)}
+        out = apply_subagent_tools_filter(dict(BASE), cfg)
+        assert "session_memory" in out
+        assert "session_todo" in out
 
     def test_absent_core_is_not_invented(self):
         # Если ядра нет в исходном наборе (глобальный stop_tools, harbor) —

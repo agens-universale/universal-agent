@@ -863,6 +863,24 @@ class TuiApp(App):
         if text:
             copy_out(self, text, toast=False, blocking=False)
 
+    def cancel_pending_select_copy(self) -> None:
+        """Отменить отложенную автокопию выделения (copy-on-select).
+
+        Нужен для явных жестов копирования блока (кнопка ❐, двойной клик):
+        двойной клик по таблице сначала рождает TextSelected (drag == выделение
+        всего тела) и ставит в очередь автокопию видимого — псевдографики, а
+        затем CopyBlockRequest кладёт в буфер переносимую форму — markdown.
+        Без отмены debounce 0.15с срабатывает позже и затирает markdown тем,
+        что видно на экране. Вызывать в момент обработки CopyBlockRequest."""
+        self._pending_select_copy = None
+        timer = getattr(self, "_select_copy_timer", None)
+        if timer is not None:
+            try:
+                timer.stop()
+            except Exception:
+                pass
+        self._select_copy_timer = None
+
     def _push_session_copy_buffer(self, payload: str) -> None:
         """B2: дописать payload сверху в буфер сессии (tui.copy_buffer) через meta.
 

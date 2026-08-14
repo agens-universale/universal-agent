@@ -1,5 +1,7 @@
 """segment_answer: сегментация ответа на прозовые прогоны + code/table-блоки."""
-from tui.services.markdown_render import Block, segment_answer, build_markdown_table
+from tui.services.markdown_render import (
+    Block, build_markdown_table, segment_answer, table_block_to_markdown,
+)
 
 
 def test_pure_prose_is_one_run():
@@ -87,3 +89,64 @@ def test_build_markdown_table_inline_code_cell():
     assert any("#afbdff" in str(s) for s in styles), (
         f"Expected code style #afbdff in cell spans, got: {styles}"
     )
+
+
+# ---- table_block_to_markdown: обратная сборка (таблица → копируемый markdown) ----
+
+def test_table_block_to_markdown_basic():
+    """3 колонки / 2 строки → валидный markdown с header + separator + rows."""
+    md = table_block_to_markdown(
+        ["A", "B", "C"], [["1", "2", "3"], ["4", "5", "6"]],
+        ["left", "left", "left"],
+    )
+    lines = md.split("\n")
+    assert lines[0] == "| A | B | C |"
+    assert lines[1] == "| --- | --- | --- |"
+    assert lines[2] == "| 1 | 2 | 3 |"
+    assert lines[3] == "| 4 | 5 | 6 |"
+    assert len(lines) == 4
+
+
+def test_table_block_to_markdown_aligns():
+    """left → ``---``, center → ``:---:``, right → ``---:``."""
+    md = table_block_to_markdown(
+        ["L", "C", "R"], [["a", "b", "c"]],
+        ["left", "center", "right"],
+    )
+    sep = md.split("\n")[1]
+    assert sep == "| --- | :---: | ---: |"
+
+
+def test_table_block_to_markdown_round_trip():
+    """Round-trip: segment_answer(table_block_to_markdown(...)) == исходный Block
+    на «чистых» ячейках (без ``|``)."""
+    headers = ["Name", "Score"]
+    rows = [["Alice", "99"], ["Bob", "42"]]
+    aligns = ["left", "right"]
+    md = table_block_to_markdown(headers, rows, aligns)
+    segs = segment_answer(md)
+    assert len(segs) == 1 and segs[0].kind == "table"
+    assert segs[0].headers == headers
+    assert segs[0].rows == rows
+    # aligns: round-trip теряет left/right-различие (``---`` vs ``---:``),
+    # но left остаётся left, right — right.
+    assert segs[0].aligns == ["left", "right"]
+
+
+def test_table_block_to_markdown_escape_pipe():
+    """Ячейка ``a|b`` → в выводе ``a\\|b`` (без round-trip через парсер)."""
+    md = table_block_to_markdown(["H"], [["a|b"]], ["left"])
+    assert r"a\|b" in md
+    # строка ячейки содержит экранированную pipe, не разрывает колонку
+    cell_line = md.split("\n")[2]
+    assert cell_line == "| a\\|b |"
+
+
+def test_table_block_to_markdown_empty():
+    """Пустые headers/rows → только header + separator, без строк данных.
+    Крайний случай: ``" | ".join([])`` = "" → строка ``"|  |"``."""
+    md = table_block_to_markdown([], [], [])
+    lines = md.split("\n")
+    assert lines[0] == "|  |"  # "| " + "" + " |"
+    assert lines[1] == "|  |"
+    assert len(lines) == 2

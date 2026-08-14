@@ -14,7 +14,6 @@ from typing import TYPE_CHECKING, Any
 from summarize.compaction import (
     history_exceeds_summary_trigger,
     run_summary_compaction,
-    without_system_messages,
 )
 from summarize.summary_logging import (
     SummaryCompactionLog,

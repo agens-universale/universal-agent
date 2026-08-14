@@ -5,7 +5,22 @@ from __future__ import annotations
 import json
 from types import SimpleNamespace
 
-from tools.subagents.progress import QueueSubagentProgressSink
+from tools.subagents.progress import QueueSubagentProgressSink, SubagentProgressEvent
+
+
+def test_tool_start_for_session_todo_carries_items():
+    """processing_responses кладёт разобранные items в событие."""
+    ev = SubagentProgressEvent(
+        parent_call_id="parent_fc_1",
+        child_run_id="child_run_9",
+        kind="tool_start",
+        step=1,
+        max_steps=50,
+        elapsed_ms=0,
+        tool_name="session_todo",
+        todo_items=[{"content": "a", "status": "pending"}],
+    )
+    assert ev.todo_items == [{"content": "a", "status": "pending"}]
 
 
 def _state(*, steps=3, max_steps=50):
@@ -139,6 +154,36 @@ class TestEmitToolStartEnd:
         assert end.error_brief is not None
         assert "boom" in (end.error_brief or "")
         assert len(end.error_brief or "") <= 120
+
+    def test_session_todo_tool_start_carries_todo_items(self, monkeypatch):
+        pr = _patch_process(monkeypatch)
+        sink = QueueSubagentProgressSink()
+        pr.process_tool_calls(
+            messages=[
+                _fc(
+                    "session_todo",
+                    "c1",
+                    json.dumps({"todos": [{"content": "a", "status": "pending"}]}),
+                )
+            ],
+            state=_state(),
+            ctx=_child_ctx(sink),
+            run_agent_func=None,
+        )
+        start = sink.drain()[0]
+        assert start.todo_items == [{"content": "a", "status": "pending"}]
+
+    def test_non_session_todo_tool_start_has_no_todo_items(self, monkeypatch):
+        pr = _patch_process(monkeypatch)
+        sink = QueueSubagentProgressSink()
+        pr.process_tool_calls(
+            messages=[_fc("fs_read_file", "c1", '{"path": "a.py"}')],
+            state=_state(),
+            ctx=_child_ctx(sink),
+            run_agent_func=None,
+        )
+        start = sink.drain()[0]
+        assert start.todo_items is None
 
     def test_batch_emits_per_tool(self, monkeypatch):
         pr = _patch_process(monkeypatch)

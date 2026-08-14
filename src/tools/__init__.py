@@ -1,7 +1,6 @@
 import difflib
 import json
 import traceback
-import sys
 import logging
 from typing import Any, Dict, Iterable, Tuple, Optional
 
