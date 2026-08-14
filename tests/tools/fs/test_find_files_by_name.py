@@ -25,9 +25,7 @@ def test_find_by_basename_anywhere(tmp_path: Path):
     assert m["type"] == "file"
     assert m["size_bytes"] == target.stat().st_size
     assert m["is_binary"] is False
-    assert m["encoding_guess"] in ("utf-8", "ascii", None) or isinstance(
-        m["encoding_guess"], str
-    )
+    assert "encoding_guess" not in m
     assert res["truncated"] is False
     assert res["walk_stats"]["stop_reason"] == "completed"
 
@@ -46,7 +44,7 @@ def test_find_match_meta_binary_and_directory(tmp_path: Path):
     assert tm["type"] == "file"
     assert tm["size_bytes"] == text.stat().st_size
     assert tm["is_binary"] is False
-    assert tm["encoding_guess"] is not None
+    assert "encoding_guess" not in tm
 
     bin_res = json.loads(_tool()(path=str(tmp_path), query="blob.bin"))
     assert bin_res["ok"] and bin_res["count"] == 1
@@ -54,15 +52,15 @@ def test_find_match_meta_binary_and_directory(tmp_path: Path):
     assert bm["type"] == "file"
     assert bm["size_bytes"] == binary.stat().st_size
     assert bm["is_binary"] is True
-    assert bm["encoding_guess"] is None
+    assert "encoding_guess" not in bm
 
     dir_res = json.loads(_tool()(path=str(tmp_path), query="subdir"))
     assert dir_res["ok"] and dir_res["count"] >= 1
     dm = next(m for m in dir_res["matches"] if m["type"] == "directory")
     assert Path(dm["path"]) == d.resolve()
-    assert dm["size_bytes"] is None
-    assert dm["is_binary"] is None
-    assert dm["encoding_guess"] is None
+    assert "size_bytes" not in dm
+    assert "is_binary" not in dm
+    assert "encoding_guess" not in dm
 
 
 def test_find_by_name_fragment_and_path_fragment(tmp_path: Path):

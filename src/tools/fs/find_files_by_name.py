@@ -19,7 +19,7 @@ from security.read_guard import (
 from tools.fs.agent_hidden import is_agent_hidden
 from tools.schema_optional import coalesce_optional_string
 from tools.simple_tool_base import AbstractSimpleTool
-from utils.file_text import BINARY_SAMPLE_BYTES, classify_content_from_sample, guess_encoding
+from utils.file_text import BINARY_SAMPLE_BYTES, classify_content_from_sample
 from utils.fs_search_walk import (
     HARD_EXCLUDE_NESTED_DOT_DIRS,
     effective_exclude_dir_names,
@@ -221,10 +221,9 @@ class FindFilesByName(AbstractSimpleTool):
         return _match_sub
 
     def _probe_file_meta(self, filepath: str) -> Dict[str, Any]:
-        """size / binary / encoding for a matched file; never raises."""
+        """size / binary for a matched file; never raises."""
         size_bytes: Optional[int] = None
         is_binary: Optional[bool] = None
-        encoding_guess: Optional[str] = None
         try:
             size_bytes = int(self._backend.getsize(filepath))
         except OSError:
@@ -233,19 +232,11 @@ class FindFilesByName(AbstractSimpleTool):
             sample = self._backend.read_head_bytes(filepath, BINARY_SAMPLE_BYTES)
             classification = classify_content_from_sample(filepath, sample)
             is_binary = classification.is_binary
-            if is_binary:
-                encoding_guess = None
-            elif classification.encoding_guess is not None:
-                encoding_guess = classification.encoding_guess
-            else:
-                encoding_guess, _conf = guess_encoding(sample)
         except OSError:
             is_binary = None
-            encoding_guess = None
         return {
             "size_bytes": size_bytes,
             "is_binary": is_binary,
-            "encoding_guess": encoding_guess,
         }
 
     def _entry(self, filepath: str, is_dir: bool) -> Dict[str, Any]:
@@ -254,11 +245,8 @@ class FindFilesByName(AbstractSimpleTool):
             "type": "directory" if is_dir else "file",
             "is_hidden": self._backend.is_hidden(filepath),
         }
-        if is_dir:
-            entry["size_bytes"] = None
-            entry["is_binary"] = None
-            entry["encoding_guess"] = None
-        else:
+        # Directories have no file meta; omit null size/binary fields.
+        if not is_dir:
             entry.update(self._probe_file_meta(filepath))
         return entry
 
