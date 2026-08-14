@@ -2,10 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from config_modules.message_notice import (
-    active_tool_usage_notice_rules,
-    project_memory_notice_from_config_dict,
-)
+from config_modules.message_notice import active_tool_usage_notice_rules
+from config_modules.project_memory import project_memory_from_config_dict
 from message_policy.project_memory_notice.policy import (
     collect_project_memory_hints,
     on_persist_steps,
@@ -94,7 +92,7 @@ def apply_tool_usage_notice_before_llm(
         available_tools, PROJECT_MEMORY_TOOL_NAME
     )
     project_interval = (
-        project_memory_notice_from_config_dict(cfg).check_interval_messages
+        project_memory_from_config_dict(cfg).check_interval_messages
         if project_hints_enabled
         else None
     )
