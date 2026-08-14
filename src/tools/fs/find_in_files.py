@@ -134,7 +134,9 @@ class FindInFiles(AbstractSimpleTool):
                 "type": "string",
                 "description": (
                     "When path is a directory: only search files whose path relative to "
-                    "path matches this glob (e.g. '*.py', 'src/**/*.ts'). "
+                    "path matches this glob. Basename-only patterns (no '/') match at any "
+                    "depth: '*.py' ≡ '**/*.py'. Patterns with '/' are path-globs "
+                    "('src/*.ts' = one level under src/; 'src/**/*.ts' = recursive). "
                     "Ignored when path is a single file."
                 ),
             },
@@ -191,7 +193,8 @@ class FindInFiles(AbstractSimpleTool):
             "Search file contents under an absolute file or directory (not file names).\n"
             "Required: path, pattern, query_mode (prefer text; regex only if needed).\n"
             "Optional: limit (default 100, max 300; no pagination), case_insensitive, "
-            "file_pattern (directory only), exclude_dirs, "
+            "file_pattern (directory only; basename-only like '*.py' matches any depth), "
+            "exclude_dirs, "
             "show_excluded_dirs (default false; full skipped-dirs list when needed).\n"
             f"Skips nested `.gc`, dirs named {skip}, nested dot-dirs, binary/large files; "
             "no .gitignore. If path itself is a skipped-name dir, it is still searched.\n"
@@ -824,6 +827,28 @@ class FindInFiles(AbstractSimpleTool):
         )
 
     # ------------------------------------------------------------------
+    # file_pattern (basename-only → any depth, like fs_find_files_by_name)
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _build_file_pattern_matcher(file_pattern: str):
+        """Match relpath against file_pattern.
+
+        Basename-only globs (no ``/``) also match at any depth via an implicit
+        ``**/`` prefix, so ``*.py`` ≡ ``**/*.py``. Patterns that already contain
+        ``/`` stay path-globs (``src/*.ts`` = one level under ``src/``).
+        """
+        patterns = [file_pattern]
+        if "/" not in file_pattern and not file_pattern.startswith("**/"):
+            patterns.append("**/" + file_pattern)
+        compiled = [compile_glob(p) for p in patterns]
+
+        def _glob_match(rel_path: str) -> bool:
+            rel_n = rel_path.replace("\\", "/")
+            return any(r.match(rel_n) for r in compiled)
+
+        return _glob_match
+
+    # ------------------------------------------------------------------
     # exclude_dirs normalize (§2)
     # ------------------------------------------------------------------
     def _normalize_exclude_dirs(
@@ -1123,14 +1148,9 @@ class FindInFiles(AbstractSimpleTool):
                 return False
             return True
 
-        glob_matcher = None
-        if file_pattern:
-            glob_re = compile_glob(file_pattern)
-
-            def _glob_match(rel_path: str) -> bool:
-                return bool(glob_re.match(rel_path))
-
-            glob_matcher = _glob_match
+        glob_matcher = (
+            self._build_file_pattern_matcher(file_pattern) if file_pattern else None
+        )
 
         # (abs_path, depth, relpath)
         candidates: List[Tuple[str, int, str]] = []

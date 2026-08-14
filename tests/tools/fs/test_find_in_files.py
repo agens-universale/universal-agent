@@ -7,6 +7,7 @@ slim RESPONSE-CONTRACT payload.
 
 import json
 import os
+from pathlib import Path
 
 import pytest
 
@@ -1059,10 +1060,13 @@ class TestFilePatternEdge:
         assert data["ok"] is True
         assert data["count"] == 2
 
-    def test_file_pattern_star_dot_py_excludes_subdirs(self, tmp_path):
+    def test_file_pattern_basename_star_is_recursive(self, tmp_path):
+        """Basename-only '*.py' matches at any depth (parity with name-locate)."""
         _make_tree(tmp_path, {
             "root.py": "needle\n",
             "src/a.py": "needle\n",
+            "src/deep/b.py": "needle\n",
+            "src/a.txt": "needle\n",
         })
         data = _call(
             with_local_ctx(FindInFiles),
@@ -1071,8 +1075,28 @@ class TestFilePatternEdge:
             file_pattern="*.py",
         )
         assert data["ok"] is True
+        assert data["count"] == 3
+        names = sorted(Path(m["file"]).name for m in data["matches"])
+        assert names == ["a.py", "b.py", "root.py"]
+
+    def test_file_pattern_with_slash_stays_one_level(self, tmp_path):
+        """Path globs with '/' keep single-segment '*' semantics."""
+        _make_tree(tmp_path, {
+            "src/a.py": "needle\n",
+            "src/deep/b.py": "needle\n",
+            "other/c.py": "needle\n",
+        })
+        data = _call(
+            with_local_ctx(FindInFiles),
+            path=str(tmp_path),
+            pattern="needle",
+            file_pattern="src/*.py",
+        )
+        assert data["ok"] is True
         assert data["count"] == 1
-        assert data["matches"][0]["file"].endswith("root.py")
+        assert data["matches"][0]["file"].endswith("src/a.py") or data["matches"][0][
+            "file"
+        ].endswith("src\\a.py")
 
     def test_file_pattern_all_files(self, tmp_path):
         _make_tree(tmp_path, {
