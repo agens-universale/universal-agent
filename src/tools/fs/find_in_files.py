@@ -84,8 +84,13 @@ class FindInFiles(AbstractSimpleTool):
     max_match_content_chars = 2000
 
     QUERY_MODE_TEXT = "text"
-    QUERY_MODE_REGEXP = "python-regexp"
-    _QUERY_MODES = frozenset({QUERY_MODE_TEXT, QUERY_MODE_REGEXP})
+    QUERY_MODE_RE = "python-re"
+    QUERY_MODE_RE_DOTALL = "python-re-dotall"
+    # Backward-compatible alias (deprecated name).
+    QUERY_MODE_REGEXP = QUERY_MODE_RE
+    _QUERY_MODES = frozenset(
+        {QUERY_MODE_TEXT, QUERY_MODE_RE, QUERY_MODE_RE_DOTALL}
+    )
 
     _PARAM_SCHEMA: Dict[str, Any] = {
         "type": "object",
@@ -99,26 +104,26 @@ class FindInFiles(AbstractSimpleTool):
                 "description": (
                     "What to search for. "
                     "query_mode=text: exact substring. "
-                    "query_mode=python-regexp: Python regular expression."
+                    "query_mode=python-re / python-re-dotall: Python regular expression."
                 ),
             },
             "query_mode": {
                 "type": "string",
-                "enum": ["text", "python-regexp"],
+                "enum": ["text", "python-re", "python-re-dotall"],
                 "description": (
                     "Required. How to read pattern. "
                     "text: exact substring (use for normal searches). "
-                    "python-regexp: Python regular expression "
-                    "('.' matches newline; ^/$ are line edges); "
-                    "use only when you need regex features."
+                    "python-re: Python regular expression "
+                    "('.' does not match newline; ^/$ are line edges). "
+                    "python-re-dotall: same, but '.' also matches newline "
+                    "(use only when a match must span lines). "
+                    "Prefer text; use python-re when you need regex features; "
+                    "use python-re-dotall only for cross-line matches."
                 ),
             },
             "limit": {
                 "type": "integer",
-                "description": (
-                    "Maximum matches to return. Default 100, maximum 300. "
-                    "There is no page offset — only the first matches."
-                ),
+                "description": "Maximum matches to return. Default 100, maximum 300.",
                 "default": 100,
             },
             "case_insensitive": {
@@ -156,8 +161,11 @@ class FindInFiles(AbstractSimpleTool):
             "description": (
                 "Search for text inside a single absolute file or under a directory "
                 "(file contents, not file names). "
-                "query_mode is required: text = exact substring; python-regexp = Python "
-                "regular expression. Prefer text unless you need regex. "
+                "query_mode is required: text = exact substring; "
+                "python-re = Python regular expression ('.' does not match newline); "
+                "python-re-dotall = same regex with '.' matching newline for cross-line "
+                "matches. Prefer text unless you need regex; use python-re-dotall only "
+                "when a match must span lines. "
                 "case_insensitive defaults to false. "
                 "Returns at most limit matches (default 100, maximum 300); no later page. "
                 "Each match has line, end_line, line_content, and context. "
@@ -185,8 +193,10 @@ class FindInFiles(AbstractSimpleTool):
             "Searches file contents, not file names.\n"
             "Required: path, pattern, query_mode.\n"
             "query_mode=text: exact substring (prefer for normal searches).\n"
-            "query_mode=python-regexp: Python regular expression "
-            "('.' matches newline; ^/$ are line edges); use only when you need regex.\n"
+            "query_mode=python-re: Python regular expression "
+            "('.' does not match newline; ^/$ are line edges); use when you need regex.\n"
+            "query_mode=python-re-dotall: same as python-re but '.' also matches newline; "
+            "use only when a match must span lines.\n"
             "Optional: limit (default 100, maximum 300; first matches only, no page offset), "
             "case_insensitive (default false), file_pattern (directory only), "
             "exclude_dirs (extra absolute directories to skip, at most 32).\n"
@@ -271,7 +281,7 @@ class FindInFiles(AbstractSimpleTool):
             return self._error(
                 "invalid_argument",
                 "query_mode",
-                "query_mode must be 'text' or 'python-regexp'",
+                "query_mode must be 'text', 'python-re', or 'python-re-dotall'",
             )
         if not isinstance(limit, int) or isinstance(limit, bool):
             return self._error("invalid_argument", "limit")
@@ -284,7 +294,10 @@ class FindInFiles(AbstractSimpleTool):
         if exclude_dirs is not None and not isinstance(exclude_dirs, list):
             return self._error("invalid_argument", "exclude_dirs")
 
-        flags = re.DOTALL | re.MULTILINE
+        # text / python-re: line-oriented '.' ; python-re-dotall: '.' spans newlines.
+        flags = re.MULTILINE
+        if query_mode == self.QUERY_MODE_RE_DOTALL:
+            flags |= re.DOTALL
         if case_insensitive:
             flags |= re.IGNORECASE
 

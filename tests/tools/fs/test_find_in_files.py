@@ -22,9 +22,9 @@ from tests.helpers.tool_ctx import with_local_ctx
 def _call(tool, **kw):
     """Call FindInFiles and parse JSON response.
 
-    Default query_mode=python-regexp when omitted (older tests).
+    Default query_mode=python-re when omitted (older tests).
     """
-    kw.setdefault("query_mode", "python-regexp")
+    kw.setdefault("query_mode", "python-re")
     return json.loads(tool(**kw))
 
 
@@ -71,7 +71,12 @@ class TestSingleFile:
     def test_single_file_regex_multiline(self, tmp_path):
         f = tmp_path / "t.md"
         f.write_text("line1\nline2\nline3\n", encoding="utf-8")
-        data = _call(with_local_ctx(FindInFiles), path=str(f), pattern="line1.*line3")
+        data = _call(
+            with_local_ctx(FindInFiles),
+            path=str(f),
+            pattern="line1.*line3",
+            query_mode="python-re-dotall",
+        )
         assert data["ok"] is True
         assert data["count"] == 1
         assert data["matches"][0]["line"] == 1
@@ -485,7 +490,7 @@ class TestDirectoryLimits:
             with_local_ctx(FindInFiles, config_dict=cfg),
             path=str(tmp_path),
             pattern=r"\w+",
-            query_mode="python-regexp",
+            query_mode="python-re",
         )
         assert data["ok"] is True
         assert data["stop_reason"] == "too_many_candidate_files"
@@ -546,7 +551,7 @@ class TestDirectoryLimits:
             with_local_ctx(FindInFiles, config_dict=cfg),
             path=str(tmp_path),
             pattern=r"def (foo|bar)",
-            query_mode="python-regexp",
+            query_mode="python-re",
             limit=100,
         )
         assert data["ok"] is True
@@ -699,7 +704,7 @@ class TestErrorEnvelopes:
             with_local_ctx(FindInFiles),
             path=str(f),
             pattern="",
-            query_mode="python-regexp",
+            query_mode="python-re",
         )
         assert data["ok"] is True
 
@@ -980,7 +985,12 @@ class TestMatchFormat:
     def test_multiline_match_end_line(self, tmp_path):
         f = tmp_path / "t.md"
         f.write_text("start\nblock1\nblock2\nend\n", encoding="utf-8")
-        data = _call(with_local_ctx(FindInFiles), path=str(f), pattern=r"start.*end")
+        data = _call(
+            with_local_ctx(FindInFiles),
+            path=str(f),
+            pattern=r"start.*end",
+            query_mode="python-re-dotall",
+        )
         assert data["count"] == 1
         m = data["matches"][0]
         assert m["line"] == 1
@@ -1081,7 +1091,7 @@ class TestSearchStats:
 
 
 # ------------------------------------------------------------------
-# query_mode: text vs python-regexp
+# query_mode: text vs python-re vs python-re-dotall
 # ------------------------------------------------------------------
 
 class TestQueryMode:
@@ -1109,10 +1119,10 @@ class TestQueryMode:
             with_local_ctx(FindInFiles),
             path=str(f),
             pattern="def foo(bar)",
-            query_mode="python-regexp",
+            query_mode="python-re",
         )
         assert data["ok"] is True
-        assert data["query_mode"] == "python-regexp"
+        assert data["query_mode"] == "python-re"
         assert data["count"] == 1
         assert data["matches"][0]["line_content"] == "def foobar"
 
@@ -1136,7 +1146,7 @@ class TestQueryMode:
             with_local_ctx(FindInFiles),
             path=str(f),
             pattern="a.b",
-            query_mode="python-regexp",
+            query_mode="python-re",
         )
         assert data["ok"] is True
         assert data["count"] == 2
@@ -1183,7 +1193,11 @@ class TestQueryMode:
     def test_schema_requires_query_mode(self):
         schema = FindInFiles._PARAM_SCHEMA
         assert "query_mode" in schema["required"]
-        assert schema["properties"]["query_mode"]["enum"] == ["text", "python-regexp"]
+        assert schema["properties"]["query_mode"]["enum"] == [
+            "text",
+            "python-re",
+            "python-re-dotall",
+        ]
         assert "exclude_dirs" in schema["properties"]
         assert schema.get("additionalProperties") is False
 
@@ -1206,8 +1220,56 @@ class TestQueryMode:
             with_local_ctx(FindInFiles),
             path=str(f),
             pattern="foo|bar",
-            query_mode="python-regexp",
+            query_mode="python-re",
         )
         assert data["pattern_mode"] == "or_simple"
         assert data["ok"] is True
         assert data["count"] == 1
+
+    def test_python_re_dot_does_not_match_newline(self, tmp_path):
+        f = tmp_path / "t.txt"
+        f.write_text("error: something\nhappened\n", encoding="utf-8")
+        data = _call(
+            with_local_ctx(FindInFiles),
+            path=str(f),
+            pattern=r"error: .+",
+            query_mode="python-re",
+        )
+        assert data["ok"] is True
+        assert data["query_mode"] == "python-re"
+        assert data["count"] == 1
+        assert data["matches"][0]["line"] == 1
+        assert data["matches"][0]["end_line"] == 1
+        assert data["matches"][0]["line_content"] == "error: something"
+
+    def test_python_re_dotall_dot_matches_newline(self, tmp_path):
+        f = tmp_path / "t.txt"
+        f.write_text("error: something\nhappened\n", encoding="utf-8")
+        data = _call(
+            with_local_ctx(FindInFiles),
+            path=str(f),
+            pattern=r"error: .+",
+            query_mode="python-re-dotall",
+        )
+        assert data["ok"] is True
+        assert data["query_mode"] == "python-re-dotall"
+        assert data["count"] == 1
+        m = data["matches"][0]
+        assert m["line"] == 1
+        assert m["end_line"] == 2
+        assert "something" in m["line_content"]
+        assert "happened" in m["line_content"]
+
+    def test_python_re_inline_s_still_spans_lines(self, tmp_path):
+        """Even without query_mode=dotall, inline (?s) enables DOTALL in the pattern."""
+        f = tmp_path / "t.txt"
+        f.write_text("start\nmiddle\nend\n", encoding="utf-8")
+        data = _call(
+            with_local_ctx(FindInFiles),
+            path=str(f),
+            pattern=r"(?s)start.*end",
+            query_mode="python-re",
+        )
+        assert data["ok"] is True
+        assert data["count"] == 1
+        assert data["matches"][0]["end_line"] == 3
