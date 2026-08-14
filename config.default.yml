@@ -21,6 +21,9 @@ backend:
   # false — типично для GigaCode и non-OpenAI; при true локальная валидация всё равно
   # принимает omit semantic optional (x-optional-keys).
   openai_strict_tools_schema: false
+  # Слать ли провайдеру поле function.strict в схемах тулов.
+  # false — если сборка провайдера (vllm/sglang) отвечает на это поле 500.
+  send_tool_strict: true
   use_retry: true
   # HTTP-таймаут одного запроса к LLM (секунды). Дефолт 600 (10 минут).
   request_timeout_sec: 600
