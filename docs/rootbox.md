@@ -81,6 +81,17 @@ security:
 
 `allowed_command_examples` — positive examples для LLM judge (ориентир безопасного профиля проекта, не строгий allowlist).
 
+**Запрет на обход.** Любой отказ уходит агенту с полем `error.guidance`: судья
+оценивает конкретную команду, а не намерение, и модель охотно переписывает
+заблокированное в эквивалент (`rm -rf X` → `rm X/* && rmdir X`). Поле несёт явный
+запрет повторять команду и запускать переписанный/раздробленный вариант.
+Формулировка одна на весь периметр — константа `NO_WORKAROUND_NOTICE`
+(`security/command_moderation.py`), её же переиспользует детерминированный
+command-guard защищённых путей.
+
+Это **смягчение, а не граница**: инструкция адресована модели и ничего не
+принуждает. Настоящей границей остаётся песочница — см. `docs/swarm.md`.
+
 ## `write_guard` — write-периметр
 
 Safe-by-default-OFF: включается только явным `enabled: true`. При включении ограничивает write-операции директорией `launch_root` + `extra_paths`. Относительные пути в `extra_paths` разрешаются от каталога `config.yml`.
@@ -311,6 +322,7 @@ gc-cli -q "..." --write-guard true
     "type": "unsafe_command_blocked",
     "mode": "deny",
     "reason": "Judge is unavailable; fail-closed policy blocks execution.",
+    "guidance": "Do NOT retry the same command, and do NOT run a rewritten, split-up or otherwise equivalent command that reaches the same result …",
     "code_preview": "print(open('/etc/passwd').read()[:200])"
   }
 }

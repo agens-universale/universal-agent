@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from gc_core.security.command_moderation import DANGEROUS_VERDICT, JudgeResult, JudgeUnavailable, ModerationContext, SAFE_VERDICT, build_judge_payload, decide_command_execution, effective_command_cwd, load_command_judge_prompt, moderate_command_execution, validate_judge_result
+from gc_core.security.command_moderation import NO_WORKAROUND_NOTICE, make_block_error, DANGEROUS_VERDICT, JudgeResult, JudgeUnavailable, ModerationContext, SAFE_VERDICT, build_judge_payload, decide_command_execution, effective_command_cwd, load_command_judge_prompt, moderate_command_execution, validate_judge_result
 from gc_core.security.path_policy import WriteGuardConfig, ToolSecurityContext
 from gc_core.security import command_moderation as command_moderation
 from gc_testkit.paths import ASSETS
@@ -438,3 +438,57 @@ def test_judge_prompt_documents_denied_examples_and_flag():
     text = (ASSETS / "prompts" / "security" / "command_judge_system.md").read_text(encoding="utf-8")
     assert "How to use denied_command_examples" in text
     assert "operator_denied" in text
+
+
+# --- запрет на обход блокировки ------------------------------------------------
+#
+# Судья оценивает конкретную команду, а не намерение. На живом прогоне 17.08.2026
+# заблокированное `rm -rf victim` было переписано агентом в
+# `rm victim/a.txt && rmdir victim`, судья пропустил, каталог удалён. Инструкция
+# «не обходи» жила только в ветках «пользователь отменил», а до ветки «судья
+# заблокировал» не доезжала вовсе — и не была закреплена ни одним ассертом.
+
+
+def _dangerous():
+    return JudgeResult("potentially_dangerous", ["bad"], ["privilege_escalation"], 1.0)
+
+
+@pytest.mark.parametrize(
+    "mode, judge_result, judge_available, user_confirmation",
+    [
+        # судья заблокировал — ветка, из-за которой всё и затевалось
+        ("deny", _dangerous(), True, None),
+        # судья недоступен в deny — fail-closed
+        ("deny", None, False, None),
+        # пользователь отказал
+        ("ask", _dangerous(), True, False),
+        ("ask", None, False, False),
+    ],
+)
+def test_every_refusal_carries_no_workaround_guidance(
+    mode, judge_result, judge_available, user_confirmation
+):
+    """Любой отказ доезжает до модели с явным запретом эквивалентной команды."""
+    decision = decide_command_execution(mode, judge_result, judge_available, user_confirmation)
+    assert decision.allowed is False
+    error = make_block_error(decision, "rm -rf victim", "exec_command", mode)
+    assert error["guidance"] == NO_WORKAROUND_NOTICE
+    assert "Do NOT retry" in error["guidance"]
+    assert "equivalent" in error["guidance"]
+
+
+def test_guidance_is_separate_from_judge_reason():
+    """reason остаётся причинами судьи: его же показывают пользователю в диалоге
+    подтверждения, и он зафиксирован примерами в доке."""
+    decision = decide_command_execution("deny", _dangerous(), True, None)
+    error = make_block_error(decision, "rm -rf victim", "exec_command", "deny")
+    assert error["reason"] == "bad"
+    assert error["guidance"] != error["reason"]
+
+
+def test_single_wording_shared_with_command_guard():
+    """Формулировка одна на весь периметр — иначе правки разъедутся."""
+    from gc_core.security import command_guard
+
+    assert command_guard.NO_WORKAROUND_NOTICE is NO_WORKAROUND_NOTICE
+
