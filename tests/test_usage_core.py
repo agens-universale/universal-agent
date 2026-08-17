@@ -3,6 +3,8 @@ from usage.account import (
     CATEGORY_MAIN,
     CATEGORY_SUMMARY,
     CATEGORY_SUBAGENT,
+    LEGACY_CURRENCY,
+    MONEY_FIELD,
     UsageAccount,
     category_for_request_label,
 )
@@ -162,30 +164,56 @@ def test_account_meta_roundtrip():
 
 def test_add_records_billed_shelf():
     acc = UsageAccount()
-    acc.add(CATEGORY_MAIN, 1000, 100, 0, cost=0.5, billed=True)
+    acc.add(CATEGORY_MAIN, 1000, 100, 0, cost=0.5, billed=True, currency="$")
     acc.add(CATEGORY_MAIN, 2000, 200)          # без цены
     b = acc.by_category[CATEGORY_MAIN]
     assert b["calls"] == 2
     assert b["billed_calls"] == 1
     assert b["input"] == 3000
     assert b["billed_input"] == 1000
-    assert b["cost"] == 0.5
+    assert b[MONEY_FIELD] == {"$": 0.5}
+
+
+def test_add_without_currency_lands_in_unknown_key():
+    # Валюту знает транспорт; вызыватель без неё (тесты, orphan-путь) пишет в
+    # «валюта неизвестна» — она разрешается при показе по текущему конфигу.
+    acc = UsageAccount()
+    acc.add(CATEGORY_MAIN, 1000, 100, 0, cost=0.5, billed=True)
+    assert acc.by_category[CATEGORY_MAIN][MONEY_FIELD] == {LEGACY_CURRENCY: 0.5}
+
+
+def test_add_keeps_currencies_apart():
+    # Ядро фичи: рубли не складываются с долларами даже внутри одной категории.
+    acc = UsageAccount()
+    acc.add(CATEGORY_MAIN, 1000, 100, 0, cost=2.0, billed=True, currency="$")
+    acc.add(CATEGORY_MAIN, 1000, 100, 0, cost=200.0, billed=True, currency="₽")
+    acc.add(CATEGORY_MAIN, 1000, 100, 0, cost=1.0, billed=True, currency="$")
+    assert acc.by_category[CATEGORY_MAIN][MONEY_FIELD] == {"$": 3.0, "₽": 200.0}
 
 
 def test_zero_cost_counts_as_billed():
     acc = UsageAccount()
-    acc.add(CATEGORY_MAIN, 100, 10, 0, cost=0.0, billed=True)
+    acc.add(CATEGORY_MAIN, 100, 10, 0, cost=0.0, billed=True, currency="$")
     b = acc.by_category[CATEGORY_MAIN]
     assert b["billed_calls"] == 1
-    assert b["cost"] == 0.0
+    assert b[MONEY_FIELD] == {"$": 0.0}
 
 
 def test_cost_survives_meta_roundtrip():
     acc = UsageAccount()
-    acc.add(CATEGORY_MAIN, 1000, 100, 0, cost=0.0058, billed=True)
+    acc.add(CATEGORY_MAIN, 1000, 100, 0, cost=0.0058, billed=True, currency="₽")
     restored = UsageAccount.from_meta(acc.to_meta())
-    assert restored.by_category[CATEGORY_MAIN]["cost"] == 0.0058
+    assert restored.by_category[CATEGORY_MAIN][MONEY_FIELD] == {"₽": 0.0058}
     assert restored.by_category[CATEGORY_MAIN]["billed_calls"] == 1
+
+
+def test_to_meta_snapshot_is_detached():
+    # Снимок не должен продолжать меняться вслед за накопителем.
+    acc = UsageAccount()
+    acc.add(CATEGORY_MAIN, 1000, 100, 0, cost=1.0, billed=True, currency="$")
+    snapshot = acc.to_meta()
+    acc.add(CATEGORY_MAIN, 1000, 100, 0, cost=5.0, billed=True, currency="$")
+    assert snapshot["by_category"][CATEGORY_MAIN][MONEY_FIELD] == {"$": 1.0}
 
 
 def test_old_meta_without_new_fields_reads_as_unbilled():
@@ -193,42 +221,88 @@ def test_old_meta_without_new_fields_reads_as_unbilled():
     acc = UsageAccount.from_meta(old)
     b = acc.by_category["main"]
     assert b["billed_calls"] == 0
-    assert b["cost"] == 0.0
+    assert b[MONEY_FIELD] == {}
+
+
+def test_legacy_meta_cost_reads_as_unknown_currency():
+    # meta, записанные версией без валюты: голое число ложится в «неизвестна».
+    old = {"by_category": {"main": {
+        "input": 1000, "output": 100, "calls": 1,
+        "billed_calls": 1, "billed_input": 1000, "billed_output": 100,
+        "cost": 0.75,
+    }}}
+    acc = UsageAccount.from_meta(old)
+    assert acc.by_category["main"][MONEY_FIELD] == {LEGACY_CURRENCY: 0.75}
 
 
 def test_merge_carries_cost_and_shelf():
     parent, child = UsageAccount(), UsageAccount()
-    child.add(CATEGORY_MAIN, 1000, 100, 0, cost=0.25, billed=True)
+    child.add(CATEGORY_MAIN, 1000, 100, 0, cost=0.25, billed=True, currency="$")
     parent.merge(child, as_category=CATEGORY_SUBAGENT)
     b = parent.by_category[CATEGORY_SUBAGENT]
-    assert b["cost"] == 0.25
+    assert b[MONEY_FIELD] == {"$": 0.25}
     assert b["billed_input"] == 1000
+
+
+def test_merge_keeps_currencies_apart():
+    # Субагент ходил на другой эндпоинт — его валюта не сливается с родительской.
+    parent, child = UsageAccount(), UsageAccount()
+    parent.add(CATEGORY_MAIN, 1000, 100, 0, cost=2.0, billed=True, currency="$")
+    child.add(CATEGORY_MAIN, 1000, 100, 0, cost=200.0, billed=True, currency="₽")
+    child.add(CATEGORY_MAIN, 1000, 100, 0, cost=1.0, billed=True, currency="$")
+    parent.merge(child, as_category=CATEGORY_SUBAGENT)
+    assert parent.by_category[CATEGORY_SUBAGENT][MONEY_FIELD] == {"₽": 200.0, "$": 1.0}
+    assert parent.by_category[CATEGORY_MAIN][MONEY_FIELD] == {"$": 2.0}
 
 
 def test_delta_from_subtracts_cost():
     base = UsageAccount()
-    base.add(CATEGORY_MAIN, 1000, 100, 0, cost=0.25, billed=True)
+    base.add(CATEGORY_MAIN, 1000, 100, 0, cost=0.25, billed=True, currency="$")
     now = UsageAccount.from_meta(base.to_meta())
-    now.add(CATEGORY_MAIN, 500, 50, 0, cost=0.10, billed=True)
+    now.add(CATEGORY_MAIN, 500, 50, 0, cost=0.10, billed=True, currency="$")
     delta = now.delta_from(base)
     assert delta.by_category[CATEGORY_MAIN]["input"] == 500
-    assert abs(delta.by_category[CATEGORY_MAIN]["cost"] - 0.10) < 1e-12
+    assert abs(delta.by_category[CATEGORY_MAIN][MONEY_FIELD]["$"] - 0.10) < 1e-12
+
+
+def test_delta_from_subtracts_each_currency():
+    base = UsageAccount()
+    base.add(CATEGORY_MAIN, 1000, 100, 0, cost=2.0, billed=True, currency="$")
+    base.add(CATEGORY_MAIN, 1000, 100, 0, cost=200.0, billed=True, currency="₽")
+    now = UsageAccount.from_meta(base.to_meta())
+    now.add(CATEGORY_MAIN, 500, 50, 0, cost=50.0, billed=True, currency="₽")
+    delta = now.delta_from(base)
+    # Доллары не изменились — их в дельте прогона быть не должно.
+    assert delta.by_category[CATEGORY_MAIN][MONEY_FIELD] == {"₽": 50.0}
 
 
 def test_delta_epsilon_does_not_create_category():
     # Float-хвост вида 1.7e-17 не должен порождать категорию: иначе она создаёт
-    # валюту, multi_currency становится True и футер прячет цену целиком.
+    # валюту, и в футере появляется фантомное второе слагаемое.
     base = UsageAccount()
-    base.add(CATEGORY_MAIN, 1000, 100, 0, cost=0.1 + 0.2, billed=True)
+    base.add(CATEGORY_MAIN, 1000, 100, 0, cost=0.1 + 0.2, billed=True, currency="$")
     now = UsageAccount.from_meta(base.to_meta())
-    now.by_category[CATEGORY_MAIN]["cost"] = 0.3       # тот же ноль с точностью до эпсилон
+    now.by_category[CATEGORY_MAIN][MONEY_FIELD]["$"] = 0.3   # ноль с точностью до эпсилон
     assert now.delta_from(base).is_empty()
 
 
-def test_totals_keeps_cost_as_float():
+def test_delta_epsilon_applies_per_currency():
+    # Эпсилон на каждую валюту: хвост в одной не должен всплыть, пока другая растёт.
+    base = UsageAccount()
+    base.add(CATEGORY_MAIN, 1000, 100, 0, cost=0.1 + 0.2, billed=True, currency="$")
+    base.add(CATEGORY_MAIN, 1000, 100, 0, cost=100.0, billed=True, currency="₽")
+    now = UsageAccount.from_meta(base.to_meta())
+    now.by_category[CATEGORY_MAIN][MONEY_FIELD]["$"] = 0.3
+    now.add(CATEGORY_MAIN, 500, 50, 0, cost=25.0, billed=True, currency="₽")
+    assert now.delta_from(base).by_category[CATEGORY_MAIN][MONEY_FIELD] == {"₽": 25.0}
+
+
+def test_totals_sums_each_currency():
     acc = UsageAccount()
-    acc.add(CATEGORY_MAIN, 100, 10, 0, cost=0.75, billed=True)
-    assert acc.totals()["cost"] == 0.75
+    acc.add(CATEGORY_MAIN, 100, 10, 0, cost=0.75, billed=True, currency="$")
+    acc.add(CATEGORY_SUMMARY, 100, 10, 0, cost=0.25, billed=True, currency="$")
+    acc.add(CATEGORY_SUMMARY, 100, 10, 0, cost=40.0, billed=True, currency="₽")
+    assert acc.totals()[MONEY_FIELD] == {"$": 1.0, "₽": 40.0}
 
 
 def test_label_to_category():
@@ -497,6 +571,79 @@ def test_tariff_remainder_accounts_for_cached():
     assert CostPart(64.0, "₽", "tariff") in r.categories[0].parts
 
 
+# ---------------- валюта факта по эндпоинту ----------------
+
+_RU_URL = "https://routerai.ru/api/v1/chat/completions"
+_USD_URL = "https://openrouter.ai/api/v1/chat/completions"
+
+
+def test_fact_currency_defaults_to_dollars_without_url():
+    # Гард обратной совместимости: трёхаргументный вызов работает как раньше.
+    acc = UsageAccount()
+    acc.add(CATEGORY_MAIN, 1000, 100, 0, cost=7.5, billed=True)
+    assert compute_cost(acc, _PRICING_RUB, "m").by_currency == {"$": 7.5}
+
+
+def test_fact_currency_follows_ru_endpoint():
+    acc = UsageAccount()
+    acc.add(CATEGORY_MAIN, 1000, 100, 0, cost=7.5, billed=True)
+    r = compute_cost(acc, _PRICING_RUB, "m", _RU_URL)
+    assert r.categories[0].parts == [CostPart(7.5, "₽", "provider")]
+    assert r.by_currency == {"₽": 7.5}
+
+
+def test_ru_endpoint_and_rub_tariff_collapse_into_one_currency():
+    # Ради этого случая правило и вводилось: факт и тариф сходятся в рублях,
+    # а не расходятся на два подытога с маркером неполноты.
+    acc = UsageAccount()
+    acc.add(CATEGORY_MAIN, 1_000_000, 100_000, 0, cost=7.5, billed=True)
+    acc.add(CATEGORY_MAIN, 500_000, 50_000)
+    r = compute_cost(acc, _PRICING_RUB, "m", _RU_URL)
+    assert set(r.by_currency) == {"₽"}
+    assert r.multi_currency is False
+    assert r.has_unpriced is False
+    assert r.categories[0].cost_source == "mixed"
+
+
+def test_ru_endpoint_with_usd_tariff_still_splits():
+    # Если тариф задан в долларах, валюты по-прежнему две — это не регресс.
+    pricing = {"enabled": True, "currency": "₽", "per_tokens": 1_000_000,
+               "models": {"m": {"input": 100, "output": 200, "currency": "$"}}}
+    acc = UsageAccount()
+    acc.add(CATEGORY_MAIN, 1_000_000, 100_000, 0, cost=7.5, billed=True)
+    acc.add(CATEGORY_MAIN, 500_000, 50_000)
+    r = compute_cost(acc, pricing, "m", _RU_URL)
+    assert set(r.by_currency) == {"₽", "$"}
+    assert r.multi_currency is True
+
+
+def test_non_ru_endpoint_and_garbage_url_give_dollars():
+    acc = UsageAccount()
+    acc.add(CATEGORY_MAIN, 1000, 100, 0, cost=7.5, billed=True)
+    assert compute_cost(acc, _PRICING_RUB, "m", _USD_URL).by_currency == {"$": 7.5}
+    assert compute_cost(acc, _PRICING_RUB, "m", "мусор").by_currency == {"$": 7.5}
+    assert compute_cost(acc, _PRICING_RUB, "m", None).by_currency == {"$": 7.5}
+
+
+def test_disabled_pricing_with_ru_endpoint_shows_no_money():
+    acc = UsageAccount()
+    acc.add(CATEGORY_MAIN, 1000, 100, 0, cost=7.5, billed=True)
+    r = compute_cost(acc, _PRICING_OFF, "m", _RU_URL)
+    assert r.has_cost is False
+    assert r.by_currency == {}
+    assert r.total_input == 1000
+
+
+def test_ru_endpoint_report_has_single_total_without_subtotals():
+    acc = UsageAccount()
+    acc.add(CATEGORY_MAIN, 1_000_000, 100_000, 0, cost=7.5, billed=True)
+    acc.add(CATEGORY_MAIN, 500_000, 50_000)
+    text = render_cost_report(compute_cost(acc, _PRICING_RUB, "m", _RU_URL), model_name="m")
+    assert "subtotals by currency" not in text
+    assert "$" not in text
+    assert "~" in text  # обе стороны есть — тильда на месте
+
+
 # ---------------- report formatting ----------------
 
 def test_format_tokens():
@@ -547,22 +694,22 @@ def test_report_marks_tariff_part_with_tilde_when_mixed():
     assert "~ — расчёт по тарифу" in text
 
 
-def test_report_category_without_any_price_shows_dash_not_dash_plus():
-    # Категория совсем без цены (нет ни факта, ни тарифа) — «—» в ячейке, без «+»:
-    # «+» переезжает на строку total и в легенду («—+» читается странно).
+def test_report_category_without_any_price_shows_dash_not_dash_question():
+    # Категория совсем без цены (нет ни факта, ни тарифа) — «—» в ячейке, без «?»:
+    # «?» переезжает на строку total и в легенду («—?» читается странно).
     acc = UsageAccount()
     acc.add(CATEGORY_MAIN, 1_000_000, 100_000, 0, cost=7.5, billed=True)  # факт
     acc.add(CATEGORY_FINISH_GATE, 1000, 100)                              # без цены вовсе
     text = render_cost_report(compute_cost(acc, _PRICING_NO_RATES, "m"), model_name="m")
     lines = {line.split()[0]: line for line in text.splitlines() if line.strip()}
     assert lines["finish_gate"].rstrip().endswith("—")
-    assert "total" in text and "+" in text  # неполнота видна на итоге
+    assert "total" in text and "?" in text  # неполнота видна на итоге
 
 
 def test_subtotal_label_reflects_sources_not_currency():
     # Метка подытога — из фактических источников частей в этой валюте, а не по
-    # самой валюте: сегодняшний выбор по currency == PROVIDER_CURRENCY совпадает
-    # с источником случайно (см. finding 9); собираем CostReport вручную, чтобы
+    # самой валюте: совпадение валюты с источником случайно и ломается, как только
+    # тариф задан в той же валюте, что и факт. Собираем CostReport вручную, чтобы
     # проверить рендер независимо от того, может ли compute_cost сегодня
     # породить такую валютную корзину.
     from usage.cost import CategoryCost, CostReport
@@ -588,13 +735,24 @@ def test_subtotal_label_reflects_sources_not_currency():
     assert "24.0 ₽ (расчёт по тарифу)" in text
 
 
-def test_report_marks_unpriced_with_plus():
+def test_report_marks_unpriced_with_question():
     acc = UsageAccount()
     acc.add(CATEGORY_MAIN, 1000, 100, 0, cost=0.5, billed=True)
     acc.add(CATEGORY_MAIN, 1000, 100)
     text = render_cost_report(compute_cost(acc, _PRICING_NO_RATES, "m"), model_name="m")
-    assert "+" in text
+    assert "?" in text
     assert "итог неполный" in text
+
+
+def test_report_joins_currencies_with_plus():
+    # «+» в ячейке категории — соединитель слагаемых, а не признак неполноты.
+    acc = UsageAccount()
+    acc.add(CATEGORY_MAIN, 1_000_000, 100_000, 0, cost=2.0, billed=True, currency="$")
+    acc.add(CATEGORY_MAIN, 1_000_000, 100_000)      # остаток по рублёвому тарифу
+    text = render_cost_report(compute_cost(acc, _PRICING_RUB, "m"), model_name="m")
+    main = next(line for line in text.splitlines() if line.startswith("main"))
+    assert "2.00 $+~" in main
+    assert "?" not in text                          # неполноты здесь нет
 
 
 def test_render_with_pricing_and_missing():

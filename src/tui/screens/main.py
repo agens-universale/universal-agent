@@ -478,7 +478,8 @@ class TraceScreen(Screen):
         session_meta, request_meta = snapshot
         cfg = getattr(self.app, "_config", None) or {}
         return usage_segments(
-            session_meta, request_meta, cfg.get("pricing"), cfg.get("model")
+            session_meta, request_meta, cfg.get("pricing"), cfg.get("model"),
+            cfg.get("completions_url"),
         )
 
     def _context_meter(self) -> "Text | None":

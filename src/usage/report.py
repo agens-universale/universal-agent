@@ -42,21 +42,24 @@ def format_money(value: float, currency: str) -> str:
 
 
 def format_parts(parts: list[CostPart], unpriced: bool = False, mark_tariff: bool = False) -> str:
-    """Ячейка стоимости: части через пробел, «+» при неполноте.
+    """Ячейка стоимости: части через «+», «?» при неполноте.
+
+    Знаки те же, что в футере TUI: «+» соединяет слагаемые суммы, «?» — есть
+    трата, стоимость которой узнать неоткуда.
 
     ``mark_tariff`` — ставить тильду перед тарифной частью; включается вызывающим
     только когда в ОТЧЁТЕ целиком есть обе стороны (факт и тариф) — иначе тильда
     ничего не сообщает (см. ``render_cost_report``). Категория совсем без цены
-    (``parts`` пуст) рендерится как «—» без «+»: «+» переезжает на строку total
-    и в легенду — «—+» читается странно."""
+    (``parts`` пуст) рендерится как «—» без «?»: «?» переезжает на строку total
+    и в легенду — «—?» читается странно."""
     if not parts:
         return "—"
     chunks = []
     for part in parts:
         money = format_money(part.amount, part.currency)
         chunks.append(f"~{money}" if mark_tariff and part.source == "tariff" else money)
-    text = " ".join(chunks)
-    return f"{text}+" if unpriced else text
+    text = "+".join(chunks)
+    return f"{text}?" if unpriced else text
 
 
 def render_cost_report(report: CostReport, *, model_name: str | None = None, title: str = "Run usage") -> str:
@@ -90,7 +93,7 @@ def render_cost_report(report: CostReport, *, model_name: str | None = None, tit
         f"{format_tokens(report.total_output):>10}"
     )
     if show_cost:
-        suffix = "+" if report.has_unpriced else ""
+        suffix = "?" if report.has_unpriced else ""
         if report.multi_currency:
             # >1 валюты: единого total нет — выводим сабтоталы отдельной секцией ниже.
             total_row += f"{'—' + suffix:>22}"
@@ -135,7 +138,7 @@ def render_cost_report(report: CostReport, *, model_name: str | None = None, tit
         if mark_tariff:
             lines.append("~ — расчёт по тарифу")
         if report.has_unpriced:
-            lines.append("+ — часть вызовов без цены, итог неполный")
+            lines.append("? — часть вызовов без цены, итог неполный")
 
     return "\n".join(lines)
 
@@ -144,11 +147,15 @@ def build_run_usage_report(
     run_usage: UsageAccount,
     pricing: Any,
     model_name: Optional[str],
+    endpoint_url: Optional[str] = None,
 ) -> Optional[str]:
-    """Готовый текст отчёта по usage прогона или None, если считать нечего."""
+    """Готовый текст отчёта по usage прогона или None, если считать нечего.
+
+    ``endpoint_url`` — адрес бэкенда: из него выводится валюта фактической цены.
+    """
     if not isinstance(run_usage, UsageAccount) or run_usage.is_empty():
         return None
-    cost_report = compute_cost(run_usage, pricing, model_name)
+    cost_report = compute_cost(run_usage, pricing, model_name, endpoint_url)
     return render_cost_report(cost_report, model_name=model_name, title="Run usage")
 
 
@@ -156,6 +163,7 @@ def build_run_usage_dict(
     run_usage: UsageAccount,
     pricing: Any,
     model_name: Optional[str],
+    endpoint_url: Optional[str] = None,
 ) -> Optional[dict]:
     """Структурный (JSON-friendly) отчёт по usage прогона или None, если считать нечего.
 
@@ -164,7 +172,7 @@ def build_run_usage_dict(
     """
     if not isinstance(run_usage, UsageAccount) or run_usage.is_empty():
         return None
-    report = compute_cost(run_usage, pricing, model_name)
+    report = compute_cost(run_usage, pricing, model_name, endpoint_url)
 
     categories: dict[str, dict[str, Any]] = {}
     for c in report.categories:

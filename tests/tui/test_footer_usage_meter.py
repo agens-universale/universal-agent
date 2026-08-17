@@ -153,3 +153,33 @@ async def test_footer_single_line_on_wide_width(tmp_path):
         plain = scr._compose_footer_right().plain
         assert "\n" not in plain
         assert "запрос" in plain and "сессия" in plain
+
+
+@pytest.mark.asyncio
+async def test_footer_fact_currency_follows_endpoint(tmp_path):
+    """Единственная проверка, что адрес эндпоинта реально доезжает из конфига
+    TUI до расчёта: факт от .ru-провайдера показывается в рублях."""
+    pytest.importorskip("textual")
+    from tui.app import TuiApp
+
+    def _billed_meta(inp, out, cost):
+        acc = UsageAccount()
+        acc.add(CATEGORY_MAIN, inp, out, 0, cost=cost, billed=True)
+        return acc.to_meta()
+
+    app = TuiApp(threads_dir=str(tmp_path / "threads"))
+    async with app.run_test() as pilot:
+        scr = pilot.app.screen
+        app._config = {
+            "model": "m",
+            "pricing": _PRICING,
+            "completions_url": "https://routerai.ru/api/v1/chat/completions",
+        }
+        scr._active_task_id = "t1"
+        app.active_runner = _FakeRunner(
+            (_billed_meta(2_000_000, 0, 20.0), _billed_meta(1_000_000, 0, 10.0))
+        )
+
+        right = scr._compose_footer_right().plain
+        assert "₽" in right
+        assert "$" not in right

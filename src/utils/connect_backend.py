@@ -164,7 +164,7 @@ def request_backend_responses(
 
     response_obj = result["response"]
     if isinstance(response_obj, dict):
-        record_usage(response_obj.get("usage"))
+        record_usage(response_obj.get("usage"), url)
     if logger is not None:
         logger.debug(
             "backend_response",
@@ -272,7 +272,7 @@ def request_backend_chat_completions(
                 )
                         # основного цикла терялся — фиксировался только non-stream aux-вызов).
             if isinstance(assembled, dict):
-                record_usage(assembled.get("usage"))
+                record_usage(assembled.get("usage"), url)
             if logger is not None:
                 logger.debug(
                     "backend_response",
@@ -367,7 +367,7 @@ def request_backend_chat_completions(
 
     data = r.json()
     if isinstance(data, dict):
-        record_usage(data.get("usage"))
+        record_usage(data.get("usage"), url)
     if logger is not None:
         logger.debug(
             "backend_response",
