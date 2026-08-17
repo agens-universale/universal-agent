@@ -15,9 +15,9 @@ from typing import Optional, Sequence
 # Одна строка — не косметика: tests/tui/test_runner_no_textual.py требует
 # err.count("\n") <= 1, чтобы падение точки входа оставалось однострочным.
 _MISSING_TEXTUAL_MSG = (
-    "TUI требует пакет textual (extra 'tui'). Переустановите: "
-    'uv tool install --force "gc-ua[tui] @ '
-    'git+https://gitverse.ru/gigacode-ai/universal-agent"'
+    "TUI не установлен (нет пакета textual). Поставьте профиль с TUI: "
+    'uv tool install --force "gc-tui @ '
+    'git+https://gitverse.ru/gigacode-ai/universal-agent#subdirectory=packaging/tui"'
 )
 
 

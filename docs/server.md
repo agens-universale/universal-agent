@@ -8,18 +8,19 @@
 ## Установка зависимостей для сервера
 
 Чтобы не тянуть FastAPI в чистый CLI‑режим, серверные зависимости живут за
-extra `[server]` — базовая установка их НЕ ставит:
+дистрибутив `gc-server` — базовая установка их НЕ ставит:
 
 ```bash
-uv tool install -e ".[server]"
+uv tool install -e packaging/server
 # без клонирования репозитория:
-uv tool install "gc-ua[server] @ git+https://gitverse.ru/gigacode-ai/universal-agent"
+uv tool install "gc-server @ git+https://gitverse.ru/gigacode-ai/universal-agent#subdirectory=packaging/server"
 ```
 
-Extra добавляет `fastapi`, `uvicorn[standard]` и `psutil`. Последний нужен
-swarm-режиму (memory/cpu enforcement); без него swarm деградирует до
-disk+timeout. Своего extra у swarm нет: он запускается только через
-`POST /swarm/run`, то есть без сервера бесполезен.
+Профиль добавляет `fastapi`, `uvicorn[standard]` и `psutil`, а также сами
+`server.py`, `rest_api/`, `swarm/`. psutil нужен swarm-режиму (memory/cpu
+enforcement); без него swarm деградирует до disk+timeout. Отдельного профиля у
+swarm нет: он запускается только через `POST /swarm/run`, то есть без сервера
+бесполезен.
 
 > Раньше зависимости лежали в `server_requirements.txt`. Файл удалён — он пинил
 > `uvicorn<0.31.0`, что **несовместимо** с `mcp==1.26.0` (тот требует
@@ -113,7 +114,7 @@ disk+timeout. Своего extra у swarm нет: он запускается т
 
 ## Запуск серверного режима
 
-После установки профиля `[server]` и настройки конфигов сервер запускается
+После установки профиля `gc-server` и настройки конфигов сервер запускается
 точкой входа:
 
 ```bash

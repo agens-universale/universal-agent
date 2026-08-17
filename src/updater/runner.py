@@ -12,12 +12,31 @@ import subprocess
 import tempfile
 from typing import Callable, Optional
 
+import app_version
 from updater.source import UpdateSource
 
 
+def build_install_target(source: UpdateSource) -> str:
+    """Строка переустановки ТЕМ ЖЕ профилем, что стоит сейчас.
+
+    Агент ставится одним из четырёх дистрибутивов (`gc-ua` — всё, `gc-cli` —
+    ядро, `gc-tui`, `gc-server`). Голый `git+URL` всегда резолвится в корневой
+    манифест, то есть в полный профиль: без явного имени и подкаталога
+    `--update` на headless-установке молча раздул бы её до полной, а на
+    `gc-tui` — потерял бы TUI.
+    """
+    url = f"git+{source.url}" + (f"@{source.ref}" if source.ref else "")
+    subdir = source.subdirectory or app_version.PROFILE_SUBDIRS.get(source.dist)
+    if subdir:
+        url = f"{url}#subdirectory={subdir}"
+    # Мета живёт в корне: для неё голого URL достаточно, имя добавляем только
+    # ради читаемости команды в логах.
+    return f"{source.dist} @ {url}"
+
+
 def build_install_command(source: UpdateSource, extra_args: list) -> list:
-    target = f"git+{source.url}" + (f"@{source.ref}" if source.ref else "")
     uv = shutil.which("uv") or "uv"
+    target = build_install_target(source)
     return [uv, "tool", "install", "--force", "--reinstall", target] + list(extra_args)
 
 

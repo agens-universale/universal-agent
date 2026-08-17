@@ -15,21 +15,27 @@ import sys
 # Однострочно — как и сообщение TUI-обёртки (tui/__init__.py): точка входа,
 # упавшая из-за отсутствующего extra, не должна разливаться на полэкрана.
 _MISSING_SERVER_MSG = (
-    "Режим server требует пакеты fastapi/uvicorn (extra 'server'). Переустановите: "
-    'uv tool install --force "gc-ua[server] @ '
-    'git+https://gitverse.ru/gigacode-ai/universal-agent"'
+    "Серверный режим не установлен (нет fastapi/uvicorn). Поставьте профиль: "
+    'uv tool install --force "gc-server @ '
+    'git+https://gitverse.ru/gigacode-ai/universal-agent#subdirectory=packaging/server"'
 )
+
+
+# Что считаем «профиль [server] не установлен»: нет самого модуля server (после
+# разделения на дистрибутивы он физически отсутствует в headless-профиле) либо
+# нет его сторонних зависимостей. Любой другой ImportError — настоящая поломка,
+# её пробрасываем с трейсбеком, а не маскируем подсказкой про установку.
+_SERVER_NAMES = {"server", "server_cleanup_threads", "rest_api", "fastapi", "uvicorn"}
 
 
 def main() -> int:
     try:
-        import fastapi  # noqa: F401
-        import uvicorn  # noqa: F401
-    except ImportError:
-        print(_MISSING_SERVER_MSG, file=sys.stderr)
-        return 1
-
-    from server import serve
+        from server import serve
+    except ImportError as exc:
+        if getattr(exc, "name", None) in _SERVER_NAMES:
+            print(_MISSING_SERVER_MSG, file=sys.stderr)
+            return 1
+        raise
 
     return serve()
 

@@ -9,7 +9,24 @@ from __future__ import annotations
 import json
 from typing import Callable, NamedTuple, Optional
 
-DIST_NAME = "gc-ua"
+# Профили установки, в порядке убывания «полноты». Агент ставится одним из
+# четырёх дистрибутивов, и какой именно — определяет и версию, и то, чем
+# переустанавливаться при --update. Мета идёт первой: если стоит она, значит
+# профиль полный, даже когда рядом лежат её листья.
+PROFILE_DISTS = ("gc-ua", "gc-tui", "gc-server", "gc-cli")
+
+# Подкаталог манифеста каждого профиля в репозитории. Нужен для переустановки:
+# uv читает из git только КОРНЕВОЙ pyproject.toml, поэтому лист без
+# `#subdirectory=` не зарезолвится (проверено: «Package metadata name `gc-ua`
+# does not match given name `gc-tui`»). У меты подкаталога нет — она в корне.
+PROFILE_SUBDIRS = {
+    "gc-cli": "packaging/cli",
+    "gc-tui": "packaging/tui",
+    "gc-server": "packaging/server",
+}
+
+# Совместимость: имя, под которым агент публиковался до разделения профилей.
+DIST_NAME = PROFILE_DISTS[0]
 
 
 class InstallSource(NamedTuple):
@@ -17,12 +34,31 @@ class InstallSource(NamedTuple):
     ref: Optional[str]      # requested_revision; None = дефолтная ветка источника
     commit: Optional[str]   # зарезолвленный коммит установки
     editable: bool          # dev-установка из исходников
+    dist: str = DIST_NAME   # имя установленного дистрибутива-профиля
+    subdirectory: Optional[str] = None   # PEP 610: подкаталог манифеста в репо
+
+
+def installed_dist() -> str:
+    """Имя установленного дистрибутива-профиля.
+
+    Листовые профили (gc-cli / gc-ua-tui / gc-ua-server) живут в подкаталогах
+    репозитория, и при их установке дистрибутива `gc-ua` в окружении нет вовсе —
+    поэтому имя нельзя зашивать константой.
+    """
+    from importlib import metadata
+    for name in PROFILE_DISTS:
+        try:
+            metadata.distribution(name)
+            return name
+        except metadata.PackageNotFoundError:
+            continue
+    return DIST_NAME
 
 
 def agent_version() -> str:
     from importlib import metadata
     try:
-        return metadata.version(DIST_NAME)
+        return metadata.version(installed_dist())
     except metadata.PackageNotFoundError:
         return "dev"
 
@@ -30,7 +66,7 @@ def agent_version() -> str:
 def _read_direct_url_text() -> Optional[str]:
     from importlib import metadata
     try:
-        dist = metadata.distribution(DIST_NAME)
+        dist = metadata.distribution(installed_dist())
     except metadata.PackageNotFoundError:
         return None
     # read_text возвращает None, если файла нет (importlib сам гасит
@@ -62,4 +98,10 @@ def install_source(
         ref=vcs.get("requested_revision"),
         commit=vcs.get("commit_id"),
         editable=bool(dir_info.get("editable")),
+        dist=installed_dist(),
+        # PEP 610 кладёт subdirectory верхним ключом. У меты его нет (она в
+        # корне репозитория), у листьев — путь к их манифесту; без него
+        # переустановка листа не зарезолвится: uv читает из git только корневой
+        # pyproject.toml.
+        subdirectory=data.get("subdirectory"),
     )

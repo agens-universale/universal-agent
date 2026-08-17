@@ -77,7 +77,12 @@ def test_update_builds_command_and_spawns(monkeypatch, tmp_path, capsys):
                          lambda command, **kw: spawned.update(command=command, kw=kw))
     assert cli._run_update() == 0
     assert spawned["command"][-1] == "--system-certs"
-    assert "git+https://x/y@master" in spawned["command"]
+    # Цель переустановки — ровно один аргумент. С 0.3.0 это не обязательно голый
+    # git+URL: если в установке есть extras, аргумент принимает форму PEP 508
+    # `gc-ua[…] @ git+URL`, иначе `--update` терял бы профиль пользователя
+    # (регрессия закреплена в tests/updater/test_runner.py).
+    target = [a for a in spawned["command"] if "git+https://x/y@master" in a]
+    assert len(target) == 1, spawned["command"]
     assert spawned["kw"]["parent_pid"] == cli.os.getpid()
     assert spawned["kw"]["restart_cmd"] is None
     err = capsys.readouterr().err

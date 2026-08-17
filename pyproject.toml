@@ -4,81 +4,40 @@ build-backend = "hatchling.build"
 
 [project]
 name = "gc-ua"
-# Релизная дисциплина (спека 2026-07-11-config-foundation): бампать при нарезке
-# release/vX.Y.Z — стамп агента сверяет версию+коммит, notice «обновлён» берёт отсюда.
-# 0.3.0 — раздельная установка профилей через extras. ЛОМАЮЩЕЕ: базовая
-# установка больше НЕ тянет TUI-стек; для gc-ua нужен extra [tui].
-version = "0.3.0"
-description = "GigaCode Universal Agent — клиент агента GigaCode (CLI / TUI / server)"
+# Релизная дисциплина: бампать при нарезке release/vX.Y.Z — стамп агента сверяет
+# версию+коммит. Версии ВСЕХ четырёх манифестов обязаны совпадать: профили
+# пинят друг друга точно, иначе можно собрать установку из разных коммитов.
+# 0.3.0 — профили через extras (гейт зависимостей).
+# 0.4.0 — профили стали отдельными дистрибутивами (гейт ФАЙЛОВ).
+version = "0.4.0"
+description = "GigaCode Universal Agent — полный агент (ядро + TUI + server)"
 readme = "readme.md"
 requires-python = ">=3.11"
-# ЯДРО. Нужно всем профилям: агентный цикл, тулы, конфиг, безопасность,
-# суммаризация, MCP-клиент. Разложено по графу импортов, а не на глаз.
+# Мета не содержит кода агента: только лаунчер команд. Ставит все три профиля,
+# поэтому короткая команда `uv tool install "gc-ua @ git+URL"` даёт полный агент.
 dependencies = [
-    "pyyaml>=6.0.3",
-    "pydantic>=2.9.0",
-    "pydantic-settings>=2.0",
-    "requests[socks]",
-    "trafilatura",
-    "readability-lxml",
-    "jsonschema>=4.0.0",
-    "httpx[socks]>=0.27.0",
-    "httpx-sse>=0.4.0",
-    "mcp==1.26.0",
-    "chardet>=7.4.3",
+    "gc-cli==0.4.0",
+    "gc-tui==0.4.0",
+    "gc-server==0.4.0",
 ]
-
-[project.scripts]
-gc-cli = "cli:main"
-gc-ua = "tui:main"
-gc-serve = "serve_entry:main"
-gc-mcp-install = "mcp_runtime.install_cli:main"
-gc-mcp = "mcp_runtime.cli:main"
 
 [project.optional-dependencies]
-# Textual-фронтенд (gc-ua). pygments импортируют tui/services/{trace_render,
-# file_view}.py напрямую — раньше он не был объявлен вовсе и приезжал
-# транзитивно через rich, что делало установку зависимой от чужого графа.
-tui = [
-    "textual>=0.55",
-    "rich>=13",
-    "pygments>=2.13",
-]
-# FastAPI-режим (gc-serve). psutil здесь же: он нужен swarm'у, а swarm
-# запускается только через POST /swarm/run, то есть без server бесполезен.
-# Без psutil swarm деградирует до disk+timeout enforcement (см. docs/swarm.md).
-server = [
-    "fastapi>=0.115.0",
-    # server_requirements.txt пинил uvicorn<0.31.0 — это НЕСОВМЕСТИМО с
-    # mcp==1.26.0, который требует uvicorn>=0.31.1. Раньше конфликт не всплывал:
-    # server_requirements.txt ставили отдельно, мимо резолвера. uvicorn и так
-    # приезжает транзитивно из mcp; здесь нужен именно extra [standard].
-    "uvicorn[standard]>=0.31.1",
-    "psutil>=5.9,<7",
-]
-# MCP-инсталлятор (gc-mcp, gc-mcp-install). Сторонних пакетов ему не нужно:
-# рантайм-клиент MCP уже в ядре, а инсталлятор — это stdlib + рецепты из
-# recommended_mcp/, которые едут в колесе всегда. Extra заведён ради явности
-# профилей в доке; файлы он не гейтит — extras этого не умеют в принципе.
-mcp = []
-all = ["gc-ua[tui,server,mcp]"]
+# Синоним полной установки: `gc-ua` и `gc-ua[all]` дают одно и то же. Extras
+# умеют только ДОБАВЛЯТЬ, а база здесь уже полная — поэтому профилей «поменьше»
+# через extras не существует, их роль выполняют отдельные дистрибутивы
+# gc-cli / gc-tui / gc-server (см. docs/packaging.md).
+all = []
 
-dev-tui = [
-    "textual>=0.85",
-    "rich>=13",
-    "pytest-textual-snapshot>=1.0",
-]
+[project.scripts]
+gc-cli = "gc_ua_launcher:cli"
+gc-ua = "gc_ua_launcher:tui"
+gc-serve = "gc_ua_launcher:serve"
+gc-mcp = "gc_ua_launcher:mcp"
+gc-mcp-install = "gc_ua_launcher:mcp_install"
 
 [tool.hatch.build.targets.wheel]
-sources = ["src"]
-only-include = ["src", "recommended_mcp"]
-
-[tool.hatch.build.targets.wheel.force-include]
-"prompts" = "prompts"
-"skills" = "skills"
-"config.default.yml" = "config.default.yml"
-"recommended_mcp/config.yml" = "recommended_mcp/config.yml"
-"external/ddgs-mcp" = "external/ddgs-mcp"
+sources = ["meta"]
+only-include = ["meta"]
 
 [dependency-groups]
 dev = [
@@ -92,14 +51,33 @@ test = [
     "pytest-asyncio>=0.23",
     "office-mcp",
     "harbor>=0.16; python_version >= '3.12'",
-    # Тестовый набор целиком гоняет и TUI, и server, и swarm.
-    "gc-ua[tui,server]",
+    # Тестовый набор гоняет и TUI, и server, и swarm — но сторонние пакеты
+    # перечислены НАПРЯМУЮ, а НЕ через "gc-ua[tui,server]". Иначе uv поставил бы
+    # соседей editable, скопировав tui/ и server.py в site-packages, а
+    # site-packages идёт в sys.path раньше пути на <repo>/src — и dev-цикл начал
+    # бы молча исполнять устаревшую копию.
+    "textual>=0.55",
+    "rich>=13",
+    "pygments>=2.13",
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.31.1",
+    "psutil>=5.9,<7",
 ]
 
 [tool.uv]
 default-groups = ["dev"]
 
+[tool.uv.workspace]
+members = ["packaging/*"]
+
 [tool.uv.sources]
+# uv читает эти sources и у git-зависимости, поэтому профили приезжают из ТОГО
+# ЖЕ коммита и по ТОМУ ЖЕ URL, который набрал пользователь — токены приватного
+# репозитория и форки продолжают работать. PEP 508 direct reference вшил бы URL
+# в METADATA и это сломал бы.
+gc-cli = { workspace = true }
+gc-tui = { workspace = true }
+gc-server = { workspace = true }
 office-mcp = { path = "external/office-mcp", editable = true }
 
 [tool.pytest.ini_options]

@@ -13,35 +13,43 @@
 В корне проекта выполните:
 
 ```bash
-uv sync                      # окружение разработки (dev + test; тянет все extras)
-uv tool install -e .         # только gc-cli (headless-ядро)
-uv tool install -e ".[tui]"  # + gc-ua (TUI)
+uv sync                              # окружение разработки (dev + test)
+uv tool install -e packaging/cli     # только ядро
+uv tool install -e .                 # полный агент
 ```
 
 > В корпоративной сети Сбера к командам `uv tool install` добавляйте `--system-certs` — иначе TLS-перехват ломает установку.
 
 ### Профили установки
 
-Базовая установка headless: ядро агента, `gc-cli` и MCP-рантайм. Фронтенды —
-через extras, они только **добавляют** зависимости.
+Профиль — отдельный дистрибутив, собираемый из общего дерева `src/`. Код чужих
+профилей физически не попадает на диск.
 
-| Профиль | Добавляет | Появляется |
-|---|---|---|
-| `gc-ua` | — | `gc-cli`, `gc-mcp`, `gc-mcp-install` |
-| `gc-ua[tui]` | `textual`, `rich`, `pygments` | `gc-ua` |
-| `gc-ua[server]` | `fastapi`, `uvicorn`, `psutil` | `gc-serve` |
-| `gc-ua[all]` | всё сразу | всё |
+| Команда | Ядро | TUI | server |
+|---|---|---|---|
+| `gc-ua` | да | да | да |
+| `gc-cli` | да | — | — |
+| `gc-tui` | да | да | — |
+| `gc-server` | да | — | да |
 
 ```bash
-uv tool install "gc-ua[tui] @ git+https://gitverse.ru/gigacode-ai/universal-agent"
+uv tool install "gc-ua @ git+https://gitverse.ru/gigacode-ai/universal-agent"
+uv tool install "gc-cli @ git+https://gitverse.ru/gigacode-ai/universal-agent#subdirectory=packaging/cli"
+uv tool install "gc-tui @ git+https://gitverse.ru/gigacode-ai/universal-agent#subdirectory=packaging/tui"
+uv tool install "gc-server @ git+https://gitverse.ru/gigacode-ai/universal-agent#subdirectory=packaging/server"
 ```
 
-Кавычки обязательны: в zsh `[tui]` — glob-паттерн, без них будет
-`no matches found`. Смена набора extras — переустановка, нужен `--force`.
+Хвост `#subdirectory=` обязателен у всех, кроме `gc-ua`: uv читает из git только
+корневой `pyproject.toml`, а корень — это полный профиль. Устройство раскладки
+описано в [docs/packaging.md](packaging.md).
 
-Скрипты `gc-ua` и `gc-serve` кладутся в PATH при любой установке (uv ставит все
-точки входа дистрибутива независимо от extras). Без своего профиля они не падают
-трейсбеком, а печатают в stderr, чем доставить недостающее, и возвращают 1.
+Смена профиля — переустановка, нужен `--force`. `gc-ua --update` сохраняет
+текущий профиль: агент определяет его по метаданным установки и переустанавливает
+тем же дистрибутивом.
+
+Любая установка кладёт в PATH все пять команд. Команда, которой не хватает своего
+профиля, печатает в stderr одну строку с готовой командой установки и возвращает
+1 — без трейсбека.
 
 Проверка после установки: `uv sync` и `uv run pytest` — см. [Тесты](testing.md).
 

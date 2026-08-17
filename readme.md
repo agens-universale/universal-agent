@@ -30,37 +30,34 @@ Background и CLI-клиент для работы с агентом GigaCode: �
 
 > 📄 **Наглядная инструкция по установке (HTML):** [docs/gc-ua-install.html](docs/gc-ua-install.html) — пошаговая страница, откройте локально в браузере.
 
-Агент ставится профилями: базовая установка — headless-ядро с `gc-cli`,
-фронтенды доезжают через extras.
+Агент ставится профилями. Профиль — это отдельный дистрибутив, собираемый из
+того же дерева `src/`: код чужих профилей на диск не попадает.
 
-| Профиль | Что приезжает | Точки входа |
-|---|---|---|
-| `gc-ua` | ядро + CLI + MCP-рантайм | `gc-cli`, `gc-mcp`, `gc-mcp-install` |
-| `gc-ua[tui]` | + `textual`, `rich`, `pygments` | + `gc-ua` |
-| `gc-ua[server]` | + `fastapi`, `uvicorn`, `psutil` | + `gc-serve` |
-| `gc-ua[all]` | всё | всё |
-
-```bash
-# из клона репозитория (кавычки обязательны: в zsh [tui] — glob-паттерн)
-uv tool install -e .                 # только gc-cli
-uv tool install -e ".[tui]"          # + TUI
-gc-mcp install duckduckgo_search     # один MCP + авто-подключение в ~/.gc/config.local.yml
-# gc-mcp install                     # все MCP из манифеста
-```
+| Команда установки | Что приезжает |
+|---|---|
+| `gc-ua` | полный агент: ядро + TUI + server |
+| `gc-cli` | только ядро (headless) |
+| `gc-tui` | ядро + TUI |
+| `gc-server` | ядро + FastAPI-режим и swarm |
 
 ```bash
-# без клонирования, прямо из git
 uv tool install "gc-ua @ git+https://gitverse.ru/gigacode-ai/universal-agent"
-uv tool install "gc-ua[tui] @ git+https://gitverse.ru/gigacode-ai/universal-agent"
-uv tool install "gc-ua[server] @ git+https://gitverse.ru/gigacode-ai/universal-agent"
-gc-mcp install   # MCP → ~/.local/share/gc/recommended_mcp/venv + авто-wire в ~/.gc/config.local.yml
-# Примечание: source-MCP (office/science/computer) устанавливаются напрямую из git-подкаталога репо
-# (pip install "git+...#subdirectory=external/<name>") — клонировать репо не нужно.
-# Требуется: git на PATH + доступ к сети.
+uv tool install "gc-cli @ git+https://gitverse.ru/gigacode-ai/universal-agent#subdirectory=packaging/cli"
+uv tool install "gc-tui @ git+https://gitverse.ru/gigacode-ai/universal-agent#subdirectory=packaging/tui"
+uv tool install "gc-server @ git+https://gitverse.ru/gigacode-ai/universal-agent#subdirectory=packaging/server"
+
+gc-mcp install duckduckgo_search   # один MCP + авто-подключение в ~/.gc/config.local.yml
+# gc-mcp install                   # все MCP из манифеста
 ```
 
-> Смена набора extras — это переустановка: добавьте `--force`, иначе uv увидит
-> конфликт имён скриптов. Скрипты `gc-ua` и `gc-serve` кладутся в PATH всегда,
+Хвост `#subdirectory=` у частичных профилей обязателен: uv читает из git только
+корневой `pyproject.toml`, а в корне лежит полный профиль. Подробно — в
+[docs/packaging.md](docs/packaging.md).
+
+> Любая установка кладёт в PATH все пять команд (`gc-cli`, `gc-ua`, `gc-serve`,
+> `gc-mcp`, `gc-mcp-install`). Команда без своего профиля не падает трейсбеком, а
+> печатает одну строку с тем, чем её доставить. Смена профиля — переустановка,
+> нужен `--force`.
 > независимо от extras, и без своего профиля печатают, чем доставить недостающее.
 
 После установки `gc-ua` / `gc-cli` работают **без `--config`**: при первом запуске конфиг создаётся сам (Windows — `~/.gc/config.yml`, macOS/Linux — `~/.config/gc/config.yml`).
@@ -72,7 +69,7 @@ gc-mcp install   # MCP → ~/.local/share/gc/recommended_mcp/venv + авто-wir
 
 > **Миграция с gc-cli-pub:** если ранее была установлена старая версия дистрибутива, сначала удалите её: `uv tool uninstall gc-cli-pub`, затем выполните установку выше.
 
-Headless-установка только `gc-cli` (без TUI): см. [docs/usage.md](docs/usage.md#минимальная-установка-gc-cli-без-tui).
+Как это устроено внутри: [docs/packaging.md](docs/packaging.md).
 
 Подробнее про MCP: [`recommended_mcp/README.md`](recommended_mcp/README.md).
 
@@ -116,6 +113,7 @@ gc-ua
 ## Документация
 
 - [Установка и запуск](docs/usage.md) — установка (uv/pip), запуск, ключи CLI.
+- [Упаковка и профили](docs/packaging.md) — как четыре дистрибутива собираются из одного `src/`, почему у частичных профилей `#subdirectory=`, как обновление сохраняет профиль.
 - [Тесты](docs/testing.md) — как запускать `tests/`, `external/*` и полный прогон.
 - [Конфигурация](docs/configuration.md) — `config.yml`, приоритет и переопределение, security policy, MCP-серверы, runtime-пути, project-local config.
 - [Скиллы и пакеты скиллов](docs/skills.md) — трёхслойный поиск, манифест пакета, canonical IDs, встроенные паки.

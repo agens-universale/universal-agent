@@ -1,21 +1,51 @@
 from updater.source import UpdateSource
-from updater.runner import build_install_command, install_location_phrase, spawn_detached_update
+from updater.runner import (
+    build_install_command,
+    build_install_target,
+    install_location_phrase,
+    spawn_detached_update,
+)
 
 
 def test_command_with_ref():
-    src = UpdateSource(url="https://x/y", ref="master", commit="c")
+    src = UpdateSource(url="https://x/y", ref="master", commit="c", dist="gc-ua")
     cmd = build_install_command(src, extra_args=["--system-certs"])
     assert "uv" in cmd[0].lower()               # shutil.which может вернуть абсолютный путь
     assert cmd[1:5] == ["tool", "install", "--force", "--reinstall"]
-    assert "git+https://x/y@master" in cmd
+    assert "git+https://x/y@master" in cmd[5]
     assert cmd[-1] == "--system-certs"
 
 
 def test_command_default_branch_no_ref():
-    src = UpdateSource(url="https://x/y", ref=None, commit="c")
+    src = UpdateSource(url="https://x/y", ref=None, commit="c", dist="gc-ua")
     cmd = build_install_command(src, extra_args=[])
-    assert "git+https://x/y" in cmd            # без @ref → дефолтная ветка
-    assert not any("@" in a for a in cmd)
+    assert cmd[5] == "gc-ua @ git+https://x/y"   # без @ref → дефолтная ветка
+
+
+def test_meta_target_has_no_subdirectory():
+    """Мета лежит в корне репозитория — подкаталог ей не нужен."""
+    src = UpdateSource(url="https://x/y", ref="master", commit="c", dist="gc-ua")
+    assert build_install_target(src) == "gc-ua @ git+https://x/y@master"
+
+
+def test_leaf_target_carries_subdirectory():
+    """Регрессия: голый git+URL всегда резолвится в КОРНЕВОЙ манифест, то есть в
+    полный профиль. Без имени и подкаталога `--update` на headless-установке
+    молча раздул бы её до полной, а на gc-tui — потерял бы TUI."""
+    src = UpdateSource(url="https://x/y", ref="master", commit="c",
+                       dist="gc-tui", subdirectory="packaging/tui")
+    assert build_install_target(src) == (
+        "gc-tui @ git+https://x/y@master#subdirectory=packaging/tui"
+    )
+
+
+def test_subdirectory_recovered_from_profile_when_metadata_lacks_it():
+    """Если в direct_url.json подкаталога нет, он берётся из карты профилей —
+    иначе переустановка листа не зарезолвится."""
+    src = UpdateSource(url="https://x/y", ref=None, commit="c", dist="gc-cli")
+    assert build_install_target(src) == (
+        "gc-cli @ git+https://x/y#subdirectory=packaging/cli"
+    )
 
 
 def test_spawn_detached_injects_command(tmp_path, monkeypatch):

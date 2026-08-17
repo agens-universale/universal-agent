@@ -12,6 +12,10 @@ class UpdateSource(NamedTuple):
     url: str
     ref: Optional[str]      # None = дефолтная ветка (проверяем HEAD)
     commit: Optional[str]   # текущий установленный коммит
+    # Профиль установки: переустанавливать нужно ИМ ЖЕ, иначе `--update`
+    # подменит профиль пользователя (см. updater.runner.build_install_target).
+    dist: str = app_version.DIST_NAME
+    subdirectory: Optional[str] = None
 
 
 def resolved_source(
@@ -20,4 +24,10 @@ def resolved_source(
     src = _source()
     if src is None or src.editable or not src.url:
         return None
-    return UpdateSource(url=src.url, ref=src.ref, commit=src.commit)
+    return UpdateSource(
+        url=src.url,
+        ref=src.ref,
+        commit=src.commit,
+        dist=getattr(src, "dist", app_version.DIST_NAME),
+        subdirectory=getattr(src, "subdirectory", None),
+    )

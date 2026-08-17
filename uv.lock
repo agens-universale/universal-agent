@@ -16,6 +16,14 @@ resolution-markers = [
     "python_full_version < '3.12' and sys_platform != 'emscripten' and sys_platform != 'win32'",
 ]
 
+[manifest]
+members = [
+    "gc-cli",
+    "gc-server",
+    "gc-tui",
+    "gc-ua",
+]
+
 [[package]]
 name = "aiohappyeyeballs"
 version = "2.7.1"
@@ -813,9 +821,9 @@ wheels = [
 ]
 
 [[package]]
-name = "gc-ua"
-version = "0.3.0"
-source = { editable = "." }
+name = "gc-cli"
+version = "0.4.0"
+source = { editable = "packaging/cli" }
 dependencies = [
     { name = "chardet" },
     { name = "httpx", extra = ["socks"] },
@@ -830,91 +838,131 @@ dependencies = [
     { name = "trafilatura" },
 ]
 
-[package.optional-dependencies]
-all = [
-    { name = "fastapi" },
-    { name = "psutil" },
-    { name = "pygments" },
-    { name = "rich" },
-    { name = "textual" },
-    { name = "uvicorn", extra = ["standard"] },
-]
-dev-tui = [
-    { name = "pytest-textual-snapshot" },
-    { name = "rich" },
-    { name = "textual" },
-]
-server = [
-    { name = "fastapi" },
-    { name = "psutil" },
-    { name = "uvicorn", extra = ["standard"] },
-]
-tui = [
-    { name = "pygments" },
-    { name = "rich" },
-    { name = "textual" },
-]
-
-[package.dev-dependencies]
-dev = [
-    { name = "gc-ua", extra = ["server", "tui"] },
-    { name = "harbor", marker = "python_full_version >= '3.12'" },
-    { name = "httpie" },
-    { name = "office-mcp" },
-    { name = "pytest" },
-    { name = "pytest-asyncio" },
-    { name = "pytest-rerunfailures" },
-]
-test = [
-    { name = "gc-ua", extra = ["server", "tui"] },
-    { name = "harbor", marker = "python_full_version >= '3.12'" },
-    { name = "office-mcp" },
-    { name = "pytest" },
-    { name = "pytest-asyncio" },
-]
-
 [package.metadata]
 requires-dist = [
     { name = "chardet", specifier = ">=7.4.3" },
-    { name = "fastapi", marker = "extra == 'server'", specifier = ">=0.115.0" },
-    { name = "gc-ua", extras = ["tui", "server", "mcp"], marker = "extra == 'all'" },
     { name = "httpx", extras = ["socks"], specifier = ">=0.27.0" },
     { name = "httpx-sse", specifier = ">=0.4.0" },
     { name = "jsonschema", specifier = ">=4.0.0" },
     { name = "mcp", specifier = "==1.26.0" },
-    { name = "psutil", marker = "extra == 'server'", specifier = ">=5.9,<7" },
     { name = "pydantic", specifier = ">=2.9.0" },
     { name = "pydantic-settings", specifier = ">=2.0" },
-    { name = "pygments", marker = "extra == 'tui'", specifier = ">=2.13" },
-    { name = "pytest-textual-snapshot", marker = "extra == 'dev-tui'", specifier = ">=1.0" },
     { name = "pyyaml", specifier = ">=6.0.3" },
     { name = "readability-lxml" },
     { name = "requests", extras = ["socks"] },
-    { name = "rich", marker = "extra == 'dev-tui'", specifier = ">=13" },
-    { name = "rich", marker = "extra == 'tui'", specifier = ">=13" },
-    { name = "textual", marker = "extra == 'dev-tui'", specifier = ">=0.85" },
-    { name = "textual", marker = "extra == 'tui'", specifier = ">=0.55" },
     { name = "trafilatura" },
-    { name = "uvicorn", extras = ["standard"], marker = "extra == 'server'", specifier = ">=0.31.1" },
 ]
-provides-extras = ["tui", "server", "mcp", "all", "dev-tui"]
+
+[[package]]
+name = "gc-server"
+version = "0.4.0"
+source = { editable = "packaging/server" }
+dependencies = [
+    { name = "fastapi" },
+    { name = "gc-cli" },
+    { name = "psutil" },
+    { name = "uvicorn", extra = ["standard"] },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "fastapi", specifier = ">=0.115.0" },
+    { name = "gc-cli", editable = "packaging/cli" },
+    { name = "psutil", specifier = ">=5.9,<7" },
+    { name = "uvicorn", extras = ["standard"], specifier = ">=0.31.1" },
+]
+
+[[package]]
+name = "gc-tui"
+version = "0.4.0"
+source = { editable = "packaging/tui" }
+dependencies = [
+    { name = "gc-cli" },
+    { name = "pygments" },
+    { name = "rich" },
+    { name = "textual" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "gc-cli", editable = "packaging/cli" },
+    { name = "pygments", specifier = ">=2.13" },
+    { name = "rich", specifier = ">=13" },
+    { name = "textual", specifier = ">=0.55" },
+]
+
+[[package]]
+name = "gc-ua"
+version = "0.4.0"
+source = { editable = "." }
+dependencies = [
+    { name = "gc-cli" },
+    { name = "gc-server" },
+    { name = "gc-tui" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "fastapi" },
+    { name = "harbor", marker = "python_full_version >= '3.12'" },
+    { name = "httpie" },
+    { name = "office-mcp" },
+    { name = "psutil" },
+    { name = "pygments" },
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+    { name = "pytest-rerunfailures" },
+    { name = "rich" },
+    { name = "textual" },
+    { name = "uvicorn", extra = ["standard"] },
+]
+test = [
+    { name = "fastapi" },
+    { name = "harbor", marker = "python_full_version >= '3.12'" },
+    { name = "office-mcp" },
+    { name = "psutil" },
+    { name = "pygments" },
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+    { name = "rich" },
+    { name = "textual" },
+    { name = "uvicorn", extra = ["standard"] },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "gc-cli", editable = "packaging/cli" },
+    { name = "gc-server", editable = "packaging/server" },
+    { name = "gc-tui", editable = "packaging/tui" },
+]
+provides-extras = ["all"]
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "gc-ua", extras = ["tui", "server"] },
+    { name = "fastapi", specifier = ">=0.115.0" },
     { name = "harbor", marker = "python_full_version >= '3.12'", specifier = ">=0.16" },
     { name = "httpie", specifier = ">=3.2.4" },
     { name = "office-mcp", editable = "external/office-mcp" },
+    { name = "psutil", specifier = ">=5.9,<7" },
+    { name = "pygments", specifier = ">=2.13" },
     { name = "pytest", specifier = ">=9.0.3" },
     { name = "pytest-asyncio", specifier = ">=0.23" },
     { name = "pytest-rerunfailures", specifier = ">=16.4" },
+    { name = "rich", specifier = ">=13" },
+    { name = "textual", specifier = ">=0.55" },
+    { name = "uvicorn", extras = ["standard"], specifier = ">=0.31.1" },
 ]
 test = [
-    { name = "gc-ua", extras = ["tui", "server"] },
+    { name = "fastapi", specifier = ">=0.115.0" },
     { name = "harbor", marker = "python_full_version >= '3.12'", specifier = ">=0.16" },
     { name = "office-mcp", editable = "external/office-mcp" },
+    { name = "psutil", specifier = ">=5.9,<7" },
+    { name = "pygments", specifier = ">=2.13" },
     { name = "pytest", specifier = ">=9.0.3" },
     { name = "pytest-asyncio", specifier = ">=0.23" },
+    { name = "rich", specifier = ">=13" },
+    { name = "textual", specifier = ">=0.55" },
+    { name = "uvicorn", extras = ["standard"], specifier = ">=0.31.1" },
 ]
 
 [[package]]
@@ -1212,7 +1260,7 @@ name = "jinja2"
 version = "3.1.6"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "markupsafe" },
+    { name = "markupsafe", marker = "python_full_version >= '3.12'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/df/bf/f7da0350254c0ed7c72f3e33cef02e048281fec7ecec5f032d4aac52226b/jinja2-3.1.6.tar.gz", hash = "sha256:0137fb05990d35f1275a587e9aee6d56da821fc83491a0fb838183be43f66d6d", size = 245115, upload-time = "2025-03-05T20:05:02.478Z" }
 wheels = [
@@ -2671,22 +2719,6 @@ wheels = [
 ]
 
 [[package]]
-name = "pytest-textual-snapshot"
-version = "1.0.0"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "jinja2" },
-    { name = "pytest" },
-    { name = "rich" },
-    { name = "syrupy" },
-    { name = "textual" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/8b/75/2ef17ae52fa5bc848ff2d1d7bc317a702cbd6d7ad733ca991b9f899dbbae/pytest_textual_snapshot-1.0.0.tar.gz", hash = "sha256:065217055ed833b8a16f2320a0613f39a0154e8d9fee63535f29f32c6414b9d7", size = 11071, upload-time = "2024-07-22T15:17:44.629Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/70/2e/4bf16ed78b382b3d7c1e545475ec8cf04346870be662815540faf8f16e8c/pytest_textual_snapshot-1.0.0-py3-none-any.whl", hash = "sha256:dd3a421491a6b1987ee7b4336d7f65299524924d2b0a297e69733b73b01570e1", size = 11171, upload-time = "2024-07-22T15:17:43.167Z" },
-]
-
-[[package]]
 name = "python-dateutil"
 version = "2.9.0.post0"
 source = { registry = "https://pypi.org/simple" }
@@ -3317,18 +3349,6 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/83/d3/803453b36afefb7c2bb238361cd4ae6125a569b4db67cd9e79846ba2d68c/sympy-1.14.0.tar.gz", hash = "sha256:d3d3fe8df1e5a0b42f0e7bdf50541697dbe7d23746e894990c030e2b05e72517", size = 7793921, upload-time = "2025-04-27T18:05:01.611Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/a2/09/77d55d46fd61b4a135c444fc97158ef34a095e5681d0a6c10b75bf356191/sympy-1.14.0-py3-none-any.whl", hash = "sha256:e091cc3e99d2141a0ba2847328f5479b05d94a6635cb96148ccb3f34671bd8f5", size = 6299353, upload-time = "2025-04-27T18:04:59.103Z" },
-]
-
-[[package]]
-name = "syrupy"
-version = "5.2.0"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "pytest" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/33/7e/a4793801683d32132d9683be8364e93f6bca2f277bfbe81647eba46b8cfd/syrupy-5.2.0.tar.gz", hash = "sha256:0e6b7abf1e04f060f6c797bed8bca96f2468954168328041e02634a68fc11ff0", size = 50223, upload-time = "2026-05-16T21:11:37.367Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/4e/18/dc99a152bea18a898a8ac387bfeb9ec0829e0f5bed11cfec2e2ca189c5a2/syrupy-5.2.0-py3-none-any.whl", hash = "sha256:798cb493a6e20f4839e58ea8f10eb1b0d85684c676442f79786e219bf32618e6", size = 51828, upload-time = "2026-05-16T21:11:34.984Z" },
 ]
 
 [[package]]
