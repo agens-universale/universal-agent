@@ -198,6 +198,28 @@ def _coerce_double_encoded_fields(
     return coerced, changed
 
 
+def _drop_empty_optional_keys(
+    parsed_args: Dict[str, Any], params_schema: Dict[str, Any]
+) -> tuple[Dict[str, Any], bool]:
+    """Recovery-проход: необязательный ключ с "" или null — это «не задано».
+
+    Зачем отдельный проход, если ниже и так вызывается
+    ``normalize_optional_empty_as_omit``: та отрабатывает ПОСЛЕ валидации, а до
+    неё дело не доходит, если "" не проходит под-схему. Так и было с enum-полями
+    (``fs_write_file.newline``, ``.mode``, ``fs_file_info.hash_algorithm``,
+    ``fs_search_and_replace.occurrence``): подсказка в описании обещает модели,
+    что пустую строку примут, а Draft7 отвергает её как значение не из enum.
+    Модель следует контракту — и получает ошибку аргументов на ровном месте.
+
+    Семантической дельты нет: проход тождественен нормализации ниже, он лишь
+    перенесён на failure-путь. Поля с ``x-preserve-empty-string`` (например
+    ``separator`` у fs_append_file) в список необязательных не попадают, для них
+    "" остаётся значением.
+    """
+    coerced = normalize_optional_empty_as_omit(parsed_args, params_schema)
+    return coerced, coerced != parsed_args
+
+
 def _coerce_numeric_strings(
     parsed_args: Dict[str, Any], params_schema: Dict[str, Any]
 ) -> tuple[Dict[str, Any], bool]:
@@ -313,7 +335,13 @@ def parse_and_validate_tool_arguments(
     except Exception as e:  # noqa: BLE001
         recovered = False
         candidate = parsed_args
-        for coercer in (_coerce_double_encoded_fields, _coerce_numeric_strings):
+        # Порядок: сначала снимаем «не задано», потом чиним типы. Обратный
+        # порядок оставил бы "" в enum-поле и второй коэрсер об него споткнулся.
+        for coercer in (
+            _drop_empty_optional_keys,
+            _coerce_double_encoded_fields,
+            _coerce_numeric_strings,
+        ):
             coerced, changed = coercer(candidate, params_schema)
             if not changed:
                 continue
