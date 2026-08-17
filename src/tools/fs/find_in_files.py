@@ -279,6 +279,13 @@ class FindInFiles(AbstractSimpleTool):
             )
         if not isinstance(pattern, str):
             return self._error("invalid_argument", "pattern")
+        if pattern == "":
+            # Empty re matches every position → flood of zero-width hits up to limit.
+            return self._error(
+                "invalid_argument",
+                "pattern",
+                "pattern must be non-empty",
+            )
         # Optional arg: omit / None → python-re (schema default).
         if query_mode is None:
             query_mode = self.QUERY_MODE_RE
@@ -309,12 +316,6 @@ class FindInFiles(AbstractSimpleTool):
             flags |= re.IGNORECASE
 
         if query_mode == self.QUERY_MODE_TEXT:
-            if pattern == "":
-                return self._error(
-                    "invalid_argument",
-                    "pattern",
-                    "pattern must be non-empty in query_mode=text",
-                )
             try:
                 compiled = re.compile(re.escape(pattern), flags)
             except re.error as e:

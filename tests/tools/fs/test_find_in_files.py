@@ -804,7 +804,8 @@ class TestErrorEnvelopes:
         assert data["error"]["type"] == "invalid_argument"
         assert data["error"]["field"] == "path"
 
-    def test_empty_pattern_is_valid_regexp(self, tmp_path):
+    def test_empty_pattern_rejected_in_python_re(self, tmp_path):
+        """Empty re is zero-width everywhere — reject before scan flood."""
         f = tmp_path / "afile"
         f.write_text("hi\n", encoding="utf-8")
         data = _call(
@@ -813,7 +814,20 @@ class TestErrorEnvelopes:
             pattern="",
             query_mode="python-re",
         )
-        assert data["ok"] is True
+        assert data["ok"] is False
+        assert data["error"]["type"] == "invalid_argument"
+        assert data["error"]["field"] == "pattern"
+
+    def test_empty_pattern_rejected_when_query_mode_omitted(self, tmp_path):
+        f = tmp_path / "afile"
+        f.write_text("hi\n", encoding="utf-8")
+        data = _call(
+            with_local_ctx(FindInFiles),
+            path=str(f),
+            pattern="",
+        )
+        assert data["ok"] is False
+        assert data["error"]["field"] == "pattern"
 
     def test_path_is_neither_file_nor_dir(self, tmp_path):
         fifo = tmp_path / "pipe"
@@ -1360,6 +1374,7 @@ class TestQueryMode:
         assert data["ok"] is False
         assert data["error"]["type"] == "invalid_argument"
         assert data["error"]["field"] == "pattern"
+        assert "non-empty" in data["error"]["message"]
 
     def test_query_mode_omitted_defaults_to_python_re(self, tmp_path):
         """Omit query_mode → python-re (regex | / groups work)."""
