@@ -12,7 +12,7 @@ import re
 import shlex
 from typing import Any, Callable
 
-from gc_core.security.command_moderation import effective_command_cwd
+from gc_core.security.command_moderation import NO_WORKAROUND_NOTICE, effective_command_cwd
 from gc_core.security.path_policy import resolve_tool_context, _extract_config_dict
 from gc_core.security.protected_paths import classify_path, protected_paths, protection_enabled
 
@@ -105,10 +105,7 @@ def enforce_command_guard(
                 # ask not confirmed → instructive blocked result
                 err = {
                     "type": "protected_path_denied",
-                    "message": (
-                        "User declined the command. Do NOT retry the same command, "
-                        "and do NOT silently run a modified command — ask the user or stop."
-                    ),
+                    "message": "User declined the command. " + NO_WORKAROUND_NOTICE,
                     "command_preview": payload[:200],
                 }
                 blocked_method = getattr(self_obj, "_command_moderation_blocked_result", None)
@@ -123,6 +120,10 @@ def enforce_command_guard(
             err = {
                 "type": "protected_path_denied",
                 "message": "Command targets a protected path (.gc / config).",
+                # Тот же класс обхода, что и у судьи: заблокированную команду
+                # модель переписывает в эквивалент. Запрет — одной формулировкой
+                # с модерацией (NO_WORKAROUND_NOTICE).
+                "guidance": NO_WORKAROUND_NOTICE,
                 "command_preview": payload[:200],
             }
             # Use tool's own blocked-result method if available (mirrors moderation pattern).

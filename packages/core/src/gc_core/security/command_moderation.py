@@ -23,6 +23,24 @@ from gc_core.bundled_assets import bundled_root
 SAFE_VERDICT = "safe"
 DANGEROUS_VERDICT = "potentially_dangerous"
 ALLOWED_VERDICTS = {SAFE_VERDICT, DANGEROUS_VERDICT}
+
+#: Инструкция агенту при любом отказе выполнить команду.
+#:
+#: Судья оценивает КОНКРЕТНУЮ КОМАНДУ, а не намерение, и модель легко переписывает
+#: её в эквивалент: заблокированное `rm -rf victim` превращается в
+#: `rm victim/a.txt && rmdir victim`, которое судья пропускает как безопасное.
+#: Наблюдалось на живом прогоне 17.08.2026 — каталог был удалён.
+#:
+#: Раньше этот текст лежал только в ветках «пользователь отменил» и был
+#: продублирован в трёх местах, а до ветки «судья заблокировал» не доезжал вовсе.
+#: Теперь формулировка одна и уходит в конверт отдельным полем `guidance`
+#: (см. make_block_error), чтобы не смешиваться с причинами судьи в `reason` —
+#: `reason` показывается пользователю в диалоге подтверждения.
+NO_WORKAROUND_NOTICE = (
+    "Do NOT retry the same command, and do NOT run a rewritten, split-up or otherwise "
+    "equivalent command that reaches the same result (different flags, another tool, "
+    "several smaller steps) — report the block to the user and ask how to proceed."
+)
 _VERDICT_SAFE_RE = re.compile(
     r'"verdict"\s*:\s*"safe"\s*[,}]',
     re.IGNORECASE,
@@ -209,10 +227,7 @@ def decide_command_execution(
                     allowed=False,
                     decision="cancelled",
                     reason_code="user_confirmation",
-                    reason=(
-                        "User declined the command. Do NOT retry the same command, "
-                        "and do NOT silently run a modified command — ask the user or stop."
-                    ),
+                    reason="User declined the command. " + NO_WORKAROUND_NOTICE,
                     error_type="unsafe_command_cancelled_by_user",
                 )
             return ExecutionDecision(
@@ -275,10 +290,7 @@ def decide_command_execution(
             allowed=False,
             decision="cancelled",
             reason_code="user_confirmation",
-            reason=(
-                "User declined the command. Do NOT retry the same command, "
-                "and do NOT silently run a modified command — ask the user or stop."
-            ),
+            reason="User declined the command. " + NO_WORKAROUND_NOTICE,
             risk_flags=judge_result.risk_flags,
             error_type="unsafe_command_cancelled_by_user",
         )
@@ -303,6 +315,13 @@ def make_block_error(
         "type": decision.error_type or "unsafe_command_blocked",
         "mode": mode,
         "reason": decision.reason,
+        # Единственная воронка всех отказов: к этому месту решение уже финальное
+        # (раунд подтверждения отыгран выше по коду). Поэтому запрет на обход
+        # кладём здесь — его получают все ветки, включая «судья заблокировал»,
+        # которая раньше уходила к модели без единой поведенческой инструкции.
+        # Отдельным полем, а не приклейкой к reason: reason несёт причины судьи
+        # и показывается пользователю в диалоге подтверждения.
+        "guidance": NO_WORKAROUND_NOTICE,
         "risk_flags": decision.risk_flags,
         preview_key: _payload_preview(payload),
     }
