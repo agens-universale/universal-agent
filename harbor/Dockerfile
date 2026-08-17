@@ -79,7 +79,9 @@ RUN --mount=type=ssh \
     && git -C /opt/gc-cli-src checkout "${GC_REF}" \
     && mkdir -p /opt/gc-harbor-adapters \
     && cp -r /opt/gc-cli-src/harbor/adapters /opt/gc-harbor-adapters/adapters \
-    && cp -r /opt/gc-cli-src/prompts /opt/gc-harbor-adapters/prompts \
-    && cp -r /opt/gc-cli-src/skills /opt/gc-harbor-adapters/skills \
+    # Ассеты переехали в packages/core/assets при разбиении на пакеты;
+    # в корне репозитория их больше нет, и прежний cp обрывал сборку.
+    && cp -r /opt/gc-cli-src/packages/core/assets/prompts /opt/gc-harbor-adapters/prompts \
+    && cp -r /opt/gc-cli-src/packages/core/assets/skills /opt/gc-harbor-adapters/skills \
     && rm -rf /opt/gc-cli-src
 ENV PYTHONPATH=/opt/gc-harbor-adapters

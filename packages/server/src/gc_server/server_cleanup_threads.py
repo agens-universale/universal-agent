@@ -8,10 +8,39 @@ from typing import Any, Dict
 
 from fastapi import FastAPI
 
+from gc_core.bundled_assets import repo_root
 from gc_core.thread_store import resolve_threads_dir
 
 _cleanup_thread_started = False
 _swarm_cleanup_thread_started = False
+
+
+def _cleanup_script(name: str, project_root: str, logger: logging.Logger) -> str | None:
+    """Путь к скрипту чистки, или ``None`` если его нет.
+
+    Скрипты живут в ``scripts/`` репозитория — это не ассеты. Раньше их искали
+    от ``bundled_root()``, который до разбиения на пакеты и был корнем
+    репозитория; после переезда ассетов путь стал вести в
+    ``packages/core/assets/scripts/``. Поток при этом исправно поднимался и раз
+    в интервал звал несуществующий файл: ``subprocess.run`` шёл с
+    ``check=False``, код возврата не проверялся, исключения не было — чистка
+    тредов просто не работала, молча.
+
+    Поэтому здесь две вещи: ищем в корне рабочей копии и **не поднимаем поток**,
+    если скрипта нет.
+    """
+    root = repo_root()
+    candidates = [os.path.join(str(root), "scripts", name)] if root is not None else []
+    candidates.append(os.path.join(project_root, "scripts", name))
+    for path in candidates:
+        if os.path.isfile(path):
+            return path
+    logger.error(
+        "скрипт чистки %s не найден (просмотрено: %s) — фоновая чистка не запущена",
+        name,
+        ", ".join(candidates) or "нет кандидатов",
+    )
+    return None
 
 
 def _cleanup_threads_loop(
@@ -29,7 +58,7 @@ def _cleanup_threads_loop(
     """
     while True:
         try:
-            subprocess.run(
+            result = subprocess.run(
                 [
                     sys.executable,
                     script_path,
@@ -42,6 +71,14 @@ def _cleanup_threads_loop(
                 capture_output=True,
                 text=True,
             )
+            # Раньше код возврата не смотрели вовсе: чистка могла падать каждый
+            # цикл, и в логе не появлялось ни строки.
+            if result.returncode != 0:
+                logger.error(
+                    "чистка тредов вернула код %s: %s",
+                    result.returncode,
+                    (result.stderr or "").strip()[:500],
+                )
         except Exception as e:  # noqa: BLE001
             logger.warning("threads cleanup failed: %r", e)
 
@@ -91,7 +128,9 @@ def register_cleanup_threads_on_startup(
             return
         interval_seconds, ttl_days = cfg
 
-        script_path = os.path.join(project_root, "scripts", "cleanup_threads_by_updated_at.py")
+        script_path = _cleanup_script("cleanup_threads_by_updated_at.py", project_root, logger)
+        if script_path is None:
+            return
         threads_dir = resolve_threads_dir(base_agent_config)
 
         threading.Thread(
@@ -119,7 +158,7 @@ def _swarm_cleanup_loop(
     """Фоновая чистка swarm_threads/ + .swarm_sandboxes/ (M6, шаг 3.2)."""
     while True:
         try:
-            subprocess.run(
+            result = subprocess.run(
                 [
                     sys.executable,
                     script_path,
@@ -131,6 +170,12 @@ def _swarm_cleanup_loop(
                 capture_output=True,
                 text=True,
             )
+            if result.returncode != 0:
+                logger.error(
+                    "чистка swarm-тредов вернула код %s: %s",
+                    result.returncode,
+                    (result.stderr or "").strip()[:500],
+                )
         except Exception as e:  # noqa: BLE001
             logger.warning("swarm cleanup failed: %r", e)
         time.sleep(interval_seconds)
@@ -169,7 +214,9 @@ def register_swarm_cleanup_on_startup(
             return
         _swarm_cleanup_thread_started = True
 
-        script_path = os.path.join(project_root, "scripts", "cleanup_swarm_threads.py")
+        script_path = _cleanup_script("cleanup_swarm_threads.py", project_root, logger)
+        if script_path is None:
+            return
         swarm_threads_dir = str(swarm_config["threads_dir"])
         sandbox_root_dir = str(swarm_config["sandbox_root_dir"])
 

@@ -1,3 +1,4 @@
+import logging
 import os
 from typing import Any, Dict
 
@@ -5,11 +6,36 @@ import yaml
 
 from gc_core.config import load_config, sync_logging_flat_and_params
 from gc_core.config_modules.env_interpolation import resolve_env_placeholders
-from gc_core.bundled_assets import bundled_root
+from gc_core.bundled_assets import bundled_root, repo_root
+
+logger = logging.getLogger(__name__)
 
 
-# bundled_root() — единый резолвер ассетов (editable → repo, wheel → site-packages).
+# bundled_root() — единый резолвер АССЕТОВ (editable → packages/core/assets,
+# wheel → site-packages). Относительные пути вида "./prompts/server_agent.md"
+# резолвятся от него.
 PROJECT_ROOT = str(bundled_root())
+
+
+def _server_config_candidates() -> list[str]:
+    """Где ищем `config_server.yml`, в порядке приоритета.
+
+    Раньше был один кандидат — `bundled_root()/config_server.yml`, и до
+    разбиения на пакеты это работало: ассеты лежали в корне репозитория, туда же
+    дока велит класть файл. После переезда ассетов путь стал указывать в
+    `packages/core/assets/`, файл в корне перестал находиться, и сервер молча
+    поднимался на минимальном дефолте — **с `auth_token: None`, то есть без
+    авторизации**. Ни строки в лог.
+    """
+    candidates = [os.path.join(os.getcwd(), "config_server.yml")]
+    root = repo_root()
+    if root is not None:
+        candidates.append(str(root / "config_server.yml"))
+    # Исторический путь: рядом с ассетами. Оставлен, чтобы не сломать установки,
+    # где файл действительно положили туда.
+    candidates.append(os.path.join(PROJECT_ROOT, "config_server.yml"))
+    seen: set[str] = set()
+    return [c for c in candidates if not (c in seen or seen.add(c))]
 
 
 def load_server_config() -> Dict[str, Any]:
@@ -27,10 +53,20 @@ def load_server_config() -> Dict[str, Any]:
     from gc_core.config_modules import env_vars
     if env_vars.env.server_config_path is not None:
         cfg_path = str(env_vars.env.server_config_path)
+        searched = [cfg_path]
     else:
-        cfg_path = os.path.join(PROJECT_ROOT, "config_server.yml")
+        searched = _server_config_candidates()
+        cfg_path = next((c for c in searched if os.path.exists(c)), searched[-1])
     if not os.path.exists(cfg_path):
-        # Минимальный дефолт, чтобы сервер мог стартовать и без файла.
+        # Минимальный дефолт, чтобы сервер мог стартовать и без файла. Раньше
+        # эта ветка была молчаливой, и «конфиг не нашёлся» было не отличить от
+        # «так и задумано» — а вместе с конфигом терялся и auth_token.
+        logger.warning(
+            "config_server.yml не найден — сервер стартует на минимальном "
+            "дефолте БЕЗ авторизации (auth_token не задан). Просмотрены пути: %s. "
+            "Явный путь задаётся переменной окружения SERVER_CONFIG_PATH.",
+            ", ".join(searched),
+        )
         return {
             "server": {
                 "host": "0.0.0.0",

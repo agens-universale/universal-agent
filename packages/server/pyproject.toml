@@ -21,7 +21,7 @@ dependencies = [
 # присутствуют всегда и без своего профиля печатают однострочную подсказку —
 # охранники gc_core.tui_entry / gc_core.serve_entry.
 [project.scripts]
-gc-cli = "gc_cli.cli:main"
+gc-cli = "gc_core.cli_entry:main"
 gc-ua = "gc_core.tui_entry:main"
 gc-serve = "gc_core.serve_entry:main"
 gc-mcp = "gc_core.mcp_runtime.cli:main"

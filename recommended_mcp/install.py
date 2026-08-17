@@ -20,8 +20,15 @@ from typing import Optional, Tuple
 # При `python -m recommended_mcp.install` и при import из тестов — no-op.
 if __package__ in (None, ""):
     _repo_root = Path(__file__).resolve().parents[1]
-    sys.path.insert(0, str(_repo_root / "src"))
-    sys.path.insert(0, str(_repo_root))
+    # Исходники разъехались по packages/<дистрибутив>/src; единого <repo>/src
+    # больше нет, и вставка мёртвого пути оставляла gc_core ненаходимым —
+    # прямой запуск (документированный фолбэк, когда gc-mcp недоступен) падал
+    # на ModuleNotFoundError. Ветка legacy оставлена для дореформенных копий.
+    for _p in (_repo_root, *sorted(_repo_root.glob("packages/*/src"))):
+        sys.path.insert(0, str(_p))
+    _legacy_src = _repo_root / "src"
+    if _legacy_src.is_dir():
+        sys.path.insert(0, str(_legacy_src))
     __package__ = "recommended_mcp"
 
 from gc_core.mcp_runtime.manifest_resolve import recipe_root, resolve_install_manifest_path

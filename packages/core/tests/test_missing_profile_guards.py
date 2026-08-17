@@ -19,7 +19,7 @@ import builtins
 
 import pytest
 
-from gc_core import app_version, serve_entry, tui_entry
+from gc_core import app_version, cli_entry, serve_entry, tui_entry
 
 
 def _hide_package(monkeypatch, package: str) -> None:
@@ -39,6 +39,9 @@ def _hide_package(monkeypatch, package: str) -> None:
     [
         (tui_entry, "gc_tui", "gc-tui"),
         (serve_entry, "gc_server", "gc-server"),
+        # gc-cli была единственной командой без шима и потому единственной,
+        # дававшей трейсбек в профилях gc-tui / gc-server.
+        (cli_entry, "gc_cli", "gc-cli"),
     ],
 )
 def test_missing_profile_prints_hint_without_traceback(
@@ -57,7 +60,7 @@ def test_missing_profile_prints_hint_without_traceback(
     )
 
 
-@pytest.mark.parametrize("entry", [tui_entry, serve_entry])
+@pytest.mark.parametrize("entry", [tui_entry, serve_entry, cli_entry])
 def test_unrelated_import_error_is_not_masked(monkeypatch, entry):
     """Чужая поломка должна лететь трейсбеком, а не превращаться в «поставьте профиль»."""
     _hide_package(monkeypatch, "some_unrelated_dependency")
@@ -92,3 +95,4 @@ def test_no_stale_packaging_dir_in_hints():
         assert "packaging/" not in app_version.install_hint(dist)
     assert "packaging/" not in tui_entry._MISSING_TUI_MSG
     assert "packaging/" not in serve_entry._MISSING_SERVER_MSG
+    assert "packaging/" not in cli_entry._MISSING_CLI_MSG
