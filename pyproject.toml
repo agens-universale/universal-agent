@@ -42,6 +42,7 @@ dev = [
 ]
 test = [
     # Раньше жили в runtime-dependencies и приезжали каждому пользователю.
+    "gc-testkit",
     "pytest>=9.0.3",
     "pytest-asyncio>=0.23",
     "office-mcp",
@@ -72,8 +73,19 @@ gc-core = { workspace = true }
 gc-cli = { workspace = true }
 gc-tui = { workspace = true }
 gc-server = { workspace = true }
+# Только для разработки: общая тестовая инфраструктура наборов. Ни в один
+# дистрибутив не входит и в колёса не попадает.
+gc-testkit = { workspace = true }
 office-mcp = { path = "external/office-mcp", editable = true }
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+# Наборы живут при своих пакетах; в корне остаётся только то, что проверяет
+# репозиторий целиком (раскладка колёс, recommended_mcp, litellm).
+testpaths = [
+    "tests",
+    "packages/core/tests",
+    "packages/cli/tests",
+    "packages/server/tests",
+    "packages/tui/tests",
+]
 asyncio_mode = "auto"

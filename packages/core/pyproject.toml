@@ -35,3 +35,9 @@ packages = ["src/gc_core"]
 "assets/config.default.yml" = "config.default.yml"
 "../../recommended_mcp" = "recommended_mcp"
 "../../external/ddgs-mcp" = "external/ddgs-mcp"
+
+[tool.pytest.ini_options]
+# Набор пакета самодостаточен: `cd packages/core && pytest` — доказательство,
+# что пакет не тянет соседей. Общая инфраструктура приезжает из gc-testkit.
+testpaths = ["tests"]
+asyncio_mode = "auto"

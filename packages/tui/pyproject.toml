@@ -29,3 +29,9 @@ gc-mcp-install = "gc_core.mcp_runtime.install_cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/gc_tui"]
+
+[tool.pytest.ini_options]
+# Набор пакета самодостаточен: `cd packages/tui && pytest` — доказательство,
+# что пакет не тянет соседей. Общая инфраструктура приезжает из gc-testkit.
+testpaths = ["tests"]
+asyncio_mode = "auto"
