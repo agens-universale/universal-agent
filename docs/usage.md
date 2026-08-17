@@ -14,7 +14,7 @@
 
 ```bash
 uv sync                              # окружение разработки (dev + test)
-uv tool install -e packaging/cli     # только ядро
+uv tool install -e packages/cli     # только ядро
 uv tool install -e .                 # полный агент
 ```
 
@@ -22,7 +22,7 @@ uv tool install -e .                 # полный агент
 
 ### Профили установки
 
-Профиль — отдельный дистрибутив, собираемый из общего дерева `src/`. Код чужих
+Профиль — отдельный дистрибутив со своим пакетом (`packages/<профиль>/src/gc_*`). Код чужих
 профилей физически не попадает на диск.
 
 | Команда | Ядро | TUI | server |
@@ -34,9 +34,9 @@ uv tool install -e .                 # полный агент
 
 ```bash
 uv tool install "gc-ua @ git+https://gitverse.ru/gigacode-ai/universal-agent"
-uv tool install "gc-cli @ git+https://gitverse.ru/gigacode-ai/universal-agent#subdirectory=packaging/cli"
-uv tool install "gc-tui @ git+https://gitverse.ru/gigacode-ai/universal-agent#subdirectory=packaging/tui"
-uv tool install "gc-server @ git+https://gitverse.ru/gigacode-ai/universal-agent#subdirectory=packaging/server"
+uv tool install "gc-cli @ git+https://gitverse.ru/gigacode-ai/universal-agent#subdirectory=packages/cli"
+uv tool install "gc-tui @ git+https://gitverse.ru/gigacode-ai/universal-agent#subdirectory=packages/tui"
+uv tool install "gc-server @ git+https://gitverse.ru/gigacode-ai/universal-agent#subdirectory=packages/server"
 ```
 
 Хвост `#subdirectory=` обязателен у всех, кроме `gc-ua`: uv читает из git только
@@ -53,16 +53,24 @@ uv tool install "gc-server @ git+https://gitverse.ru/gigacode-ai/universal-agent
 
 Проверка после установки: `uv sync` и `uv run pytest` — см. [Тесты](testing.md).
 
-### Классический путь через pip
+### Через pip — не работает
 
-```bash
-pip install -e .
+`pip install -e .` в чистом окружении падает:
+
+```
+ERROR: Could not find a version that satisfies the requirement gc-cli==0.5.0
 ```
 
-Для установки в конкретный интерпретатор Python (например 3.12):
+Причина не в опечатке и не чинится флагами. Корневой манифест — мета-пакет
+`gc-ua`, который точно пинит четыре листа (`gc-core==0.5.0` и остальные), а
+резолвятся они через `[tool.uv.sources] workspace = true`. Этой секции pip не
+понимает: он идёт искать листья на PyPI, где их нет и не будет — пакеты не
+публикуются, установка только из git.
+
+Ставьте через `uv` (см. выше). Для конкретного интерпретатора:
 
 ```bash
-python3.12 -m pip install -e .
+uv tool install --python 3.12 -e .
 ```
 
 Если при установке возникает ошибка, связанная с `distutils`, обновите pip:
@@ -110,7 +118,7 @@ gc-cli -q "создай подпапку test_project. В ней напиши н
 
 ## Ключи запуска gc-cli
 
-**Ключи запуска gc-cli** (см. `src/arg_parser.py`):
+**Ключи запуска gc-cli** (см. `packages/cli/src/gc_cli/arg_parser.py`):
 
 | Ключ | Описание |
 |------|----------|

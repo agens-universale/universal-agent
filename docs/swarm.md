@@ -54,15 +54,20 @@ sudo apt-get install -y bubblewrap coreutils jq
 # 2. gc-cli в отдельный venv (важно: НЕ uv-venv, нужен системный python3 —
 #    он подхватится через ro-bind /usr внутри bwrap)
 python3 -m venv /opt/gc-cli/.venv
-/opt/gc-cli/.venv/bin/pip install -e .
+# pip тут не годится: корневой манифест — мета gc-ua, её листья резолвятся
+# через uv-workspace и на PyPI не публикуются. Ставим профиль сервера из git.
+/opt/gc-cli/.venv/bin/pip install \
+  "gc-server @ git+https://gitverse.ru/gigacode-ai/universal-agent#subdirectory=packages/server"
 /opt/gc-cli/.venv/bin/pip install psutil    # для memory/cpu enforcement
 
 # 3. config_server.yml с включённым swarm (см. ниже)
-# 4. Запуск сервера (отдельной `gc-cli serve` команды НЕТ — поднимаем uvicorn из репо;
-#    --app-dir src нужен, т.к. внутри src/ плоские импорты, а конфиг — через SERVER_CONFIG_PATH)
-cd /opt/gc-cli/repo   # каталог с src/
+# 4. Запуск сервера. Профиль gc-server кладёт в PATH команду gc-serve;
+#    конфиг подхватывается через SERVER_CONFIG_PATH.
 SERVER_CONFIG_PATH=/etc/gc-cli/config_server.yml \
-  /opt/gc-cli/.venv/bin/uvicorn server:app --app-dir src --host 0.0.0.0 --port 8000
+  /opt/gc-cli/.venv/bin/gc-serve
+# либо напрямую через uvicorn (--app-dir больше не нужен: gc_server — обычный пакет)
+SERVER_CONFIG_PATH=/etc/gc-cli/config_server.yml \
+  /opt/gc-cli/.venv/bin/uvicorn gc_server.server:app --host 0.0.0.0 --port 8000
 ```
 
 ## Конфигурация (config_server.yml)

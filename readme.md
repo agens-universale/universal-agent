@@ -31,7 +31,7 @@ Background и CLI-клиент для работы с агентом GigaCode: �
 > 📄 **Наглядная инструкция по установке (HTML):** [docs/gc-ua-install.html](docs/gc-ua-install.html) — пошаговая страница, откройте локально в браузере.
 
 Агент ставится профилями. Профиль — это отдельный дистрибутив, собираемый из
-того же дерева `src/`: код чужих профилей на диск не попадает.
+своего пакета `packages/<профиль>/src/gc_*`: код чужих профилей на диск не попадает.
 
 | Команда установки | Что приезжает |
 |---|---|
@@ -42,9 +42,9 @@ Background и CLI-клиент для работы с агентом GigaCode: �
 
 ```bash
 uv tool install "gc-ua @ git+https://gitverse.ru/gigacode-ai/universal-agent"
-uv tool install "gc-cli @ git+https://gitverse.ru/gigacode-ai/universal-agent#subdirectory=packaging/cli"
-uv tool install "gc-tui @ git+https://gitverse.ru/gigacode-ai/universal-agent#subdirectory=packaging/tui"
-uv tool install "gc-server @ git+https://gitverse.ru/gigacode-ai/universal-agent#subdirectory=packaging/server"
+uv tool install "gc-cli @ git+https://gitverse.ru/gigacode-ai/universal-agent#subdirectory=packages/cli"
+uv tool install "gc-tui @ git+https://gitverse.ru/gigacode-ai/universal-agent#subdirectory=packages/tui"
+uv tool install "gc-server @ git+https://gitverse.ru/gigacode-ai/universal-agent#subdirectory=packages/server"
 
 gc-mcp install duckduckgo_search   # один MCP + авто-подключение в ~/.gc/config.local.yml
 # gc-mcp install                   # все MCP из манифеста
@@ -113,12 +113,14 @@ gc-ua
 ## Документация
 
 - [Установка и запуск](docs/usage.md) — установка (uv/pip), запуск, ключи CLI.
-- [Упаковка и профили](docs/packaging.md) — как четыре дистрибутива собираются из одного `src/`, почему у частичных профилей `#subdirectory=`, как обновление сохраняет профиль.
-- [Тесты](docs/testing.md) — как запускать `tests/`, `external/*` и полный прогон.
+- [Упаковка и профили](docs/packaging.md) — как пять дистрибутивов собираются из одного репозитория, почему у частичных профилей `#subdirectory=`, как обновление сохраняет профиль.
+- [Тесты](docs/testing.md) — наборы при пакетах (`packages/*/tests`), общий тест-кит, `external/*`, полный прогон.
 - [Конфигурация](docs/configuration.md) — `config.yml`, приоритет и переопределение, security policy, MCP-серверы, runtime-пути, project-local config.
+- [Сабагенты](docs/subagents.md) — делегирование задач, кастомные сабагенты, лимиты и бюджет вызовов.
 - [Скиллы и пакеты скиллов](docs/skills.md) — трёхслойный поиск, манифест пакета, canonical IDs, встроенные паки.
 - [Серверный режим](docs/server.md) — REST-обёртка (FastAPI), конфиги сервера, эндпоинты, Swarm-режим (Linux).
 - [Swarm-режим](docs/swarm.md) — изолированные bubblewrap-песочницы для каждой задачи, pipeline запроса, эндпоинты, AR-1..AR-9, troubleshooting.
 - [TUI режим (gc-ua)](docs/tui.md) — кроссплатформенный TUI поверх агента: установка, запуск, основные команды и экраны.
 - [RootBox режим](docs/rootbox.md) — Roox box режим, конфиги (command_moderation, read_guard, root_box (write_guard), url_policy)
+- [Разбиение на модули](docs/module-split.md) — зачем ядро стало SDK `gc_core`, границы пакетов, цена и итоги переезда.
 - [Токены и стоимость](docs/usage_pricing.md) — подсчёт токенов по категориям, секция `pricing`, учёт prompt-кэша, хранение в meta треда.

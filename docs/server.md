@@ -11,9 +11,9 @@
 дистрибутив `gc-server` — базовая установка их НЕ ставит:
 
 ```bash
-uv tool install -e packaging/server
+uv tool install -e packages/server
 # без клонирования репозитория:
-uv tool install "gc-server @ git+https://gitverse.ru/gigacode-ai/universal-agent#subdirectory=packaging/server"
+uv tool install "gc-server @ git+https://gitverse.ru/gigacode-ai/universal-agent#subdirectory=packages/server"
 ```
 
 Профиль добавляет `fastapi`, `uvicorn[standard]` и `psutil`, а также сами
@@ -75,7 +75,7 @@ swarm нет: он запускается только через `POST /swarm/r
 
   - Путь к этому файлу можно переопределить через переменную окружения `SERVER_CONFIG_PATH`.
   - Секция `agent_overrides` перекрывает соответствующие поля `config.yml`
-    (аналогично тому, как CLI‑аргументы перекрывают конфиг в `src/cli.py`).
+    (аналогично тому, как CLI‑аргументы перекрывают конфиг в `packages/cli/src/gc_cli/cli.py`).
   - **Унификация webhook ↔ swarm:** `agent_overrides` применяется и к webhook'у, и
     к swarm-режиму. В webhook-режиме используется flat-формат (как в примере выше
     — ключи на верхнем уровне). В swarm-материализаторе тот же flat-формат
@@ -102,7 +102,7 @@ swarm нет: он запускается только через `POST /swarm/r
   - **Слои инструкций L0–L3 работают в серверном режиме так же, как в CLI.** `server_agentmd_path` является аналогом L0 (системный промпт). Если в рабочем каталоге сервера присутствует `.gc/AGENTS.md` — он также подхватывается как project-level слой инструкций.
 
 - **Папка для хранения тредов**:
-  - на файловую персистентность отвечает тот же механизм, что и в CLI (`src/thread_store.py`);
+  - на файловую персистентность отвечает тот же механизм, что и в CLI (`packages/core/src/gc_core/thread_store.py`);
   - по умолчанию используется папка `threads` в корне проекта (`mini-cli-pub/threads`);
   - опциональный параметр `threads_data_path` задаётся в `config.yml` и должен быть **абсолютным путём**; если не задан — используется дефолт `<state>/projects/<project-slug>/threads/`;
   - серверный режим НЕ переопределяет этот путь, он использует те же настройки, что и CLI.
@@ -178,7 +178,7 @@ uv run python -m src.server
 - В `config_server.yml` в секции `agent_overrides.stop_tools` перечислены simple‑tools,
   которые **отключаются** в серверном режиме (fs/командные тулзы).
 - При построении `config_dict` для сервера эти поля попадают в конфиг как `stop_tools`,
-  и `src/tools/simple_tools/__init__.py` автоматически вырезает такие тулы из реестра.
+  и `packages/core/src/gc_core/tools/registry.py` (`_apply_stop_tools`) автоматически вырезает такие тулы из реестра.
 - Это защищает директорию библиотеки и окружение сервера от нежелательных изменений файловой системы. 
 
 ## Swarm-режим (только Linux)

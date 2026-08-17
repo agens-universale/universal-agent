@@ -26,6 +26,25 @@ PROFILE_SUBDIRS = {
     "gc-server": "packages/server",
 }
 
+# Канонический git-URL репозитория. Живёт рядом с PROFILE_SUBDIRS намеренно:
+# подсказки «поставьте профиль» носили подкаталог у себя строкой и разъехались
+# при переименовании packaging/ → packages/ — пользователю показывали команду,
+# ведущую в несуществующий каталог.
+REPO_GIT_URL = "https://gitverse.ru/gigacode-ai/universal-agent"
+
+
+def install_hint(dist: str) -> str:
+    """Команда установки профиля, одной строкой.
+
+    Единственный источник правды для сообщений «профиль не установлен»:
+    подкаталог берётся из PROFILE_SUBDIRS, а не переписывается руками.
+    """
+    return (
+        f'uv tool install --force "{dist} @ git+{REPO_GIT_URL}'
+        f'#subdirectory={PROFILE_SUBDIRS[dist]}"'
+    )
+
+
 # Совместимость: имя, под которым агент публиковался до разделения профилей.
 DIST_NAME = PROFILE_DISTS[0]
 

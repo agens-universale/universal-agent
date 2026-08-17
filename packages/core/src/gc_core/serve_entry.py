@@ -12,20 +12,25 @@ from __future__ import annotations
 
 import sys
 
-# Однострочно — как и сообщение TUI-обёртки (tui/__init__.py): точка входа,
-# упавшая из-за отсутствующего extra, не должна разливаться на полэкрана.
+from gc_core.app_version import install_hint
+
+# Однострочно — как и сообщение TUI-обёртки: точка входа, упавшая из-за
+# отсутствующего профиля, не должна разливаться на полэкрана. Команду собираем
+# из PROFILE_SUBDIRS, чтобы подкаталог не разъезжался с реальной раскладкой.
 _MISSING_SERVER_MSG = (
-    "Серверный режим не установлен (нет fastapi/uvicorn). Поставьте профиль: "
-    'uv tool install --force "gc-server @ '
-    'git+https://gitverse.ru/gigacode-ai/universal-agent#subdirectory=packaging/server"'
+    "Серверный режим не установлен (нет пакета gc_server). Поставьте профиль: "
+    + install_hint("gc-server")
 )
 
 
-# Что считаем «профиль [server] не установлен»: нет самого модуля server (после
-# разделения на дистрибутивы он физически отсутствует в headless-профиле) либо
-# нет его сторонних зависимостей. Любой другой ImportError — настоящая поломка,
-# её пробрасываем с трейсбеком, а не маскируем подсказкой про установку.
-_SERVER_NAMES = {"server", "server_cleanup_threads", "rest_api", "fastapi", "uvicorn"}
+# Что считаем «профиль server не установлен»: нет самого пакета gc_server (в
+# headless-профиле он физически отсутствует) либо нет его сторонних
+# зависимостей. Любой другой ImportError — настоящая поломка, её пробрасываем
+# с трейсбеком, а не маскируем подсказкой про установку.
+#
+# Плоские имена `server`/`rest_api`/`server_cleanup_threads` мертвы с разбиения
+# на пакеты: модули стали gc_server.*, и охранник перестал узнавать свой случай.
+_SERVER_NAMES = {"gc_server", "fastapi", "uvicorn"}
 
 
 def main() -> int:

@@ -6,16 +6,17 @@
 
 ## Установка
 
-TUI-стек (`textual`, `rich`, `pygments`) и сами пакеты `tui/`, `diff_tui/` едут
+TUI-стек (`textual`, `rich`, `pygments`) и сам пакет `gc_tui` (вместе с подпакетом `diff_tui`) едет
 дистрибутивом `gc-tui`. В профиле `gc-cli` их на диске нет вовсе:
 
 ```bash
-uv tool install -e packaging/tui
+uv tool install -e packages/tui
 # без клонирования репозитория:
-uv tool install "gc-tui @ git+https://gitverse.ru/gigacode-ai/universal-agent#subdirectory=packaging/tui"
-# или
-pip install -e packaging/tui
+uv tool install "gc-tui @ git+https://gitverse.ru/gigacode-ai/universal-agent#subdirectory=packages/tui"
 ```
+
+`pip install -e packages/tui` не сработает: манифест пинит `gc-core==0.5.0`,
+который резолвится только через uv-workspace — pip пойдёт за ним на PyPI.
 
 Полная таблица профилей — [Установка и запуск](usage.md#профили-установки), устройство — [упаковка](packaging.md).
 
