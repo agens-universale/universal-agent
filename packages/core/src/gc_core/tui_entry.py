@@ -13,19 +13,26 @@ from __future__ import annotations
 import sys
 from typing import Optional, Sequence
 
-# Однострочно: tests/tui/test_runner_no_textual.py требует err.count("\n") <= 1.
-# `#subdirectory=` обязателен: uv читает из git только корневой pyproject.toml,
-# а корень — это полный профиль gc-ua.
+from gc_core.app_version import install_hint
+
+# Однострочно: packages/tui/tests/test_runner_no_textual.py требует
+# err.count("\n") <= 1. Команду собираем из PROFILE_SUBDIRS — строку с
+# подкаталогом здесь уже один раз забыли обновить при переименовании каталога.
 _MISSING_TUI_MSG = (
-    "TUI не установлен (нет пакета textual). Поставьте профиль с TUI: "
-    'uv tool install --force "gc-tui @ '
-    'git+https://gitverse.ru/gigacode-ai/universal-agent#subdirectory=packaging/tui"'
+    "TUI не установлен (нет пакета gc_tui). Поставьте профиль с TUI: "
+    + install_hint("gc-tui")
 )
 
-# Что считаем «профиль [tui] не установлен»: нет самого пакета tui либо нет его
+# Что считаем «профиль TUI не установлен»: нет самого пакета gc_tui либо нет его
 # сторонних зависимостей. Любой другой ImportError — настоящая поломка, её
 # прячем не мы: пробрасываем с трейсбеком.
-_TUI_NAMES = {"tui", "textual", "rich", "pygments"}
+#
+# Имя именно `gc_tui`: до разбиения на пакеты пакет звался `tui`, и это
+# множество осталось со старым именем — охранник переставал узнавать свой же
+# случай и вместо однострочной подсказки показывал трейсбек (проверено вживую
+# на профиле gc-cli 18.08.2026). Кодмод импортов такие строковые множества не
+# видит, поэтому ниже стоит тест ровно на этот сценарий.
+_TUI_NAMES = {"gc_tui", "textual", "rich", "pygments"}
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:

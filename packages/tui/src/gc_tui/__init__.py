@@ -12,13 +12,17 @@ import sys
 from typing import Optional, Sequence
 
 
-# Одна строка — не косметика: tests/tui/test_runner_no_textual.py требует
-# err.count("\n") <= 1, чтобы падение точки входа оставалось однострочным.
-_MISSING_TEXTUAL_MSG = (
-    "TUI не установлен (нет пакета textual). Поставьте профиль с TUI: "
-    'uv tool install --force "gc-tui @ '
-    'git+https://gitverse.ru/gigacode-ai/universal-agent#subdirectory=packaging/tui"'
-)
+# Одна строка — не косметика: packages/tui/tests/test_runner_no_textual.py
+# требует err.count("\n") <= 1, чтобы падение точки входа оставалось
+# однострочным. Команда собирается из PROFILE_SUBDIRS: подкаталог здесь уже
+# один раз протух при переименовании каталога пакетов.
+def _missing_textual_msg() -> str:
+    from gc_core.app_version import install_hint
+
+    return (
+        "TUI не установлен (нет пакета textual). Поставьте профиль с TUI: "
+        + install_hint("gc-tui")
+    )
 
 
 def _interactive() -> bool:
@@ -49,7 +53,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         # attribute cache, so evicting tui.app in tests forces a real re-import.
         _app_mod = importlib.import_module("gc_tui.app")
     except ImportError:
-        print(_MISSING_TEXTUAL_MSG, file=sys.stderr)
+        print(_missing_textual_msg(), file=sys.stderr)
         return 1
 
     parser = argparse.ArgumentParser(prog="gc-ua", add_help=False)
