@@ -83,6 +83,29 @@ def _is_string_like_property(prop_schema: Any) -> bool:
     return False
 
 
+def _accepts_empty_string(prop_schema: Any) -> bool:
+    """Пройдёт ли "" валидацию против под-схемы этого свойства.
+
+    Обе подсказки обещают модели, что пустая строка означает «не задано». Для
+    свойства с ``enum`` (или ``minLength``, ``pattern``, ``format``) это обещание
+    ложно: Draft7 отвергает "" раньше, чем сработает нормализация. Модель честно
+    следует подсказке и получает ошибку аргументов — наблюдалось на живом
+    прогоне с ``fs_write_file.newline`` (17.08.2026).
+
+    Поэтому подсказку вешаем только туда, где она правдива.
+    """
+    if not isinstance(prop_schema, dict):
+        return False
+    try:
+        from jsonschema import Draft7Validator
+
+        return Draft7Validator(prop_schema).is_valid("")
+    except Exception:  # noqa: BLE001
+        # Схему не удалось разобрать — не отнимаем подсказку, поведение
+        # остаётся прежним.
+        return True
+
+
 def seed_optional_keys(schema: dict[str, Any]) -> list[str]:
     """
     Ensure ``x-optional-keys`` exists on an object node and return it.
@@ -253,6 +276,10 @@ def augment_optional_property_descriptions(
     for name in resolve_optional_property_keys(params):
         prop = props.get(name)
         if not _is_string_like_property(prop):
+            continue
+        # Не обещаем пустую строку там, где схема её не примет (enum, minLength,
+        # pattern): подсказка увела бы модель в гарантированную ошибку аргументов.
+        if not _accepts_empty_string(prop):
             continue
         prop["description"] = optional_property_description(
             prop.get("description", ""),
