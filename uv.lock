@@ -21,6 +21,7 @@ members = [
     "gc-cli",
     "gc-core",
     "gc-server",
+    "gc-testkit",
     "gc-tui",
     "gc-ua",
 ]
@@ -885,6 +886,17 @@ requires-dist = [
 ]
 
 [[package]]
+name = "gc-testkit"
+version = "0.5.0"
+source = { editable = "packages/testkit" }
+dependencies = [
+    { name = "pytest" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "pytest", specifier = ">=9.0.3" }]
+
+[[package]]
 name = "gc-tui"
 version = "0.5.0"
 source = { editable = "packages/tui" }
@@ -917,6 +929,7 @@ dependencies = [
 [package.dev-dependencies]
 dev = [
     { name = "fastapi" },
+    { name = "gc-testkit" },
     { name = "harbor", marker = "python_full_version >= '3.12'" },
     { name = "httpie" },
     { name = "office-mcp" },
@@ -931,6 +944,7 @@ dev = [
 ]
 test = [
     { name = "fastapi" },
+    { name = "gc-testkit" },
     { name = "harbor", marker = "python_full_version >= '3.12'" },
     { name = "office-mcp" },
     { name = "psutil" },
@@ -954,6 +968,7 @@ provides-extras = ["all"]
 [package.metadata.requires-dev]
 dev = [
     { name = "fastapi", specifier = ">=0.115.0" },
+    { name = "gc-testkit", editable = "packages/testkit" },
     { name = "harbor", marker = "python_full_version >= '3.12'", specifier = ">=0.16" },
     { name = "httpie", specifier = ">=3.2.4" },
     { name = "office-mcp", editable = "external/office-mcp" },
@@ -968,6 +983,7 @@ dev = [
 ]
 test = [
     { name = "fastapi", specifier = ">=0.115.0" },
+    { name = "gc-testkit", editable = "packages/testkit" },
     { name = "harbor", marker = "python_full_version >= '3.12'", specifier = ">=0.16" },
     { name = "office-mcp", editable = "external/office-mcp" },
     { name = "psutil", specifier = ">=5.9,<7" },

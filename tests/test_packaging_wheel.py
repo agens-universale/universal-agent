@@ -80,6 +80,17 @@ def test_core_wheel_bundles_assets(wheels):
     assert "external/ddgs-mcp/src/ddgs_mcp/server.py" in names
 
 
+def test_testkit_never_ships(wheels):
+    """Тест-кит — инструмент разработки, в поставку он попадать не должен.
+
+    gc_testkit лежит в packages/ рядом с настоящими пакетами и подхватывается
+    workspace-ом, поэтому единственная защита от его утечки — проверка колёс.
+    """
+    for dist, names in wheels.items():
+        leaked = [n for n in names if n.split("/")[0] == "gc_testkit"]
+        assert not leaked, f"{dist} тащит тестовую инфраструктуру: {leaked[:5]}"
+
+
 def test_core_wheel_excludes_frontends(wheels):
     """Ради этого всё и затевалось: headless-установка не должна класть на диск
     код фронтендов."""
